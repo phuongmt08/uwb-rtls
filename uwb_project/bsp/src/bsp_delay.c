@@ -14,7 +14,8 @@
 /* Includes ----------------------------------------------------------- */
 #include "bsp_delay.h"
 #include "stm32f4xx_hal.h"
-
+#include "assert.h"
+#include "stdbool.h"
 /* Private types ------------------------------------------------------------- */
 typedef struct
 {
@@ -23,7 +24,7 @@ typedef struct
 
 /* Private variables --------------------------------------------------------- */
 static delay_handle_t g_delay;
-
+static bool is_bsp_delay_inited = false;
 /* Private function prototypes ---------------------------------------- */
 /**
  * @brief  Internal helper to wait for given microseconds.
@@ -48,7 +49,7 @@ delay_err_t bsp_delay_init(void)
 
   if (HAL_TIM_Base_Start(&g_delay.htim) != HAL_OK)
     return DELAY_ERR;
-
+  is_bsp_delay_inited = true;
   return DELAY_OK;
 }
 
@@ -65,6 +66,7 @@ void bsp_delay(uint32_t ms)
 /* Private functions --------------------------------------------------------- */
 static void delay_wait_us_(uint32_t us)
 {
+  assert(is_bsp_delay_inited && "bsp_delay used before bsp_delay_init");
   uint16_t start = __HAL_TIM_GET_COUNTER(&g_delay.htim);
   while ((uint16_t) (__HAL_TIM_GET_COUNTER(&g_delay.htim) - start) < us)
   {
