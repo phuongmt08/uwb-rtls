@@ -39,6 +39,8 @@ typedef struct
   void (*set_reset)(bool active_low);
   /* Busy-wait delay in microseconds */
   void (*delay_us)(uint32_t us);
+  void (*set_spi_low_speed)(void);   /* ~3 MHz (PSC = 32) */
+  void (*set_spi_high_speed)(void);  /* ~6 MHz (PSC = 16) */
 } dwm_bus_if_t;
 
 /**

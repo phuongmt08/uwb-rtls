@@ -89,7 +89,7 @@ static inline void cs_deassert(dwm1000_t *dev)
  * ---------------------------------------------------------------------------
  * | Bits 7..0 : High 8 bits of 15-bit sub-address                           |
  * ---------------------------------------------------------------------------
-*/
+ */
 
 static uint8_t build_spi_header(uint8_t register_id, int32_t subaddress, bool is_read, uint8_t *header_out)
 {
@@ -123,7 +123,7 @@ dwm_err_t dwm_read_register(dwm1000_t *dev, uint8_t reg, int32_t sub, void *buf,
 
   cs_assert(dev);
   CHECK_ERR(dev->bus.spi_transfer(hdr, NULL, hlen), DWM_ERR);
-  CHECK_ERR(dev->bus.spi_transfer(NULL, (uint8_t *)buf, len), DWM_ERR);
+  CHECK_ERR(dev->bus.spi_transfer(NULL, (uint8_t *) buf, len), DWM_ERR);
   cs_deassert(dev);
 
   return DWM_OK;
@@ -141,7 +141,8 @@ dwm_err_t dwm_write_register(dwm1000_t *dev, uint8_t reg, int32_t sub, const voi
   cs_assert(dev);
   CHECK_ERR(dev->bus.spi_transfer(hdr, NULL, hlen), DWM_ERR);
   bool ok = true;
-  if (len) ok = dev->bus.spi_transfer((const uint8_t *)buf, NULL, len);
+  if (len)
+    ok = dev->bus.spi_transfer((const uint8_t *) buf, NULL, len);
   cs_deassert(dev);
 
   CHECK_ERR(ok, DWM_ERR);
@@ -153,17 +154,28 @@ dwm_err_t dwm_init(dwm1000_t *dev)
   CHECK_PARAM(dev, DWM_ERR_PARAM);
   CHECK_PARAM(dev->bus.spi_transfer && dev->bus.set_cs && dev->bus.delay_us, DWM_ERR_PARAM);
 
-  if (dev->bus.set_reset)       /* optional hardware reset pulse */
+  /* Ensure SPI runs at low speed (≤ 3 MHz) during INIT */
+  if (dev->bus.set_spi_low_speed)
+    dev->bus.set_spi_low_speed();
+
+  /* Optional hardware reset pulse */
+  if (dev->bus.set_reset)
   {
     dev->bus.set_reset(true);
     dev->bus.delay_us(10);
     dev->bus.set_reset(false);
   }
-  dev->bus.delay_us(20);        /* allow INIT -> IDLE; keep host SCLK ≤3 MHz during INIT */
 
-  /* Clear pending status (write-1-to-clear) */
-  uint8_t clr[5] = {0xFF,0xFF,0xFF,0xFF,0xFF};
+  /* Allow DW1000 to transition INIT -> IDLE */
+  dev->bus.delay_us(20);
+
+  /* Clear pending status flags (write-1-to-clear) */
+  uint8_t clr[5] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
   CHECK_ERR(dwm_write_register(dev, REG_SYS_STATUS, -1, clr, 5) == DWM_OK, DWM_ERR);
+
+  /* Switch SPI to high speed (~6 MHz) after device is ready */
+  if (dev->bus.set_spi_high_speed)
+    dev->bus.set_spi_high_speed();
 
   return DWM_OK;
 }
@@ -172,10 +184,10 @@ dwm_err_t dwm_read_device_id(dwm1000_t *dev, uint32_t *device_id)
 {
   CHECK_PARAM(dev && device_id, DWM_ERR_PARAM);
 
-  uint8_t b[4] = {0};
+  uint8_t b[4] = { 0 };
   CHECK_ERR(dwm_read_register(dev, REG_DEV_ID, -1, b, 4) == DWM_OK, DWM_ERR);
 
-  *device_id = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+  *device_id = (uint32_t) b[0] | ((uint32_t) b[1] << 8) | ((uint32_t) b[2] << 16) | ((uint32_t) b[3] << 24);
   return DWM_OK;
 }
 
@@ -186,11 +198,8 @@ dwm_err_t dwm_read_40bit(dwm1000_t *dev, uint8_t reg, int32_t sub, uint64_t *val
   uint8_t b[5];
   CHECK_ERR(dwm_read_register(dev, reg, sub, b, 5) == DWM_OK, DWM_ERR);
 
-  *value =  (uint64_t)b[0]        |
-           ((uint64_t)b[1] << 8 ) |
-           ((uint64_t)b[2] << 16) |
-           ((uint64_t)b[3] << 24) |
-           ((uint64_t)b[4] << 32);
+  *value = (uint64_t) b[0] | ((uint64_t) b[1] << 8) | ((uint64_t) b[2] << 16) | ((uint64_t) b[3] << 24)
+           | ((uint64_t) b[4] << 32);
   return DWM_OK;
 }
 
@@ -199,11 +208,11 @@ dwm_err_t dwm_write_40bit(dwm1000_t *dev, uint8_t reg, int32_t sub, uint64_t val
   CHECK_PARAM(dev, DWM_ERR_PARAM);
 
   uint8_t b[5];
-  b[0] = (uint8_t)( value        & 0xFF);
-  b[1] = (uint8_t)((value >> 8 ) & 0xFF);
-  b[2] = (uint8_t)((value >> 16) & 0xFF);
-  b[3] = (uint8_t)((value >> 24) & 0xFF);
-  b[4] = (uint8_t)((value >> 32) & 0xFF);
+  b[0] = (uint8_t) (value & 0xFF);
+  b[1] = (uint8_t) ((value >> 8) & 0xFF);
+  b[2] = (uint8_t) ((value >> 16) & 0xFF);
+  b[3] = (uint8_t) ((value >> 24) & 0xFF);
+  b[4] = (uint8_t) ((value >> 32) & 0xFF);
   return dwm_write_register(dev, reg, sub, b, 5);
 }
 dwm_err_t dwm_write_tx_buffer(dwm1000_t *dev, const void *psdu, uint16_t length_bytes)
@@ -215,7 +224,7 @@ dwm_err_t dwm_write_tx_buffer(dwm1000_t *dev, const void *psdu, uint16_t length_
 
   /* Program TX_FCTRL length field (little-endian) — only length for now */
   /* Note: keep data rate, ranging bit, etc. handled by higher layer later */
-  uint32_t tx_fctrl = (uint32_t)length_bytes & 0x7FFu; /* TXFLEN[10:0] */
+  uint32_t tx_fctrl = (uint32_t) length_bytes & 0x7FFu; /* TXFLEN[10:0] */
   return dwm_write_register(dev, REG_TX_FCTRL, -1, &tx_fctrl, 4);
 }
 
@@ -243,26 +252,19 @@ dwm_err_t dwm_read_system_status(dwm1000_t *dev, uint32_t *status_low32_le)
 {
   CHECK_PARAM(dev && status_low32_le, DWM_ERR_PARAM);
 
-  uint8_t b[5] = {0};
+  uint8_t b[5] = { 0 };
   CHECK_ERR(dwm_read_register(dev, REG_SYS_STATUS, -1, b, 5) == DWM_OK, DWM_ERR);
 
-  *status_low32_le =  (uint32_t)b[0] |
-                      ((uint32_t)b[1] << 8) |
-                      ((uint32_t)b[2] << 16) |
-                      ((uint32_t)b[3] << 24);
+  *status_low32_le =
+    (uint32_t) b[0] | ((uint32_t) b[1] << 8) | ((uint32_t) b[2] << 16) | ((uint32_t) b[3] << 24);
   return DWM_OK;
 }
 
 dwm_err_t dwm_clear_system_status(dwm1000_t *dev, uint32_t mask_le)
 {
   CHECK_PARAM(dev, DWM_ERR_PARAM);
-  uint8_t b[5] = {
-    (uint8_t)( mask_le        & 0xFF),
-    (uint8_t)((mask_le >> 8 ) & 0xFF),
-    (uint8_t)((mask_le >> 16) & 0xFF),
-    (uint8_t)((mask_le >> 24) & 0xFF),
-    0x00
-  };
+  uint8_t b[5] = { (uint8_t) (mask_le & 0xFF), (uint8_t) ((mask_le >> 8) & 0xFF),
+                   (uint8_t) ((mask_le >> 16) & 0xFF), (uint8_t) ((mask_le >> 24) & 0xFF), 0x00 };
   return dwm_write_register(dev, REG_SYS_STATUS, -1, b, 5);
 }
 /* End of file -------------------------------------------------------------- */

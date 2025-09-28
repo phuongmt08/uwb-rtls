@@ -37,7 +37,16 @@ static void bsp_uwb_reset(bool active)
   HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN,
                     active ? GPIO_PIN_RESET : GPIO_PIN_SET);
 }
-
+static void bsp_spi_set_low_speed(void)
+{
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; // ~3 MHz
+  HAL_SPI_Init(&hspi1);
+}
+static void bsp_spi_set_high_speed(void)
+{
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16; // ~6 MHz
+  HAL_SPI_Init(&hspi1);
+}
 /* Public functions --------------------------------------------------------- */
 extern void bsp_delay_us(uint32_t us);
 
@@ -47,6 +56,8 @@ bsp_err_t bsp_uwb_init(void)
   dwm1000.bus.set_cs       = bsp_uwb_cs;
   dwm1000.bus.set_reset    = bsp_uwb_reset;
   dwm1000.bus.delay_us     = bsp_delay_us;
+  dwm1000.bus.set_spi_low_speed  = bsp_spi_set_low_speed;
+  dwm1000.bus.set_spi_high_speed = bsp_spi_set_high_speed;
 
   CHECK_ERR(dwm_init(&dwm1000) == DWM_OK, BSP_ERR);
 
