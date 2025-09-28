@@ -21,12 +21,14 @@
 #include "adc.h"
 #include "i2c.h"
 #include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "usb_otg.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp_uwb.h"
 
 /* USER CODE END Includes */
 
@@ -97,8 +99,22 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_SPI1_Init();
+  MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
-
+//  dwm_config_t cfg = {
+//      .channel = 5,
+//      .prf = 16,
+//      .data_rate = 2,
+//      .preamble_symbols = 128,
+//      .sfd_mode = DWM_SFD_STANDARD_IEEE,
+//      .phr_mode = DWM_PHYSIC_STANDARD_MODE
+//  };
+//
+//  /* Gọi hàm mà không init trước → assert sẽ kích hoạt */
+//  bsp_err_t ret = bsp_uwb_configure(&cfg);
+//
+//  printf("Return code = %d\n", ret);
+//  return 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
