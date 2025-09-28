@@ -21,7 +21,6 @@
 #define REG_DEV_ID             0x00
 #define REG_EUI                0x01
 #define REG_PANADR             0x03
-#define REG_SYS_CFG            0x04
 #define REG_SYS_TIME           0x06 /* 40-bit */
 #define REG_TX_FCTRL           0x08
 #define REG_TX_BUFFER          0x09
@@ -31,9 +30,6 @@
 #define REG_SYS_STATUS         0x0F
 #define REG_RX_FINFO           0x10
 #define REG_RX_BUFFER          0x11
-#define REG_RX_TIME            0x15 /* 40-bit */
-#define REG_TX_TIME            0x17 /* 40-bit */
-#define REG_CHAN_CTRL          0x1F
 #define REG_RX_FWTO            0x0C /* subaddress 0 */
 
 /* SYS_CTRL bits (subset) */
@@ -94,7 +90,7 @@ static inline void cs_deassert(dwm1000_t *dev)
 static uint8_t build_spi_header(uint8_t register_id, int32_t subaddress, bool is_read, uint8_t *header_out)
 {
   uint8_t header_len = 1;
-  header_out[0]      = (is_read ? 0x80 : 0x00) | ((subaddress >= 0) ? 0x40 : 0x00) | (register_id & 0x3F);
+  header_out[0]      = (is_read ? 0x00 : 0x80) | ((subaddress >= 0) ? 0x40 : 0x00) | (register_id & 0x3F);
   if (subaddress >= 0)
   {
     if (subaddress < 0x80)
@@ -142,10 +138,9 @@ dwm_err_t dwm_write_register(dwm1000_t *dev, uint8_t reg, int32_t sub, const voi
   CHECK_ERR(dev->bus.spi_transfer(hdr, NULL, hlen), DWM_ERR);
   bool ok = true;
   if (len)
-    ok = dev->bus.spi_transfer((const uint8_t *) buf, NULL, len);
+    CHECK_ERR(dev->bus.spi_transfer((const uint8_t *) buf, NULL, len), DWM_ERR);
   cs_deassert(dev);
 
-  CHECK_ERR(ok, DWM_ERR);
   return DWM_OK;
 }
 
@@ -153,6 +148,7 @@ dwm_err_t dwm_init(dwm1000_t *dev)
 {
   CHECK_PARAM(dev, DWM_ERR_PARAM);
   CHECK_PARAM(dev->bus.spi_transfer && dev->bus.set_cs && dev->bus.delay_us, DWM_ERR_PARAM);
+  cs_deassert(dev);
 
   /* Ensure SPI runs at low speed (≤ 3 MHz) during INIT */
   if (dev->bus.set_spi_low_speed)
@@ -161,6 +157,7 @@ dwm_err_t dwm_init(dwm1000_t *dev)
   /* Optional hardware reset pulse */
   if (dev->bus.set_reset)
   {
+	dev->bus.delay_us(10);
     dev->bus.set_reset(true);
     dev->bus.delay_us(10);
     dev->bus.set_reset(false);
@@ -174,8 +171,8 @@ dwm_err_t dwm_init(dwm1000_t *dev)
   CHECK_ERR(dwm_write_register(dev, REG_SYS_STATUS, -1, clr, 5) == DWM_OK, DWM_ERR);
 
   /* Switch SPI to high speed (~6 MHz) after device is ready */
-  if (dev->bus.set_spi_high_speed)
-    dev->bus.set_spi_high_speed();
+//  if (dev->bus.set_spi_high_speed)
+//    dev->bus.set_spi_high_speed();
 
   return DWM_OK;
 }
