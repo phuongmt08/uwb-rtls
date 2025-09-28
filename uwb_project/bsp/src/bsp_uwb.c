@@ -7,11 +7,15 @@
 
 /* Includes ----------------------------------------------------------- */
 #include "bsp_uwb.h"
+
 #include "bsp_delay.h"
-#include "spi.h"
 #include "err.h"
+#include "spi.h"
 /* Private defines ---------------------------------------------------- */
-#define EXPECTED_DEV_ID   0xDECA0130u  /* Typical DW1000 device ID */
+#define EXPECTED_DEV_ID 0xDECA0130u /* Typical DW1000 device ID */
+#define REG_SYS_CFG            0x04
+#define REG_TX_FCTRL           0x08
+#define REG_CHAN_CTRL          0x1F
 
 /* Private variables -------------------------------------------------- */
 static dwm1000_t dwm1000;
@@ -20,31 +24,48 @@ extern SPI_HandleTypeDef hspi1;
 /* Private functions -------------------------------------------------------- */
 static bool bsp_uwb_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t len)
 {
-  CHECK_ERR((HAL_SPI_TransmitReceive(&hspi1, (uint8_t *)tx, rx, len, HAL_MAX_DELAY) == HAL_OK), false);
-  return true;
+  HAL_StatusTypeDef ret;
+  if (tx && rx)
+  {
+    // Full duplex
+    ret = HAL_SPI_TransmitReceive(&hspi1, (uint8_t *) tx, rx, len, HAL_MAX_DELAY);
+  }
+  else if (tx)
+  {
+    // Only transmit
+    ret = HAL_SPI_Transmit(&hspi1, (uint8_t *) tx, len, HAL_MAX_DELAY);
+  }
+  else if (rx)
+  {
+    // Only receive
+    ret = HAL_SPI_Receive(&hspi1, rx, len, HAL_MAX_DELAY);
+  }
+  else
+  {
+    return false;  // invalid
+  }
+  return (ret == HAL_OK);
 }
-
 static void bsp_uwb_cs(bool enable)
 {
   if (enable)
     HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_RESET); /* CS low */
   else
-    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);   /* CS high */
+    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET); /* CS high */
 }
 
-static void bsp_uwb_reset(bool active)
+void bsp_uwb_reset(bool active)
 {
-  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN,
-                    active ? GPIO_PIN_RESET : GPIO_PIN_SET);
+  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, active ? GPIO_PIN_RESET : GPIO_PIN_SET);
 }
 static void bsp_spi_set_low_speed(void)
 {
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; // ~3 MHz
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;  // ~3 MHz
   HAL_SPI_Init(&hspi1);
 }
 static void bsp_spi_set_high_speed(void)
 {
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16; // ~6 MHz
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;  // ~6 MHz
   HAL_SPI_Init(&hspi1);
 }
 /* Public functions --------------------------------------------------------- */
@@ -52,10 +73,11 @@ extern void bsp_delay_us(uint32_t us);
 
 bsp_err_t bsp_uwb_init(void)
 {
-  dwm1000.bus.spi_transfer = bsp_uwb_spi_transfer;
-  dwm1000.bus.set_cs       = bsp_uwb_cs;
-  dwm1000.bus.set_reset    = bsp_uwb_reset;
-  dwm1000.bus.delay_us     = bsp_delay_us;
+  bsp_delay_init();
+  dwm1000.bus.spi_transfer       = bsp_uwb_spi_transfer;
+  dwm1000.bus.set_cs             = bsp_uwb_cs;
+  dwm1000.bus.set_reset          = bsp_uwb_reset;
+  dwm1000.bus.delay_us           = bsp_delay_us;
   dwm1000.bus.set_spi_low_speed  = bsp_spi_set_low_speed;
   dwm1000.bus.set_spi_high_speed = bsp_spi_set_high_speed;
 
@@ -63,22 +85,37 @@ bsp_err_t bsp_uwb_init(void)
 
   uint32_t device_id = 0;
   CHECK_ERR(dwm_read_device_id(&dwm1000, &device_id) == DWM_OK, BSP_ERR);
-  if (device_id != EXPECTED_DEV_ID) return BSP_ERR;
+  //  if (device_id != EXPECTED_DEV_ID) return BSP_ERR;
 
-  (void)dwm_clear_system_status(&dwm1000, 0xFFFFFFFFu);
+  (void) dwm_clear_system_status(&dwm1000, 0xFFFFFFFFu);
   return BSP_OK;
 }
-bsp_err_t bsp_uwb_configure(const dwm_config_t *cfg)
+dwm_err_t dwm_configure(dwm1000_t *dev, const dwm_config_t *cfg)
 {
-  CHECK_PARAM(cfg, BSP_ERR_PARAM);
+  CHECK_PARAM(dev && cfg, DWM_ERR_PARAM);
 
-  /* Store for later; RF tune to be added in middleware/radio cfg */
-  dwm1000.channel   = cfg->channel;
-  dwm1000.prf       = cfg->prf;
-  dwm1000.data_rate = cfg->data_rate;
+  // 1. CHAN_CTRL
+  uint32_t chan_ctrl = 0;
+  chan_ctrl |= (cfg->channel & 0x7) << 0;       // TX channel
+  chan_ctrl |= (cfg->channel & 0x7) << 5;       // RX channel
+  chan_ctrl |= (cfg->prf == 64 ? 1 : 0) << 18;  // RXPRF
+  // ( preamble, SFD length…)
 
-  /* Minimal CHAN_CTRL programming can be added when you finalize RF table */
-  return BSP_OK;
+  CHECK_ERR(dwm_write_register(dev, REG_CHAN_CTRL, -1, &chan_ctrl, 4) == DWM_OK, DWM_ERR);
+
+  // 2. SYS_CFG: phr_mode
+  uint32_t sys_cfg = 0;
+  if (cfg->phr_mode == DWM_PHYSIC_EXTETENED_MODE)
+    sys_cfg |= (1u << 18);
+  CHECK_ERR(dwm_write_register(dev, REG_SYS_CFG, -1, &sys_cfg, 4) == DWM_OK, DWM_ERR);
+
+  // 3. TX_FCTRL: preamble length + data rate
+  uint32_t tx_fctrl = 0;
+  tx_fctrl |= (cfg->preamble_symbols << 2);
+  tx_fctrl |= (cfg->data_rate & 0x3) << 16;  // bit 17:16
+  CHECK_ERR(dwm_write_register(dev, REG_TX_FCTRL, -1, &tx_fctrl, 4) == DWM_OK, DWM_ERR);
+
+  return DWM_OK;
 }
 
 bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
@@ -93,7 +130,8 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
 
   /* Wait TXFRS */
   uint32_t status = 0;
-  do {
+  do
+  {
     CHECK_ERR(dwm_read_system_status(&dwm1000, &status) == DWM_OK, BSP_ERR);
   } while ((status & (1u << 7)) == 0);
 
@@ -112,12 +150,14 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t max_len, uint16_t *out_len)
 
   /* Wait RX good frame or error/timeout */
   uint32_t status = 0;
-  for (;;)
+  while (1)
   {
     CHECK_ERR(dwm_read_system_status(&dwm1000, &status) == DWM_OK, BSP_ERR);
-    if (status & (1u << 6)) break; /* RXFCG */
-    if (status & ((1u << 30) | (0x3Cu))) { /* RXFTO or RX errors */
-      (void)dwm_clear_system_status(&dwm1000, status);
+    if (status & (1u << 6))
+      break; /* RXFCG */
+    if (status & ((1u << 30) | (0x3Cu)))
+    { /* RXFTO or RX errors */
+      (void) dwm_clear_system_status(&dwm1000, status);
       return BSP_ERR;
     }
   }
@@ -130,6 +170,17 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t max_len, uint16_t *out_len)
   /* Clear RXFCG */
   CHECK_ERR(dwm_clear_system_status(&dwm1000, (1u << 6)) == DWM_OK, BSP_ERR);
   return BSP_OK;
+}
+bsp_err_t bsp_uwb_write_40bit(uint8_t reg, int32_t sub, uint64_t *value)
+{
+	CHECK_ERR((dwm_write_40bit(&dwm1000, reg, sub, value) == DWM_OK), BSP_ERR);
+	return BSP_OK;
+}
+
+bsp_err_t bsp_uwb_read_40bit(uint8_t reg, int32_t sub, uint64_t *value)
+{
+	CHECK_ERR((dwm_read_40bit(&dwm1000, reg, sub, value) == DWM_OK), BSP_ERR);
+	return BSP_OK;
 }
 
 /* End of file -------------------------------------------------------- */

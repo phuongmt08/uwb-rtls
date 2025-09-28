@@ -56,6 +56,12 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length);
  */
 bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len);
 
+void bsp_uwb_reset(bool active);
+
+bsp_err_t bsp_uwb_write_40bit(uint8_t reg, int32_t sub, uint64_t *value);
+
+bsp_err_t bsp_uwb_read_40bit(uint8_t reg, int32_t sub, uint64_t *value);
+
 #endif /* __BSP_UWB_H */
 
 /* End of file -------------------------------------------------------- */
