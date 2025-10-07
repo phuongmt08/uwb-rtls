@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
 #include "i2c.h"
 #include "spi.h"
 #include "tim.h"
@@ -31,6 +30,7 @@
 #include "bsp_uwb.h"
 #include "string.h"
 #include "bsp_delay.h"
+#include "sys_task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -78,6 +78,11 @@ void SystemClock_Config(void);
   * @brief  The application entry point.
   * @retval int
   */
+void task_toggle_led(void *arg)
+{
+//	bsp_uwb_tx(test_frame, strlen(test_frame));
+	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
 int main(void)
 {
 
@@ -108,13 +113,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ADC1_Init();
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
   MX_USB_DEVICE_Init();
+  MX_TIM11_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_Delay(1000);
@@ -122,17 +127,19 @@ int main(void)
 //    // stay here if initialization failed
 //    while (1);
 //  }
-  bsp_uwb_init();
-  const char test_frame[] = "HELLO_UWB";
+//  const char test_frame[] = "HELLO_UWB";
+  sys_task_init();
+  int id = sys_task_add(task_toggle_led, NULL, 1000, 0);
+  sys_task_start(id);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	bsp_uwb_tx(test_frame, strlen(test_frame));
-	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	HAL_Delay(1000);
+	  sys_task_process();
+//	HAL_Delay(1000);
 
 //	if (HAL_GetTick() >= 5000) {
 //		*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;
