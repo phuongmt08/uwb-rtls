@@ -23,13 +23,14 @@
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
-#include "usb_otg.h"
+#include "usb_device.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_uwb.h"
-
+#include "string.h"
+#include "bsp_delay.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,7 +40,16 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+/* Magic flag in SRAM to request DFU after soft reset */
+#define BL_MAGIC_ADDR      (0x2001FFF0UL)
+#define BL_MAGIC_VALUE     (0xDEADB007UL)
+#if 0
+// Set magic and perform a clean system reset
+*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;  // request DFU
+__DSB(); __ISB();
+NVIC_SystemReset();
+}
+#endif
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,7 +82,12 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	__disable_irq();
+	SCB->VTOR = 0x08008000;
+	SysTick->CTRL = 0; SysTick->LOAD = 0; SysTick->VAL = 0;
+	for (uint32_t i=0;i<8;i++){ NVIC->ICER[i]=0xFFFFFFFF; NVIC->ICPR[i]=0xFFFFFFFF; }
+	__DSB(); __ISB();
+	__enable_irq();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -97,30 +112,34 @@ int main(void)
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
-  MX_USB_OTG_FS_PCD_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-//  dwm_config_t cfg = {
-//      .channel = 5,
-//      .prf = 16,
-//      .data_rate = 2,
-//      .preamble_symbols = 128,
-//      .sfd_mode = DWM_SFD_STANDARD_IEEE,
-//      .phr_mode = DWM_PHYSIC_STANDARD_MODE
-//  };
-//
-//  /* Gọi hàm mà không init trước → assert sẽ kích hoạt */
-//  bsp_err_t ret = bsp_uwb_configure(&cfg);
-//
-//  printf("Return code = %d\n", ret);
-//  return 0;
+
+  HAL_Delay(1000);
+//  if (bsp_uwb_init() != BSP_OK) {
+//    // stay here if initialization failed
+//    while (1);
+//  }
+  bsp_uwb_init();
+  const char test_frame[] = "HELLO_UWB";
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	bsp_uwb_tx(test_frame, strlen(test_frame));
+	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	HAL_Delay(1000);
+
+//	if (HAL_GetTick() >= 5000) {
+//		*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;
+//		__DSB(); __ISB();
+//		NVIC_SystemReset();
+//	}
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -188,6 +207,8 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	HAL_Delay(100);
   }
   /* USER CODE END Error_Handler_Debug */
 }

@@ -51,6 +51,20 @@ typedef struct
   uint64_t t4_40;  // Poll RX timestamp (40-bit in LSBs)
   uint64_t t5_40;  // Response TX timestamp (40-bit in LSBs)
 } msg_final_t;
+/* Private variables -------------------------------------------------- */
+sys_ranging_cfg_t cfg = {
+    .seq = 1,
+    .rx_timeout_us = 10000,
+    .uwb_cfg = {
+        .channel = 5,
+        .prf = 64,
+        .data_rate = 2,   // 6M8
+        .preamble_symbols = 128,
+        .sfd_mode = DWM_SFD_STANDARD_IEEE,
+        .phr_mode = DWM_PHYSIC_STANDARD_MODE
+    }
+};
+
 
 /* Private function prototypes --------------------------------------- */
 static inline uint64_t   u64_from40(const uint8_t b[5]);
@@ -60,6 +74,7 @@ static sys_ranging_err_t rx_with_timeout(uint8_t *buf, uint16_t bufsz, uint16_t 
 sys_ranging_err_t sys_ranging_ds_twr_tag_once(const sys_ranging_cfg_t *cfg, sys_ranging_result_t *res)
 {
   CHECK_PARAM(cfg, SYS_RANGING_ERR_PARAM);
+  CHECK_ERR(bsp_uwb_configure(&cfg->uwb_cfg) == BSP_OK, SYS_RANGING_ERR_PARAM);
 
   uint64_t t1 = 0, t4 = 0, t5 = 0;
 
@@ -105,6 +120,7 @@ sys_ranging_err_t sys_ranging_ds_twr_tag_once(const sys_ranging_cfg_t *cfg, sys_
 sys_ranging_err_t sys_ranging_ds_twr_anchor_once(const sys_ranging_cfg_t *cfg, sys_ranging_result_t *res)
 {
   CHECK_PARAM(cfg, SYS_RANGING_ERR_PARAM);
+  CHECK_ERR(bsp_uwb_configure(&cfg->uwb_cfg) == BSP_OK, SYS_RANGING_ERR_PARAM);
 
   uint8_t  rx[SYS_UWB_RXBUF_MAX] = { 0 };
   uint16_t rlen                  = 0;

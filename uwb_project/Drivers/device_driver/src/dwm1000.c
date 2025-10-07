@@ -264,4 +264,22 @@ dwm_err_t dwm_clear_system_status(dwm1000_t *dev, uint32_t mask_le)
                    (uint8_t) ((mask_le >> 16) & 0xFF), (uint8_t) ((mask_le >> 24) & 0xFF), 0x00 };
   return dwm_write_register(dev, REG_SYS_STATUS, -1, b, 5);
 }
+dwm_err_t dwm_enter_sleep(dwm1000_t *dev)
+{
+    uint8_t aon_cfg = 0x02; //  enable sleep
+    CHECK_ERR(dwm_write_register(dev, 0x2C, 0x00, &aon_cfg, 1) == DWM_OK, DWM_ERR);
+
+    uint8_t aon_ctrl = 0x00; // trigger save
+    CHECK_ERR(dwm_write_register(dev, 0x2C, 0x02, &aon_ctrl, 1) == DWM_OK, DWM_ERR);
+    return DWM_OK;
+}
+
+dwm_err_t dwm_wakeup_via_cs(dwm1000_t *dev)
+{
+    dev->bus.set_cs(true);   // CS low
+    dev->bus.delay_us(500);  // hold ≥ 500 µs
+    dev->bus.set_cs(false);  // CS high
+    dev->bus.delay_us(5000); // wait PLL lock
+    return DWM_OK;
+}
 /* End of file -------------------------------------------------------------- */

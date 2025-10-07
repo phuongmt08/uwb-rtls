@@ -35,8 +35,8 @@ typedef struct
 {
   uint8_t  seq;             /*!< Sequence number */
   uint32_t rx_timeout_us;   /*!< Per-leg RX timeout (us) */
+  dwm_config_t uwb_cfg;     /*!< UWB radio configuration */
 } sys_ranging_cfg_t;
-
 typedef struct
 {
   float    distance_m;      /*!< DS-TWR distance (meters), valid on Anchor */
