@@ -64,18 +64,7 @@ typedef enum
   DWM_PHYSIC_STANDARD_MODE,
   DWM_PHYSIC_EXTETENED_MODE
 } dwm_phr_mode_t;
-/**
- * @brief  Minimal radio configuration
- */
-typedef struct
-{
-  uint8_t        channel;          /* 1,2,3,4,5,7 */
-  uint8_t        prf;              /* 16 or 64 MHz */
-  uint8_t        data_rate;        /* 0=110k, 1=850k, 2=6M8 */
-  uint16_t       preamble_symbols; /* 64..4096 */
-  dwm_sfd_mode_t sfd_mode;         /* 0=IEEE std, 1=Decawave (16 sym) */
-  dwm_phr_mode_t phr_mode;         /* 0=std (≤127B), 1=extended (≤1023B) */
-} dwm_config_t;
+
 /* Inline public functions  ----------------------------------------------------------- */
 /* Device Time Unit (DTU) conversion (~63.8976 DTU per microsecond) */
 static inline uint64_t dwm_us_to_dtu(float us)
@@ -110,6 +99,8 @@ dwm_err_t dwm_clear_system_status(dwm1000_t *dev, uint32_t mask_le);
 
 dwm_err_t dwm_write_tx_buffer(dwm1000_t *dev, const void *psdu, uint16_t length_bytes);
 dwm_err_t dwm_read_rx_buffer(dwm1000_t *dev, void *buffer, uint16_t length_bytes);
+dwm_err_t dwm_wakeup(dwm1000_t *dev);
+dwm_err_t dwm_enter_sleep(dwm1000_t *dev);
 
 /* -------------------------------------------------------------------------- */
 

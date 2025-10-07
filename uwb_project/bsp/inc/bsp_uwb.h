@@ -13,7 +13,21 @@
 #include "dwm1000.h"
 
 /* Public enumerate/structure ----------------------------------------- */
-
+/**
+ * @brief  Minimal radio configuration
+ */
+typedef struct
+{
+  uint8_t  channel;           /*!< Channel 1,2,3,4,5,7 */
+  uint8_t  prf;               /*!< Pulse Repetition Frequency: 16 or 64 MHz */
+  uint8_t  data_rate;         /*!< 0=110k,1=850k,2=6M8 */
+  uint16_t preamble_symbols;  /*!< 64..4096 symbols */
+  uint8_t  phr_mode;          /*!< 0=Standard, 1=Extended */
+  bool     frame_filter_en;   /*!< Enable MAC frame filter */
+  bool     auto_ack_en;       /*!< Enable auto acknowledgment */
+  uint32_t tx_power;          /*!< TX power word */
+  uint16_t rx_fwto;           /*!< RX frame wait timeout (us) */
+} bsp_uwb_config_t;
 
 /* Public function prototypes ----------------------------------------- */
 /**
@@ -33,7 +47,7 @@ bsp_err_t bsp_uwb_init(void);
  *
  * @return see bsp_err_t
  */
-bsp_err_t bsp_uwb_configure(const dwm_config_t *cfg);
+bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg);
 
 /**
  * @brief Transmit frame

@@ -19,31 +19,13 @@
 /* Private defines ---------------------------------------------------------- */
 /* Register addresses (subset) */
 #define REG_DEV_ID             0x00
-#define REG_EUI                0x01
-#define REG_PANADR             0x03
-#define REG_SYS_TIME           0x06 /* 40-bit */
 #define REG_TX_FCTRL           0x08
 #define REG_TX_BUFFER          0x09
-#define REG_DX_TIME            0x0A /* 40-bit */
 #define REG_SYS_CTRL           0x0D
-#define REG_SYS_MASK           0x0E
 #define REG_SYS_STATUS         0x0F
-#define REG_RX_FINFO           0x10
 #define REG_RX_BUFFER          0x11
-#define REG_RX_FWTO            0x0C /* subaddress 0 */
-
 /* SYS_CTRL bits (subset) */
-#define SYS_CTRL_RXENAB        (1u << 0)
-#define SYS_CTRL_TXSTRT        (1u << 1)
-#define SYS_CTRL_TXDLYS        (1u << 0) /* used with TXSTRT */
 #define SYS_CTRL_TRXOFF        (1u << 6)
-#define SYS_CTRL_WAIT4RESP     (1u << 7)
-
-/* SYS_STATUS bits (subset) */
-#define SYS_STATUS_RXFCG       (1u << 6)
-#define SYS_STATUS_TXFRS       (1u << 7)
-#define SYS_STATUS_RXFTO       (1u << 30)
-#define SYS_STATUS_RX_ERR_MASK ((1u << 5) | (1u << 4) | (1u << 3) | (1u << 2))
 
 /* Private macros ----------------------------------------------------------- */
 /* None */
@@ -274,7 +256,7 @@ dwm_err_t dwm_enter_sleep(dwm1000_t *dev)
     return DWM_OK;
 }
 
-dwm_err_t dwm_wakeup_via_cs(dwm1000_t *dev)
+dwm_err_t dwm_wakeup(dwm1000_t *dev)
 {
     dev->bus.set_cs(true);   // CS low
     dev->bus.delay_us(500);  // hold ≥ 500 µs
