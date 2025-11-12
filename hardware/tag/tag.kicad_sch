@@ -8611,6 +8611,12 @@
 		(uuid "b7453d67-c0d5-4a60-aab8-4438c469a583")
 	)
 	(junction
+		(at 323.85 176.53)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "c0f53218-ff61-40e1-97ae-0ac4a5ca9419")
+	)
+	(junction
 		(at 181.61 154.94)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -9317,6 +9323,16 @@
 			(type default)
 		)
 		(uuid "1a1ca21e-caf7-415d-b05d-416e3fd04748")
+	)
+	(wire
+		(pts
+			(xy 323.85 171.45) (xy 323.85 176.53)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1a1de15d-138f-4c95-9423-809fb1fb6329")
 	)
 	(wire
 		(pts
@@ -10520,16 +10536,6 @@
 	)
 	(wire
 		(pts
-			(xy 283.21 198.12) (xy 294.64 198.12)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "63eaf013-9b3c-4203-84a5-b6cdbedebd4a")
-	)
-	(wire
-		(pts
 			(xy 50.8 156.21) (xy 54.61 156.21)
 		)
 		(stroke
@@ -10587,6 +10593,16 @@
 			(type default)
 		)
 		(uuid "6bdb4f0a-860d-443b-b560-29b125b48fee")
+	)
+	(wire
+		(pts
+			(xy 321.31 168.91) (xy 321.31 166.37)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6cae0c67-a0a2-434f-b956-6f03e818a3ab")
 	)
 	(wire
 		(pts
@@ -11310,16 +11326,6 @@
 	)
 	(wire
 		(pts
-			(xy 283.21 195.58) (xy 294.64 195.58)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "9c54c5b8-1d4b-49e4-a1cb-034331dada80")
-	)
-	(wire
-		(pts
 			(xy 152.4 165.1) (xy 152.4 166.37)
 		)
 		(stroke
@@ -11880,6 +11886,16 @@
 	)
 	(wire
 		(pts
+			(xy 283.21 195.58) (xy 294.64 195.58)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "bcd3f0af-e2ce-4013-9b47-a338937610c3")
+	)
+	(wire
+		(pts
 			(xy 335.28 113.03) (xy 335.28 116.84)
 		)
 		(stroke
@@ -12240,6 +12256,16 @@
 	)
 	(wire
 		(pts
+			(xy 323.85 176.53) (xy 323.85 179.07)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d5b12973-ee1f-4762-b54a-109fb3aa9f24")
+	)
+	(wire
+		(pts
 			(xy 53.34 92.71) (xy 40.64 92.71)
 		)
 		(stroke
@@ -12247,6 +12273,16 @@
 			(type default)
 		)
 		(uuid "d6779274-1a3d-48ef-8180-d26c59a4ddd2")
+	)
+	(wire
+		(pts
+			(xy 326.39 171.45) (xy 323.85 171.45)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d6fd58a3-3410-478d-a71e-b146cf0e7558")
 	)
 	(wire
 		(pts
@@ -12630,6 +12666,16 @@
 	)
 	(wire
 		(pts
+			(xy 323.85 176.53) (xy 326.39 176.53)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "edaa4261-bf93-4647-97db-e00c6cbc3fa9")
+	)
+	(wire
+		(pts
 			(xy 325.12 53.34) (xy 325.12 54.61)
 		)
 		(stroke
@@ -12810,6 +12856,16 @@
 	)
 	(wire
 		(pts
+			(xy 326.39 168.91) (xy 321.31 168.91)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f9075435-9146-479e-a7c4-f5b66ccf28c0")
+	)
+	(wire
+		(pts
 			(xy 25.4 113.03) (xy 25.4 120.65)
 		)
 		(stroke
@@ -12918,6 +12974,16 @@
 		)
 		(uuid "ff312f80-6932-4fb5-bf6c-3498d2966aaf")
 	)
+	(wire
+		(pts
+			(xy 283.21 198.12) (xy 294.64 198.12)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ff9f4281-3e24-4827-b04e-9460810e6111")
+	)
 	(label "CHG"
 		(at 83.82 176.53 0)
 		(effects
@@ -12947,6 +13013,16 @@
 			(justify left bottom)
 		)
 		(uuid "199354bc-8a49-4870-a826-9367f48329ec")
+	)
+	(label "PB9 {slash} I2C1_SDA"
+		(at 283.21 198.12 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "1c487bc1-6094-4378-9173-c39c5818062c")
 	)
 	(label "IMU_IQR"
 		(at 34.29 57.15 0)
@@ -13037,16 +13113,6 @@
 			(justify left bottom)
 		)
 		(uuid "43db29a9-52e5-4961-b5a3-3621b148f5d0")
-	)
-	(label "PB9 {slash} I2C1_SDA"
-		(at 283.21 195.58 0)
-		(effects
-			(font
-				(size 1 1)
-			)
-			(justify left bottom)
-		)
-		(uuid "472db3aa-f3c6-4503-bc27-9f4206deb9f8")
 	)
 	(label "SPI_SCK"
 		(at 370.84 67.31 180)
@@ -13187,6 +13253,16 @@
 			(justify left bottom)
 		)
 		(uuid "702d222c-8630-44bb-902f-7e0f094fbc01")
+	)
+	(label "PB8 {slash} I2C1_SCL"
+		(at 283.21 195.58 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "774feca2-9444-4e98-8f2c-94a26792e3cd")
 	)
 	(label "SYS"
 		(at 48.26 168.91 0)
@@ -13437,16 +13513,6 @@
 			(justify left bottom)
 		)
 		(uuid "b8fe02c0-366b-46e6-9bfe-ec36e8a68e72")
-	)
-	(label "PB8 {slash} I2C1_SCL"
-		(at 283.21 198.12 0)
-		(effects
-			(font
-				(size 1 1)
-			)
-			(justify left bottom)
-		)
-		(uuid "babeb063-2f33-472b-92aa-0b0c70617cbc")
 	)
 	(label "SYS"
 		(at 25.4 100.33 0)
@@ -14267,6 +14333,72 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#PWR078")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 323.85 179.07 0)
+		(mirror y)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "0ff215e5-ba0a-41d8-919c-c682082094dd")
+		(property "Reference" "#PWR057"
+			(at 323.85 185.42 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 320.04 180.848 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 323.85 179.07 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 323.85 179.07 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 323.85 179.07 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "ff3a9d9e-0801-451a-b1e6-570074425b16")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "#PWR057")
 					(unit 1)
 				)
 			)
@@ -15545,6 +15677,71 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "R20")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:VBUS")
+		(at 321.31 166.37 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "2a89bd45-c590-4331-bc1d-5bc6b3b64973")
+		(property "Reference" "#PWR032"
+			(at 321.31 170.18 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "VBUS"
+			(at 321.564 161.544 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 321.31 166.37 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 321.31 166.37 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"VBUS\""
+			(at 321.31 166.37 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "04edee1b-eca3-4538-8dd9-cf2e5509facf")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "#PWR032")
 					(unit 1)
 				)
 			)
@@ -19726,6 +19923,212 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "TP4")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "BM02B-SRSS-TB_LF__SN_:BM02B-SRSS-TB_LF__SN_")
+		(at 336.55 173.99 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "730de819-39ca-4c92-bf45-ed88c98fe030")
+		(property "Reference" "J8"
+			(at 342.9 171.4499 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "SOURCE"
+			(at 342.9 173.9899 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" ""
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "MF" "JST"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "MAXIMUM_PACKAGE_HEIGHT" "6.3 mm"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "Package" "None"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "Price" "None"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "Check_prices" "https://www.snapeda.com/parts/BM02B-SRSS-TB%20%20(LF)(SN)/JST/view-part/?ref=eda"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "STANDARD" "Manufacturer Recommendations"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "PARTREV" "N/A"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "SnapEDA_Link" "https://www.snapeda.com/parts/BM02B-SRSS-TB%20%20(LF)(SN)/JST/view-part/?ref=snap"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "MP" "BM02B-SRSS-TB  (LF)(SN)"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "Description_1" "Socket; wire-board; male; SH,SR; 1mm; PIN: 2; SMT; 50V; 1A; -25÷85°C"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "MANUFACTURER" "JST Sales America Inc."
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "Availability" "In Stock"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(property "SNAPEDA_PN" "BM02B-SRSS-TB(LF)(SN)"
+			(at 336.55 173.99 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+				(hide yes)
+			)
+		)
+		(pin "S1"
+			(uuid "3051a12c-ddff-4be1-aa7d-9ad30cfab660")
+		)
+		(pin "S2"
+			(uuid "1646d579-c26c-4225-b16a-9c6fc63f087f")
+		)
+		(pin "2"
+			(uuid "1e451878-393c-4b2f-a3ca-5aea2a5a9ee8")
+		)
+		(pin "1"
+			(uuid "4f650233-305e-4dc4-978c-80ab31d7d575")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "J8")
 					(unit 1)
 				)
 			)
