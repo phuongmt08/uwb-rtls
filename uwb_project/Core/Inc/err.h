@@ -36,5 +36,9 @@
       return (err_code);            \
     }                               \
   } while (0)
-
+  
+#define CHECK_VOID(condition) \
+	do { \
+		if (!(condition)) return; \
+	} while(0)
 #endif /* __ERR_H */
