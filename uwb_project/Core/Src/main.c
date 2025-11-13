@@ -31,6 +31,8 @@
 #include "string.h"
 #include "bsp_delay.h"
 #include "sys_task.h"
+#include "sys_logger.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,18 +73,62 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void task_toggle_led(void *arg)
+{
+//	bsp_uwb_tx(test_frame, strlen(test_frame));
+	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
+static void task_sys_logger_test(void *arg)
+{
+    static bool inited = false;
+    static uint32_t cnt = 0;
 
+    if (!inited) {
+        sys_logger_init();
+        RLOG_I(LOG_OBJECT_CODE_DEBUG, "Logger init OK");
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System started, buffer size=%d bytes", SYS_LOGGER_BUF_SIZE);
+        inited = true;
+    }
+
+    // Routine logs with timestamp
+    RLOG_D(LOG_OBJECT_CODE_DEBUG, "Tick=%lu, Free=%u, Used=%u",
+           cnt, sys_logger_space_count(), sys_logger_data_count());
+
+    // Periodic warning
+    if ((cnt % 10) == 0) {
+        RLOG_W(LOG_OBJECT_CODE_DEBUG, "Periodic check at tick %lu", cnt);
+    }
+    
+    // Simulated error
+    if ((cnt % 33) == 0) {
+        RLOG_E(LOG_OBJECT_CODE_DEBUG, ERR_TIMEOUT, "Simulated error: code=%d", -123);
+    }
+
+    // Stress test: long message near SYS_LOGGER_MAX_MSG_LEN
+    if ((cnt % 25) == 0) {
+        char big[220];
+        for (size_t i = 0; i < sizeof(big) - 1; i++) big[i] = 'A';
+        big[sizeof(big) - 1] = '\0';
+        RLOG_D(LOG_OBJECT_CODE_DEBUG, "Long msg test: %s", big);  // Will be truncated
+    }
+    
+    // Test different components
+    if ((cnt % 50) == 0) {
+        RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "UWB module status check");
+        RLOG_D(LOG_OBJECT_CODE_RANGING, "Distance measurement ready");
+    }
+
+    // Pump buffer to USB CDC
+    sys_logger_task();
+
+    cnt++;
+}
 /* USER CODE END 0 */
 
 /**
   * @brief  The application entry point.
   * @retval int
   */
-void task_toggle_led(void *arg)
-{
-//	bsp_uwb_tx(test_frame, strlen(test_frame));
-	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-}
 int main(void)
 {
 
@@ -131,6 +177,8 @@ int main(void)
   sys_task_init();
   int id = sys_task_add(task_toggle_led, NULL, 1000, 0);
   sys_task_start(id);
+  int id_log = sys_task_add(task_sys_logger_test, NULL, 1000, 0);  // 20 ms period
+  sys_task_start(id_log);
 
   /* USER CODE END 2 */
 
@@ -176,9 +224,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 25;
-  RCC_OscInitStruct.PLL.PLLN = 192;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -193,7 +241,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
