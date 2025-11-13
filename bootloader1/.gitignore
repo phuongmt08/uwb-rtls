@@ -18,6 +18,8 @@
 !middlewares/**
 !sys/
 !sys/**
+!USB_DEVICE/
+!USB_DEVICE/**
 !.project
 !.cproject
 !.settings/

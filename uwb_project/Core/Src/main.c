@@ -118,8 +118,6 @@ static void task_sys_logger_test(void *arg)
         RLOG_D(LOG_OBJECT_CODE_RANGING, "Distance measurement ready");
     }
 
-    // Pump buffer to USB CDC
-    sys_logger_task();
 
     cnt++;
 }
@@ -187,6 +185,9 @@ int main(void)
   while (1)
   {
 	  sys_task_process();
+
+	// Pump buffer to USB CDC
+	sys_logger_task();
 //	HAL_Delay(1000);
 
 //	if (HAL_GetTick() >= 5000) {

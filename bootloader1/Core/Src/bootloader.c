@@ -10,7 +10,7 @@
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
-pp_vector_valid(void)
+bool bl_app_vector_valid(void)
 {
   const uint32_t msp = *(uint32_t*)APP_ADDRESS;;
   return (msp >= SRAM_BASE_ADDR) && (msp <= SRAM_END_ADDR);
@@ -32,6 +32,3 @@ void bl_jump_to_app(void)
 
   ((void (*)(void))(*(uint32_t*)(APP_ADDRESS + 4U)))();
 }
-
-/* Extern flag toggled by DFU download/upload callbacks */
-volatile uint8_t g_dfu_host_active = 0;
