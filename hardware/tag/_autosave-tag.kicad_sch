@@ -10010,7 +10010,7 @@
 	)
 	(wire
 		(pts
-			(xy 383.54 198.12) (xy 383.54 201.93)
+			(xy 383.54 219.71) (xy 383.54 223.52)
 		)
 		(stroke
 			(width 0)
@@ -10537,6 +10537,16 @@
 			(type default)
 		)
 		(uuid "6066f905-d4dd-4ca4-b09a-27bda8214bbb")
+	)
+	(wire
+		(pts
+			(xy 398.78 198.12) (xy 398.78 201.93)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "60b1d997-8078-472f-b415-64e27c102e6a")
 	)
 	(wire
 		(pts
@@ -11960,7 +11970,7 @@
 	)
 	(wire
 		(pts
-			(xy 398.78 198.12) (xy 398.78 201.93)
+			(xy 398.78 219.71) (xy 398.78 223.52)
 		)
 		(stroke
 			(width 0)
@@ -13119,7 +13129,7 @@
 		(uuid "01912f1a-c46f-4709-81b0-6dfa97f4c6ee")
 	)
 	(label "BLE_RX"
-		(at 398.78 198.12 90)
+		(at 398.78 219.71 90)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -13538,6 +13548,16 @@
 		)
 		(uuid "8e5f14b7-bed4-45e8-b49f-459357046c27")
 	)
+	(label "SPI_CS2"
+		(at 398.78 198.12 90)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "912c6aaa-4316-431c-8846-cf38e13dec8d")
+	)
 	(label "PA10 {slash} UART1_RX"
 		(at 218.44 200.66 0)
 		(effects
@@ -13659,7 +13679,7 @@
 		(uuid "c5c99a64-8373-404c-8d3f-351ee9d0f291")
 	)
 	(label "BLE_TX"
-		(at 383.54 198.12 90)
+		(at 383.54 219.71 90)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -18755,7 +18775,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 383.54 201.93 180)
+		(at 383.54 223.52 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -18763,7 +18783,7 @@
 		(dnp no)
 		(uuid "6332063f-4af0-4ad7-a66f-8e5162ffae5a")
 		(property "Reference" "TP9"
-			(at 382.016 207.772 0)
+			(at 382.016 229.362 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18772,7 +18792,7 @@
 			)
 		)
 		(property "Value" "TestPoint"
-			(at 379.476 210.566 0)
+			(at 379.476 232.156 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18781,7 +18801,7 @@
 			)
 		)
 		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
-			(at 378.46 201.93 0)
+			(at 378.46 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18790,7 +18810,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 378.46 201.93 0)
+			(at 378.46 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18799,7 +18819,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 383.54 201.93 0)
+			(at 383.54 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -24244,6 +24264,72 @@
 		)
 	)
 	(symbol
+		(lib_id "Connector:TestPoint")
+		(at 398.78 201.93 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "aa4a2704-f9a7-45e0-8e6a-2a69322ecbae")
+		(property "Reference" "TP5"
+			(at 397.002 207.772 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "TestPoint"
+			(at 395.224 210.566 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
+			(at 393.7 201.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 393.7 201.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "test point"
+			(at 398.78 201.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "9d371cd2-1b23-4338-98ec-a7e27e40c459")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "TP5")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:GND")
 		(at 30.48 271.78 0)
 		(unit 1)
@@ -25156,75 +25242,6 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 379.73 68.58 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "c0d5f407-7a27-4d9f-afe2-d8bb98dff13e")
-		(property "Reference" "R22"
-			(at 374.015 67.691 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "10k"
-			(at 377.698 69.85 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
-			(at 377.952 68.58 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 379.73 68.58 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 379.73 68.58 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "a8a22403-d05c-4f6a-83af-ab2b28435326")
-		)
-		(pin "2"
-			(uuid "56c77c35-33ac-4893-b34a-e3c05a33d45f")
-		)
-		(instances
-			(project "learningkcad"
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "R22")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
 		(at 307.34 160.02 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -25287,6 +25304,75 @@
 			(project "tag"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "R24")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 379.73 68.58 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "c0d5f407-7a27-4d9f-afe2-d8bb98dff13e")
+		(property "Reference" "R22"
+			(at 374.015 67.691 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "10k"
+			(at 377.698 69.85 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
+			(at 377.952 68.58 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 379.73 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 379.73 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "a8a22403-d05c-4f6a-83af-ab2b28435326")
+		)
+		(pin "2"
+			(uuid "56c77c35-33ac-4893-b34a-e3c05a33d45f")
+		)
+		(instances
+			(project "learningkcad"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "R22")
 					(unit 1)
 				)
 			)
@@ -25697,7 +25783,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 398.78 201.93 180)
+		(at 398.78 223.52 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -25705,7 +25791,7 @@
 		(dnp no)
 		(uuid "cbfbcfd2-d04e-4632-a05c-b3f840294341")
 		(property "Reference" "TP12"
-			(at 397.002 207.772 0)
+			(at 397.002 229.362 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25714,7 +25800,7 @@
 			)
 		)
 		(property "Value" "TestPoint"
-			(at 395.224 210.566 0)
+			(at 395.224 232.156 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25723,7 +25809,7 @@
 			)
 		)
 		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
-			(at 393.7 201.93 0)
+			(at 393.7 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25732,7 +25818,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 393.7 201.93 0)
+			(at 393.7 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25741,7 +25827,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 398.78 201.93 0)
+			(at 398.78 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
