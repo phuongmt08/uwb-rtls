@@ -18,11 +18,12 @@
 !middlewares/**
 !sys/
 !sys/**
+!USB_DEVICE/
+!USB_DEVICE/**
 !.project
 !.cproject
 !.settings/
-!USB_DEVICE/
-!USB_DEVICE/**
+
 # (Optional) Keep .gitignore files even in subfolders, for future use
 !.gitignore
 # Keep clang-format file
