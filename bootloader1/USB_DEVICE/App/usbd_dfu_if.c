@@ -30,7 +30,8 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-volatile uint8_t g_dfu_host_active = 0;
+volatile uint32_t g_dfu_last_activity = 0;
+static uint8_t g_erase_done = 0;  /* Flag to track if erase was done */
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -61,7 +62,15 @@ volatile uint8_t g_dfu_host_active = 0;
   * @{
   */
 
-#define FLASH_DESC_STR      "@Internal Flash   /0x08000000/03*016Ka,01*016Kg,01*064Kg,07*128Kg,04*016Kg,01*064Kg,07*128Kg"
+/* DFU descriptor string for STM32F411CE:
+ * Format must match: @name/base_address/sectors
+ * STM32CubeProgrammer parses this to show memory layout
+ * Sector 2: 16KB @ 0x08008000
+ * Sector 3: 16KB @ 0x0800C000  
+ * Sector 4: 64KB @ 0x08010000
+ * Each sector listed individually with 'g' flag (readable+writable)
+ */
+#define FLASH_DESC_STR      "@Internal Flash  /0x08008000/01*016Kg,01*016Kg,01*064Kg"
 
 /* USER CODE BEGIN PRIVATE_DEFINES */
 
@@ -154,6 +163,7 @@ __ALIGN_BEGIN USBD_DFU_MediaTypeDef USBD_DFU_fops_FS __ALIGN_END =
 uint16_t MEM_If_Init_FS(void)
 {
   /* USER CODE BEGIN 0 */
+  g_erase_done = 0;  /* Reset erase flag on DFU init */
   return (USBD_OK);
   /* USER CODE END 0 */
 }
@@ -177,46 +187,35 @@ uint16_t MEM_If_DeInit_FS(void)
 uint16_t MEM_If_Erase_FS(uint32_t Add)
 {
   /* USER CODE BEGIN 2 */
-  g_dfu_host_active = 1;
+  g_dfu_last_activity = HAL_GetTick();
 
-  /* Only erase if address is within application space */
-  if (Add < APP_ADDRESS) {
-    return USBD_FAIL;
-  }
-
+  /* Accept any address for erase - will erase all app sectors */
+  /* This handles both individual sector erase and full chip erase */
+  
   HAL_FLASH_Unlock();
 
-  /* Determine which sector to erase based on address */
+  /* Erase all application sectors (2, 3, 4) */
   uint32_t SectorError = 0;
   FLASH_EraseInitTypeDef EraseInitStruct;
   
-  /* STM32F411 Flash sectors:
-   * Sector 0-3: 16KB each (0x08000000 - 0x0800FFFF) - Bootloader area
-   * Sector 4:   64KB      (0x08010000 - 0x0801FFFF)
-   * Sector 5-7: 128KB each (0x08020000 - 0x0807FFFF) - Application area
-   */
-  
-  uint8_t sector;
-  if (Add >= 0x08020000) {
-    sector = 5 + ((Add - 0x08020000) / 0x20000); // 128KB sectors
-  } else if (Add >= 0x08010000) {
-    sector = 4; // 64KB sector
-  } else if (Add >= APP_ADDRESS) {
-    sector = (Add - 0x08000000) / 0x4000; // 16KB sectors
-  } else {
-    HAL_FLASH_Lock();
-    return USBD_FAIL;
-  }
-
   EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
   EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-  EraseInitStruct.Sector = sector;
   EraseInitStruct.NbSectors = 1;
-
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
-    HAL_FLASH_Lock();
-    return USBD_FAIL;
-  }
+  
+  /* Erase Sector 2 (16KB @ 0x08008000) */
+  EraseInitStruct.Sector = 2;
+  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+  
+  /* Erase Sector 3 (16KB @ 0x0800C000) */
+  EraseInitStruct.Sector = 3;
+  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+  
+  /* Erase Sector 4 (64KB @ 0x08010000) */
+  EraseInitStruct.Sector = 4;
+  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+  
+  /* Mark as erased for write callback */
+  g_erase_done = 1;
 
   HAL_FLASH_Lock();
   return (USBD_OK);
@@ -233,14 +232,35 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
 uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
 {
   /* USER CODE BEGIN 3 */
-  g_dfu_host_active = 1;
+  g_dfu_last_activity = HAL_GetTick();
 
-  /* Verify destination is in application space */
-  if ((uint32_t)dest < APP_ADDRESS) {
+  /* Verify destination is in application space (sector 2-4 only) */
+  uint32_t addr = (uint32_t)dest;
+  if (addr < APP_ADDRESS || addr >= 0x08020000) {
+    /* Reject writes to bootloader (< 0x08008000) or data storage (>= 0x08020000) */
     return USBD_FAIL;
   }
 
   HAL_FLASH_Unlock();
+  
+  /* Auto-erase on first write (since Mass Erase doesn't call erase callback) */
+  if (!g_erase_done) {
+    g_erase_done = 1;
+    
+    uint32_t SectorError = 0;
+    FLASH_EraseInitTypeDef EraseInitStruct;
+    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+    EraseInitStruct.NbSectors = 1;
+    
+    /* Erase all app sectors */
+    EraseInitStruct.Sector = 2;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    EraseInitStruct.Sector = 3;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    EraseInitStruct.Sector = 4;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+  }
 
   /* Write data word by word (32-bit) */
   uint32_t data_offset = 0;
@@ -286,7 +306,7 @@ uint8_t *MEM_If_Read_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
 {
   /* Return a valid address to avoid HardFault */
   /* USER CODE BEGIN 4 */
-  g_dfu_host_active = 1;
+  g_dfu_last_activity = HAL_GetTick();
   
   /* DFU read expects direct pointer to flash memory */
   UNUSED(dest);
@@ -306,7 +326,28 @@ uint8_t *MEM_If_Read_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
 uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer)
 {
   /* USER CODE BEGIN 5 */
-  UNUSED(Add);
+  
+  /* Detect Mass Erase request - some DFU tools send special address */
+  if (Cmd == DFU_MEDIA_ERASE && (Add == 0xFFFFFFFF || Add == 0x00000000)) {
+    /* Mass Erase requested - erase all app sectors */
+    HAL_FLASH_Unlock();
+    
+    uint32_t SectorError = 0;
+    FLASH_EraseInitTypeDef EraseInitStruct;
+    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+    EraseInitStruct.NbSectors = 1;
+    
+    EraseInitStruct.Sector = 2;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    EraseInitStruct.Sector = 3;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    EraseInitStruct.Sector = 4;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    
+    HAL_FLASH_Lock();
+    g_erase_done = 1;
+  }
 
   switch (Cmd)
   {
