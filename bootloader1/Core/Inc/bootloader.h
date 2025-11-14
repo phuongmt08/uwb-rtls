@@ -1,0 +1,36 @@
+/**
+ * @file       bootloader.h
+ * @brief      Minimal USB DFU bootloader API for STM32F411CEU6
+ * @version    1.0.0
+ * @date       2025-09-29
+ */
+
+#ifndef __BOOTLOADER_H
+#define __BOOTLOADER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+/* Application base address (after 32KB bootloader) */
+#define APP_ADDRESS        (0x08008000UL)
+
+/* SRAM range for MSP sanity check (F411 has 96KB SRAM) */
+#define SRAM_BASE_ADDR     (0x20000000UL)
+#define SRAM_END_ADDR      (0x20018000UL)
+
+/* Magic flag in SRAM to request DFU after soft reset */
+#define BL_MAGIC_ADDR      (0x2001FFF0UL)
+#define BL_MAGIC_VALUE     (0xDEADB007UL)
+
+
+/* DFU wait timeout before jumping to app if no host activity (ms) */
+#define BL_DFU_TIMEOUT_MS  (10000U)
+
+
+bool bl_app_vector_valid(void);
+void bl_jump_to_app(void);
+/* Set by DFU callbacks when host starts a session */
+extern volatile uint8_t g_dfu_host_active;
+
+
+#endif /* __BOOTLOADER_H */
