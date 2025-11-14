@@ -36,18 +36,6 @@
  *                |                          |  [Pop sent data]       |
  *                |                          |                        |
  * 
- *             Usage Example:
- *             
- *               // In main initialization
- *               sys_logger_init();
- *               
- *               // In application
- *               LOGI("System started");
- *               LOGD("Counter: %d", counter);
- *               LOGE("Error code: 0x%X", err);
- *               
- *               // In main loop or timer callback
- *               sys_logger_task();  // Call periodically (e.g., every 10ms)
  */
 /* Define to prevent recursive inclusion ------------------------------------ */
 #ifndef __SYS_LOGGER_H
