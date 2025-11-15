@@ -29,7 +29,7 @@
 #define HW_REV_MINOR            0
 
 /* ========================================================================== */
-/*                         HARDWARE FEATURES                                 */
+/*                          FEATURES                                          */
 /* ========================================================================== */
 /* Available hardware peripherals */
 #define HAVE_UWB                       /* UWB radio (DW1000) */
