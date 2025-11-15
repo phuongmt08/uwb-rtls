@@ -76,7 +76,7 @@ typedef enum {
 	LOG_OBJECT_CODE_TAG = 0x11,
 	LOG_OBJECT_CODE_TDOA = 0x12,
 	LOG_OBJECT_CODE_TWR = 0x13,
-    LOG_OBJECT_CODE_DEBUG = 0x14,
+    LOG_OBJECT_CODE_SYS_CFG = 0x14,
     LOG_OBJECT_CODE_MAX = 0x15
 } log_object_code_t;
 
