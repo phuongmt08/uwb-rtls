@@ -85,23 +85,23 @@ static void task_sys_logger_test(void *arg)
 
     if (!inited) {
         sys_logger_init();
-        RLOG_I(LOG_OBJECT_CODE_DEBUG, "Logger init OK");
+        RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Logger init OK");
         RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System started, buffer size=%d bytes", SYS_LOGGER_BUF_SIZE);
         inited = true;
     }
 
     // Routine logs with timestamp
-    RLOG_D(LOG_OBJECT_CODE_DEBUG, "Tick=%lu, Free=%u, Used=%u",
+    RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Tick=%lu, Free=%u, Used=%u",
            cnt, sys_logger_space_count(), sys_logger_data_count());
 
     // Periodic warning
     if ((cnt % 10) == 0) {
-        RLOG_W(LOG_OBJECT_CODE_DEBUG, "Periodic check at tick %lu", cnt);
+        RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Periodic check at tick %lu", cnt);
     }
     
     // Simulated error
     if ((cnt % 33) == 0) {
-        RLOG_E(LOG_OBJECT_CODE_DEBUG, ERR_TIMEOUT, "Simulated error: code=%d", -123);
+        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_TIMEOUT, "Simulated error: code=%d", -123);
     }
 
     // Stress test: long message near SYS_LOGGER_MAX_MSG_LEN
@@ -109,7 +109,7 @@ static void task_sys_logger_test(void *arg)
         char big[220];
         for (size_t i = 0; i < sizeof(big) - 1; i++) big[i] = 'A';
         big[sizeof(big) - 1] = '\0';
-        RLOG_D(LOG_OBJECT_CODE_DEBUG, "Long msg test: %s", big);  // Will be truncated
+        RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Long msg test: %s", big);  // Will be truncated
     }
     
     // Test different components
@@ -224,8 +224,8 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 25;
-  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLM = 6;
+  RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
   RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
