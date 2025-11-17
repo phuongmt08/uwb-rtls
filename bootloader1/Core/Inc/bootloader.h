@@ -24,13 +24,15 @@
 
 
 /* DFU wait timeout before jumping to app if no host activity (ms) */
-#define BL_DFU_TIMEOUT_MS  (10000U)
+#define BL_DFU_TIMEOUT_MS  (5000U)  /* Wait 3s for user to connect DFU tool */
 
+/* Inactivity timeout - time to wait after last DFU operation (ms) */
+#define BL_DFU_INACTIVITY_MS  (5000U)  /* 5s should be enough for programmer to complete */
 
 bool bl_app_vector_valid(void);
 void bl_jump_to_app(void);
-/* Set by DFU callbacks when host starts a session */
-extern volatile uint8_t g_dfu_host_active;
+/* Timestamp of last DFU activity - updated by DFU callbacks */
+extern volatile uint32_t g_dfu_last_activity;
 
 
 #endif /* __BOOTLOADER_H */

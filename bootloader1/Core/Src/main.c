@@ -91,27 +91,56 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  
+  /* Check if app requested DFU mode via magic flag */
+  bool force_dfu = bl_should_enter_dfu();
+  
+  /* Always enter DFU mode with timeout window to allow:
+   * 1. User to flash new firmware (even if current app is valid)
+   * 2. App-requested DFU mode (via magic flag)
+   * 3. No valid app case (must stay in DFU)
+   */
+  
   uint32_t t0 = HAL_GetTick();
-  while ((HAL_GetTick() - t0) < BL_DFU_TIMEOUT_MS)
+  
+  while (1)
   {
-    if (g_dfu_host_active) {
-      /* Host is interacting (download/upload) -> extend the window */
-      t0 = HAL_GetTick();
+    uint32_t now = HAL_GetTick();
+    
+    /* If we had DFU activity, check inactivity timeout */
+    if (g_dfu_last_activity != 0) {
+      uint32_t inactive_time = now - g_dfu_last_activity;
+      
+      /* If inactive for more than threshold, exit to app */
+      if (inactive_time >= BL_DFU_INACTIVITY_MS) {
+        break;
+      }
+      
+      /* Still within inactivity window - blink fast to show active */
+      bl_led_tick();
+      HAL_Delay(100);
+      continue;
     }
-
-    /* Blink to indicate DFU mode is open */
+    
+    /* No activity yet - check initial timeout */
+    if ((now - t0) >= BL_DFU_TIMEOUT_MS) {
+      break;  /* Initial timeout - try to jump to app */
+    }
+    
+    /* Still waiting for connection - blink slow */
     bl_led_tick();
-    HAL_Delay(20);
+    HAL_Delay(300);
   }
 
   /* Leave DFU window: chain to application if valid, else stay in BL */
   if (bl_app_vector_valid()) {
     bl_jump_to_app();
   } else {
-    /* No valid app: slow blink and remain in bootloader */
+    /* No valid app: stay in DFU mode permanently with slow blink */
     while (1) {
       bl_led_tick();
-      HAL_Delay(5000);
+      HAL_Delay(5000);  /* Slow blink to indicate waiting for firmware */
+      /* USB DFU remains active - user can connect anytime to flash */
     }
   }
   /* USER CODE END 2 */
