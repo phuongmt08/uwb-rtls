@@ -92,10 +92,6 @@ void app_tag_process(void)
       s_error_count = 0;
     }
   }
-
-    /* Small delay */
-    HAL_Delay(10);
-  }
 }
 
 /* End of file -------------------------------------------------------- */

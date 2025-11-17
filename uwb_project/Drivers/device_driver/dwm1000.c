@@ -139,10 +139,16 @@ dwm_err_t dwm_init(dwm1000_t *dev)
   /* Optional hardware reset pulse */
   if (dev->bus.set_reset)
   {
-	dev->bus.delay_us(10);
+	dev->bus.delay_us(100);
     dev->bus.set_reset(true);
-    dev->bus.delay_us(10);
+    dev->bus.delay_us(100);
     dev->bus.set_reset(false);
+    dev->bus.delay_us(5000);
+  }
+  else
+  {
+  /* No hardware reset - still need startup time */
+  dev->bus.delay_us(5000);
   }
 
   /* Allow DW1000 to transition INIT -> IDLE */
@@ -153,8 +159,8 @@ dwm_err_t dwm_init(dwm1000_t *dev)
   CHECK_ERR(dwm_write_register(dev, REG_SYS_STATUS, -1, clr, 5) == DWM_OK, DWM_ERR);
 
   /* Switch SPI to high speed (~6 MHz) after device is ready */
-//  if (dev->bus.set_spi_high_speed)
-//    dev->bus.set_spi_high_speed();
+ if (dev->bus.set_spi_high_speed)
+   dev->bus.set_spi_high_speed();
 
   return DWM_OK;
 }
@@ -214,7 +220,7 @@ dwm_err_t dwm_read_rx_buffer(dwm1000_t *dev, void *buffer, uint16_t length_bytes
   /* Read from start of RX buffer */
   return dwm_read_register(dev, REG_RX_BUFFER, 0x00, buffer, length_bytes);
 }
-dwm_err_t dwm_stop_transmitt(dwm1000_t *dev)
+dwm_err_t dwm_stop_transmitt  (dwm1000_t *dev)
 {
   CHECK_PARAM(dev, DWM_ERR_PARAM);
   uint32_t v = SYS_CTRL_TRXOFF;

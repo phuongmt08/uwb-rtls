@@ -13,13 +13,15 @@
 #include "spi.h"
 /* Private defines ---------------------------------------------------- */
 #define EXPECTED_DEV_ID             0xDECA0130u
+#define RX_TIMEOUT_MS               1000u  /* Software RX timeout: 1 second */
 
 /* Register map (subset) */
 #define REG_SYS_CFG                 0x04
 #define REG_TX_FCTRL                0x08
+#define REG_RX_FWTO                 0x0C
+#define REG_RX_FINFO                0x10
 #define REG_TX_POWER                0x1E
 #define REG_CHAN_CTRL               0x1F
-#define REG_RX_FWTO                 0x0C
 
 /* SYS_CFG bits */
 #define SYS_CFG_PHR_MODE_EXT        (1u << 18)
@@ -158,23 +160,43 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t max_len, uint16_t *out_len)
   uint32_t ctrl = (1u << 0); /* RXENAB */
   CHECK_ERR(dwm_write_system_control(&dwm1000, ctrl) == DWM_OK, BSP_ERR);
 
-  /* Wait RX good frame or error/timeout */
+  /* Wait RX good frame or error/timeout (with software timeout) */
+  uint32_t start_tick = HAL_GetTick();
   uint32_t status = 0;
+  
   while (1)
   {
     CHECK_ERR(dwm_read_system_status(&dwm1000, &status) == DWM_OK, BSP_ERR);
+    
     if (status & (1u << 6))
-      break; /* RXFCG */
+      break; /* RXFCG - frame received */
+      
     if (status & ((1u << 30) | (0x3Cu)))
     { /* RXFTO or RX errors */
       (void) dwm_clear_system_status(&dwm1000, status);
       return BSP_ERR;
     }
+    
+    /* Check software timeout */
+    if ((HAL_GetTick() - start_tick) > RX_TIMEOUT_MS)
+    {
+      /* Force RX disable on timeout */
+      uint32_t trxoff = (1u << 6); /* TRXOFF */
+      (void) dwm_write_system_control(&dwm1000, trxoff);
+      return BSP_ERR;
+    }
   }
 
-  /* Read received length from RX_FINFO if desired later.
-     For now, read up to max_len; middleware can parse actual MAC length. */
-  *out_len = max_len;
+  /* Read actual received frame length from RX_FINFO register */
+  uint32_t rx_finfo = 0;
+  CHECK_ERR(dwm_read_register(&dwm1000, REG_RX_FINFO, -1, &rx_finfo, 4) == DWM_OK, BSP_ERR);
+  
+  /* Extract frame length: RXFLEN is bits [9:0] of RX_FINFO */
+  uint16_t frame_len = (uint16_t)(rx_finfo & 0x3FF);  /* 0x3FF = 0b1111111111 (10 bits) */
+  
+  /* Clamp to max_len to prevent buffer overflow */
+  *out_len = (frame_len < max_len) ? frame_len : max_len;
+  
   CHECK_ERR(dwm_read_rx_buffer(&dwm1000, data, *out_len) == DWM_OK, BSP_ERR);
 
   /* Clear RXFCG */
@@ -216,7 +238,7 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
 }
 bsp_err_t bsp_uwb_write_40bit(uint8_t reg, int32_t sub, uint64_t *value)
 {
-	CHECK_ERR((dwm_write_40bit(&dwm1000, reg, sub, value) == DWM_OK), BSP_ERR);
+	CHECK_ERR((dwm_write_40bit(&dwm1000, reg, sub, *value) == DWM_OK), BSP_ERR);
 	return BSP_OK;
 }
 

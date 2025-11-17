@@ -65,21 +65,15 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
     .sequence_num = config->sequence_num,
     .poll_tx_timestamp = t1,
     .resp_rx_timestamp = t4,
-    .final_tx_timestamp = 0
+    .final_tx_timestamp = 0  /* Placeholder, will be read after TX */
   };
 
-  /* Send partial FINAL (without T5) */
-  if (hal->tx(&final_msg, offsetof(mw_dstwr_final_msg_t, final_tx_timestamp)) != 0)
-    return MW_DSTWR_ERR;
-
-  /* Read T5 timestamp */
-  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0)
-    return MW_DSTWR_ERR;
-
-  final_msg.final_tx_timestamp = t5;
-
-  /* Send complete FINAL */
+  /* Send FINAL message once */
   if (hal->tx(&final_msg, sizeof(final_msg)) != 0)
+    return MW_DSTWR_ERR;
+
+  /* Read T5 timestamp after transmission (for logging/verification only) */
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0)
     return MW_DSTWR_ERR;
 
   /* Store results */
