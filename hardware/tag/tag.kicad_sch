@@ -8777,10 +8777,6 @@
 		(uuid "17a93499-4cf6-46e5-9db3-e25fb61c94d3")
 	)
 	(no_connect
-		(at 256.54 77.47)
-		(uuid "27d85ba7-287a-4ad6-b1cf-377c8e27f5d6")
-	)
-	(no_connect
 		(at 312.42 87.63)
 		(uuid "2dc9a89a-3b3e-476b-a4fc-64ea62ff400a")
 	)
@@ -9060,7 +9056,7 @@
 	)
 	(wire
 		(pts
-			(xy 383.54 176.53) (xy 383.54 180.34)
+			(xy 384.81 176.53) (xy 384.81 180.34)
 		)
 		(stroke
 			(width 0)
@@ -9117,6 +9113,16 @@
 			(type default)
 		)
 		(uuid "0ca691ff-4e8a-49c0-bb86-185ad09a4ea4")
+	)
+	(wire
+		(pts
+			(xy 262.89 81.28) (xy 262.89 77.47)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "0d321e27-1246-4bdc-a700-7a1c966a61e8")
 	)
 	(wire
 		(pts
@@ -10010,7 +10016,7 @@
 	)
 	(wire
 		(pts
-			(xy 383.54 198.12) (xy 383.54 201.93)
+			(xy 387.35 198.12) (xy 387.35 201.93)
 		)
 		(stroke
 			(width 0)
@@ -10540,6 +10546,16 @@
 	)
 	(wire
 		(pts
+			(xy 398.78 198.12) (xy 398.78 201.93)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "60b1d997-8078-472f-b415-64e27c102e6a")
+	)
+	(wire
+		(pts
 			(xy 171.45 165.1) (xy 171.45 166.37)
 		)
 		(stroke
@@ -10637,6 +10653,16 @@
 			(type default)
 		)
 		(uuid "66e780c7-c7db-44f3-a133-23987f7d6b7a")
+	)
+	(wire
+		(pts
+			(xy 359.41 196.85) (xy 359.41 203.2)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6788d9c6-6af0-49a6-a65a-d2a0ec36f73c")
 	)
 	(wire
 		(pts
@@ -11217,6 +11243,16 @@
 			(type default)
 		)
 		(uuid "8ccfa8dc-27f0-4e2c-ac52-983e1eaf385f")
+	)
+	(wire
+		(pts
+			(xy 262.89 88.9) (xy 262.89 91.44)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8d0bc11b-2697-445c-b53b-3f837f2a1f3a")
 	)
 	(wire
 		(pts
@@ -11960,7 +11996,7 @@
 	)
 	(wire
 		(pts
-			(xy 398.78 198.12) (xy 398.78 201.93)
+			(xy 373.38 219.71) (xy 373.38 223.52)
 		)
 		(stroke
 			(width 0)
@@ -12400,7 +12436,7 @@
 	)
 	(wire
 		(pts
-			(xy 358.14 198.12) (xy 358.14 201.93)
+			(xy 358.14 219.71) (xy 358.14 223.52)
 		)
 		(stroke
 			(width 0)
@@ -12647,6 +12683,16 @@
 			(type default)
 		)
 		(uuid "e72f2ab4-0f9b-49b6-9fd1-f7ffec962566")
+	)
+	(wire
+		(pts
+			(xy 262.89 77.47) (xy 256.54 77.47)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e7388811-b453-4b92-b88d-695fd3e8091d")
 	)
 	(wire
 		(pts
@@ -12900,6 +12946,16 @@
 	)
 	(wire
 		(pts
+			(xy 262.89 99.06) (xy 262.89 101.6)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f3444c63-bb3f-441b-9547-6ef9dd66f77a")
+	)
+	(wire
+		(pts
 			(xy 151.13 201.93) (xy 151.13 209.55)
 		)
 		(stroke
@@ -13119,7 +13175,7 @@
 		(uuid "01912f1a-c46f-4709-81b0-6dfa97f4c6ee")
 	)
 	(label "BLE_RX"
-		(at 398.78 198.12 90)
+		(at 373.38 219.71 90)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -13309,7 +13365,7 @@
 		(uuid "58aa03eb-1076-4ca7-9ca0-310436c0270d")
 	)
 	(label "SPI_MOSI"
-		(at 383.54 176.53 90)
+		(at 384.81 176.53 90)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -13397,6 +13453,16 @@
 			(justify right bottom)
 		)
 		(uuid "798b23d1-cbb4-4d13-863f-ec5aa3ddee09")
+	)
+	(label "SYS"
+		(at 22.86 154.94 0)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "7b1d0c31-789f-49de-9b82-25c00d62a70d")
 	)
 	(label "LED_USR"
 		(at 175.26 193.04 180)
@@ -13528,6 +13594,16 @@
 		)
 		(uuid "8cdc71e8-a355-4db5-980b-97b7e22cb815")
 	)
+	(label "PGOOD"
+		(at 22.86 179.07 270)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify right bottom)
+		)
+		(uuid "8cf22f9e-00f4-4647-84bd-0bca06577032")
+	)
 	(label "SPI_MISO"
 		(at 397.51 153.67 90)
 		(effects
@@ -13537,6 +13613,16 @@
 			(justify left bottom)
 		)
 		(uuid "8e5f14b7-bed4-45e8-b49f-459357046c27")
+	)
+	(label "SPI_CS2"
+		(at 398.78 198.12 90)
+		(effects
+			(font
+				(size 1.016 1.016)
+			)
+			(justify left bottom)
+		)
+		(uuid "912c6aaa-4316-431c-8846-cf38e13dec8d")
 	)
 	(label "PA10 {slash} UART1_RX"
 		(at 218.44 200.66 0)
@@ -13629,6 +13715,16 @@
 		(uuid "b8fe02c0-366b-46e6-9bfe-ec36e8a68e72")
 	)
 	(label "SYS"
+		(at 359.41 196.85 270)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify right bottom)
+		)
+		(uuid "bfabd7bf-5228-47b7-b1af-119cbc829bd1")
+	)
+	(label "SYS"
 		(at 25.4 100.33 0)
 		(effects
 			(font
@@ -13659,7 +13755,7 @@
 		(uuid "c5c99a64-8373-404c-8d3f-351ee9d0f291")
 	)
 	(label "BLE_TX"
-		(at 383.54 198.12 90)
+		(at 387.35 198.12 90)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -13747,16 +13843,6 @@
 			(justify left bottom)
 		)
 		(uuid "e4945ba8-1e7f-424d-bab6-df5c1ad5fb2b")
-	)
-	(label "PGOOD"
-		(at 22.86 154.94 0)
-		(effects
-			(font
-				(size 1.016 1.016)
-			)
-			(justify left bottom)
-		)
-		(uuid "e6e180fc-de35-4aee-938c-2a6418dc3d1a")
 	)
 	(label "PA0{slash}BTN_USR"
 		(at 240.03 236.22 180)
@@ -16467,6 +16553,85 @@
 		)
 	)
 	(symbol
+		(lib_id "Device:LED")
+		(at 262.89 95.25 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "35499c96-3c8e-435d-883d-174586d075ca")
+		(property "Reference" "D8"
+			(at 266.7 95.5674 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "GREEN"
+			(at 266.7 98.1074 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "LED_SMD:LED_0603_1608Metric_Pad1.05x0.95mm_HandSolder"
+			(at 262.89 95.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 262.89 95.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Light emitting diode"
+			(at 262.89 95.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Sim.Pins" "1=K 2=A"
+			(at 262.89 95.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "14145539-46dc-476a-a175-ed8e418142ac")
+		)
+		(pin "1"
+			(uuid "6ede70cb-6438-412a-916e-5c3145408fe8")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "D8")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:C")
 		(at 40.64 106.68 0)
 		(unit 1)
@@ -17084,7 +17249,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 358.14 201.93 180)
+		(at 358.14 223.52 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -17092,7 +17257,7 @@
 		(dnp no)
 		(uuid "40d88cfc-3230-4c70-8819-a2954d251e9b")
 		(property "Reference" "TP13"
-			(at 356.362 207.772 0)
+			(at 356.362 229.362 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17101,7 +17266,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 356.362 210.312 0)
+			(at 356.362 231.902 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17110,7 +17275,7 @@
 			)
 		)
 		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
-			(at 353.06 201.93 0)
+			(at 353.06 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17119,7 +17284,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 353.06 201.93 0)
+			(at 353.06 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17128,7 +17293,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 358.14 201.93 0)
+			(at 358.14 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18755,7 +18920,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 383.54 201.93 180)
+		(at 387.35 201.93 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -18763,7 +18928,7 @@
 		(dnp no)
 		(uuid "6332063f-4af0-4ad7-a66f-8e5162ffae5a")
 		(property "Reference" "TP9"
-			(at 382.016 207.772 0)
+			(at 385.826 207.772 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18772,7 +18937,7 @@
 			)
 		)
 		(property "Value" "TestPoint"
-			(at 379.476 210.566 0)
+			(at 383.286 210.566 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18781,7 +18946,7 @@
 			)
 		)
 		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
-			(at 378.46 201.93 0)
+			(at 382.27 201.93 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18790,7 +18955,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 378.46 201.93 0)
+			(at 382.27 201.93 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18799,7 +18964,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 383.54 201.93 0)
+			(at 387.35 201.93 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19278,71 +19443,6 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#PWR081")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 22.86 179.07 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "69f219f5-0c4a-4e7c-8843-e2a8d2f59076")
-		(property "Reference" "#PWR031"
-			(at 22.86 185.42 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "GND"
-			(at 22.86 183.134 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 22.86 179.07 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 22.86 179.07 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 22.86 179.07 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "80dd3729-6ad7-41b9-8a66-048b50ead403")
-		)
-		(instances
-			(project "tag"
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "#PWR031")
 					(unit 1)
 				)
 			)
@@ -23178,7 +23278,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 358.14 198.12 0)
+		(at 358.14 219.71 0)
 		(mirror x)
 		(unit 1)
 		(exclude_from_sim no)
@@ -23187,7 +23287,7 @@
 		(dnp no)
 		(uuid "9c576401-8335-4b47-aa6f-564ca727114c")
 		(property "Reference" "#PWR07"
-			(at 358.14 191.77 0)
+			(at 358.14 213.36 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23196,7 +23296,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 361.95 196.342 0)
+			(at 361.95 217.932 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23204,7 +23304,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 358.14 198.12 0)
+			(at 358.14 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23213,7 +23313,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 358.14 198.12 0)
+			(at 358.14 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23222,7 +23322,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 358.14 198.12 0)
+			(at 358.14 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23639,6 +23739,71 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "J3")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 262.89 101.6 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "a085a307-190b-4d5a-9e47-4f0f63197a63")
+		(property "Reference" "#PWR031"
+			(at 262.89 107.95 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 262.89 105.41 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 262.89 101.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 262.89 101.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 262.89 101.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "8f46331f-7b5d-4b30-bf6b-a0873a641829")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "#PWR031")
 					(unit 1)
 				)
 			)
@@ -24238,6 +24403,72 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "R13")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Connector:TestPoint")
+		(at 398.78 201.93 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "aa4a2704-f9a7-45e0-8e6a-2a69322ecbae")
+		(property "Reference" "TP5"
+			(at 397.002 207.772 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "TestPoint"
+			(at 395.224 210.566 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
+			(at 393.7 201.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 393.7 201.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "test point"
+			(at 398.78 201.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "9d371cd2-1b23-4338-98ec-a7e27e40c459")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "TP5")
 					(unit 1)
 				)
 			)
@@ -25156,75 +25387,6 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 379.73 68.58 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "c0d5f407-7a27-4d9f-afe2-d8bb98dff13e")
-		(property "Reference" "R22"
-			(at 374.015 67.691 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "10k"
-			(at 377.698 69.85 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
-			(at 377.952 68.58 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 379.73 68.58 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 379.73 68.58 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "a8a22403-d05c-4f6a-83af-ab2b28435326")
-		)
-		(pin "2"
-			(uuid "56c77c35-33ac-4893-b34a-e3c05a33d45f")
-		)
-		(instances
-			(project "learningkcad"
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "R22")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
 		(at 307.34 160.02 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -25287,6 +25449,75 @@
 			(project "tag"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "R24")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 379.73 68.58 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "c0d5f407-7a27-4d9f-afe2-d8bb98dff13f")
+		(property "Reference" "R22"
+			(at 374.015 67.691 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "10k"
+			(at 377.698 69.85 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
+			(at 377.952 68.58 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 379.73 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 379.73 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "a8a22403-d05c-4f6a-83af-ab2b28435327")
+		)
+		(pin "2"
+			(uuid "56c77c35-33ac-4893-b34a-e3c05a33d460")
+		)
+		(instances
+			(project "learningkcad"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "R22")
 					(unit 1)
 				)
 			)
@@ -25566,6 +25797,72 @@
 		)
 	)
 	(symbol
+		(lib_id "Connector:TestPoint")
+		(at 359.41 203.2 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "c8296bfb-f32e-4579-978d-35ee5ddc947c")
+		(property "Reference" "TP6"
+			(at 357.886 209.042 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "VSYS"
+			(at 358.14 211.582 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
+			(at 354.33 203.2 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 354.33 203.2 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "test point"
+			(at 359.41 203.2 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "28d616e3-ffe9-4eb1-aba6-ea8be22c5289")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "TP6")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:GND")
 		(at 152.4 120.65 0)
 		(unit 1)
@@ -25697,7 +25994,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 398.78 201.93 180)
+		(at 373.38 223.52 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -25705,7 +26002,7 @@
 		(dnp no)
 		(uuid "cbfbcfd2-d04e-4632-a05c-b3f840294341")
 		(property "Reference" "TP12"
-			(at 397.002 207.772 0)
+			(at 371.602 229.362 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25714,7 +26011,7 @@
 			)
 		)
 		(property "Value" "TestPoint"
-			(at 395.224 210.566 0)
+			(at 369.824 232.156 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25723,7 +26020,7 @@
 			)
 		)
 		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
-			(at 393.7 201.93 0)
+			(at 368.3 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25732,7 +26029,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 393.7 201.93 0)
+			(at 368.3 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25741,7 +26038,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 398.78 201.93 0)
+			(at 373.38 223.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25763,7 +26060,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 383.54 180.34 180)
+		(at 384.81 180.34 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -25771,7 +26068,7 @@
 		(dnp no)
 		(uuid "cc1e9207-61e2-40c3-85d4-26a66f2de4da")
 		(property "Reference" "TP8"
-			(at 382.016 186.182 0)
+			(at 383.286 186.182 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25780,7 +26077,7 @@
 			)
 		)
 		(property "Value" "TestPoint"
-			(at 379.476 188.976 0)
+			(at 380.746 188.976 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25789,7 +26086,7 @@
 			)
 		)
 		(property "Footprint" "TestPoint:TestPoint_Pad_D1.0mm"
-			(at 378.46 180.34 0)
+			(at 379.73 180.34 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25798,7 +26095,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 378.46 180.34 0)
+			(at 379.73 180.34 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25807,7 +26104,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 383.54 180.34 0)
+			(at 384.81 180.34 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26150,6 +26447,73 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#PWR067")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 262.89 85.09 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "d2fc0b65-b7a6-4288-a139-20488704e4ea")
+		(property "Reference" "R19"
+			(at 259.715 83.947 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "2.2k"
+			(at 259.715 85.979 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
+			(at 264.668 85.09 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 262.89 85.09 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 262.89 85.09 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "97d47042-7410-4709-89e9-e9bc8c2a4c63")
+		)
+		(pin "1"
+			(uuid "bf870b0f-7152-4a9a-9fe3-e308704aea68")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "R19")
 					(unit 1)
 				)
 			)

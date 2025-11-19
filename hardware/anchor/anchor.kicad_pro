@@ -554,7 +554,7 @@
     "last_paths": {
       "gencad": "",
       "idf": "",
-      "netlist": "",
+      "netlist": "./",
       "plot": "print/",
       "pos_files": "pick&place/",
       "specctra_dsn": "anchor.dsn",
