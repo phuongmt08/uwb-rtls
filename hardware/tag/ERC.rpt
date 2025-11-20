@@ -1,0 +1,304 @@
+ERC report (2025-09-10T17:04:26+0700, Encoding UTF8)
+
+***** Sheet /
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(30.48 mm, 43.18 mm): Directive Label [Net Class SPI]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(38.10 mm, 45.72 mm): Directive Label [Net Class SPI]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(38.10 mm, 48.26 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(41.91 mm, 45.72 mm): Symbol U1 Pin 13 [AP_SCL/AP_SCLK, Input, Clock]
+[pin_not_driven]: Input pin not driven by any Output pins
+    ; error
+    @(41.91 mm, 45.72 mm): Symbol U1 Pin 13 [AP_SCL/AP_SCLK, Input, Clock]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(38.10 mm, 50.80 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(41.91 mm, 48.26 mm): Symbol U1 Pin 14 [AP_SDA/AP_SDIO/AP_SDI, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(41.91 mm, 50.80 mm): Symbol U1 Pin 1 [AP_SDO/AP_AD0, Bidirectional, Line]
+[footprint_link_issues]: The current configuration does not include the footprint library 'ICM-42688-P'.
+    ; warning
+    @(67.31 mm, 43.18 mm): Symbol U1 [ICM-42688-P]
+[power_pin_not_driven]: Input Power pin not driven by any Output Power pins
+    ; error
+    @(92.71 mm, 30.48 mm): Symbol U1 Pin 8 [VDD, Power input, Line]
+[power_pin_not_driven]: Input Power pin not driven by any Output Power pins
+    ; error
+    @(92.71 mm, 33.02 mm): Symbol U1 Pin 5 [VDDIO, Power input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(92.71 mm, 38.10 mm): Symbol U1 Pin 4 [INT1/INT, Output, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(93.98 mm, 38.10 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(81.28 mm, 129.54 mm): Symbol U3 Pin 6 [I/O1, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(81.28 mm, 132.08 mm): Symbol U3 Pin 4 [I/O2, Passive, Line]
+[power_pin_not_driven]: Input Power pin not driven by any Output Power pins
+    ; error
+    @(62.23 mm, 185.42 mm): Symbol #PWR08 Pin 1 [Power input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(49.53 mm, 208.28 mm): Symbol U2 Pin 5 [EN2, Input, Line]
+[pin_not_driven]: Input pin not driven by any Output pins
+    ; error
+    @(49.53 mm, 208.28 mm): Symbol U2 Pin 5 [EN2, Input, Line]
+[undefined_netclass]: Netclass LED is not defined
+    ; error
+    @(208.28 mm, 118.11 mm): Directive Label [Net Class LED]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 118.11 mm): Symbol U5 Pin 2 [PC13, Bidirectional, Line]
+[power_pin_not_driven]: Input Power pin not driven by any Output Power pins
+    ; error
+    @(233.68 mm, 77.47 mm): Symbol #PWR034 Pin 1 [Power input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 128.27 mm): Symbol U5 Pin 18 [PB0, Bidirectional, Line]
+[footprint_link_issues]: The current configuration does not include the footprint library 'B2B-PH-SM4-TB'.
+    ; warning
+    @(38.10 mm, 243.84 mm): Symbol J1 [B2B-PH-SM4-TB]
+[power_pin_not_driven]: Input Power pin not driven by any Output Power pins
+    ; error
+    @(30.48 mm, 245.11 mm): Symbol #PWR02 Pin 1 [Power input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 130.81 mm): Symbol U5 Pin 19 [PB1, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 133.35 mm): Symbol U5 Pin 20 [PB2, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(95.25 mm, 236.22 mm): Symbol C3 Pin 1 [Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 143.51 mm): Symbol U5 Pin 42 [PB6, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 146.05 mm): Symbol U5 Pin 43 [PB7, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 148.59 mm): Symbol U5 Pin 45 [PB8, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(207.01 mm, 156.21 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 151.13 mm): Symbol U5 Pin 46 [PB9, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(207.01 mm, 158.75 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 153.67 mm): Symbol U5 Pin 21 [PB10, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 156.21 mm): Symbol U5 Pin 25 [PB12, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(207.01 mm, 161.29 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 158.75 mm): Symbol U5 Pin 26 [PB13, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(207.01 mm, 163.83 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 161.29 mm): Symbol U5 Pin 27 [PB14, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 100.33 mm): Symbol U5 Pin 10 [PA0, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(210.82 mm, 163.83 mm): Symbol U5 Pin 28 [PB15, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 105.41 mm): Symbol U5 Pin 12 [PA2, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 107.95 mm): Symbol U5 Pin 13 [PA3, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 113.03 mm): Symbol U5 Pin 15 [PA5, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 115.57 mm): Symbol U5 Pin 16 [PA6, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 118.11 mm): Symbol U5 Pin 17 [PA7, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 120.65 mm): Symbol U5 Pin 29 [PA8, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(250.19 mm, 113.03 mm): Directive Label [Net Class SPI]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(250.19 mm, 115.57 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 125.73 mm): Symbol U5 Pin 31 [PA10, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(250.19 mm, 118.11 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 128.27 mm): Symbol U5 Pin 32 [PA11, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 133.35 mm): Symbol U5 Pin 34 [PA13, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 135.89 mm): Symbol U5 Pin 37 [PA14, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(246.38 mm, 138.43 mm): Symbol U5 Pin 38 [PA15, Bidirectional, Line]
+[undefined_netclass]: Netclass SWD is not defined
+    ; error
+    @(250.19 mm, 133.35 mm): Directive Label [Net Class SWD]
+[undefined_netclass]: Netclass SWD is not defined
+    ; error
+    @(250.19 mm, 135.89 mm): Directive Label [Net Class SWD]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(196.85 mm, 217.17 mm): Symbol U4 Pin 5 [FB, Input, Line]
+[pin_not_driven]: Input pin not driven by any Output pins
+    ; error
+    @(196.85 mm, 217.17 mm): Symbol U4 Pin 5 [FB, Input, Line]
+[footprint_link_issues]: The current configuration does not include the footprint library 'TPS63070RNMR'.
+    ; warning
+    @(214.63 mm, 227.33 mm): Symbol U4 [TPS63070RNMR]
+[pin_to_pin]: Pins of type Output and Output are connected
+    ; error
+    @(232.41 mm, 214.63 mm): Symbol U4 Pin 6 [FB2, Output, Line]
+    @(232.41 mm, 222.25 mm): Symbol U4 Pin 7_8 [VOUT, Output, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(320.04 mm, 72.39 mm): Symbol DWM1 Pin 3 [~{RST}, Bidirectional, Line]
+[multiple_net_names]: Both +3.3V and GND are attached to the same items; +3.3V will be used in the netlist
+    ; warning
+    @(364.49 mm, 157.48 mm): Symbol #PWR043 Pin 1 [Power input, Line]
+    @(326.39 mm, 129.54 mm): Symbol #PWR046 Pin 1 [Power input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 52.07 mm): Symbol DWM1 Pin 22 [IRQ/GPIO8, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 54.61 mm): Symbol DWM1 Pin 20 [SPICLK, Input, Line]
+[pin_not_driven]: Input pin not driven by any Output pins
+    ; error
+    @(365.76 mm, 54.61 mm): Symbol DWM1 Pin 20 [SPICLK, Input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 57.15 mm): Symbol DWM1 Pin 19 [SPIMISO, Output, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 59.69 mm): Symbol DWM1 Pin 18 [SPIMOSI, Input, Line]
+[pin_not_driven]: Input pin not driven by any Output pins
+    ; error
+    @(365.76 mm, 59.69 mm): Symbol DWM1 Pin 18 [SPIMOSI, Input, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 72.39 mm): Symbol DWM1 Pin 15 [GPIO0/RXOKLED, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(354.33 mm, 116.84 mm): Symbol R18 Pin 2 [Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 74.93 mm): Symbol DWM1 Pin 14 [GPIO1/SFDLED, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 77.47 mm): Symbol DWM1 Pin 13 [GPIO2/RXLED, Bidirectional, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 80.01 mm): Symbol DWM1 Pin 12 [GPIO3/TXLED, Bidirectional, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(370.84 mm, 52.07 mm): Directive Label [Net Class SPI]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(370.84 mm, 54.61 mm): Directive Label [Net Class SPI]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(370.84 mm, 57.15 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(354.33 mm, 124.46 mm): Symbol R19 Pin 2 [Passive, Line]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(370.84 mm, 59.69 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(354.33 mm, 132.08 mm): Symbol R20 Pin 2 [Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(354.33 mm, 142.24 mm): Symbol R21 Pin 2 [Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(344.17 mm, 180.34 mm): Symbol D4 Pin 1 [K, Passive, Line]
+[undefined_netclass]: Netclass LED is not defined
+    ; error
+    @(344.17 mm, 181.61 mm): Directive Label [Net Class LED]
+[undefined_netclass]: Netclass SPI is not defined
+    ; error
+    @(389.89 mm, 62.23 mm): Directive Label [Net Class SPI]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(356.87 mm, 205.74 mm): Symbol J3 Pin 2 [Pin_2, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(356.87 mm, 208.28 mm): Symbol J3 Pin 3 [Pin_3, Passive, Line]
+[undefined_netclass]: Netclass SWD is not defined
+    ; error
+    @(361.95 mm, 205.74 mm): Directive Label [Net Class SWD]
+[undefined_netclass]: Netclass SWD is not defined
+    ; error
+    @(361.95 mm, 208.28 mm): Directive Label [Net Class SWD]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(353.06 mm, 228.60 mm): Symbol J5 Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(353.06 mm, 231.14 mm): Symbol J5 Pin 5 [Pin_5, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(353.06 mm, 233.68 mm): Symbol J5 Pin 7 [Pin_7, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(353.06 mm, 236.22 mm): Symbol J5 Pin 9 [Pin_9, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(353.06 mm, 238.76 mm): Symbol J5 Pin 11 [Pin_11, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(353.06 mm, 241.30 mm): Symbol J5 Pin 13 [Pin_13, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 228.60 mm): Symbol J5 Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 231.14 mm): Symbol J5 Pin 6 [Pin_6, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 233.68 mm): Symbol J5 Pin 8 [Pin_8, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 236.22 mm): Symbol J5 Pin 10 [Pin_10, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(365.76 mm, 238.76 mm): Symbol J5 Pin 12 [Pin_12, Passive, Line]
+
+ ** ERC messages: 99  Errors 95  Warnings 4
