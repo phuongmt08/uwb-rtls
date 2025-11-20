@@ -34,8 +34,8 @@
 /* Available hardware peripherals */
 #define HAVE_UWB                       /* UWB radio (DW1000) */
 #define HAVE_USB_CDC                   /* USB CDC for logging */
-#define HAVE_FLASH_STORAGE             /* Flash storage for config */
-#define  HAVE_RTC
+#undef  HAVE_FLASH_STORAGE             /* Flash storage for config */
+#undef  HAVE_RTC
 #undef  HAVE_IMU
 #undef  HAVE_LED
 #undef  HAVE_SWITCH

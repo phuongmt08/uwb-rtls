@@ -100,7 +100,6 @@ dwm_err_t dwm_read_register(dwm1000_t *dev, uint8_t reg, int32_t sub, void *buf,
   uint8_t hlen = build_spi_header(reg, sub, true, hdr);
 
   cs_assert(dev);
-  if (dev->bus.delay_us) dev->bus.delay_us(10); /* small settle time after CS assert */
   CHECK_ERR(dev->bus.spi_transfer(hdr, NULL, hlen), DWM_ERR);
   CHECK_ERR(dev->bus.spi_transfer(NULL, (uint8_t *) buf, len), DWM_ERR);
   cs_deassert(dev);
@@ -118,7 +117,6 @@ dwm_err_t dwm_write_register(dwm1000_t *dev, uint8_t reg, int32_t sub, const voi
   uint8_t hlen = build_spi_header(reg, sub, false, hdr);
 
   cs_assert(dev);
-  if (dev->bus.delay_us) dev->bus.delay_us(10); /* small settle time after CS assert */
   CHECK_ERR(dev->bus.spi_transfer(hdr, NULL, hlen), DWM_ERR);
   bool ok = true;
   if (len)
@@ -141,21 +139,20 @@ dwm_err_t dwm_init(dwm1000_t *dev)
   /* Optional hardware reset pulse */
   if (dev->bus.set_reset)
   {
-    /* Reset sequence: idle → assert (low) → release (high) → wait for PLL */
-	dev->bus.delay_us(100);       /* idle before reset */
-    dev->bus.set_reset(true);     /* assert reset (pull low) */
-    dev->bus.delay_us(1000);      /* hold reset for 1ms (was 100us) */
-    dev->bus.set_reset(false);    /* release reset (pull high) */
-    dev->bus.delay_us(10000);     /* wait 10ms for PLL lock (was 5ms) */
+	dev->bus.delay_us(100);
+    dev->bus.set_reset(true);
+    dev->bus.delay_us(100);
+    dev->bus.set_reset(false);
+    dev->bus.delay_us(5000);
   }
   else
   {
   /* No hardware reset - still need startup time */
-  dev->bus.delay_us(10000);       /* longer delay if no reset available */
+  dev->bus.delay_us(5000);
   }
 
   /* Allow DW1000 to transition INIT -> IDLE */
-  dev->bus.delay_us(100);         /* increased from 20us to 100us */
+  dev->bus.delay_us(20);
 
   /* Clear pending status flags (write-1-to-clear) */
   uint8_t clr[5] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };

@@ -12,15 +12,8 @@
 
 #include "log_config.h"
 #include "usbd_cdc_if.h"
-#include "platform_config.h"
 #include <stdarg.h>
 #include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
-
-#ifdef HAVE_RTC
-#include "bsp_util.h"  // For bsp_rtc_get_timestamp()
-#endif
 
 /* Private includes --------------------------------------------------------- */
 /* Private defines ---------------------------------------------------------- */
@@ -286,7 +279,7 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
 
 // Timestamp (6 bytes)
 #ifdef HAVE_RTC
-  uint64_t timestamp_ms = (uint64_t) bsp_rtc_get_timestamp();  // Use RTC timestamp
+  uint64_t timestamp_ms = (uint64_t) HAL_GetTick();  // Use RTC/system tick
 #else
   uint64_t timestamp_ms = (uint64_t) log_seq_num++;  // Use sequence number
 #endif

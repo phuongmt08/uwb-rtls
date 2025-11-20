@@ -14,9 +14,9 @@
 #include <stdint.h>
 
 /* Public defines ----------------------------------------------------- */
-#define BSP_FLASH_ENTRY_MARKER  0xC0DEC0DEu   /* Valid metadata entry marker */
+#define BSP_FLASH_SOF_MARKER    0xDEADBEEFu   /* Metadata valid marker */
 #define BSP_FLASH_METADATA_SIZE (16u * 1024u) /* 16 KB metadata region */
-#define BSP_FLASH_ENTRY_SIZE    32u           /* Size of one metadata entry (bytes) */
+#define BSP_FLASH_MAX_RECORDS   64u           /* Max config records tracked */
 
 /* Public typedefs ---------------------------------------------------- */
 /**
@@ -49,22 +49,32 @@ typedef enum
 } bsp_flash_status_t;
 
 /**
- * @brief Single metadata entry (append-only)
- * @note Size: 32 bytes (8 words)
- *       Entries appended sequentially in metadata region
- *       Latest valid entry = last entry with valid marker + CRC
+ * @brief Record descriptor in metadata table
+ * @note Each write creates new entry, read_ptr points to latest valid
  */
 typedef struct
 {
-  uint32_t marker;      /**< Entry valid marker (0xC0DEC0DE) */
-  uint32_t gen;         /**< Generation counter (for wear leveling) */
-  uint32_t data_offset; /**< Offset in data region */
-  uint32_t data_length; /**< Config data length */
-  uint32_t timestamp;   /**< Write timestamp (0 if unused) */
-  uint32_t crc32;       /**< Config data CRC32 (0 if unused) */
-  uint32_t entry_crc;   /**< CRC32 of this entry (first 6 words) */
-  uint32_t reserved;    /**< Reserved for alignment */
-} bsp_flash_metadata_entry_t;
+  uint32_t offset;    /**< Offset in data region */
+  uint32_t length;    /**< Record length in bytes */
+  uint32_t timestamp; /**< Write timestamp (optional) */
+  uint32_t crc32;     /**< Data CRC32 (optional, 0 = unused) */
+} bsp_flash_record_entry_t;
+
+/**
+ * @brief Metadata region structure (16 KB)
+ * @note Layout: [header][record_table][padding]
+ *       SOF written LAST for atomic commit
+ */
+typedef struct
+{
+  uint32_t                 sof;                            /**< Start-of-Flash marker (written LAST) */
+  uint32_t                 gen;                            /**< Generation counter */
+  uint32_t                 write_ptr;                      /**< Next write offset in data region */
+  uint32_t                 read_ptr;                       /**< Current valid config record offset */
+  uint32_t                 record_count;                   /**< Number of records in table */
+  uint32_t                 reserved[3];                    /**< Reserved for future use */
+  bsp_flash_record_entry_t records[BSP_FLASH_MAX_RECORDS]; /**< Record table */
+} bsp_flash_metadata_t;
 
 /**
  * @brief Single flash sector descriptor

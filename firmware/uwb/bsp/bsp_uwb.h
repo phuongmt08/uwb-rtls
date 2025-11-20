@@ -50,14 +50,7 @@ bsp_err_t bsp_uwb_init(void);
 bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg);
 
 /**
- * @brief Get dwm1000 device handle for direct access
- *
- * @return Pointer to dwm1000_t structure, or NULL if not initialized
- */
-dwm1000_t* bsp_uwb_get_device(void);
-
-/**
- * @brief Transmit a frame
+ * @brief Transmit frame
  *
  * @param[in] data   PSDU data
  * @param[in] length Length of PSDU
