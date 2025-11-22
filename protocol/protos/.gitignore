@@ -1,15 +1,17 @@
-# Build directories
+# Chỉ viết tên folder, KHÔNG viết protocol/... ở đầu
 build/
 
-# Generated Protobuf files (keep .proto/.options, ignore .pb.c/.pb.h)
+# Generated files
 protos/*.pb.c
 protos/*.pb.h
 
-# Python cache
+# Python junk
 __pycache__/
 *.pyc
 
-# System/IDE files
+# IDE
 .vscode/
-.idea/
-*.ds_store
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile

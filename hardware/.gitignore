@@ -1,24 +1,23 @@
-# Autosave 
 _autosave-*
 *_autosave.kicad_sch
 *_autosave.kicad_pcb
+#auto_saved_files#
 
 # Lock files
 *.lck
 *~
 
-# Backup zips & folders
+# Backups
 *-backups/
 *.zip
 *.bak
 *.kicad_pcb-bak
 *.sch-bak
 
-# Temporary files khác
-#auto_saved_files#
+# Cache
 fp-info-cache
 
-# Output (Gerbers, Plots)
+# Output folders
 plots/
 print/
 gerber/
