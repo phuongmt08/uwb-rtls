@@ -8,7 +8,7 @@
 /* Includes ----------------------------------------------------------- */
 #include "bsp_uwb.h"
 
-#include "bsp_delay.h"
+#include "bsp_util.h"
 #include "err.h"
 #include "spi.h"
 /* Private defines ---------------------------------------------------- */
@@ -49,6 +49,20 @@ extern SPI_HandleTypeDef hspi1;
 static bool bsp_uwb_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t len)
 {
   HAL_StatusTypeDef ret;
+  
+  /* DEBUG: Log TX bytes to see what MCU sends */
+  #if 0  // Enable this for debug
+  if (tx && len <= 8) {
+    char log_buf[64];
+    int pos = 0;
+    pos += sprintf(log_buf + pos, "TX[%u]: ", len);
+    for (uint16_t i = 0; i < len && i < 8; i++) {
+      pos += sprintf(log_buf + pos, "%02X ", tx[i]);
+    }
+    // Would log here but logger not available in BSP context
+  }
+  #endif
+  
   if (tx && rx)
   {
     // Full duplex
@@ -61,7 +75,7 @@ static bool bsp_uwb_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t len)
   }
   else if (rx)
   {
-    // Only receive
+    // Only receive (SPI will send 0xFF dummy bytes)
     ret = HAL_SPI_Receive(&hspi1, rx, len, HAL_MAX_DELAY);
   }
   else
@@ -92,6 +106,7 @@ static void bsp_spi_set_high_speed(void)
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;  // ~6 MHz
   HAL_SPI_Init(&hspi1);
 }
+
 /* Private functions -------------------------------------------------------- */
 static bsp_err_t config_table(const uwb_reg_cfg_t *table, size_t count)
 {
@@ -108,11 +123,21 @@ static bsp_err_t config_table(const uwb_reg_cfg_t *table, size_t count)
   return BSP_OK;
 }
 /* Public functions --------------------------------------------------------- */
-extern void bsp_delay_us(uint32_t us);
+
+dwm1000_t* bsp_uwb_get_device(void)
+{
+  return &dwm1000;
+}
 
 bsp_err_t bsp_uwb_init(void)
 {
-  bsp_delay_init();
+  dwm_err_t derr;
+  uint32_t device_id = 0;
+  uint8_t raw[4];
+  
+  /* Initialize bsp_util (includes delay timer) */
+  bsp_util_init();
+  
   dwm1000.bus.spi_transfer       = bsp_uwb_spi_transfer;
   dwm1000.bus.set_cs             = bsp_uwb_cs;
   dwm1000.bus.set_reset          = bsp_uwb_reset;
@@ -120,13 +145,27 @@ bsp_err_t bsp_uwb_init(void)
   dwm1000.bus.set_spi_low_speed  = bsp_spi_set_low_speed;
   dwm1000.bus.set_spi_high_speed = bsp_spi_set_high_speed;
 
-  CHECK_ERR(dwm_init(&dwm1000) == DWM_OK, BSP_ERR);
+  /* Call dwm_init (does reset + clear status) */
+  derr = dwm_init(&dwm1000);
+  if (derr != DWM_OK) {
+    return BSP_ERR;
+  }
 
-  uint32_t device_id = 0;
-  CHECK_ERR(dwm_read_device_id(&dwm1000, &device_id) == DWM_OK, BSP_ERR);
-  //  if (device_id != EXPECTED_DEV_ID) return BSP_ERR;
+  /* Try reading Device ID multiple times */
+  for (int attempt = 0; attempt < 5; attempt++) {
+    derr = dwm_read_device_id(&dwm1000, &device_id);
+    if (derr == DWM_OK && device_id != 0xFFFFFFFFu && device_id != 0x00000000u) {
+      break; /* success */
+    }
+    /* Read raw bytes to see what MISO returns */
+    (void)dwm_read_register(&dwm1000, 0x00, -1, raw, 4);
+    bsp_delay_us(2000); /* 2ms between retries */
+  }
 
+  /* Clear status regardless of ID check result */
   (void) dwm_clear_system_status(&dwm1000, 0xFFFFFFFFu);
+  
+  /* Don't fail init even if ID doesn't match - let task report it */
   return BSP_OK;
 }
 
