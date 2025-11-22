@@ -137,6 +137,9 @@ typedef enum
 #define ERR_BUSY               (0x26)  // Device busy
 #define ERR_OVERFLOW           (0x27)  // Buffer overflow
 #define ERR_UNDERFLOW          (0x28)  // Buffer underflow
+#define ERR_HAL                (0x29)  // HAL driver error
+#define ERR_NOT_INIT           (0x2A)  // Component not initialized
+#define ERR_CRC                (0x2B)  // CRC mismatch error
 
 /**
  * @brief UWB specific error codes (0x30-0x3F)

@@ -11,13 +11,89 @@
 #include "platform_config.h"
 #include <string.h>
 
+#ifdef HAVE_FLASH_STORAGE
+#include "bsp_flash.h"
+#include "bsp_util.h"
+#include "stm32f4xx_hal.h"
+#endif
+
 /* Private defines ---------------------------------------------------------- */
 #define CONFIG_RAM_MAGIC    0xC0FEC0DE  /* Magic number for valid config */
 
+#ifdef HAVE_FLASH_STORAGE
+/* Flash sectors for config storage (dual-sector for wear leveling) */
+#define FLASH_SECTOR0_BASE  0x08010000u  /* Sector 4: 64KB */
+#define FLASH_SECTOR0_SIZE  (64u * 1024u)
+#define FLASH_SECTOR1_BASE  0x08020000u  /* Sector 5: 128KB */
+#define FLASH_SECTOR1_SIZE  (128u * 1024u)
+#endif
+
 /* Private variables -------------------------------------------------------- */
 static sys_config_t g_config;           /* Active configuration */
+
+
+#ifdef HAVE_FLASH_STORAGE
+static bsp_flash_dual_t g_flash_storage;  /* Flash storage manager */
+static uint8_t g_flash_init_done = 0;     /* Flash init flag */
+#else
 static sys_config_t g_config_backup;    /* RAM backup storage */
 static uint32_t g_config_magic = 0;     /* Magic number for backup validity */
+#endif
+/* Private function prototypes ---------------------------------------------- */
+#ifdef HAVE_FLASH_STORAGE
+static uint32_t config_calc_crc32(const void *data, uint32_t len);
+static uint32_t config_get_timestamp(void);
+static int flash_storage_init(void);
+#endif
+
+/* ========================================================================== */
+/*                         PRIVATE FUNCTIONS                                 */
+/* ========================================================================== */
+
+#ifdef HAVE_FLASH_STORAGE
+/**
+ * @brief Hardware CRC32 calculation using bsp_util
+ */
+static uint32_t config_calc_crc32(const void *data, uint32_t len)
+{
+    return bsp_crc32(data, len);
+}
+
+/**
+ * @brief Get timestamp for flash record (RTC timestamp)
+ */
+static uint32_t config_get_timestamp(void)
+{
+    return bsp_rtc_get_timestamp();
+}
+
+/**
+ * @brief Initialize flash storage
+ */
+static int flash_storage_init(void)
+{
+    if (g_flash_init_done) {
+        return 0;
+    }
+    
+    bsp_flash_status_t status = bsp_flash_dual_init(
+        &g_flash_storage,
+        FLASH_SECTOR0_BASE, FLASH_SECTOR0_SIZE,
+        FLASH_SECTOR1_BASE, FLASH_SECTOR1_SIZE,
+        config_calc_crc32,
+        config_get_timestamp
+    );
+    
+    if (status != BSP_FLASH_OK) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Flash init failed: %d", status);
+        return -1;
+    }
+    
+    g_flash_init_done = 1;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Flash storage initialized");
+    return 0;
+}
+#endif
 
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
@@ -30,7 +106,19 @@ void sys_config_init(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Initializing configuration...");
     
-    /* Try to load from flash first */
+#ifdef HAVE_FLASH_STORAGE
+    /* Initialize bsp_util for CRC and RTC */
+    if (bsp_util_init() != BSP_UTIL_OK) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "BSP util init failed");
+    }
+    
+    /* Initialize flash storage */
+    if (flash_storage_init() != 0) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Flash init failed, using RAM only");
+    }
+#endif
+    
+    /* Try to load from flash/RAM */
     if (sys_config_load() != 0) {
         /* If load fails, use defaults */
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "No saved config, using defaults");
@@ -131,16 +219,34 @@ int sys_config_set_ranging_period(uint16_t period_ms)
 int sys_config_save(void)
 {
 #ifdef HAVE_FLASH_STORAGE
-    /* Save to flash - not implemented yet */
-    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Save to flash - NOT IMPLEMENTED YET");
+    if (!g_flash_init_done) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_NOT_INIT, "Flash not initialized");
+        return -1;
+    }
     
-    /* TODO: Implement flash write
-     * 1. Calculate CRC32
-     * 2. Write to flash
-     * 3. Verify write
-     */
+    /* Calculate CRC32 (exclude crc32 field itself) */
+    uint32_t crc_offset = offsetof(sys_config_t, crc32);
+    g_config.crc32 = config_calc_crc32(&g_config, crc_offset);
     
-    return -1; /* Not implemented */
+    /* Write to flash */
+    bsp_flash_status_t status = bsp_flash_write_config(
+        &g_flash_storage,
+        &g_config,
+        sizeof(sys_config_t)
+    );
+    
+    if (status != BSP_FLASH_OK) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Flash write failed: %d", status);
+        return -1;
+    }
+    
+#ifdef HAVE_RTC
+    uint32_t timestamp = bsp_rtc_get_timestamp();
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config saved to flash (CRC: 0x%08X, TS: %lu)", g_config.crc32, timestamp);
+#else
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config saved to flash (CRC: 0x%08X)", g_config.crc32);
+#endif
+    return 0;
 #else
     /* Save to RAM backup */
     memcpy(&g_config_backup, &g_config, sizeof(sys_config_t));
@@ -157,14 +263,48 @@ int sys_config_save(void)
 int sys_config_load(void)
 {
 #ifdef HAVE_FLASH_STORAGE
-    /* Load from flash - not implemented yet */
-    /* TODO: Implement flash read
-     * 1. Read from flash
-     * 2. Verify CRC32
-     * 3. Validate values
-     */
+    if (!g_flash_init_done) {
+        return -1; /* Flash not initialized */
+    }
     
-    return -1; /* Not implemented - will use defaults */
+    /* Read from flash */
+    sys_config_t temp_config;
+    uint32_t bytes_read = bsp_flash_read_config(
+        &g_flash_storage,
+        &temp_config,
+        sizeof(sys_config_t)
+    );
+    
+    if (bytes_read != sizeof(sys_config_t)) {
+        RLOG_D(LOG_OBJECT_CODE_SYS_CFG, "No valid config in flash");
+        return -1;
+    }
+    
+    /* Verify CRC32 */
+    uint32_t crc_offset = offsetof(sys_config_t, crc32);
+    uint32_t calc_crc = config_calc_crc32(&temp_config, crc_offset);
+    
+    if (calc_crc != temp_config.crc32) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_CRC, "Config CRC mismatch: calc=0x%08X != stored=0x%08X",
+               calc_crc, temp_config.crc32);
+        return -1;
+    }
+    
+    /* Validate config values */
+    if (temp_config.role != DEVICE_ROLE_TAG && temp_config.role != DEVICE_ROLE_ANCHOR) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid role in flash");
+        return -1;
+    }
+    
+    if (temp_config.uwb_channel < 1 || temp_config.uwb_channel > 7) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid channel in flash");
+        return -1;
+    }
+    
+    /* All checks passed, copy to active config */
+    memcpy(&g_config, &temp_config, sizeof(sys_config_t));
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
+    return 0;
 #else
     /* Load from RAM backup */
     if (g_config_magic == CONFIG_RAM_MAGIC) {
