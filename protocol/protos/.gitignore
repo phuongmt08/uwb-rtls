@@ -1,0 +1,15 @@
+# Build directories
+build/
+
+# Generated Protobuf files (keep .proto/.options, ignore .pb.c/.pb.h)
+protos/*.pb.c
+protos/*.pb.h
+
+# Python cache
+__pycache__/
+*.pyc
+
+# System/IDE files
+.vscode/
+.idea/
+*.ds_store
