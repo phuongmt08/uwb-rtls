@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+// Tên package để tránh trùng lặp
+package uwb_protocol;
+
+// Định nghĩa gói tin mẫu
+message UwbData {
+    uint32 node_id = 1;
+    float distance = 2;
+    int32 rssi = 3;
+}
