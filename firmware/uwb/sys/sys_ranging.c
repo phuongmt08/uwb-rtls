@@ -16,6 +16,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/* DecaWave driver for direct register access */
+#include "deca_driver/deca_device_api.h"
+#include "deca_driver/deca_regs.h"
+
 /* Private defines ---------------------------------------------------- */
 #define UWB_RX_BUFFER_SIZE (128u)
 
@@ -211,12 +215,16 @@ static int hal_uwb_read_timestamp(uint8_t reg_addr, uint8_t sub_addr, uint64_t *
   if (!timestamp)
     return -1;
 
-  bsp_err_t bsp_err = bsp_uwb_read_40bit(reg_addr, sub_addr, timestamp);
-  if (bsp_err != BSP_OK)
-  {
-    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP, "Failed to read timestamp");
-    return -1;
-  }
+  /* Use deca driver API directly to read 40-bit timestamp */
+  uint8_t buf[5];
+  dwt_readfromdevice(reg_addr, sub_addr, 5, buf);
+  
+  *timestamp = ((uint64_t)buf[0]) |
+               ((uint64_t)buf[1] << 8) |
+               ((uint64_t)buf[2] << 16) |
+               ((uint64_t)buf[3] << 24) |
+               ((uint64_t)buf[4] << 32);
+  
   return 0;
 }
 
