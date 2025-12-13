@@ -90,5 +90,11 @@ bsp_err_t bsp_uwb_read_40bit(uint8_t reg_addr, uint8_t sub_addr, uint64_t *times
  */
 void bsp_uwb_reset(bool active);
 
+/**
+ * @brief Force DW1000 to idle state (turn off TX/RX)
+ * @note Call this when stopping ranging to turn off RX/TX LEDs
+ */
+void bsp_uwb_idle(void);
+
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */

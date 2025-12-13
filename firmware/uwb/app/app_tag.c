@@ -10,7 +10,8 @@
 #include "sys_ranging.h"
 #include "sys_config.h"
 #include "sys_logger.h"
-#include "gpio.h"
+#include "bsp_io.h"
+#include "bsp_util.h"
 #include <stdint.h>
 
 /* Configuration ------------------------------------------------------ */
@@ -111,9 +112,9 @@ void app_tag_process(void)
         /* Success */
         s_error_count = 0;
         /* LED blink */
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-        HAL_Delay(50);
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        bsp_io_led_on();
+        bsp_delay_ms(50);
+        bsp_io_led_off();
       } else {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Result invalid or not available");
       }
