@@ -22,9 +22,9 @@
 
 #ifdef HAVE_FLASH_STORAGE
 /* Flash sectors for config storage (dual-sector for wear leveling) */
-#define FLASH_SECTOR0_BASE  0x08010000u  /* Sector 4: 64KB */
-#define FLASH_SECTOR0_SIZE  (64u * 1024u)
-#define FLASH_SECTOR1_BASE  0x08020000u  /* Sector 5: 128KB */
+#define FLASH_SECTOR0_BASE  0x08040000u  /* Sector 6: 128KB */
+#define FLASH_SECTOR0_SIZE  (128u * 1024u)
+#define FLASH_SECTOR1_BASE  0x08060000u  /* Sector 7: 128KB */
 #define FLASH_SECTOR1_SIZE  (128u * 1024u)
 #endif
 
