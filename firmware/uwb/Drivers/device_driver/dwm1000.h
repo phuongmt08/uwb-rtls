@@ -1,11 +1,16 @@
 /**
  * @file       dwm1000.h
- * @brief      DW1000/DWM1000 driver - FIXED VERSION
- * @version    1.0.0
+ * @copyright
+ * @license
+ * @version    0.1.0
  * @date       2025
- * @note       Added txFCTRL_base to preserve TX configuration
+ * @author
+ * @brief      Minimal DW1000/DWM1000 driver for PoC ranging
+ * @note       SPI header supports 1/2/3-octet formats
+ * @example    None
  */
 
+/* Define to prevent recursive inclusion ------------------------------------ */
 #ifndef __DWM1000_H
 #define __DWM1000_H
 
