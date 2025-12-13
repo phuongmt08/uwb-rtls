@@ -46,115 +46,77 @@ typedef enum {
  * @brief Device runtime configuration
  */
 typedef struct {
-    /* Device identification */
-    device_role_t   role;              /* Tag or Anchor */
-    uint8_t         device_id;         /* Unique device ID (0x01-0xFF) */
-    
-    /* Ranging configuration */
-    ranging_method_t method;           /* DS-TWR or TDoA (can change) */
-    uint8_t         uwb_channel;       /* UWB channel (1-7) */
-    uint16_t        ranging_period_ms; /* Tag ranging period (ms) */
-    
-    /* Hardware revision (from actual board) */
-    uint8_t         hw_rev_major;      /* e.g., 1 for v1.0 */
-    uint8_t         hw_rev_minor;      /* e.g., 0 for v1.0 */
-    
-    /* Reserved for future use */
-    uint8_t         reserved[8];
-    
-    /* CRC for validation */
-    uint32_t        crc32;
+  /* Device identity */
+  device_role_t role;
+  uint8_t device_id;
+  uint8_t hw_rev_major;
+  uint8_t hw_rev_minor;
+  
+  /* Ranging parameters */
+  ranging_method_t method;
+  uint16_t ranging_period_ms;
+  uint32_t rx_timeout_ms;
+  
+  /* UWB radio configuration */
+  uint8_t uwb_channel;        // 1-7
+  uint8_t uwb_prf;            // 16 or 64 MHz
+  uint8_t uwb_data_rate;      // 0=110kbps, 1=850kbps, 2=6.8Mbps
+  uint8_t uwb_preamble_code;  // 9-24
+  
+  /* Antenna delay calibration (in DWT units) */
+  uint16_t tx_antenna_delay;
+  uint16_t rx_antenna_delay;
+  
+  /* Power settings */
+  uint32_t tx_power;          // TX power register value
+  
+  uint8_t reserved[16];
+  
+  /* CRC32 checksum (must be last) */
+  uint32_t crc32;
 } sys_config_t;
 
 /* ========================================================================== */
 /*                         DEFAULT CONFIGURATION                             */
 /* ========================================================================== */
 
-/* Factory default values  */
-#define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR  /* Default: Anchor */
-#define DEFAULT_DEVICE_ID           0x10                /* Default ID: 0x10 */
-#define DEFAULT_RANGING_METHOD      RANGING_DS_TWR      /* Default: DS-TWR */
-#define DEFAULT_UWB_CHANNEL         5                   /* Channel 5 (6489.6 MHz) */
-#define DEFAULT_RANGING_PERIOD_MS   200                 /* 200ms (5Hz) */
-#define DEFAULT_HW_REV_MAJOR        HW_REV_MAJOR        /* From platform_config.h */
-#define DEFAULT_HW_REV_MINOR        HW_REV_MINOR        /* From platform_config.h */
-
+/* Default values */
+#define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR
+#define DEFAULT_DEVICE_ID           0x01
+#define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
+#define DEFAULT_RANGING_PERIOD_MS   100
+#define DEFAULT_RX_TIMEOUT_MS       100
+#define DEFAULT_UWB_CHANNEL         5
+#define DEFAULT_UWB_PRF             64
+#define DEFAULT_UWB_DATA_RATE       1
+#define DEFAULT_UWB_PREAMBLE_CODE   9
+#define DEFAULT_TX_ANT_DLY          16436
+#define DEFAULT_RX_ANT_DLY          16436
+#define DEFAULT_TX_POWER            0x0E082848UL
+#define DEFAULT_HW_REV_MAJOR        1
+#define DEFAULT_HW_REV_MINOR        0
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
 /* ========================================================================== */
 
-/**
- * @brief Initialize system configuration with defaults
- */
+
 void sys_config_init(void);
-
-/**
- * @brief Get current configuration
- * @return Pointer to current config structure
- */
 sys_config_t* sys_config_get(void);
-
-/**
- * @brief Set device role
- * @param role Device role (TAG or ANCHOR)
- * @return 0 on success, -1 on error
- */
+/* Setters */
 int sys_config_set_role(device_role_t role);
-
-/**
- * @brief Set device ID
- * @param id Device ID (0x01-0xFF)
- * @return 0 on success, -1 on error
- */
 int sys_config_set_device_id(uint8_t id);
-
-/**
- * @brief Set ranging method
- * @param method Ranging method (DS_TWR or TDOA)
- * @return 0 on success, -1 on error
- */
 int sys_config_set_ranging_method(ranging_method_t method);
-
-/**
- * @brief Set UWB channel
- * @param channel UWB channel (1-7)
- * @return 0 on success, -1 on error
- */
 int sys_config_set_uwb_channel(uint8_t channel);
-
-/**
- * @brief Set ranging period (Tag only)
- * @param period_ms Period in milliseconds
- * @return 0 on success, -1 on error
- */
 int sys_config_set_ranging_period(uint16_t period_ms);
+int sys_config_set_rx_timeout(uint32_t timeout_ms);
+int sys_config_set_antenna_delay(uint16_t tx_delay, uint16_t rx_delay);
+int sys_config_set_tx_power(uint32_t power);
 
-/**
- * @brief Save configuration
- * @note  RAM mode: saves to backup RAM (lost on reset)
- *        Flash mode: saves to flash (persistent) - not implemented yet
- * @return 0 on success, -1 on error
- */
+/* Storage */
 int sys_config_save(void);
-
-/**
- * @brief Load configuration
- * @note  RAM mode: loads from backup RAM
- *        Flash mode: loads from flash - not implemented yet
- * @return 0 on success, -1 on error
- */
 int sys_config_load(void);
-
-/**
- * @brief Reset to factory defaults
- */
 void sys_config_reset_to_defaults(void);
-
-/**
- * @brief Print current configuration
- */
 void sys_config_print(void);
-
 #ifdef __cplusplus
 }
 #endif

@@ -1,8 +1,8 @@
 /* ============================== app_anchor.c ===============================
  * @file       app_anchor.c
- * @brief      Anchor application - Ranging responder
- * @version    1.0.0
- * @date       2025-11-15
+ * @brief      Non-blocking Anchor application
+ * @version    2.0.0
+ * @date       2025-11-26
  */
 
 /* Includes ----------------------------------------------------------- */
@@ -10,16 +10,25 @@
 #include "sys_ranging.h"
 #include "sys_config.h"
 #include "sys_logger.h"
-
+#include "gpio.h"
 #include <stdint.h>
 
 /* Configuration ------------------------------------------------------ */
-#define MAX_CONSECUTIVE_ERR (5)       /* Max errors before reset */
+#define MAX_CONSECUTIVE_ERR     (5)
+#define LOG_INTERVAL_SUCCESS    (1)
+
+/* Private types ------------------------------------------------------ */
+typedef enum {
+  ANCHOR_STATE_IDLE = 0,
+  ANCHOR_STATE_LISTENING,
+  ANCHOR_STATE_GET_RESULT
+} anchor_app_state_t;
 
 /* Private variables -------------------------------------------------- */
-static uint8_t  s_sequence_num = 0;
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
+static anchor_app_state_t s_app_state = ANCHOR_STATE_IDLE;
+static uint32_t s_last_listen_tick = 0;
 
 /* Public function definitions ---------------------------------------- */
 
@@ -29,53 +38,87 @@ app_err_t app_anchor_init(void)
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "===== ANCHOR INIT =====");
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Device ID: 0x%02X", cfg->device_id);
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Method: %s", 
-         cfg->method == RANGING_DS_TWR ? "DS-TWR" : "TDoA");
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "UWB Channel: %u", cfg->uwb_channel);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Method: DS-TWR");
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "=======================");
 
+  s_app_state = ANCHOR_STATE_IDLE;
   return APP_OK;
 }
 
-void app_anchor_process(void)
+void app_anchor_process(void *arg)
 {
-  sys_ranging_config_t config;
-  sys_ranging_result_t result;
-
-  /* Prepare ranging config */
-  config.sequence_num = s_sequence_num++;
-  config.rx_timeout_us = 100000;  /* 100ms */
-
-  /* Execute ranging */
-  sys_ranging_err_t err = sys_ranging_anchor_once(&config, &result);
-
-  if (err == SYS_RANGING_OK && result.valid)
-  {
-    /* Success */
-    s_success_count++;
-    s_error_count = 0;
-
-    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Distance: %.3f m (seq=%u)", 
-           result.distance_m, config.sequence_num);
-  }
-  else if (err == SYS_RANGING_ERR_TIMEOUT)
-  {
-    /* Timeout (normal - waiting for tag) */
-    /* Don't log to avoid spam */
-  }
-  else
-  {
-    /* Error */
-    s_error_count++;
-    s_success_count = 0;
-
-    if (s_error_count >= MAX_CONSECUTIVE_ERR)
-    {
-      RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_TIMEOUT, 
-             "Too many errors (%lu), resetting...", s_error_count);
+  sys_config_t *cfg = sys_config_get();
+  uint32_t current_tick = HAL_GetTick();
+  switch (s_app_state) {
+    case ANCHOR_STATE_IDLE:
+      /* Chỉ khởi động lại sau mỗi interval, giống Tag */
+      if ((current_tick - s_last_listen_tick) >= cfg->ranging_period_ms) {
+        s_last_listen_tick = current_tick;
+        sys_ranging_err_t err = sys_ranging_anchor_start(100);
+        if (err == SYS_RANGING_OK) {
+          s_app_state = ANCHOR_STATE_LISTENING;
+          // RLOG_D(LOG_OBJECT_CODE_ANCHOR, "[ANCHOR] Started listening");
+        } else if (err == SYS_RANGING_ERR_BUSY) {
+          /* Không gọi lại liên tục, chỉ log cảnh báo nếu cần */
+        } else {
+          RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_RANGING, "[ANCHOR] Start failed: %d", err);
+          s_error_count++;
+        }
+      }
+      break;
+    
+    case ANCHOR_STATE_LISTENING: {
+      /* Process state machine */
+      sys_ranging_err_t err = sys_ranging_anchor_process();
       
-      s_error_count = 0;
+      if (err == SYS_RANGING_OK) {
+        /* Ranging complete */
+        s_app_state = ANCHOR_STATE_GET_RESULT;
+      } else if (err == SYS_RANGING_ERR_BUSY) {
+        /* Still processing - normal, do nothing */
+      } else if (err == SYS_RANGING_ERR_TIMEOUT) {
+        /* Timeout is normal for anchor - restart listening */
+        s_app_state = ANCHOR_STATE_IDLE;
+      } else {
+        /* Other error */
+        RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_RANGING, "[ANCHOR] Error: %d", err);
+        s_error_count++;
+        s_app_state = ANCHOR_STATE_IDLE;
+        
+        if (s_error_count >= MAX_CONSECUTIVE_ERR) {
+          RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_TIMEOUT,
+                 "Too many errors (%lu)", s_error_count);
+          s_error_count = 0;
+        }
+      }
+      break;
     }
+    
+    case ANCHOR_STATE_GET_RESULT: {
+      sys_ranging_result_t result;
+      sys_ranging_err_t err = sys_ranging_anchor_get_result(&result);
+      
+      if (err == SYS_RANGING_OK && result.valid) {
+        /* Success */
+        s_success_count++;
+        s_error_count = 0;
+        
+        /* LED blink */
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+        HAL_Delay(20);
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+      } else {
+        RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[ANCHOR] Result invalid");
+      }
+      
+      /* Restart listening immediately */
+      s_app_state = ANCHOR_STATE_IDLE;
+      break;
+    }
+    
+    default:
+      s_app_state = ANCHOR_STATE_IDLE;
+      break;
   }
 }
 
