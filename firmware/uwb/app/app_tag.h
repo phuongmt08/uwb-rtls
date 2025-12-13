@@ -10,13 +10,10 @@
 
 /* Includes ----------------------------------------------------------- */
 #include <stdint.h>
+#include "common.h"
 
 /* Public enumerate/structure ----------------------------------------- */
-typedef enum
-{
-  APP_OK = 0,
-  APP_ERR = -1
-} app_err_t;
+
 
 /* Public function prototypes ----------------------------------------- */
 

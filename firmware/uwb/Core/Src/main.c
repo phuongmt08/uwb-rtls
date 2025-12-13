@@ -2,23 +2,17 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  * @brief          : DS-TWR Tag/Anchor Application
+  * @version        : 3.0.0
+  * @date           : 2025-12-10
   ******************************************************************************
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "crc.h"
 #include "i2c.h"
+#include "rtc.h"
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
@@ -27,12 +21,13 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "bsp_uwb.h"
-#include "string.h"
-#include "bsp_delay.h"
-#include "sys_task.h"
+#include "sys_config.h"
 #include "sys_logger.h"
-
+#include "bsp_uwb.h"
+#include "common.h"
+#include "app_tag.h"
+#include "app_anchor.h"
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,16 +37,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Magic flag in SRAM to request DFU after soft reset */
 #define BL_MAGIC_ADDR      (0x2001FFF0UL)
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
-#if 0
-// Set magic and perform a clean system reset
-*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;  // request DFU
-__DSB(); __ISB();
-NVIC_SystemReset();
-}
-#endif
+
+#define DEVICE_MODE_TAG     0	   // Set to 1 for Tag, 0 for Anchor
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -62,65 +51,34 @@ NVIC_SystemReset();
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void task_toggle_led(void *arg)
+
+void app_reset_config(void)
 {
-//	bsp_uwb_tx(test_frame, strlen(test_frame));
-	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+  __disable_irq();
+  SCB->VTOR = 0x08008000;
+  SysTick->CTRL = 0; 
+  SysTick->LOAD = 0; 
+  SysTick->VAL = 0;
+  
+  for (uint32_t i = 0; i < 8; i++) {
+    NVIC->ICER[i] = 0xFFFFFFFF;
+    NVIC->ICPR[i] = 0xFFFFFFFF;
+  }
+  
+  __DSB(); 
+  __ISB();
+  __enable_irq();
 }
-static void task_sys_logger_test(void *arg)
-{
-    static bool inited = false;
-    static uint32_t cnt = 0;
 
-    if (!inited) {
-        sys_logger_init();
-        RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Logger init OK");
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System started, buffer size=%d bytes", SYS_LOGGER_BUF_SIZE);
-        inited = true;
-    }
-
-    // Routine logs with timestamp
-    RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Tick=%lu, Free=%u, Used=%u",
-           cnt, sys_logger_space_count(), sys_logger_data_count());
-
-    // Periodic warning
-    if ((cnt % 10) == 0) {
-        RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Periodic check at tick %lu", cnt);
-    }
-    
-    // Simulated error
-    if ((cnt % 33) == 0) {
-        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_TIMEOUT, "Simulated error: code=%d", -123);
-    }
-
-    // Stress test: long message near SYS_LOGGER_MAX_MSG_LEN
-    if ((cnt % 25) == 0) {
-        char big[220];
-        for (size_t i = 0; i < sizeof(big) - 1; i++) big[i] = 'A';
-        big[sizeof(big) - 1] = '\0';
-        RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Long msg test: %s", big);  // Will be truncated
-    }
-    
-    // Test different components
-    if ((cnt % 50) == 0) {
-        RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "UWB module status check");
-        RLOG_D(LOG_OBJECT_CODE_RANGING, "Distance measurement ready");
-    }
-
-
-    cnt++;
-}
 /* USER CODE END 0 */
 
 /**
@@ -131,12 +89,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	__disable_irq();
-	SCB->VTOR = 0x08008000;
-	SysTick->CTRL = 0; SysTick->LOAD = 0; SysTick->VAL = 0;
-	for (uint32_t i=0;i<8;i++){ NVIC->ICER[i]=0xFFFFFFFF; NVIC->ICPR[i]=0xFFFFFFFF; }
-	__DSB(); __ISB();
-	__enable_irq();
+  app_reset_config();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -164,19 +117,46 @@ int main(void)
   MX_TIM10_Init();
   MX_USB_DEVICE_Init();
   MX_TIM11_Init();
+  MX_CRC_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
-
-  HAL_Delay(1000);
-//  if (bsp_uwb_init() != BSP_OK) {
-//    // stay here if initialization failed
-//    while (1);
-//  }
-//  const char test_frame[] = "HELLO_UWB";
-  sys_task_init();
-  int id = sys_task_add(task_toggle_led, NULL, 1000, 0);
-  sys_task_start(id);
-  int id_log = sys_task_add(task_sys_logger_test, NULL, 1000, 0);  // 20 ms period
-  sys_task_start(id_log);
+  
+  // Initialize logger
+  sys_logger_init();
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
+  
+  // Initialize system configuration (loads from flash if available)
+  sys_config_init();
+  sys_config_t *cfg = sys_config_get();
+  
+  // Initialize UWB hardware with config from flash
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
+  
+  bsp_uwb_init();
+  
+  bsp_uwb_config_t uwb_cfg = {
+    .channel           = cfg->uwb_channel,
+    .prf               = cfg->uwb_prf,
+    .data_rate         = cfg->uwb_data_rate,
+    .preamble_code     = cfg->uwb_preamble_code,
+    .tx_antenna_delay  = cfg->tx_antenna_delay,
+  .rx_antenna_delay  = cfg->rx_antenna_delay,
+    .tx_power          = cfg->tx_power,
+  };
+  bsp_uwb_configure(&uwb_cfg);
+  
+  // Initialize application
+#if DEVICE_MODE_TAG
+  app_tag_init();
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application started");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Starting ranging operations...");
+#else
+  app_anchor_init();
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application started");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Listening for ranging requests...");
+#endif
+  
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "");
 
   /* USER CODE END 2 */
 
@@ -184,18 +164,15 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  sys_task_process();
-
-	// Pump buffer to USB CDC
-	sys_logger_task();
-//	HAL_Delay(1000);
-
-//	if (HAL_GetTick() >= 5000) {
-//		*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;
-//		__DSB(); __ISB();
-//		NVIC_SystemReset();
-//	}
-
+#if DEVICE_MODE_TAG
+    app_tag_process();
+#else
+    app_anchor_process(NULL);
+#endif
+    
+    sys_logger_task();
+    HAL_Delay(1);
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -220,14 +197,15 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 6;
-  RCC_OscInitStruct.PLL.PLLN = 168;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
-  RCC_OscInitStruct.PLL.PLLQ = 7;
+  RCC_OscInitStruct.PLL.PLLN = 96;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -238,18 +216,21 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
+
+  /** Enables the Clock Security System
+  */
+  HAL_RCC_EnableCSS();
 }
 
 /* USER CODE BEGIN 4 */
-
 /* USER CODE END 4 */
 
 /**
@@ -259,12 +240,10 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
-	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	HAL_Delay(100);
+  while (1) {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    HAL_Delay(100);
   }
   /* USER CODE END Error_Handler_Debug */
 }
@@ -279,8 +258,6 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

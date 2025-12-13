@@ -99,9 +99,6 @@ static int flash_storage_init(void)
 /*                         PUBLIC FUNCTIONS                                  */
 /* ========================================================================== */
 
-/**
- * @brief Initialize system configuration with defaults
- */
 void sys_config_init(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Initializing configuration...");
@@ -127,18 +124,11 @@ void sys_config_init(void)
     
     sys_config_print();
 }
-
-/**
- * @brief Get current configuration
- */
 sys_config_t* sys_config_get(void)
 {
     return &g_config;
 }
 
-/**
- * @brief Set device role
- */
 int sys_config_set_role(device_role_t role)
 {
     if (role != DEVICE_ROLE_TAG && role != DEVICE_ROLE_ANCHOR) {
@@ -152,9 +142,6 @@ int sys_config_set_role(device_role_t role)
     return 0;
 }
 
-/**
- * @brief Set device ID
- */
 int sys_config_set_device_id(uint8_t id)
 {
     if (id == 0x00 || id == 0xFF) {
@@ -167,9 +154,6 @@ int sys_config_set_device_id(uint8_t id)
     return 0;
 }
 
-/**
- * @brief Set ranging method
- */
 int sys_config_set_ranging_method(ranging_method_t method)
 {
     if (method != RANGING_DS_TWR && method != RANGING_TDOA) {
@@ -198,9 +182,6 @@ int sys_config_set_uwb_channel(uint8_t channel)
     return 0;
 }
 
-/**
- * @brief Set ranging period
- */
 int sys_config_set_ranging_period(uint16_t period_ms)
 {
     if (period_ms < 50 || period_ms > 5000) {
@@ -213,9 +194,6 @@ int sys_config_set_ranging_period(uint16_t period_ms)
     return 0;
 }
 
-/**
- * @brief Save configuration
- */
 int sys_config_save(void)
 {
 #ifdef HAVE_FLASH_STORAGE
@@ -257,9 +235,6 @@ int sys_config_save(void)
 #endif
 }
 
-/**
- * @brief Load configuration
- */
 int sys_config_load(void)
 {
 #ifdef HAVE_FLASH_STORAGE
@@ -318,9 +293,36 @@ int sys_config_load(void)
 #endif
 }
 
-/**
- * @brief Reset to factory defaults
- */
+int sys_config_set_rx_timeout(uint32_t timeout_ms)
+{
+    if (timeout_ms < 10 || timeout_ms > 1000) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, 
+               "Invalid RX timeout: %lu ms", timeout_ms);
+        return -1;
+    }
+    
+    g_config.rx_timeout_ms = timeout_ms;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX timeout set to: %lu ms", timeout_ms);
+    return 0;
+}
+
+int sys_config_set_antenna_delay(uint16_t tx_delay, uint16_t rx_delay)
+{
+    g_config.tx_antenna_delay = tx_delay;
+    g_config.rx_antenna_delay = rx_delay;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Antenna delay: TX=%u, RX=%u", 
+           tx_delay, rx_delay);
+    return 0;
+}
+
+
+int sys_config_set_tx_power(uint32_t power)
+{
+    g_config.tx_power = power;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "TX power set to: 0x%08lX", power);
+    return 0;
+}
+
 void sys_config_reset_to_defaults(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Resetting to factory defaults");
@@ -332,35 +334,57 @@ void sys_config_reset_to_defaults(void)
     g_config.method = DEFAULT_RANGING_METHOD;
     g_config.uwb_channel = DEFAULT_UWB_CHANNEL;
     g_config.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
+    g_config.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
     g_config.hw_rev_major = DEFAULT_HW_REV_MAJOR;
     g_config.hw_rev_minor = DEFAULT_HW_REV_MINOR;
+    
+    /* UWB radio config */
+    g_config.uwb_prf = DEFAULT_UWB_PRF;
+    g_config.uwb_data_rate = DEFAULT_UWB_DATA_RATE;
+    g_config.uwb_preamble_code = DEFAULT_UWB_PREAMBLE_CODE;
+    
+    /* Antenna delay */
+    g_config.tx_antenna_delay = DEFAULT_TX_ANT_DLY;
+    g_config.rx_antenna_delay = DEFAULT_RX_ANT_DLY;
+    
+    /* TX power */
+    g_config.tx_power = DEFAULT_TX_POWER;
 }
 
-/**
- * @brief Print current configuration
- */
+/* Update sys_config_print() to show all parameters: */
 void sys_config_print(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "========== DEVICE CONFIGURATION ==========");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  FW Version  : v%d.%d.%d", 
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "FW Version   : v%d.%d.%d", 
            FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  HW Revision : v%d.%d",
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "HW Revision  : v%d.%d",
            g_config.hw_rev_major, g_config.hw_rev_minor);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  Device Role : %s (0x%02X)",
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Role  : %s (0x%02X)",
            g_config.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR",
            g_config.role);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  Device ID   : 0x%02X", g_config.device_id);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  Ranging     : %s",
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device ID    : 0x%02X", g_config.device_id);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Ranging      : %s",
            g_config.method == RANGING_DS_TWR ? "DS-TWR" : "TDoA");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  UWB Channel : %d", g_config.uwb_channel);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- UWB RADIO --------------");
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Channel      : %d", g_config.uwb_channel);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "PRF          : %d MHz", g_config.uwb_prf);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Data Rate    : %d", g_config.uwb_data_rate);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Preamble Code: %d", g_config.uwb_preamble_code);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- CALIBRATION ------------");
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "TX Ant Delay : %u", g_config.tx_antenna_delay);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX Ant Delay : %u", g_config.rx_antenna_delay);
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "TX Power     : 0x%08lX", g_config.tx_power);
     
     if (g_config.role == DEVICE_ROLE_TAG) {
-        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "  Ranging Period: %d ms", g_config.ranging_period_ms);
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- TIMING -----------------");
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Ranging Period: %d ms", g_config.ranging_period_ms);
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX Timeout    : %lu ms", g_config.rx_timeout_ms);
     }
     
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "==========================================");
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
 }
+
 
 /* End of file -------------------------------------------------------- */

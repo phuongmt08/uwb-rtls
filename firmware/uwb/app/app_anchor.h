@@ -5,13 +5,7 @@
 #include "common.h"
 #include "sys_ranging.h"
 
-typedef enum {
-  APP_OK = 0,
-  APP_ERR,
-  APP_TIMEOUT
-} app_err_t;
-
 app_err_t app_anchor_init(void);
-void      app_anchor_run(void);
+void      app_anchor_process(void *arg);
 
 #endif /* __APP_ANCHOR_H */
