@@ -13,8 +13,13 @@ typedef enum
   BSP_OK = 0,
   BSP_ERR,
   BSP_ERR_PARAM,
+  BSP_ERR_BUSY,
 } bsp_err_t;
-
+typedef enum
+{
+  APP_OK = 0,
+  APP_ERR = -1
+} app_err_t;
 #define UWB_RST_PIN GPIO_PIN_2
 #define UWB_RST_PORT GPIOB
 
