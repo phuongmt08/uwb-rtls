@@ -32,11 +32,9 @@
 /*                          FEATURES                                          */
 /* ========================================================================== */
 /* Available hardware peripherals */
-#undef  HAVE_FLASH_STORAGE
+#define HAVE_FLASH_STORAGE      /* Flash storage for config persistence */
 #undef  HAVE_RTC
 #undef  HAVE_IMU
-#undef  HAVE_LED
-#undef  HAVE_SWITCH
 #undef  HAVE_AUTH
 #endif /* __PLATFORM_CONFIG_H */
 

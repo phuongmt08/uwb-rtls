@@ -458,5 +458,9 @@ void bsp_uwb_reset(bool active)
         HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
     }
 }
+void bsp_uwb_idle(void)
+{
+  dwt_forcetrxoff();
+}
 
 /* End of file -------------------------------------------------------- */

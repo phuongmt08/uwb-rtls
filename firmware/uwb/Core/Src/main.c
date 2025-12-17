@@ -24,6 +24,8 @@
 #include "sys_config.h"
 #include "sys_logger.h"
 #include "bsp_uwb.h"
+#include "bsp_io.h"
+#include "bsp_util.h"
 #include "common.h"
 #include "app_tag.h"
 #include "app_anchor.h"
@@ -40,7 +42,6 @@
 #define BL_MAGIC_ADDR      (0x2001FFF0UL)
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
 
-#define DEVICE_MODE_TAG     0	   // Set to 1 for Tag, 0 for Anchor
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,6 +52,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static bool s_ranging_enabled = true;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -145,17 +147,20 @@ int main(void)
   };
   bsp_uwb_configure(&uwb_cfg);
   
-  // Initialize application
-#if DEVICE_MODE_TAG
-  app_tag_init();
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application started");
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Starting ranging operations...");
-#else
-  app_anchor_init();
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application started");
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Listening for ranging requests...");
-#endif
+  // Initialize IO (LED, Button, DIP switch)
+  bsp_io_init();
+  bsp_io_led_off();  /* LED off initially */
   
+  // Initialize application based on role from config
+  if (cfg->role == DEVICE_ROLE_TAG) {
+    app_tag_init();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
+  } else {
+    app_anchor_init();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
+  }
+  
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging disabled - Press button to start");
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "");
 
   /* USER CODE END 2 */
@@ -164,14 +169,74 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-#if DEVICE_MODE_TAG
-    app_tag_process();
-#else
-    app_anchor_process(NULL);
-#endif
+    /* Process button events */
+    bsp_io_button_event_t btn_event = bsp_io_button_event();
+    
+    switch (btn_event)
+    {
+      case BSP_IO_EVENT_HOLD:
+        /* Toggle TAG/ANCHOR role and save to flash */
+        {
+          sys_config_t *cfg_curr = sys_config_get();
+          device_role_t new_role = (cfg_curr->role == DEVICE_ROLE_TAG) ? 
+                                    DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
+          
+          sys_config_set_role(new_role);
+          sys_config_save();
+          
+          /* Quick LED blink to indicate save */
+          for (uint8_t i = 0; i < 3; i++) {
+            bsp_io_led_on();
+            bsp_delay_ms(50);
+            bsp_io_led_off();
+            bsp_delay_ms(50);
+          }
+          
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed to: %s",
+                 new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
+          bsp_delay_ms(100);
+          // Reset system to apply new role
+          HAL_NVIC_SystemReset();
+        }
+        break;
+        
+      case BSP_IO_EVENT_DOUBLE_CLICK:
+        /* Stop ranging */
+        if (s_ranging_enabled) {
+          s_ranging_enabled = false;
+          /* Force DW1000 to idle to turn off RX/TX */
+          bsp_uwb_idle();
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
+        }
+        break;
+        
+      case BSP_IO_EVENT_CLICK:
+        /* Start ranging */
+        if (!s_ranging_enabled) {
+          s_ranging_enabled = true;
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
+        }
+        break;
+        
+      default:
+        break;
+    }
+    
+    /* Process ranging if enabled */
+    if (s_ranging_enabled)
+    {
+      sys_config_t *cfg_curr = sys_config_get();
+      if (cfg_curr->role == DEVICE_ROLE_TAG) {
+        app_tag_process();
+      } else {
+        app_anchor_process(NULL);
+      }
+    }
+
     
     sys_logger_task();
-    HAL_Delay(1);
+    bsp_delay_ms(1);
     
     /* USER CODE END WHILE */
 
@@ -203,9 +268,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 6;
-  RCC_OscInitStruct.PLL.PLLN = 96;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLN = 168;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -216,18 +281,14 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
-
-  /** Enables the Clock Security System
-  */
-  HAL_RCC_EnableCSS();
 }
 
 /* USER CODE BEGIN 4 */
@@ -242,7 +303,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   __disable_irq();
   while (1) {
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    bsp_io_led_toggle();
     HAL_Delay(100);
   }
   /* USER CODE END Error_Handler_Debug */

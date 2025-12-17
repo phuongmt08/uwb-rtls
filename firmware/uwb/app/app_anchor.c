@@ -10,7 +10,8 @@
 #include "sys_ranging.h"
 #include "sys_config.h"
 #include "sys_logger.h"
-#include "gpio.h"
+#include "bsp_io.h"
+#include "bsp_util.h"
 #include <stdint.h>
 
 /* Configuration ------------------------------------------------------ */
@@ -36,8 +37,25 @@ app_err_t app_anchor_init(void)
 {
   sys_config_t *cfg = sys_config_get();
   
+  /* Read DIP switch for anchor ID configuration */
+  uint8_t dip_value = bsp_io_dip_read();
+  
+  if (dip_value == 0) {
+    /* DIP = 0: Use last saved config ID */
+    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "DIP switch = 0, using saved ID: 0x%02X", cfg->device_id);
+  } else {
+    /* DIP != 0: Override with DIP switch value (1-7) */
+    if (cfg->device_id != dip_value) {
+      cfg->device_id = dip_value;
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR, "DIP switch override: ID set to 0x%02X", dip_value);
+      sys_config_save();
+    } else {
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR, "DIP switch matches saved ID: 0x%02X", dip_value);
+    }
+  }
+  
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "===== ANCHOR INIT =====");
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Device ID: 0x%02X", cfg->device_id);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Anchor ID: 0x%02X", cfg->device_id);
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Method: DS-TWR");
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "=======================");
 
@@ -104,9 +122,9 @@ void app_anchor_process(void *arg)
         s_error_count = 0;
         
         /* LED blink */
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-        HAL_Delay(20);
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        bsp_io_led_on();
+        bsp_delay_ms(20);
+        bsp_io_led_off();
       } else {
         RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[ANCHOR] Result invalid");
       }
