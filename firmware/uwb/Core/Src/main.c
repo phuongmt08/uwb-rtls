@@ -134,7 +134,9 @@ int main(void)
   // Initialize UWB hardware with config from flash
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
   
-  bsp_uwb_init();
+  if (bsp_uwb_init() != 0) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
+  }
   
   bsp_uwb_config_t uwb_cfg = {
     .channel           = cfg->uwb_channel,
@@ -145,6 +147,12 @@ int main(void)
   .rx_antenna_delay  = cfg->rx_antenna_delay,
     .tx_power          = cfg->tx_power,
   };
+  
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u", 
+         uwb_cfg.channel, uwb_cfg.prf, uwb_cfg.data_rate, uwb_cfg.preamble_code);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", 
+         uwb_cfg.tx_antenna_delay, uwb_cfg.rx_antenna_delay);
+  
   bsp_uwb_configure(&uwb_cfg);
   
   // Initialize IO (LED, Button, DIP switch)
@@ -159,10 +167,6 @@ int main(void)
     app_anchor_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
-  
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging disabled - Press button to start");
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "");
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -262,9 +266,8 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 6;

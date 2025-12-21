@@ -91,10 +91,40 @@ bsp_err_t bsp_uwb_read_40bit(uint8_t reg_addr, uint8_t sub_addr, uint64_t *times
 void bsp_uwb_reset(bool active);
 
 /**
+ * @brief Enable RX with specific timeout
+ * @param[in] timeout_ms Timeout in milliseconds (0 = continuous)
+ * @return BSP_OK on success, BSP_ERR on failure
+ */
+bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms);
+
+/**
  * @brief Force DW1000 to idle state (turn off TX/RX)
  * @note Call this when stopping ranging to turn off RX/TX LEDs
  */
 void bsp_uwb_idle(void);
+
+/**
+ * @brief Read RSSI of last received frame
+ * @return RSSI value in dBm (negative value, e.g., -70 dBm)
+ *         Returns 0 if no valid RX or error
+ */
+int8_t bsp_uwb_get_rssi(void);
+
+/**
+ * @brief Get configured TX antenna delay
+ * @return TX antenna delay in DW1000 time units
+ */
+uint16_t bsp_uwb_get_tx_antenna_delay(void);
+
+/**
+ * @brief Transmit frame at specific delayed time (scheduled TX)
+ * @param[in] data Frame data
+ * @param[in] length Frame length in bytes
+ * @param[in] tx_timestamp 40-bit DW1000 timestamp when to transmit
+ * @return BSP_OK on success, BSP_ERR on failure
+ * @note Uses DW1000 delayed TX feature to transmit at precise time
+ */
+bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_timestamp);
 
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */

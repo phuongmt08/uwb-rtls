@@ -65,20 +65,24 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
 {
   uint32_t timeout_ms = (timeout_us + 999) / 1000;
   uint32_t start_tick = HAL_GetTick();
-  
-  while (1) {
-    bsp_err_t err = bsp_uwb_rx(buffer, buffer_size, received_length);
-    
-    if (err == BSP_OK && *received_length > 0) {
-      return 0;
-    }
-    
-    if ((HAL_GetTick() - start_tick) >= timeout_ms) {
-      return -1;
-    }
-    
-    HAL_Delay(1);
+
+  *received_length = 0;
+
+  /* Initial RX enable with full setup */
+  if (bsp_uwb_enable_rx(0) != BSP_OK) {  /* 0 = no HW timeout, use SW timeout */
+    return -1;
   }
+
+  while ((HAL_GetTick() - start_tick) < timeout_ms) {
+    bsp_err_t err = bsp_uwb_rx(buffer, buffer_size, received_length);
+
+    if (err == BSP_OK && *received_length > 0) {
+      return 0; /* Frame received */
+    }
+    /* bsp_uwb_rx handles re-enable internally for timeout/errors */
+  }
+
+  return -1; /* Timeout */
 }
 
 static int hal_read_timestamp(uint8_t reg_addr, uint8_t sub_addr, uint64_t *timestamp)
@@ -92,12 +96,32 @@ static uint32_t hal_get_tick_ms(void)
   return HAL_GetTick();
 }
 
+static int hal_get_rssi(void)
+{
+  return (int)bsp_uwb_get_rssi();
+}
+
+static int hal_tx_delayed(const void *data, uint16_t length, uint64_t tx_timestamp)
+{
+  /* Use proper delayed TX from BSP layer */
+  bsp_err_t err = bsp_uwb_tx_delayed(data, length, tx_timestamp);
+  return (err == BSP_OK) ? 0 : -1;
+}
+
+static uint16_t hal_get_tx_antenna_delay(void)
+{
+  return bsp_uwb_get_tx_antenna_delay();
+}
+
 /* HAL structure */
 static const mw_dstwr_hal_t s_hal = {
   .tx = hal_tx,
+  .tx_delayed = hal_tx_delayed,
   .rx_with_timeout = hal_rx_with_timeout,
   .read_timestamp = hal_read_timestamp,
-  .get_tick_ms = hal_get_tick_ms
+  .get_tick_ms = hal_get_tick_ms,
+  .get_rssi = hal_get_rssi,
+  .get_tx_antenna_delay = hal_get_tx_antenna_delay
 };
 
 /* Private function implementations ----------------------------------- */
@@ -108,6 +132,9 @@ static void state_machine_reset(void)
   s_ctx.has_result = false;
   memset(&s_ctx.result, 0, sizeof(s_ctx.result));
   memset(&s_ctx.mw_result, 0, sizeof(s_ctx.mw_result));
+  
+  /* Turn off RX when idle to prevent noise/error spam */
+  bsp_uwb_idle();
 }
 
 static void format_distance_m(char *buf, size_t len, float distance_m)
@@ -132,9 +159,9 @@ static inline void format_ts(char *buf, uint64_t timestamp)
     
     buf[0] = '0';
     buf[1] = 'x';
-    buf[10] = '\0';
+    buf[12] = '\0';  /* 10 hex digits for 40-bit */
     
-    for (int i = 9; i >= 2; i--) {
+    for (int i = 11; i >= 2; i--) {
         buf[i] = hex[ts & 0x0F];
         ts >>= 4;
     }
@@ -151,7 +178,7 @@ static void log_ranging_result(const sys_ranging_result_t *result, const char *r
     
     s_success_count++;
     char dist_str[16];
-    char t1[11], t2[11], t3[11], t4[11], t5[11], t6[11];
+    char t1[13], t2[13], t3[13], t4[13], t5[13], t6[13];  /* 40-bit = 10 hex + "0x" + null */
     
     format_distance_m(dist_str, sizeof(dist_str), result->distance_m);
     format_ts(t1, result->t1);
@@ -161,11 +188,12 @@ static void log_ranging_result(const sys_ranging_result_t *result, const char *r
     format_ts(t5, result->t5);
     format_ts(t6, result->t6);
     
-    RLOG_I(LOG_OBJECT_CODE_RANGING, "========== %s DS-TWR #%lu ==========", role, s_success_count);
-    RLOG_I(LOG_OBJECT_CODE_RANGING, "Distance: %s m", dist_str);
-    RLOG_I(LOG_OBJECT_CODE_RANGING, "T1:%s T2:%s T3:%s", t1, t2, t3);
-    RLOG_I(LOG_OBJECT_CODE_RANGING, "T4:%s T5:%s T6:%s", t4, t5, t6);
-    RLOG_I(LOG_OBJECT_CODE_RANGING, "====================================");
+    // RLOG_I(LOG_OBJECT_CODE_RANGING, "========== %s DS-TWR #%lu ==========", role, s_success_count);
+    RLOG_I(LOG_OBJECT_CODE_RANGING, "Distance: %s m [Anchor:%u RSSI:%ddBm]", 
+           dist_str, result->anchor_id, result->rssi);
+    // RLOG_I(LOG_OBJECT_CODE_RANGING, "T1:%s T2:%s T3:%s", t1, t2, t3);
+    // RLOG_I(LOG_OBJECT_CODE_RANGING, "T4:%s T5:%s T6:%s", t4, t5, t6);
+    // RLOG_I(LOG_OBJECT_CODE_RANGING, "====================================");
 }
 
 /* Public API - Non-blocking Tag -------------------------------------- */
@@ -187,6 +215,7 @@ sys_ranging_err_t sys_ranging_tag_start(uint8_t sequence_num, uint32_t rx_timeou
   s_ctx.state_entry_tick = HAL_GetTick();
   
   s_ctx.mw_config.sequence_num = sequence_num;
+  s_ctx.mw_config.target_anchor_id = ANCHOR_ID_ANY;
   s_ctx.mw_config.rx_timeout_us = rx_timeout_ms * 1000;
   s_ctx.mw_config.hal = &s_hal;
   
@@ -216,6 +245,8 @@ sys_ranging_err_t sys_ranging_tag_process(void)
         s_ctx.result.t5 = s_ctx.mw_result.timestamps.t5;
         s_ctx.result.t6 = s_ctx.mw_result.timestamps.t6;
         s_ctx.result.distance_m = s_ctx.mw_result.distance_m;
+        s_ctx.result.anchor_id = s_ctx.mw_result.anchor_id;
+        s_ctx.result.rssi = s_ctx.mw_result.rssi;
         s_ctx.result.valid = s_ctx.mw_result.valid;
         s_ctx.has_result = true;
         
@@ -279,6 +310,12 @@ sys_ranging_err_t sys_ranging_anchor_start(uint32_t rx_timeout_ms)
   state_machine_reset();
   s_ctx.state_entry_tick = HAL_GetTick();
   
+  /* If timeout = 0, use config default */
+  if (rx_timeout_ms == 0) {
+    sys_config_t *cfg = sys_config_get();
+    rx_timeout_ms = cfg->rx_timeout_ms;
+  }
+  
   s_ctx.mw_config.sequence_num = 0;
   s_ctx.mw_config.rx_timeout_us = rx_timeout_ms * 1000;
   s_ctx.mw_config.hal = &s_hal;
@@ -306,6 +343,8 @@ sys_ranging_err_t sys_ranging_anchor_process(void)
         s_ctx.result.t5 = s_ctx.mw_result.timestamps.t5;
         s_ctx.result.t6 = s_ctx.mw_result.timestamps.t6;
         s_ctx.result.distance_m = s_ctx.mw_result.distance_m;
+        s_ctx.result.anchor_id = s_ctx.mw_result.anchor_id;
+        s_ctx.result.rssi = s_ctx.mw_result.rssi;
         s_ctx.result.valid = s_ctx.mw_result.valid;
         s_ctx.has_result = true;
 
@@ -356,3 +395,126 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result)
   
   return SYS_RANGING_ERR_NO_RESULT;
 }
+
+/* Multiple Anchor API implementation --------------------------------- */
+#ifdef MULTIPLE_ANCHOR
+
+sys_ranging_err_t sys_ranging_tag_start_with_anchor(uint8_t anchor_id,
+                                                     uint8_t sequence_num,
+                                                     uint32_t rx_timeout_ms)
+{
+  if (s_ctx.state != STATE_IDLE) {
+    return SYS_RANGING_ERR_BUSY;
+  }
+  
+  /* Get timeout from config if not specified */
+  if (rx_timeout_ms == 0) {
+    sys_config_t *cfg = sys_config_get();
+    rx_timeout_ms = cfg->rx_timeout_ms;
+  }
+  
+  state_machine_reset();
+  s_ctx.sequence_num = sequence_num;
+  s_ctx.state_entry_tick = HAL_GetTick();
+  
+  s_ctx.mw_config.sequence_num = sequence_num;
+  s_ctx.mw_config.target_anchor_id = anchor_id;  /* Target specific anchor */
+  s_ctx.mw_config.rx_timeout_us = rx_timeout_ms * 1000;
+  s_ctx.mw_config.hal = &s_hal;
+  
+  s_ctx.state = STATE_TAG_RANGING;
+  
+  RLOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Starting DS-TWR seq=%u anchor=%u", 
+         sequence_num, anchor_id);
+  
+  return SYS_RANGING_OK;
+}
+
+int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
+                                 uint8_t num_anchors,
+                                 sys_ranging_result_t *results,
+                                 uint8_t sequence_num,
+                                 uint32_t rx_timeout_ms)
+{
+  if (!anchor_ids || !results || num_anchors == 0) {
+    return 0;
+  }
+  
+  /* Limit to MAX_ANCHORS */
+  if (num_anchors > MAX_ANCHORS) {
+    num_anchors = MAX_ANCHORS;
+  }
+  
+  /* Get timeout from config if not specified */
+  if (rx_timeout_ms == 0) {
+    sys_config_t *cfg = sys_config_get();
+    rx_timeout_ms = cfg->rx_timeout_ms;
+  }
+  
+  int success_count = 0;
+  
+  RLOG_I(LOG_OBJECT_CODE_RANGING, "[TAG] Multi-anchor ranging: %u anchors", num_anchors);
+  
+  /* Sequential ranging with each anchor */
+  for (uint8_t i = 0; i < num_anchors; i++) {
+    uint8_t anchor_id = anchor_ids[i];
+    sys_ranging_result_t *result = &results[i];
+    
+    /* Initialize result as invalid */
+    memset(result, 0, sizeof(sys_ranging_result_t));
+    result->valid = false;
+    result->anchor_id = anchor_id;
+    
+    /* Start ranging with this anchor */
+    sys_ranging_err_t err = sys_ranging_tag_start_with_anchor(
+      anchor_id, sequence_num + i, rx_timeout_ms);
+    
+    if (err != SYS_RANGING_OK) {
+      RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: Failed to start", anchor_id);
+      continue;
+    }
+    
+    /* Process until complete or error */
+    uint32_t start_tick = HAL_GetTick();
+    uint32_t total_timeout = rx_timeout_ms * 5;  /* Allow 5x timeout for full exchange */
+    
+    while (1) {
+      err = sys_ranging_tag_process();
+      
+      if (err == SYS_RANGING_OK) {
+        /* Complete - get result */
+        if (sys_ranging_tag_get_result(result) == SYS_RANGING_OK) {
+          RLOG_I(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: %.2fm", 
+                 anchor_id, result->distance_m);
+          success_count++;
+        }
+        break;
+      }
+      else if (err == SYS_RANGING_ERR_BUSY) {
+        /* Still processing - check timeout */
+        if ((HAL_GetTick() - start_tick) > total_timeout) {
+          RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: Timeout", anchor_id);
+          state_machine_reset();
+          break;
+        }
+        bsp_delay_ms(1);  /* Small delay */
+      }
+      else {
+        /* Error */
+        RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: Error %d", anchor_id, err);
+        state_machine_reset();
+        break;
+      }
+    }
+    
+    /* Small delay between anchors */
+    bsp_delay_ms(50);
+  }
+  
+  RLOG_I(LOG_OBJECT_CODE_RANGING, "[TAG] Multi-anchor complete: %d/%u successful",
+         success_count, num_anchors);
+  
+  return success_count;
+}
+
+#endif /* MULTIPLE_ANCHOR */

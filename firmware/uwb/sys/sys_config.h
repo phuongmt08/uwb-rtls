@@ -46,6 +46,9 @@ typedef enum {
  * @brief Device runtime configuration
  */
 typedef struct {
+  /* Config version - increment to force reset on firmware update */
+  uint8_t config_version;
+  
   /* Device identity */
   device_role_t role;
   uint8_t device_id;
@@ -84,8 +87,25 @@ typedef struct {
 #define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR
 #define DEFAULT_DEVICE_ID           0x01
 #define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
-#define DEFAULT_RANGING_PERIOD_MS   100
-#define DEFAULT_RX_TIMEOUT_MS       100
+
+#ifdef HAVE_TX_DELAY
+  /* HAVE_TX_DELAY mode: 
+   * - Period between ranging attempts
+   * - Internal timeouts are fixed (10ms for each step)
+   * - One complete cycle takes ~15-20ms max
+   * - Faster period = more retries = better success rate
+   */
+  #define DEFAULT_RANGING_PERIOD_MS   50   /* 20 ranging/sec - faster retry */
+  #define DEFAULT_RX_TIMEOUT_MS       100  /* For POLL listening - must be > period */
+#else
+  /* CORRECTION mode: fast performance */
+  #define DEFAULT_RANGING_PERIOD_MS   50   /* 20 ranging/sec */
+  #define DEFAULT_RX_TIMEOUT_MS       60   /* Must be > period */
+#endif
+
+/* Config version - increment this to force config reset on firmware update */
+#define CONFIG_VERSION              3
+
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
 #define DEFAULT_UWB_DATA_RATE       1

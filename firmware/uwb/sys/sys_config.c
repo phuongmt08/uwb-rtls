@@ -103,6 +103,9 @@ void sys_config_init(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Initializing configuration...");
     
+    /* Always start with defaults first */
+    sys_config_reset_to_defaults();
+    
 #ifdef HAVE_FLASH_STORAGE
     /* Initialize bsp_util for CRC and RTC */
     if (bsp_util_init() != BSP_UTIL_OK) {
@@ -115,11 +118,9 @@ void sys_config_init(void)
     }
 #endif
     
-    /* Try to load from flash/RAM */
+    /* Try to load from flash/RAM (will override defaults if valid) */
     if (sys_config_load() != 0) {
-        /* If load fails, use defaults */
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "No saved config, using defaults");
-        sys_config_reset_to_defaults();
     }
     
     sys_config_print();
@@ -265,6 +266,14 @@ int sys_config_load(void)
         return -1;
     }
     
+    /* Check config version - warn but don't force reset to preserve user settings */
+    if (temp_config.config_version != CONFIG_VERSION) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Config version mismatch: flash=%u != fw=%u (keeping user settings)",
+               temp_config.config_version, CONFIG_VERSION);
+        /* Update version in memory but keep other settings */
+        temp_config.config_version = CONFIG_VERSION;
+    }
+    
     /* Validate config values */
     if (temp_config.role != DEVICE_ROLE_TAG && temp_config.role != DEVICE_ROLE_ANCHOR) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid role in flash");
@@ -274,6 +283,29 @@ int sys_config_load(void)
     if (temp_config.uwb_channel < 1 || temp_config.uwb_channel > 7) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid channel in flash");
         return -1;
+    }
+    
+    /* Validate and fix RX timeout (5ms - 500ms range) */
+    if (temp_config.rx_timeout_ms > 500 || temp_config.rx_timeout_ms < 5) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx_timeout=%lu in flash, forcing to %u ms",
+               temp_config.rx_timeout_ms, DEFAULT_RX_TIMEOUT_MS);
+        temp_config.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
+    }
+    
+    /* Validate and fix ranging period */
+    if (temp_config.ranging_period_ms > 1000 || temp_config.ranging_period_ms < 20) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid period=%lu in flash, forcing to %u ms",
+               temp_config.ranging_period_ms, DEFAULT_RANGING_PERIOD_MS);
+        temp_config.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
+    }
+    
+    /* Auto-fix: Anchor RX timeout should be > Tag period to reliably catch POLL
+     * If timeout < period, force timeout = period + 50ms margin */
+    if (temp_config.rx_timeout_ms < temp_config.ranging_period_ms) {
+        uint32_t new_timeout = temp_config.ranging_period_ms + 50;
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "rx_timeout(%lu) < period(%lu), fixing to %lu ms",
+               temp_config.rx_timeout_ms, temp_config.ranging_period_ms, new_timeout);
+        temp_config.rx_timeout_ms = new_timeout;
     }
     
     /* All checks passed, copy to active config */
@@ -329,6 +361,7 @@ void sys_config_reset_to_defaults(void)
     
     memset(&g_config, 0, sizeof(sys_config_t));
     
+    g_config.config_version = CONFIG_VERSION;
     g_config.role = DEFAULT_DEVICE_ROLE;
     g_config.device_id = DEFAULT_DEVICE_ID;
     g_config.method = DEFAULT_RANGING_METHOD;

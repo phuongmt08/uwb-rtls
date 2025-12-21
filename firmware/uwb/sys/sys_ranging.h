@@ -41,6 +41,8 @@ typedef struct
 {
   float    distance_m;
   uint64_t t1, t2, t3, t4, t5, t6;
+  uint8_t  anchor_id;  /* Which anchor (for multiple anchor mode) */
+  int8_t  rssi;       /* RSSI for diagnostics */
   bool     valid;
 } sys_ranging_result_t;
 
@@ -93,6 +95,35 @@ sys_ranging_err_t sys_ranging_anchor_process(void);
  * @return SYS_RANGING_OK if result available
  */
 sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
+
+/* Multiple Anchor API (TAG only) ------------------------------------ */
+#ifdef MULTIPLE_ANCHOR
+/**
+ * @brief Start Tag ranging with specific anchor
+ * @param anchor_id Target anchor ID (or 0xFF for any/broadcast)
+ * @param sequence_num Sequence number
+ * @param rx_timeout_ms RX timeout in milliseconds
+ * @return SYS_RANGING_OK if started successfully
+ */
+sys_ranging_err_t sys_ranging_tag_start_with_anchor(uint8_t anchor_id, 
+                                                     uint8_t sequence_num, 
+                                                     uint32_t rx_timeout_ms);
+
+/**
+ * @brief Range with multiple anchors sequentially
+ * @param anchor_ids Array of anchor IDs to range with
+ * @param num_anchors Number of anchors in array (max 8)
+ * @param results Output array for results (must be size num_anchors)
+ * @param sequence_num Starting sequence number
+ * @param rx_timeout_ms RX timeout per anchor
+ * @return Number of successful ranging operations (0 to num_anchors)
+ */
+int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
+                                 uint8_t num_anchors,
+                                 sys_ranging_result_t *results,
+                                 uint8_t sequence_num,
+                                 uint32_t rx_timeout_ms);
+#endif
 
 /* Legacy blocking API (compatibility) -------------------------------- */
 sys_ranging_err_t sys_ranging_tag_once(const sys_ranging_config_t *config,

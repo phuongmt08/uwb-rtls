@@ -14,6 +14,7 @@ typedef enum
   BSP_ERR,
   BSP_ERR_PARAM,
   BSP_ERR_BUSY,
+  BSP_ERR_TIMEOUT,
 } bsp_err_t;
 typedef enum
 {

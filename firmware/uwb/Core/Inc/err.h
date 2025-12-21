@@ -32,7 +32,6 @@
   {                                 \
     if (!(expr))                    \
     {                               \
-      assert(expr);                 \
       return (err_code);            \
     }                               \
   } while (0)

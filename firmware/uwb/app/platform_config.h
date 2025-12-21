@@ -36,6 +36,15 @@
 #undef  HAVE_RTC
 #undef  HAVE_IMU
 #undef  HAVE_AUTH
+
+/* UWB Ranging features */
+// #define MULTIPLE_ANCHOR         /* Enable multiple anchor ranging support */
+#define MAX_ANCHORS            8   /* Maximum number of anchors (1-8) */
+
+/* Advanced features (disable for basic operation) */
+#define ENABLE_RSSI             /* Enable RSSI measurement and reporting */
+#define HAVE_TX_DELAY           /* Enable delayed TX mode (faster, 4 msgs instead of 5) */
+
 #endif /* __PLATFORM_CONFIG_H */
 
 /* End of file -------------------------------------------------------- */

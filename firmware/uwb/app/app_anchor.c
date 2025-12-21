@@ -37,23 +37,7 @@ app_err_t app_anchor_init(void)
 {
   sys_config_t *cfg = sys_config_get();
   
-  /* Read DIP switch for anchor ID configuration */
-  uint8_t dip_value = bsp_io_dip_read();
-  
-  if (dip_value == 0) {
-    /* DIP = 0: Use last saved config ID */
-    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "DIP switch = 0, using saved ID: 0x%02X", cfg->device_id);
-  } else {
-    /* DIP != 0: Override with DIP switch value (1-7) */
-    if (cfg->device_id != dip_value) {
-      cfg->device_id = dip_value;
-      RLOG_I(LOG_OBJECT_CODE_ANCHOR, "DIP switch override: ID set to 0x%02X", dip_value);
-      sys_config_save();
-    } else {
-      RLOG_I(LOG_OBJECT_CODE_ANCHOR, "DIP switch matches saved ID: 0x%02X", dip_value);
-    }
-  }
-  
+  /* Device ID is already set from DIP switch in main.c */
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "===== ANCHOR INIT =====");
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Anchor ID: 0x%02X", cfg->device_id);
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Method: DS-TWR");
@@ -69,19 +53,16 @@ void app_anchor_process(void *arg)
   uint32_t current_tick = HAL_GetTick();
   switch (s_app_state) {
     case ANCHOR_STATE_IDLE:
-      /* Chỉ khởi động lại sau mỗi interval, giống Tag */
-      if ((current_tick - s_last_listen_tick) >= cfg->ranging_period_ms) {
+      /* ANCHOR mode: restart immediately, no delay */
+      sys_ranging_err_t err = sys_ranging_anchor_start(0);  /* 0 = use default timeout from config */
+      if (err == SYS_RANGING_OK) {
+        s_app_state = ANCHOR_STATE_LISTENING;
         s_last_listen_tick = current_tick;
-        sys_ranging_err_t err = sys_ranging_anchor_start(100);
-        if (err == SYS_RANGING_OK) {
-          s_app_state = ANCHOR_STATE_LISTENING;
-          // RLOG_D(LOG_OBJECT_CODE_ANCHOR, "[ANCHOR] Started listening");
-        } else if (err == SYS_RANGING_ERR_BUSY) {
-          /* Không gọi lại liên tục, chỉ log cảnh báo nếu cần */
-        } else {
-          RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_RANGING, "[ANCHOR] Start failed: %d", err);
-          s_error_count++;
-        }
+      } else if (err == SYS_RANGING_ERR_BUSY) {
+        /* Already running, ignore */
+      } else {
+        RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_RANGING, "[ANCHOR] Start failed: %d", err);
+        s_error_count++;
       }
       break;
     

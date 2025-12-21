@@ -17,6 +17,7 @@
 #include "sys_logger.h"
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 /* Private defines ---------------------------------------------------- */
 #define DW1000_DEVICE_ID 0xDECA0130UL
 #define RX_TIMEOUT_MS    1000
@@ -36,6 +37,7 @@
 static bool s_initialized = false;
 static uint64_t s_last_rx_timestamp = 0;  /* Cached RX timestamp */
 static uint64_t s_last_tx_timestamp = 0;  /* Cached TX timestamp */
+static uint16_t s_tx_antenna_delay = 0;   /* Cached TX antenna delay */
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
@@ -156,16 +158,26 @@ static void reset_DW1000(void)
 
 static void port_set_dw1000_slowrate(void)
 {
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
     HAL_SPI_Init(&hspi1);
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[SPI] Set to SLOW rate (prescaler=128)");
 }
 
 static void port_set_dw1000_fastrate(void)
 {
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
     HAL_SPI_Init(&hspi1);
-    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[SPI] Set to FAST rate (prescaler=16)");
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[SPI] Set to FAST rate (prescaler=8, ~5.25MHz)");
+}
+
+static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
+{
+    /* 1 unit = ~1.0256 μs => units = (ms * 1000000) / 10256 */
+    uint32_t units = (timeout_ms * 1000u * 1000u) / 10256u;
+    if (units > 0xFFFFu) {
+        units = 0xFFFFu;  /* Max 16-bit value */
+    }
+    return (uint16_t)units;
 }
 
 /* Public functions --------------------------------------------------- */
@@ -183,7 +195,7 @@ bsp_err_t bsp_uwb_init(void)
         return BSP_ERR;
     }
 
-    dev_id = dwt_readdevid();
+        dev_id = dwt_readdevid();
     if (dev_id != DW1000_DEVICE_ID) {
         return BSP_ERR;
     }
@@ -200,21 +212,23 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
     CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
     CHECK_PARAM(s_initialized, BSP_ERR);
 
-    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuring: CH=%u PRF=%u DataRate=%u", 
-           cfg->channel, cfg->prf, cfg->data_rate);
-
     dwt_config_t dw_cfg = {
         .chan           = cfg->channel,
         .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_128,
-        .rxPAC          = DWT_PAC8,
+        .txPreambLength = DWT_PLEN_256,
+        .rxPAC          = DWT_PAC16,
         .txCode         = 9,
         .rxCode         = 9,
         .nsSFD          = 0,
         .dataRate       = cfg->data_rate,
         .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = 129
+        .sfdTO          = 265
     };
+    
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
+           dw_cfg.chan, cfg->prf, dw_cfg.dataRate, dw_cfg.txCode);
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=256 PAC=16 SFD=%u nsSFD=%u PHR=%u",
+           dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
 
     if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS) {
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] dwt_configure() failed");
@@ -228,6 +242,9 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
 
     dwt_setrxantennadelay(cfg->rx_antenna_delay);
     dwt_settxantennadelay(cfg->tx_antenna_delay);
+    
+    /* Cache TX antenna delay for later use in delayed TX calculations */
+    s_tx_antenna_delay = cfg->tx_antenna_delay;
 
     dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
     dwt_forcetrxoff();
@@ -251,29 +268,15 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
     if (!data || length == 0 || length > TX_MAX_PAYLOAD)
         return BSP_ERR;
 
-    /* Ensure idle */
+    /* Ensure idle and clear all flags */
     dwt_forcetrxoff();
-    HAL_Delay(1);
+    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
 
-    /* Clear previous TX flags */
-    dwt_write32bitreg(SYS_STATUS_ID,
-                      SYS_STATUS_TXFRB |
-                      SYS_STATUS_TXPRS |
-                      SYS_STATUS_TXFRS |
-                      SYS_STATUS_AAT);
-
-
-    /* 
-     * CRITICAL FIX:
-     * - Write ONLY payload bytes to TX buffer
-     * - But tell DW1000 the total on-air length = payload + 2 (CRC)
-     */
     dwt_writetxdata(length, (uint8_t*)data, 0);  /* Write payload only */
     dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);  /* Total on-air length including CRC */
 
-    /* Start TX */
-    /* Start TX with RESPONSE_EXPECTED as before */
-    if (dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED) != DWT_SUCCESS) {
+    /* Start TX immediately */
+    if (dwt_starttx(DWT_START_TX_IMMEDIATE) != DWT_SUCCESS) {
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX] dwt_starttx() failed");
         return BSP_ERR;
     }
@@ -307,19 +310,10 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
 
     /* TX success */
     dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
-        // RLOG_D(LOG_OBJECT_CODE_UWB_DRIVER, "[TX] Success - %u bytes + 2 CRC sent", length);
 
     return BSP_OK;
 }
 
-/**
- * @brief RX function - FIXED to properly handle CRC
- * 
- * QUAN TRỌNG:
- * - RX_FINFO chứa độ dài on-air (bao gồm CRC)
- * - Phải trừ 2 byte CRC để lấy payload thật
- * - CRC đã được DW1000 verify, không cần kiểm tra thêm
- */
 bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
 {
     CHECK_PARAM(data && out_len, BSP_ERR_PARAM);
@@ -366,10 +360,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
 
         /* Read full frame including CRC */
         dwt_readrxdata(rx_buf, frame_len_onair, 0);
-        /* 
-         * CRITICAL FIX: 
-         * Calculate payload length by subtracting CRC
-         */
+
         uint16_t payload_len = 0;
         if (frame_len_onair >= DW1000_CRC_LENGTH) {
             payload_len = frame_len_onair - DW1000_CRC_LENGTH;
@@ -388,41 +379,35 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
                           SYS_STATUS_RXFCG | SYS_STATUS_RXDFR | 
                           SYS_STATUS_RXPRD | SYS_STATUS_RXSFDD | 
                           SYS_STATUS_RXPHD | SYS_STATUS_LDEDONE);
-
+        
         return BSP_OK;
     }
 
-    /* RX errors - clear and restart */
-    if (status & SYS_STATUS_ALL_RX_ERR) {
-        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][RX] RX error flags: 0x%08X", status);
-        dwt_write32bitreg(SYS_STATUS_ID, status & SYS_STATUS_ALL_RX_ERR);
-        dwt_forcetrxoff();
-        dwt_rxreset();
+    /* RX timeout (RXRFTO/RXPTO) - clear flags and re-enable RX quickly */
+    if (status & (SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO)) {
+        dwt_write32bitreg(SYS_STATUS_ID,
+                          SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO |
+                          SYS_STATUS_RXDFR  | SYS_STATUS_RXPRD |
+                          SYS_STATUS_RXSFDD | SYS_STATUS_RXPHD |
+                          SYS_STATUS_LDEDONE);
+        /* Quick re-enable without forcetrxoff */
+        dwt_rxenable(DWT_START_RX_IMMEDIATE);
+        *out_len = 0;
+        return BSP_ERR_TIMEOUT;
+    }
 
-        if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
-            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][RX] dwt_rxenable() failed after RX error");
-            return BSP_ERR;
-        }
+    /* RX frame errors (CRC, PHR, etc.) - clear flags and re-enable */
+    if (status & (SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL)) {
+        dwt_write32bitreg(SYS_STATUS_ID, 
+                          SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL |
+                          SYS_STATUS_RXDFR | SYS_STATUS_RXSFDD | SYS_STATUS_RXPRD |
+                          SYS_STATUS_LDEDONE);
+        /* Quick re-enable */
+        dwt_rxenable(DWT_START_RX_IMMEDIATE);
         return BSP_ERR;
     }
 
-    /* No frame yet - ensure RX is enabled */
-    if (!(status & SYS_STATUS_RXPRD)) {
-        dwt_forcetrxoff();
-        dwt_write32bitreg(SYS_STATUS_ID, 
-                          SYS_STATUS_RXFCG | SYS_STATUS_RXFCE | 
-                          SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL | 
-                          SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO | 
-                          SYS_STATUS_ALL_RX_ERR | SYS_STATUS_CLKPLL_LL);
-
-        dwt_setrxtimeout(0);  /* Continuous RX */
-
-        if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
-            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][RX] dwt_rxenable() failed");
-            return BSP_ERR;
-        }
-    }
-
+    /* No event yet - RX still active */
     return BSP_ERR;
 }
 
@@ -458,9 +443,152 @@ void bsp_uwb_reset(bool active)
         HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
     }
 }
+bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
+{
+    CHECK_PARAM(s_initialized, BSP_ERR);
+    
+    /* CRITICAL: Force idle state first to ensure clean RX start */
+    dwt_forcetrxoff();
+    
+    /* Clear ALL status flags - both TX and RX */
+    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+    
+    /* Set RX timeout */
+    if (timeout_ms > 0 && timeout_ms <= 67) {
+        uint16_t timeout_units = ms_to_dw1000_rxtimeout_units(timeout_ms);
+        dwt_setrxtimeout(timeout_units);
+    } else {
+        dwt_setrxtimeout(0);  /* 0 = continuous RX mode */
+    }
+    
+    /* Enable RX */
+    if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] dwt_rxenable failed");
+        return BSP_ERR;
+    }
+    
+    return BSP_OK;
+}
+
 void bsp_uwb_idle(void)
 {
+  /* Force RX/TX off */
   dwt_forcetrxoff();
+  
+  /* Clear all status flags to prevent stale error flags */
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+}
+
+int8_t bsp_uwb_get_rssi(void)
+{
+    /* Read receive power diagnostics from DW1000 using proper API
+     * Based on DW1000 User Manual section 4.7.1 & 4.7.2
+     */
+    dwt_rxdiag_t diag;
+    dwt_readdignostics(&diag);
+    
+    /* Calculate Receive Signal Power using DW1000 formula:
+     * RSL (dBm) = 10*log10((CIR_PWR * 2^17) / N^2) - A
+     * Where:
+     *   CIR_PWR = firstPathAmp1^2 (Channel Impulse Response Power at first path)
+     *   N = rxPreamCount (number of preamble symbols accumulated)
+     *   A = 113.77 dB for PRF64, 121.74 dB for PRF16
+     * 
+     * Simplified for PRF64 (typical configuration):
+     * RSL ≈ 10*log10(F1^2 / N^2) + 10*log10(2^17) - 113.77
+     * RSL ≈ 20*log10(F1/N) + 51.35 - 113.77
+     * RSL ≈ 20*log10(F1/N) - 62.42
+     */
+    
+    if (diag.firstPathAmp1 == 0 || diag.rxPreamCount == 0) {
+        return -100;  /* Invalid/weak signal */
+    }
+    
+    /* Calculate ratio F1/N (avoid float division in embedded) */
+    float ratio = (float)diag.firstPathAmp1 / (float)diag.rxPreamCount;
+    
+    /* Calculate 20*log10(ratio) using approximation or math library */
+    float log_ratio = 20.0f * log10f(ratio);
+    
+    /* Apply DW1000 formula for PRF64 */
+    int8_t rssi_dbm = (int8_t)(log_ratio - 62.0f);
+    
+    // /* Clamp to realistic UWB range */
+    // if (rssi_dbm > -30) rssi_dbm = -30;   /* Very strong signal */
+    // if (rssi_dbm < -100) rssi_dbm = -100; /* Very weak signal */
+    
+    return rssi_dbm;
+}
+
+uint16_t bsp_uwb_get_tx_antenna_delay(void)
+{
+    return s_tx_antenna_delay;
+}
+
+bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_timestamp)
+{
+    CHECK_PARAM(s_initialized, BSP_ERR);
+    CHECK_PARAM(data != NULL, BSP_ERR);
+    CHECK_PARAM(length > 0 && length <= TX_MAX_PAYLOAD, BSP_ERR);
+
+    /* Ensure idle and clear all flags */
+    dwt_forcetrxoff();
+    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+
+    /* Write frame data to TX buffer */
+    dwt_writetxdata(length, (uint8_t *)data, 0);
+    dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);  /* Include CRC in on-air length */
+
+    /* Set delayed transmission time
+     * DW1000 uses upper 32 bits of 40-bit timestamp for delayed TX
+     * Shift right by 8 bits to get the value for DX_TIME register
+     */
+    uint32_t dx_time = (uint32_t)(tx_timestamp >> 8);
+    dwt_setdelayedtrxtime(dx_time);
+
+    /* Start delayed transmission (NO auto-RX enable) */
+    int ret = dwt_starttx(DWT_START_TX_DELAYED);
+    if (ret != DWT_SUCCESS) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAYED] dwt_starttx failed");
+        return BSP_ERR;
+    }
+
+    /* Wait for TX complete */
+    uint32_t timeout_ms = 100;
+    uint32_t start = HAL_GetTick();
+
+    while ((HAL_GetTick() - start) < timeout_ms) {
+        uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+        
+        if (status & SYS_STATUS_TXFRS) {
+            /* Cache TX timestamp immediately */
+            uint8_t ts_buf[5];
+            dwt_readtxtimestamp(ts_buf);
+            s_last_tx_timestamp = ((uint64_t)ts_buf[0]) |
+                                  ((uint64_t)ts_buf[1] << 8) |
+                                  ((uint64_t)ts_buf[2] << 16) |
+                                  ((uint64_t)ts_buf[3] << 24) |
+                                  ((uint64_t)ts_buf[4] << 32);
+            
+            /* TX complete - clear flag */
+            dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+            
+            return BSP_OK;
+        }
+        
+        /* Check for delayed TX error (too late) */
+        if (status & SYS_STATUS_HPDWARN) {
+            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAYED] Half period warning - timing too tight");
+            dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
+            dwt_forcetrxoff();
+            return BSP_ERR;
+        }
+    }
+    
+    /* Timeout */
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TX, "[TX_DELAYED] Timeout waiting for TXFRS");
+    dwt_forcetrxoff();
+    return BSP_ERR;
 }
 
 /* End of file -------------------------------------------------------- */
