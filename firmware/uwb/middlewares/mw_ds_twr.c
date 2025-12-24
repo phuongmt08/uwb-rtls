@@ -1,6 +1,6 @@
-/* ============================== mw_ds_twr.c (FINAL FIX) ====================
+/* 
  * @file       mw_ds_twr.c
- * @brief      DS-TWR with proper inter-message delays
+ * @brief      DS-TWR
  * @version    2.2.0
  * @date       2025-12-15
  */
@@ -20,9 +20,6 @@
 #define DWT_TIME_UNITS (1.0/499.2e6/128.0)
 #define SPEED_OF_LIGHT 299792458.0
 
-/* Protocol mode selection */
-// #define HAVE_TX_DELAY  /* Define to use delayed TX, comment out to use CORRECTION message */
-#define ENABLE_RSSI       /* Define to enable RSSI measurements */
 
 /* Inter-message delays to ensure receiver is ready */
 #define INTER_MSG_DELAY_MS     (2)   // 2ms delay (DW1000 RX turnaround ~300us + margin)
@@ -36,6 +33,7 @@
 /* Total minimum delay = 300 + 500 + 100 + 1100 = 2000us = 2ms */
 #define MIN_FINAL_TX_DELAY_US  (DW1000_TURNAROUND_US + MCU_PROCESSING_US + ANTENNA_DELAY_US + SAFETY_MARGIN_US)
 #define FINAL_TX_DELAY_US      (3000) // 3ms - safe margin for MCU processing
+#define CORRECTION_TX_DELAY_US (1000) // 1ms gap between FINAL and CORRECTION
 
 /* Internal timeouts for message exchange (shorter than config timeout) */
 #define WAIT_FINAL_TIMEOUT_US  (15000)  // 15ms - Tag sends FINAL after 3ms delay
@@ -169,22 +167,51 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   /* Calculate scheduled TX time (what we pass to DW1000) */
   uint64_t scheduled_tx_time = ts40_add(t4, (uint32_t)delay_units);
   
-  /* Calculate T5 = Actual TX time = scheduled + tx_antenna_delay
-   * This is what we send in the FINAL message for accurate ranging
+  /* IMPORTANT: We will read the ACTUAL T5 after TX completes
+   * Problem with estimated T5 = scheduled + antenna_delay:
+   *   - DW1000 internal delays (DX_TIME shift, TX scheduling, bit-9 rounding)
+   *   - Can cause ~5-10cm error in distance calculation
+   * Solution: Read TX_TIME register after TXFRS for true T5
    */
-  t5 = ts40_add(scheduled_tx_time, tx_ant_delay);
 
   mw_dstwr_final_msg_t final_msg = {
     .msg_type = MW_DSTWR_MSG_TYPE_FINAL,
     .sequence_num = config->sequence_num,
     .poll_tx_timestamp = t1,
     .resp_rx_timestamp = t4,
-    .final_tx_timestamp = t5  /* T5 = actual TX time (scheduled + antenna delay) */
+    .final_tx_timestamp = 0  /* Will send real T5 in CORRECTION message */
   };
 
-  /* Execute delayed transmission at scheduled time (DW1000 will add antenna delay internally) */
+  /* Execute delayed transmission */
   if (hal->tx_delayed(&final_msg, sizeof(final_msg), scheduled_tx_time) != 0) {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] FINAL TX FAILED!");
+    return MW_DSTWR_ERR;
+  }
+  
+  /* Read ACTUAL TX timestamp after transmission completes */
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0) {
+    return MW_DSTWR_ERR;
+  }
+  
+  /* Calculate scheduled time for CORRECTION (fixed gap after FINAL)
+   * This ensures consistent timing and avoids MCU processing jitter
+   */
+  double corr_delay_sec = CORRECTION_TX_DELAY_US * 1e-6;
+  uint64_t corr_delay_units = (uint64_t)(corr_delay_sec / DWT_TIME_UNITS);
+  uint64_t corr_scheduled_time = ts40_add(t5, (uint32_t)corr_delay_units);
+  
+  /* Send T5 CORRECTION with delayed TX for precise timing
+   * This fixes the delayed TX estimation error
+   */
+  mw_dstwr_correction_msg_t t5_correction = {
+    .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
+    .sequence_num = config->sequence_num,
+    .final_tx_timestamp = t5,  /* Actual T5 from TX_TIME register */
+    .distance_mm = 0
+  };
+  
+  if (hal->tx_delayed(&t5_correction, sizeof(t5_correction), corr_scheduled_time) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] T5 CORRECTION TX FAILED!");
     return MW_DSTWR_ERR;
   }
 
@@ -201,7 +228,8 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
 
   /* Parse distance from Anchor's RESULT */
   const mw_dstwr_result_msg_t *result_msg = (const mw_dstwr_result_msg_t *)rx_buffer;
-  float distance_m = (float)result_msg->distance_mm / 1000.0f;
+  int32_t distance_mm = result_msg->distance_mm;
+  float distance_m = (float)distance_mm / 1000.0f;
 
 #else
   /* Step 3: Send FINAL with T5=0 (will be corrected later) */
@@ -257,8 +285,6 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
     result->anchor_id = anchor_id;  /* From RESPONSE message */
 #ifdef ENABLE_RSSI
     result->rssi = (int8_t)(rssi_resp & 0xFF);
-#else
-    result->rssi = 0;
 #endif
     result->valid = true;
   }
@@ -320,8 +346,6 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
     .anchor_id = sys_cfg->device_id,  /* Always send device ID */
 #ifdef ENABLE_RSSI
     .rssi_poll = (uint8_t)(rssi_poll & 0xFF),
-#else
-    .rssi_poll = 0,
 #endif
     .padding = {0}
   };
@@ -384,7 +408,9 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   t4 &= TIMESTAMP_40BIT_MASK;
 
 #ifdef HAVE_TX_DELAY
-  /* T5 is already in FINAL message (bytes 18-25) - delayed TX mode */
+  /* In delayed TX mode with correction: T5 in FINAL is placeholder (0)
+   * Tag will send actual T5 in CORRECTION message immediately after
+   */
   t5 = ((uint64_t)rx_buffer[18]) |
        ((uint64_t)rx_buffer[19] << 8) |
        ((uint64_t)rx_buffer[20] << 16) |
@@ -394,8 +420,36 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
        ((uint64_t)rx_buffer[24] << 48) |
        ((uint64_t)rx_buffer[25] << 56);
   t5 &= TIMESTAMP_40BIT_MASK;
+  
+  /* ALWAYS wait for CORRECTION message with actual T5 from TX_TIME register
+   * This fixes delayed TX timing errors for maximum accuracy
+   */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] CORRECTION timeout");
+    return MW_DSTWR_ERR_TIMEOUT;
+  }
+  
+  /* Handle out-of-order frames: if we receive POLL instead of CORRECTION, retry once
+   * This handles phase-shift scenarios where TAG cycle overlaps
+   */
+  if (rx_buffer[0] == MW_DSTWR_MSG_TYPE_POLL) {
+    RLOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Got POLL while waiting CORRECTION, retry");
+    /* Try one more time to get CORRECTION */
+    if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
+      return MW_DSTWR_ERR_TIMEOUT;
+    }
+  }
+  
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_CORRECTION, poll_seq)) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid CORRECTION: type=0x%02X len=%u", rx_buffer[0], rx_length);
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+  
+  /* Parse actual T5 from CORRECTION (overwrites placeholder from FINAL) */
+  const mw_dstwr_correction_msg_t *corr = (const mw_dstwr_correction_msg_t *)rx_buffer;
+  t5 = corr->final_tx_timestamp & TIMESTAMP_40BIT_MASK;
 
-  /* Calculate distance using DS-TWR formula */
+  /* Calculate distance with actual T5 */
   mw_dstwr_timestamps_t timestamps = {
     .t1 = t1, .t2 = t2, .t3 = t3,
     .t4 = t4, .t5 = t5, .t6 = t6
@@ -416,9 +470,7 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
 #ifdef ENABLE_RSSI
     .anchor_id = sys_cfg->device_id,
     .rssi_final = (uint8_t)(rssi_final & 0xFF),
-#else
-    .anchor_id = 0,
-    .rssi_final = 0,
+
 #endif
     .padding = {0}
   };
@@ -571,7 +623,7 @@ bool mw_dstwr_validate_message(const uint8_t *data, uint16_t length,
       return length >= 12;  /* RESULT: type+seq+dist+anchor+rssi+pad = 12 bytes */
       
     case MW_DSTWR_MSG_TYPE_CORRECTION:
-      return length >= 12;  /* CORRECTION: type+seq+T5+distance(16-bit) = 12 bytes payload */
+      return length >= 14;  /* CORRECTION: type+seq+T5(8)+distance_mm(4) = 14 bytes */
       
     default:
       return false;
@@ -581,8 +633,7 @@ bool mw_dstwr_validate_message(const uint8_t *data, uint16_t length,
 static inline bool is_valid_hal(const mw_dstwr_hal_t *hal)
 {
   /* Basic callbacks required for all modes */
-  if (!hal->tx || !hal->rx_with_timeout || !hal->read_timestamp || 
-      !hal->get_tick_ms) {
+  if (!hal->tx || !hal->rx_with_timeout || !hal->read_timestamp) {
     return false;
   }
   
@@ -593,12 +644,10 @@ static inline bool is_valid_hal(const mw_dstwr_hal_t *hal)
 #endif
   
 #ifdef HAVE_TX_DELAY
-  /* tx_delayed required only in HAVE_TX_DELAY mode */
   if (!hal->tx_delayed) {
     return false;
   }
 #endif
-  
   return true;
 }
 

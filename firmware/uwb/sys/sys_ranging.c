@@ -10,12 +10,13 @@
 #include "sys_config.h"
 #include "sys_logger.h"
 #include "bsp_uwb.h"
+#include "bsp_util.h"
 #include "mw_ds_twr.h"
 #include "stm32f4xx_hal.h"
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
-
+#include "platform_config.h"
 /* Private defines ---------------------------------------------------- */
 #define UWB_RX_BUFFER_SIZE (128u)
 #define RX_POLL_INTERVAL_MS (5)
@@ -40,6 +41,16 @@ typedef struct {
   
   sys_ranging_result_t result;
   bool has_result;
+  
+#ifdef MULTIPLE_ANCHOR
+  /* Multiple anchor support */
+  uint8_t target_anchor_id;  /* Current target anchor (0xFF = broadcast) */
+  uint8_t current_anchor_idx; /* Index in anchor list */
+  uint8_t anchor_count;       /* Total anchors to range */
+  const uint8_t *anchor_list; /* Pointer to anchor ID list */
+  sys_ranging_result_t *multi_results; /* Results array */
+  uint8_t multi_success_count; /* Successful ranges */
+#endif
 } ranging_ctx_t;
 
 /* Private variables -------------------------------------------------- */
@@ -91,11 +102,6 @@ static int hal_read_timestamp(uint8_t reg_addr, uint8_t sub_addr, uint64_t *time
   return (err == BSP_OK) ? 0 : -1;
 }
 
-static uint32_t hal_get_tick_ms(void)
-{
-  return HAL_GetTick();
-}
-
 static int hal_get_rssi(void)
 {
   return (int)bsp_uwb_get_rssi();
@@ -119,7 +125,6 @@ static const mw_dstwr_hal_t s_hal = {
   .tx_delayed = hal_tx_delayed,
   .rx_with_timeout = hal_rx_with_timeout,
   .read_timestamp = hal_read_timestamp,
-  .get_tick_ms = hal_get_tick_ms,
   .get_rssi = hal_get_rssi,
   .get_tx_antenna_delay = hal_get_tx_antenna_delay
 };
@@ -176,6 +181,13 @@ static void log_ranging_result(const sys_ranging_result_t *result, const char *r
 {
     if (!result || !result->valid) return;
     
+    /* Sanity check: filter out unrealistic distances (>50m likely error) */
+    if (result->distance_m > 50.0f || result->distance_m < 0.0f) {
+        RLOG_W(LOG_OBJECT_CODE_RANGING, "Invalid distance: %.3f m [Anchor:%u] - REJECTED", 
+               result->distance_m, result->anchor_id);
+        return;
+    }
+    
     s_success_count++;
     char dist_str[16];
     char t1[13], t2[13], t3[13], t4[13], t5[13], t6[13];  /* 40-bit = 10 hex + "0x" + null */
@@ -220,8 +232,6 @@ sys_ranging_err_t sys_ranging_tag_start(uint8_t sequence_num, uint32_t rx_timeou
   s_ctx.mw_config.hal = &s_hal;
   
   s_ctx.state = STATE_TAG_RANGING;
-  
-  RLOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Starting DS-TWR seq=%u", sequence_num);
   
   return SYS_RANGING_OK;
 }
@@ -424,9 +434,6 @@ sys_ranging_err_t sys_ranging_tag_start_with_anchor(uint8_t anchor_id,
   
   s_ctx.state = STATE_TAG_RANGING;
   
-  RLOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Starting DS-TWR seq=%u anchor=%u", 
-         sequence_num, anchor_id);
-  
   return SYS_RANGING_OK;
 }
 
@@ -451,9 +458,10 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
     rx_timeout_ms = cfg->rx_timeout_ms;
   }
   
-  int success_count = 0;
+  /* Use longer timeout for multi-anchor to handle delays */
+  uint32_t anchor_timeout = rx_timeout_ms + 50;  /* Extra 50ms per anchor */
   
-  RLOG_I(LOG_OBJECT_CODE_RANGING, "[TAG] Multi-anchor ranging: %u anchors", num_anchors);
+  int success_count = 0;
   
   /* Sequential ranging with each anchor */
   for (uint8_t i = 0; i < num_anchors; i++) {
@@ -467,7 +475,7 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
     
     /* Start ranging with this anchor */
     sys_ranging_err_t err = sys_ranging_tag_start_with_anchor(
-      anchor_id, sequence_num + i, rx_timeout_ms);
+      anchor_id, sequence_num + i, anchor_timeout);
     
     if (err != SYS_RANGING_OK) {
       RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: Failed to start", anchor_id);
@@ -476,7 +484,7 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
     
     /* Process until complete or error */
     uint32_t start_tick = HAL_GetTick();
-    uint32_t total_timeout = rx_timeout_ms * 5;  /* Allow 5x timeout for full exchange */
+    uint32_t total_timeout = rx_timeout_ms * 3;  /* 3x timeout for stability */
     
     while (1) {
       err = sys_ranging_tag_process();
@@ -484,8 +492,6 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
       if (err == SYS_RANGING_OK) {
         /* Complete - get result */
         if (sys_ranging_tag_get_result(result) == SYS_RANGING_OK) {
-          RLOG_I(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: %.2fm", 
-                 anchor_id, result->distance_m);
           success_count++;
         }
         break;
@@ -493,26 +499,22 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
       else if (err == SYS_RANGING_ERR_BUSY) {
         /* Still processing - check timeout */
         if ((HAL_GetTick() - start_tick) > total_timeout) {
-          RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: Timeout", anchor_id);
+          /* Timeout - no log to reduce noise */
           state_machine_reset();
           break;
         }
         bsp_delay_ms(1);  /* Small delay */
       }
       else {
-        /* Error */
-        RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] Anchor %u: Error %d", anchor_id, err);
+        /* Error - no log for timeout to reduce spam */
         state_machine_reset();
         break;
       }
     }
     
     /* Small delay between anchors */
-    bsp_delay_ms(50);
+    bsp_delay_ms(5);
   }
-  
-  RLOG_I(LOG_OBJECT_CODE_RANGING, "[TAG] Multi-anchor complete: %d/%u successful",
-         success_count, num_anchors);
   
   return success_count;
 }

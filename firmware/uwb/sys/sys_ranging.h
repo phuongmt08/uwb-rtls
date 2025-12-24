@@ -11,6 +11,7 @@
 /* Includes ----------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
+#include "platform_config.h"
 
 /* Public enumerate/structure ---------------------------------------- */
 typedef enum
@@ -45,6 +46,17 @@ typedef struct
   int8_t  rssi;       /* RSSI for diagnostics */
   bool     valid;
 } sys_ranging_result_t;
+
+#ifdef MULTIPLE_ANCHOR
+/**
+ * @brief Multiple anchor results
+ */
+typedef struct
+{
+  sys_ranging_result_t results[MAX_ANCHORS];
+  uint8_t count;  /* Number of valid results */
+} sys_ranging_multi_result_t;
+#endif
 
 /* Non-blocking API --------------------------------------------------- */
 

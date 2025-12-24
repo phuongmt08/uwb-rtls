@@ -38,8 +38,8 @@
 #undef  HAVE_AUTH
 
 /* UWB Ranging features */
-// #define MULTIPLE_ANCHOR         /* Enable multiple anchor ranging support */
-#define MAX_ANCHORS            8   /* Maximum number of anchors (1-8) */
+#define MULTIPLE_ANCHOR         /* Enable multiple anchor ranging support */
+#define MAX_ANCHORS            4   /* Maximum number of anchors (1-8) */
 
 /* Advanced features (disable for basic operation) */
 #define ENABLE_RSSI             /* Enable RSSI measurement and reporting */

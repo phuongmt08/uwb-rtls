@@ -159,6 +159,23 @@ int main(void)
   bsp_io_init();
   bsp_io_led_off();  /* LED off initially */
   
+  // Read DIP switch - ALWAYS OVERRIDES saved config
+  // DIP = 0: Use saved ID from flash
+  // DIP = 1-7: Force override to that ID
+  uint8_t dip_value = bsp_io_dip_read();
+  if (dip_value == 0) {
+    // DIP all OFF (000) = Use saved ID from flash
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->device_id);
+  } else {
+    // DIP = 1-7: FORCE override device ID
+    sys_config_set_device_id(dip_value);
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
+    // NOTE: Not saving to flash - DIP switch always overrides on boot
+  }
+  
+  // Update config pointer after DIP switch override
+  cfg = sys_config_get();
+  
   // Initialize application based on role from config
   if (cfg->role == DEVICE_ROLE_TAG) {
     app_tag_init();

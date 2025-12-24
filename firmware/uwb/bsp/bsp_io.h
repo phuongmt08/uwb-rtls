@@ -1,9 +1,10 @@
 /**
  * @file       bsp_io.h
- * @brief      BSP for GPIO: LED, Button, DIP Switch
- * @version    1.0.0
- * @date       2025-12-14
+ * @brief      BSP for GPIO: LED, Button, DIP Switch + UART1 Position Sender
+ * @version    1.3.0
+ * @date       2025-12-21
  * @note       Non-blocking state machine for button and DIP switch monitoring
+ *             UART1: TX=PA9, RX=PA10, Baudrate=115200 (interrupt mode)
  */
 
 #ifndef __BSP_IO_H
@@ -61,9 +62,9 @@ typedef enum {
 /* Public function prototypes ----------------------------------------- */
 
 /**
- * @brief Initialize BSP IO (LED, Button, DIP switch)
+ * @brief Initialize BSP IO (LED, Button, DIP switch, UART1)
  * @return BSP_OK on success, BSP_ERR on failure
- * @note GPIO should be initialized by MX_GPIO_Init() first
+ * @note GPIO and UART1 should be initialized by CubeMX first
  */
 bsp_err_t bsp_io_init(void);
 
@@ -112,6 +113,19 @@ uint8_t bsp_io_dip_read(void);
  * @note Clears change flag after reading
  */
 bool bsp_io_dip_changed(void);
+
+/* UART Position Sender ----------------------------------------------- */
+/**
+ * @brief Send position data via UART1 (interrupt mode)
+ * @param x X coordinate in meters
+ * @param y Y coordinate in meters
+ * @param z Z coordinate in meters
+ * @param error Error estimate in meters (from trilateration)
+ * @return BSP_OK on success, BSP_ERR on failure
+ * @note Frame format: SOF(1) + X(4) + Y(4) + Z(4) + ERROR(4) + LENGTH(1) = 18 bytes
+ *       SOF = 0xAA, LENGTH = 16 (payload size)
+ */
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error);
 
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

@@ -1,14 +1,29 @@
 /**
  * @file       bsp_io.c
- * @brief      BSP for GPIO: LED, Button, DIP Switch implementation
- * @version    1.0.0
- * @date       2025-12-14
+ * @brief      BSP for GPIO: LED, Button, DIP Switch + UART1 Position Sender
+ * @version    1.3.0
+ * @date       2025-12-21
  */
 
 /* Includes ----------------------------------------------------------- */
 #include "bsp_io.h"
 #include "gpio.h"
 #include "stm32f4xx_hal.h"
+#include <string.h>
+
+/* Private defines ---------------------------------------------------- */
+#define UART_SOF           (0xAA)
+#define UART_TX_TIMEOUT_MS (100)
+
+/* Private types ------------------------------------------------------ */
+typedef struct {
+  uint8_t sof;      /* Start of frame: 0xAA */
+  float   x;        /* X position in meters */
+  float   y;        /* Y position in meters */
+  float   z;        /* Z position in meters */
+  float   error;    /* Error estimate in meters */
+  uint8_t length;   /* Payload length (16 bytes: 4 floats) */
+} __attribute__((packed)) uart_position_frame_t;
 
 /* Private variables -------------------------------------------------- */
 static bsp_io_button_state_t s_button_state      = BSP_IO_BUTTON_IDLE;
@@ -17,7 +32,10 @@ static uint32_t              s_press_start_tick  = 0;
 static uint8_t               s_pending_single    = 0;
 static volatile uint8_t      s_button_activity   = 0;
 static volatile uint8_t      s_dip_changed       = 0;
-static bool                  s_sm_active         = false;  /* State machine active flag */
+static bool                  s_sm_active         = false;
+
+/* UART handle (extern from main.c or usart.c) */
+extern UART_HandleTypeDef huart1;
 
 /* Private function prototypes ---------------------------------------- */
 static bool button_is_pressed(void);
@@ -27,6 +45,8 @@ static bool button_is_pressed(void);
 bsp_err_t bsp_io_init(void)
 {
   /* GPIO pins should already be initialized by MX_GPIO_Init() */
+  /* UART1 should already be initialized by MX_USART1_UART_Init() */
+  
   /* Just reset internal state */
   s_button_state    = BSP_IO_BUTTON_IDLE;
   s_last_tick       = HAL_GetTick();
@@ -45,13 +65,11 @@ bsp_err_t bsp_io_init(void)
 
 void bsp_io_led_on(void)
 {
-  /* PC13 LOW = LED ON (typical dev board configuration) */
   HAL_GPIO_WritePin(BSP_IO_LED_PORT, BSP_IO_LED_PIN, GPIO_PIN_RESET);
 }
 
 void bsp_io_led_off(void)
 {
-  /* PC13 HIGH = LED OFF */
   HAL_GPIO_WritePin(BSP_IO_LED_PORT, BSP_IO_LED_PIN, GPIO_PIN_SET);
 }
 
@@ -67,17 +85,11 @@ bsp_io_button_event_t bsp_io_button_event(void)
   uint32_t now     = HAL_GetTick();
   bool     pressed = button_is_pressed();
 
-  /* Only process state machine if:
-   * 1. Already in active state (not IDLE)
-   * 2. OR interrupt activity detected while IDLE
-   */
   if (s_button_state == BSP_IO_BUTTON_IDLE && !s_button_activity)
   {
-    /* No activity and idle - skip processing */
     return BSP_IO_EVENT_NONE;
   }
 
-  /* Clear activity flag if we're processing */
   if (s_button_activity)
   {
     s_button_activity = 0;
@@ -111,12 +123,10 @@ bsp_io_button_event_t bsp_io_button_event(void)
     break;
 
   case BSP_IO_BUTTON_PRESSED:
-    /* Released within click window */
     if ((now - s_press_start_tick <= BSP_IO_RELEASE_MS) && (!pressed))
     {
       if (s_pending_single)
       {
-        /* Second click detected */
         s_pending_single = 0;
         s_button_state   = BSP_IO_BUTTON_IDLE;
         s_sm_active      = false;
@@ -124,20 +134,17 @@ bsp_io_button_event_t bsp_io_button_event(void)
       }
       else
       {
-        /* First click, wait for possible second */
         s_pending_single = 1;
         s_last_tick      = now;
         s_button_state   = BSP_IO_BUTTON_WAIT_SECOND;
       }
     }
-    /* Still pressed and passed hold threshold */
     else if ((now - s_press_start_tick) >= BSP_IO_HOLD_MS && pressed)
     {
       s_button_state   = BSP_IO_BUTTON_HOLD_DETECTED;
       s_pending_single = 0;
       return BSP_IO_EVENT_HOLD;
     }
-    /* Released after click window expired */
     else if ((now - s_press_start_tick) > BSP_IO_RELEASE_MS && !pressed)
     {
       s_button_state = BSP_IO_BUTTON_IDLE;
@@ -148,14 +155,12 @@ bsp_io_button_event_t bsp_io_button_event(void)
   case BSP_IO_BUTTON_WAIT_SECOND:
     if (pressed)
     {
-      /* Second press started */
       s_button_state     = BSP_IO_BUTTON_DEBOUNCE;
       s_last_tick        = now;
       s_press_start_tick = now;
     }
     else if ((now - s_last_tick) >= BSP_IO_DOUBLE_MS)
     {
-      /* Double-click window expired, report single click */
       s_pending_single = 0;
       s_button_state   = BSP_IO_BUTTON_IDLE;
       s_sm_active      = false;
@@ -194,7 +199,6 @@ uint8_t bsp_io_dip_read(void)
 {
   uint8_t value = 0;
   
-  /* Read each DIP switch bit */
   if (HAL_GPIO_ReadPin(BSP_IO_DIP_PORT, BSP_IO_DIP_PIN_0) == GPIO_PIN_SET)
     value |= 0x01;
   
@@ -214,22 +218,42 @@ bool bsp_io_dip_changed(void)
   return (temp != 0);
 }
 
+/* UART Position Sender ----------------------------------------------- */
+
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error)
+{
+  uart_position_frame_t frame;
+  
+  /* Build frame */
+  frame.sof    = UART_SOF;
+  frame.x      = x;
+  frame.y      = y;
+  frame.z      = z;
+  frame.error  = error;
+  frame.length = sizeof(float) * 4; /* x + y + z + error = 16 bytes */
+  
+  /* Send via UART1 with interrupt */
+  HAL_StatusTypeDef status = HAL_UART_Transmit_IT(&huart1, 
+                                                   (uint8_t*)&frame, 
+                                                   sizeof(frame));
+  
+  if (status != HAL_OK)
+  {
+    return BSP_ERR;
+  }
+  
+  return BSP_OK;
+}
+
 /* Private function implementations ----------------------------------- */
 
 static bool button_is_pressed(void)
 {
-  /* Read button state - adjust logic based on pull-up/pull-down */
-  /* Assuming pull-down: pressed = HIGH */
   return (HAL_GPIO_ReadPin(BSP_IO_BUTTON_PORT, BSP_IO_BUTTON_PIN) == GPIO_PIN_RESET);
 }
 
 /* Interrupt callback ------------------------------------------------- */
 
-/**
- * @brief GPIO EXTI callback for button and DIP switch interrupts
- * @param GPIO_Pin Pin that triggered interrupt
- * @note Direct HAL callback - no need to forward from main.c
- */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   /* Button PA0 interrupt */

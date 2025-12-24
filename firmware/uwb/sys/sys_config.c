@@ -382,6 +382,14 @@ void sys_config_reset_to_defaults(void)
     
     /* TX power */
     g_config.tx_power = DEFAULT_TX_POWER;
+    
+#ifdef MULTIPLE_ANCHOR
+    /* Default anchor list - empty to auto-discover anchors */
+    /* Or manually set via command/config */
+    g_config.anchor_count = 0;  /* 0 = auto-discover mode */
+    // g_config.anchor_list[0] = 1;
+    // g_config.anchor_list[1] = 5;
+#endif
 }
 
 /* Update sys_config_print() to show all parameters: */

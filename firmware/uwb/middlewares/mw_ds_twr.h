@@ -1,8 +1,8 @@
-/* ============================== mw_ds_twr.h ================================
+/* 
  * @file       mw_ds_twr.h
- * @brief      DS-TWR with proper T5 correction message
- * @version    2.0.0
- * @date       2025-12-13
+ * @brief      DS-TWR
+ * @version    2.2.0
+ * @date       2025-12-15
  */
 
 #ifndef __MW_DS_TWR_H
@@ -118,7 +118,7 @@ typedef struct __attribute__((packed))
 
 #pragma pack(pop)
 
-/* Compile-time checks for struct sizes */
+/* Compile-time checks */
 _Static_assert(sizeof(mw_dstwr_poll_msg_t) == 12, "POLL message must be 12 bytes");
 _Static_assert(sizeof(mw_dstwr_resp_msg_t) == 12, "RESP message must be 12 bytes");
 _Static_assert(sizeof(mw_dstwr_final_msg_t) == 26, "FINAL message must be 26 bytes");
@@ -143,9 +143,8 @@ typedef struct
   int (*rx_with_timeout)(uint8_t *buffer, uint16_t buffer_size,
                          uint16_t *received_length, uint32_t timeout_us);
   int (*read_timestamp)(uint8_t reg_addr, uint8_t sub_addr, uint64_t *timestamp);
-  uint32_t (*get_tick_ms)(void);
   int (*get_rssi)(void);
-  uint16_t (*get_tx_antenna_delay)(void);  /* Get TX antenna delay in DW1000 units */
+  uint16_t (*get_tx_antenna_delay)(void); 
 } mw_dstwr_hal_t;
 
 /**
@@ -154,7 +153,7 @@ typedef struct
 typedef struct
 {
   uint8_t  sequence_num;
-  uint8_t  target_anchor_id;  /* Target anchor ID (0xFF = any/broadcast) */
+  uint8_t  target_anchor_id;  /* Target anchor ID (0xFF = broadcast) */
   uint32_t rx_timeout_us;
   const mw_dstwr_hal_t *hal;
 } mw_dstwr_config_t;
@@ -166,8 +165,8 @@ typedef struct
 {
   mw_dstwr_timestamps_t timestamps;
   float distance_m;
-  uint8_t anchor_id;     /* Which anchor this result came from */
-  int8_t rssi;           /* RSSI in dBm (negative value, e.g. -30 to -100) */
+  uint8_t anchor_id;
+  int8_t rssi;
   bool  valid;
 } mw_dstwr_result_t;
 

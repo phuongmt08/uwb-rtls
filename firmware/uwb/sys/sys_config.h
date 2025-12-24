@@ -73,6 +73,12 @@ typedef struct {
   /* Power settings */
   uint32_t tx_power;          // TX power register value
   
+#ifdef MULTIPLE_ANCHOR
+  /* Multiple anchor support */
+  uint8_t anchor_count;       // Number of anchors in list (0 = broadcast to all)
+  uint8_t anchor_list[MAX_ANCHORS]; // List of anchor IDs to range with
+#endif
+  
   uint8_t reserved[16];
   
   /* CRC32 checksum (must be last) */
@@ -92,19 +98,19 @@ typedef struct {
   /* HAVE_TX_DELAY mode: 
    * - Period between ranging attempts
    * - Internal timeouts are fixed (10ms for each step)
-   * - One complete cycle takes ~15-20ms max
-   * - Faster period = more retries = better success rate
+   * - Multi-anchor: 2 anchors × 20ms = 40ms per cycle
+   * - 100ms period = 10Hz for 2 anchors
    */
-  #define DEFAULT_RANGING_PERIOD_MS   50   /* 20 ranging/sec - faster retry */
-  #define DEFAULT_RX_TIMEOUT_MS       100  /* For POLL listening - must be > period */
+  #define DEFAULT_RANGING_PERIOD_MS   100   /* 10 cycles/sec for 2 anchors */
+  #define DEFAULT_RX_TIMEOUT_MS       150  /* For POLL listening - increased for reliability */
 #else
   /* CORRECTION mode: fast performance */
-  #define DEFAULT_RANGING_PERIOD_MS   50   /* 20 ranging/sec */
-  #define DEFAULT_RX_TIMEOUT_MS       60   /* Must be > period */
+  #define DEFAULT_RANGING_PERIOD_MS   100   /* 10 ranging/sec */
+  #define DEFAULT_RX_TIMEOUT_MS       150   /* Must be > period */
 #endif
 
 /* Config version - increment this to force config reset on firmware update */
-#define CONFIG_VERSION              3
+#define CONFIG_VERSION              4  /* v4: Multi-anchor support */
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
