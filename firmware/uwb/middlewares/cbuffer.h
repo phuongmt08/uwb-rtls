@@ -1,10 +1,10 @@
 /**
  * @file       cbuffer.h
- * @copyright
- * @license
+ * @copyright  Copyright (C) 2019 ITRVN.
+ * @license    This project is released under the Fiot License.
  * @version    1.0.0
  * @date
- * @author     Triet Luu
+ * @author     Phuong Mai
  * @brief      Circular Buffer
  *             This Circular Buffer is safe to use in IRQ with single reader,
  *             single writer. No need to disable any IRQ.

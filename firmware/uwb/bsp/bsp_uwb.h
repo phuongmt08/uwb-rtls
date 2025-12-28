@@ -1,10 +1,14 @@
 /**
  * @file       bsp_uwb.h
- * @brief      BSP layer for DW1000 using DecaWave driver
- * @version    0.3.0
- * @date       2025-12-10
+ * @copyright
+ * @license
+ * @version    0.4.0
+ * @date       2025-12-11
+ * @author     Phuong Mai
+ * @brief      Board Support Package for UWB (DW1000)
+ * @note       None
+ * @example    None
  */
-
 #ifndef __BSP_UWB_H
 #define __BSP_UWB_H
 

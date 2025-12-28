@@ -1,9 +1,12 @@
-/* ============================== app_tag.c ==================================
+/**
  * @file       app_tag.c
- * @brief      Tag with filter pipeline + height compensation for 2D positioning
+ * @copyright
+ * @license
  * @version    3.2.0
  * @date       2025-12-24
- *
+ * @author     Phuong Mai
+ * @brief      Non-blocking Tag with filtering and trilateration
+ * @note       
  * Pipeline:
  *   1. Raw 3D distance → Convert to 2D planar distance (height compensation)
  *   2. 2D distance → EMA filter (optional)
@@ -11,8 +14,8 @@
  *   4. Filtered 2D distance + RSSI → Trilateration (auto-select best 3)
  *   5. Trilateration position → Kalman 2D
  *   6. Kalman R: Fixed tuning OR adaptive from RSSI
+ * @example    None
  */
-
 #include "app_tag.h"
 
 #include "bsp_io.h"
@@ -29,14 +32,11 @@
 #include <stdio.h>
 #include <string.h>
 
-/* DO NOT redefine config values here - use positioning_config.h! */
-
 /* Anchor positions with Z from config -------------------------------- */
 static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
     {.x = ANCHOR_1_X, .y = ANCHOR_1_Y, .z = ANCHOR_1_Z},
     {.x = ANCHOR_2_X, .y = ANCHOR_2_Y, .z = ANCHOR_2_Z},
-    {.x = ANCHOR_3_X, .y = ANCHOR_3_Y, .z = ANCHOR_3_Z},
-    {.x = ANCHOR_4_X, .y = ANCHOR_4_Y, .z = ANCHOR_4_Z}
+    {.x = ANCHOR_3_X, .y = ANCHOR_3_Y, .z = ANCHOR_3_Z}
 };
 
 /* Private types ------------------------------------------------------ */
@@ -64,8 +64,6 @@ static void init_filters(void);
 static void process_ranging_results(sys_ranging_result_t *results, int num_success);
 static float rssi_to_r_scale(float avg_rssi);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
-static void format_float_2(char *buf, size_t len, float v);
-static void format_float_3(char *buf, size_t len, float v);
 
 /* Private function implementations ----------------------------------- */
 
@@ -84,9 +82,12 @@ static void init_filters(void)
 
 #if MW_FILTER_ENABLE_KALMAN_2D
     /* Initialize at center of anchor layout */
-    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X + ANCHOR_4_X) / 4.0f;
-    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y + ANCHOR_4_Y) / 4.0f;
-    float dt = RANGING_INTERVAL_MS / 1000.0f;
+    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 4.0f;
+    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y) / 4.0f;
+    
+    /* Get dt from config ranging_period_ms */
+    sys_config_t *cfg = sys_config_get();
+    float dt = cfg->ranging_period_ms / 1000.0f;
 
     mw_filter_kalman2d_init(&s_filters.kalman, init_x, init_y, dt,
                            KALMAN_PROCESS_NOISE, KALMAN_MEASURE_NOISE);
@@ -134,13 +135,12 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
     return true;
 }
 
+
 static float rssi_to_r_scale(float avg_rssi)
 {
-    /* Map RSSI to R_scale for Kalman filter
-     * Better signal → lower scale → more trust in measurement
-     */
+
     if (avg_rssi > RSSI_THRESHOLD_EXCELLENT) {
-        return 1.0f; /* Excellent signal */
+        return 1.0f;
     } else if (avg_rssi > RSSI_THRESHOLD_GOOD) {
         float range = RSSI_THRESHOLD_EXCELLENT - RSSI_THRESHOLD_GOOD;
         float scale = 1.0f + ((RSSI_THRESHOLD_EXCELLENT - avg_rssi) / range) * 1.0f;
@@ -154,30 +154,8 @@ static float rssi_to_r_scale(float avg_rssi)
         float scale = 4.0f + ((RSSI_THRESHOLD_MODERATE - avg_rssi) / range) * 4.0f;
         return scale;
     } else {
-        return 8.0f; /* Very poor signal */
+        return 8.0f;
     }
-}
-
-static void format_float_2(char *buf, size_t len, float v)
-{
-    int32_t c = (int32_t)(v * 100.0f + (v >= 0.0f ? 0.5f : -0.5f));
-    int32_t abs_c = (c >= 0) ? c : -c;
-    uint32_t i = (uint32_t)(abs_c / 100);
-    uint32_t f = (uint32_t)(abs_c % 100);
-
-    if (c < 0) snprintf(buf, len, "-%lu.%02lu", (unsigned long)i, (unsigned long)f);
-    else       snprintf(buf, len,  "%lu.%02lu", (unsigned long)i, (unsigned long)f);
-}
-
-static void format_float_3(char *buf, size_t len, float v)
-{
-    int32_t c = (int32_t)(v * 1000.0f + (v >= 0.0f ? 0.5f : -0.5f));
-    int32_t abs_c = (c >= 0) ? c : -c;
-    uint32_t i = (uint32_t)(abs_c / 1000);
-    uint32_t f = (uint32_t)(abs_c % 1000);
-
-    if (c < 0) snprintf(buf, len, "-%lu.%03lu", (unsigned long)i, (unsigned long)f);
-    else       snprintf(buf, len,  "%lu.%03lu", (unsigned long)i, (unsigned long)f);
 }
 
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
@@ -218,12 +196,9 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         /* Convert 3D slant distance to 2D planar distance */
         double r2d = 0.0;
         if (!convert_3d_to_2d_distance(r3d, dz, &r2d)) {
-            char r3d_str[16], dz_str[16];
-            format_float_3(r3d_str, sizeof(r3d_str), (float)r3d);
-            format_float_3(dz_str, sizeof(dz_str), (float)dz);
             RLOG_W(LOG_OBJECT_CODE_TAG, 
-                   "Anchor #%u: Cannot project to 2D (r3d=%sm dz=%sm)",
-                   anchor_id, r3d_str, dz_str);
+                   "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)",
+                   anchor_id, (float)r3d, (float)dz);
             continue;
         }
         
@@ -252,15 +227,9 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         valid_count++;
         
         /* Debug: show conversion */
-        char r3d_str[16], r2d_str[16], dz_str[16], filt_str[16];
-        format_float_3(r3d_str, sizeof(r3d_str), (float)r3d);
-        format_float_3(r2d_str, sizeof(r2d_str), (float)r2d);
-        format_float_2(dz_str, sizeof(dz_str), (float)dz);
-        format_float_3(filt_str, sizeof(filt_str), filtered_dist);
-        
         RLOG_D(LOG_OBJECT_CODE_TAG,
-               "Anchor #%u: r3d=%sm -> r2d=%sm (dz=%sm, filt=%sm)",
-               anchor_id, r3d_str, r2d_str, dz_str, filt_str);
+               "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm, filt=%.3fm)",
+               anchor_id, (float)r3d, (float)r2d, (float)dz, filtered_dist);
     }
 
     /* ALWAYS log individual anchor distances (even if <3 anchors) */
@@ -268,10 +237,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
            s_success_count + 1);
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
-            char dist_str[16];
-            format_float_3(dist_str, sizeof(dist_str), (float)anchors_by_id[id].distance);
-            RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor #%u: dist=%sm RSSI=%ddBm",
-                   id, dist_str, anchors_by_id[id].rssi);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor #%u: dist=%.3fm RSSI=%ddBm",
+                   id, (float)anchors_by_id[id].distance, anchors_by_id[id].rssi);
         }
     }
 
@@ -311,12 +278,9 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     /* ==== STEP 4: Quality gating ==== */
 #if ENABLE_QUALITY_GATING
     if (tril_result.error_estimate > MAX_ACCEPTABLE_ERROR_M) {
-        char err_str[16], max_str[16];
-        format_float_3(err_str, sizeof(err_str), (float)tril_result.error_estimate);
-        format_float_3(max_str, sizeof(max_str), MAX_ACCEPTABLE_ERROR_M);
         RLOG_W(LOG_OBJECT_CODE_TAG,
-               "[TRIL] Error %sm > %sm - REJECTED",
-               err_str, max_str);
+               "[TRIL] Error %.3fm > %.3fm - REJECTED",
+               (float)tril_result.error_estimate, MAX_ACCEPTABLE_ERROR_M);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
         s_error_count++;
         return;
@@ -352,30 +316,16 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_success_count++;
     s_error_count = 0;
 
-    /* Format output strings */
-    char raw_x[16], raw_y[16], raw_z[16];
-    char filt_x[16], filt_y[16], velocity[16];
-    char error_str[16], r_scale_str[16];
+    /* Log results */
+    float velocity = sqrtf(final_position.vx * final_position.vx +
+                          final_position.vy * final_position.vy);
     
-    format_float_3(raw_x, sizeof(raw_x), (float)tril_position.x);
-    format_float_3(raw_y, sizeof(raw_y), (float)tril_position.y);
-    format_float_2(raw_z, sizeof(raw_z), TAG_HEIGHT_M);
-    
-    format_float_3(filt_x, sizeof(filt_x), final_position.x);
-    format_float_3(filt_y, sizeof(filt_y), final_position.y);
-    format_float_3(velocity, sizeof(velocity),
-                   sqrtf(final_position.vx * final_position.vx +
-                         final_position.vy * final_position.vy));
-    
-    format_float_3(error_str, sizeof(error_str), (float)tril_result.error_estimate);
-    format_float_2(r_scale_str, sizeof(r_scale_str), R_scale);
-
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Raw:      X=%sm Y=%sm Z=%sm",
-           raw_x, raw_y, raw_z);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Filtered: X=%sm Y=%sm (V=%sm/s)",
-           filt_x, filt_y, velocity);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%sm R_scale=%s",
-           error_str, r_scale_str);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Raw:      X=%.3fm Y=%.3fm Z=%.2fm",
+           (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Filtered: X=%.3fm Y=%.3fm (V=%.3fm/s)",
+           final_position.x, final_position.y, velocity);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%.3fm R_scale=%.2f",
+           (float)tril_result.error_estimate, R_scale);
 
     /* Send position via UART (X, Y, Z, ERROR) */
     if (bsp_io_uart_send_position(final_position.x, final_position.y,
@@ -389,15 +339,9 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_success_count++;
     s_error_count = 0;
 
-    char x_str[16], y_str[16], z_str[16], err_str[16];
-    format_float_3(x_str, sizeof(x_str), (float)tril_position.x);
-    format_float_3(y_str, sizeof(y_str), (float)tril_position.y);
-    format_float_2(z_str, sizeof(z_str), TAG_HEIGHT_M);
-    format_float_3(err_str, sizeof(err_str), (float)tril_result.error_estimate);
-
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Position: X=%sm Y=%sm Z=%sm",
-           x_str, y_str, z_str);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Error:    %sm", err_str);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Position: X=%.3fm Y=%.3fm Z=%.2fm",
+           (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Error:    %.3fm", (float)tril_result.error_estimate);
 
     /* Send position via UART */
     if (bsp_io_uart_send_position((float)tril_position.x, (float)tril_position.y,
@@ -419,24 +363,20 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "========== TAG INIT ==========");
     RLOG_I(LOG_OBJECT_CODE_TAG, "Tag ID: 0x%02X", cfg->device_id);
     
-    char interval_str[16];
-    snprintf(interval_str, sizeof(interval_str), "%lu", (unsigned long)RANGING_INTERVAL_MS);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Update rate: %sms (%luHz)",
-           interval_str, 1000UL / RANGING_INTERVAL_MS);
+    /* Log ranging period from config */
+    uint32_t update_hz = (cfg->ranging_period_ms > 0) ? (1000 / cfg->ranging_period_ms) : 0;
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Update rate: %dms (%luHz)",
+           cfg->ranging_period_ms, update_hz);
 
     /* Log height configuration */
-    char tag_h[16], anchor_h[16], dz_h[16];
-    format_float_2(tag_h, sizeof(tag_h), TAG_HEIGHT_M);
-    format_float_2(anchor_h, sizeof(anchor_h), ANCHOR_HEIGHT_M);
-    format_float_2(dz_h, sizeof(dz_h), HEIGHT_OFFSET_M);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%sm Anchor=%sm dZ=%sm",
-           tag_h, anchor_h, dz_h);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
+           TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
 
     /* Log active preset */
 #ifdef PRESET_TEST_WORST_CASE
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: TEST_WORST_CASE (1Hz, low accuracy)");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: TEST_WORST_CASE");
 #elif defined(PRESET_HIGH_SPEED_VEHICLE)
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: HIGH_SPEED_VEHICLE (5-8Hz, >20mm/s)");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: HIGH_SPEED_VEHICLE");
 #else
     RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: MANUAL");
 #endif
@@ -444,12 +384,11 @@ app_err_t app_tag_init(void)
     /* Log anchor positions */
     RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor positions:");
     for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-        char x_str[16], y_str[16], z_str[16];
-        format_float_2(x_str, sizeof(x_str), (float)ANCHOR_POSITIONS[i].x);
-        format_float_2(y_str, sizeof(y_str), (float)ANCHOR_POSITIONS[i].y);
-        format_float_2(z_str, sizeof(z_str), (float)ANCHOR_POSITIONS[i].z);
-        RLOG_I(LOG_OBJECT_CODE_TAG, "  #%d: X=%sm Y=%sm Z=%sm",
-               i + 1, x_str, y_str, z_str);
+        RLOG_I(LOG_OBJECT_CODE_TAG, "  #%d: X=%.2fm Y=%.2fm Z=%.2fm",
+               i + 1, 
+               (float)ANCHOR_POSITIONS[i].x,
+               (float)ANCHOR_POSITIONS[i].y,
+               (float)ANCHOR_POSITIONS[i].z);
     }
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "==============================");
@@ -464,18 +403,18 @@ void app_tag_process(void)
     sys_config_t *cfg = sys_config_get();
     uint32_t current_tick = HAL_GetTick();
 
-    /* Rate limiting */
-    if ((current_tick - s_last_ranging_tick) < RANGING_INTERVAL_MS) {
+    if ((current_tick - s_last_ranging_tick) < cfg->ranging_period_ms) {
         return;
     }
+
+    /* Record ranging start time BEFORE ranging starts */
     s_last_ranging_tick = current_tick;
 
     /* LED on during ranging */
     bsp_io_led_on();
 
-#ifdef MULTIPLE_ANCHOR
     /* Use anchor_ids array matching NUM_ANCHORS from config */
-    const uint8_t anchor_ids[NUM_ANCHORS] = {1, 2, 3, 4};
+    const uint8_t anchor_ids[NUM_ANCHORS] = {1, 2, 3};
     sys_ranging_result_t results[NUM_ANCHORS];
 
     int num_success = sys_ranging_tag_multi_anchor(anchor_ids, NUM_ANCHORS,
@@ -484,7 +423,7 @@ void app_tag_process(void)
 
     bsp_io_led_off();
 
-    /* Process results (will log distances even if <3 anchors) */
+    /* Process results */
     if (num_success > 0) {
         process_ranging_results(results, num_success);
     } else {
@@ -499,9 +438,6 @@ void app_tag_process(void)
             s_error_count = 0;
         }
     }
-#else
-    #error "MULTIPLE_ANCHOR must be defined for multi-anchor positioning"
-#endif
 }
 
 /* End of file -------------------------------------------------------- */

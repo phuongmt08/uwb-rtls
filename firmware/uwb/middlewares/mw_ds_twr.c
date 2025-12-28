@@ -1,10 +1,14 @@
-/* 
+/**
  * @file       mw_ds_twr.c
- * @brief      DS-TWR
+ * @copyright
+ * @license
  * @version    2.2.0
  * @date       2025-12-15
+ * @author     Phuong Mai
+ * @brief      
+ * @note       None
+ * @example    None
  */
-
 #include "mw_ds_twr.h"
 #include <stddef.h>
 #include <string.h>
@@ -325,7 +329,8 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   uint8_t target_anchor = poll_msg->target_anchor;
   if (target_anchor != ANCHOR_ID_BROADCAST && target_anchor != sys_cfg->device_id) {
     /* Not for us, ignore silently */
-    return MW_DSTWR_ERR_INVALID_MSG;
+    /* NOTE: return OK for silent */
+    return MW_DSTWR_OK;
   }
 
   if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t2) != 0)

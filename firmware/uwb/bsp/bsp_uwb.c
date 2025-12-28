@@ -1,10 +1,14 @@
 /**
  * @file       bsp_uwb.c
- * @brief      BSP layer for DW1000 - FIXED CRC handling
+ * @copyright
+ * @license
  * @version    0.4.0
  * @date       2025-12-11
+ * @author     Phuong Mai
+ * @brief      Board Support Package for UWB (DW1000)
+ * @note       None
+ * @example    None
  */
-
 /* Includes ----------------------------------------------------------- */
 #include "bsp_uwb.h"
 #include "bsp_util.h"
@@ -26,10 +30,8 @@
 #endif
 #define TX_MAX_PAYLOAD 120
 
-/* DW1000 automatically appends 2-byte CRC */
 #define DW1000_CRC_LENGTH 2
 
-/* DW1000 timestamp registers */
 #define RX_TIME_ID 0x15
 #define TX_TIME_ID 0x17
 
@@ -158,7 +160,7 @@ static void reset_DW1000(void)
 
 static void port_set_dw1000_slowrate(void)
 {
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
     HAL_SPI_Init(&hspi1);
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[SPI] Set to SLOW rate (prescaler=128)");
 }
@@ -215,15 +217,18 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
     dwt_config_t dw_cfg = {
         .chan           = cfg->channel,
         .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_256,
-        .rxPAC          = DWT_PAC16,
+        .txPreambLength = DWT_PLEN_1024,
+        .rxPAC          = DWT_PAC32,
         .txCode         = 9,
         .rxCode         = 9,
-        .nsSFD          = 0,
+        .nsSFD          = 1,
         .dataRate       = cfg->data_rate,
         .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = 265
+        /* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
+        /* sfdTO = 1024 + 1 + 8 − 32 = 1001 */
+        .sfdTO          = (1025 + 64 - 32)
     };
+    
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
            dw_cfg.chan, cfg->prf, dw_cfg.dataRate, dw_cfg.txCode);
@@ -236,8 +241,8 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
     }
 
     dwt_txconfig_t tx_cfg;
-    tx_cfg.power = 0x0E082848UL;
-    tx_cfg.PGdly = 0xC0;
+    tx_cfg.power = cfg->tx_power;
+    tx_cfg.PGdly = 0xC2;
     dwt_configuretxrf(&tx_cfg);
 
     dwt_setrxantennadelay(cfg->rx_antenna_delay);
@@ -255,14 +260,6 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
     return BSP_OK;
 }
 
-/**
- * @brief TX function - FIXED
- * 
- * QUAN TRỌNG: 
- * - DW1000 tự động thêm 2 byte CRC vào cuối frame
- * - dwt_writetxfctrl() nhận (payload_length + 2) để báo tổng độ dài on-air
- * - Nhưng chỉ ghi payload_length byte vào TX buffer
- */
 bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
 {
     if (!data || length == 0 || length > TX_MAX_PAYLOAD)
@@ -403,6 +400,8 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
                           SYS_STATUS_RXDFR | SYS_STATUS_RXSFDD | SYS_STATUS_RXPRD |
                           SYS_STATUS_LDEDONE);
         /* Quick re-enable */
+        dwt_forcetrxoff();
+        dwt_rxreset();     
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
         return BSP_ERR;
     }

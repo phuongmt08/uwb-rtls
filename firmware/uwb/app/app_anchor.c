@@ -100,9 +100,9 @@ static bool calib_add_sample(float distance)
     return false;
   }
   
-  if (distance < 0.1f || distance > 10.0f) {
-    return false;
-  }
+  // if (distance < 0.1f || distance > 50.0f) {
+  //   return false;
+  // }
   
   s_calib.distances[s_calib.count++] = distance;
   

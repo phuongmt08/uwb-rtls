@@ -2,9 +2,9 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : DS-TWR Tag/Anchor Application
-  * @version        : 3.0.0
-  * @date           : 2025-12-10
+  * @brief          : DS-TWR Tag/Anchor Application with Calibration
+  * @version        : 3.1.0
+  * @date           : 2025-12-24
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -29,6 +29,7 @@
 #include "common.h"
 #include "app_tag.h"
 #include "app_anchor.h"
+#include "positioning_config.h"
 #include <string.h>
 /* USER CODE END Includes */
 
@@ -123,15 +124,12 @@ int main(void)
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   
-  // Initialize logger
   sys_logger_init();
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
   
-  // Initialize system configuration (loads from flash if available)
   sys_config_init();
   sys_config_t *cfg = sys_config_get();
   
-  // Initialize UWB hardware with config from flash
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
   
   if (bsp_uwb_init() != 0) {
@@ -144,7 +142,7 @@ int main(void)
     .data_rate         = cfg->uwb_data_rate,
     .preamble_code     = cfg->uwb_preamble_code,
     .tx_antenna_delay  = cfg->tx_antenna_delay,
-  .rx_antenna_delay  = cfg->rx_antenna_delay,
+    .rx_antenna_delay  = cfg->rx_antenna_delay,
     .tx_power          = cfg->tx_power,
   };
   
@@ -155,28 +153,21 @@ int main(void)
   
   bsp_uwb_configure(&uwb_cfg);
   
-  // Initialize IO (LED, Button, DIP switch)
   bsp_io_init();
-  bsp_io_led_off();  /* LED off initially */
+  bsp_io_led_off();
   
-  // Read DIP switch - ALWAYS OVERRIDES saved config
-  // DIP = 0: Use saved ID from flash
-  // DIP = 1-7: Force override to that ID
+  /* Read DIP switch - ALWAYS OVERRIDES saved config */
   uint8_t dip_value = bsp_io_dip_read();
   if (dip_value == 0) {
-    // DIP all OFF (000) = Use saved ID from flash
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->device_id);
   } else {
-    // DIP = 1-7: FORCE override device ID
     sys_config_set_device_id(dip_value);
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-    // NOTE: Not saving to flash - DIP switch always overrides on boot
   }
   
-  // Update config pointer after DIP switch override
   cfg = sys_config_get();
   
-  // Initialize application based on role from config
+  /* Initialize application based on role */
   if (cfg->role == DEVICE_ROLE_TAG) {
     app_tag_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
@@ -190,11 +181,19 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* Process button events */
     bsp_io_button_event_t btn_event = bsp_io_button_event();
+    
+#if ENABLE_ANCHOR_AUTO_CALIB
+    /* In calibration build, anchor button events handled differently */
+    if (cfg->role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE) {
+      app_anchor_on_button(btn_event);
+      btn_event = BSP_IO_EVENT_NONE;  /* Prevent normal button handling */
+    }
+#endif
     
     switch (btn_event)
     {
+#if !ENABLE_ANCHOR_AUTO_CALIB
       case BSP_IO_EVENT_HOLD:
         /* Toggle TAG/ANCHOR role and save to flash */
         {
@@ -217,16 +216,15 @@ int main(void)
                  new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
           RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
           bsp_delay_ms(100);
-          // Reset system to apply new role
           HAL_NVIC_SystemReset();
         }
         break;
+#endif
         
       case BSP_IO_EVENT_DOUBLE_CLICK:
         /* Stop ranging */
         if (s_ranging_enabled) {
           s_ranging_enabled = false;
-          /* Force DW1000 to idle to turn off RX/TX */
           bsp_uwb_idle();
           RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
         }
@@ -255,7 +253,6 @@ int main(void)
       }
     }
 
-    
     sys_logger_task();
     bsp_delay_ms(1);
     

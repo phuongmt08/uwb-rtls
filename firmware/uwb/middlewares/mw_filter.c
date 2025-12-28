@@ -1,10 +1,14 @@
-/* 
+/**
  * @file       mw_filter.c
- * @brief      Simple filter algorithms
+ * @copyright
+ * @license
  * @version    2.0.0
  * @date       2025-12-21
+ * @author     Phuong Mai
+ * @brief      Simple filter algorithms
+ * @note       None
+ * @example    None
  */
-
 #include "mw_filter.h"
 #include <string.h>
 

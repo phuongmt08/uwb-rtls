@@ -227,7 +227,7 @@ sys_ranging_err_t sys_ranging_tag_start(uint8_t sequence_num, uint32_t rx_timeou
   s_ctx.state_entry_tick = HAL_GetTick();
   
   s_ctx.mw_config.sequence_num = sequence_num;
-  s_ctx.mw_config.target_anchor_id = ANCHOR_ID_ANY;
+	s_ctx.mw_config.target_anchor_id = 1;
   s_ctx.mw_config.rx_timeout_us = rx_timeout_ms * 1000;
   s_ctx.mw_config.hal = &s_hal;
   
@@ -376,7 +376,7 @@ sys_ranging_err_t sys_ranging_anchor_process(void)
       else {
         RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] Error: %d", mw_err);
         s_ctx.state = STATE_ERROR;
-        state_machine_reset();
+      state_machine_reset();
         return SYS_RANGING_ERR;
       }
     }

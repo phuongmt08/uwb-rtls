@@ -1,5 +1,7 @@
 /**
  * @file       bsp_flash.h
+ * @copyright  Copyright (C) 2019 ITRVN.
+ * @license    This project is released under the Fiot License.
  * @version    1.2.1
  * @date       2025-6-12
  * @author     Phuong Mai

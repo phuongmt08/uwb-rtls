@@ -1,10 +1,21 @@
-/* ============================== app_tag.h ==================================
+/**
  * @file       app_tag.h
- * @brief      Tag application header
- * @version    1.0.0
- * @date       2025-11-15
+ * @copyright
+ * @license
+ * @version    3.2.0
+ * @date       2025-12-24
+ * @author     Phuong Mai
+ * @brief      Non-blocking Tag with filtering and trilateration
+ * @note       
+ * Pipeline:
+ *   1. Raw 3D distance → Convert to 2D planar distance (height compensation)
+ *   2. 2D distance → EMA filter (optional)
+ *   3. Raw RSSI → EMA filter (optional)
+ *   4. Filtered 2D distance + RSSI → Trilateration (auto-select best 3)
+ *   5. Trilateration position → Kalman 2D
+ *   6. Kalman R: Fixed tuning OR adaptive from RSSI
+ * @example    None
  */
-
 #ifndef __APP_TAG_H
 #define __APP_TAG_H
 

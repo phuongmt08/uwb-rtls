@@ -1,10 +1,14 @@
-/* 
- * @file       mw_ds_twr.h
- * @brief      DS-TWR
+/**
+ * @file       mw_ds_twr.c
+ * @copyright
+ * @license
  * @version    2.2.0
  * @date       2025-12-15
+ * @author     Phuong Mai
+ * @brief      
+ * @note       None
+ * @example    None
  */
-
 #ifndef __MW_DS_TWR_H
 #define __MW_DS_TWR_H
 

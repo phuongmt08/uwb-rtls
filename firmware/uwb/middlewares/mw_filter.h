@@ -1,10 +1,14 @@
-/* ============================== mw_filter.h ================================
+/**
  * @file       mw_filter.h
- * @brief      Simple filter algorithms (technology-agnostic)
+ * @copyright
+ * @license
  * @version    2.0.0
  * @date       2025-12-21
+ * @author     Phuong Mai
+ * @brief      Simple filter algorithms
+ * @note       None
+ * @example    None
  */
-
 #ifndef __MW_FILTER_H
 #define __MW_FILTER_H
 
