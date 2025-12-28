@@ -1,186 +1,258 @@
-/* ============================== positioning_config.h =======================
- * @file       positioning_config.h
- * @brief      Centralized configuration for positioning system
- * @version    2.0.0
- * @date       2025-12-21
- */
+    /* ============================== positioning_config.h =======================
+    * @file       positioning_config.h
+    * @brief      Centralized configuration for positioning system
+    * @version    2.2.0
+    * @date       2025-12-24
+    */
 
-#ifndef __POSITIONING_CONFIG_H
-#define __POSITIONING_CONFIG_H
+    #ifndef __POSITIONING_CONFIG_H
+    #define __POSITIONING_CONFIG_H
 
-/* ===== PRESETS ===== */
+    /* ===== ANTENNA DELAY (FACTORY CALIBRATION) ===== */
 
-/**
- * Uncomment ONE preset:
- * 
- * PRESET_TEST_WORST_CASE:
- *   - 1Hz update (1000ms interval)
- *   - Low accuracy, heavy filtering
- *   - For testing other systems under poor positioning
- * 
- * PRESET_HIGH_SPEED_VEHICLE:
- *   - 5-8Hz update (125-200ms interval)
- *   - High accuracy, fast response
- *   - For vehicle moving >20mm/s (0.02m/s)
- */
+    /**
+     * TAG antenna delays - FIXED (manufacturer calibrated)
+     */
+    #define TAG_FACTORY_TX_ANT_DLY      16436
+    #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#undef PRESET_TEST_WORST_CASE
-#define PRESET_HIGH_SPEED_VEHICLE
+    /**
+     * ANCHOR antenna delays - Default (can be auto-calibrated)
+     */
+    #define ANCHOR_DEFAULT_TX_ANT_DLY   16436
+    #define ANCHOR_DEFAULT_RX_ANT_DLY   16436
 
-/* ===== ANCHOR LAYOUT (2D only, Z ignored) ===== */
+    /* ===== ANCHOR AUTO-CALIBRATION ===== */
 
-#define NUM_ANCHORS  4  /* Total anchors (will use best 3 for trilateration) */
+    /**
+     * Enable anchor calibration build (0=disabled, 1=enabled)
+     */
+    #define ENABLE_ANCHOR_AUTO_CALIB    0
+    #if ENABLE_ANCHOR_AUTO_CALIB
+    #define CALIB_REF_DISTANCE_M      5.600f  /* Physical distance Tag-Anchor (m) */
+    #define CALIB_SAMPLES             25      /* Number of samples to collect */
+    #define CALIB_ERROR_THRESHOLD_M   0.02f   // Stop if error < 2cm
+    #define CALIB_MIN_DELTA_STEP      3       // Stop if step < 3
+    #define CALIB_MAX_ROUNDS          10      // Max 10 rounds
+    #define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
+    #define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
+    #endif
 
-/* Anchor positions (X, Y in meters - Z ignored) */
-#define ANCHOR_1_X   0.0f
-#define ANCHOR_1_Y   0.0f
+    /* ===== PRESETS ===== */
 
-#define ANCHOR_2_X   5.0f
-#define ANCHOR_2_Y   0.0f
+    /**
+     * Uncomment ONE preset:
+     * 
+     * PRESET_TEST_WORST_CASE:
+     *   - 1Hz update (1000ms interval)
+     *   - Low accuracy, heavy filtering
+     *   - For testing other systems under poor positioning
+     * 
+     * PRESET_HIGH_SPEED_VEHICLE:
+     *   - 5-8Hz update (125-200ms interval)
+     *   - High accuracy, fast response
+     *   - For vehicle moving >20mm/s (0.02m/s)
+     */
 
-#define ANCHOR_3_X   5.0f
-#define ANCHOR_3_Y   5.0f
+    #undef PRESET_TEST_WORST_CASE
+    #define PRESET_HIGH_SPEED_VEHICLE
 
-#define ANCHOR_4_X   0.0f
-#define ANCHOR_4_Y   5.0f
+    /* ===== HEIGHT CONFIGURATION (Z-AXIS) ===== */
 
-/* ===== FILTER CONFIGURATION ===== */
+    /**
+     * @brief Tag height from ground (meters)
+     */
+    #define TAG_HEIGHT_M            (0.45f)
 
-/**
- * Enable distance EMA filter
- * 1 = Apply EMA smoothing to raw distances
- * 0 = Use raw distances directly
- */
-#ifndef ENABLE_DISTANCE_FILTER
-#define ENABLE_DISTANCE_FILTER  1
-#endif
+    /**
+     * @brief Anchor height from ground (meters)
+     */
+    #define ANCHOR_HEIGHT_M         (0.45f)
 
-/**
- * Enable RSSI EMA filter
- * 1 = Apply EMA smoothing to RSSI (required if ENABLE_RSSI_ADAPTIVE=1)
- * 0 = Use raw RSSI
- */
-#ifndef ENABLE_RSSI_FILTER
-#define ENABLE_RSSI_FILTER  1
-#endif
+    /**
+     * @brief Calculate vertical offset (dZ = z_anchor - z_tag)
+     * This is used to convert 3D slant distance to 2D planar distance
+     */
+    #define HEIGHT_OFFSET_M         (ANCHOR_HEIGHT_M - TAG_HEIGHT_M)
 
-/**
- * Enable Kalman 2D filter
- * 1 = Smooth position with Kalman (HIGHLY RECOMMENDED)
- * 0 = Use raw trilateration output
- */
-#ifndef MW_FILTER_ENABLE_KALMAN_2D
-#define MW_FILTER_ENABLE_KALMAN_2D  1
-#endif
+    /* ===== ANCHOR LAYOUT (2D COORDINATES) ===== */
 
-/**
- * Kalman R tuning method
- * 0 = Fixed R (manual tuning)
- * 1 = Adaptive R from RSSI (auto adjust based on signal quality)
- */
-#ifndef ENABLE_RSSI_ADAPTIVE
-#define ENABLE_RSSI_ADAPTIVE  0
-#endif
+    #define NUM_ANCHORS  3  /* Total anchors (will use best 3 for trilateration) */
 
-/**
- * Enable quality gating
- * 1 = Reject trilateration if error_estimate too high
- * 0 = Accept all trilateration results
- */
-#ifndef ENABLE_QUALITY_GATING
-#define ENABLE_QUALITY_GATING  1
-#endif
+    #define ANCHOR_1_X   0.0f
+    #define ANCHOR_1_Y   4.0f
 
-/* ===== PRESET IMPLEMENTATIONS ===== */
+    #define ANCHOR_2_X   0.0f
+    #define ANCHOR_2_Y   0.0f
 
-#ifdef PRESET_TEST_WORST_CASE
-    /* 1Hz update, low accuracy, heavy filtering */
-    #undef RANGING_INTERVAL_MS
-    #undef DISTANCE_EMA_ALPHA
-    #undef RSSI_EMA_ALPHA
-    #undef KALMAN_PROCESS_NOISE
-    #undef KALMAN_MEASURE_NOISE
-    #undef MAX_ACCEPTABLE_ERROR_M
-    #undef ENABLE_RSSI_ADAPTIVE
-    
-    #define RANGING_INTERVAL_MS     1000  /* 1Hz */
-    #define DISTANCE_EMA_ALPHA      0.2f  /* Heavy smoothing */
-    #define RSSI_EMA_ALPHA          0.15f /* Very smooth */
-    #define KALMAN_PROCESS_NOISE    0.05f /* Slow changes */
-    #define KALMAN_MEASURE_NOISE    5.0f  /* Low trust in measurements */
-    #define MAX_ACCEPTABLE_ERROR_M  2.0f  /* Accept poor quality */
-    #define ENABLE_RSSI_ADAPTIVE    0     /* Fixed R */
-#endif
+    #define ANCHOR_3_X   4.0f
+    #define ANCHOR_3_Y   0.0f
 
-#ifdef PRESET_HIGH_SPEED_VEHICLE
-    /* 5-8Hz update, high accuracy, fast tracking for >20mm/s vehicle */
-    #undef RANGING_INTERVAL_MS
-    #undef DISTANCE_EMA_ALPHA
-    #undef RSSI_EMA_ALPHA
-    #undef KALMAN_PROCESS_NOISE
-    #undef KALMAN_MEASURE_NOISE
-    #undef MAX_ACCEPTABLE_ERROR_M
-    #undef ENABLE_RSSI_ADAPTIVE
-    
-    #define RANGING_INTERVAL_MS     125   /* 8Hz (can adjust 125-200ms for 5-8Hz) */
-    #define DISTANCE_EMA_ALPHA      0.5f  /* Fast response */
-    #define RSSI_EMA_ALPHA          0.3f  /* Moderate smoothing */
-    #define KALMAN_PROCESS_NOISE    0.8f  /* Allow fast changes (vehicle speed) */
-    #define KALMAN_MEASURE_NOISE    0.8f  /* Trust measurements */
-    #define MAX_ACCEPTABLE_ERROR_M  0.8f  /* Strict quality */
-    #define ENABLE_RSSI_ADAPTIVE    1     /* Adaptive R for robustness */
-#endif
+    #define ANCHOR_4_X   0.0f
+    #define ANCHOR_4_Y   2.0f
 
-/* ===== MANUAL TUNING (if no preset selected) ===== */
+    /**
+     * @brief Individual anchor heights (optional - use if heights differ)
+     */
+    // #define ANCHOR_1_Z   0.30f  /* Uncomment to override */
+    // #define ANCHOR_2_Z   0.35f  /* Uncomment to override */
+    // #define ANCHOR_3_Z   0.30f  /* Uncomment to override */
+    // #define ANCHOR_4_Z   0.30f  /* Uncomment to override */
 
-#ifndef RANGING_INTERVAL_MS
-#define RANGING_INTERVAL_MS  125  /* 8Hz default */
-#endif
+    /* If individual heights not defined, use common ANCHOR_HEIGHT_M */
+    #ifndef ANCHOR_1_Z
+    #define ANCHOR_1_Z ANCHOR_HEIGHT_M
+    #endif
+    #ifndef ANCHOR_2_Z
+    #define ANCHOR_2_Z ANCHOR_HEIGHT_M
+    #endif
+    #ifndef ANCHOR_3_Z
+    #define ANCHOR_3_Z ANCHOR_HEIGHT_M
+    #endif
+    #ifndef ANCHOR_4_Z
+    #define ANCHOR_4_Z ANCHOR_HEIGHT_M
+    #endif
 
-#ifndef DISTANCE_EMA_ALPHA
-#define DISTANCE_EMA_ALPHA  0.4f
-#endif
+    /* ===== DISTANCE VALIDATION ===== */
 
-#ifndef RSSI_EMA_ALPHA
-#define RSSI_EMA_ALPHA  0.3f
-#endif
+    /**
+     * @brief Maximum valid 3D distance (meters)
+     * Reject measurements beyond this range (likely error or out of zone)
+     */
+    #define MAX_VALID_DISTANCE_M    (50.0f)
 
-#ifndef KALMAN_PROCESS_NOISE
-#define KALMAN_PROCESS_NOISE  0.5f
-#endif
+    /**
+     * @brief Minimum valid 3D distance (meters)
+     * Reject measurements below this (likely error)
+     */
+    #define MIN_VALID_DISTANCE_M    (0.05f)
 
-#ifndef KALMAN_MEASURE_NOISE
-#define KALMAN_MEASURE_NOISE  1.0f
-#endif
+    /* ===== FILTER CONFIGURATION ===== */
 
-#ifndef MAX_ACCEPTABLE_ERROR_M
-#define MAX_ACCEPTABLE_ERROR_M  1.0f
-#endif
+    /**
+     * Enable distance EMA filter
+     * 1 = Apply EMA smoothing to raw distances
+     * 0 = Use raw distances directly
+     */
+    #ifndef ENABLE_DISTANCE_FILTER
+    #define ENABLE_DISTANCE_FILTER  1
+    #endif
+
+    /**
+     * Enable RSSI EMA filter
+     * 1 = Apply EMA smoothing to RSSI (required if ENABLE_RSSI_ADAPTIVE=1)
+     * 0 = Use raw RSSI
+     */
+    #ifndef ENABLE_RSSI_FILTER
+    #define ENABLE_RSSI_FILTER  1
+    #endif
+
+    /**
+     * Enable Kalman 2D filter
+     * 1 = Smooth position with Kalman
+     * 0 = Use raw trilateration output
+     */
+    #ifndef MW_FILTER_ENABLE_KALMAN_2D
+    #define MW_FILTER_ENABLE_KALMAN_2D  1
+    #endif
+
+    /**
+     * Kalman R tuning method
+     * 0 = Fixed R (manual tuning)
+     * 1 = Adaptive R from RSSI (auto adjust based on signal quality)
+     */
+    #ifndef ENABLE_RSSI_ADAPTIVE
+    #define ENABLE_RSSI_ADAPTIVE  0
+    #endif
+
+    /**
+     * Enable quality gating
+     * 1 = Reject trilateration if error_estimate too high
+     * 0 = Accept all trilateration results
+     */
+    #ifndef ENABLE_QUALITY_GATING
+    #define ENABLE_QUALITY_GATING  1
+    #endif
+
+    /* ===== PRESET IMPLEMENTATIONS ===== */
+
+    #ifdef PRESET_TEST_WORST_CASE
+        /* 1Hz update, low accuracy, heavy filtering */
+        #undef RANGING_INTERVAL_MS
+        #undef DISTANCE_EMA_ALPHA
+        #undef RSSI_EMA_ALPHA
+        #undef KALMAN_PROCESS_NOISE
+        #undef KALMAN_MEASURE_NOISE
+        #undef MAX_ACCEPTABLE_ERROR_M
+        #undef ENABLE_RSSI_ADAPTIVE
+        
+        #define RANGING_INTERVAL_MS     1000  /* 1Hz */
+        #define DISTANCE_EMA_ALPHA      0.2f  /* Heavy smoothing */
+        #define RSSI_EMA_ALPHA          0.15f /* Very smooth */
+        #define KALMAN_PROCESS_NOISE    0.8f  /* More responsive to movement */
+        #define KALMAN_MEASURE_NOISE    5.0f  /* Low trust in measurements */
+        #define MAX_ACCEPTABLE_ERROR_M  2.0f  /* Accept poor quality */
+        #define ENABLE_RSSI_ADAPTIVE    0     /* Fixed R */
+    #endif
+
+    #ifdef PRESET_HIGH_SPEED_VEHICLE
+        /* 5-8Hz update, high accuracy, fast tracking for >20mm/s vehicle */
+        #undef RANGING_INTERVAL_MS
+        #undef DISTANCE_EMA_ALPHA
+        #undef RSSI_EMA_ALPHA
+        #undef KALMAN_PROCESS_NOISE
+        #undef KALMAN_MEASURE_NOISE
+        #undef MAX_ACCEPTABLE_ERROR_M
+        #undef ENABLE_RSSI_ADAPTIVE
+        
+        #define RANGING_INTERVAL_MS     100   /* 10Hz */
+        #define DISTANCE_EMA_ALPHA      0.5f  /* Fast response */
+        #define RSSI_EMA_ALPHA          0.3f  /* Moderate smoothing */
+        #define KALMAN_PROCESS_NOISE    0.8f  /* More responsive to movement */
+        #define KALMAN_MEASURE_NOISE    0.6f  /* Trust measurements */
+        #define MAX_ACCEPTABLE_ERROR_M  0.8f  /* Strict quality */
+        #define ENABLE_RSSI_ADAPTIVE    1     /* Adaptive R for robustness */
+    #endif
+
+    /* ===== MANUAL TUNING (if no preset selected) ===== */
+
+    #ifndef RANGING_INTERVAL_MS
+    #define RANGING_INTERVAL_MS  125  /* 8Hz default */
+    #endif
+
+    #ifndef DISTANCE_EMA_ALPHA
+    #define DISTANCE_EMA_ALPHA  0.4f
+    #endif
+
+    #ifndef RSSI_EMA_ALPHA
+    #define RSSI_EMA_ALPHA  0.3f
+    #endif
+
+    #ifndef KALMAN_PROCESS_NOISE
+    #define KALMAN_PROCESS_NOISE  0.5f
+    #endif
+
+    #ifndef KALMAN_MEASURE_NOISE
+    #define KALMAN_MEASURE_NOISE  1.0f
+    #endif
+
+    #ifndef MAX_ACCEPTABLE_ERROR_M
+    #define MAX_ACCEPTABLE_ERROR_M  1.0f
+    #endif
 
 /* ===== RSSI ADAPTIVE THRESHOLDS ===== */
 
 /**
  * RSSI-to-R_scale mapping (if ENABLE_RSSI_ADAPTIVE = 1)
+ * Adjusted for real-world RSSI range: -20 to -80 dBm
  */
-#define RSSI_THRESHOLD_EXCELLENT  -40   /* dBm */
-#define RSSI_THRESHOLD_GOOD       -60   /* dBm */
-#define RSSI_THRESHOLD_MODERATE   -80   /* dBm */
-#define RSSI_THRESHOLD_POOR       -100  /* dBm */
+#define RSSI_THRESHOLD_EXCELLENT  -25   /* Very strong signal */
+#define RSSI_THRESHOLD_GOOD       -45   /* Good signal */
+#define RSSI_THRESHOLD_MODERATE   -60   /* Moderate signal */
+#define RSSI_THRESHOLD_POOR       -70   /* Weak signal */
 
-#define MAX_CONSECUTIVE_ERR  10
+#define RSSI_MANUAL_R_SCALE       0.0f  
 
-#if NUM_ANCHORS < 3
-    #error "Need at least 3 anchors for 2D positioning"
-#endif
+#define MAX_CONSECUTIVE_ERR       10
 
-#if RANGING_INTERVAL_MS < 20
-    #error "Ranging too fast, UWB can't keep up"
-#endif
-
-#if ENABLE_RSSI_ADAPTIVE && !ENABLE_RSSI_FILTER
-    #warning "ENABLE_RSSI_ADAPTIVE requires ENABLE_RSSI_FILTER, enabling RSSI filter"
-    #undef ENABLE_RSSI_FILTER
-    #define ENABLE_RSSI_FILTER 1
-#endif
-
-#endif /* __POSITIONING_CONFIG_H */
+    #endif /* __POSITIONING_CONFIG_H */
