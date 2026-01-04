@@ -1,15 +1,14 @@
-/* ============================== sys_config.h ===============================
+/**
  * @file       sys_config.h
- * @brief      System runtime configuration - Can be changed via BLE/USB
- * @version    1.0.0
- * @date       2025-11-15
- * 
- * @note       These settings can be modified at runtime.
- *             Storage options (configured in platform_config.h):
- *             - HAVE_FLASH_STORAGE undefined: RAM only (lost on reset)
- *             - HAVE_FLASH_STORAGE defined: Flash storage (persistent)
+ * @copyright
+ * @license
+ * @version    1.1.0
+ * @date       2025-12-24
+ * @author     Phuong Mai
+ * @brief      
+ * @note       None
+ * @example    None
  */
-
 #ifndef __SYS_CONFIG_H
 #define __SYS_CONFIG_H
 
@@ -21,10 +20,6 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "platform_config.h"
-
-/* ========================================================================== */
-/*                    DEVICE RUNTIME CONFIGURATION                           */
-/* ========================================================================== */
 
 /**
  * @brief Device role enumeration
@@ -57,7 +52,7 @@ typedef struct {
   
   /* Ranging parameters */
   ranging_method_t method;
-  uint16_t ranging_period_ms;
+  uint16_t ranging_period_ms;  /* Ranging interval (ms) - synced with RANGING_INTERVAL_MS default */
   uint32_t rx_timeout_ms;
   
   /* UWB radio configuration */
@@ -73,11 +68,9 @@ typedef struct {
   /* Power settings */
   uint32_t tx_power;          // TX power register value
   
-#ifdef MULTIPLE_ANCHOR
   /* Multiple anchor support */
   uint8_t anchor_count;       // Number of anchors in list (0 = broadcast to all)
   uint8_t anchor_list[MAX_ANCHORS]; // List of anchor IDs to range with
-#endif
   
   uint8_t reserved[16];
   
@@ -85,40 +78,23 @@ typedef struct {
   uint32_t crc32;
 } sys_config_t;
 
-/* ========================================================================== */
-/*                         DEFAULT CONFIGURATION                             */
-/* ========================================================================== */
-
 /* Default values */
 #define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR
 #define DEFAULT_DEVICE_ID           0x01
 #define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
 
-#ifdef HAVE_TX_DELAY
-  /* HAVE_TX_DELAY mode: 
-   * - Period between ranging attempts
-   * - Internal timeouts are fixed (10ms for each step)
-   * - Multi-anchor: 2 anchors × 20ms = 40ms per cycle
-   * - 100ms period = 10Hz for 2 anchors
-   */
-  #define DEFAULT_RANGING_PERIOD_MS   100   /* 10 cycles/sec for 2 anchors */
-  #define DEFAULT_RX_TIMEOUT_MS       150  /* For POLL listening - increased for reliability */
-#else
-  /* CORRECTION mode: fast performance */
-  #define DEFAULT_RANGING_PERIOD_MS   100   /* 10 ranging/sec */
-  #define DEFAULT_RX_TIMEOUT_MS       150   /* Must be > period */
-#endif
+#define DEFAULT_RANGING_PERIOD_MS   100  /* 10Hz */
+#define DEFAULT_RX_TIMEOUT_MS       150
 
-/* Config version - increment this to force config reset on firmware update */
-#define CONFIG_VERSION              4  /* v4: Multi-anchor support */
+#define CONFIG_VERSION              5
 
-#define DEFAULT_UWB_CHANNEL         5
+#define DEFAULT_UWB_CHANNEL         2
 #define DEFAULT_UWB_PRF             64
 #define DEFAULT_UWB_DATA_RATE       1
 #define DEFAULT_UWB_PREAMBLE_CODE   9
 #define DEFAULT_TX_ANT_DLY          16436
 #define DEFAULT_RX_ANT_DLY          16436
-#define DEFAULT_TX_POWER            0x0E082848UL
+#define DEFAULT_TX_POWER            0x67676767UL
 #define DEFAULT_HW_REV_MAJOR        1
 #define DEFAULT_HW_REV_MINOR        0
 /* ========================================================================== */

@@ -4043,155 +4043,6 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "Graphic:SYM_ESD_Large"
-			(exclude_from_sim no)
-			(in_bom no)
-			(on_board no)
-			(property "Reference" "#SYM"
-				(at 0 5.08 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Value" "SYM_ESD_Large"
-				(at 0 -6.35 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Footprint" ""
-				(at -0.127 -0.762 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Datasheet" "~"
-				(at -0.127 -0.762 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Description" "ESD warning/\"Do not touch\" symbol, large"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Sim.Enable" "0"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "ki_keywords" "symbol ESD"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(symbol "SYM_ESD_Large_0_0"
-				(polyline
-					(pts
-						(xy -2.667 -0.762) (xy 4.318 -3.302)
-					)
-					(stroke
-						(width 0.508)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.4826 -5.1308) (xy 5.3848 -5.1308) (xy 5.3848 -5.1054) (xy 5.334 -5.0546) (xy 5.2832 -4.953)
-						(xy 5.207 -4.826) (xy 5.0038 -4.4704) (xy 4.8768 -4.2672) (xy 4.7498 -4.0386) (xy 4.1402 -3.0226)
-						(xy 3.9878 -2.7432) (xy 3.5306 -1.9812) (xy 3.4036 -1.7526) (xy 3.2766 -1.5494) (xy 3.1496 -1.3716)
-						(xy 3.0734 -1.1938) (xy 2.9972 -1.0668) (xy 2.921 -0.9652) (xy 2.8956 -0.889) (xy 2.8448 -0.8382)
-						(xy 2.8194 -0.8636) (xy 2.7686 -0.889) (xy 2.5908 -1.0668) (xy 2.4892 -1.2192) (xy 2.4638 -1.3462)
-						(xy 2.413 -1.4224) (xy 2.3622 -1.5748) (xy 2.286 -1.7018) (xy 1.9812 -2.0066) (xy 1.8542 -2.1082)
-						(xy 1.7018 -2.2352) (xy 1.5494 -2.3368) (xy 1.397 -2.4638) (xy 1.2192 -2.5908) (xy 1.0668 -2.7178)
-						(xy 0.9144 -2.8194) (xy 0.8128 -2.8956) (xy 0.7112 -2.9464) (xy 0.6096 -3.0226) (xy 0.3556 -3.2258)
-						(xy 0.254 -3.3528) (xy 0.1524 -3.5052) (xy 0.0508 -3.683) (xy -0.0762 -3.8862) (xy -0.2286 -4.2672)
-						(xy -0.381 -4.572) (xy -0.5334 -4.7244) (xy -0.6096 -4.7752) (xy -0.635 -4.8006) (xy -0.8382 -4.8006)
-						(xy -0.9144 -4.7752) (xy -1.016 -4.6736) (xy -1.0668 -4.5212) (xy -1.1176 -4.3434) (xy -1.143 -4.1148)
-						(xy -1.143 -3.4544) (xy -1.0922 -3.2512) (xy -1.0414 -3.0734) (xy -0.9398 -2.921) (xy -0.8382 -2.794)
-						(xy -0.381 -2.3368) (xy -0.3048 -2.2352) (xy -0.2032 -1.9812) (xy -0.1778 -1.9304) (xy -0.1524 -1.8288)
-						(xy -0.127 -1.7526) (xy -0.127 -1.7272) (xy -0.2032 -1.651) (xy -0.254 -1.5748) (xy -0.3556 -1.524)
-						(xy -0.4318 -1.4478) (xy -0.508 -1.397) (xy -0.5588 -1.3462) (xy -0.6096 -1.3462) (xy -0.6604 -1.3716)
-						(xy -0.7366 -1.4224) (xy -0.8382 -1.4732) (xy -0.9652 -1.5494) (xy -1.0668 -1.6002) (xy -1.1684 -1.6764)
-						(xy -1.3208 -1.778) (xy -1.6002 -2.0574) (xy -1.778 -2.2606) (xy -1.7272 -2.3876) (xy -1.7018 -2.4384)
-						(xy -1.7018 -2.5146) (xy -1.6764 -2.5908) (xy -1.6764 -2.8702) (xy -1.7018 -2.9972) (xy -1.7272 -3.0734)
-						(xy -1.7272 -3.0988) (xy -1.7526 -3.1496) (xy -1.7018 -3.2512) (xy -1.651 -3.3274) (xy -1.651 -3.3528)
-						(xy -1.524 -3.6068) (xy -1.4478 -3.8608) (xy -1.4224 -4.1402) (xy -1.4224 -4.3434) (xy -1.4478 -4.4196)
-						(xy -1.4732 -4.4704) (xy -1.4986 -4.5466) (xy -1.5748 -4.6736) (xy -1.6764 -4.7498) (xy -1.778 -4.8006)
-						(xy -1.8796 -4.8006) (xy -1.9558 -4.7752) (xy -2.0066 -4.7244) (xy -2.0574 -4.6228) (xy -2.1336 -4.4958)
-						(xy -2.2098 -4.318) (xy -2.3114 -4.0894) (xy -2.413 -3.8354) (xy -2.5146 -3.5306) (xy -2.5146 -3.5052)
-						(xy -2.5654 -3.3528) (xy -2.6416 -3.2004) (xy -2.7432 -2.9464) (xy -2.7686 -2.921) (xy -2.8448 -2.6924)
-						(xy -2.8956 -2.4638) (xy -2.8956 -2.2606) (xy -2.8448 -2.032) (xy -2.7686 -1.8034) (xy -2.7178 -1.7018)
-						(xy -2.6162 -1.5494) (xy -2.5146 -1.3716) (xy -2.3622 -1.1938) (xy -2.2098 -0.9906) (xy -2.1082 -0.889)
-						(xy -1.9558 -0.635) (xy -1.8796 -0.5334) (xy -1.8542 -0.508) (xy -1.7272 -0.2794) (xy -1.6002 -0.1016)
-						(xy -1.4478 0.0508) (xy -1.3208 0.1524) (xy -1.1684 0.2032) (xy -1.1176 0.2286) (xy -0.9906 0.254)
-						(xy -0.8128 0.3048) (xy -0.5842 0.3302) (xy -0.3302 0.3556) (xy -0.0254 0.381) (xy 0.0254 0.381)
-						(xy 0.2794 0.4064) (xy 0.508 0.4318) (xy 0.6858 0.4318) (xy 0.8382 0.4572) (xy 0.9652 0.4826)
-						(xy 1.0668 0.508) (xy 1.1684 0.5588) (xy 1.2446 0.5842) (xy 1.3208 0.635) (xy 1.524 0.7874) (xy 1.7272 0.9906)
-						(xy 1.7272 1.0414) (xy 1.7018 1.0922) (xy 1.651 1.1684) (xy 1.6002 1.27) (xy 1.4986 1.4224) (xy 1.4224 1.6002)
-						(xy 1.1684 2.0066) (xy 1.0414 2.2352) (xy 0.6604 2.8702) (xy 0.508 3.0988) (xy 0.4064 3.302) (xy 0.3048 3.4544)
-						(xy 0.2286 3.5814) (xy 0.1524 3.683) (xy 0.1016 3.7592) (xy 0.0508 3.8608) (xy 0.0254 3.8862)
-						(xy -0.0508 3.8862) (xy -0.0508 3.8608) (xy -0.127 3.7846) (xy -0.1524 3.7338) (xy -0.2032 3.6576)
-						(xy -0.254 3.556) (xy -0.4064 3.302) (xy -0.508 3.1496) (xy -0.6096 2.9718) (xy -0.7366 2.7686)
-						(xy -1.0414 2.2606) (xy -1.2192 1.9558) (xy -1.4224 1.6256) (xy -1.8796 0.8636) (xy -2.1336 0.4064)
-						(xy -2.4384 -0.0762) (xy -2.7432 -0.6096) (xy -2.921 -0.889) (xy -3.429 -1.7526) (xy -3.6576 -2.159)
-						(xy -3.8862 -2.54) (xy -4.1148 -2.8956) (xy -4.318 -3.2512) (xy -4.5212 -3.5814) (xy -4.6736 -3.8862)
-						(xy -4.8514 -4.1402) (xy -4.9784 -4.3942) (xy -5.1054 -4.5974) (xy -5.2324 -4.7752) (xy -5.3594 -5.0292)
-						(xy -5.4102 -5.1054) (xy -5.4102 -5.1308) (xy -0.7112 -5.1308) (xy -0.0254 -5.1562) (xy 0.4826 -5.1308)
-					)
-					(stroke
-						(width 0.127)
-						(type default)
-					)
-					(fill
-						(type background)
-					)
-				)
-			)
-			(symbol "SYM_ESD_Large_0_1"
-				(polyline
-					(pts
-						(xy -5.334 -5.08) (xy 5.334 -5.08) (xy 0 3.81) (xy -5.334 -5.08)
-					)
-					(stroke
-						(width 0.508)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-			)
-			(embedded_fonts no)
-		)
 		(symbol "ICM-45686:ICM-45686"
 			(pin_names
 				(offset 1.016)
@@ -10495,6 +10346,16 @@
 	)
 	(wire
 		(pts
+			(xy 398.78 219.71) (xy 398.78 223.52)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "522d5883-e109-4e12-a094-6b1438a6b9dd")
+	)
+	(wire
+		(pts
 			(xy 123.19 222.25) (xy 128.27 222.25)
 		)
 		(stroke
@@ -14444,6 +14305,72 @@
 		)
 	)
 	(symbol
+		(lib_id "Connector:TestPoint")
+		(at 398.78 223.52 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "07346673-d25a-4197-b810-708ffba0d21b")
+		(property "Reference" "TP16"
+			(at 397.002 229.362 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "3V3"
+			(at 397.51 231.902 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
+			(at 393.7 223.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 393.7 223.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "test point"
+			(at 398.78 223.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "b165ea7e-111c-42ba-9a3c-a3c861efeb60")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "TP16")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:FerriteBead")
 		(at 231.14 157.48 90)
 		(unit 1)
@@ -17026,7 +16953,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "SW_Push"
+		(property "Value" "RESET"
 			(at 124.968 182.88 90)
 			(effects
 				(font
@@ -20315,6 +20242,72 @@
 		)
 	)
 	(symbol
+		(lib_id "power:+3.3V")
+		(at 398.78 219.71 0)
+		(mirror y)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "722ce021-878d-4f49-abd7-9d5b3804131d")
+		(property "Reference" "#PWR058"
+			(at 398.78 223.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "+3.3V"
+			(at 398.78 215.646 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 398.78 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 398.78 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3.3V\""
+			(at 398.78 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "dd9a9425-cfa0-4fd1-993d-4d120c48cea8")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "#PWR058")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Connector:TestPoint")
 		(at 373.38 157.48 180)
 		(unit 1)
@@ -20943,79 +20936,6 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#PWR079")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Graphic:SYM_ESD_Large")
-		(at 185.42 123.19 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom no)
-		(on_board no)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "788aace7-09b9-48ab-bd44-0b683200c7cf")
-		(property "Reference" "#SYM1"
-			(at 185.42 118.11 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "SYM_ESD_Large"
-			(at 185.42 129.54 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Footprint" "Symbol:ESD-Logo_6.6x6mm_SilkScreen"
-			(at 185.293 123.952 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 185.293 123.952 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "ESD warning/\"Do not touch\" symbol, large"
-			(at 185.42 123.19 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Sim.Enable" "0"
-			(at 185.42 123.19 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(instances
-			(project ""
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "#SYM1")
 					(unit 1)
 				)
 			)
@@ -23266,7 +23186,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "SW_Push"
+		(property "Value" "USER"
 			(at 217.678 243.84 90)
 			(effects
 				(font
@@ -25917,7 +25837,7 @@
 				)
 			)
 		)
-		(property "Value" "SW_SPDT"
+		(property "Value" "BOOT"
 			(at 165.1 186.69 0)
 			(effects
 				(font

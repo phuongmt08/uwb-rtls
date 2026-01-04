@@ -1,14 +1,19 @@
-/* ============================== sys_config.c ===============================
+/**
  * @file       sys_config.c
- * @brief      System runtime configuration implementation
- * @version    1.0.0
- * @date       2025-11-15
+ * @copyright
+ * @license
+ * @version    1.1.0
+ * @date       2025-12-24
+ * @author     Phuong Mai
+ * @brief      
+ * @note       None
+ * @example    None
  */
-
 /* Includes ----------------------------------------------------------------- */
 #include "sys_config.h"
 #include "sys_logger.h"
 #include "platform_config.h"
+#include "positioning_config.h"
 #include <string.h>
 
 #ifdef HAVE_FLASH_STORAGE
@@ -18,27 +23,26 @@
 #endif
 
 /* Private defines ---------------------------------------------------------- */
-#define CONFIG_RAM_MAGIC    0xC0FEC0DE  /* Magic number for valid config */
+#define CONFIG_RAM_MAGIC    0xC0FEC0DE
 
 #ifdef HAVE_FLASH_STORAGE
-/* Flash sectors for config storage (dual-sector for wear leveling) */
-#define FLASH_SECTOR0_BASE  0x08040000u  /* Sector 6: 128KB */
+#define FLASH_SECTOR0_BASE  0x08040000u
 #define FLASH_SECTOR0_SIZE  (128u * 1024u)
-#define FLASH_SECTOR1_BASE  0x08060000u  /* Sector 7: 128KB */
+#define FLASH_SECTOR1_BASE  0x08060000u
 #define FLASH_SECTOR1_SIZE  (128u * 1024u)
 #endif
 
 /* Private variables -------------------------------------------------------- */
-static sys_config_t g_config;           /* Active configuration */
-
+static sys_config_t g_config;
 
 #ifdef HAVE_FLASH_STORAGE
-static bsp_flash_dual_t g_flash_storage;  /* Flash storage manager */
-static uint8_t g_flash_init_done = 0;     /* Flash init flag */
+static bsp_flash_dual_t g_flash_storage;
+static uint8_t g_flash_init_done = 0;
 #else
-static sys_config_t g_config_backup;    /* RAM backup storage */
-static uint32_t g_config_magic = 0;     /* Magic number for backup validity */
+static sys_config_t g_config_backup;
+static uint32_t g_config_magic = 0;
 #endif
+
 /* Private function prototypes ---------------------------------------------- */
 #ifdef HAVE_FLASH_STORAGE
 static uint32_t config_calc_crc32(const void *data, uint32_t len);
@@ -51,25 +55,17 @@ static int flash_storage_init(void);
 /* ========================================================================== */
 
 #ifdef HAVE_FLASH_STORAGE
-/**
- * @brief Hardware CRC32 calculation using bsp_util
- */
+
 static uint32_t config_calc_crc32(const void *data, uint32_t len)
 {
     return bsp_crc32(data, len);
 }
 
-/**
- * @brief Get timestamp for flash record (RTC timestamp)
- */
 static uint32_t config_get_timestamp(void)
 {
     return bsp_rtc_get_timestamp();
 }
 
-/**
- * @brief Initialize flash storage
- */
 static int flash_storage_init(void)
 {
     if (g_flash_init_done) {
@@ -107,12 +103,10 @@ void sys_config_init(void)
     sys_config_reset_to_defaults();
     
 #ifdef HAVE_FLASH_STORAGE
-    /* Initialize bsp_util for CRC and RTC */
     if (bsp_util_init() != BSP_UTIL_OK) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "BSP util init failed");
     }
     
-    /* Initialize flash storage */
     if (flash_storage_init() != 0) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Flash init failed, using RAM only");
     }
@@ -125,6 +119,7 @@ void sys_config_init(void)
     
     sys_config_print();
 }
+
 sys_config_t* sys_config_get(void)
 {
     return &g_config;
@@ -140,6 +135,7 @@ int sys_config_set_role(device_role_t role)
     g_config.role = role;
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Role set to: %s", 
            role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
+    
     return 0;
 }
 
@@ -168,9 +164,6 @@ int sys_config_set_ranging_method(ranging_method_t method)
     return 0;
 }
 
-/**
- * @brief Set UWB channel
- */
 int sys_config_set_uwb_channel(uint8_t channel)
 {
     if (channel < 1 || channel > 7) {
@@ -203,11 +196,9 @@ int sys_config_save(void)
         return -1;
     }
     
-    /* Calculate CRC32 (exclude crc32 field itself) */
     uint32_t crc_offset = offsetof(sys_config_t, crc32);
     g_config.crc32 = config_calc_crc32(&g_config, crc_offset);
     
-    /* Write to flash */
     bsp_flash_status_t status = bsp_flash_write_config(
         &g_flash_storage,
         &g_config,
@@ -227,7 +218,6 @@ int sys_config_save(void)
 #endif
     return 0;
 #else
-    /* Save to RAM backup */
     memcpy(&g_config_backup, &g_config, sizeof(sys_config_t));
     g_config_magic = CONFIG_RAM_MAGIC;
     
@@ -240,10 +230,9 @@ int sys_config_load(void)
 {
 #ifdef HAVE_FLASH_STORAGE
     if (!g_flash_init_done) {
-        return -1; /* Flash not initialized */
+        return -1;
     }
     
-    /* Read from flash */
     sys_config_t temp_config;
     uint32_t bytes_read = bsp_flash_read_config(
         &g_flash_storage,
@@ -256,7 +245,6 @@ int sys_config_load(void)
         return -1;
     }
     
-    /* Verify CRC32 */
     uint32_t crc_offset = offsetof(sys_config_t, crc32);
     uint32_t calc_crc = config_calc_crc32(&temp_config, crc_offset);
     
@@ -266,15 +254,20 @@ int sys_config_load(void)
         return -1;
     }
     
-    /* Check config version - warn but don't force reset to preserve user settings */
     if (temp_config.config_version != CONFIG_VERSION) {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Config version mismatch: flash=%u != fw=%u (keeping user settings)",
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Config version mismatch: flash=%u != fw=%u - resetting to defaults",
                temp_config.config_version, CONFIG_VERSION);
-        /* Update version in memory but keep other settings */
-        temp_config.config_version = CONFIG_VERSION;
+        /* Version changed - reset everything to defaults including antenna delays */
+        sys_config_reset_to_defaults();
+        /* Save defaults to flash immediately to override old config */
+        if (sys_config_save() == 0) {
+            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to flash");
+        } else {
+            RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Failed to save default config to flash");
+        }
+        return -1;  /* Return error to indicate config was reset */
     }
     
-    /* Validate config values */
     if (temp_config.role != DEVICE_ROLE_TAG && temp_config.role != DEVICE_ROLE_ANCHOR) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid role in flash");
         return -1;
@@ -285,42 +278,29 @@ int sys_config_load(void)
         return -1;
     }
     
-    /* Validate and fix RX timeout (5ms - 500ms range) */
     if (temp_config.rx_timeout_ms > 500 || temp_config.rx_timeout_ms < 5) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx_timeout=%lu in flash, forcing to %u ms",
                temp_config.rx_timeout_ms, DEFAULT_RX_TIMEOUT_MS);
         temp_config.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
     }
     
-    /* Validate and fix ranging period */
-    if (temp_config.ranging_period_ms > 1000 || temp_config.ranging_period_ms < 20) {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid period=%lu in flash, forcing to %u ms",
+    if (temp_config.ranging_period_ms > 5000 || temp_config.ranging_period_ms < 50) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid ranging_period=%u in flash, forcing to %u ms",
                temp_config.ranging_period_ms, DEFAULT_RANGING_PERIOD_MS);
         temp_config.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
     }
     
-    /* Auto-fix: Anchor RX timeout should be > Tag period to reliably catch POLL
-     * If timeout < period, force timeout = period + 50ms margin */
-    if (temp_config.rx_timeout_ms < temp_config.ranging_period_ms) {
-        uint32_t new_timeout = temp_config.ranging_period_ms + 50;
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "rx_timeout(%lu) < period(%lu), fixing to %lu ms",
-               temp_config.rx_timeout_ms, temp_config.ranging_period_ms, new_timeout);
-        temp_config.rx_timeout_ms = new_timeout;
-    }
-    
-    /* All checks passed, copy to active config */
     memcpy(&g_config, &temp_config, sizeof(sys_config_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
     return 0;
 #else
-    /* Load from RAM backup */
     if (g_config_magic == CONFIG_RAM_MAGIC) {
         memcpy(&g_config, &g_config_backup, sizeof(sys_config_t));
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from RAM");
         return 0;
     } else {
         RLOG_D(LOG_OBJECT_CODE_SYS_CFG, "No valid RAM backup found");
-        return -1; /* No valid backup */
+        return -1;
     }
 #endif
 }
@@ -347,7 +327,6 @@ int sys_config_set_antenna_delay(uint16_t tx_delay, uint16_t rx_delay)
     return 0;
 }
 
-
 int sys_config_set_tx_power(uint32_t power)
 {
     g_config.tx_power = power;
@@ -371,28 +350,18 @@ void sys_config_reset_to_defaults(void)
     g_config.hw_rev_major = DEFAULT_HW_REV_MAJOR;
     g_config.hw_rev_minor = DEFAULT_HW_REV_MINOR;
     
-    /* UWB radio config */
     g_config.uwb_prf = DEFAULT_UWB_PRF;
     g_config.uwb_data_rate = DEFAULT_UWB_DATA_RATE;
     g_config.uwb_preamble_code = DEFAULT_UWB_PREAMBLE_CODE;
     
-    /* Antenna delay */
+    /* Set default antenna delays for ALL roles (TAG and ANCHOR) */
     g_config.tx_antenna_delay = DEFAULT_TX_ANT_DLY;
     g_config.rx_antenna_delay = DEFAULT_RX_ANT_DLY;
-    
-    /* TX power */
     g_config.tx_power = DEFAULT_TX_POWER;
     
-#ifdef MULTIPLE_ANCHOR
-    /* Default anchor list - empty to auto-discover anchors */
-    /* Or manually set via command/config */
-    g_config.anchor_count = 0;  /* 0 = auto-discover mode */
-    // g_config.anchor_list[0] = 1;
-    // g_config.anchor_list[1] = 5;
-#endif
+    g_config.anchor_count = 0;
 }
 
-/* Update sys_config_print() to show all parameters: */
 void sys_config_print(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
@@ -419,13 +388,13 @@ void sys_config_print(void)
     
     if (g_config.role == DEVICE_ROLE_TAG) {
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- TIMING -----------------");
-        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Ranging Period: %d ms", g_config.ranging_period_ms);
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Ranging Period: %d ms (%d Hz)", 
+               g_config.ranging_period_ms, 1000 / g_config.ranging_period_ms);
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX Timeout    : %lu ms", g_config.rx_timeout_ms);
     }
     
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "==========================================");
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
 }
-
 
 /* End of file -------------------------------------------------------- */

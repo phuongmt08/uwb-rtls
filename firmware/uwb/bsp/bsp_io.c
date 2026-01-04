@@ -34,6 +34,9 @@ static volatile uint8_t      s_button_activity   = 0;
 static volatile uint8_t      s_dip_changed       = 0;
 static bool                  s_sm_active         = false;
 
+static uart_position_frame_t s_frame;
+static volatile uint8_t s_tx_busy = 0;
+
 /* UART handle (extern from main.c or usart.c) */
 extern UART_HandleTypeDef huart1;
 
@@ -222,27 +225,28 @@ bool bsp_io_dip_changed(void)
 
 bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error)
 {
-  uart_position_frame_t frame;
-  
-  /* Build frame */
-  frame.sof    = UART_SOF;
-  frame.x      = x;
-  frame.y      = y;
-  frame.z      = z;
-  frame.error  = error;
-  frame.length = sizeof(float) * 4; /* x + y + z + error = 16 bytes */
-  
-  /* Send via UART1 with interrupt */
-  HAL_StatusTypeDef status = HAL_UART_Transmit_IT(&huart1, 
-                                                   (uint8_t*)&frame, 
-                                                   sizeof(frame));
-  
-  if (status != HAL_OK)
-  {
-    return BSP_ERR;
-  }
-  
-  return BSP_OK;
+    if (s_tx_busy) return BSP_ERR; // hoặc queue lại
+
+    s_frame.sof    = UART_SOF;
+    s_frame.x      = x;
+    s_frame.y      = y;
+    s_frame.z      = z;
+    s_frame.error  = error;
+    s_frame.length = 16;
+
+    s_tx_busy = 1;
+    if (HAL_UART_Transmit_IT(&huart1, (uint8_t*)&s_frame, sizeof(s_frame)) != HAL_OK) {
+        s_tx_busy = 0;
+        return BSP_ERR;
+    }
+    return BSP_OK;
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1) {
+        s_tx_busy = 0;
+    }
 }
 
 /* Private function implementations ----------------------------------- */

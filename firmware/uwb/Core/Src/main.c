@@ -43,6 +43,21 @@
 #define BL_MAGIC_ADDR      (0x2001FFF0UL)
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
 
+/* ========== Position Test Mode ========== */
+#define TEST_SEND_POS           1     /* 0=disabled, 1=enabled */
+
+#if TEST_SEND_POS
+  #define TEST_DISABLE_RANGING    1     /* 1=disable ranging (UART only), 0=keep ranging */
+  #define TEST_POS_INTERVAL_MS    100   /* Send interval (ms) */
+  #define TEST_POS_START_X        1.0f  /* Start X coordinate */
+  #define TEST_POS_START_Y        1.0f  /* Start Y coordinate */
+  #define TEST_POS_END_X          5.0f  /* End X coordinate */
+  #define TEST_POS_END_Y          5.0f  /* End Y coordinate */
+  #define TEST_POS_STEP           0.5f  /* Step increment */
+  #define TEST_POS_Z              0.5f  /* Fixed Z coordinate */
+  #define TEST_POS_ERROR          0.1f  /* Fixed error estimate */
+#endif
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +69,12 @@
 
 /* USER CODE BEGIN PV */
 static bool s_ranging_enabled = true;
+
+#if TEST_SEND_POS
+static float s_test_x = TEST_POS_START_X;
+static float s_test_y = TEST_POS_START_Y;
+static uint32_t s_last_test_send_tick = 0;
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,6 +84,44 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+#if TEST_SEND_POS
+/**
+ * @brief Test function to send dummy position data via UART
+ * @note Non-blocking, called periodically from main loop
+ */
+static void test_send_position(void)
+{
+  uint32_t current_tick = HAL_GetTick();
+  
+  /* Check if enough time has passed */
+  if ((current_tick - s_last_test_send_tick) < TEST_POS_INTERVAL_MS) {
+    return;
+  }
+  
+  s_last_test_send_tick = current_tick;
+  
+  /* Send current position */
+  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, TEST_POS_ERROR);
+  
+  if (ret == BSP_OK) {
+    /* Update position for next send */
+    s_test_x += TEST_POS_STEP;
+    
+    /* Check X boundary */
+    if (s_test_x > TEST_POS_END_X) {
+      s_test_x = TEST_POS_START_X;
+      s_test_y += TEST_POS_STEP;
+      
+      /* Check Y boundary - loop back */
+      if (s_test_y > TEST_POS_END_Y) {
+        s_test_y = TEST_POS_START_Y;
+      }
+    }
+  }
+  /* If BSP_ERR (busy), just skip this interval and try next time */
+}
+#endif
 
 void app_reset_config(void)
 {
@@ -127,9 +186,26 @@ int main(void)
   sys_logger_init();
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
   
+#if TEST_SEND_POS
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)", 
+         TEST_POS_START_X, TEST_POS_START_Y, TEST_POS_END_X, TEST_POS_END_Y);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
+#if TEST_DISABLE_RANGING
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
+#endif
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+#endif
+  
   sys_config_init();
   sys_config_t *cfg = sys_config_get();
   
+#if TEST_SEND_POS && TEST_DISABLE_RANGING
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
+#else
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
   
   if (bsp_uwb_init() != 0) {
@@ -152,10 +228,12 @@ int main(void)
          uwb_cfg.tx_antenna_delay, uwb_cfg.rx_antenna_delay);
   
   bsp_uwb_configure(&uwb_cfg);
+#endif
   
   bsp_io_init();
   bsp_io_led_off();
   
+#if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
   /* Read DIP switch - ALWAYS OVERRIDES saved config */
   uint8_t dip_value = bsp_io_dip_read();
   if (dip_value == 0) {
@@ -175,6 +253,7 @@ int main(void)
     app_anchor_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -243,6 +322,9 @@ int main(void)
     }
     
     /* Process ranging if enabled */
+#if TEST_SEND_POS && TEST_DISABLE_RANGING
+    /* Ranging disabled in test mode */
+#else
     if (s_ranging_enabled)
     {
       sys_config_t *cfg_curr = sys_config_get();
@@ -252,6 +334,12 @@ int main(void)
         app_anchor_process(NULL);
       }
     }
+#endif`
+
+#if TEST_SEND_POS
+    /* Test mode: Send dummy position periodically */
+    test_send_position();
+#endif
 
     sys_logger_task();
     bsp_delay_ms(1);

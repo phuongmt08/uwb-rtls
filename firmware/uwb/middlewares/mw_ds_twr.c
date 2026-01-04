@@ -2,11 +2,12 @@
  * @file       mw_ds_twr.c
  * @copyright
  * @license
- * @version    2.2.0
- * @date       2025-12-15
+ * @version    2.2.1
+ * @date       2025-12-28
  * @author     Phuong Mai
- * @brief      
- * @note       None
+ * @brief      FIXED: Increased timeouts (15ms→30ms) + Added state guard to prevent premature POLL
+ * @note       FIX 1: WAIT_FINAL/RESULT_TIMEOUT_US: 15ms → 30ms (for 850k+PLEN1024)
+ *             FIX 2: Added ranging_state to prevent TAG from sending new POLL before completing sequence
  * @example    None
  */
 #include "mw_ds_twr.h"
@@ -36,14 +37,49 @@
 
 /* Total minimum delay = 300 + 500 + 100 + 1100 = 2000us = 2ms */
 #define MIN_FINAL_TX_DELAY_US  (DW1000_TURNAROUND_US + MCU_PROCESSING_US + ANTENNA_DELAY_US + SAFETY_MARGIN_US)
-#define FINAL_TX_DELAY_US      (3000) // 3ms - safe margin for MCU processing
-#define CORRECTION_TX_DELAY_US (1000) // 1ms gap between FINAL and CORRECTION
+#define FINAL_TX_DELAY_US      (5000) // 3ms - safe margin for MCU processing
+#define CORRECTION_TX_DELAY_US (5000) // 1ms gap between FINAL and CORRECTION
 
-/* Internal timeouts for message exchange (shorter than config timeout) */
-#define WAIT_FINAL_TIMEOUT_US  (15000)  // 15ms - Tag sends FINAL after 3ms delay
-#define WAIT_RESULT_TIMEOUT_US (15000)  // 15ms - Anchor sends RESULT quickly after FINAL
+/* ========================================================================
+ * FIX #1: INCREASED TIMEOUTS FOR 850kbps + PLEN=1024
+ * ========================================================================
+ * Old values: 15ms (too short → missed packets)
+ * New values: 30ms (safe margin for slow data rate)
+ * 
+ * Calculation:
+ * - PLEN=1024 @ 850kbps: ~12ms airtime
+ * - Processing + turnaround: ~3-5ms
+ * - Total needed: ~20ms minimum
+ * - Set to 30ms: 50% safety margin
+ * ======================================================================== */
+#define WAIT_FINAL_TIMEOUT_US  (30000)  // 15ms - Tag sends FINAL after 3ms delay
+#define WAIT_RESULT_TIMEOUT_US (30000)  // 15ms - Anchor sends RESULT quickly after FINAL
 
 #define CHECK_PARAM(cond, ret) do { if (!(cond)) return (ret); } while(0)
+
+/* ========================================================================
+ * FIX #2: STATE MACHINE TO PREVENT PREMATURE POLL
+ * ========================================================================
+ * Problem: TAG sends new POLL before receiving CORRECTION/RESULT
+ * Solution: Add state tracking to enforce sequence completion
+ * ======================================================================== */
+typedef enum {
+  RANGING_STATE_IDLE = 0,           // Ready to start new ranging
+  RANGING_STATE_POLL_SENT,          // Waiting for RESPONSE
+  RANGING_STATE_RESP_RECEIVED,      // Waiting for RESULT (HAVE_TX_DELAY) or sending FINAL (no HAVE_TX_DELAY)
+  RANGING_STATE_FINAL_SENT,         // Waiting for CORRECTION (HAVE_TX_DELAY)
+  RANGING_STATE_CORRECTION_SENT,    // Waiting for RESULT (HAVE_TX_DELAY)
+  RANGING_STATE_COMPLETE            // Sequence finished, can start new one
+} ranging_state_t;
+
+/* Global state tracker (in real implementation, should be per-tag context) */
+static ranging_state_t g_ranging_state = RANGING_STATE_IDLE;
+
+/* Helper: Check if ready to start new ranging sequence */
+static inline bool can_start_new_ranging(void) {
+  return (g_ranging_state == RANGING_STATE_IDLE || 
+          g_ranging_state == RANGING_STATE_COMPLETE);
+}
 
 /* 40-bit timestamp arithmetic */
 static inline uint64_t ts40_add(uint64_t ts, uint32_t dly)
@@ -59,13 +95,21 @@ static inline uint64_t ts40_sub(uint64_t ts, uint32_t dly)
 static inline bool is_valid_hal(const mw_dstwr_hal_t *hal);
 
 /* ====================================================================
- * TAG IMPLEMENTATION
+ * TAG IMPLEMENTATION (WITH STATE GUARD)
  * ==================================================================== */
 mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
                                     mw_dstwr_result_t *result)
 {
   CHECK_PARAM(config && config->hal, MW_DSTWR_ERR_PARAM);
   CHECK_PARAM(is_valid_hal(config->hal), MW_DSTWR_ERR_PARAM);
+
+  /* ========================================================================
+   * FIX #2: STATE GUARD - Prevent sending new POLL if previous not complete
+   * ======================================================================== */
+  if (!can_start_new_ranging()) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] REJECTED: Previous ranging not complete (state=%d)", g_ranging_state);
+    return MW_DSTWR_ERR_BUSY;  // Return busy error instead of proceeding
+  }
 
   sys_config_t *sys_cfg = sys_config_get();
   const mw_dstwr_hal_t *hal = config->hal;
@@ -84,31 +128,39 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
 
   if (hal->tx(&poll_msg, sizeof(poll_msg)) != 0) {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] POLL TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset state on failure
     return MW_DSTWR_ERR;
   }
 
-  /* DW1000 automatically completes TX before timestamp read */
-  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t1) != 0)
-    return MW_DSTWR_ERR;
+  g_ranging_state = RANGING_STATE_POLL_SENT;  // Update state
 
-  /* Step 2: Wait for RESPONSE with SHORT timeout
-   * Anchor responds quickly (~2-5ms), no need to wait 250ms
-   * Using short timeout allows fast retry if missed
-   */
+  /* DW1000 automatically completes TX before timestamp read */
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t1) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
+    return MW_DSTWR_ERR;
+  }
+
+  /* Step 2: Wait for RESPONSE with INCREASED timeout (30ms instead of 15ms) */
   if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_FINAL_TIMEOUT_US) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on timeout
     return MW_DSTWR_ERR_TIMEOUT;
   }
 
   if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_RESP, config->sequence_num)) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on invalid message
     return MW_DSTWR_ERR_INVALID_MSG;
   }
+
+  g_ranging_state = RANGING_STATE_RESP_RECEIVED;  // Update state
 
   /* Parse RESPONSE to get anchor_id */
   const mw_dstwr_resp_msg_t *resp_msg = (const mw_dstwr_resp_msg_t *)rx_buffer;
   uint8_t anchor_id = resp_msg->anchor_id;
 
-  if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t4) != 0)
+  if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t4) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
     return MW_DSTWR_ERR;
+  }
   
 #ifdef ENABLE_RSSI
   /* Read RSSI of RESPONSE message */
@@ -189,11 +241,15 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   /* Execute delayed transmission */
   if (hal->tx_delayed(&final_msg, sizeof(final_msg), scheduled_tx_time) != 0) {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] FINAL TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
     return MW_DSTWR_ERR;
   }
   
+  g_ranging_state = RANGING_STATE_FINAL_SENT;  // Update state
+
   /* Read ACTUAL TX timestamp after transmission completes */
   if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
     return MW_DSTWR_ERR;
   }
   
@@ -210,94 +266,102 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   mw_dstwr_correction_msg_t t5_correction = {
     .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
     .sequence_num = config->sequence_num,
-    .final_tx_timestamp = t5,  /* Actual T5 from TX_TIME register */
-    .distance_mm = 0
+    .final_tx_timestamp = t5,
+    .distance_mm = 0  /* Placeholder - will be filled by Anchor */
   };
   
   if (hal->tx_delayed(&t5_correction, sizeof(t5_correction), corr_scheduled_time) != 0) {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] T5 CORRECTION TX FAILED!");
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] CORRECTION TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
     return MW_DSTWR_ERR;
   }
 
-  /* Step 4: Wait for distance result from Anchor with SHORT timeout
-   * Anchor calculates and sends RESULT quickly (~5ms)
-   */
-  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
-    return MW_DSTWR_ERR_TIMEOUT;
-  }
-
-  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_RESULT, config->sequence_num)) {
-    return MW_DSTWR_ERR_INVALID_MSG;
-  }
-
-  /* Parse distance from Anchor's RESULT */
-  const mw_dstwr_result_msg_t *result_msg = (const mw_dstwr_result_msg_t *)rx_buffer;
-  int32_t distance_mm = result_msg->distance_mm;
-  float distance_m = (float)distance_mm / 1000.0f;
+  g_ranging_state = RANGING_STATE_CORRECTION_SENT;  // Update state
 
 #else
-  /* Step 3: Send FINAL with T5=0 (will be corrected later) */
+  /* Step 3: Send FINAL immediately (no delayed TX) */
   mw_dstwr_final_msg_t final_msg = {
     .msg_type = MW_DSTWR_MSG_TYPE_FINAL,
     .sequence_num = config->sequence_num,
     .poll_tx_timestamp = t1,
     .resp_rx_timestamp = t4,
-    .final_tx_timestamp = 0
+    .final_tx_timestamp = 0  /* Placeholder for T5 */
   };
 
-  if (hal->tx(&final_msg, sizeof(final_msg)) != 0)
+  if (hal->tx(&final_msg, sizeof(final_msg)) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] FINAL TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
     return MW_DSTWR_ERR;
+  }
 
-  /* DW1000 automatically completes TX before timestamp read */
-  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0)
+  g_ranging_state = RANGING_STATE_FINAL_SENT;  // Update state
+
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
     return MW_DSTWR_ERR;
+  }
 
-  /* Step 4: Send CORRECTION with real T5 immediately */
-  mw_dstwr_correction_msg_t tx_correction = {
+  /* Send T5 CORRECTION immediately after FINAL */
+  mw_dstwr_correction_msg_t t5_correction = {
     .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
     .sequence_num = config->sequence_num,
     .final_tx_timestamp = t5,
-    .distance_mm = 0  /* Not used in TX direction */
+    .distance_mm = 0
   };
 
-  if (hal->tx(&tx_correction, sizeof(tx_correction)) != 0)
+  if (hal->tx(&t5_correction, sizeof(t5_correction)) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] CORRECTION TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
     return MW_DSTWR_ERR;
+  }
 
-  /* Step 5: Wait for RESULT (0xE5) from Anchor (ANCHOR sends immediately after processing) */
-  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, config->rx_timeout_us) != 0)
-    return MW_DSTWR_ERR_TIMEOUT;
-
-  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_RESULT, config->sequence_num))
-    return MW_DSTWR_ERR_INVALID_MSG;
-
-  /* Parse distance (16-bit) from bytes 2-3 (after type and seq) */
-  int32_t distance_mm_raw = ((int32_t)rx_buffer[2]) |
-                            ((int32_t)rx_buffer[3] << 8);
-  
-  float distance_m = (float)distance_mm_raw / 1000.0f;
+  g_ranging_state = RANGING_STATE_CORRECTION_SENT;  // Update state
 #endif
 
-  /* Fill result structure (common for both modes) */
+  /* Step 4: Wait for RESULT with INCREASED timeout (30ms instead of 15ms) */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on timeout
+    return MW_DSTWR_ERR_TIMEOUT;
+  }
+
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_RESULT, config->sequence_num)) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on invalid message
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+
+  /* Parse distance from RESULT */
+  const mw_dstwr_result_msg_t *result_msg = (const mw_dstwr_result_msg_t *)rx_buffer;
+  float distance = result_msg->distance_mm / 1000.0f;
+
+  /* Fill result structure */
   if (result) {
     result->timestamps.t1 = t1;
-    result->timestamps.t2 = 0;
-    result->timestamps.t3 = 0;
+    result->timestamps.t2 = 0;  /* Unknown at Tag */
+    result->timestamps.t3 = 0;  /* Unknown at Tag */
     result->timestamps.t4 = t4;
     result->timestamps.t5 = t5;
-    result->timestamps.t6 = 0;
-    result->distance_m = distance_m;
-    result->anchor_id = anchor_id;  /* From RESPONSE message */
+    result->timestamps.t6 = 0;  /* Unknown at Tag */
+    result->distance_m = distance;
 #ifdef ENABLE_RSSI
-    result->rssi = (int8_t)(rssi_resp & 0xFF);
+    result->anchor_id = result_msg->anchor_id;
+    result->rssi = result_msg->rssi_final;
+#else
+    result->anchor_id = anchor_id;
+    result->rssi = 0;
 #endif
     result->valid = true;
   }
+
+  /* ========================================================================
+   * FIX #2: Mark sequence as COMPLETE - Now safe to start new ranging
+   * ======================================================================== */
+  g_ranging_state = RANGING_STATE_COMPLETE;
 
   return MW_DSTWR_OK;
 }
 
 /* ====================================================================
- * ANCHOR IMPLEMENTATION
+ * ANCHOR IMPLEMENTATION (WITH STATE GUARD)
  * ==================================================================== */
 mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
                                        mw_dstwr_result_t *result)
@@ -307,34 +371,33 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
 
   sys_config_t *sys_cfg = sys_config_get();
   const mw_dstwr_hal_t *hal = config->hal;
-  uint64_t t1 = 0, t2 = 0, t3 = 0, t4 = 0, t5 = 0, t6 = 0;
+  uint64_t t2 = 0, t3 = 0, t6 = 0, t1 = 0, t4 = 0, t5 = 0;
   uint8_t rx_buffer[RX_BUFFER_SIZE];
   uint16_t rx_length = 0;
-  uint8_t poll_seq = 0;
 
-  /* Step 1: Wait for POLL */
-  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, config->rx_timeout_us) != 0) {
+  /* Step 1: Wait for POLL (blocking with timeout) */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, config->rx_timeout_us) != 0)
     return MW_DSTWR_ERR_TIMEOUT;
-  }
 
-  /* Quick check: is this a POLL message? */
-  if (rx_buffer[0] != MW_DSTWR_MSG_TYPE_POLL || rx_length < 12) {
+  /* Validate POLL message (accept any sequence number if 0xFF) */
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_POLL, 0xFF)) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid POLL: type=0x%02X len=%u", rx_buffer[0], rx_length);
     return MW_DSTWR_ERR_INVALID_MSG;
   }
 
-  const mw_dstwr_poll_msg_t *poll_msg = (const mw_dstwr_poll_msg_t *)rx_buffer;
-  poll_seq = poll_msg->sequence_num;
-  
-  /* Check if this POLL is for us (or broadcast) */
-  uint8_t target_anchor = poll_msg->target_anchor;
-  if (target_anchor != ANCHOR_ID_BROADCAST && target_anchor != sys_cfg->device_id) {
+  /* Extract sequence number and target anchor ID from POLL */
+  const mw_dstwr_poll_msg_t *poll = (const mw_dstwr_poll_msg_t *)rx_buffer;
+  uint8_t poll_seq = poll->sequence_num;
+  uint8_t target_anchor = poll->target_anchor;
+
+  /* Check if this POLL is for us (0xFF means broadcast) */
+  if (target_anchor != 0xFF && target_anchor != sys_cfg->device_id) {
     /* Not for us, ignore silently */
-    /* NOTE: return OK for silent */
     return MW_DSTWR_OK;
   }
 
   if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t2) != 0)
-    return -10;
+    return MW_DSTWR_ERR;
   
 #ifdef ENABLE_RSSI
   /* Read RSSI of POLL message */
@@ -344,44 +407,37 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   }
 #endif
 
-  /* Step 2: Send RESPONSE */
+  /* Step 2: Send RESPONSE with embedded anchor_id */
   mw_dstwr_resp_msg_t resp_msg = {
     .msg_type = MW_DSTWR_MSG_TYPE_RESP,
     .sequence_num = poll_seq,
-    .anchor_id = sys_cfg->device_id,  /* Always send device ID */
-#ifdef ENABLE_RSSI
-    .rssi_poll = (uint8_t)(rssi_poll & 0xFF),
-#endif
+    .anchor_id = sys_cfg->device_id,  /* Send our anchor ID */
+    .rssi_last = 0,
     .padding = {0}
   };
 
-  if (hal->tx(&resp_msg, sizeof(resp_msg)) != 0) {
-    return -20;
-  }
+  if (hal->tx(&resp_msg, sizeof(resp_msg)) != 0)
+    return MW_DSTWR_ERR;
 
-  /* DW1000 automatically completes TX before timestamp read */
   if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t3) != 0)
-    return -30;
+    return MW_DSTWR_ERR;
 
-  /* Step 3: Wait for FINAL with SHORT timeout
-   * Tag sends FINAL after 3ms delay, so we only need ~15ms total wait
-   * Using config timeout here would wait too long and miss next POLL cycle
-   */
-  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_FINAL_TIMEOUT_US) != 0) {
+  /* Step 3: Wait for FINAL with INCREASED timeout (30ms instead of 15ms) */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_FINAL_TIMEOUT_US) != 0)
     return MW_DSTWR_ERR_TIMEOUT;
-  }
-
-  /* Check if we received POLL instead of FINAL (Tag missed our RESPONSE) */
-  if (rx_buffer[0] == MW_DSTWR_MSG_TYPE_POLL) {
-    return MW_DSTWR_ERR_SYNC_LOST;  /* Special error for retry logic */
-  }
 
   if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_FINAL, poll_seq)) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid FINAL: type=0x%02X len=%u", rx_buffer[0], rx_length);
     return MW_DSTWR_ERR_INVALID_MSG;
   }
 
+  /* Parse T1 and T4 from FINAL message */
+  const mw_dstwr_final_msg_t *final = (const mw_dstwr_final_msg_t *)rx_buffer;
+  t1 = final->poll_tx_timestamp & TIMESTAMP_40BIT_MASK;
+  t4 = final->resp_rx_timestamp & TIMESTAMP_40BIT_MASK;
+
   if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t6) != 0)
-    return -40;
+    return MW_DSTWR_ERR;
   
 #ifdef ENABLE_RSSI
   /* Read RSSI of FINAL message */
@@ -391,58 +447,11 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   }
 #endif
 
-  /* Parse FINAL message: [type:1][seq:1][T1:8][T4:8][T5:8] = 26 bytes */
-  t1 = ((uint64_t)rx_buffer[2]) |
-       ((uint64_t)rx_buffer[3] << 8) |
-       ((uint64_t)rx_buffer[4] << 16) |
-       ((uint64_t)rx_buffer[5] << 24) |
-       ((uint64_t)rx_buffer[6] << 32) |
-       ((uint64_t)rx_buffer[7] << 40) |
-       ((uint64_t)rx_buffer[8] << 48) |
-       ((uint64_t)rx_buffer[9] << 56);
-  t1 &= TIMESTAMP_40BIT_MASK;
-       
-  t4 = ((uint64_t)rx_buffer[10]) |
-       ((uint64_t)rx_buffer[11] << 8) |
-       ((uint64_t)rx_buffer[12] << 16) |
-       ((uint64_t)rx_buffer[13] << 24) |
-       ((uint64_t)rx_buffer[14] << 32) |
-       ((uint64_t)rx_buffer[15] << 40) |
-       ((uint64_t)rx_buffer[16] << 48) |
-       ((uint64_t)rx_buffer[17] << 56);
-  t4 &= TIMESTAMP_40BIT_MASK;
-
 #ifdef HAVE_TX_DELAY
-  /* In delayed TX mode with correction: T5 in FINAL is placeholder (0)
-   * Tag will send actual T5 in CORRECTION message immediately after
-   */
-  t5 = ((uint64_t)rx_buffer[18]) |
-       ((uint64_t)rx_buffer[19] << 8) |
-       ((uint64_t)rx_buffer[20] << 16) |
-       ((uint64_t)rx_buffer[21] << 24) |
-       ((uint64_t)rx_buffer[22] << 32) |
-       ((uint64_t)rx_buffer[23] << 40) |
-       ((uint64_t)rx_buffer[24] << 48) |
-       ((uint64_t)rx_buffer[25] << 56);
-  t5 &= TIMESTAMP_40BIT_MASK;
-  
-  /* ALWAYS wait for CORRECTION message with actual T5 from TX_TIME register
-   * This fixes delayed TX timing errors for maximum accuracy
-   */
+  /* Step 4: Wait for CORRECTION with T5 with INCREASED timeout (30ms) */
   if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] CORRECTION timeout");
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] CORRECTION TIMEOUT");
     return MW_DSTWR_ERR_TIMEOUT;
-  }
-  
-  /* Handle out-of-order frames: if we receive POLL instead of CORRECTION, retry once
-   * This handles phase-shift scenarios where TAG cycle overlaps
-   */
-  if (rx_buffer[0] == MW_DSTWR_MSG_TYPE_POLL) {
-    RLOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Got POLL while waiting CORRECTION, retry");
-    /* Try one more time to get CORRECTION */
-    if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
-      return MW_DSTWR_ERR_TIMEOUT;
-    }
   }
   
   if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_CORRECTION, poll_seq)) {
@@ -633,6 +642,14 @@ bool mw_dstwr_validate_message(const uint8_t *data, uint16_t length,
     default:
       return false;
   }
+}
+
+/* ====================================================================
+ * STATE RESET (for external use)
+ * ==================================================================== */
+void mw_dstwr_reset_state(void)
+{
+  g_ranging_state = RANGING_STATE_IDLE;
 }
 
 static inline bool is_valid_hal(const mw_dstwr_hal_t *hal)
