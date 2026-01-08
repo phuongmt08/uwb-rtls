@@ -31,7 +31,7 @@
 /**
  * Enable anchor calibration build (0=disabled, 1=enabled)
  */
-#define ENABLE_ANCHOR_AUTO_CALIB    1
+#define ENABLE_ANCHOR_AUTO_CALIB    0
 #if ENABLE_ANCHOR_AUTO_CALIB
 #define CALIB_REF_DISTANCE_M      14.64f  /* Physical distance Tag-Anchor (m) */
 #define CALIB_SAMPLES             25      /* Number of samples to collect */

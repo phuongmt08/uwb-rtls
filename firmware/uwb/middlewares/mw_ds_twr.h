@@ -81,7 +81,7 @@ typedef struct __attribute__((packed)) {
   int32_t distance_mm;     /* Distance in millimeters */
   uint8_t anchor_id;       /* Anchor that calculated this distance */
   uint8_t rssi_final;      /* RSSI of FINAL message */
-  uint8_t padding[2];
+  uint8_t padding[4];      /* Increased to 4 bytes to match validation (total 12 bytes) */
 } mw_dstwr_result_msg_t;
 
 /* ====================================================================

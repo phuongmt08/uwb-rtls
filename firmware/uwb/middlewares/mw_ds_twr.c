@@ -484,7 +484,9 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
 #ifdef ENABLE_RSSI
     .anchor_id = sys_cfg->device_id,
     .rssi_final = (uint8_t)(rssi_final & 0xFF),
-
+#else
+    .anchor_id = sys_cfg->device_id,
+    .rssi_final = 0,
 #endif
     .padding = {0}
   };
@@ -634,7 +636,7 @@ bool mw_dstwr_validate_message(const uint8_t *data, uint16_t length,
       return length >= 26;  /* FINAL: type+seq+T1+T4+T5 = 26 bytes */
       
     case MW_DSTWR_MSG_TYPE_RESULT:
-      return length >= 12;  /* RESULT: type+seq+dist+anchor+rssi+pad = 12 bytes */
+      return length >= 12;  /* RESULT: type+seq+dist(4)+anchor+rssi+pad(4) = 12 bytes */
       
     case MW_DSTWR_MSG_TYPE_CORRECTION:
       return length >= 14;  /* CORRECTION: type+seq+T5(8)+distance_mm(4) = 14 bytes */
