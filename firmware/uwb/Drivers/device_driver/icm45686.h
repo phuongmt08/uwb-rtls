@@ -4,7 +4,7 @@
  * @license
  * @version    0.1.0
  * @date       2025
- * @author
+ * @author     Phuong Mai
  * @brief      ICM-45686 6-axis IMU driver với low-noise configuration
  * @note       SPI mode 0/3, max 24MHz, MSB first
  * @example    None
@@ -38,6 +38,7 @@
 #define ICM_REG_GYRO_DATA_X0       0x26
 #define ICM_REG_SIGNAL_PATH_RESET  0x4B
 #define ICM_REG_INTF_CONFIG1       0x4D
+#define ICM_REG_SELF_TEST_CONFIG   0x70
 #define ICM_REG_REG_BANK_SEL       0x76
 
 /* Bank 1 registers - High resolution mode */
@@ -116,6 +117,56 @@ typedef struct
   int16_t y;
   int16_t z;
 } icm_axis_raw_t;
+
+typedef struct
+{
+  float x;
+  float y;
+  float z;
+} icm_axis_float_t;
+
+typedef icm_axis_raw_t icm_axis_offset_t;
+
+typedef struct
+{
+  icm_axis_offset_t gyro_offset;
+  icm_axis_offset_t accel_offset;
+} icm_calibration_t;
+
+typedef struct
+{
+  bool enable;
+  uint16_t frequency_hz;
+  uint8_t bandwidth;
+} icm_notch_filter_t;
+
+typedef struct
+{
+  bool use_low_noise_mode;
+  bool use_high_resolution;
+  icm_notch_filter_t gyro_notch;
+  icm_notch_filter_t accel_notch;
+  uint8_t gyro_ui_filt_ord;
+  uint8_t accel_ui_filt_ord;
+} icm_filter_config_t;
+
+typedef struct
+{
+  bool gyro_x_pass;
+  bool gyro_y_pass;
+  bool gyro_z_pass;
+  bool accel_x_pass;
+  bool accel_y_pass;
+  bool accel_z_pass;
+  bool all_pass;
+} icm_selftest_result_t;
+
+typedef struct
+{
+  bool data_ready;
+  bool fifo_overflow;
+  bool fifo_watermark;
+} icm_status_t;
 
 typedef struct
 {
