@@ -13,6 +13,31 @@
 #include <string.h>
 #include <math.h>
 
+/* EMA Filter --------------------------------------------------------- */
+
+void mw_filter_ema_init(ema_filter_t *filter, float alpha)
+{
+    if (!filter) return;
+    
+    filter->value = 0.0f;
+    filter->alpha = (alpha < 0.0f) ? 0.0f : (alpha > 1.0f) ? 1.0f : alpha;
+    filter->initialized = false;
+}
+
+float mw_filter_ema_update(ema_filter_t *filter, float measurement)
+{
+    if (!filter) return measurement;
+    
+    if (!filter->initialized) {
+        filter->value = measurement;
+        filter->initialized = true;
+    } else {
+        filter->value = filter->alpha * measurement + (1.0f - filter->alpha) * filter->value;
+    }
+    
+    return filter->value;
+}
+
 /* Adaptive Kalman Filter -------------------------------------------- */
 
 void mw_filter_akf_init(adaptive_kalman_2d_t *akf,

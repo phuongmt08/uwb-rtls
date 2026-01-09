@@ -2,18 +2,16 @@
  * @file       app_tag.c
  * @copyright
  * @license
- * @version    3.2.0
- * @date       2025-12-24
+ * @version    3.3.0
+ * @date       2026-01-10
  * @author     Phuong Mai
- * @brief      Non-blocking Tag with filtering and trilateration
+ * @brief      Non-blocking Tag with AKF (Adaptive Kalman Filter)
  * @note       
  * Pipeline:
  *   1. Raw 3D distance → Convert to 2D planar distance (height compensation)
- *   2. 2D distance → EMA filter (optional)
- *   3. Raw RSSI → EMA filter (optional)
- *   4. Filtered 2D distance + RSSI → Trilateration (auto-select best 3)
- *   5. Trilateration position → Kalman 2D
- *   6. Kalman R: Fixed tuning OR adaptive from RSSI
+ *   2. 2D planar distance → Trilateration (auto-select best 3)
+ *   3. Trilateration position → Adaptive Kalman Filter (AKF)
+ *   4. AKF: Innovation-based automatic R adaptation (no pre-filtering needed!)
  * @example    None
  */
 #include "app_tag.h"
@@ -41,14 +39,8 @@ static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
 
 /* Private types ------------------------------------------------------ */
 typedef struct {
-#if ENABLE_DISTANCE_FILTER
-    ema_filter_t dist_filter[NUM_ANCHORS];
-#endif
-#if ENABLE_RSSI_FILTER
-    ema_filter_t rssi_filter[NUM_ANCHORS];
-#endif
 #if MW_FILTER_ENABLE_KALMAN_2D
-    kalman_2d_t kalman;
+    adaptive_kalman_2d_t akf;
 #endif
 } filter_state_t;
 
@@ -62,7 +54,6 @@ static filter_state_t s_filters;
 /* Private function prototypes ---------------------------------------- */
 static void init_filters(void);
 static void process_ranging_results(sys_ranging_result_t *results, int num_success);
-static float rssi_to_r_scale(float avg_rssi);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 
 /* Private function implementations ----------------------------------- */
@@ -71,17 +62,8 @@ static void init_filters(void)
 {
     memset(&s_filters, 0, sizeof(s_filters));
 
-    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-#if ENABLE_DISTANCE_FILTER
-        mw_filter_ema_init(&s_filters.dist_filter[i], DISTANCE_EMA_ALPHA);
-#endif
-#if ENABLE_RSSI_FILTER
-        mw_filter_ema_init(&s_filters.rssi_filter[i], RSSI_EMA_ALPHA);
-#endif
-    }
-
 #if MW_FILTER_ENABLE_KALMAN_2D
-    /* Initialize at center of anchor layout */
+    /* Initialize Adaptive Kalman Filter at center of anchor layout */
     float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 4.0f;
     float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y) / 4.0f;
     
@@ -89,8 +71,9 @@ static void init_filters(void)
     sys_config_t *cfg = sys_config_get();
     float dt = cfg->ranging_period_ms / 1000.0f;
 
-    mw_filter_kalman2d_init(&s_filters.kalman, init_x, init_y, dt,
-                           KALMAN_PROCESS_NOISE, KALMAN_MEASURE_NOISE);
+    mw_filter_akf_init(&s_filters.akf, init_x, init_y, dt,
+                      AKF_PROCESS_NOISE, AKF_R_BASE,
+                      AKF_INNOVATION_ALPHA, AKF_R_SCALE_MIN, AKF_R_SCALE_MAX);
 #endif
 }
 
@@ -135,36 +118,12 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
     return true;
 }
 
-
-static float rssi_to_r_scale(float avg_rssi)
-{
-
-    if (avg_rssi > RSSI_THRESHOLD_EXCELLENT) {
-        return 1.0f;
-    } else if (avg_rssi > RSSI_THRESHOLD_GOOD) {
-        float range = RSSI_THRESHOLD_EXCELLENT - RSSI_THRESHOLD_GOOD;
-        float scale = 1.0f + ((RSSI_THRESHOLD_EXCELLENT - avg_rssi) / range) * 1.0f;
-        return scale;
-    } else if (avg_rssi > RSSI_THRESHOLD_MODERATE) {
-        float range = RSSI_THRESHOLD_GOOD - RSSI_THRESHOLD_MODERATE;
-        float scale = 2.0f + ((RSSI_THRESHOLD_GOOD - avg_rssi) / range) * 2.0f;
-        return scale;
-    } else if (avg_rssi > RSSI_THRESHOLD_POOR) {
-        float range = RSSI_THRESHOLD_MODERATE - RSSI_THRESHOLD_POOR;
-        float scale = 4.0f + ((RSSI_THRESHOLD_MODERATE - avg_rssi) / range) * 4.0f;
-        return scale;
-    } else {
-        return 8.0f;
-    }
-}
-
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
-    /* ==== STEP 1: Convert 3D to 2D + Apply EMA filters ==== */
+    /* ==== STEP 1: Convert 3D to 2D planar distance ==== */
     
     /* Use array indexed by anchor_id for proper mapping */
     mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1]; /* +1 for 1-based indexing */
-    float filtered_rssi_sum = 0.0f;
     uint8_t valid_count = 0;
     
     /* Initialize all as invalid */
@@ -202,34 +161,22 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             continue;
         }
         
-        /* Apply distance EMA filter (on 2D distance) */
-        float filtered_dist = (float)r2d;
-#if ENABLE_DISTANCE_FILTER
-        filtered_dist = mw_filter_ema_update(&s_filters.dist_filter[anchor_idx], 
-                                            (float)r2d);
-#endif
-
-        /* Apply RSSI EMA filter */
-        float filtered_rssi = (float)results[i].rssi;
-#if ENABLE_RSSI_FILTER
-        filtered_rssi = mw_filter_ema_update(&s_filters.rssi_filter[anchor_idx],
-                                            (float)results[i].rssi);
-#endif
-
-        filtered_rssi_sum += filtered_rssi;
+        /* Use raw 2D distance - AKF will handle filtering */
+        float distance_2d = (float)r2d;
+        int8_t rssi = (int8_t)results[i].rssi;
         
         /* Fill anchor data at correct position (indexed by anchor_id) */
         anchors_by_id[anchor_id].position = ANCHOR_POSITIONS[anchor_idx];
-        anchors_by_id[anchor_id].distance = filtered_dist;  /* 2D planar distance! */
-        anchors_by_id[anchor_id].rssi = (int8_t)filtered_rssi;
+        anchors_by_id[anchor_id].distance = distance_2d;  /* 2D planar distance */
+        anchors_by_id[anchor_id].rssi = rssi;
         anchors_by_id[anchor_id].id = anchor_id;
         anchors_by_id[anchor_id].valid = true;
         valid_count++;
         
         /* Debug: show conversion */
         RLOG_D(LOG_OBJECT_CODE_TAG,
-               "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm, filt=%.3fm)",
-               anchor_id, (float)r3d, (float)r2d, (float)dz, filtered_dist);
+               "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm, rssi=%ddBm)",
+               anchor_id, (float)r3d, (float)r2d, (float)dz, rssi);
     }
 
     /* ALWAYS log individual anchor distances (even if <3 anchors) */
@@ -287,30 +234,14 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 
-    /* ==== STEP 5: Calculate R_scale from filtered RSSI ==== */
-    float R_scale = 1.0f;
-
-#if ENABLE_RSSI_ADAPTIVE
-    if (valid_count > 0) {
-        float avg_rssi = filtered_rssi_sum / valid_count;
-        R_scale = rssi_to_r_scale(avg_rssi);
-    }
-#endif
-
-    /* ==== STEP 6: Apply Kalman filter ==== */
+    /* ==== STEP 5: Apply Adaptive Kalman Filter (AKF) ==== */
 #if MW_FILTER_ENABLE_KALMAN_2D
     pos_vel_2d_t final_position;
 
-    bool ok = mw_filter_kalman2d_update(&s_filters.kalman,
-                                       tril_position.x, tril_position.y,
-                                       R_scale, &final_position);
-
-    if (!ok) {
-        RLOG_W(LOG_OBJECT_CODE_TAG, "[KALMAN] Update failed");
-        RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        s_error_count++;
-        return;
-    }
+    /* AKF automatically adapts R based on innovation variance */
+    float R_scale = mw_filter_akf_update(&s_filters.akf,
+                                         tril_position.x, tril_position.y,
+                                         &final_position);
 
     /* Success! */
     s_success_count++;
@@ -324,7 +255,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
            (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
     RLOG_I(LOG_OBJECT_CODE_TAG, "Filtered: X=%.3fm Y=%.3fm (V=%.3fm/s)",
            final_position.x, final_position.y, velocity);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%.3fm R_scale=%.2f",
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%.3fm R_adapt=%.2f",
            (float)tril_result.error_estimate, R_scale);
 
     /* Send position via UART (X, Y, Z, ERROR) */

@@ -136,18 +136,20 @@
 #endif
 
 /**
- * Enable Kalman 2D filter
- * 1 = Smooth position with Kalman
+ * Enable Adaptive Kalman Filter (AKF)
+ * 1 = Smooth position with innovation-based adaptive AKF
  * 0 = Use raw trilateration output
+ * 
+ * Note: AKF automatically adapts measurement noise (R) based on
+ *       innovation variance - no manual R tuning or RSSI needed!
  */
 #ifndef MW_FILTER_ENABLE_KALMAN_2D
 #define MW_FILTER_ENABLE_KALMAN_2D  1
 #endif
 
 /**
- * Kalman R tuning method
- * 0 = Fixed R (manual tuning)
- * 1 = Adaptive R from RSSI (auto adjust based on signal quality)
+ * DEPRECATED: RSSI adaptive mode (no longer used with AKF)
+ * AKF uses innovation-based adaptation which is more robust than RSSI
  */
 #ifndef ENABLE_RSSI_ADAPTIVE
 #define ENABLE_RSSI_ADAPTIVE  0
@@ -166,54 +168,60 @@
 
 #ifdef PRESET_WORST_CASE
     /* Heavy filtering for noisy environment */
-    #undef DISTANCE_EMA_ALPHA
-    #undef RSSI_EMA_ALPHA
-    #undef KALMAN_PROCESS_NOISE
-    #undef KALMAN_MEASURE_NOISE
+    #undef AKF_PROCESS_NOISE
+    #undef AKF_R_BASE
+    #undef AKF_INNOVATION_ALPHA
+    #undef AKF_R_SCALE_MIN
+    #undef AKF_R_SCALE_MAX
     #undef MAX_ACCEPTABLE_ERROR_M
-    #undef ENABLE_RSSI_ADAPTIVE
     
-    #define DISTANCE_EMA_ALPHA          0.2f  /* Heavy smoothing */
-    #define RSSI_EMA_ALPHA              0.15f /* Very smooth */
-    #define KALMAN_PROCESS_NOISE        0.5f  /* Moderate movement response */
-    #define KALMAN_MEASURE_NOISE        5.0f  /* Low trust in measurements */
+    #define AKF_PROCESS_NOISE           0.01f /* Low process noise (stable) */
+    #define AKF_R_BASE                  0.5f  /* Base measurement noise */
+    #define AKF_INNOVATION_ALPHA        0.2f  /* Smooth adaptation */
+    #define AKF_R_SCALE_MIN             0.5f  /* Trust more when stable */
+    #define AKF_R_SCALE_MAX             5.0f  /* Increase R when unstable */
     #define MAX_ACCEPTABLE_ERROR_M      2.0f  /* Accept poor quality */
-    #define ENABLE_RSSI_ADAPTIVE        0     /* Fixed R */
 #endif
 
 #ifdef PRESET_BEST_CASE
     /* Light filtering for clean environment */
-    #undef DISTANCE_EMA_ALPHA
-    #undef RSSI_EMA_ALPHA
-    #undef KALMAN_PROCESS_NOISE
-    #undef KALMAN_MEASURE_NOISE
+    #undef AKF_PROCESS_NOISE
+    #undef AKF_R_BASE
+    #undef AKF_INNOVATION_ALPHA
+    #undef AKF_R_SCALE_MIN
+    #undef AKF_R_SCALE_MAX
     #undef MAX_ACCEPTABLE_ERROR_M
-    #undef ENABLE_RSSI_ADAPTIVE
     
-    #define DISTANCE_EMA_ALPHA          0.5f  /* Fast response */
-    #define RSSI_EMA_ALPHA              0.3f  /* Moderate smoothing */
-    #define KALMAN_PROCESS_NOISE        0.8f  /* Responsive to movement */
-    #define KALMAN_MEASURE_NOISE        0.6f  /* High trust in measurements */
+    #define AKF_PROCESS_NOISE           0.05f /* Higher Q for responsive tracking */
+    #define AKF_R_BASE                  0.2f  /* Lower base R (trust measurements) */
+    #define AKF_INNOVATION_ALPHA        0.4f  /* Faster adaptation */
+    #define AKF_R_SCALE_MIN             0.3f  /* More aggressive trust */
+    #define AKF_R_SCALE_MAX             3.0f  /* Lower max R */
     #define MAX_ACCEPTABLE_ERROR_M      0.8f  /* Strict quality gating */
-    #define ENABLE_RSSI_ADAPTIVE        1     /* Adaptive R */
 #endif
 
 /* ===== MANUAL TUNING (if no preset selected) ===== */
 
-#ifndef DISTANCE_EMA_ALPHA
-#define DISTANCE_EMA_ALPHA  0.4f
+/* ===== Adaptive Kalman Filter (AKF) Parameters ===== */
+
+#ifndef AKF_PROCESS_NOISE
+#define AKF_PROCESS_NOISE  0.01f  /* Process noise Q (fixed) */
 #endif
 
-#ifndef RSSI_EMA_ALPHA
-#define RSSI_EMA_ALPHA  0.3f
+#ifndef AKF_R_BASE
+#define AKF_R_BASE  0.3f  /* Base measurement noise */
 #endif
 
-#ifndef KALMAN_PROCESS_NOISE
-#define KALMAN_PROCESS_NOISE  0.5f
+#ifndef AKF_INNOVATION_ALPHA
+#define AKF_INNOVATION_ALPHA  0.3f  /* EMA for innovation (0.2-0.5) */
 #endif
 
-#ifndef KALMAN_MEASURE_NOISE
-#define KALMAN_MEASURE_NOISE  1.0f
+#ifndef AKF_R_SCALE_MIN
+#define AKF_R_SCALE_MIN  0.3f  /* Min R multiplier (high confidence) */
+#endif
+
+#ifndef AKF_R_SCALE_MAX
+#define AKF_R_SCALE_MAX  4.0f  /* Max R multiplier (low confidence) */
 #endif
 
 #ifndef MAX_ACCEPTABLE_ERROR_M
