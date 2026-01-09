@@ -2,41 +2,19 @@
  * @file       mw_filter.c
  * @copyright
  * @license
- * @version    3.0.0
+ * @version    3.1.0
  * @date       2026-01-10
  * @author     Phuong Mai
  * @brief      Adaptive Kalman Filter with Innovation-based R tuning
- * @note       Replaced old KF2D + RSSI with innovation-based AKF
+ * @note       
+ *   - Uses continuous white noise acceleration model (physically correct)
+ *   - Q inflation based on innovation magnitude for responsive tracking
+ *   - Automatic R adaptation via innovation variance
  * @example    None
  */
 #include "mw_filter.h"
 #include <string.h>
 #include <math.h>
-
-/* EMA Filter --------------------------------------------------------- */
-
-void mw_filter_ema_init(ema_filter_t *filter, float alpha)
-{
-    if (!filter) return;
-    
-    filter->value = 0.0f;
-    filter->alpha = (alpha < 0.0f) ? 0.0f : (alpha > 1.0f) ? 1.0f : alpha;
-    filter->initialized = false;
-}
-
-float mw_filter_ema_update(ema_filter_t *filter, float measurement)
-{
-    if (!filter) return measurement;
-    
-    if (!filter->initialized) {
-        filter->value = measurement;
-        filter->initialized = true;
-    } else {
-        filter->value = filter->alpha * measurement + (1.0f - filter->alpha) * filter->value;
-    }
-    
-    return filter->value;
-}
 
 /* Adaptive Kalman Filter -------------------------------------------- */
 
@@ -105,23 +83,42 @@ float mw_filter_akf_update(adaptive_kalman_2d_t *akf,
     float y_pred = akf->state[2] + akf->state[3] * dt;
     float vy_pred = akf->state[3];
     
-    /* Covariance prediction: P_k = F * P_{k-1} * F^T + Q
-     * Simplified for constant velocity model
-     */
-    float P00 = akf->P[0][0] + 2.0f*dt*akf->P[0][1] + dt*dt*akf->P[1][1] + Q;
-    float P01 = akf->P[0][1] + dt*akf->P[1][1];
-    float P11 = akf->P[1][1] + Q;
-    float P22 = akf->P[2][2] + 2.0f*dt*akf->P[2][3] + dt*dt*akf->P[3][3] + Q;
-    float P23 = akf->P[2][3] + dt*akf->P[3][3];
-    float P33 = akf->P[3][3] + Q;
-    
-    /* ===== INNOVATION CALCULATION ===== */
+    /* ===== INNOVATION CALCULATION (before covariance) ===== */
     
     /* Innovation (measurement residual): y = z - H*x_pred
      * Where H = [1 0 0 0; 0 0 1 0] (we measure position only)
      */
     float innov_x = mx - x_pred;
     float innov_y = my - y_pred;
+    
+    /* Inflate Q based on innovation magnitude for better tracking */
+    float innov_magnitude = fabsf(innov_x) + fabsf(innov_y);
+    float q_scale = 1.0f + 0.5f * innov_magnitude;  /* beta = 0.5 */
+    float sigma_a2 = Q * q_scale;  /* Acceleration noise variance */
+    
+    /* Covariance prediction: P_k = F * P_{k-1} * F^T + Q
+     * Using continuous white noise acceleration model (physically correct)
+     */
+    float dt2 = dt * dt;
+    float dt3 = dt2 * dt;
+    float dt4 = dt3 * dt;
+    
+    /* Process noise covariance from acceleration */
+    float Q_pos_pos = 0.25f * sigma_a2 * dt4;  /* Position variance */
+    float Q_pos_vel = 0.5f  * sigma_a2 * dt3;  /* Position-velocity covariance */
+    float Q_vel_vel = sigma_a2 * dt2;          /* Velocity variance */
+    
+    /* X-axis covariance propagation */
+    float P00 = akf->P[0][0] + 2.0f*dt*akf->P[0][1] + dt2*akf->P[1][1] + Q_pos_pos;
+    float P01 = akf->P[0][1] + dt*akf->P[1][1] + Q_pos_vel;
+    float P11 = akf->P[1][1] + Q_vel_vel;
+    
+    /* Y-axis covariance propagation */
+    float P22 = akf->P[2][2] + 2.0f*dt*akf->P[2][3] + dt2*akf->P[3][3] + Q_pos_pos;
+    float P23 = akf->P[2][3] + dt*akf->P[3][3] + Q_pos_vel;
+    float P33 = akf->P[3][3] + Q_vel_vel;
+    
+    /* ===== INNOVATION VARIANCE TRACKING ===== */
     
     /* Innovation magnitude squared (Euclidean distance^2) */
     float innov_magnitude_sq = innov_x*innov_x + innov_y*innov_y;

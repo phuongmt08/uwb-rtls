@@ -5,7 +5,7 @@
  * @version    3.0.0
  * @date       2026-01-10
  * @author     Phuong Mai
- * @brief      Adaptive Kalman Filter with Innovation & Velocity-based tuning
+ * @brief      Adaptive Kalman Filter with Innovation & Q inflation
  * @example    None
  */
 #ifndef __MW_FILTER_H
@@ -52,7 +52,9 @@ typedef struct {
  * @param akf Adaptive Kalman filter structure
  * @param x0, y0 Initial position (meters)
  * @param dt Time step (seconds, e.g., 0.1 for 10Hz)
- * @param Q Process noise (fixed, e.g., 0.001-0.01)
+ * @param Q Acceleration noise variance (e.g., 0.001-0.05)
+ *          - Inflated automatically based on innovation magnitude
+ *          - Uses continuous white noise acceleration model
  * @param R_base Base measurement noise (e.g., 0.1-0.5)
  * @param innovation_alpha EMA for innovation variance (0.2=smooth, 0.5=responsive)
  * @param R_scale_min Min R scale (0.3 = trust more when stable)
