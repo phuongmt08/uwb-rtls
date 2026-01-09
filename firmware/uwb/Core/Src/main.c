@@ -44,7 +44,7 @@
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
 
 /* ========== Position Test Mode ========== */
-#define TEST_SEND_POS           1     /* 0=disabled, 1=enabled */
+#define TEST_SEND_POS           0     /* 0=disabled, 1=enabled */
 
 #if TEST_SEND_POS
   #define TEST_DISABLE_RANGING    1     /* 1=disable ranging (UART only), 0=keep ranging */
@@ -53,7 +53,7 @@
   #define TEST_POS_START_Y        1.0f  /* Start Y coordinate */
   #define TEST_POS_END_X          5.0f  /* End X coordinate */
   #define TEST_POS_END_Y          5.0f  /* End Y coordinate */
-  #define TEST_POS_STEP           0.5f  /* Step increment */
+  #define TEST_POS_STEP           0.5f  /* Step increment 	*/
   #define TEST_POS_Z              0.5f  /* Fixed Z coordinate */
   #define TEST_POS_ERROR          0.1f  /* Fixed error estimate */
 #endif

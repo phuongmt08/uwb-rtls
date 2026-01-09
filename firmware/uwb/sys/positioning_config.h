@@ -33,7 +33,7 @@
  */
 #define ENABLE_ANCHOR_AUTO_CALIB    0
 #if ENABLE_ANCHOR_AUTO_CALIB
-#define CALIB_REF_DISTANCE_M      14.64f  /* Physical distance Tag-Anchor (m) */
+#define CALIB_REF_DISTANCE_M      5.6f  /* Physical distance Tag-Anchor (m) */
 #define CALIB_SAMPLES             25      /* Number of samples to collect */
 #define CALIB_ERROR_THRESHOLD_M   0.02f   // Stop if error < 2cm
 #define CALIB_MIN_DELTA_STEP      3       // Stop if step < 3
@@ -70,14 +70,14 @@
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
 
-#define ANCHOR_2_X   0.0f
-#define ANCHOR_2_Y   14.64f
+#define ANCHOR_2_X   5.2f
+#define ANCHOR_2_Y   0.0f
 
-#define ANCHOR_3_X   9.76f
-#define ANCHOR_3_Y   0.0f
+#define ANCHOR_3_X   0.0f
+#define ANCHOR_3_Y   2.0f
 
 #define ANCHOR_4_X   0.0f
-#define ANCHOR_4_Y   2.0f
+#define ANCHOR_4_Y   0.0f
 
 /**
  * @brief Individual anchor heights (optional - use if heights differ)

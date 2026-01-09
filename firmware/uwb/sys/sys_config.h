@@ -86,15 +86,15 @@ typedef struct {
 #define DEFAULT_RANGING_PERIOD_MS   100  /* 10Hz */
 #define DEFAULT_RX_TIMEOUT_MS       150
 
-#define CONFIG_VERSION              5
+#define CONFIG_VERSION              6
 
-#define DEFAULT_UWB_CHANNEL         2
+#define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
 #define DEFAULT_UWB_DATA_RATE       1
 #define DEFAULT_UWB_PREAMBLE_CODE   9
 #define DEFAULT_TX_ANT_DLY          16436
 #define DEFAULT_RX_ANT_DLY          16436
-#define DEFAULT_TX_POWER            0x67676767UL
+#define DEFAULT_TX_POWER            0x0E082848UL
 #define DEFAULT_HW_REV_MAJOR        1
 #define DEFAULT_HW_REV_MINOR        0
 /* ========================================================================== */
