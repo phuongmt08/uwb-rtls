@@ -26,13 +26,13 @@ import time
 class UDPReceiver(QThread):
     """Thread để nhận UDP data"""
     position_received = pyqtSignal(dict)
-    
-    def __init__(self, port=5000):
+
+    def __init__(self, port=5005):
         super().__init__()
         self.port = port
         self.running = False
         self.sock = None
-    
+
     def run(self):
         """Nhận dữ liệu UDP"""
         self.running = True
@@ -40,36 +40,34 @@ class UDPReceiver(QThread):
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind(('0.0.0.0', self.port))
             self.sock.settimeout(1.0)
-            
+
             while self.running:
                 try:
                     data, addr = self.sock.recvfrom(1024)
-                    
-                    # Parse UDP data (28 bytes)
-                    if len(data) == 28:
-                        x, y, z, error, timestamp = struct.unpack('<ffffq', data)
-                        
+
+                    # Parse UDP data (12 bytes for x, y, z)
+                    if len(data) == 12:
+                        x, y, z = struct.unpack('<fff', data)
+
                         position = {
                             'x': x,
                             'y': y,
-                            'z': z,
-                            'error': error,
-                            'timestamp': timestamp / 1000000.0  # Convert to seconds
+                            'z': z
                         }
-                        
+
                         self.position_received.emit(position)
-                        
+
                 except socket.timeout:
                     continue
                 except Exception as e:
                     print(f"Parse error: {e}")
-                    
+
         except Exception as e:
             print(f"UDP receiver error: {e}")
         finally:
             if self.sock:
                 self.sock.close()
-    
+
     def stop(self):
         """Dừng thread"""
         self.running = False
@@ -253,7 +251,7 @@ class MainWindow(QMainWindow):
         
         port_layout = QHBoxLayout()
         port_layout.addWidget(QLabel("UDP Port:"))
-        self.port_input = QLineEdit("5000")
+        self.port_input = QLineEdit("5005")
         self.port_input.setMaximumWidth(100)
         port_layout.addWidget(self.port_input)
         conn_layout.addLayout(port_layout)

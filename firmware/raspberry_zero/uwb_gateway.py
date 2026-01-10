@@ -192,14 +192,11 @@ class UwbGateway:
             True if sent successfully, False otherwise
         """
         try:
-            # Format: Simple binary format (same as UART frame for now)
-            # Can be changed to JSON, Protocol Buffers, etc.
-            data = struct.pack('<ffffq',
+            # Format: Binary format with only x, y, z (12 bytes)
+            data = struct.pack('<fff',
                 position.x,
                 position.y,
-                position.z,
-                position.error,
-                int(position.timestamp * 1000000)  # microseconds
+                position.z
             )
             
             self.udp_socket.sendto(data, (self.udp_host, self.udp_port))
