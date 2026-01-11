@@ -1,6 +1,6 @@
 """
-UWB Position Dashboard - PyQt5
-Simple and lightweight dashboard for visualizing UWB position data
+Modern UWB Position Dashboard - PyQt5
+Beautiful and professional dashboard for visualizing UWB position data
 
 Requirements:
     pip install PyQt5
@@ -10,16 +10,15 @@ Usage:
 """
 
 import sys
-import json
 import socket
 import struct
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
-    QGroupBox, QGridLayout, QMessageBox
+    QGroupBox, QGridLayout, QMessageBox, QFrame, QScrollArea
 )
-from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
-from PyQt5.QtGui import QPainter, QColor, QPen, QFont
+from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize
+from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient, QBrush, QPainterPath, QIcon
 import time
 
 
@@ -57,6 +56,10 @@ class UDPReceiver(QThread):
 
                         self.position_received.emit(position)
 
+                    if len(data) == 12:
+                        x, y, z = struct.unpack('<fff', data)
+                        position = {'x': x, 'y': y, 'z': z}
+                        self.position_received.emit(position)
                 except socket.timeout:
                     continue
                 except Exception as e:
@@ -73,21 +76,29 @@ class UDPReceiver(QThread):
         self.running = False
 
 
-class PositionCanvas(QWidget):
-    """Widget vẽ vị trí 2D"""
+class ModernPositionCanvas(QWidget):
+    """Modern widget vẽ vị trí 2D với hiệu ứng đẹp"""
     
     def __init__(self):
         super().__init__()
-        self.setMinimumSize(600, 600)
+        self.setMinimumSize(700, 550)
         
-        # Data
-        self.position = {'x': 0, 'y': 0, 'z': 0, 'error': 0}
+        self.position = {'x': 0, 'y': 0, 'z': 0}
         self.anchors = []
         self.history = []
-        self.max_history = 50
+        self.max_history = 30
+        
+        # Throttle updates
+        self.last_update_time = 0
+        self.update_interval = 0.05  # 50ms minimum between updates
     
     def update_position(self, position):
-        """Cập nhật vị trí"""
+        """Cập nhật vị trí với throttling"""
+        current_time = time.time()
+        if current_time - self.last_update_time < self.update_interval:
+            return
+        
+        self.last_update_time = current_time
         self.position = position
         self.history.append((position['x'], position['y']))
         if len(self.history) > self.max_history:
@@ -100,19 +111,19 @@ class PositionCanvas(QWidget):
         self.update()
     
     def paintEvent(self, event):
-        """Vẽ canvas"""
+        """Vẽ canvas với thiết kế hiện đại"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
         
-        # Background
-        painter.fillRect(self.rect(), QColor(30, 30, 30))
+        # Solid background
+        painter.fillRect(self.rect(), QColor(30, 41, 59))
         
         # Calculate bounds
-        margin = 50
+        margin = 60
         width = self.width() - 2 * margin
         height = self.height() - 2 * margin
         
-        # Get all coordinates for auto-scale
         all_x = [a['x'] for a in self.anchors] + [self.position['x']]
         all_y = [a['y'] for a in self.anchors] + [self.position['y']]
         
@@ -128,17 +139,15 @@ class PositionCanvas(QWidget):
         range_x = max_x - min_x
         range_y = max_y - min_y
         
-        # Scale
         scale = min(width / range_x, height / range_y) if range_x > 0 and range_y > 0 else 50
         
         def to_canvas(x, y):
-            """Convert world coordinates to canvas coordinates"""
             cx = margin + (x - min_x) * scale
             cy = self.height() - margin - (y - min_y) * scale
             return int(cx), int(cy)
         
-        # Draw grid
-        painter.setPen(QPen(QColor(60, 60, 60), 1))
+        # Draw modern grid
+        painter.setPen(QPen(QColor(51, 65, 85, 80), 1, Qt.DotLine))
         for i in range(int(min_x), int(max_x) + 1):
             x1, y1 = to_canvas(i, min_y)
             x2, y2 = to_canvas(i, max_y)
@@ -149,63 +158,218 @@ class PositionCanvas(QWidget):
             x2, y2 = to_canvas(max_x, i)
             painter.drawLine(x1, y1, x2, y2)
         
-        # Draw history trail
+        # Draw axis labels
+        painter.setFont(QFont('Segoe UI', 9))
+        painter.setPen(QColor(148, 163, 184))
+        for i in range(int(min_x), int(max_x) + 1):
+            x, y = to_canvas(i, min_y)
+            painter.drawText(x - 10, self.height() - margin + 20, f"{i}m")
+        for i in range(int(min_y), int(max_y) + 1):
+            x, y = to_canvas(min_x, i)
+            painter.drawText(margin - 35, y + 5, f"{i}m")
+        
+        # Draw history trail - simplified
         if len(self.history) > 1:
-            painter.setPen(QPen(QColor(100, 255, 100, 100), 2))
+            painter.setPen(QPen(QColor(96, 165, 250, 120), 2))
             for i in range(len(self.history) - 1):
                 x1, y1 = to_canvas(self.history[i][0], self.history[i][1])
                 x2, y2 = to_canvas(self.history[i+1][0], self.history[i+1][1])
                 painter.drawLine(x1, y1, x2, y2)
         
-        # Draw anchors
-        painter.setFont(QFont('Arial', 10))
+        # Draw connection lines from tag to anchors (faded)
+        px, py = to_canvas(self.position['x'], self.position['y'])
+        for anchor in self.anchors:
+            ax, ay = to_canvas(anchor['x'], anchor['y'])
+            painter.setPen(QPen(QColor(99, 102, 241, 40), 1, Qt.DashLine))
+            painter.drawLine(px, py, ax, ay)
+        
+        # Draw anchors with modern style
+        painter.setFont(QFont('Segoe UI', 10, QFont.Bold))
         for anchor in self.anchors:
             cx, cy = to_canvas(anchor['x'], anchor['y'])
             
             # Anchor circle
-            painter.setPen(QPen(QColor(50, 150, 255), 2))
-            painter.setBrush(QColor(50, 150, 255))
-            painter.drawEllipse(cx - 8, cy - 8, 16, 16)
+            painter.setPen(QPen(QColor(99, 102, 241), 3))
+            painter.setBrush(QColor(30, 41, 59))
+            painter.drawEllipse(cx - 10, cy - 10, 20, 20)
             
-            # Label
-            painter.setPen(QColor(255, 255, 255))
-            painter.drawText(cx + 15, cy - 10, anchor['label'])
-            painter.drawText(cx + 15, cy + 5, f"({anchor['x']:.1f}, {anchor['y']:.1f})")
+            # Inner dot
+            painter.setBrush(QColor(99, 102, 241))
+            painter.drawEllipse(cx - 4, cy - 4, 8, 8)
+            
+            # Label with background
+            label_rect = painter.fontMetrics().boundingRect(anchor['label'])
+            label_rect.moveCenter(painter.fontMetrics().boundingRect(anchor['label']).center())
+            label_rect.translate(cx + 25, cy - 20)
+            
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(30, 41, 59, 200))
+            painter.drawRoundedRect(label_rect.adjusted(-4, -2, 4, 2), 4, 4)
+            
+            painter.setPen(QColor(226, 232, 240))
+            painter.drawText(cx + 25, cy - 15, anchor['label'])
+            
+            # Coordinates
+            painter.setFont(QFont('Segoe UI', 8))
+            painter.setPen(QColor(148, 163, 184))
+            painter.drawText(cx + 25, cy, f"({anchor['x']:.1f}, {anchor['y']:.1f})")
+            painter.setFont(QFont('Segoe UI', 10, QFont.Bold))
         
-        # Draw current position
-        px, py = to_canvas(self.position['x'], self.position['y'])
-        
-        # Error circle
-        error_radius = int(self.position['error'] * scale)
-        painter.setPen(QPen(QColor(255, 100, 100, 100), 2))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(px - error_radius, py - error_radius, 
-                          error_radius * 2, error_radius * 2)
+        # Error circle - COMMENTED OUT FOR FUTURE USE
+        # if self.position.get('error', 0) > 0:
+        #     error_radius = int(self.position['error'] * scale)
+        #     painter.setPen(QPen(QColor(239, 68, 68, 60), 2, Qt.DashLine))
+        #     painter.setBrush(QColor(239, 68, 68, 20))
+        #     painter.drawEllipse(px - error_radius, py - error_radius, 
+        #                       error_radius * 2, error_radius * 2)
         
         # Position marker
-        painter.setPen(QPen(QColor(0, 255, 0), 3))
-        painter.setBrush(QColor(0, 255, 0))
-        painter.drawEllipse(px - 10, py - 10, 20, 20)
+        painter.setPen(QPen(QColor(37, 99, 235), 3))
+        painter.setBrush(QColor(96, 165, 250))
+        painter.drawEllipse(px - 12, py - 12, 24, 24)
+        
+        # Inner highlight
+        painter.setBrush(QColor(147, 197, 253))
+        painter.drawEllipse(px - 5, py - 5, 10, 10)
         
         # Crosshair
-        painter.drawLine(px - 15, py, px + 15, py)
-        painter.drawLine(px, py - 15, px, py + 15)
+        painter.setPen(QPen(QColor(96, 165, 250), 2))
+        painter.drawLine(px - 18, py, px - 12, py)
+        painter.drawLine(px + 12, py, px + 18, py)
+        painter.drawLine(px, py - 18, px, py - 12)
+        painter.drawLine(px, py + 12, px, py + 18)
         
-        # Draw coordinates
+        # Coordinates label
+        coord_text = f"({self.position['x']:.2f}, {self.position['y']:.2f}, {self.position['z']:.2f})"
+        painter.setFont(QFont('Segoe UI', 10, QFont.Bold))
+        text_rect = painter.fontMetrics().boundingRect(coord_text)
+        text_rect.translate(px + 25, py - 25)
+        
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(37, 99, 235, 230))
+        painter.drawRoundedRect(text_rect.adjusted(-6, -3, 6, 3), 6, 6)
+        
         painter.setPen(QColor(255, 255, 255))
-        painter.drawText(px + 20, py - 20, 
-                        f"({self.position['x']:.2f}, {self.position['y']:.2f})")
+        painter.drawText(px + 25, py - 20, coord_text)
+
+
+class CollapsibleCard(QFrame):
+    """Collapsible card widget"""
+    def __init__(self, title="", parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("""
+            CollapsibleCard {
+                background-color: #1e293b;
+                border-radius: 10px;
+                border: 1px solid #334155;
+            }
+        """)
+        
+        self.is_collapsed = False
+        
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+        
+        # Title bar with toggle button
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(8)
+        
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet("""
+            color: #f1f5f9;
+            font-size: 14px;
+            font-weight: bold;
+            background-color: transparent;
+        """)
+        title_layout.addWidget(self.title_label)
+        
+        self.toggle_btn = QPushButton("▼")
+        self.toggle_btn.setFixedSize(30, 26)
+        self.toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #e2e8f0;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                padding: 0px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #475569;
+            }
+        """)
+        self.toggle_btn.clicked.connect(self.toggle_collapse)
+        title_layout.addWidget(self.toggle_btn)
+        
+        main_layout.addLayout(title_layout)
+        
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setStyleSheet("background-color: #334155; max-height: 2px;")
+        main_layout.addWidget(separator)
+        
+        # Content area
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_widget.setLayout(self.content_layout)
+        main_layout.addWidget(self.content_widget)
+        
+        self.setLayout(main_layout)
+    
+    def toggle_collapse(self):
+        """Toggle collapsed state"""
+        self.is_collapsed = not self.is_collapsed
+        self.content_widget.setVisible(not self.is_collapsed)
+        self.toggle_btn.setText("►" if self.is_collapsed else "▼")
+
+
+class ModernCard(QFrame):
+    """Modern card widget"""
+    def __init__(self, title="", parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("""
+            ModernCard {
+                background-color: #1e293b;
+                border-radius: 10px;
+                border: 1px solid #334155;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        
+        if title:
+            title_label = QLabel(title)
+            title_label.setStyleSheet("""
+                color: #f1f5f9;
+                font-size: 14px;
+                font-weight: bold;
+                padding-bottom: 8px;
+                border-bottom: 2px solid #334155;
+            """)
+            layout.addWidget(title_label)
+        
+        self.content_layout = QVBoxLayout()
+        layout.addLayout(self.content_layout)
+        
+        self.setLayout(layout)
 
 
 class MainWindow(QMainWindow):
-    """Main dashboard window"""
+    """Modern main dashboard window"""
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("UWB Position Dashboard")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("UWB Position Dashboard - Modern UI")
+        self.setGeometry(20, 20, 1320, 650)
         
-        # Data
         self.anchors = [
             {'x': 0.0, 'y': 0.0, 'label': 'A0'},
             {'x': 5.0, 'y': 0.0, 'label': 'A1'},
@@ -213,114 +377,265 @@ class MainWindow(QMainWindow):
             {'x': 0.0, 'y': 5.0, 'label': 'A3'},
         ]
         
-        self.position = {'x': 0, 'y': 0, 'z': 0, 'error': 0, 'timestamp': 0}
+        self.position = {'x': 0, 'y': 0, 'z': 0, 'error': 0}
         self.frame_count = 0
         self.start_time = time.time()
-        
-        # UDP receiver
         self.udp_receiver = None
+        self.is_listening = False
         
-        # Setup UI
         self.setup_ui()
         
-        # FPS timer
         self.fps_timer = QTimer()
         self.fps_timer.timeout.connect(self.update_stats)
-        self.fps_timer.start(1000)  # Update every second
+        self.fps_timer.start(1000)
     
     def setup_ui(self):
-        """Setup UI components"""
+        """Setup modern UI"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
+        # Dark theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #0f172a;
+            }
+            QLabel {
+                color: #e2e8f0;
+                font-family: 'Segoe UI', Arial;
+            }
+            QLineEdit {
+                background-color: #1e293b;
+                color: #e2e8f0;
+                border: 2px solid #334155;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border-color: #6366f1;
+            }
+            QPushButton {
+                background-color: #6366f1;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #4f46e5;
+            }
+            QPushButton:pressed {
+                background-color: #4338ca;
+            }
+            QTableWidget {
+                background-color: #1e293b;
+                color: #e2e8f0;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                gridline-color: #334155;
+            }
+            QTableWidget::item {
+                padding: 5px;
+                border: none;
+            }
+            QTableWidget::item:selected {
+                background-color: #6366f1;
+            }
+            QHeaderView::section {
+                background-color: #1e293b;
+                color: #e2e8f0;
+                padding: 8px;
+                border: none;
+                font-weight: bold;
+            }
+            QTableCornerButton::section {
+                background-color: #1e293b;
+                border: none;
+            }
+        """)
+        
         main_layout = QHBoxLayout()
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         central_widget.setLayout(main_layout)
         
-        # Left panel - Canvas
-        self.canvas = PositionCanvas()
+        # Left panel with canvas and header
+        left_panel = QVBoxLayout()
+        left_panel.setSpacing(6)
+        left_panel.setContentsMargins(0, 0, 0, 0)
+        
+        # Canvas header
+        canvas_header = QLabel("Real-time Position Tracking")
+        canvas_header.setStyleSheet("""
+            color: #f1f5f9;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 0px 0px 8px 0px;
+            background-color: transparent;
+        """)
+        canvas_header.setFixedHeight(30)
+        left_panel.addWidget(canvas_header)
+        
+        # Canvas
+        self.canvas = ModernPositionCanvas()
         self.canvas.set_anchors(self.anchors)
-        main_layout.addWidget(self.canvas, stretch=2)
+        left_panel.addWidget(self.canvas, 1)  # Stretch factor 1 để canvas chiếm hết không gian còn lại
         
-        # Right panel - Controls
+        main_layout.addLayout(left_panel, 1)  # Stretch factor 1 cho left panel
+        
+        # Right panel with fixed width and scrollbar
+        right_widget = QWidget()
+        right_widget.setFixedWidth(380)
+        
+        # Scroll area for right panel
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: #0f172a;
+            }
+            QScrollBar:vertical {
+                background-color: #0f172a;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #475569;
+                border-radius: 5px;
+                min-height: 30px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #64748b;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                background: none;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: #0f172a;")
         right_panel = QVBoxLayout()
-        main_layout.addLayout(right_panel, stretch=1)
+        right_panel.setSpacing(8)
+        right_panel.setContentsMargins(0, 0, 0, 0)
+        scroll_content.setLayout(right_panel)
         
-        # Connection group
-        conn_group = QGroupBox("Connection")
-        conn_layout = QVBoxLayout()
+        scroll_area.setWidget(scroll_content)
         
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(scroll_area)
+        right_widget.setLayout(right_layout)
+        
+        main_layout.addWidget(right_widget)
+        
+        # Connection card
+        conn_card = CollapsibleCard("Connection")
         port_layout = QHBoxLayout()
         port_layout.addWidget(QLabel("UDP Port:"))
         self.port_input = QLineEdit("5005")
         self.port_input.setMaximumWidth(100)
         port_layout.addWidget(self.port_input)
-        conn_layout.addLayout(port_layout)
+        conn_card.content_layout.addLayout(port_layout)
         
         self.connect_btn = QPushButton("Start Listening")
+        self.connect_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6366f1;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #4f46e5;
+            }
+            QPushButton:pressed {
+                background-color: #4338ca;
+            }
+        """)
         self.connect_btn.clicked.connect(self.toggle_connection)
-        conn_layout.addWidget(self.connect_btn)
+        conn_card.content_layout.addWidget(self.connect_btn)
         
-        self.status_label = QLabel("Status: Disconnected")
-        self.status_label.setStyleSheet("color: red;")
-        conn_layout.addWidget(self.status_label)
+        self.status_label = QLabel("● Disconnected")
+        self.status_label.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold;")
+        conn_card.content_layout.addWidget(self.status_label)
         
-        conn_group.setLayout(conn_layout)
-        right_panel.addWidget(conn_group)
+        right_panel.addWidget(conn_card)
         
-        # Position group
-        pos_group = QGroupBox("Current Position")
+        # Position card
+        pos_card = CollapsibleCard("Live Position")
         pos_layout = QGridLayout()
+        pos_layout.setSpacing(10)
         
-        pos_layout.addWidget(QLabel("X:"), 0, 0)
-        self.x_label = QLabel("0.000 m")
-        self.x_label.setStyleSheet("font-family: monospace; color: #4ade80;")
-        pos_layout.addWidget(self.x_label, 0, 1)
+        labels = [
+            ("X:", "x_label", "#60a5fa"),
+            ("Y:", "y_label", "#60a5fa"),
+            ("Z:", "z_label", "#60a5fa"),
+            # ("Error:", "error_label", "#f59e0b")  # Commented out for future use
+        ]
         
-        pos_layout.addWidget(QLabel("Y:"), 1, 0)
-        self.y_label = QLabel("0.000 m")
-        self.y_label.setStyleSheet("font-family: monospace; color: #4ade80;")
-        pos_layout.addWidget(self.y_label, 1, 1)
+        for i, (text, attr, color) in enumerate(labels):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-size: 13px; color: #94a3b8;")
+            pos_layout.addWidget(lbl, i, 0)
+            
+            value_label = QLabel("0.000 m")
+            value_label.setStyleSheet(f"font-family: 'Consolas', monospace; font-size: 16px; font-weight: bold; color: {color};")
+            pos_layout.addWidget(value_label, i, 1)
+            setattr(self, attr, value_label)
         
-        pos_layout.addWidget(QLabel("Z:"), 2, 0)
-        self.z_label = QLabel("0.000 m")
-        self.z_label.setStyleSheet("font-family: monospace; color: #4ade80;")
-        pos_layout.addWidget(self.z_label, 2, 1)
+        pos_card.content_layout.addLayout(pos_layout)
+        right_panel.addWidget(pos_card)
         
-        pos_layout.addWidget(QLabel("Error:"), 3, 0)
-        self.error_label = QLabel("0.000 m")
-        self.error_label.setStyleSheet("font-family: monospace; color: #f59e0b;")
-        pos_layout.addWidget(self.error_label, 3, 1)
-        
-        pos_group.setLayout(pos_layout)
-        right_panel.addWidget(pos_group)
-        
-        # Statistics group
-        stats_group = QGroupBox("Statistics")
+        # Stats card
+        stats_card = CollapsibleCard("Statistics")
         stats_layout = QGridLayout()
+        stats_layout.setSpacing(10)
         
-        stats_layout.addWidget(QLabel("Frames:"), 0, 0)
-        self.frames_label = QLabel("0")
-        stats_layout.addWidget(self.frames_label, 0, 1)
+        stats = [
+            ("Frames:", "frames_label"),
+            ("FPS:", "fps_label"),
+            ("Uptime:", "uptime_label")
+        ]
         
-        stats_layout.addWidget(QLabel("FPS:"), 1, 0)
-        self.fps_label = QLabel("0")
-        stats_layout.addWidget(self.fps_label, 1, 1)
+        for i, (text, attr) in enumerate(stats):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-size: 13px; color: #94a3b8;")
+            stats_layout.addWidget(lbl, i, 0)
+            
+            value_label = QLabel("0")
+            value_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #60a5fa;")
+            stats_layout.addWidget(value_label, i, 1)
+            setattr(self, attr, value_label)
         
-        stats_layout.addWidget(QLabel("Uptime:"), 2, 0)
-        self.uptime_label = QLabel("0s")
-        stats_layout.addWidget(self.uptime_label, 2, 1)
+        stats_card.content_layout.addLayout(stats_layout)
+        right_panel.addWidget(stats_card)
         
-        stats_group.setLayout(stats_layout)
-        right_panel.addWidget(stats_group)
-        
-        # Anchors group
-        anchor_group = QGroupBox("Anchors")
-        anchor_layout = QVBoxLayout()
+        # Anchors card
+        anchor_card = CollapsibleCard("Anchor Points")
         
         self.anchor_table = QTableWidget()
         self.anchor_table.setColumnCount(3)
         self.anchor_table.setHorizontalHeaderLabels(["Label", "X (m)", "Y (m)"])
         self.anchor_table.setRowCount(len(self.anchors))
+        self.anchor_table.setMinimumHeight(150)
+        self.anchor_table.horizontalHeader().setStretchLastSection(True)
+        self.anchor_table.verticalHeader().setDefaultSectionSize(30)
+        self.anchor_table.setColumnWidth(0, 70)
+        self.anchor_table.setColumnWidth(1, 110)
+        # Column 2 (Y) will auto-stretch to fill remaining space
         
         for i, anchor in enumerate(self.anchors):
             self.anchor_table.setItem(i, 0, QTableWidgetItem(anchor['label']))
@@ -328,27 +643,27 @@ class MainWindow(QMainWindow):
             self.anchor_table.setItem(i, 2, QTableWidgetItem(f"{anchor['y']:.2f}"))
         
         self.anchor_table.cellChanged.connect(self.on_anchor_changed)
-        anchor_layout.addWidget(self.anchor_table)
+        anchor_card.content_layout.addWidget(self.anchor_table)
         
         btn_layout = QHBoxLayout()
-        add_btn = QPushButton("Add")
+        add_btn = QPushButton("➕ Add")
         add_btn.clicked.connect(self.add_anchor)
+        add_btn.setStyleSheet("background-color: #3b82f6;")
         btn_layout.addWidget(add_btn)
         
-        del_btn = QPushButton("Delete")
+        del_btn = QPushButton("🗑️ Delete")
         del_btn.clicked.connect(self.delete_anchor)
+        del_btn.setStyleSheet("background-color: #ef4444;")
         btn_layout.addWidget(del_btn)
         
-        anchor_layout.addLayout(btn_layout)
-        anchor_group.setLayout(anchor_layout)
-        right_panel.addWidget(anchor_group)
+        anchor_card.content_layout.addLayout(btn_layout)
+        right_panel.addWidget(anchor_card)
         
         right_panel.addStretch()
     
     def toggle_connection(self):
         """Start/Stop UDP listening"""
         if self.udp_receiver is None or not self.udp_receiver.isRunning():
-            # Start
             try:
                 port = int(self.port_input.text())
                 self.udp_receiver = UDPReceiver(port)
@@ -356,38 +671,74 @@ class MainWindow(QMainWindow):
                 self.udp_receiver.start()
                 
                 self.connect_btn.setText("Stop Listening")
-                self.status_label.setText(f"Status: Listening on port {port}")
-                self.status_label.setStyleSheet("color: green;")
+                self.connect_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #ef4444;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 10px 20px;
+                        font-size: 13px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #dc2626;
+                    }
+                    QPushButton:pressed {
+                        background-color: #b91c1c;
+                    }
+                """)
+                self.status_label.setText(f"● Connected (Port {port})")
+                self.status_label.setStyleSheet("color: #60a5fa; font-size: 14px; font-weight: bold;")
                 self.start_time = time.time()
                 self.frame_count = 0
+                self.is_listening = True
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to start: {e}")
         else:
-            # Stop
             self.udp_receiver.stop()
             self.udp_receiver.wait()
             
             self.connect_btn.setText("Start Listening")
-            self.status_label.setText("Status: Disconnected")
-            self.status_label.setStyleSheet("color: red;")
+            self.connect_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #6366f1;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 10px 20px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #4f46e5;
+                }
+                QPushButton:pressed {
+                    background-color: #4338ca;
+                }
+            """)
+            self.status_label.setText("● Disconnected")
+            self.status_label.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold;")
+            self.is_listening = False
     
     def on_position_received(self, position):
         """Handle received position data"""
         self.position = position
         self.frame_count += 1
         
-        # Update labels
         self.x_label.setText(f"{position['x']:.3f} m")
         self.y_label.setText(f"{position['y']:.3f} m")
         self.z_label.setText(f"{position['z']:.3f} m")
-        self.error_label.setText(f"{position['error']:.3f} m")
+        # self.error_label.setText(f"{position.get('error', 0):.3f} m")  # Commented out
         
-        # Update canvas
         self.canvas.update_position(position)
     
     def update_stats(self):
-        """Update statistics labels"""
+        """Update statistics"""
+        if not self.is_listening:
+            return
+            
         self.frames_label.setText(str(self.frame_count))
         
         uptime = int(time.time() - self.start_time)
@@ -396,17 +747,16 @@ class MainWindow(QMainWindow):
         self.uptime_label.setText(f"{uptime}s")
     
     def on_anchor_changed(self, row, col):
-        """Handle anchor table edit"""
+        """Handle anchor edit"""
         try:
-            if col == 0:  # Label
+            if col == 0:
                 self.anchors[row]['label'] = self.anchor_table.item(row, col).text()
-            else:  # X, Y
+            else:
                 coord = ['x', 'y'][col - 1]
                 value = float(self.anchor_table.item(row, col).text())
                 self.anchors[row][coord] = value
             
             self.canvas.set_anchors(self.anchors)
-            
         except (ValueError, IndexError):
             pass
     
