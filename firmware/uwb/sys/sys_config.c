@@ -228,73 +228,95 @@ int sys_config_save(void)
 
 int sys_config_load(void)
 {
-#ifdef HAVE_FLASH_STORAGE
+    #ifdef HAVE_FLASH_STORAGE
     if (!g_flash_init_done) {
         return -1;
     }
-    
+
     sys_config_t temp_config;
     uint32_t bytes_read = bsp_flash_read_config(
         &g_flash_storage,
         &temp_config,
         sizeof(sys_config_t)
     );
-    
+
     if (bytes_read != sizeof(sys_config_t)) {
         RLOG_D(LOG_OBJECT_CODE_SYS_CFG, "No valid config in flash");
         return -1;
     }
-    
+
     uint32_t crc_offset = offsetof(sys_config_t, crc32);
     uint32_t calc_crc = config_calc_crc32(&temp_config, crc_offset);
-    
+
     if (calc_crc != temp_config.crc32) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_CRC, "Config CRC mismatch: calc=0x%08X != stored=0x%08X",
                calc_crc, temp_config.crc32);
         return -1;
     }
-    
+
     if (temp_config.config_version != CONFIG_VERSION) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Config version mismatch: flash=%u != fw=%u - resetting to defaults",
                temp_config.config_version, CONFIG_VERSION);
-        /* Version changed - reset everything to defaults including antenna delays */
+        /* Save old antenna delay */
+        uint16_t old_tx_delay = temp_config.tx_antenna_delay;
+        uint16_t old_rx_delay = temp_config.rx_antenna_delay;
+        /* Version changed - reset everything to defaults */
         sys_config_reset_to_defaults();
-        /* Save defaults to flash immediately to override old config */
+        /* Restore old antenna delay */
+        g_config.tx_antenna_delay = old_tx_delay;
+        g_config.rx_antenna_delay = old_rx_delay;
+        /* Save defaults to flash ngay để override config cũ */
         if (sys_config_save() == 0) {
-            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to flash");
+            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to flash (antenna delay giữ nguyên)");
         } else {
             RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Failed to save default config to flash");
         }
         return -1;  /* Return error to indicate config was reset */
     }
-    
+
     if (temp_config.role != DEVICE_ROLE_TAG && temp_config.role != DEVICE_ROLE_ANCHOR) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid role in flash");
         return -1;
     }
-    
+
     if (temp_config.uwb_channel < 1 || temp_config.uwb_channel > 7) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid channel in flash");
         return -1;
     }
-    
+
     if (temp_config.rx_timeout_ms > 500 || temp_config.rx_timeout_ms < 5) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx_timeout=%lu in flash, forcing to %u ms",
                temp_config.rx_timeout_ms, DEFAULT_RX_TIMEOUT_MS);
         temp_config.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
     }
-    
+
     if (temp_config.ranging_period_ms > 5000 || temp_config.ranging_period_ms < 50) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid ranging_period=%u in flash, forcing to %u ms",
                temp_config.ranging_period_ms, DEFAULT_RANGING_PERIOD_MS);
         temp_config.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
     }
-    
+
     memcpy(&g_config, &temp_config, sizeof(sys_config_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
     return 0;
 #else
     if (g_config_magic == CONFIG_RAM_MAGIC) {
+        /* Save old antenna delay */
+        uint16_t old_tx_delay = g_config_backup.tx_antenna_delay;
+        uint16_t old_rx_delay = g_config_backup.rx_antenna_delay;
+        if (g_config_backup.config_version != CONFIG_VERSION) {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Config version mismatch: RAM=%u != fw=%u - resetting to defaults",
+                   g_config_backup.config_version, CONFIG_VERSION);
+            sys_config_reset_to_defaults();
+            g_config.tx_antenna_delay = old_tx_delay;
+            g_config.rx_antenna_delay = old_rx_delay;
+            if (sys_config_save() == 0) {
+                RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to RAM (antenna delay giữ nguyên)");
+            } else {
+                RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Failed to save default config to RAM");
+            }
+            return -1;
+        }
         memcpy(&g_config, &g_config_backup, sizeof(sys_config_t));
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from RAM");
         return 0;
