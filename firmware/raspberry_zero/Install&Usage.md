@@ -43,21 +43,3 @@ Installation on Raspberry Pi Zero:
    sudo systemctl enable uwb-gateway
    sudo systemctl start uwb-gateway
    sudo systemctl status uwb-gateway
-
-UDP Data Format (28 bytes):
-- X (4 bytes): float, little-endian
-- Y (4 bytes): float, little-endian
-- Z (4 bytes): float, little-endian
-- Error (4 bytes): float, little-endian
-- Timestamp (8 bytes): int64 (microseconds), little-endian
-
-Extension Ideas:
-1. Add JSON format option for UDP payload
-2. Add MQTT support alongside UDP
-3. Add data filtering (Kalman filter)
-4. Add multiple UDP destinations
-5. Add web dashboard
-6. Add data logging to database
-7. Add frame rate limiting
-8. Add coordinate transformation
-"""
