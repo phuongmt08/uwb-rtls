@@ -79,62 +79,13 @@
 #define ANCHOR_4_X   0.0f
 #define ANCHOR_4_Y   0.0f
 
-/**
- * @brief Individual anchor heights (optional - use if heights differ)
- */
-// #define ANCHOR_1_Z   0.30f  /* Uncomment to override */
-// #define ANCHOR_2_Z   0.35f  /* Uncomment to override */
-// #define ANCHOR_3_Z   0.30f  /* Uncomment to override */
-// #define ANCHOR_4_Z   0.30f  /* Uncomment to override */
-
-/* If individual heights not defined, use common ANCHOR_HEIGHT_M */
-#ifndef ANCHOR_1_Z
-#define ANCHOR_1_Z ANCHOR_HEIGHT_M
-#endif
-#ifndef ANCHOR_2_Z
-#define ANCHOR_2_Z ANCHOR_HEIGHT_M
-#endif
-#ifndef ANCHOR_3_Z
-#define ANCHOR_3_Z ANCHOR_HEIGHT_M
-#endif
-#ifndef ANCHOR_4_Z
-#define ANCHOR_4_Z ANCHOR_HEIGHT_M
-#endif
-
 /* ===== DISTANCE VALIDATION ===== */
 
-/**
- * @brief Maximum valid 3D distance (meters)
- * Reject measurements beyond this range (likely error or out of zone)
- */
 #define MAX_VALID_DISTANCE_M    (50.0f)
 
-/**
- * @brief Minimum valid 3D distance (meters)
- * Reject measurements below this (likely error)
- */
 #define MIN_VALID_DISTANCE_M    (0.05f)
 
 /* ===== FILTER CONFIGURATION ===== */
-
-/**
- * Enable distance EMA filter
- * 1 = Apply EMA smoothing to raw distances
- * 0 = Use raw distances directly
- */
-#ifndef ENABLE_DISTANCE_FILTER
-#define ENABLE_DISTANCE_FILTER  1
-#endif
-
-/**
- * Enable RSSI EMA filter
- * 1 = Apply EMA smoothing to RSSI (required if ENABLE_RSSI_ADAPTIVE=1)
- * 0 = Use raw RSSI
- */
-#ifndef ENABLE_RSSI_FILTER
-#define ENABLE_RSSI_FILTER  1
-#endif
-
 /**
  * Enable Adaptive Kalman Filter (AKF)
  * 1 = Smooth position with innovation-based adaptive AKF
@@ -145,14 +96,6 @@
  */
 #ifndef MW_FILTER_ENABLE_KALMAN_2D
 #define MW_FILTER_ENABLE_KALMAN_2D  1
-#endif
-
-/**
- * DEPRECATED: RSSI adaptive mode (no longer used with AKF)
- * AKF uses innovation-based adaptation which is more robust than RSSI
- */
-#ifndef ENABLE_RSSI_ADAPTIVE
-#define ENABLE_RSSI_ADAPTIVE  0
 #endif
 
 /**
@@ -193,11 +136,11 @@
     #undef MAX_ACCEPTABLE_ERROR_M
     
     #define AKF_PROCESS_NOISE           0.05f /* Higher Q for responsive tracking */
-    #define AKF_R_BASE                  0.2f  /* Lower base R (trust measurements) */
+    #define AKF_R_BASE                  0.2f  /* Lower base R */
     #define AKF_INNOVATION_ALPHA        0.4f  /* Faster adaptation */
-    #define AKF_R_SCALE_MIN             0.3f  /* More aggressive trust */
+    #define AKF_R_SCALE_MIN             0.2f  /* More aggressive trust */
     #define AKF_R_SCALE_MAX             3.0f  /* Lower max R */
-    #define MAX_ACCEPTABLE_ERROR_M      0.8f  /* Strict quality gating */
+    #define MAX_ACCEPTABLE_ERROR_M      1.0f  /* Strict quality gating */
 #endif
 
 /* ===== MANUAL TUNING (if no preset selected) ===== */
@@ -217,7 +160,7 @@
 #endif
 
 #ifndef AKF_R_SCALE_MIN
-#define AKF_R_SCALE_MIN  0.3f  /* Min R multiplier (high confidence) */
+#define AKF_R_SCALE_MIN  0.1f  /* Min R multiplier (high confidence) */
 #endif
 
 #ifndef AKF_R_SCALE_MAX
@@ -227,20 +170,3 @@
 #ifndef MAX_ACCEPTABLE_ERROR_M
 #define MAX_ACCEPTABLE_ERROR_M  1.0f
 #endif
-
-/* ===== RSSI ADAPTIVE THRESHOLDS ===== */
-
-/**
- * RSSI-to-R_scale mapping (if ENABLE_RSSI_ADAPTIVE = 1)
- * Adjusted for real-world RSSI range: -20 to -80 dBm
- */
-#define RSSI_THRESHOLD_EXCELLENT  -25   /* Very strong signal */
-#define RSSI_THRESHOLD_GOOD       -45   /* Good signal */
-#define RSSI_THRESHOLD_MODERATE   -60   /* Moderate signal */
-#define RSSI_THRESHOLD_POOR       -70   /* Weak signal */
-
-#define RSSI_MANUAL_R_SCALE       0.0f  
-
-#define MAX_CONSECUTIVE_ERR       10
-
-    #endif /* __POSITIONING_CONFIG_H */
