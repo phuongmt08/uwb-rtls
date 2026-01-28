@@ -84,17 +84,17 @@ typedef struct {
 #define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
 
 #define DEFAULT_RANGING_PERIOD_MS   100  /* 10Hz */
-#define DEFAULT_RX_TIMEOUT_MS       150
+#define DEFAULT_RX_TIMEOUT_MS       75
 
-#define CONFIG_VERSION              6
+#define CONFIG_VERSION              7
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
-#define DEFAULT_UWB_DATA_RATE       1
-#define DEFAULT_UWB_PREAMBLE_CODE   9
+#define DEFAULT_UWB_DATA_RATE       0   // 0=110kbps, 1=850kbps, 2=6.8Mbps
+#define DEFAULT_UWB_PREAMBLE_CODE   10
 #define DEFAULT_TX_ANT_DLY          16436
 #define DEFAULT_RX_ANT_DLY          16436
-#define DEFAULT_TX_POWER            0x0E082848UL
+#define DEFAULT_TX_POWER            0x1F1F1F1FUL
 #define DEFAULT_HW_REV_MAJOR        1
 #define DEFAULT_HW_REV_MINOR        0
 /* ========================================================================== */

@@ -339,7 +339,7 @@ void app_anchor_process(void *arg)
 #endif
     
     case ANCHOR_STATE_LISTENING: {
-      /* Normal ranging mode (non-calib build or after calib done) */
+      /* Normal ranging mode */
       sys_ranging_err_t err = sys_ranging_anchor_process();
       
       if (err == SYS_RANGING_OK) {

@@ -31,7 +31,7 @@
 #define BSP_IO_DIP_PIN_2       GPIO_PIN_7  /* MSB */
 
 /* Button timing constants (ms) */
-#define BSP_IO_DEBOUNCE_MS     50 
+#define BSP_IO_DEBOUNCE_MS     25 
 #define BSP_IO_DOUBLE_MS       300
 #define BSP_IO_HOLD_MS         1000
 #define BSP_IO_RELEASE_MS      300

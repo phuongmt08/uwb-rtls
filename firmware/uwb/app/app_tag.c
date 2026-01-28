@@ -35,6 +35,9 @@ static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
     {.x = ANCHOR_1_X, .y = ANCHOR_1_Y, .z = ANCHOR_1_Z},
     {.x = ANCHOR_2_X, .y = ANCHOR_2_Y, .z = ANCHOR_2_Z},
     {.x = ANCHOR_3_X, .y = ANCHOR_3_Y, .z = ANCHOR_3_Z}
+#if NUM_ANCHORS > 3
+    ,{.x = ANCHOR_4_X, .y = ANCHOR_4_Y, .z = ANCHOR_4_Z}
+#endif
 };
 
 /* Private types ------------------------------------------------------ */
@@ -64,9 +67,13 @@ static void init_filters(void)
 
 #if MW_FILTER_ENABLE_KALMAN_2D
     /* Initialize Adaptive Kalman Filter at center of anchor layout */
-    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 4.0f;
-    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y) / 4.0f;
-    
+#if NUM_ANCHORS < 4
+    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 3.0f;  /* FIX: divide by 3 not 4 */
+    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y) / 3.0f;
+#else
+    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X + ANCHOR_4_X) / 4.0f;
+    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y + ANCHOR_4_Y) / 4.0f;
+#endif
     /* Get dt from config ranging_period_ms */
     sys_config_t *cfg = sys_config_get();
     float dt = cfg->ranging_period_ms / 1000.0f;
@@ -120,6 +127,19 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
+
+    RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", 
+           s_success_count + 1);
+    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+        RLOG_I(LOG_OBJECT_CODE_TAG, 
+               "  [%u] ID=%u Valid=%d Dist=%.3fm RSSI=%ddBm",
+               i,
+               results[i].anchor_id,
+               results[i].valid,
+               results[i].distance_m,
+               results[i].rssi);
+    }
+    
     /* ==== STEP 1: Convert 3D to 2D planar distance ==== */
     
     /* Use array indexed by anchor_id for proper mapping */
@@ -132,14 +152,16 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 
     /* Process each ranging result */
-    for (uint8_t i = 0; i < num_success && i < NUM_ANCHORS; i++) {
+    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
         uint8_t anchor_id = results[i].anchor_id;
         
         /* Validate anchor_id */
         if (anchor_id < 1 || anchor_id > NUM_ANCHORS || !results[i].valid) {
-            if (results[i].anchor_id != 0) {  /* Don't log if completely invalid */
-                RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u: Invalid ID or result", anchor_id);
-            }
+            RLOG_W(LOG_OBJECT_CODE_TAG, 
+                   "Anchor #%u: REJECTED (id_range:%d valid:%d)",
+                   anchor_id,
+                   (anchor_id >= 1 && anchor_id <= NUM_ANCHORS),
+                   results[i].valid);
             continue;
         }
         
@@ -175,17 +197,14 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         
         /* Debug: show conversion */
         RLOG_D(LOG_OBJECT_CODE_TAG,
-               "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm, rssi=%ddBm)",
-               anchor_id, (float)r3d, (float)r2d, (float)dz, rssi);
+               "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
+               anchor_id, (float)r3d, (float)r2d, (float)dz);
     }
 
-    /* ALWAYS log individual anchor distances (even if <3 anchors) */
-    RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", 
-           s_success_count + 1);
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
-            RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor #%u: dist=%.3fm RSSI=%ddBm",
-                   id, (float)anchors_by_id[id].distance, anchors_by_id[id].rssi);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm RSSI=%ddBm",
+                   id, anchors_by_id[id].distance, anchors_by_id[id].rssi);
         }
     }
 
@@ -334,7 +353,7 @@ void app_tag_process(void)
     sys_config_t *cfg = sys_config_get();
     uint32_t current_tick = HAL_GetTick();
 
-    if ((current_tick - s_last_ranging_tick) < cfg->ranging_period_ms) {
+    if ((current_tick - s_last_ranging_tick) < 150 ) {
         return;
     }
 
@@ -345,7 +364,11 @@ void app_tag_process(void)
     bsp_io_led_on();
 
     /* Use anchor_ids array matching NUM_ANCHORS from config */
+#if NUM_ANCHORS < 4
     const uint8_t anchor_ids[NUM_ANCHORS] = {1, 2, 3};
+#else
+    const uint8_t anchor_ids[NUM_ANCHORS] = {1, 2, 3, 4};
+#endif
     sys_ranging_result_t results[NUM_ANCHORS];
 
     int num_success = sys_ranging_tag_multi_anchor(anchor_ids, NUM_ANCHORS,

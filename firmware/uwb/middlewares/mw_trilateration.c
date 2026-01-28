@@ -73,66 +73,41 @@ static inline double vec_dot(vec3d_t v1, vec3d_t v2) {
 
 /* Anchor selection --------------------------------------------------- */
 
-/**
- * @brief Select best 3 anchors from available anchors
- * Strategy: Prioritize by RSSI, then by distance
- */
 static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
                                   uint8_t num_anchors,
                                   uint8_t selected[3])
 {
     typedef struct {
         uint8_t index;
-        double score;
-    } anchor_score_t;
+        double distance;
+    } anchor_dist_t;
 
-    anchor_score_t scores[MAX_ANCHORS];
+    anchor_dist_t dists[MAX_ANCHORS];
     uint8_t valid_count = 0;
 
-    /* Calculate score for each valid anchor
-     * Score = RSSI_normalized + Distance_normalized
-     * Higher RSSI (less negative) = better
-     * Shorter distance = better
-     */
+    // Lưu lại index và distance của các anchor hợp lệ
     for (uint8_t i = 0; i < num_anchors && i < MAX_ANCHORS; i++) {
         if (!anchors[i].valid) continue;
-
-        /* RSSI score: normalize to 0-100 range
-         * -50 dBm = excellent (score 100)
-         * -100 dBm = poor (score 0)
-         */
-        double rssi_score = (anchors[i].rssi + 100.0) * 2.0;  /* 0-100 */
-        if (rssi_score < 0) rssi_score = 0;
-        if (rssi_score > 100) rssi_score = 100;
-
-        /* Distance score: normalize to 0-100 range
-         * 0 m = excellent (score 100)
-         * 50 m = poor (score 0)
-         */
-        double dist_score = 100.0 - (anchors[i].distance * 2.0);  /* 0-100 */
-        if (dist_score < 0) dist_score = 0;
-        if (dist_score > 100) dist_score = 100;
-
-        scores[valid_count].index = i;
-        scores[valid_count].score = rssi_score * 0.7 + dist_score * 0.3;
+        dists[valid_count].index = i;
+        dists[valid_count].distance = anchors[i].distance;
         valid_count++;
     }
 
-    /* Simple bubble sort to find top 3 */
+    // Sắp xếp tăng dần theo distance
     for (uint8_t i = 0; i < valid_count - 1; i++) {
         for (uint8_t j = 0; j < valid_count - i - 1; j++) {
-            if (scores[j].score < scores[j + 1].score) {
-                anchor_score_t temp = scores[j];
-                scores[j] = scores[j + 1];
-                scores[j + 1] = temp;
+            if (dists[j].distance > dists[j + 1].distance) {
+                anchor_dist_t temp = dists[j];
+                dists[j] = dists[j + 1];
+                dists[j + 1] = temp;
             }
         }
     }
 
-    /* Take top 3 */
+    // Lấy 3 anchor gần nhất
     uint8_t count = (valid_count < 3) ? valid_count : 3;
     for (uint8_t i = 0; i < count; i++) {
-        selected[i] = scores[i].index;
+        selected[i] = dists[i].index;
     }
 }
 
@@ -255,7 +230,6 @@ mw_tril_err_t mw_trilateration_2d(const mw_tril_anchor_t *anchors,
         return MW_TRIL_ERR_PARAM;
     }
 
-    /* Select best 3 anchors */
     uint8_t selected[3] = {0, 1, 2};
     if (num_anchors > 3) {
         select_best_3_anchors(anchors, num_anchors, selected);

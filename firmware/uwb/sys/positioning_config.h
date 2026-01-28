@@ -52,12 +52,12 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.47f)
+#define TAG_HEIGHT_M            (0.148f)
 
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (0.47f)
+#define ANCHOR_HEIGHT_M         (0.415f)
 /**
  * @brief Height offset between Anchor and Tag (meters)
  */
@@ -65,20 +65,32 @@
 
 /* ===== ANCHOR LAYOUT (2D COORDINATES) ===== */
 
-#define NUM_ANCHORS  3  /* Total anchors (will use best 3 for trilateration) */
+#define NUM_ANCHORS  4  /* Total anchors (will use best 3 for trilateration) */
 
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
 
-#define ANCHOR_2_X   5.2f
+#define ANCHOR_2_X   9.76f
 #define ANCHOR_2_Y   0.0f
 
-#define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   2.0f
+#define ANCHOR_3_X   4.88f
+#define ANCHOR_3_Y   14.64f
 
-#define ANCHOR_4_X   0.0f
-#define ANCHOR_4_Y   0.0f
+#define ANCHOR_4_X   9.76f
+#define ANCHOR_4_Y   14.64f
 
+#ifndef ANCHOR_1_Z
+#define ANCHOR_1_Z ANCHOR_HEIGHT_M
+#endif
+#ifndef ANCHOR_2_Z
+#define ANCHOR_2_Z ANCHOR_HEIGHT_M
+#endif
+#ifndef ANCHOR_3_Z
+#define ANCHOR_3_Z ANCHOR_HEIGHT_M
+#endif
+#ifndef ANCHOR_4_Z
+#define ANCHOR_4_Z ANCHOR_HEIGHT_M
+#endif
 /* ===== DISTANCE VALIDATION ===== */
 
 #define MAX_VALID_DISTANCE_M    (50.0f)
@@ -95,7 +107,7 @@
  *       innovation variance - no manual R tuning or RSSI needed!
  */
 #ifndef MW_FILTER_ENABLE_KALMAN_2D
-#define MW_FILTER_ENABLE_KALMAN_2D  1
+#define MW_FILTER_ENABLE_KALMAN_2D  0
 #endif
 
 /**
@@ -135,20 +147,20 @@
     #undef AKF_R_SCALE_MAX
     #undef MAX_ACCEPTABLE_ERROR_M
     
-    #define AKF_PROCESS_NOISE           0.05f /* Higher Q for responsive tracking */
-    #define AKF_R_BASE                  0.2f  /* Lower base R */
-    #define AKF_INNOVATION_ALPHA        0.4f  /* Faster adaptation */
+    #define AKF_PROCESS_NOISE           0.003f /* Higher Q for responsive tracking */
+    #define AKF_R_BASE                  0.06f  /* Lower base R */
+    #define AKF_INNOVATION_ALPHA        0.7f  /* Faster adaptation */
     #define AKF_R_SCALE_MIN             0.2f  /* More aggressive trust */
-    #define AKF_R_SCALE_MAX             3.0f  /* Lower max R */
+    #define AKF_R_SCALE_MAX             0.1f  /* Lower max R */
     #define MAX_ACCEPTABLE_ERROR_M      1.0f  /* Strict quality gating */
 #endif
 
-/* ===== MANUAL TUNING (if no preset selected) ===== */
+/* ===== MANUAL TUNING ===== */
 
 /* ===== Adaptive Kalman Filter (AKF) Parameters ===== */
 
 #ifndef AKF_PROCESS_NOISE
-#define AKF_PROCESS_NOISE  0.01f  /* Process noise Q (fixed) */
+#define AKF_PROCESS_NOISE  0.01f  /* Process noise Q */
 #endif
 
 #ifndef AKF_R_BASE
@@ -170,3 +182,7 @@
 #ifndef MAX_ACCEPTABLE_ERROR_M
 #define MAX_ACCEPTABLE_ERROR_M  1.0f
 #endif
+
+#define MAX_CONSECUTIVE_ERR       10
+
+#endif //__POSITIONING_CONFIG

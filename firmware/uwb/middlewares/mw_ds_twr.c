@@ -171,37 +171,7 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
 #endif
 
 #ifdef HAVE_TX_DELAY
-  /* Step 3: Send FINAL with delayed TX (T5 known in advance) */
-  
-  /* ┌─────────────────────────────────────────────────────────────────────────┐
-   * │             DS-TWR DELAYED TX TIMING TABLE (HAVE_TX_DELAY)              │
-   * ├─────────────┬──────────────┬──────────────┬─────────────────────────────┤
-   * │ Timestamp   │ Device       │ Event        │ Timing Constraints          │
-   * ├─────────────┼──────────────┼──────────────┼─────────────────────────────┤
-   * │ T1          │ Tag          │ POLL TX      │ -                           │
-   * │ T2          │ Anchor       │ POLL RX      │ T2 = T1 + ToF               │
-   * │ T3          │ Anchor       │ RESPONSE TX  │ T3 = T2 + Anchor_delay      │
-   * │ T4          │ Tag          │ RESPONSE RX  │ T4 = T3 + ToF               │
-   * │ **T5**      │ **Tag**      │ **FINAL TX** │ **T5 = T4 + DELAY (known)** │
-   * │ T6          │ Anchor       │ FINAL RX     │ T6 = T5 + ToF               │
-   * ├─────────────┴──────────────┴──────────────┴─────────────────────────────┤
-   * │ DELAY CALCULATION (T5 - T4):                                            │
-   * │   • DW1000 turnaround:    300 µs  (TX→RX switching)                     │
-   * │   • MCU processing:       200 µs  (frame preparation)                   │
-   * │   • Antenna delay:        100 µs  (signal propagation)                  │
-   * │   • Safety margin:        400 µs  (clock drift + jitter)                │
-   * │   ─────────────────────────────────────────────────────                 │
-   * │   • MINIMUM required:    1000 µs  (1 ms)                                │
-   * │   • RECOMMENDED value:   3000 µs  (3 ms) ← Current setting              │
-   * │   • MAXIMUM allowed:   100000 µs  (100 ms)                              │
-   * ├──────────────────────────────────────────────────────────────────────────┤
-   * │ DW1000 TIME UNITS CONVERSION:                                            │
-   * │   • 1 unit ≈ 15.65 ps  (picoseconds)                                     │
-   * │   • DWT_TIME_UNITS = 1/(499.2 MHz / 128) ≈ 2.565×10⁻¹⁰ seconds           │
-   * │   • 3000 µs = 3ms / 2.565e-10 ≈ 11,695,906 DW1000 units                 │
-   * └──────────────────────────────────────────────────────────────────────────┘
-   */
-  
+ 
   double delay_seconds = FINAL_TX_DELAY_US * 1e-6;  // Convert us to seconds
   uint64_t delay_units = (uint64_t)(delay_seconds / DWT_TIME_UNITS);
   
@@ -225,7 +195,7 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   
   /* IMPORTANT: We will read the ACTUAL T5 after TX completes
    * Problem with estimated T5 = scheduled + antenna_delay:
-   *   - DW1000 internal delays (DX_TIME shift, TX scheduling, bit-9 rounding)
+   *   - DW1000 internal delays
    *   - Can cause ~5-10cm error in distance calculation
    * Solution: Read TX_TIME register after TXFRS for true T5
    */
@@ -253,7 +223,7 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
     return MW_DSTWR_ERR;
   }
   
-  /* Calculate scheduled time for CORRECTION (fixed gap after FINAL)
+  /* Calculate scheduled time for CORRECTION
    * This ensures consistent timing and avoids MCU processing jitter
    */
   double corr_delay_sec = CORRECTION_TX_DELAY_US * 1e-6;
@@ -279,7 +249,7 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   g_ranging_state = RANGING_STATE_CORRECTION_SENT;  // Update state
 
 #else
-  /* Step 3: Send FINAL immediately (no delayed TX) */
+  /* Step 3: Send FINAL immediately */
   mw_dstwr_final_msg_t final_msg = {
     .msg_type = MW_DSTWR_MSG_TYPE_FINAL,
     .sequence_num = config->sequence_num,
@@ -422,7 +392,7 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t3) != 0)
     return MW_DSTWR_ERR;
 
-  /* Step 3: Wait for FINAL with INCREASED timeout (30ms instead of 15ms) */
+  /* Step 3: Wait for FINAL with INCREASED timeout */
   if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_FINAL_TIMEOUT_US) != 0)
     return MW_DSTWR_ERR_TIMEOUT;
 

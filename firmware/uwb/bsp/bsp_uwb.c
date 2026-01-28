@@ -217,14 +217,14 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
     dwt_config_t dw_cfg = {
         .chan           = cfg->channel,
         .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_256,
-        .rxPAC          = DWT_PAC16,
+        .txPreambLength = DWT_PLEN_1024,
+        .rxPAC          = DWT_PAC32,
         .txCode         = 9,
         .rxCode         = 9,
         .nsSFD          = 0,
         .dataRate       = cfg->data_rate,
         .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = 265
+        .sfdTO          = (1024 + 64)   
     };
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
