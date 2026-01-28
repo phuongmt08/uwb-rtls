@@ -201,7 +201,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
                anchor_id, (float)r3d, (float)r2d, (float)dz);
     }
 
-    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+        for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
             RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm RSSI=%ddBm",
                    id, anchors_by_id[id].distance, anchors_by_id[id].rssi);
@@ -240,8 +240,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         s_error_count++;
         return;
     }
-
-    /* ==== STEP 4: Quality gating ==== */
+    
+        /* ==== STEP 4: Quality gating ==== */
 #if ENABLE_QUALITY_GATING
     if (tril_result.error_estimate > MAX_ACCEPTABLE_ERROR_M) {
         RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -353,7 +353,7 @@ void app_tag_process(void)
     sys_config_t *cfg = sys_config_get();
     uint32_t current_tick = HAL_GetTick();
 
-    if ((current_tick - s_last_ranging_tick) < 150 ) {
+    if ((current_tick - s_last_ranging_tick) < cfg->ranging_period_ms) {
         return;
     }
 

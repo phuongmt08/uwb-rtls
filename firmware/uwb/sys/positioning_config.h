@@ -65,7 +65,7 @@
 
 /* ===== ANCHOR LAYOUT (2D COORDINATES) ===== */
 
-#define NUM_ANCHORS  4  /* Total anchors (will use best 3 for trilateration) */
+#define NUM_ANCHORS  3  /* Total anchors (will use best 3 for trilateration) */
 
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f

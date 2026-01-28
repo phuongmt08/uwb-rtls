@@ -5,9 +5,6 @@
  * @version    2.2.1
  * @date       2025-12-28
  * @author     Phuong Mai
- * @brief      FIXED: Increased timeouts (15ms→30ms) + Added state guard to prevent premature POLL
- * @note       FIX 1: WAIT_FINAL/RESULT_TIMEOUT_US: 15ms → 30ms (for 850k+PLEN1024)
- *             FIX 2: Added ranging_state to prevent TAG from sending new POLL before completing sequence
  * @example    None
  */
 #include "mw_ds_twr.h"
@@ -180,11 +177,7 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   if (delay_units < min_delay_units) {
     delay_units = min_delay_units;  // Enforce minimum
   }
-  
-  /* Get TX antenna delay for compensation
-   * DW1000 delayed TX: Actual TX time = Scheduled time + TX_antenna_delay
-   * We must send the ACTUAL TX time (T5) in the message, not scheduled time
-   */
+
   uint16_t tx_ant_delay = 0;
   if (hal->get_tx_antenna_delay) {
     tx_ant_delay = hal->get_tx_antenna_delay();
@@ -192,13 +185,6 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   
   /* Calculate scheduled TX time (what we pass to DW1000) */
   uint64_t scheduled_tx_time = ts40_add(t4, (uint32_t)delay_units);
-  
-  /* IMPORTANT: We will read the ACTUAL T5 after TX completes
-   * Problem with estimated T5 = scheduled + antenna_delay:
-   *   - DW1000 internal delays
-   *   - Can cause ~5-10cm error in distance calculation
-   * Solution: Read TX_TIME register after TXFRS for true T5
-   */
 
   mw_dstwr_final_msg_t final_msg = {
     .msg_type = MW_DSTWR_MSG_TYPE_FINAL,
@@ -208,7 +194,6 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
     .final_tx_timestamp = 0  /* Will send real T5 in CORRECTION message */
   };
 
-  /* Execute delayed transmission */
   if (hal->tx_delayed(&final_msg, sizeof(final_msg), scheduled_tx_time) != 0) {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] FINAL TX FAILED!");
     g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
@@ -217,22 +202,15 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   
   g_ranging_state = RANGING_STATE_FINAL_SENT;  // Update state
 
-  /* Read ACTUAL TX timestamp after transmission completes */
   if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0) {
     g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
     return MW_DSTWR_ERR;
   }
-  
-  /* Calculate scheduled time for CORRECTION
-   * This ensures consistent timing and avoids MCU processing jitter
-   */
+
   double corr_delay_sec = CORRECTION_TX_DELAY_US * 1e-6;
   uint64_t corr_delay_units = (uint64_t)(corr_delay_sec / DWT_TIME_UNITS);
   uint64_t corr_scheduled_time = ts40_add(t5, (uint32_t)corr_delay_units);
-  
-  /* Send T5 CORRECTION with delayed TX for precise timing
-   * This fixes the delayed TX estimation error
-   */
+
   mw_dstwr_correction_msg_t t5_correction = {
     .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
     .sequence_num = config->sequence_num,
@@ -271,7 +249,6 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
     return MW_DSTWR_ERR;
   }
 
-  /* Send T5 CORRECTION immediately after FINAL */
   mw_dstwr_correction_msg_t t5_correction = {
     .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
     .sequence_num = config->sequence_num,
@@ -288,7 +265,6 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   g_ranging_state = RANGING_STATE_CORRECTION_SENT;  // Update state
 #endif
 
-  /* Step 4: Wait for RESULT with INCREASED timeout (30ms instead of 15ms) */
   if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
     g_ranging_state = RANGING_STATE_IDLE;  // Reset on timeout
     return MW_DSTWR_ERR_TIMEOUT;

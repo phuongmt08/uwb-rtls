@@ -44,7 +44,7 @@
 /* Advanced features (disable for basic operation) */
 #define ENABLE_RSSI             /* Enable RSSI measurement and reporting */
 #define HAVE_TX_DELAY           /* Enable delayed TX mode (faster, 4 msgs instead of 5) */
-
+#define ENABLE_DEBUG_LOGGING    /* Enable detailed debug logging */
 #endif /* __PLATFORM_CONFIG_H */
 
 /* End of file -------------------------------------------------------- */

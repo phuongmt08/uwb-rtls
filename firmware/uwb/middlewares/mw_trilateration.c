@@ -9,10 +9,12 @@
 #include "mw_trilateration.h"
 #include <math.h>
 #include <string.h>
-
+#include "platform_config.h"
+#ifdef ENABLE_DEBUG_LOGGING
+#include "sys_logger.h"
+#endif
 /* Private defines ---------------------------------------------------- */
 #define MAXZERO  (0.001)
-#define MAX_ANCHORS (8)
 
 /* Private function prototypes ---------------------------------------- */
 static inline vec3d_t vec_diff(vec3d_t v1, vec3d_t v2);
@@ -85,7 +87,6 @@ static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
     anchor_dist_t dists[MAX_ANCHORS];
     uint8_t valid_count = 0;
 
-    // Lưu lại index và distance của các anchor hợp lệ
     for (uint8_t i = 0; i < num_anchors && i < MAX_ANCHORS; i++) {
         if (!anchors[i].valid) continue;
         dists[valid_count].index = i;
@@ -109,6 +110,13 @@ static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
     for (uint8_t i = 0; i < count; i++) {
         selected[i] = dists[i].index;
     }
+#ifdef ENABLE_DEBUG_LOGGING
+    RLOG_D(LOG_OBJECT_CODE_POSITIONING,
+           "Selected anchors: #%u (%.3fm), #%u (%.3fm), #%u (%.3fm)",
+           selected[0], anchors[selected[0]].distance,
+           selected[1], anchors[selected[1]].distance,
+           selected[2], anchors[selected[2]].distance);
+#endif
 }
 
 /* Core 3-sphere trilateration ---------------------------------------- */
