@@ -129,6 +129,7 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void);
  * @note Uses DW1000 delayed TX feature to transmit at precise time
  */
 bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_timestamp);
+bool bsp_uwb_is_rx_ready(void);
 
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */

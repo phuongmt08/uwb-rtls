@@ -344,62 +344,55 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
                               ((uint64_t)ts_buf[2] << 16) |
                               ((uint64_t)ts_buf[3] << 24) |
                               ((uint64_t)ts_buf[4] << 32);
-        
         uint32_t rxfi = dwt_read32bitreg(RX_FINFO_ID);
         uint16_t frame_len_onair = (uint16_t)(rxfi & 0x03FF);  /* On-air length WITH CRC */
-
         if (frame_len_onair > sizeof(rx_buf)) {
             frame_len_onair = sizeof(rx_buf);
         }
-
         /* Read full frame including CRC */
         dwt_readrxdata(rx_buf, frame_len_onair, 0);
-
         uint16_t payload_len = 0;
         if (frame_len_onair >= DW1000_CRC_LENGTH) {
             payload_len = frame_len_onair - DW1000_CRC_LENGTH;
         }
-
         /* Copy payload to user buffer */
         uint16_t copy_len = (payload_len < length) ? payload_len : length;
         if (copy_len > 0) {
             memcpy((uint8_t *)data, rx_buf, copy_len);
         }
-
         *out_len = payload_len;
-
         /* Clear RX flags */
         dwt_write32bitreg(SYS_STATUS_ID, 
                           SYS_STATUS_RXFCG | SYS_STATUS_RXDFR | 
                           SYS_STATUS_RXPRD | SYS_STATUS_RXSFDD | 
                           SYS_STATUS_RXPHD | SYS_STATUS_LDEDONE);
-        
         return BSP_OK;
     }
 
-    /* RX timeout (RXRFTO/RXPTO) - clear flags and re-enable RX quickly */
+    /* RX timeout (RXRFTO/RXPTO): only re-enable RX, do not reset */
     if (status & (SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO)) {
         dwt_write32bitreg(SYS_STATUS_ID,
                           SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO |
                           SYS_STATUS_RXDFR  | SYS_STATUS_RXPRD |
                           SYS_STATUS_RXSFDD | SYS_STATUS_RXPHD |
                           SYS_STATUS_LDEDONE);
-        /* Quick re-enable without forcetrxoff */
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
+        s_last_rx_timestamp = 0; // Invalidate cached RX timestamp on timeout
         *out_len = 0;
         return BSP_ERR_TIMEOUT;
     }
 
-    /* RX frame errors (CRC, PHR, etc.) - clear flags and re-enable */
+    /* RX frame errors (CRC, PHR, RFSL): force reset and re-enable RX */
     if (status & (SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL)) {
         dwt_write32bitreg(SYS_STATUS_ID, 
                           SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL |
                           SYS_STATUS_RXDFR | SYS_STATUS_RXSFDD | SYS_STATUS_RXPRD |
                           SYS_STATUS_LDEDONE);
-        /* Quick re-enable */
         dwt_forcetrxoff();
         dwt_rxreset();     
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
+        s_last_rx_timestamp = 0; // Invalidate cached RX timestamp on RX error
+        *out_len = 0;
         return BSP_ERR;
     }
 
@@ -412,8 +405,11 @@ bsp_err_t bsp_uwb_read_40bit(uint8_t reg_addr, uint8_t sub_addr, uint64_t *times
     CHECK_PARAM(timestamp, BSP_ERR_PARAM);
     CHECK_PARAM(s_initialized, BSP_ERR);
 
-    /* Return cached timestamp values to avoid timing issues */
+    /* Only allow reading RX timestamp if valid (last RX was good) */
     if (reg_addr == RX_TIME_ID && sub_addr == 0) {
+        if (s_last_rx_timestamp == 0) {
+            return BSP_ERR; // No valid RX timestamp available
+        }
         *timestamp = s_last_rx_timestamp;
     } else if (reg_addr == TX_TIME_ID && sub_addr == 0) {
         *timestamp = s_last_tx_timestamp;
@@ -538,8 +534,24 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
     /* Set delayed transmission time
      * DW1000 uses upper 32 bits of 40-bit timestamp for delayed TX
      * Shift right by 8 bits to get the value for DX_TIME register
+     * Must subtract antenna delay for correct scheduling
+     * Add guard: scheduled_time must be sufficiently in the future
      */
-    uint32_t dx_time = (uint32_t)(tx_timestamp >> 8);
+    if (tx_timestamp < s_tx_antenna_delay) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAYED] tx_timestamp < antenna_delay, cannot schedule");
+        return BSP_ERR;
+    }
+    uint64_t scheduled_time = tx_timestamp - s_tx_antenna_delay;
+    // Guard: scheduled_time must be at least MIN_GUARD ticks in the future
+    const uint32_t MIN_GUARD = 1024; // ~10us (1 tick = ~10ns)
+    uint64_t now;
+    dwt_readtxtimestamp((uint8_t*)&now); // Read current TX timestamp (raw)
+    now &= 0xFFFFFFFFFFULL; // Mask to 40 bits
+    if (scheduled_time <= now || (scheduled_time - now) < MIN_GUARD) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAYED] scheduled_time too close or in the past (now=0x%llx, sched=0x%llx)", now, scheduled_time);
+        return BSP_ERR;
+    }
+    uint32_t dx_time = (uint32_t)(scheduled_time >> 8);
     dwt_setdelayedtrxtime(dx_time);
 
     /* Start delayed transmission (NO auto-RX enable) */
@@ -586,5 +598,26 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
     dwt_forcetrxoff();
     return BSP_ERR;
 }
+bool bsp_uwb_is_rx_ready(void)
+{
+    if (!s_initialized) {
+        return false;
+    }
 
+    uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+    
+    /*
+     * RXFCG: Receiver Functional Control Good
+     * RXRFTO: Receiver RF Timeout
+     * RXPTO: Preamble Detection Timeout
+     * RXFCE: Receiver Frame Check Error
+     * RXPHE: Receiver PHR Error
+     * RXRFSL: Receiver Reed Solomon Error/Sync Loss
+     */
+    uint32_t mask = SYS_STATUS_RXFCG | 
+                    SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO | 
+                    SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL;
+
+    return (status & mask) != 0;
+}
 /* End of file -------------------------------------------------------- */
