@@ -42,8 +42,8 @@ static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
 
 /* Private types ------------------------------------------------------ */
 typedef struct {
-#if MW_FILTER_ENABLE_KALMAN_2D
-    adaptive_kalman_2d_t akf;
+#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
+    mw_filter_cxt_t filter;
 #endif
 } filter_state_t;
 
@@ -65,22 +65,23 @@ static void init_filters(void)
 {
     memset(&s_filters, 0, sizeof(s_filters));
 
-#if MW_FILTER_ENABLE_KALMAN_2D
+#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
     /* Initialize Adaptive Kalman Filter at center of anchor layout */
 #if NUM_ANCHORS < 4
-    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 3.0f;  /* FIX: divide by 3 not 4 */
+    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 3.0f;
     float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y) / 3.0f;
 #else
     float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X + ANCHOR_4_X) / 4.0f;
     float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y + ANCHOR_4_Y) / 4.0f;
 #endif
-    /* Get dt from config ranging_period_ms */
+
     sys_config_t *cfg = sys_config_get();
     float dt = cfg->ranging_period_ms / 1000.0f;
 
-    mw_filter_akf_init(&s_filters.akf, init_x, init_y, dt,
-                      AKF_PROCESS_NOISE, AKF_R_BASE,
-                      AKF_INNOVATION_ALPHA, AKF_R_SCALE_MIN, AKF_R_SCALE_MAX);
+    mw_filter_init(&s_filters.filter, init_x, init_y, dt,
+                   DES_ALPHA_BASE, DES_BETA,
+                   AKF_PROCESS_NOISE, AKF_R_BASE,
+                   AKF_INNOVATION_ALPHA, AKF_R_SCALE_MIN, AKF_R_SCALE_MAX);
 #endif
 }
 
@@ -98,7 +99,6 @@ static void init_filters(void)
  */
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
-    /* Validate input range */
     if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
         return false;
     }
@@ -108,7 +108,7 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
      * while maintaining the height difference)
      */
     double dz_abs = fabs(dz);
-    if (r3d <= dz_abs + 1e-6) {  /* Add small epsilon for floating point */
+    if (r3d <= dz_abs + 1e-6) {
         return false;
     }
     
@@ -118,7 +118,7 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
      */
     double r2d_sq = r3d * r3d - dz * dz;
     if (r2d_sq < 0.0) {
-        return false;  /* Should not happen after above check, but safety */
+        return false;
     }
     
     *r2d_out = sqrt(r2d_sq);
@@ -189,19 +189,18 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         
         /* Fill anchor data at correct position (indexed by anchor_id) */
         anchors_by_id[anchor_id].position = ANCHOR_POSITIONS[anchor_idx];
-        anchors_by_id[anchor_id].distance = distance_2d;  /* 2D planar distance */
+        anchors_by_id[anchor_id].distance = distance_2d;
         anchors_by_id[anchor_id].rssi = rssi;
         anchors_by_id[anchor_id].id = anchor_id;
         anchors_by_id[anchor_id].valid = true;
         valid_count++;
         
-        /* Debug: show conversion */
         RLOG_D(LOG_OBJECT_CODE_TAG,
                "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
                anchor_id, (float)r3d, (float)r2d, (float)dz);
     }
 
-        for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
             RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm RSSI=%ddBm",
                    id, anchors_by_id[id].distance, anchors_by_id[id].rssi);
@@ -253,20 +252,17 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 
-    /* ==== STEP 5: Apply Adaptive Kalman Filter (AKF) ==== */
-#if MW_FILTER_ENABLE_KALMAN_2D
+    /* ==== STEP 5: Apply Filter ==== */
+#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
     pos_vel_2d_t final_position;
 
-    /* AKF automatically adapts R based on innovation variance */
-    float R_scale = mw_filter_akf_update(&s_filters.akf,
-                                         tril_position.x, tril_position.y,
-                                         &final_position);
+    float R_scale = mw_filter_update(&s_filters.filter,
+                                     tril_position.x, tril_position.y,
+                                     &final_position);
 
-    /* Success! */
     s_success_count++;
     s_error_count = 0;
 
-    /* Log results */
     float velocity = sqrtf(final_position.vx * final_position.vx +
                           final_position.vy * final_position.vy);
     
@@ -277,7 +273,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%.3fm R_adapt=%.2f",
            (float)tril_result.error_estimate, R_scale);
 
-    /* Send position via UART (X, Y, Z, ERROR) */
     if (bsp_io_uart_send_position(final_position.x, final_position.y,
                                   TAG_HEIGHT_M,
                                   (float)tril_result.error_estimate) != BSP_OK) {
@@ -285,7 +280,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 
 #else
-    /* No Kalman - use raw trilateration */
+    /* No Filter - use raw trilateration */
     s_success_count++;
     s_error_count = 0;
 
@@ -322,16 +317,31 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
 
-    /* Log active preset */
-#ifdef PRESET_TEST_WORST_CASE
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: TEST_WORST_CASE");
-#elif defined(PRESET_HIGH_SPEED_VEHICLE)
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: HIGH_SPEED_VEHICLE");
+#ifdef PRESET_WORST_CASE
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: WORST_CASE");
+#elif defined(PRESET_BEST_CASE)
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: BEST_CASE");
 #else
     RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: MANUAL");
 #endif
 
-    /* Log anchor positions */
+#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Filter: %s%s%s",
+           MW_FILTER_ENABLE_DES ? "DES" : "",
+           (MW_FILTER_ENABLE_DES && MW_FILTER_ENABLE_AKF) ? " + " : "",
+           MW_FILTER_ENABLE_AKF ? "AKF" : "");
+#if MW_FILTER_ENABLE_DES
+    RLOG_I(LOG_OBJECT_CODE_TAG, "  DES: alpha=%.2f beta=%.2f", 
+           DES_ALPHA_BASE, DES_BETA);
+#endif
+#if MW_FILTER_ENABLE_AKF
+    RLOG_I(LOG_OBJECT_CODE_TAG, "  AKF: Q=%.3f R=%.2f", 
+           AKF_PROCESS_NOISE, AKF_R_BASE);
+#endif
+#else
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Filter: DISABLED (Raw trilateration)");
+#endif
+
     RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor positions:");
     for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
         RLOG_I(LOG_OBJECT_CODE_TAG, "  #%d: X=%.2fm Y=%.2fm Z=%.2fm",
@@ -375,9 +385,8 @@ void app_tag_process(void)
                                                    results, s_sequence_num++,
                                                    cfg->rx_timeout_ms);
 
-    bsp_io_led_off();
+        bsp_io_led_off();
 
-    /* Process results */
     if (num_success > 0) {
         process_ranging_results(results, num_success);
     } else {

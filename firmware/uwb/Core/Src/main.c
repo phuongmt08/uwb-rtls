@@ -212,6 +212,12 @@ int main(void)
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
   
+  if (cfg->role == DEVICE_ROLE_TAG) {
+    cfg->tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+    cfg->rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u", TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
+  }
+
   bsp_uwb_config_t uwb_cfg = {
     .channel           = cfg->uwb_channel,
     .prf               = cfg->uwb_prf,
@@ -334,7 +340,7 @@ int main(void)
         app_anchor_process(NULL);
       }
     }
-#endif`
+#endif
 
 #if TEST_SEND_POS
     /* Test mode: Send dummy position periodically */

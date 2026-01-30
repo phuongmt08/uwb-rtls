@@ -83,7 +83,7 @@ typedef struct {
 #define DEFAULT_DEVICE_ID           0x01
 #define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
 
-#define DEFAULT_RANGING_PERIOD_MS   100  /* 10Hz */
+#define DEFAULT_RANGING_PERIOD_MS   150 
 #define DEFAULT_RX_TIMEOUT_MS       75
 
 #define CONFIG_VERSION              7

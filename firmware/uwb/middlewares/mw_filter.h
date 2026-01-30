@@ -1,12 +1,9 @@
 /**
  * @file       mw_filter.h
- * @copyright
- * @license
- * @version    3.0.0
- * @date       2026-01-10
+ * @version    4.1.0 
+ * @date       2026-01-29
  * @author     Phuong Mai
- * @brief      Adaptive Kalman Filter with Innovation & Q inflation
- * @example    None
+ * @brief      DES pre-smoothing + Adaptive Kalman filtering system
  */
 #ifndef __MW_FILTER_H
 #define __MW_FILTER_H
@@ -14,52 +11,64 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* ===== Common Types ===== */
-
-#define AKF_STATE_SIZE (4)  /* [x, vx, y, vy] */
+#define AKF_STATE_SIZE (4)
 
 typedef struct {
-    float x, y;      /* Position (m) */
-    float vx, vy;    /* Velocity (m/s) */
+    float x, y;
+    float vx, vy;
 } pos_vel_2d_t;
 
-/* ===== Adaptive Kalman Filter (AKF) - Innovation-based Adaptive R ===== */
+typedef struct {
+    float s_x, b_x;
+    float s_y, b_y;
+    
+    float alpha_base;
+    float alpha;
+    float beta;
+    
+    float prev_mx;
+    float prev_my;
+    float change_ema;
+    
+    bool initialized;
+} des_filter_2d_t;
 
 typedef struct {
-    float state[AKF_STATE_SIZE];  /* [x, vx, y, vy] */
-    float P[AKF_STATE_SIZE][AKF_STATE_SIZE];  /* State covariance */
-    float dt;  /* Time step (seconds) */
+    float state[AKF_STATE_SIZE];
+    float P[AKF_STATE_SIZE][AKF_STATE_SIZE];
+    float dt;
     
-    /* Fixed noise parameters */
-    float Q;  /* Process noise (fixed) */
-    float R_base;  /* Base measurement noise */
+    float Q;
+    float R_base;
     
-    /* Innovation-based adaptive R */
-    float innovation_x;     /* Last innovation for X */
-    float innovation_y;     /* Last innovation for Y */
-    float innovation_var;   /* Innovation variance (EMA filtered) */
-    float innovation_alpha; /* EMA smoothing for innovation (0.2-0.5) */
+    float innovation_x;
+    float innovation_y;
+    float innovation_var;
+    float innovation_alpha;
     
-    float R_scale;      /* Current adaptive R multiplier */
-    float R_scale_min;  /* Min R scale (high confidence, e.g., 0.3) */
-    float R_scale_max;  /* Max R scale (low confidence, e.g., 5.0) */
+    float R_scale;
+    float R_scale_min;
+    float R_scale_max;
     
     bool initialized;
 } adaptive_kalman_2d_t;
 
-/**
- * @brief Initialize Adaptive Kalman Filter
- * @param akf Adaptive Kalman filter structure
- * @param x0, y0 Initial position (meters)
- * @param dt Time step (seconds, e.g., 0.1 for 10Hz)
- * @param Q Acceleration noise variance (e.g., 0.001-0.05)
- *          - Inflated automatically based on innovation magnitude
- *          - Uses continuous white noise acceleration model
- * @param R_base Base measurement noise (e.g., 0.1-0.5)
- * @param innovation_alpha EMA for innovation variance (0.2=smooth, 0.5=responsive)
- * @param R_scale_min Min R scale (0.3 = trust more when stable)
- * @param R_scale_max Max R scale (5.0 = trust less when unstable)
- */
+typedef struct {
+    des_filter_2d_t des;
+    adaptive_kalman_2d_t akf;
+} mw_filter_cxt_t;
+
+void mw_filter_des_init(des_filter_2d_t *des,
+                        float x0, float y0,
+                        float alpha_base,
+                        float beta);
+
+void mw_filter_des_update(des_filter_2d_t *des,
+                          float mx_raw, float my_raw,
+                          float *mx_smooth, float *my_smooth);
+
+void mw_filter_des_reset(des_filter_2d_t *des, float x, float y);
+
 void mw_filter_akf_init(adaptive_kalman_2d_t *akf,
                         float x0, float y0,
                         float dt,
@@ -69,23 +78,27 @@ void mw_filter_akf_init(adaptive_kalman_2d_t *akf,
                         float R_scale_min,
                         float R_scale_max);
 
-/**
- * @brief Update AKF with measurement
- * @details Automatically adapts R based on innovation variance
- * @param akf Adaptive Kalman filter
- * @param mx, my Measurement position (meters)
- * @param out Output position and velocity (can be NULL)
- * @return Current R_scale for debugging
- */
 float mw_filter_akf_update(adaptive_kalman_2d_t *akf,
                            float mx, float my,
                            pos_vel_2d_t *out);
 
-/**
- * @brief Get adaptive filter stats for debugging
- */
 void mw_filter_akf_get_stats(const adaptive_kalman_2d_t *akf,
                              float *innovation_var,
                              float *R_scale);
+
+void mw_filter_init(mw_filter_cxt_t *filter,
+                    float x0, float y0,
+                    float dt,
+                    float des_alpha,
+                    float des_beta,
+                    float akf_Q,
+                    float akf_R_base,
+                    float akf_innovation_alpha,
+                    float akf_R_scale_min,
+                    float akf_R_scale_max);
+
+float mw_filter_update(mw_filter_cxt_t *filter,
+                       float mx_raw, float my_raw,
+                       pos_vel_2d_t *out);
 
 #endif /* __MW_FILTER_H */
