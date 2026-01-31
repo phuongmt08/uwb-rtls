@@ -86,7 +86,7 @@ typedef struct {
 #define DEFAULT_RANGING_PERIOD_MS   150 
 #define DEFAULT_RX_TIMEOUT_MS       75
 
-#define CONFIG_VERSION              7
+#define CONFIG_VERSION              8
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
