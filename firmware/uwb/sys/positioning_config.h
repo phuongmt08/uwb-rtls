@@ -26,7 +26,7 @@
 #define ENABLE_ANCHOR_AUTO_CALIB    0
 
 #if ENABLE_ANCHOR_AUTO_CALIB
-#define CALIB_REF_DISTANCE_M      9.76f    /* Physical distance Tag-Anchor (m) */
+#define CALIB_REF_DISTANCE_M      7.32f    /* Physical distance Tag-Anchor (m) */
 #define CALIB_SAMPLES             30      /* Number of samples to collect */
 #define CALIB_ERROR_THRESHOLD_M   0.02f   /* Stop if error < 2cm */
 #define CALIB_MIN_DELTA_STEP      3       /* Stop if step < 3 */
@@ -58,15 +58,15 @@
  * ANCHOR LAYOUT
  * =================================================================== */
 
-#define NUM_ANCHORS  3
+#define NUM_ANCHORS  4
 
-#define ANCHOR_1_X   0.0f
+#define ANCHOR_1_X   -1.0f
 #define ANCHOR_1_Y   0.0f
 
 #define ANCHOR_2_X   9.76f
 #define ANCHOR_2_Y   0.0f
 
-#define ANCHOR_3_X   4.88f
+#define ANCHOR_3_X   -1.0f
 #define ANCHOR_3_Y   14.64f
 
 #define ANCHOR_4_X   9.76f
@@ -214,12 +214,12 @@
     /* Aggressive filtering for low noise */
     #define AKF_PROCESS_NOISE           0.05f  /* Process noise Q (acceleration variance) */
     #define AKF_R_BASE                  0.08f   /* Base measurement noise R */
-    #define AKF_INNOVATION_ALPHA        0.5f    /* Innovation variance EMA (0-1) */
+    #define AKF_INNOVATION_ALPHA        0.6f    /* Innovation variance EMA (0-1) */
     #define AKF_R_SCALE_MIN             0.05f    /* Min R scale (trust measurements more) */
-    #define AKF_R_SCALE_MAX             1.5f    /* Max R scale (trust model more) */
+    #define AKF_R_SCALE_MAX             2.0f    /* Max R scale (trust model more) */
     
     /* Motion detection thresholds */
-    #define AKF_STOP_THRESHOLD          0.15f    /* Velocity threshold for "stopped" (m/s) */
+    #define AKF_STOP_THRESHOLD          0.10f    /* Velocity threshold for "stopped" (m/s) */
     #define AKF_STOP_VELOCITY_DAMPING   0.2f    /* Velocity damping factor when stopped */
     #define AKF_STOP_GAIN_REDUCTION     0.2f    /* Kalman gain reduction when stopped */
     

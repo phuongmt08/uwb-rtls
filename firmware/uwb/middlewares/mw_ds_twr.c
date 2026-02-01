@@ -1,411 +1,624 @@
 /**
- * @file       mw_filter.c
- * @version    3.2.0
- * @date       2026-01-30
+ * @file       mw_ds_twr.c
+ * @copyright
+ * @license
+ * @version    2.2.1
+ * @date       2025-12-28
  * @author     Phuong Mai
- * @brief      Adaptive Kalman Filter + DES pre-smoothing implementation
- * @note       
+ * @example    None
  */
-#include "mw_filter.h"
-#include "positioning_config.h"
+#include "mw_ds_twr.h"
+#include <stddef.h>
 #include <string.h>
-#include <math.h>
+#include "sys_config.h"
+#include "platform_config.h"
+#include "sys_logger.h"
+/* Private defines ---------------------------------------------------- */
+#define DW1000_REG_RX_TIME     (0x15)
+#define DW1000_REG_TX_TIME     (0x17)
+#define TIMESTAMP_40BIT_MASK   (0x000000FFFFFFFFFFULL)
+#define RX_BUFFER_SIZE         (128u)
 
-/* ========== DES FILTER ========== */
+#define DWT_TIME_UNITS (1.0/499.2e6/128.0)
+#define SPEED_OF_LIGHT 299792458.0
 
-#if MW_FILTER_ENABLE_DES
 
-void mw_filter_des_init(des_filter_2d_t *des,
-                        float x0, float y0,
-                        float alpha_base,
-                        float beta)
-{
-    if (!des) return;
-    memset(des, 0, sizeof(des_filter_2d_t));
-    
-    des->s_x = x0;
-    des->s_y = y0;
-    des->b_x = 0.0f;
-    des->b_y = 0.0f;
-    
-    des->alpha_base = alpha_base;
-    des->alpha = alpha_base;
-    des->beta = beta;
-    
-    des->prev_mx = x0;
-    des->prev_my = y0;
-    des->change_ema = 0.0f;
-    
-    des->initialized = true;
+/* Inter-message delays to ensure receiver is ready */
+#define INTER_MSG_DELAY_MS     (2)   // 2ms delay (DW1000 RX turnaround ~300us + margin)
+
+/* DW1000 TX delay constraints (based on datasheet) */
+#define DW1000_TURNAROUND_US   (300)  // TX->RX or RX->TX switching time (~200-300us)
+#define MCU_PROCESSING_US      (500)  // MCU processing + frame preparation + logging
+#define ANTENNA_DELAY_US       (100)  // Antenna delay compensation
+#define SAFETY_MARGIN_US       (1100) // Safety margin for clock drift & jitter & OS delays
+
+/* Total minimum delay = 300 + 500 + 100 + 1100 = 2000us = 2ms */
+#define MIN_FINAL_TX_DELAY_US  (DW1000_TURNAROUND_US + MCU_PROCESSING_US + ANTENNA_DELAY_US + SAFETY_MARGIN_US)
+#define FINAL_TX_DELAY_US      (5000) // 3ms - safe margin for MCU processing
+#define CORRECTION_TX_DELAY_US (5000) // 1ms gap between FINAL and CORRECTION
+
+/* ========================================================================
+ * FIX #1: INCREASED TIMEOUTS FOR 850kbps + PLEN=1024
+ * ========================================================================
+ * Old values: 15ms (too short → missed packets)
+ * New values: 30ms (safe margin for slow data rate)
+ * 
+ * Calculation:
+ * - PLEN=1024 @ 850kbps: ~12ms airtime
+ * - Processing + turnaround: ~3-5ms
+ * - Total needed: ~20ms minimum
+ * - Set to 30ms: 50% safety margin
+ * ======================================================================== */
+#define WAIT_FINAL_TIMEOUT_US  (30000)  // 15ms - Tag sends FINAL after 3ms delay
+#define WAIT_RESULT_TIMEOUT_US (30000)  // 15ms - Anchor sends RESULT quickly after FINAL
+
+#define CHECK_PARAM(cond, ret) do { if (!(cond)) return (ret); } while(0)
+
+/* ========================================================================
+ * FIX #2: STATE MACHINE TO PREVENT PREMATURE POLL
+ * ========================================================================
+ * Problem: TAG sends new POLL before receiving CORRECTION/RESULT
+ * Solution: Add state tracking to enforce sequence completion
+ * ======================================================================== */
+typedef enum {
+  RANGING_STATE_IDLE = 0,           // Ready to start new ranging
+  RANGING_STATE_POLL_SENT,          // Waiting for RESPONSE
+  RANGING_STATE_RESP_RECEIVED,      // Waiting for RESULT (HAVE_TX_DELAY) or sending FINAL (no HAVE_TX_DELAY)
+  RANGING_STATE_FINAL_SENT,         // Waiting for CORRECTION (HAVE_TX_DELAY)
+  RANGING_STATE_CORRECTION_SENT,    // Waiting for RESULT (HAVE_TX_DELAY)
+  RANGING_STATE_COMPLETE            // Sequence finished, can start new one
+} ranging_state_t;
+
+/* Global state tracker (in real implementation, should be per-tag context) */
+static ranging_state_t g_ranging_state = RANGING_STATE_IDLE;
+
+/* Helper: Check if ready to start new ranging sequence */
+static inline bool can_start_new_ranging(void) {
+  return (g_ranging_state == RANGING_STATE_IDLE || 
+          g_ranging_state == RANGING_STATE_COMPLETE);
 }
 
-void mw_filter_des_update(des_filter_2d_t *des,
-                          float mx_raw, float my_raw,
-                          float *mx_smooth, float *my_smooth)
+/* 40-bit timestamp arithmetic */
+static inline uint64_t ts40_add(uint64_t ts, uint32_t dly)
 {
-    if (!des || !des->initialized || !mx_smooth || !my_smooth) return;
-    
-    /* Calculate movement change */
-    float dx = mx_raw - des->prev_mx;
-    float dy = my_raw - des->prev_my;
-    float change = sqrtf(dx*dx + dy*dy);
-    
-    /* Exponential moving average of change */
-    if (des->change_ema == 0.0f) {
-        des->change_ema = change;
-    } else {
-        des->change_ema = DES_CHANGE_ALPHA * change + 
-                         (1.0f - DES_CHANGE_ALPHA) * des->change_ema;
-    }
-    
-    /* Adaptive alpha based on motion */
-    if (des->change_ema > DES_MOTION_THRESHOLD) {
-        /* High motion: increase responsiveness */
-        des->alpha = des->alpha_base * DES_MOTION_SCALE_HIGH;
-        if (des->alpha > DES_ALPHA_MAX) des->alpha = DES_ALPHA_MAX;
-    } else {
-        /* Low motion: increase smoothing */
-        des->alpha = des->alpha_base * DES_MOTION_SCALE_LOW;
-        if (des->alpha < DES_ALPHA_MIN) des->alpha = DES_ALPHA_MIN;
-    }
-    
-    /* Double Exponential Smoothing update */
-    float s_x_prev = des->s_x;
-    float b_x_prev = des->b_x;
-    des->s_x = des->alpha * mx_raw + (1.0f - des->alpha) * (s_x_prev + b_x_prev);
-    des->b_x = des->beta * (des->s_x - s_x_prev) + (1.0f - des->beta) * b_x_prev;
-    
-    float s_y_prev = des->s_y;
-    float b_y_prev = des->b_y;
-    des->s_y = des->alpha * my_raw + (1.0f - des->alpha) * (s_y_prev + b_y_prev);
-    des->b_y = des->beta * (des->s_y - s_y_prev) + (1.0f - des->beta) * b_y_prev;
-    
-    /* Output: level + trend */
-    *mx_smooth = des->s_x + des->b_x;
-    *my_smooth = des->s_y + des->b_y;
-    
-    /* Update history */
-    des->prev_mx = mx_raw;
-    des->prev_my = my_raw;
+  return (ts + dly) & TIMESTAMP_40BIT_MASK;
 }
 
-void mw_filter_des_reset(des_filter_2d_t *des, float x, float y)
+static inline uint64_t ts40_sub(uint64_t ts, uint32_t dly)
 {
-    if (!des) return;
-    
-    des->s_x = x;
-    des->s_y = y;
-    des->b_x = 0.0f;
-    des->b_y = 0.0f;
-    des->prev_mx = x;
-    des->prev_my = y;
-    des->change_ema = 0.0f;
+  return (ts - dly) & TIMESTAMP_40BIT_MASK;
 }
 
-#endif /* MW_FILTER_ENABLE_DES */
+static inline bool is_valid_hal(const mw_dstwr_hal_t *hal);
 
-/* ========== ADAPTIVE KALMAN FILTER ========== */
-
-#if MW_FILTER_ENABLE_AKF
-
-void mw_filter_akf_init(adaptive_kalman_2d_t *akf,
-                        float x0, float y0,
-                        float dt,
-                        float Q,
-                        float R_base,
-                        float innovation_alpha,
-                        float R_scale_min,
-                        float R_scale_max)
+/* ====================================================================
+ * TAG IMPLEMENTATION (WITH STATE GUARD)
+ * ==================================================================== */
+mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
+                                    mw_dstwr_result_t *result)
 {
-    if (!akf) return;
-    memset(akf, 0, sizeof(adaptive_kalman_2d_t));
-    
-    /* State: [x, vx, y, vy] */
-    akf->state[0] = x0;
-    akf->state[1] = 0.0f;
-    akf->state[2] = y0;
-    akf->state[3] = 0.0f;
-    
-    /* Initial covariance */
-    akf->P[0][0] = 1.0f;
-    akf->P[1][1] = 1.0f;
-    akf->P[2][2] = 1.0f;
-    akf->P[3][3] = 1.0f;
-    
-    /* Parameters */
-    akf->dt = dt;
-    akf->Q = Q;
-    akf->R_base = R_base;
-    
-    /* Innovation tracking */
-    akf->innovation_x = 0.0f;
-    akf->innovation_y = 0.0f;
-    akf->innovation_var = R_base;
-    akf->innovation_alpha = innovation_alpha;
-    
-    /* Adaptive R scaling */
-    akf->R_scale = 1.0f;
-    akf->R_scale_min = R_scale_min;
-    akf->R_scale_max = R_scale_max;
-    
-    /* Stop detection - initialize */
-    akf->prev_meas_x = x0;
-    akf->prev_meas_y = y0;
-    akf->stop_counter = 0;
-    akf->was_stopped = false;
-    
-    akf->initialized = true;
-}
+  CHECK_PARAM(config && config->hal, MW_DSTWR_ERR_PARAM);
+  CHECK_PARAM(is_valid_hal(config->hal), MW_DSTWR_ERR_PARAM);
 
-float mw_filter_akf_update(adaptive_kalman_2d_t *akf,
-                           float mx, float my,
-                           pos_vel_2d_t *out)
-{
-    if (!akf || !akf->initialized) return 1.0f;
-    
-    float dt = akf->dt;
-    float Q = akf->Q;
+  /* ========================================================================
+   * FIX #2: STATE GUARD - Prevent sending new POLL if previous not complete
+   * ======================================================================== */
+  if (!can_start_new_ranging()) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] REJECTED: Previous ranging not complete (state=%d)", g_ranging_state);
+    return MW_DSTWR_ERR_BUSY;  // Return busy error instead of proceeding
+  }
 
-    float meas_dx = mx - akf->prev_meas_x;
-    float meas_dy = my - akf->prev_meas_y;
-    float meas_speed = sqrtf(meas_dx*meas_dx + meas_dy*meas_dy) / dt;
-    
-    /* Update measurement history */
-    akf->prev_meas_x = mx;
-    akf->prev_meas_y = my;
-    
-    /* Hysteresis: different thresholds for entering vs exiting stop */
-    float stop_threshold = akf->was_stopped ? 
-                          AKF_STOP_THRESHOLD_EXIT : 
-                          AKF_STOP_THRESHOLD_ENTER;
-    
-    bool stop_detected = (meas_speed < stop_threshold);
-    
-    /* Update stop counter */
-    if (stop_detected) {
-        akf->stop_counter++;
-        if (akf->stop_counter > 100) akf->stop_counter = 100; /* cap */
-    } else {
-        akf->stop_counter = 0;
-    }
-    
-    akf->was_stopped = (akf->stop_counter > 0);
-    
-    /* ===== PREDICT ===== */
-    float x_pred = akf->state[0] + akf->state[1] * dt;
-    float vx_pred = akf->state[1];
-    float y_pred = akf->state[2] + akf->state[3] * dt;
-    float vy_pred = akf->state[3];
-    
-    /* Innovation (measurement residual) */
-    float innov_x = mx - x_pred;
-    float innov_y = my - y_pred;
-    
-    /* ===== STATE-DEPENDENT KALMAN BEHAVIOR ===== */
-    float q_scale = 1.0f;
-    float R_multiplier = 1.0f;
-    float gain_reduction = 1.0f;
-    
-    /* Get current state velocity for Q scaling in moving state */
-    float velocity = sqrtf(akf->state[1]*akf->state[1] + 
-                          akf->state[3]*akf->state[3]);
-    
-    if (akf->stop_counter == 0) {
-        /* ===== MOVING STATE ===== */
-        q_scale = 1.0f + AKF_Q_SCALE_VELOCITY_K * velocity;
-        R_multiplier = 1.0f;  /* Use adaptive R normally */
-        gain_reduction = 1.0f;
-    }
-    else if (akf->stop_counter <= AKF_STOP_SOFT_FRAMES) {
-        /* ===== SOFT STOP (CRITICAL PHASE) ===== */
-        /* Goal: Let state converge to measurement */
-        q_scale = AKF_SOFT_STOP_Q_SCALE;      /* Slightly higher Q */
-        R_multiplier = AKF_SOFT_STOP_R_MULT;  /* Lower R - trust meas MORE */
-        gain_reduction = 1.0f;                /* FULL Kalman gain */
-        
-        /* NO velocity damping in soft stop! */
-    }
-    else if (akf->stop_counter <= AKF_STOP_HARD_FRAMES) {
-        /* ===== TRANSITION TO HARD STOP ===== */
-        float transition_ratio = (float)(akf->stop_counter - AKF_STOP_SOFT_FRAMES) / 
-                                (float)(AKF_STOP_HARD_FRAMES - AKF_STOP_SOFT_FRAMES);
-        
-        /* Gradually transition parameters */
-        q_scale = AKF_SOFT_STOP_Q_SCALE - 
-                 (AKF_SOFT_STOP_Q_SCALE - AKF_HARD_STOP_Q_SCALE) * transition_ratio;
-        R_multiplier = AKF_SOFT_STOP_R_MULT + 
-                      (1.0f - AKF_SOFT_STOP_R_MULT) * transition_ratio;
-        gain_reduction = 1.0f - (1.0f - AKF_HARD_STOP_GAIN_RED) * transition_ratio;
-        
-        /* Start gentle velocity damping */
-        akf->state[1] *= (1.0f - 0.3f * transition_ratio);
-        akf->state[3] *= (1.0f - 0.3f * transition_ratio);
-    }
-    else {
-        /* ===== HARD STOP ===== */
-        /* Goal: Hold position, eliminate jitter */
-        q_scale = AKF_HARD_STOP_Q_SCALE;
-        R_multiplier = 1.0f;  /* Adaptive R allowed */
-        gain_reduction = AKF_HARD_STOP_GAIN_RED;
-        
-        /* Zero out tiny velocities */
-        if (fabsf(akf->state[1]) < 0.02f) akf->state[1] = 0.0f;
-        if (fabsf(akf->state[3]) < 0.02f) akf->state[3] = 0.0f;
-    }
-    
-    /* Apply process noise scaling */
-    float sigma_a2 = Q * q_scale;
-    
-    /* Process noise covariance matrix */
-    float dt2 = dt * dt;
-    float dt3 = dt2 * dt;
-    float dt4 = dt3 * dt;
-    
-    float Q_pos_pos = 0.25f * sigma_a2 * dt4;
-    float Q_pos_vel = 0.5f  * sigma_a2 * dt3;
-    float Q_vel_vel = sigma_a2 * dt2;
-    
-    /* Predict covariance (X dimension) */
-    float P00 = akf->P[0][0] + 2.0f*dt*akf->P[0][1] + dt2*akf->P[1][1] + Q_pos_pos;
-    float P01 = akf->P[0][1] + dt*akf->P[1][1] + Q_pos_vel;
-    float P11 = akf->P[1][1] + Q_vel_vel;
-    
-    /* Predict covariance (Y dimension) */
-    float P22 = akf->P[2][2] + 2.0f*dt*akf->P[2][3] + dt2*akf->P[3][3] + Q_pos_pos;
-    float P23 = akf->P[2][3] + dt*akf->P[3][3] + Q_pos_vel;
-    float P33 = akf->P[3][3] + Q_vel_vel;
-    
-    /* ===== ADAPTIVE R CALCULATION ===== */
-    float innov_magnitude_sq = innov_x*innov_x + innov_y*innov_y;
-    
-    /* Initialize or update innovation variance estimate */
-    if (akf->innovation_var == 0.0f || akf->innovation_var == akf->R_base) {
-        akf->innovation_var = innov_magnitude_sq > 1e-6f ? 
-                             innov_magnitude_sq : akf->R_base;
-    } else {
-        akf->innovation_var = akf->innovation_alpha * innov_magnitude_sq +
-                             (1.0f - akf->innovation_alpha) * akf->innovation_var;
-    }
-    
-    akf->innovation_x = innov_x;
-    akf->innovation_y = innov_y;
-    
-    /* Calculate R scale based on innovation */
-    float innovation_ratio = sqrtf(akf->innovation_var / akf->R_base);
-    akf->R_scale = 1.0f / innovation_ratio;
-    
-    /* Apply constraints on R_scale */
-    if (akf->R_scale < akf->R_scale_min) akf->R_scale = akf->R_scale_min;
-    if (akf->R_scale > akf->R_scale_max) akf->R_scale = akf->R_scale_max;
-    
-    /* Apply R multiplier from stop state */
-    float R = akf->R_base * akf->R_scale * R_multiplier;
-    
-    /* ===== UPDATE (X dimension) ===== */
-    float Sx = P00 + R;
-    float Kx0 = P00 / Sx;
-    float Kx1 = P01 / Sx;
-    
-    /* Apply gain reduction from stop state */
-    Kx0 *= gain_reduction;
-    Kx1 *= gain_reduction;
-    
-    akf->state[0] = x_pred + Kx0 * innov_x;
-    akf->state[1] = vx_pred + Kx1 * innov_x;
-    
-    akf->P[0][0] = P00 - Kx0*Sx*Kx0;
-    akf->P[0][1] = akf->P[1][0] = P01 - Kx0*Sx*Kx1;
-    akf->P[1][1] = P11 - Kx1*Sx*Kx1;
-    
-    /* ===== UPDATE (Y dimension) ===== */
-    float Sy = P22 + R;
-    float Ky2 = P22 / Sy;
-    float Ky3 = P23 / Sy;
-    
-    /* Apply gain reduction from stop state */
-    Ky2 *= gain_reduction;
-    Ky3 *= gain_reduction;
-    
-    akf->state[2] = y_pred + Ky2 * innov_y;
-    akf->state[3] = vy_pred + Ky3 * innov_y;
-    
-    akf->P[2][2] = P22 - Ky2*Sy*Ky2;
-    akf->P[2][3] = akf->P[3][2] = P23 - Ky2*Sy*Ky3;
-    akf->P[3][3] = P33 - Ky3*Sy*Ky3;
-    
-    /* Output state */
-    if (out) {
-        out->x = akf->state[0];
-        out->vx = akf->state[1];
-        out->y = akf->state[2];
-        out->vy = akf->state[3];
-    }
-    
-    return akf->R_scale;
-}
+  sys_config_t *sys_cfg = sys_config_get();
+  const mw_dstwr_hal_t *hal = config->hal;
+  uint64_t t1 = 0, t4 = 0, t5 = 0;
+  uint8_t rx_buffer[RX_BUFFER_SIZE];
+  uint16_t rx_length = 0;
 
-void mw_filter_akf_get_stats(const adaptive_kalman_2d_t *akf,
-                             float *innovation_var,
-                             float *R_scale)
-{
-    if (!akf) return;
-    
-    if (innovation_var) *innovation_var = akf->innovation_var;
-    if (R_scale) *R_scale = akf->R_scale;
-}
+  /* Step 1: Send POLL */
+  mw_dstwr_poll_msg_t poll_msg = {
+    .msg_type = MW_DSTWR_MSG_TYPE_POLL,
+    .sequence_num = config->sequence_num,
+    .target_anchor = config->target_anchor_id,  /* Target specific anchor or 0xFF for any */
+    .rssi_last = 0,  /* Could store last RSSI for diagnostics */
+    .padding = {0}
+  };
 
-#endif /* MW_FILTER_ENABLE_AKF */
+  if (hal->tx(&poll_msg, sizeof(poll_msg)) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] POLL TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset state on failure
+    return MW_DSTWR_ERR;
+  }
 
-/* ========== COMBINED FILTER ========== */
+  g_ranging_state = RANGING_STATE_POLL_SENT;  // Update state
 
-void mw_filter_init(mw_filter_cxt_t *filter,
-                    float x0, float y0,
-                    float dt,
-                    float des_alpha,
-                    float des_beta,
-                    float akf_Q,
-                    float akf_R_base,
-                    float akf_innovation_alpha,
-                    float akf_R_scale_min,
-                    float akf_R_scale_max)
-{
-    if (!filter) return;
-    
-#if MW_FILTER_ENABLE_DES
-    mw_filter_des_init(&filter->des, x0, y0, des_alpha, des_beta);
+  /* DW1000 automatically completes TX before timestamp read */
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t1) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
+    return MW_DSTWR_ERR;
+  }
+
+  /* Step 2: Wait for RESPONSE with INCREASED timeout (30ms instead of 15ms) */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_FINAL_TIMEOUT_US) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on timeout
+    return MW_DSTWR_ERR_TIMEOUT;
+  }
+
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_RESP, config->sequence_num)) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on invalid message
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+
+  g_ranging_state = RANGING_STATE_RESP_RECEIVED;  // Update state
+
+  /* Parse RESPONSE to get anchor_id */
+  const mw_dstwr_resp_msg_t *resp_msg = (const mw_dstwr_resp_msg_t *)rx_buffer;
+  uint8_t anchor_id = resp_msg->anchor_id;
+
+  if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t4) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
+    return MW_DSTWR_ERR;
+  }
+  
+#ifdef ENABLE_RSSI
+  /* Read RSSI of RESPONSE message */
+  int rssi_resp = 0;
+  if (hal->get_rssi) {
+    rssi_resp = hal->get_rssi();
+  }
 #endif
-    
-#if MW_FILTER_ENABLE_AKF
-    mw_filter_akf_init(&filter->akf, x0, y0, dt,
-                       akf_Q, akf_R_base, akf_innovation_alpha,
-                       akf_R_scale_min, akf_R_scale_max);
-#endif
-}
 
-float mw_filter_update(mw_filter_cxt_t *filter,
-                       float mx_raw, float my_raw,
-                       pos_vel_2d_t *out)
-{
-    if (!filter || !out) return 1.0f;
-    
-    float mx_input = mx_raw;
-    float my_input = my_raw;
-    
-#if MW_FILTER_ENABLE_DES
-    /* Stage 1: DES pre-smoothing */
-    mw_filter_des_update(&filter->des, mx_raw, my_raw, &mx_input, &my_input);
-#endif
-    
-#if MW_FILTER_ENABLE_AKF
-    /* Stage 2: Adaptive Kalman Filter */
-    float R_scale = mw_filter_akf_update(&filter->akf, mx_input, my_input, out);
-    return R_scale;
+#ifdef HAVE_TX_DELAY
+ 
+  double delay_seconds = FINAL_TX_DELAY_US * 1e-6;  // Convert us to seconds
+  uint64_t delay_units = (uint64_t)(delay_seconds / DWT_TIME_UNITS);
+  
+  /* Validate delay is above minimum threshold */
+  uint64_t min_delay_units = (uint64_t)(MIN_FINAL_TX_DELAY_US * 1e-6 / DWT_TIME_UNITS);
+  if (delay_units < min_delay_units) {
+    delay_units = min_delay_units;  // Enforce minimum
+  }
+
+  uint16_t tx_ant_delay = 0;
+  if (hal->get_tx_antenna_delay) {
+    tx_ant_delay = hal->get_tx_antenna_delay();
+  }
+  
+  /* Calculate scheduled TX time (what we pass to DW1000) */
+  uint64_t scheduled_tx_time = ts40_add(t4, (uint32_t)delay_units);
+
+  mw_dstwr_final_msg_t final_msg = {
+    .msg_type = MW_DSTWR_MSG_TYPE_FINAL,
+    .sequence_num = config->sequence_num,
+    .poll_tx_timestamp = t1,
+    .resp_rx_timestamp = t4,
+    .final_tx_timestamp = 0  /* Will send real T5 in CORRECTION message */
+  };
+
+  if (hal->tx_delayed(&final_msg, sizeof(final_msg), scheduled_tx_time) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] FINAL TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
+    return MW_DSTWR_ERR;
+  }
+  
+  g_ranging_state = RANGING_STATE_FINAL_SENT;  // Update state
+
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
+    return MW_DSTWR_ERR;
+  }
+
+  double corr_delay_sec = CORRECTION_TX_DELAY_US * 1e-6;
+  uint64_t corr_delay_units = (uint64_t)(corr_delay_sec / DWT_TIME_UNITS);
+  uint64_t corr_scheduled_time = ts40_add(t5, (uint32_t)corr_delay_units);
+
+  mw_dstwr_correction_msg_t t5_correction = {
+    .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
+    .sequence_num = config->sequence_num,
+    .final_tx_timestamp = t5,
+    .distance_mm = 0  /* Placeholder - will be filled by Anchor */
+  };
+  
+  if (hal->tx_delayed(&t5_correction, sizeof(t5_correction), corr_scheduled_time) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] CORRECTION TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
+    return MW_DSTWR_ERR;
+  }
+
+  g_ranging_state = RANGING_STATE_CORRECTION_SENT;  // Update state
+
 #else
-    /* No AKF: output DES result or raw input */
-    out->x = mx_input;
-    out->y = my_input;
-    out->vx = 0.0f;
-    out->vy = 0.0f;
-    return 1.0f;
+  /* Step 3: Send FINAL immediately */
+  mw_dstwr_final_msg_t final_msg = {
+    .msg_type = MW_DSTWR_MSG_TYPE_FINAL,
+    .sequence_num = config->sequence_num,
+    .poll_tx_timestamp = t1,
+    .resp_rx_timestamp = t4,
+    .final_tx_timestamp = 0  /* Placeholder for T5 */
+  };
+
+  if (hal->tx(&final_msg, sizeof(final_msg)) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] FINAL TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
+    return MW_DSTWR_ERR;
+  }
+
+  g_ranging_state = RANGING_STATE_FINAL_SENT;  // Update state
+
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t5) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on error
+    return MW_DSTWR_ERR;
+  }
+
+  mw_dstwr_correction_msg_t t5_correction = {
+    .msg_type = MW_DSTWR_MSG_TYPE_CORRECTION,
+    .sequence_num = config->sequence_num,
+    .final_tx_timestamp = t5,
+    .distance_mm = 0
+  };
+
+  if (hal->tx(&t5_correction, sizeof(t5_correction)) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] CORRECTION TX FAILED!");
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on failure
+    return MW_DSTWR_ERR;
+  }
+
+  g_ranging_state = RANGING_STATE_CORRECTION_SENT;  // Update state
 #endif
+
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on timeout
+    return MW_DSTWR_ERR_TIMEOUT;
+  }
+
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_RESULT, config->sequence_num)) {
+    g_ranging_state = RANGING_STATE_IDLE;  // Reset on invalid message
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+
+  /* Parse distance from RESULT */
+  const mw_dstwr_result_msg_t *result_msg = (const mw_dstwr_result_msg_t *)rx_buffer;
+  float distance = result_msg->distance_mm / 1000.0f;
+
+  /* Fill result structure */
+  if (result) {
+    result->timestamps.t1 = t1;
+    result->timestamps.t2 = 0;  /* Unknown at Tag */
+    result->timestamps.t3 = 0;  /* Unknown at Tag */
+    result->timestamps.t4 = t4;
+    result->timestamps.t5 = t5;
+    result->timestamps.t6 = 0;  /* Unknown at Tag */
+    result->distance_m = distance;
+#ifdef ENABLE_RSSI
+    result->anchor_id = result_msg->anchor_id;
+    result->rssi = result_msg->rssi_final;
+#else
+    result->anchor_id = anchor_id;
+    result->rssi = 0;
+#endif
+    result->valid = true;
+  }
+
+  /* ========================================================================
+   * FIX #2: Mark sequence as COMPLETE - Now safe to start new ranging
+   * ======================================================================== */
+  g_ranging_state = RANGING_STATE_COMPLETE;
+
+  return MW_DSTWR_OK;
 }
+
+/* ====================================================================
+ * ANCHOR IMPLEMENTATION (WITH STATE GUARD)
+ * ==================================================================== */
+mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
+                                       mw_dstwr_result_t *result)
+{
+  CHECK_PARAM(config && config->hal, MW_DSTWR_ERR_PARAM);
+  CHECK_PARAM(is_valid_hal(config->hal), MW_DSTWR_ERR_PARAM);
+
+  sys_config_t *sys_cfg = sys_config_get();
+  const mw_dstwr_hal_t *hal = config->hal;
+  uint64_t t2 = 0, t3 = 0, t6 = 0, t1 = 0, t4 = 0, t5 = 0;
+  uint8_t rx_buffer[RX_BUFFER_SIZE];
+  uint16_t rx_length = 0;
+
+  /* Step 1: Wait for POLL (blocking with timeout) */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, config->rx_timeout_us) != 0)
+    return MW_DSTWR_ERR_TIMEOUT;
+
+  /* Validate POLL message (accept any sequence number if 0xFF) */
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_POLL, 0xFF)) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid POLL: type=0x%02X len=%u", rx_buffer[0], rx_length);
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+
+  /* Extract sequence number and target anchor ID from POLL */
+  const mw_dstwr_poll_msg_t *poll = (const mw_dstwr_poll_msg_t *)rx_buffer;
+  uint8_t poll_seq = poll->sequence_num;
+  uint8_t target_anchor = poll->target_anchor;
+
+  /* Check if this POLL is for us (0xFF means broadcast) */
+  if (target_anchor != 0xFF && target_anchor != sys_cfg->device_id) {
+    /* Not for us, ignore silently */
+    return MW_DSTWR_OK;
+  }
+
+  if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t2) != 0)
+    return MW_DSTWR_ERR;
+  
+#ifdef ENABLE_RSSI
+  /* Read RSSI of POLL message */
+  int rssi_poll = 0;
+  if (hal->get_rssi) {
+    rssi_poll = hal->get_rssi();
+  }
+#endif
+
+  /* Step 2: Send RESPONSE with embedded anchor_id */
+  mw_dstwr_resp_msg_t resp_msg = {
+    .msg_type = MW_DSTWR_MSG_TYPE_RESP,
+    .sequence_num = poll_seq,
+    .anchor_id = sys_cfg->device_id,  /* Send our anchor ID */
+    .rssi_last = 0,
+    .padding = {0}
+  };
+
+  if (hal->tx(&resp_msg, sizeof(resp_msg)) != 0)
+    return MW_DSTWR_ERR;
+
+  if (hal->read_timestamp(DW1000_REG_TX_TIME, 0x00, &t3) != 0)
+    return MW_DSTWR_ERR;
+
+  /* Step 3: Wait for FINAL with INCREASED timeout */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_FINAL_TIMEOUT_US) != 0)
+    return MW_DSTWR_ERR_TIMEOUT;
+
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_FINAL, poll_seq)) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid FINAL: type=0x%02X len=%u", rx_buffer[0], rx_length);
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+
+  /* Parse T1 and T4 from FINAL message */
+  const mw_dstwr_final_msg_t *final = (const mw_dstwr_final_msg_t *)rx_buffer;
+  t1 = final->poll_tx_timestamp & TIMESTAMP_40BIT_MASK;
+  t4 = final->resp_rx_timestamp & TIMESTAMP_40BIT_MASK;
+
+  if (hal->read_timestamp(DW1000_REG_RX_TIME, 0x00, &t6) != 0)
+    return MW_DSTWR_ERR;
+  
+#ifdef ENABLE_RSSI
+  /* Read RSSI of FINAL message */
+  int rssi_final = 0;
+  if (hal->get_rssi) {
+    rssi_final = hal->get_rssi();
+  }
+#endif
+
+#ifdef HAVE_TX_DELAY
+  /* Step 4: Wait for CORRECTION with T5 with INCREASED timeout (30ms) */
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, WAIT_RESULT_TIMEOUT_US) != 0) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] CORRECTION TIMEOUT");
+    return MW_DSTWR_ERR_TIMEOUT;
+  }
+  
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_CORRECTION, poll_seq)) {
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid CORRECTION: type=0x%02X len=%u", rx_buffer[0], rx_length);
+    return MW_DSTWR_ERR_INVALID_MSG;
+  }
+  
+  /* Parse actual T5 from CORRECTION (overwrites placeholder from FINAL) */
+  const mw_dstwr_correction_msg_t *corr = (const mw_dstwr_correction_msg_t *)rx_buffer;
+  t5 = corr->final_tx_timestamp & TIMESTAMP_40BIT_MASK;
+
+  /* Calculate distance with actual T5 */
+  mw_dstwr_timestamps_t timestamps = {
+    .t1 = t1, .t2 = t2, .t3 = t3,
+    .t4 = t4, .t5 = t5, .t6 = t6
+  };
+
+  float distance = mw_dstwr_calculate_distance(&timestamps);
+  
+  /* Validate calculated distance */
+  if (distance < 0.0f || distance > 1000.0f)
+    return MW_DSTWR_ERR;
+
+  /* Send distance result back to Tag */
+  int32_t distance_mm = (int32_t)(distance * 1000.0f);
+  mw_dstwr_result_msg_t result_msg = {
+    .msg_type = MW_DSTWR_MSG_TYPE_RESULT,
+    .sequence_num = poll_seq,
+    .distance_mm = distance_mm,
+#ifdef ENABLE_RSSI
+    .anchor_id = sys_cfg->device_id,
+    .rssi_final = (uint8_t)(rssi_final & 0xFF),
+#else
+    .anchor_id = sys_cfg->device_id,
+    .rssi_final = 0,
+#endif
+    .padding = {0}
+  };
+
+  if (hal->tx(&result_msg, sizeof(result_msg)) != 0)
+    return MW_DSTWR_ERR;
+
+#else
+  /* Step 4: Wait for CORRECTION with T5 */
+  uint32_t correction_timeout = config->rx_timeout_us + (INTER_MSG_DELAY_MS * 1000);
+  
+  if (hal->rx_with_timeout(rx_buffer, sizeof(rx_buffer), &rx_length, correction_timeout) != 0)
+    return MW_DSTWR_ERR_TIMEOUT;
+
+  if (!mw_dstwr_validate_message(rx_buffer, rx_length, MW_DSTWR_MSG_TYPE_CORRECTION, poll_seq))
+    return MW_DSTWR_ERR_INVALID_MSG;
+
+  /* Parse T5 from CORRECTION message */
+  t5 = ((uint64_t)rx_buffer[2]) |
+       ((uint64_t)rx_buffer[3] << 8) |
+       ((uint64_t)rx_buffer[4] << 16) |
+       ((uint64_t)rx_buffer[5] << 24) |
+       ((uint64_t)rx_buffer[6] << 32) |
+       ((uint64_t)rx_buffer[7] << 40) |
+       ((uint64_t)rx_buffer[8] << 48) |
+       ((uint64_t)rx_buffer[9] << 56);
+  t5 &= TIMESTAMP_40BIT_MASK;
+
+  /* Calculate distance */
+  mw_dstwr_timestamps_t timestamps = {
+    .t1 = t1, .t2 = t2, .t3 = t3,
+    .t4 = t4, .t5 = t5, .t6 = t6
+  };
+
+  float distance = mw_dstwr_calculate_distance(&timestamps);
+  
+  if (distance < 0.0f || distance > 1000.0f) {
+    /* Log invalid distance for debugging */
+    return MW_DSTWR_ERR;
+  }
+
+  /* Send distance result immediately - Put distance at bytes 2-3 (not at end - DW1000 strips last 2 bytes as CRC) */
+  int32_t distance_mm = (int32_t)(distance * 1000.0f);
+  if (distance_mm > 65535) distance_mm = 65535;
+  if (distance_mm < 0) distance_mm = 0;
+  
+  uint8_t response_buffer[12];
+  response_buffer[0] = MW_DSTWR_MSG_TYPE_RESULT;  /* 0xE5 */
+  response_buffer[1] = poll_seq;
+  response_buffer[2] = (uint8_t)(distance_mm & 0xFF);        /* distance LOW */
+  response_buffer[3] = (uint8_t)((distance_mm >> 8) & 0xFF); /* distance HIGH */
+  response_buffer[4] = 0;
+  response_buffer[5] = 0;
+  response_buffer[6] = 0;
+  response_buffer[7] = 0;
+  response_buffer[8] = 0;
+  response_buffer[9] = 0;
+  response_buffer[10] = 0;
+  response_buffer[11] = 0;
+
+  if (hal->tx(response_buffer, 12) != 0)
+    return MW_DSTWR_ERR;
+#endif
+
+  /* Fill result structure */
+  if (result) {
+    result->timestamps.t1 = t1;
+    result->timestamps.t2 = t2;
+    result->timestamps.t3 = t3;
+    result->timestamps.t4 = t4;
+    result->timestamps.t5 = t5;
+    result->timestamps.t6 = t6;
+    result->distance_m = distance;
+    result->anchor_id = sys_cfg->device_id;  /* Always set anchor ID */
+#ifdef ENABLE_RSSI
+    result->rssi = (int8_t)(rssi_final & 0xFF);
+#else
+    result->rssi = 0;
+#endif
+    result->valid = true;
+  }
+
+  return MW_DSTWR_OK;
+}
+
+/* ====================================================================
+ * DISTANCE CALCULATION 
+ * ==================================================================== */
+float mw_dstwr_calculate_distance(const mw_dstwr_timestamps_t *timestamps)
+{
+  if (!timestamps) return -1.0f;
+
+  const uint64_t MASK_40BIT = 0x000000FFFFFFFFFFULL;
+  
+  /* Wrap-safe 40-bit subtraction */
+  uint64_t Ra = (timestamps->t4 - timestamps->t1) & MASK_40BIT;
+  uint64_t Rb = (timestamps->t6 - timestamps->t3) & MASK_40BIT;
+  uint64_t Da = (timestamps->t5 - timestamps->t4) & MASK_40BIT;
+  uint64_t Db = (timestamps->t3 - timestamps->t2) & MASK_40BIT;
+
+  /* Convert to double for calculation (avoid overflow) */
+  double Ra_d = (double)Ra;
+  double Rb_d = (double)Rb;
+  double Da_d = (double)Da;
+  double Db_d = (double)Db;
+
+  double denominator = Ra_d + Rb_d + Da_d + Db_d;
+  if (denominator <= 0.0) return -1.0f;
+
+  /* DS-TWR formula: ToF = (Ra*Rb - Da*Db) / (Ra + Rb + Da + Db) */
+  double tof_dtu = (Ra_d * Rb_d - Da_d * Db_d) / denominator;
+  
+  /* ToF should be positive and reasonable (max ~3.3ms for 1km range) */
+  if (tof_dtu < 0.0 || tof_dtu > 1e9) return -1.0f;
+  
+  double tof_sec = tof_dtu * DWT_TIME_UNITS;
+  float distance = (float)(tof_sec * SPEED_OF_LIGHT);
+
+  return distance;
+}
+
+/* ====================================================================
+ * MESSAGE VALIDATION
+ * ==================================================================== */
+bool mw_dstwr_validate_message(const uint8_t *data, uint16_t length,
+                               uint8_t expected_type, uint8_t expected_seq)
+{
+  if (!data || length < 2)
+    return false;
+
+  if (data[0] != expected_type)
+    return false;
+
+  if (expected_seq != 0xFF && data[1] != expected_seq)
+    return false;
+
+  /* Minimum length check per message type */
+  switch (expected_type)
+  {
+    case MW_DSTWR_MSG_TYPE_POLL:
+      return length >= 12;  /* POLL: type+seq+target+rssi+padding = 12 bytes */
+      
+    case MW_DSTWR_MSG_TYPE_RESP:
+      return length >= 12;  /* RESP: type+seq+anchor+rssi+padding = 12 bytes */
+      
+    case MW_DSTWR_MSG_TYPE_FINAL:
+      return length >= 26;  /* FINAL: type+seq+T1+T4+T5 = 26 bytes */
+      
+    case MW_DSTWR_MSG_TYPE_RESULT:
+      return length >= 12;  /* RESULT: type+seq+dist(4)+anchor+rssi+pad(4) = 12 bytes */
+      
+    case MW_DSTWR_MSG_TYPE_CORRECTION:
+      return length >= 14;  /* CORRECTION: type+seq+T5(8)+distance_mm(4) = 14 bytes */
+      
+    default:
+      return false;
+  }
+}
+
+/* ====================================================================
+ * STATE RESET (for external use)
+ * ==================================================================== */
+void mw_dstwr_reset_state(void)
+{
+  g_ranging_state = RANGING_STATE_IDLE;
+}
+
+static inline bool is_valid_hal(const mw_dstwr_hal_t *hal)
+{
+  /* Basic callbacks required for all modes */
+  if (!hal->tx || !hal->rx_with_timeout || !hal->read_timestamp) {
+    return false;
+  }
+  
+#ifdef ENABLE_RSSI
+  if (!hal->get_rssi) {
+    return false;
+  }
+#endif
+  
+#ifdef HAVE_TX_DELAY
+  if (!hal->tx_delayed) {
+    return false;
+  }
+#endif
+  return true;
+}
+
+/* End of file -------------------------------------------------------- */
