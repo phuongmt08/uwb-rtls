@@ -2,20 +2,12 @@
  * @file       app_tag.c
  * @copyright
  * @license
- * @version    3.3.0
- * @date       2026-01-10
+ * @version    3.4.0 (TDMA Full)
+ * @date       2026-01-31
  * @author     Phuong Mai
- * @brief      Non-blocking Tag with AKF (Adaptive Kalman Filter)
- * @note       
- * Pipeline:
- *   1. Raw 3D distance → Convert to 2D planar distance (height compensation)
- *   2. 2D planar distance → Trilateration (auto-select best 3)
- *   3. Trilateration position → Adaptive Kalman Filter (AKF)
- *   4. AKF: Innovation-based automatic R adaptation (no pre-filtering needed!)
- * @example    None
+ * @brief      Non-blocking Tag with TDMA, Trilateration and Adaptive Kalman Filter
  */
 #include "app_tag.h"
-
 #include "bsp_io.h"
 #include "bsp_util.h"
 #include "mw_filter.h"
@@ -30,7 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Anchor positions with Z from config -------------------------------- */
+/* Anchor positions with Z from config */
 static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
     {.x = ANCHOR_1_X, .y = ANCHOR_1_Y, .z = ANCHOR_1_Z},
     {.x = ANCHOR_2_X, .y = ANCHOR_2_Y, .z = ANCHOR_2_Z},
@@ -40,26 +32,27 @@ static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
 #endif
 };
 
-/* Private types ------------------------------------------------------ */
+/* Private types */
 typedef struct {
 #if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
     mw_filter_cxt_t filter;
 #endif
 } filter_state_t;
 
-/* Private variables -------------------------------------------------- */
+/* Private variables */
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
 static uint32_t s_last_ranging_tick = 0;
 static uint8_t s_sequence_num = 0;
 static filter_state_t s_filters;
+static bool s_is_ranging_active = false;
 
-/* Private function prototypes ---------------------------------------- */
+/* Private prototypes */
 static void init_filters(void);
 static void process_ranging_results(sys_ranging_result_t *results, int num_success);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 
-/* Private function implementations ----------------------------------- */
+/* Implementation */
 
 static void init_filters(void)
 {
@@ -85,18 +78,6 @@ static void init_filters(void)
 #endif
 }
 
-/**
- * @brief Convert 3D slant distance to 2D planar distance with height compensation
- * 
- * Formula:
- *   dz = z_anchor - z_tag
- *   r_xy = sqrt(r_meas² - dz²)
- * 
- * @param r3d Measured 3D distance (slant range from UWB)
- * @param dz Vertical offset (anchor_z - tag_z)
- * @param r2d_out Output: 2D planar distance (horizontal projection)
- * @return true if conversion successful, false if invalid
- */
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
     if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
@@ -127,77 +108,51 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
+    // RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", s_success_count + 1);  // DISABLED - causes 20ms delay
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", 
-           s_success_count + 1);
-    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-        RLOG_I(LOG_OBJECT_CODE_TAG, 
-               "  [%u] ID=%u Valid=%d Dist=%.3fm RSSI=%ddBm",
-               i,
-               results[i].anchor_id,
-               results[i].valid,
-               results[i].distance_m,
-               results[i].rssi);
-    }
-    
-    /* ==== STEP 1: Convert 3D to 2D planar distance ==== */
-    
-    /* Use array indexed by anchor_id for proper mapping */
-    mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1]; /* +1 for 1-based indexing */
+    mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1];
     uint8_t valid_count = 0;
     
-    /* Initialize all as invalid */
-    for (uint8_t i = 0; i <= NUM_ANCHORS; i++) {
-        anchors_by_id[i].valid = false;
-    }
+    for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
-    /* Process each ranging result */
-    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-        uint8_t anchor_id = results[i].anchor_id;
-        
-        /* Validate anchor_id */
-        if (anchor_id < 1 || anchor_id > NUM_ANCHORS || !results[i].valid) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, 
-                   "Anchor #%u: REJECTED (id_range:%d valid:%d)",
-                   anchor_id,
-                   (anchor_id >= 1 && anchor_id <= NUM_ANCHORS),
-                   results[i].valid);
-            continue;
-        }
-        
-        /* Get anchor array index (1-based ID to 0-based index) */
-        uint8_t anchor_idx = anchor_id - 1;
-        
-        /* Get 3D distance from ranging */
-        double r3d = (double)results[i].distance_m;
-        
-        /* Calculate vertical offset for this specific anchor */
-        double dz = ANCHOR_POSITIONS[anchor_idx].z - (double)TAG_HEIGHT_M;
-        
-        /* Convert 3D slant distance to 2D planar distance */
-        double r2d = 0.0;
-        if (!convert_3d_to_2d_distance(r3d, dz, &r2d)) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, 
-                   "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)",
-                   anchor_id, (float)r3d, (float)dz);
-            continue;
-        }
-        
-        /* Use raw 2D distance - AKF will handle filtering */
-        float distance_2d = (float)r2d;
-        int8_t rssi = (int8_t)results[i].rssi;
-        
-        /* Fill anchor data at correct position (indexed by anchor_id) */
-        anchors_by_id[anchor_id].position = ANCHOR_POSITIONS[anchor_idx];
-        anchors_by_id[anchor_id].distance = distance_2d;
-        anchors_by_id[anchor_id].rssi = rssi;
-        anchors_by_id[anchor_id].id = anchor_id;
-        anchors_by_id[anchor_id].valid = true;
-        valid_count++;
-        
-        RLOG_D(LOG_OBJECT_CODE_TAG,
-               "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
-               anchor_id, (float)r3d, (float)r2d, (float)dz);
+    /* Iterate through the array of results returned by TDMA */
+    /* Note: 'num_success' is the number of valid items in the 'results' array */
+    for (int i = 0; i < num_success; i++) {
+        sys_ranging_result_t *r = &results[i];
+        if (!r->valid) continue;
+
+        uint8_t aid = r->anchor_id;
+        /* Sanity check anchor ID */
+        if (aid < 1 || aid > NUM_ANCHORS) continue;
+
+         double r3d = (double)r->distance_m;
+         
+         /* Calculate vertical offset based on specific anchor height */
+         double dz = ANCHOR_POSITIONS[aid - 1].z - (double)TAG_HEIGHT_M;
+         double r2d = 0.0;
+         
+         if (!convert_3d_to_2d_distance(r3d, dz, &r2d)) {
+             RLOG_W(LOG_OBJECT_CODE_TAG, 
+                 "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)",
+                 aid, (float)r3d, (float)dz);
+             continue;
+         }
+         
+         /* Use raw 2D distance - AKF will handle filtering */
+         float distance_2d = (float)r2d;
+         int8_t rssi = (int8_t)r->rssi;
+         
+         /* Fill anchor data at correct position (indexed by anchor_id) */
+         anchors_by_id[aid].position = ANCHOR_POSITIONS[aid - 1];
+         anchors_by_id[aid].distance = distance_2d;
+         anchors_by_id[aid].rssi = rssi;
+         anchors_by_id[aid].id = aid;
+         anchors_by_id[aid].valid = true;
+         valid_count++;
+         
+         RLOG_D(LOG_OBJECT_CODE_TAG,
+             "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
+             aid, (float)r3d, (float)r2d, (float)dz);
     }
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
@@ -207,7 +162,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
     }
 
-    /* Need at least 3 anchors for trilateration - use valid_count not num_success */
+    /* Need at least 3 anchors for trilateration */
     if (valid_count < 3) {
         RLOG_W(LOG_OBJECT_CODE_TAG, 
                "Not enough valid anchors: %u/3 minimum", valid_count);
@@ -266,8 +221,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     float velocity = sqrtf(final_position.vx * final_position.vx +
                           final_position.vy * final_position.vy);
     
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Raw:      X=%.3fm Y=%.3fm Z=%.2fm",
-           (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Raw:      X=%.3fm Y=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
     RLOG_I(LOG_OBJECT_CODE_TAG, "Filtered: X=%.3fm Y=%.3fm (V=%.3fm/s)",
            final_position.x, final_position.y, velocity);
     RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%.3fm R_adapt=%.2f",
@@ -284,9 +238,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_success_count++;
     s_error_count = 0;
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Position: X=%.3fm Y=%.3fm Z=%.2fm",
-           (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Error:    %.3fm", (float)tril_result.error_estimate);
+    // RLOG_I(LOG_OBJECT_CODE_TAG, "Position: X=%.3fm Y=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
+    // RLOG_I(LOG_OBJECT_CODE_TAG, "Error:    %.3fm", (float)tril_result.error_estimate);
 
     /* Send position via UART */
     if (bsp_io_uart_send_position((float)tril_position.x, (float)tril_position.y,
@@ -295,18 +248,13 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
 #endif
-
-    RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
 }
-
-/* Public function definitions ---------------------------------------- */
 
 app_err_t app_tag_init(void)
 {
     sys_config_t *cfg = sys_config_get();
-
-    RLOG_I(LOG_OBJECT_CODE_TAG, "========== TAG INIT ==========");
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Tag ID: 0x%02X", cfg->device_id);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "========== TAG INIT (TDMA) ==========");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "ID: %d | Interval: %dms", cfg->device_id, cfg->ranging_period_ms);
     
     /* Log ranging period from config */
     uint32_t update_hz = (cfg->ranging_period_ms > 0) ? (1000 / cfg->ranging_period_ms) : 0;
@@ -330,14 +278,6 @@ app_err_t app_tag_init(void)
            MW_FILTER_ENABLE_DES ? "DES" : "",
            (MW_FILTER_ENABLE_DES && MW_FILTER_ENABLE_AKF) ? " + " : "",
            MW_FILTER_ENABLE_AKF ? "AKF" : "");
-#if MW_FILTER_ENABLE_DES
-    RLOG_I(LOG_OBJECT_CODE_TAG, "  DES: alpha=%.2f beta=%.2f", 
-           DES_ALPHA_BASE, DES_BETA);
-#endif
-#if MW_FILTER_ENABLE_AKF
-    RLOG_I(LOG_OBJECT_CODE_TAG, "  AKF: Q=%.3f R=%.2f", 
-           AKF_PROCESS_NOISE, AKF_R_BASE);
-#endif
 #else
     RLOG_I(LOG_OBJECT_CODE_TAG, "Filter: DISABLED (Raw trilateration)");
 #endif
@@ -354,53 +294,45 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "==============================");
 
     init_filters();
-
     return APP_OK;
 }
 
 void app_tag_process(void)
 {
+    static uint32_t last_log = 0;
     sys_config_t *cfg = sys_config_get();
-    uint32_t current_tick = HAL_GetTick();
+    uint32_t now = HAL_GetTick();
 
-    if ((current_tick - s_last_ranging_tick) < cfg->ranging_period_ms) {
-        return;
+    /* Debug every 1s */
+    if ((now - last_log) >= 1000) {
+        uint32_t delta = now - s_last_ranging_tick;
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[D] act=%d last=%lu now=%lu delta=%lu period=%lu OK=%d",
+               s_is_ranging_active, s_last_ranging_tick, now, delta, 
+               cfg->ranging_period_ms, (delta >= cfg->ranging_period_ms));
+        last_log = now;
     }
 
-    /* Record ranging start time BEFORE ranging starts */
-    s_last_ranging_tick = current_tick;
-
-    /* LED on during ranging */
-    bsp_io_led_on();
-
-    /* Use anchor_ids array matching NUM_ANCHORS from config */
-#if NUM_ANCHORS < 4
-    const uint8_t anchor_ids[NUM_ANCHORS] = {1, 2, 3};
-#else
-    const uint8_t anchor_ids[NUM_ANCHORS] = {1, 2, 3, 4};
-#endif
-    sys_ranging_result_t results[NUM_ANCHORS];
-
-    int num_success = sys_ranging_tag_multi_anchor(anchor_ids, NUM_ANCHORS,
-                                                   results, s_sequence_num++,
-                                                   cfg->rx_timeout_ms);
-
-        bsp_io_led_off();
-
-    if (num_success > 0) {
-        process_ranging_results(results, num_success);
-    } else {
-        RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No anchors responded");
-        s_error_count++;
-
-        if (s_error_count >= MAX_CONSECUTIVE_ERR) {
-            char err_str[16];
-            snprintf(err_str, sizeof(err_str), "%lu", s_error_count);
-            RLOG_E(LOG_OBJECT_CODE_TAG, ERR_TIMEOUT,
-                   "Too many errors (%s), check anchors!", err_str);
-            s_error_count = 0;
+    /* --- STEP 1: TRIGGER RANGING --- */
+    if (!s_is_ranging_active) {
+        /* Check update rate period */
+        if ((now - s_last_ranging_tick) >= cfg->ranging_period_ms) {
+            
+            bsp_io_led_on();
+            
+            /* Call ranging DIRECTLY - no split start/process to avoid logger delay */
+            uint8_t anchor_ids[1] = {1};
+            sys_ranging_err_t err = sys_ranging_tag_run_tdma_blocking(1, anchor_ids, s_sequence_num++, cfg->rx_timeout_ms);
+            
+            bsp_io_led_off();
+            s_last_ranging_tick = HAL_GetTick();
+            
+            if (err == SYS_RANGING_OK) {
+                s_success_count++;
+            } else {
+                s_error_count++;
+                if (s_error_count % 10 == 0)
+                    RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Ranging failed");
+            }
         }
     }
 }
-
-/* End of file -------------------------------------------------------- */

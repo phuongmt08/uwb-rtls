@@ -6,10 +6,6 @@
  * @date       2026-01-10
  * @author     Phuong Mai
  * @brief      Adaptive Kalman Filter with Innovation-based R tuning
- * @note       
- *   - Uses continuous white noise acceleration model (physically correct)
- *   - Q inflation based on innovation magnitude for responsive tracking
- *   - Automatic R adaptation via innovation variance
  * @example    None
  */
 #include "mw_filter.h"
@@ -187,7 +183,7 @@ float mw_filter_akf_update(adaptive_kalman_2d_t *akf,
     float y_pred = akf->state[2] + akf->state[3] * dt;
     float vy_pred = akf->state[3];
     
-    /* Innovation (measurement residual) */
+    /* Innovation */
     float innov_x = mx - x_pred;
     float innov_y = my - y_pred;
     
@@ -340,16 +336,13 @@ float mw_filter_update(mw_filter_cxt_t *filter,
     float my_input = my_raw;
     
 #if MW_FILTER_ENABLE_DES
-    /* Stage 1: DES pre-smoothing */
     mw_filter_des_update(&filter->des, mx_raw, my_raw, &mx_input, &my_input);
 #endif
     
 #if MW_FILTER_ENABLE_AKF
-    /* Stage 2: Adaptive Kalman Filter */
     float R_scale = mw_filter_akf_update(&filter->akf, mx_input, my_input, out);
     return R_scale;
 #else
-    /* No AKF: output DES result or raw input */
     out->x = mx_input;
     out->y = my_input;
     out->vx = 0.0f;
