@@ -130,6 +130,9 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void);
  */
 bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_timestamp);
 bool bsp_uwb_is_rx_ready(void);
+uint64_t bsp_uwb_get_current_time_dw(void);
+bsp_err_t bsp_uwb_validate_delayed_tx(uint64_t tx_timestamp_dw, uint64_t min_guard_dw);
+uint16_t bsp_uwb_get_rx_antenna_delay(void);
 
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */
