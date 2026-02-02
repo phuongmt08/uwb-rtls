@@ -86,7 +86,7 @@ tdma_err_t tdma_init(tdma_scheduler_t *tdma,
     
     sched->guard_time_us = calculate_safe_guard_time(num_anchors);
     
-    sched->processing_margin_us = TDMA_PROCESSING_MARGIN_US;  /* 400µs for STM32 */
+    sched->processing_margin_us = TDMA_PROCESSING_MARGIN_US; 
     
     sched->poll_to_resp_delay_us = TDMA_DEFAULT_POLL_TO_RESP_DELAY_US;
     sched->resp_to_final_delay_us = TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US;
@@ -358,7 +358,7 @@ tdma_err_t tdma_calculate_slot_end_time(const tdma_scheduler_t *tdma,
     if (!slot_end_dw) return TDMA_ERR_PARAM;
     if (slot_id > tdma->schedule.num_anchors) return TDMA_ERR_INVALID_SLOT;
     
-    /* FIXED: Slot end = superframe_start + (slot_id + 1) * (slot_duration + guard) */
+    /* Slot end = superframe_start + (slot_id + 1) * (slot_duration + guard) */
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
     *slot_end_dw = tdma->superframe_start_dw + 
                    tdma_us_to_dw((slot_id + 1) * effective_slot_us);
@@ -429,8 +429,6 @@ tdma_err_t tdma_get_slot_rx_window(const tdma_scheduler_t *tdma,
     if (!tdma || !rx_start_dw || !rx_end_dw) return TDMA_ERR_INVALID_PARAM;
     if (!tdma->initialized || !tdma->synchronized) return TDMA_ERR_NOT_SYNCHRONIZED;
     
-    /* FIXED: slot_table doesn't exist, use slots[] */
-    /* FIXED: Slot 0 = POLL, Slot 1-N = anchors */
     int slot_id = -1;
     for (uint8_t i = 1; i <= tdma->schedule.num_anchors; i++) {
         if (tdma->schedule.slots[i].anchor_id == anchor_id) {
@@ -440,14 +438,7 @@ tdma_err_t tdma_get_slot_rx_window(const tdma_scheduler_t *tdma,
     }
     
     if (slot_id < 0) return TDMA_ERR_INVALID_PARAM;
-    
-    /* CRITICAL MODEL FIX: RX window = expected_resp_time ± margin
-     * NOT slot_start + complicated calculation!
-     * 
-     * Expected RESP arrives at: superframe_start + slot_id × (slot+guard) + poll_to_resp_delay
-     * Early margin: 100µs (clock drift, jitter)
-     * Late margin: 300µs (propagation, processing)
-     */
+
     #define RX_EARLY_MARGIN_US  100
     #define RX_LATE_MARGIN_US   300
     

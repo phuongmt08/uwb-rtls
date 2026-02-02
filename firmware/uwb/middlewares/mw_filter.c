@@ -13,8 +13,6 @@
 #include <string.h>
 #include <math.h>
 
-/* ========== DES FILTER ========== */
-
 #if MW_FILTER_ENABLE_DES
 
 void mw_filter_des_init(des_filter_2d_t *des,
@@ -105,8 +103,6 @@ void mw_filter_des_reset(des_filter_2d_t *des, float x, float y)
 }
 
 #endif /* MW_FILTER_ENABLE_DES */
-
-/* ========== ADAPTIVE KALMAN FILTER ========== */
 
 #if MW_FILTER_ENABLE_AKF
 
@@ -300,7 +296,6 @@ void mw_filter_akf_get_stats(const adaptive_kalman_2d_t *akf,
 
 #endif /* MW_FILTER_ENABLE_AKF */
 
-/* ========== COMBINED FILTER ========== */
 
 void mw_filter_init(mw_filter_cxt_t *filter,
                     float x0, float y0,

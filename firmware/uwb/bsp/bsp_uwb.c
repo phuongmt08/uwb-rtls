@@ -458,7 +458,7 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
     dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);
     
     if (tx_timestamp < s_tx_antenna_delay) {
-        RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAY] tx_timestamp < antenna_delay");
+        RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP , "[TX_DELAY] tx_timestamp < antenna_delay");
         return BSP_ERR;
     }
     uint64_t scheduled_time = (tx_timestamp - s_tx_antenna_delay) & 0x000000FFFFFFFFFFULL;

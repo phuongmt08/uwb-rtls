@@ -61,7 +61,9 @@ typedef enum {
     TDMA_ERR_PARAM = -2,
     TDMA_ERR_NOT_INITIALIZED = -3,
     TDMA_ERR_SYNC_LOST = -4,
-    TDMA_ERR_INVALID_SLOT = -5
+    TDMA_ERR_INVALID_SLOT = -5,
+    TDMA_ERR_INVALID_PARAM = -6,
+    TDMA_ERR_NOT_SYNCHRONIZED = -7
 } tdma_err_t;
 
 typedef enum {

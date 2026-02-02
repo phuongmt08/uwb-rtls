@@ -40,6 +40,9 @@
     #define MW_DSTWR_MSG_TYPE_RESP   0xE2
     #define MW_DSTWR_MSG_TYPE_FINAL  0xE3
 #define MW_DSTWR_MSG_TYPE_RESULT 0xE4  /* Anchor sends distance to TAG */
+    /* Private types ------------------------------------------------------ */
+    typedef enum {
+    STATE_IDLE = 0,
     STATE_TAG_RANGING_TDMA,
     STATE_TAG_COMPLETE,
     STATE_ANCHOR_RANGING_TDMA,
@@ -112,7 +115,7 @@ typedef struct __attribute__((packed)) {
     /* Private variables -------------------------------------------------- */
     static ranging_ctx_t s_ctx = {0};
     static tdma_scheduler_t s_tdma_tag = {0};
-    static tdma_scheduler_t s_tdma_anchor = {0};
+    // static tdma_scheduler_t s_tdma_anchor = {0};
     static struct {
     uint32_t total_count;
     uint32_t success_count;
@@ -123,6 +126,11 @@ typedef struct __attribute__((packed)) {
     static bool s_ranging_busy = false;
 
     /* Helper functions --------------------------------------------------- */
+
+    /* DS-TWR timestamp structure */
+    typedef struct {
+        uint64_t t1, t2, t3, t4, t5, t6;
+    } dstwr_timestamps_t;
 
     static float calculate_distance(const dstwr_timestamps_t *ts)
     {
@@ -211,7 +219,6 @@ typedef struct __attribute__((packed)) {
             role, dist_str, result->anchor_id, result->rssi);
     }
 
-    /* Tight spin-wait for precision timing (no HAL_Delay) */
     static void spin_wait_us(uint32_t us)
     {
         uint64_t target_dw = bsp_uwb_get_current_time_dw() + tdma_us_to_dw(us);
@@ -274,9 +281,9 @@ typedef struct __attribute__((packed)) {
         }
 
         uint64_t start_dw = bsp_uwb_get_current_time_dw();
-        uint64_t timeout_dw = tdma_us_to_dw(rx_timeout_us);
+        uint64_t poll_timeout_dw = tdma_us_to_dw(rx_timeout_us);
 
-        while (bsp_uwb_get_current_time_dw() - start_dw < timeout_dw) {
+        while (bsp_uwb_get_current_time_dw() - start_dw < poll_timeout_dw) {
             bsp_err_t err = bsp_uwb_rx(poll_buf, sizeof(poll_buf), &poll_len);
             if (err == BSP_OK && poll_len > 0 && validate_msg_type(poll_buf, poll_len, MW_DSTWR_MSG_TYPE_POLL)) {
                 break;
@@ -352,7 +359,10 @@ typedef struct __attribute__((packed)) {
             return -1;
         }
 
-        uint64_t final_rx_start_dw = bsp_uwb_get_current_time_dw();`r`n    uint64_t timeout_dw = tdma_us_to_dw(final_timeout_us);`r`n`r`n    while (bsp_uwb_get_current_time_dw() - final_rx_start_dw < timeout_dw) {
+        uint64_t final_rx_start_dw = bsp_uwb_get_current_time_dw();
+        uint64_t final_timeout_dw = tdma_us_to_dw(final_timeout_us);
+
+        while (bsp_uwb_get_current_time_dw() - final_rx_start_dw < final_timeout_dw) {
             bsp_err_t err = bsp_uwb_rx(final_buf, sizeof(final_buf), &final_len);
             if (err == BSP_OK && final_len > 0 && validate_msg_type(final_buf, final_len, MW_DSTWR_MSG_TYPE_FINAL)) {
                 break;
@@ -366,7 +376,18 @@ typedef struct __attribute__((packed)) {
             return -1;
         }
 
-        final_msg_t *final_msg = (final_msg_t *)final_buf;`r`n`r`n    /* CRITICAL: Validate FINAL sequence_num matches POLL */`r`n    if (final_msg->sequence_num != poll->sequence_num) {`r`n        RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, `r`n               "[ANCHOR] FINAL seq=%u mismatch POLL seq=%u", `r`n               final_msg->sequence_num, poll->sequence_num);`r`n        s_ranging_busy = false;`r`n        return -1;`r`n    }`r`n`r`n    /* Read T6 */
+        final_msg_t *final_msg = (final_msg_t *)final_buf;
+
+        /* CRITICAL: Validate FINAL sequence_num matches POLL */
+        if (final_msg->sequence_num != poll->sequence_num) {
+            RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, 
+                   "[ANCHOR] FINAL seq=%u mismatch POLL seq=%u", 
+                   final_msg->sequence_num, poll->sequence_num);
+            s_ranging_busy = false;
+            return -1;
+        }
+
+        /* Read T6 */
         uint64_t final_rx_ts = 0;
         if (bsp_uwb_read_40bit(0x15, 0x00, &final_rx_ts) != BSP_OK) {
             RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] Failed to read T6 timestamp");
@@ -376,7 +397,7 @@ typedef struct __attribute__((packed)) {
 
         /* Extract our data */
         final_anchor_data_t *anchor_data = (final_anchor_data_t *)(final_buf + sizeof(final_msg_t));
-        bool found = false;
+        bool anchor_found = false;
         uint64_t resp_rx_ts_tag = 0;
         uint64_t final_tx_ts_tag = 0;
 
@@ -384,12 +405,12 @@ typedef struct __attribute__((packed)) {
             if (anchor_data[i].anchor_id == anchor_id) {
                 resp_rx_ts_tag = anchor_data[i].resp_rx_ts;
                 final_tx_ts_tag = anchor_data[i].final_tx_ts;
-                found = true;
+                anchor_found = true;
                 break;
             }
         }
 
-        if (!found) {
+        if (!anchor_found) {
             RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] Anchor ID %u not found in FINAL (num_responses=%u)", anchor_id, final_msg->num_responses);
             s_ranging_busy = false;
             return -1;
@@ -438,9 +459,14 @@ typedef struct __attribute__((packed)) {
         RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT sent: %.3fm", result_msg.distance_m);
     }
 
-    /* ====================================================================
-    * DS-TWR TAG IMPLEMENTATION - FIXED FOR TDMA
-    * ==================================================================== */
+    log_ranging_result(&s_ctx.result_single, "ANCHOR");
+    s_ranging_busy = false;
+    return 0;
+}
+
+/* ====================================================================
+ * DS-TWR TAG IMPLEMENTATION - FIXED FOR TDMA
+ * ==================================================================== */
 
     static int ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids,
                             uint8_t sequence_num, uint32_t rx_timeout_us)
