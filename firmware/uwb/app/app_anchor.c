@@ -247,6 +247,18 @@ app_err_t app_anchor_init(void)
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "===== ANCHOR #%u =====", cfg->device_id);
   
+  /* Force antenna delay to default values if enabled */
+#if ENABLE_FORCE_DEFAULT_ANT_DLY
+  cfg->tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
+  cfg->rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Ant Delay: TX=%u RX=%u (FORCED DEFAULT)",
+         cfg->tx_antenna_delay, cfg->rx_antenna_delay);
+  sys_config_save();
+#else
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Ant Delay: TX=%u RX=%u",
+         cfg->tx_antenna_delay, cfg->rx_antenna_delay);
+#endif
+  
 #if ENABLE_ANCHOR_AUTO_CALIB
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Calib: target=%.3fm samples=%u/round", 
          CALIB_REF_DISTANCE_M, CALIB_SAMPLES_PER_ROUND);
