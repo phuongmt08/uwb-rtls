@@ -9619,7 +9619,7 @@
 			(net 25 "GND")
 			(pinfunction "SHIELD")
 			(pintype "passive")
-			(uuid "75fab5e6-f1a7-4716-abaf-596534f35911")
+			(uuid "db1d82aa-9d0e-4489-8c74-d694c03d10fb")
 		)
 		(pad "S1" thru_hole oval
 			(at 4.32 -3.13 270)
@@ -9631,7 +9631,7 @@
 			(net 25 "GND")
 			(pinfunction "SHIELD")
 			(pintype "passive")
-			(uuid "75fab5e6-f1a7-4716-abaf-596534f35911")
+			(uuid "b94d3de7-cf8e-4533-8a11-08c6f0d5fe15")
 		)
 		(pad "S1" thru_hole oval
 			(at 4.32 1.05 270)
@@ -9643,7 +9643,7 @@
 			(net 25 "GND")
 			(pinfunction "SHIELD")
 			(pintype "passive")
-			(uuid "75fab5e6-f1a7-4716-abaf-596534f35911")
+			(uuid "98015c16-97cf-4adb-9f7e-b6fb55b82da9")
 		)
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Connector_USB.3dshapes/USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal.step"
@@ -27345,8 +27345,8 @@
 		(uuid "923d256a-0a89-4788-b396-62a1ab9e54e0")
 	)
 	(gr_line
-		(start 57.7 73.6)
-		(end 57.7 57.6)
+		(start 57.2 74)
+		(end 57.2 57.7)
 		(stroke
 			(width 0.15)
 			(type solid)
@@ -27379,6 +27379,17 @@
 		(fill yes)
 		(layer "F.SilkS")
 		(uuid "d785a048-72e2-4bb3-9beb-a9d9f9c40635")
+	)
+	(gr_rect
+		(start 64.3 99.25)
+		(end 73.3 100.5)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill yes)
+		(layer "B.SilkS")
+		(uuid "d97f8851-7a80-4303-bdfb-cfcf00b6b5e2")
 	)
 	(gr_arc
 		(start 78.8 50.1)
@@ -27465,7 +27476,7 @@
 		(uuid "8dd575b2-c46c-4e26-b56d-58843ddbb30c")
 	)
 	(gr_text "UWB-RTLS\n"
-		(at 57.515 73.82 90)
+		(at 57.015 74.22 90)
 		(layer "F.SilkS")
 		(uuid "00c2b9d3-ebad-4e44-964e-8c4fe658ad29")
 		(effects
@@ -27490,8 +27501,8 @@
 			(justify right bottom)
 		)
 	)
-	(gr_text "BOARD: TAG REV v1.1"
-		(at 59.35 73.845 90)
+	(gr_text "BOARD: TAG|REV v1.1"
+		(at 58.85 74.245 90)
 		(layer "F.SilkS")
 		(uuid "1a1bd527-c4be-44cf-9d7f-1da93287f4cc")
 		(effects
@@ -27605,6 +27616,32 @@
 				(bold yes)
 			)
 			(justify left bottom)
+		)
+	)
+	(gr_text "PRODUCTION BOARD\nREL: 2025-02-22\n"
+		(at 75.4 97.7 0)
+		(layer "B.SilkS")
+		(uuid "0bba1d03-7532-49ac-87af-ad5c588b502d")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.17)
+				(bold yes)
+			)
+			(justify left mirror)
+		)
+	)
+	(gr_text "ID:"
+		(at 75.4 99.9 0)
+		(layer "B.SilkS")
+		(uuid "a8ad9db6-d20d-462e-9542-1511bc348ff2")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.17)
+				(bold yes)
+			)
+			(justify left mirror)
 		)
 	)
 	(segment

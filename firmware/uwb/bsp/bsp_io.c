@@ -8,6 +8,7 @@
 /* Includes ----------------------------------------------------------- */
 #include "bsp_io.h"
 #include "gpio.h"
+#include "bsp_uwb.h"
 #include "stm32f4xx_hal.h"
 #include <string.h>
 
@@ -272,6 +273,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       GPIO_Pin == BSP_IO_DIP_PIN_2)
   {
     s_dip_changed = 1;
+  }
+
+  /* UWB IRQ interrupt PA4 */
+  if (GPIO_Pin == UWB_IRQ_PIN)
+  {
+    bsp_uwb_on_irq();
   }
 }
 

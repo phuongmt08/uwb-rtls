@@ -40,6 +40,7 @@ static bool s_initialized = false;
 static uint64_t s_last_rx_timestamp = 0;  /* Cached RX timestamp */
 static uint64_t s_last_tx_timestamp = 0;  /* Cached TX timestamp */
 static uint16_t s_tx_antenna_delay = 0;   /* Cached TX antenna delay */
+static volatile uint8_t s_irq_event_pending = 0;
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
@@ -458,6 +459,8 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] dwt_rxenable failed");
         return BSP_ERR;
     }
+
+    s_irq_event_pending = 0;
     
     return BSP_OK;
 }
@@ -619,5 +622,29 @@ bool bsp_uwb_is_rx_ready(void)
                     SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL;
 
     return (status & mask) != 0;
+}
+
+void bsp_uwb_on_irq(void)
+{
+    s_irq_event_pending = 1;
+}
+
+void bsp_uwb_clear_irq_event(void)
+{
+    s_irq_event_pending = 0;
+}
+
+bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
+{
+    uint32_t start_tick = HAL_GetTick();
+
+    while ((HAL_GetTick() - start_tick) < timeout_ms) {
+        if (s_irq_event_pending) {
+            s_irq_event_pending = 0;
+            return true;
+        }
+    }
+
+    return false;
 }
 /* End of file -------------------------------------------------------- */
