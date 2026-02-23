@@ -12,7 +12,6 @@
 /* Includes ----------------------------------------------------------------- */
 #include "sys_config.h"
 #include "sys_logger.h"
-#include "platform_config.h"
 #include "positioning_config.h"
 #include <string.h>
 
@@ -369,8 +368,6 @@ void sys_config_reset_to_defaults(void)
     g_config.uwb_channel = DEFAULT_UWB_CHANNEL;
     g_config.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
     g_config.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
-    g_config.hw_rev_major = DEFAULT_HW_REV_MAJOR;
-    g_config.hw_rev_minor = DEFAULT_HW_REV_MINOR;
     
     g_config.uwb_prf = DEFAULT_UWB_PRF;
     g_config.uwb_data_rate = DEFAULT_UWB_DATA_RATE;
@@ -388,10 +385,6 @@ void sys_config_print(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "========== DEVICE CONFIGURATION ==========");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "FW Version   : v%d.%d.%d", 
-           FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "HW Revision  : v%d.%d",
-           g_config.hw_rev_major, g_config.hw_rev_minor);
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Role  : %s (0x%02X)",
            g_config.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR",
            g_config.role);

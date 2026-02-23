@@ -16,7 +16,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
-#include "platform_config.h"
 /* Private defines ---------------------------------------------------- */
 #define UWB_RX_BUFFER_SIZE (128u)
 #define RX_POLL_INTERVAL_MS (5)
@@ -75,7 +74,6 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
                                uint16_t *received_length, uint32_t timeout_us)
 {
   uint32_t timeout_ms = (timeout_us + 999) / 1000;
-  uint32_t start_tick = HAL_GetTick();
 
   *received_length = 0;
 
@@ -84,16 +82,24 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
     return -1;
   }
 
-  while ((HAL_GetTick() - start_tick) < timeout_ms) {
-    bsp_err_t err = bsp_uwb_rx(buffer, buffer_size, received_length);
+  if (timeout_ms == 0) {
+    timeout_ms = 1;
+  }
 
+  bsp_uwb_clear_irq_event();
+
+  if (!bsp_uwb_wait_for_irq_event(timeout_ms)) {
+    return -1; /* Timeout */
+  }
+
+  {
+    bsp_err_t err = bsp_uwb_rx(buffer, buffer_size, received_length);
     if (err == BSP_OK && *received_length > 0) {
       return 0; /* Frame received */
     }
-    /* bsp_uwb_rx handles re-enable internally for timeout/errors */
   }
 
-  return -1; /* Timeout */
+  return -1;
 }
 
 static int hal_read_timestamp(uint8_t reg_addr, uint8_t sub_addr, uint64_t *timestamp)
@@ -447,9 +453,9 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
     return 0;
   }
   
-  /* Limit to MAX_ANCHORS */
-  if (num_anchors > MAX_ANCHORS) {
-    num_anchors = MAX_ANCHORS;
+  /* Limit to NUM_ANCHORS */
+  if (num_anchors > NUM_ANCHORS) {
+    num_anchors = NUM_ANCHORS;
   }
   
   /* Get timeout from config if not specified */

@@ -11,7 +11,6 @@
 #include <stddef.h>
 #include <string.h>
 #include "sys_config.h"
-#include "platform_config.h"
 #include "sys_logger.h"
 /* Private defines ---------------------------------------------------- */
 #define DW1000_REG_RX_TIME     (0x15)
@@ -26,7 +25,7 @@
 /* Inter-message delays to ensure receiver is ready */
 #define INTER_MSG_DELAY_MS     (2)   // 2ms delay (DW1000 RX turnaround ~300us + margin)
 
-/* DW1000 TX delay constraints (based on datasheet) */
+/* DW1000 TX delay constraints  */
 #define DW1000_TURNAROUND_US   (300)  // TX->RX or RX->TX switching time (~200-300us)
 #define MCU_PROCESSING_US      (500)  // MCU processing + frame preparation + logging
 #define ANTENNA_DELAY_US       (100)  // Antenna delay compensation
@@ -37,29 +36,11 @@
 #define FINAL_TX_DELAY_US      (5000) // 3ms - safe margin for MCU processing
 #define CORRECTION_TX_DELAY_US (5000) // 1ms gap between FINAL and CORRECTION
 
-/* ========================================================================
- * FIX #1: INCREASED TIMEOUTS FOR 850kbps + PLEN=1024
- * ========================================================================
- * Old values: 15ms (too short → missed packets)
- * New values: 30ms (safe margin for slow data rate)
- * 
- * Calculation:
- * - PLEN=1024 @ 850kbps: ~12ms airtime
- * - Processing + turnaround: ~3-5ms
- * - Total needed: ~20ms minimum
- * - Set to 30ms: 50% safety margin
- * ======================================================================== */
 #define WAIT_FINAL_TIMEOUT_US  (30000)  // 15ms - Tag sends FINAL after 3ms delay
 #define WAIT_RESULT_TIMEOUT_US (30000)  // 15ms - Anchor sends RESULT quickly after FINAL
 
 #define CHECK_PARAM(cond, ret) do { if (!(cond)) return (ret); } while(0)
 
-/* ========================================================================
- * FIX #2: STATE MACHINE TO PREVENT PREMATURE POLL
- * ========================================================================
- * Problem: TAG sends new POLL before receiving CORRECTION/RESULT
- * Solution: Add state tracking to enforce sequence completion
- * ======================================================================== */
 typedef enum {
   RANGING_STATE_IDLE = 0,           // Ready to start new ranging
   RANGING_STATE_POLL_SENT,          // Waiting for RESPONSE
@@ -100,9 +81,6 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
   CHECK_PARAM(config && config->hal, MW_DSTWR_ERR_PARAM);
   CHECK_PARAM(is_valid_hal(config->hal), MW_DSTWR_ERR_PARAM);
 
-  /* ========================================================================
-   * FIX #2: STATE GUARD - Prevent sending new POLL if previous not complete
-   * ======================================================================== */
   if (!can_start_new_ranging()) {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] REJECTED: Previous ranging not complete (state=%d)", g_ranging_state);
     return MW_DSTWR_ERR_BUSY;  // Return busy error instead of proceeding
@@ -297,10 +275,7 @@ mw_dstwr_err_t mw_dstwr_execute_tag(const mw_dstwr_config_t *config,
 #endif
     result->valid = true;
   }
-
-  /* ========================================================================
-   * FIX #2: Mark sequence as COMPLETE - Now safe to start new ranging
-   * ======================================================================== */
+ 
   g_ranging_state = RANGING_STATE_COMPLETE;
 
   return MW_DSTWR_OK;

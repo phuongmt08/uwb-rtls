@@ -19,7 +19,8 @@ extern "C" {
 /* Includes ----------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
-#include "platform_config.h"
+#include "config.h"
+#include "positioning_config.h"
 
 /**
  * @brief Device role enumeration
@@ -47,8 +48,6 @@ typedef struct {
   /* Device identity */
   device_role_t role;
   uint8_t device_id;
-  uint8_t hw_rev_major;
-  uint8_t hw_rev_minor;
   
   /* Ranging parameters */
   ranging_method_t method;
@@ -70,7 +69,7 @@ typedef struct {
   
   /* Multiple anchor support */
   uint8_t anchor_count;       // Number of anchors in list (0 = broadcast to all)
-  uint8_t anchor_list[MAX_ANCHORS]; // List of anchor IDs to range with
+  uint8_t anchor_list[NUM_ANCHORS]; // List of anchor IDs to range with
   
   uint8_t reserved[16];
   
@@ -86,7 +85,7 @@ typedef struct {
 #define DEFAULT_RANGING_PERIOD_MS   150 
 #define DEFAULT_RX_TIMEOUT_MS       75
 
-#define CONFIG_VERSION              8
+#define CONFIG_VERSION              9
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
@@ -95,8 +94,6 @@ typedef struct {
 #define DEFAULT_TX_ANT_DLY          16436
 #define DEFAULT_RX_ANT_DLY          16436
 #define DEFAULT_TX_POWER            0x1F1F1F1FUL
-#define DEFAULT_HW_REV_MAJOR        1
-#define DEFAULT_HW_REV_MINOR        0
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
 /* ========================================================================== */
