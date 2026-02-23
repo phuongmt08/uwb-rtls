@@ -16,8 +16,8 @@
 #include "spi.h"
 
 /* DecaWave driver */
-#include "../deca/deca_driver/deca_device_api.h"
-#include "../deca/deca_driver/deca_regs.h"
+#include "deca_device_api.h"
+#include "deca_regs.h"
 #include "sys_logger.h"
 #include <string.h>
 #include <stdio.h>
