@@ -14,9 +14,9 @@
 #include "sys_logger.h"
 
 /* DecaWave driver */
-#include "../deca/deca_driver/deca_device_api.h"
-#include "../deca/deca_driver/deca_regs.h"
-
+#include "deca_device_api.h"
+#include "deca_regs.h"
+#include "sys_logger.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -40,6 +40,7 @@ static uint64_t s_last_tx_timestamp = 0;  /* Cached TX timestamp */
 static uint16_t s_tx_antenna_delay = 0;   /* Cached TX antenna delay */
 static uint16_t s_rx_antenna_delay = 0;   /* Cached RX antenna delay */
 
+static volatile uint8_t s_irq_event_pending = 0;
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
@@ -412,6 +413,8 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
     if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
         return BSP_ERR;
     }
+
+    s_irq_event_pending = 0;
     
     return BSP_OK;
 }
@@ -608,3 +611,27 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void)
 {
     return s_tx_antenna_delay;
 }
+void bsp_uwb_on_irq(void)
+{
+    s_irq_event_pending = 1;
+}
+
+void bsp_uwb_clear_irq_event(void)
+{
+    s_irq_event_pending = 0;
+}
+
+bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
+{
+    uint32_t start_tick = HAL_GetTick();
+
+    while ((HAL_GetTick() - start_tick) < timeout_ms) {
+        if (s_irq_event_pending) {
+            s_irq_event_pending = 0;
+            return true;
+        }
+    }
+
+    return false;
+}
+/* End of file -------------------------------------------------------- */

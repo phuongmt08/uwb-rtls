@@ -1,11 +1,57 @@
+/******************************************************************************
+ * @file           : protocol.proto
+ * @brief          : UWB Protocol Buffer message definitions
+ ******************************************************************************
+ * @details
+ *    Protocol definitions for UWB positioning system
+ *    Supports command-response pattern for app control
+ *    App sends commands, STM executes and responds
+ *
+ * @version        : 1.0.0
+ * @author         :
+ * @date           : 2024
+ *
+ * @attention
+ * @note       Style guide: https://protobuf.dev/programming-guides/style/
+ * @note       Proto 3 guide: https://protobuf.dev/programming-guides/proto3/
+ *
+ ******************************************************************************/
+
 syntax = "proto3";
 
-// Tên package để tránh trùng lặp
-package uwb_protocol;
+package protocol;
 
-// Định nghĩa gói tin mẫu
-message UwbData {
-    uint32 node_id = 1;
-    float distance = 2;
-    int32 rssi = 3;
+enum response_status {
+    RESPONSE_OK              = 0;
+    RESPONSE_ERROR           = 1;
+    RESPONSE_NACK            = 2;
+    RESPONSE_NOT_SUPPORTED   = 3;
+    RESPONSE_BUSY            = 4;
 }
+
+message addr_t {
+    uint32 src = 1;
+    uint32 dst = 2;
+}
+
+message hdr_t {
+    addr_t addr      = 1;
+    uint32 seq       = 2;
+    uint32 timestamp = 3;
+}
+
+message ack_t {
+    uint32 ack_seq           = 1;
+    response_status response = 2;
+}
+
+message packet_t {
+    hdr_t hdr = 1;
+
+    oneof payload {
+        ack_t ack = 2;
+    }
+}
+
+/* ========================================================================== */
+/* End of file ============================================================ */

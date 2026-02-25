@@ -12,7 +12,8 @@
 /* Includes ----------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
-#include "platform_config.h"
+#include "config.h"
+#include "positioning_config.h"
 
 /* Public enumerate/structure ---------------------------------------- */
 

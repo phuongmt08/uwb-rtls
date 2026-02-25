@@ -7,9 +7,9 @@
 
 /* Includes ----------------------------------------------------------- */
 #include "mw_trilateration.h"
+#include "positioning_config.h"
 #include <math.h>
 #include <string.h>
-#include "platform_config.h"
 #ifdef ENABLE_DEBUG_LOGGING
 #include "sys_logger.h"
 #endif
@@ -84,10 +84,10 @@ static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
         double distance;
     } anchor_dist_t;
 
-    anchor_dist_t dists[MAX_ANCHORS];
+    anchor_dist_t dists[NUM_ANCHORS];
     uint8_t valid_count = 0;
 
-    for (uint8_t i = 0; i < num_anchors && i < MAX_ANCHORS; i++) {
+    for (uint8_t i = 0; i < num_anchors && i < NUM_ANCHORS; i++) {
         if (!anchors[i].valid) continue;
         dists[valid_count].index = i;
         dists[valid_count].distance = anchors[i].distance;

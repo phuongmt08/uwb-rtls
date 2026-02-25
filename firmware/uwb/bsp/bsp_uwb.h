@@ -134,5 +134,22 @@ uint64_t bsp_uwb_get_current_time_dw(void);
 bsp_err_t bsp_uwb_validate_delayed_tx(uint64_t tx_timestamp_dw, uint64_t min_guard_dw);
 uint16_t bsp_uwb_get_rx_antenna_delay(void);
 
+/**
+ * @brief Notify BSP about UWB IRQ edge (call from EXTI callback)
+ */
+void bsp_uwb_on_irq(void);
+
+/**
+ * @brief Clear pending UWB IRQ event flag
+ */
+void bsp_uwb_clear_irq_event(void);
+
+/**
+ * @brief Wait for UWB IRQ event flag with timeout
+ * @param[in] timeout_ms Timeout in milliseconds
+ * @return true if IRQ event occurred, false on timeout
+ */
+bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms);
+
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */

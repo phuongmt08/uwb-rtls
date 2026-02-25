@@ -13,10 +13,16 @@
  * ANTENNA DELAY CONFIGURATION
  * =================================================================== */
 
-#define TAG_FACTORY_TX_ANT_DLY      16436
+/* Enable/Disable: Force antenna delay to default values on startup
+ * 0 = Use calibrated values (if available)
+ * 1 = Force antenna delay to factory defaults
+ */
+#define ENABLE_FORCE_DEFAULT_ANT_DLY    0
+
+#define TAG_FACTORY_TX_ANT_DLY      16618
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16436
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16611
 #define ANCHOR_DEFAULT_RX_ANT_DLY   16436
 
 /* ===================================================================
@@ -42,12 +48,12 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.148f)
+#define TAG_HEIGHT_M            (0.24f)
 
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (0.415f)
+#define ANCHOR_HEIGHT_M         (0.93f)
 
 /**
  * @brief Height offset between Anchor and Tag (meters)
@@ -60,13 +66,13 @@
 
 #define NUM_ANCHORS  4
 
-#define ANCHOR_1_X   -1.0f
+#define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
 
 #define ANCHOR_2_X   9.76f
 #define ANCHOR_2_Y   0.0f
 
-#define ANCHOR_3_X   -1.0f
+#define ANCHOR_3_X   0.0f
 #define ANCHOR_3_Y   14.64f
 
 #define ANCHOR_4_X   9.76f
@@ -191,7 +197,6 @@
  * =================================================================== */
 
 #ifdef PRESET_WORST_CASE
-    /* Conservative filtering for high noise */
     #define AKF_PROCESS_NOISE           0.01f   /* Process noise Q (acceleration variance) */
     #define AKF_R_BASE                  0.5f    /* Base measurement noise R */
     #define AKF_INNOVATION_ALPHA        0.2f    /* Innovation variance EMA (0-1) */
@@ -211,7 +216,6 @@
     #define MAX_ACCEPTABLE_ERROR_M      2.0f    /* Max trilateration error (m) */
 
 #elif defined(PRESET_BEST_CASE)
-    /* Aggressive filtering for low noise */
     #define AKF_PROCESS_NOISE           0.05f  /* Process noise Q (acceleration variance) */
     #define AKF_R_BASE                  0.08f   /* Base measurement noise R */
     #define AKF_INNOVATION_ALPHA        0.6f    /* Innovation variance EMA (0-1) */

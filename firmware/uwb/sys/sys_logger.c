@@ -12,7 +12,6 @@
 
 #include "log_config.h"
 #include "usbd_cdc_if.h"
-#include "platform_config.h"
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
