@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "anchor")(type "KiCad")(uri "E:/DataUser/Desktop/final_project/hardware/anchor.pretty")(options "")(descr ""))
+)

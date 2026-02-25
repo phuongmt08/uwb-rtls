@@ -1,0 +1,16 @@
+build/
+
+# Generated files
+protos/*.pb.c
+protos/*.pb.h
+
+# Python junk
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile

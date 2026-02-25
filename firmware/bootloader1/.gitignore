@@ -1,0 +1,31 @@
+# Ignore everything
+*
+
+# But keep .ioc and linker script file
+!*.ioc
+!STM32F411CEUX_FLASH.ld
+!STM32F411CEUX_RAM.ld
+# And keep Core/ directory and all its contents
+!Core/
+!Core/**
+!app/
+!app/**
+!bsp/
+!bsp/**
+!Drivers/
+!Drivers/**
+!middlewares/
+!middlewares/**
+!sys/
+!sys/**
+!USB_DEVICE/
+!USB_DEVICE/**
+!.project
+!.cproject
+!.settings/
+!bootloader1 Debug.launch
+
+# (Optional) Keep .gitignore files even in subfolders, for future use
+!.gitignore
+# Keep clang-format file
+!.clang-format
