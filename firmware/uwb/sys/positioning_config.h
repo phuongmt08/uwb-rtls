@@ -26,22 +26,6 @@
 #define ANCHOR_DEFAULT_RX_ANT_DLY   16436
 
 /* ===================================================================
- * ANCHOR AUTO-CALIBRATION
- * =================================================================== */
-
-#define ENABLE_ANCHOR_AUTO_CALIB    0
-
-#if ENABLE_ANCHOR_AUTO_CALIB
-#define CALIB_REF_DISTANCE_M      7.32f    /* Physical distance Tag-Anchor (m) */
-#define CALIB_SAMPLES             30      /* Number of samples to collect */
-#define CALIB_ERROR_THRESHOLD_M   0.02f   /* Stop if error < 2cm */
-#define CALIB_MIN_DELTA_STEP      3       /* Stop if step < 3 */
-#define CALIB_MAX_ROUNDS          12      /* Max 10 rounds */
-#define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
-#define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
-#endif
-
-/* ===================================================================
  * HEIGHT CONFIGURATION
  * =================================================================== */
 
@@ -59,6 +43,27 @@
  * @brief Height offset between Anchor and Tag (meters)
  */
 #define HEIGHT_OFFSET_M         (ANCHOR_HEIGHT_M - TAG_HEIGHT_M)
+
+/* ===================================================================
+ * ANCHOR/TAG AUTO-CALIBRATION
+ * =================================================================== */
+
+#define ENABLE_ANCHOR_AUTO_CALIB    0
+#define ENABLE_TAG_AUTO_CALIB       0
+
+#if (ENABLE_ANCHOR_AUTO_CALIB || ENABLE_TAG_AUTO_CALIB)
+#define CALIB_REF_DISTANCE_XY_M   7.32f   /* Horizontal distance Tag-Anchor (m) */
+#define CALIB_TAG_HEIGHT_M        TAG_HEIGHT_M
+#define CALIB_ANCHOR_HEIGHT_M     ANCHOR_HEIGHT_M
+#define CALIB_ANCHOR_ID           1       /* Anchor used for tag calibration */
+
+#define CALIB_SAMPLES             30      /* Number of samples to collect */
+#define CALIB_ERROR_THRESHOLD_M   0.02f   /* Stop if error < 2cm */
+#define CALIB_MIN_DELTA_STEP      3       /* Stop if step < 3 */
+#define CALIB_MAX_ROUNDS          12      /* Max 10 rounds */
+#define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
+#define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
+#endif
 
 /* ===================================================================
  * ANCHOR LAYOUT

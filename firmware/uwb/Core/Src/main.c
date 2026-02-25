@@ -275,6 +275,14 @@ int main(void)
       btn_event = BSP_IO_EVENT_NONE;  /* Prevent normal button handling */
     }
 #endif
+
+#if ENABLE_TAG_AUTO_CALIB
+    /* In calibration build, tag button events handled differently */
+    if (cfg->role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE) {
+      app_tag_on_button(btn_event);
+      btn_event = BSP_IO_EVENT_NONE;
+    }
+#endif
     
     switch (btn_event)
     {

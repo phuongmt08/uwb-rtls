@@ -74,11 +74,18 @@ static void calib_reset(void);
 static bool calib_add_sample(float distance);
 static void calib_calculate_and_adjust(void);
 static void calib_apply_and_save(void);
+static float calib_get_ref_distance_3d(void);
 #endif
 
 /* Private function implementations ----------------------------------- */
 
 #if ENABLE_ANCHOR_AUTO_CALIB
+
+static float calib_get_ref_distance_3d(void)
+{
+  float dz = (float)(CALIB_ANCHOR_HEIGHT_M - CALIB_TAG_HEIGHT_M);
+  return sqrtf(CALIB_REF_DISTANCE_XY_M * CALIB_REF_DISTANCE_XY_M + dz * dz);
+}
 
 static void calib_reset(void)
 {
@@ -90,8 +97,9 @@ static void calib_reset(void)
   s_calib.last_error = 999.0f;
   s_calib.converged = false;
   
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Start: delay=%u target=%.3fm", 
-         s_calib.current_delay, CALIB_REF_DISTANCE_M);
+    s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
+    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Start: delay=%u target=%.3fm", 
+      s_calib.current_delay, calib_get_ref_distance_3d());
 }
 
 static bool calib_add_sample(float distance)
@@ -141,7 +149,8 @@ static void calib_calculate_and_adjust(void)
     return;
   }
   
-  s_calib.error = s_calib.mean - CALIB_REF_DISTANCE_M;
+  /* Calculate Error */
+  s_calib.error = s_calib.mean - calib_get_ref_distance_3d();
   s_calib.round++;
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[R%u] mean=%.3fm std=%.3fm err=%+.3fm delay=%u step=%u", 
@@ -260,16 +269,18 @@ app_err_t app_anchor_init(void)
 #endif
   
 #if ENABLE_ANCHOR_AUTO_CALIB
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Calib: target=%.3fm samples=%u/round", 
-         CALIB_REF_DISTANCE_M, CALIB_SAMPLES_PER_ROUND);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Calib Mode: Target=%.3fm", calib_get_ref_distance_3d());
   calib_reset();
+  s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
 #else
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Mode: DS-TWR");
 #endif
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "======================");
 
+#if !ENABLE_ANCHOR_AUTO_CALIB
   s_app_state = ANCHOR_STATE_IDLE;
+#endif
   return APP_OK;
 }
 
