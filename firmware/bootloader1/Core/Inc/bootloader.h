@@ -30,6 +30,7 @@
 #define BL_DFU_INACTIVITY_MS  (5000U)  /* 5s should be enough for programmer to complete */
 
 bool bl_app_vector_valid(void);
+bool bl_should_enter_dfu(void);
 void bl_jump_to_app(void);
 /* Timestamp of last DFU activity - updated by DFU callbacks */
 extern volatile uint32_t g_dfu_last_activity;

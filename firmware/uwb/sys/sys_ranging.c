@@ -70,7 +70,7 @@ static int hal_tx(const void *data, uint16_t length)
   return (err == BSP_OK) ? 0 : -1;
 }
 
-static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
+static int hal_rx_with_timeout(void *buffer, uint16_t buffer_size,
                                uint16_t *received_length, uint32_t timeout_us)
 {
   uint32_t timeout_ms = (timeout_us + 999) / 1000;
@@ -102,9 +102,9 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
   return -1;
 }
 
-static int hal_read_timestamp(uint8_t reg_addr, uint8_t sub_addr, uint64_t *timestamp)
+static int hal_read_timestamp(uint8_t reg_addr, uint16_t sub_addr, uint64_t *timestamp)
 {
-  bsp_err_t err = bsp_uwb_read_40bit(reg_addr, sub_addr, timestamp);
+  bsp_err_t err = bsp_uwb_read_40bit(reg_addr, (uint8_t)sub_addr, timestamp);
   return (err == BSP_OK) ? 0 : -1;
 }
 

@@ -77,15 +77,6 @@
 	sys_logger_write_record(INFO_LOG, _OBJ_CODE, _FORMAT, ##__VA_ARGS__)
 
 /**
- * @brief Log an informational message
- * @param _OBJ_CODE Object code identifying the component
- * @param _FORMAT printf-style format string
- * @param ... Variable arguments
- */
-#define RLOG_I(_OBJ_CODE, _FORMAT, ...) \
-	sys_logger_write_record(INFO_LOG, _OBJ_CODE, _FORMAT, ##__VA_ARGS__)
-
-/**
  * @brief Log a debug message
  * @param _OBJ_CODE Object code identifying the component
  * @param _FORMAT printf-style format string
