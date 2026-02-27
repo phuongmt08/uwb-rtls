@@ -115,7 +115,7 @@ typedef struct __attribute__((packed)) {
     /* Private variables -------------------------------------------------- */
     static ranging_ctx_t s_ctx = {0};
     static tdma_scheduler_t s_tdma_tag = {0};
-    // static tdma_scheduler_t s_tdma_anchor = {0};
+    static tdma_scheduler_t s_tdma_anchor = {0};
     static struct {
     uint32_t total_count;
     uint32_t success_count;
@@ -243,30 +243,26 @@ typedef struct __attribute__((packed)) {
         if (s_ranging_busy) return -1;
         s_ranging_busy = true;
 
-        /* SIMPLIFIED: Anchor doesn't need full TDMA scheduler
-        * Only needs: slot_id, slot_duration, base_offset
-        */
-        
-        /* Find my slot_id */
-        uint8_t my_slot_id = 0;
-        bool found = false;
-        for (uint8_t i = 0; i < num_anchors; i++) {
-            if (anchor_ids[i] == anchor_id) {
-                my_slot_id = i;
-                found = true;
-                break;
-            }
+        if (tdma_init(&s_tdma_anchor, TDMA_ROLE_ANCHOR, anchor_id, num_anchors, anchor_ids) != TDMA_OK) {
+            s_ranging_busy = false;
+            return -1;
         }
-        
-        if (!found) {
+        if (tdma_set_timing(&s_tdma_anchor,
+                            4000,
+                            TDMA_DEFAULT_GUARD_TIME_US,
+                            TDMA_POLL_TO_RESP_US,
+                            TDMA_RESP_TO_FINAL_US) != TDMA_OK) {
+            s_ranging_busy = false;
+            return -1;
+        }
+
+        tdma_slot_t my_slot = {0};
+        if (tdma_get_slot_for_anchor(&s_tdma_anchor, anchor_id, &my_slot) != TDMA_OK) {
             RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] anchor_id %u not in anchor_ids list", anchor_id);
             s_ranging_busy = false;
             return -1;
         }
-        
-        /* TDMA timing constants */
-        const uint32_t SLOT_DURATION_US = 4000;      /* 4ms per slot */
-        const uint32_t POLL_TO_RESP_BASE_US = 5000;  /* 5ms base offset */
+        uint8_t my_slot_id = my_slot.slot_id;
 
         /* 1. Receive POLL */
         uint8_t poll_buf[128];
@@ -292,9 +288,8 @@ typedef struct __attribute__((packed)) {
         }
 
         if (poll_len == 0) {
-            RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] No POLL received (timeout=%luus)", (unsigned long)rx_timeout_us);
             s_ranging_busy = false;
-            return -1;
+            return -2;
         }
 
         poll_msg_t *poll = (poll_msg_t *)poll_buf;
@@ -307,16 +302,21 @@ typedef struct __attribute__((packed)) {
             return -1;
         }
 
-        /* SIMPLIFIED: Calculate RESP TX time directly
-        * resp_tx = poll_rx + base_offset + slot_id * slot_duration
-        * No need for full TDMA sync/scheduler
-        */
-        uint32_t resp_offset_us = POLL_TO_RESP_BASE_US + (my_slot_id * SLOT_DURATION_US);
-        uint64_t resp_tx_time_dw = poll_rx_ts + tdma_us_to_dw(resp_offset_us);
-        resp_tx_time_dw &= 0x000000FFFFFFFFFFULL;
-        
-        RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] T2=%llu, RESP_TX=%llu (slot=%u, offset=%luus)", 
-            (unsigned long long)poll_rx_ts, (unsigned long long)resp_tx_time_dw, 
+        if (tdma_sync_to_poll(&s_tdma_anchor, poll_rx_ts) != TDMA_OK) {
+            s_ranging_busy = false;
+            return -1;
+        }
+
+        uint64_t resp_tx_time_dw = 0;
+        if (tdma_calculate_response_time(&s_tdma_anchor, anchor_id, &resp_tx_time_dw) != TDMA_OK) {
+            s_ranging_busy = false;
+            return -1;
+        }
+
+        uint32_t resp_offset_us = tdma_dw_to_us((resp_tx_time_dw - poll_rx_ts) & 0x000000FFFFFFFFFFULL);
+
+        RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] T2=%llu, RESP_TX=%llu (slot=%u, offset=%luus)",
+            (unsigned long long)poll_rx_ts, (unsigned long long)resp_tx_time_dw,
             my_slot_id, (unsigned long)resp_offset_us);
 
         /* Ensure future TX */
@@ -346,11 +346,11 @@ typedef struct __attribute__((packed)) {
         uint8_t final_buf[256];
         uint16_t final_len = 0;
 
-        /* SIMPLIFIED: Don't calculate exact FINAL time
-        * Just use generous timeout: RESP_BASE + num_anchors * slot + margin
-        */
-        uint32_t final_timeout_us = POLL_TO_RESP_BASE_US + (num_anchors * SLOT_DURATION_US) + 
-                                    TDMA_RESP_TO_FINAL_US + 5000; /* 5ms margin (was 20ms) */
+        uint32_t effective_slot_us = s_tdma_anchor.schedule.slot_duration_us +
+                        s_tdma_anchor.schedule.guard_time_us;
+        uint32_t final_timeout_us = s_tdma_anchor.schedule.poll_to_resp_delay_us +
+                        (num_anchors * effective_slot_us) +
+                        s_tdma_anchor.schedule.resp_to_final_delay_us + 5000;
         if (final_timeout_us > 100000) final_timeout_us = 100000; /* Max 100ms */
 
         if (bsp_uwb_enable_rx(0) != BSP_OK) {
@@ -448,7 +448,8 @@ typedef struct __attribute__((packed)) {
     result_msg.rssi = s_ctx.result_single.rssi;
 
     /* Calculate RESULT TX time: FINAL_RX + small delay */
-    uint32_t result_offset_us = 2000 + (my_slot_id * 1000); /* 2ms base + 1ms per slot */
+    uint32_t result_offset_us = s_tdma_anchor.schedule.final_to_result_delay_us +
+                                ((my_slot_id - 1U) * effective_slot_us);
     uint64_t result_tx_time_dw = final_rx_ts + tdma_us_to_dw(result_offset_us);
     result_tx_time_dw = ensure_future_tx(result_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
 
@@ -771,8 +772,14 @@ typedef struct __attribute__((packed)) {
         if (num_anchors == 0 || num_anchors > 8 || !anchor_ids) return SYS_RANGING_ERR_PARAM;
         
         int ret = ds_twr_tag_tdma(num_anchors, anchor_ids, sequence_num, rx_timeout_ms * 1000);
-        
-        return (ret == 0) ? SYS_RANGING_OK : SYS_RANGING_ERR;
+
+        if (ret == 0) {
+            s_ctx.has_result = true;
+            s_ctx.state = STATE_TAG_COMPLETE;
+            return SYS_RANGING_OK;
+        }
+
+        return SYS_RANGING_ERR;
     }
 
     sys_ranging_err_t sys_ranging_anchor_run_tdma_blocking(uint8_t anchor_id,
@@ -784,7 +791,11 @@ typedef struct __attribute__((packed)) {
         if (num_anchors == 0 || num_anchors > 8 || !anchor_ids) return SYS_RANGING_ERR_PARAM;
         
         int ret = ds_twr_anchor_tdma(anchor_id, num_anchors, anchor_ids, rx_timeout_ms * 1000);
-        
+
+        if (ret == -2) {
+            return SYS_RANGING_ERR_TIMEOUT;
+        }
+
         if (ret == 0) {
             /* Success - result is in s_ctx.result_single */
             return SYS_RANGING_OK;
@@ -834,6 +845,11 @@ typedef struct __attribute__((packed)) {
         }
 
         int ret = ds_twr_anchor_tdma(s_ctx.anchor_id, num_anchors, anchor_ids, rx_timeout_ms * 1000);
+
+        if (ret == -2) {
+            state_machine_reset();
+            return SYS_RANGING_ERR_TIMEOUT;
+        }
 
         if (ret == 0) {
             s_ctx.has_result = true;

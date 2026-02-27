@@ -51,6 +51,7 @@ static bool s_is_ranging_active = false;
 static void init_filters(void);
 static void process_ranging_results(sys_ranging_result_t *results, int num_success);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
+static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 
 /* Implementation */
 
@@ -104,6 +105,16 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
     
     *r2d_out = sqrt(r2d_sq);
     return true;
+}
+
+static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids)
+{
+    uint8_t total = (NUM_ANCHORS > MAX_ANCHORS) ? MAX_ANCHORS : NUM_ANCHORS;
+    *num_anchors = total;
+
+    for (uint8_t i = 0; i < total; i++) {
+        anchor_ids[i] = i + 1;
+    }
 }
 
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
@@ -316,23 +327,36 @@ void app_tag_process(void)
     if (!s_is_ranging_active) {
         /* Check update rate period */
         if ((now - s_last_ranging_tick) >= cfg->ranging_period_ms) {
-            
+            uint8_t num_anchors = 1;
+            uint8_t anchor_ids[MAX_ANCHORS] = {0};
+            get_tdma_config(&num_anchors, anchor_ids);
+
+            s_is_ranging_active = true;
             bsp_io_led_on();
-            
-            /* Call ranging DIRECTLY - no split start/process to avoid logger delay */
-            uint8_t anchor_ids[1] = {1};
-            sys_ranging_err_t err = sys_ranging_tag_run_tdma_blocking(1, anchor_ids, s_sequence_num++, cfg->rx_timeout_ms);
-            
+
+            sys_ranging_err_t err = sys_ranging_tag_run_tdma_blocking(num_anchors,
+                                                                       anchor_ids,
+                                                                       s_sequence_num++,
+                                                                       cfg->rx_timeout_ms);
+
             bsp_io_led_off();
             s_last_ranging_tick = HAL_GetTick();
-            
+
             if (err == SYS_RANGING_OK) {
-                s_success_count++;
+                sys_ranging_multi_result_t multi_results;
+                if (sys_ranging_tag_get_results_tdma(&multi_results) == SYS_RANGING_OK) {
+                    process_ranging_results(multi_results.results, multi_results.count);
+                } else {
+                    s_error_count++;
+                    RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
+                }
             } else {
                 s_error_count++;
                 if (s_error_count % 10 == 0)
                     RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Ranging failed");
             }
+
+            s_is_ranging_active = false;
         }
     }
 }

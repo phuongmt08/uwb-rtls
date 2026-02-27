@@ -33,6 +33,8 @@ static int trilaterate_3sphere(vec3d_t *sol1, vec3d_t *sol2,
 static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
                                   uint8_t num_anchors,
                                   uint8_t selected[3]);
+static double triangle_area_2d(vec3d_t a, vec3d_t b, vec3d_t c);
+static double rssi_quality(int8_t rssi);
 
 /* Vector operations -------------------------------------------------- */
 
@@ -73,43 +75,70 @@ static inline double vec_dot(vec3d_t v1, vec3d_t v2) {
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
+static double triangle_area_2d(vec3d_t a, vec3d_t b, vec3d_t c)
+{
+    double area2 = a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y);
+    return fabs(area2) * 0.5;
+}
+
+static double rssi_quality(int8_t rssi)
+{
+    /* Normalize RSSI into [0..1] with a conservative range of [-100..-40] dBm */
+    double q = ((double)rssi + 100.0) / 60.0;
+    if (q < 0.0) return 0.0;
+    if (q > 1.0) return 1.0;
+    return q;
+}
+
 /* Anchor selection --------------------------------------------------- */
 
 static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
                                   uint8_t num_anchors,
                                   uint8_t selected[3])
 {
-    typedef struct {
-        uint8_t index;
-        double distance;
-    } anchor_dist_t;
-
-    anchor_dist_t dists[NUM_ANCHORS];
+    uint8_t idx[NUM_ANCHORS];
     uint8_t valid_count = 0;
 
     for (uint8_t i = 0; i < num_anchors && i < NUM_ANCHORS; i++) {
         if (!anchors[i].valid) continue;
-        dists[valid_count].index = i;
-        dists[valid_count].distance = anchors[i].distance;
-        valid_count++;
+        idx[valid_count++] = i;
     }
 
-    // Sắp xếp tăng dần theo distance
-    for (uint8_t i = 0; i < valid_count - 1; i++) {
-        for (uint8_t j = 0; j < valid_count - i - 1; j++) {
-            if (dists[j].distance > dists[j + 1].distance) {
-                anchor_dist_t temp = dists[j];
-                dists[j] = dists[j + 1];
-                dists[j + 1] = temp;
+    if (valid_count < 3) return;
+
+    double best_score = -1.0;
+    uint8_t best_i = idx[0], best_j = idx[1], best_k = idx[2];
+
+    for (uint8_t a = 0; a < valid_count - 2; a++) {
+        for (uint8_t b = a + 1; b < valid_count - 1; b++) {
+            for (uint8_t c = b + 1; c < valid_count; c++) {
+                uint8_t i = idx[a];
+                uint8_t j = idx[b];
+                uint8_t k = idx[c];
+
+                double area = triangle_area_2d(anchors[i].position,
+                                               anchors[j].position,
+                                               anchors[k].position);
+                double mean_dist = (anchors[i].distance + anchors[j].distance + anchors[k].distance) / 3.0;
+                double rssi_q = (rssi_quality(anchors[i].rssi) +
+                                 rssi_quality(anchors[j].rssi) +
+                                 rssi_quality(anchors[k].rssi)) / 3.0;
+
+                double score = area * (1.0 + rssi_q) / (1.0 + mean_dist);
+
+                if (score > best_score) {
+                    best_score = score;
+                    best_i = i;
+                    best_j = j;
+                    best_k = k;
+                }
             }
         }
     }
 
-    // Lấy 3 anchor gần nhất
-    uint8_t count = (valid_count < 3) ? valid_count : 3;
-    for (uint8_t i = 0; i < count; i++) {
-        selected[i] = dists[i].index;
-    }
+    selected[0] = best_i;
+    selected[1] = best_j;
+    selected[2] = best_k;
 #ifdef ENABLE_DEBUG_LOGGING
     RLOG_D(LOG_OBJECT_CODE_POSITIONING,
            "Selected anchors: #%u (%.3fm), #%u (%.3fm), #%u (%.3fm)",

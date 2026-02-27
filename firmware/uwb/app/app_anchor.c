@@ -2,7 +2,7 @@
  * @file       app_anchor.c
  * @copyright
  * @license
- * @version    2.1.0 (TDMA Fixed)
+ * @version    2.1.0
  * @date       2026-02-01
  * @author     Phuong Mai
  * @brief      Non-blocking Anchor with binary search auto-calibration & TDMA
@@ -292,10 +292,13 @@ app_err_t app_anchor_init(void)
 
 void app_anchor_process(void *arg)
 {
+  (void)arg;
   sys_config_t *cfg = sys_config_get();
-  uint8_t my_id = cfg->device_id;
+  uint8_t my_id = 0;
   uint8_t num_anchors = 1;
-  uint8_t anchor_ids[1] = {my_id};
+  uint8_t anchor_ids[MAX_ANCHORS] = {0};
+
+  get_tdma_config(&my_id, &num_anchors, anchor_ids);
 
   /* FIX #6: Use short timeout (10ms) for TDMA - should detect POLL quickly */
   /* In TDMA, if TAG isn't sending, anchor should timeout fast and retry */
