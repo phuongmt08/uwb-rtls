@@ -71,6 +71,7 @@ static void calib_reset(void);
 static bool calib_add_sample(float distance);
 static void calib_calculate_and_adjust(void);
 static void calib_apply_and_save(void);
+static float calib_get_ref_distance_3d(void);
 #endif
 
 /* Helper to configure TDMA network */
@@ -78,8 +79,8 @@ static void get_tdma_config(uint8_t *my_id, uint8_t *num_anchors, uint8_t *ancho
     sys_config_t *cfg = sys_config_get();
     *my_id = cfg->device_id;
     
-    /* Config network size based on MAX_ANCHORS definition */
-    *num_anchors = (MAX_ANCHORS > 8) ? 8 : MAX_ANCHORS; 
+    /* Config network size from NUM_ANCHORS (TDMA max 8) */
+    *num_anchors = (NUM_ANCHORS > 8) ? 8 : NUM_ANCHORS;
     
     /* Create linear list of Anchor IDs: 1, 2, 3... */
     for(uint8_t i=0; i<*num_anchors; i++) {
@@ -91,6 +92,12 @@ static void get_tdma_config(uint8_t *my_id, uint8_t *num_anchors, uint8_t *ancho
 
 #if ENABLE_ANCHOR_AUTO_CALIB
 
+static float calib_get_ref_distance_3d(void)
+{
+  float dz = (float)(CALIB_ANCHOR_HEIGHT_M - CALIB_TAG_HEIGHT_M);
+  return sqrtf(CALIB_REF_DISTANCE_XY_M * CALIB_REF_DISTANCE_XY_M + dz * dz);
+}
+
 static void calib_reset(void)
 {
   memset(&s_calib, 0, sizeof(s_calib));
@@ -101,8 +108,9 @@ static void calib_reset(void)
   s_calib.last_error = 999.0f;
   s_calib.converged = false;
   
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Start: delay=%u target=%.3fm", 
-         s_calib.current_delay, CALIB_REF_DISTANCE_M);
+    s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
+    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Start: delay=%u target=%.3fm", 
+      s_calib.current_delay, calib_get_ref_distance_3d());
 }
 
 static bool calib_add_sample(float distance)
@@ -156,7 +164,7 @@ static void calib_calculate_and_adjust(void)
   }
   
   /* Calculate Error */
-  s_calib.error = s_calib.mean - CALIB_REF_DISTANCE_M;
+  s_calib.error = s_calib.mean - calib_get_ref_distance_3d();
   s_calib.round++;
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[R%u] mean=%.3fm std=%.3fm err=%+.3fm delay=%u step=%u", 
@@ -280,13 +288,16 @@ app_err_t app_anchor_init(void)
 #endif
   
 #if ENABLE_ANCHOR_AUTO_CALIB
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Calib Mode: Target=%.3fm", CALIB_REF_DISTANCE_M);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Calib Mode: Target=%.3fm", calib_get_ref_distance_3d());
   calib_reset();
+  s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
 #else
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Normal Mode: TDMA Responder");
 #endif
 
+#if !ENABLE_ANCHOR_AUTO_CALIB
   s_app_state = ANCHOR_STATE_IDLE;
+#endif
   return APP_OK;
 }
 
@@ -296,7 +307,7 @@ void app_anchor_process(void *arg)
   sys_config_t *cfg = sys_config_get();
   uint8_t my_id = 0;
   uint8_t num_anchors = 1;
-  uint8_t anchor_ids[MAX_ANCHORS] = {0};
+  uint8_t anchor_ids[NUM_ANCHORS] = {0};
 
   get_tdma_config(&my_id, &num_anchors, anchor_ids);
 

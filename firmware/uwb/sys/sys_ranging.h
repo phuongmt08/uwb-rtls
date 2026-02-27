@@ -58,7 +58,7 @@ typedef struct
 
 typedef struct
 {
-  sys_ranging_result_t results[MAX_ANCHORS];
+  sys_ranging_result_t results[NUM_ANCHORS];
   uint8_t count;          /* Number of valid results */
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
@@ -80,7 +80,7 @@ typedef struct
   
   /* TDMA multi-anchor mode */
   uint8_t  num_anchors;             /* Number of anchors (1-8) */
-  uint8_t  anchor_ids[MAX_ANCHORS]; /* List of anchor IDs */
+  uint8_t  anchor_ids[NUM_ANCHORS]; /* List of anchor IDs */
   uint32_t slot_duration_ms;        /* TDMA slot duration (0 = default) */
 } sys_ranging_config_t;
 

@@ -10,6 +10,7 @@
 #include "app_tag.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
+#include "bsp_uwb.h"
 #include "mw_filter.h"
 #include "mw_trilateration.h"
 #include "positioning_config.h"
@@ -33,6 +34,28 @@ static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
 };
 
 /* Private types */
+#if ENABLE_TAG_AUTO_CALIB
+typedef enum {
+    TAG_STATE_IDLE = 0,
+    TAG_STATE_CALIB_COLLECTING,
+    TAG_STATE_CALIB_CALCULATE,
+    TAG_STATE_CALIB_PENDING_ACCEPT,
+    TAG_STATE_CALIB_DONE
+} tag_app_state_t;
+
+typedef struct {
+    float distances[CALIB_SAMPLES];
+    uint16_t count;
+    float mean;
+    float error;
+    float last_error;
+    uint16_t current_delay;
+    uint16_t delta_step;
+    uint16_t round;
+    bool converged;
+} tag_calib_state_t;
+#endif
+
 typedef struct {
 #if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
     mw_filter_cxt_t filter;
@@ -46,12 +69,23 @@ static uint32_t s_last_ranging_tick = 0;
 static uint8_t s_sequence_num = 0;
 static filter_state_t s_filters;
 static bool s_is_ranging_active = false;
+#if ENABLE_TAG_AUTO_CALIB
+static tag_calib_state_t s_tag_calib = {0};
+static tag_app_state_t s_tag_app_state = TAG_STATE_IDLE;
+#endif
 
 /* Private prototypes */
 static void init_filters(void);
 static void process_ranging_results(sys_ranging_result_t *results, int num_success);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
+#if ENABLE_TAG_AUTO_CALIB
+static void tag_calib_reset(void);
+static bool tag_calib_add_sample(float distance);
+static void tag_calib_calculate_and_adjust(void);
+static void tag_calib_apply_and_save(void);
+static float tag_calib_get_ref_distance_3d(void);
+#endif
 
 /* Implementation */
 
@@ -109,7 +143,7 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids)
 {
-    uint8_t total = (NUM_ANCHORS > MAX_ANCHORS) ? MAX_ANCHORS : NUM_ANCHORS;
+    uint8_t total = (NUM_ANCHORS > 8) ? 8 : NUM_ANCHORS;
     *num_anchors = total;
 
     for (uint8_t i = 0; i < total; i++) {
@@ -117,6 +151,172 @@ static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids)
     }
 }
 
+#if ENABLE_TAG_AUTO_CALIB
+static float tag_calib_get_ref_distance_3d(void)
+{
+    float dz = (float)(CALIB_ANCHOR_HEIGHT_M - CALIB_TAG_HEIGHT_M);
+    return sqrtf(CALIB_REF_DISTANCE_XY_M * CALIB_REF_DISTANCE_XY_M + dz * dz);
+}
+
+static void tag_calib_reset(void)
+{
+    memset(&s_tag_calib, 0, sizeof(s_tag_calib));
+
+    sys_config_t *cfg = sys_config_get();
+    s_tag_calib.current_delay = cfg->tx_antenna_delay;
+    s_tag_calib.delta_step = 100;
+    s_tag_calib.last_error = 999.0f;
+    s_tag_calib.converged = false;
+
+    s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Start: delay=%u target=%.3fm",
+           s_tag_calib.current_delay, tag_calib_get_ref_distance_3d());
+}
+
+static bool tag_calib_add_sample(float distance)
+{
+    if (s_tag_calib.count >= CALIB_SAMPLES) {
+        return true;
+    }
+
+    if (distance < 0.1f || distance > 50.0f) {
+        return false;
+    }
+
+    s_tag_calib.distances[s_tag_calib.count++] = distance;
+
+    if (s_tag_calib.count % 5 == 0) {
+        bsp_io_led_toggle();
+    }
+
+    return (s_tag_calib.count >= CALIB_SAMPLES);
+}
+
+static void tag_calib_calculate_and_adjust(void)
+{
+    if (s_tag_calib.count < CALIB_SAMPLES) {
+        return;
+    }
+
+    float sum = 0.0f;
+    for (uint16_t i = 0; i < s_tag_calib.count; i++) {
+        sum += s_tag_calib.distances[i];
+    }
+    s_tag_calib.mean = sum / s_tag_calib.count;
+
+    float variance = 0.0f;
+    for (uint16_t i = 0; i < s_tag_calib.count; i++) {
+        float diff = s_tag_calib.distances[i] - s_tag_calib.mean;
+        variance += diff * diff;
+    }
+    float std_dev = sqrtf(variance / s_tag_calib.count);
+
+    if (std_dev > CALIB_MAX_STD_M) {
+        RLOG_W(LOG_OBJECT_CODE_TAG,
+               "[R%u] REJECTED std=%.3fm > %.3fm",
+               s_tag_calib.round + 1, std_dev, CALIB_MAX_STD_M);
+        s_tag_calib.count = 0;
+        return;
+    }
+
+    s_tag_calib.error = s_tag_calib.mean - tag_calib_get_ref_distance_3d();
+    s_tag_calib.round++;
+
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[R%u] mean=%.3fm std=%.3fm err=%+.3fm delay=%u step=%u",
+           s_tag_calib.round, s_tag_calib.mean, std_dev, s_tag_calib.error,
+           s_tag_calib.current_delay, s_tag_calib.delta_step);
+
+    if (fabsf(s_tag_calib.error) < CALIB_ERROR_THRESHOLD_M) {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] DONE! delay=%u err=%.3fm",
+               s_tag_calib.current_delay, s_tag_calib.error);
+        RLOG_I(LOG_OBJECT_CODE_TAG, "HOLD=accept CLICK=retry");
+        s_tag_calib.converged = true;
+        s_tag_app_state = TAG_STATE_CALIB_PENDING_ACCEPT;
+        bsp_io_led_on();
+        return;
+    }
+
+    if (s_tag_calib.round >= CALIB_MAX_ROUNDS || s_tag_calib.delta_step < CALIB_MIN_DELTA_STEP) {
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[CALIB] STOP! delay=%u err=%.3fm",
+               s_tag_calib.current_delay, s_tag_calib.error);
+        RLOG_I(LOG_OBJECT_CODE_TAG, "HOLD=accept CLICK=retry");
+        s_tag_calib.converged = true;
+        s_tag_app_state = TAG_STATE_CALIB_PENDING_ACCEPT;
+        bsp_io_led_on();
+        return;
+    }
+
+    if (s_tag_calib.error * s_tag_calib.last_error < 0.0f) {
+        s_tag_calib.delta_step = s_tag_calib.delta_step / 2;
+    }
+
+    int32_t new_delay;
+    if (s_tag_calib.error > 0.0f) {
+        new_delay = (int32_t)s_tag_calib.current_delay + s_tag_calib.delta_step;
+    } else {
+        new_delay = (int32_t)s_tag_calib.current_delay - s_tag_calib.delta_step;
+    }
+
+    if (new_delay < 0) new_delay = 0;
+    if (new_delay > 65535) new_delay = 65535;
+
+    s_tag_calib.last_error = s_tag_calib.error;
+    s_tag_calib.current_delay = (uint16_t)new_delay;
+
+    bsp_uwb_config_t uwb_cfg;
+    sys_config_t *cfg = sys_config_get();
+    uwb_cfg.channel = cfg->uwb_channel;
+    uwb_cfg.prf = cfg->uwb_prf;
+    uwb_cfg.data_rate = cfg->uwb_data_rate;
+    uwb_cfg.preamble_code = cfg->uwb_preamble_code;
+    uwb_cfg.tx_antenna_delay = s_tag_calib.current_delay;
+    uwb_cfg.rx_antenna_delay = s_tag_calib.current_delay;
+    uwb_cfg.tx_power = cfg->tx_power;
+
+    bsp_uwb_configure(&uwb_cfg);
+    s_tag_calib.count = 0;
+    s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
+}
+
+static void tag_calib_apply_and_save(void)
+{
+    if (!s_tag_calib.converged) return;
+
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saving TX/RX delay=%u...", s_tag_calib.current_delay);
+
+    sys_config_t *cfg = sys_config_get();
+    cfg->tx_antenna_delay = s_tag_calib.current_delay;
+    cfg->rx_antenna_delay = s_tag_calib.current_delay;
+
+    if (sys_config_save() == 0) {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saved! Restarting...");
+        bsp_delay_ms(1000);
+        HAL_NVIC_SystemReset();
+    } else {
+        RLOG_E(LOG_OBJECT_CODE_TAG, ERR_HAL, "[CALIB] Save failed!");
+    }
+}
+
+void app_tag_on_button(bsp_io_button_event_t event)
+{
+    if (s_tag_app_state != TAG_STATE_CALIB_PENDING_ACCEPT) return;
+
+    if (event == BSP_IO_EVENT_HOLD) {
+        tag_calib_apply_and_save();
+        s_tag_app_state = TAG_STATE_CALIB_DONE;
+    } else if (event == BSP_IO_EVENT_CLICK) {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Retry...");
+        tag_calib_reset();
+    } else if (event == BSP_IO_EVENT_DOUBLE_CLICK) {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Reset to factory...");
+        sys_config_t *cfg = sys_config_get();
+        cfg->tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+        cfg->rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+        sys_config_save();
+        s_tag_app_state = TAG_STATE_IDLE;
+    }
+}
+#endif
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
     // RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", s_success_count + 1);  // DISABLED - causes 20ms delay
@@ -304,6 +504,11 @@ app_err_t app_tag_init(void)
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "==============================");
 
+#if ENABLE_TAG_AUTO_CALIB
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Calib Mode: Target=%.3fm", tag_calib_get_ref_distance_3d());
+    tag_calib_reset();
+#endif
+
     init_filters();
     return APP_OK;
 }
@@ -313,6 +518,13 @@ void app_tag_process(void)
     static uint32_t last_log = 0;
     sys_config_t *cfg = sys_config_get();
     uint32_t now = HAL_GetTick();
+
+#if ENABLE_TAG_AUTO_CALIB
+    if (s_tag_app_state == TAG_STATE_CALIB_PENDING_ACCEPT ||
+        s_tag_app_state == TAG_STATE_CALIB_DONE) {
+        return;
+    }
+#endif
 
     /* Debug every 1s */
     if ((now - last_log) >= 1000) {
@@ -328,8 +540,16 @@ void app_tag_process(void)
         /* Check update rate period */
         if ((now - s_last_ranging_tick) >= cfg->ranging_period_ms) {
             uint8_t num_anchors = 1;
-            uint8_t anchor_ids[MAX_ANCHORS] = {0};
+            uint8_t anchor_ids[NUM_ANCHORS] = {0};
             get_tdma_config(&num_anchors, anchor_ids);
+#if ENABLE_TAG_AUTO_CALIB
+            bool calib_mode = (!s_tag_calib.converged &&
+                               s_tag_app_state == TAG_STATE_CALIB_COLLECTING);
+            if (calib_mode) {
+                num_anchors = 1;
+                anchor_ids[0] = CALIB_ANCHOR_ID;
+            }
+#endif
 
             s_is_ranging_active = true;
             bsp_io_led_on();
@@ -338,17 +558,48 @@ void app_tag_process(void)
                                                                        anchor_ids,
                                                                        s_sequence_num++,
                                                                        cfg->rx_timeout_ms);
-
             bsp_io_led_off();
             s_last_ranging_tick = HAL_GetTick();
 
             if (err == SYS_RANGING_OK) {
                 sys_ranging_multi_result_t multi_results;
                 if (sys_ranging_tag_get_results_tdma(&multi_results) == SYS_RANGING_OK) {
+#if ENABLE_TAG_AUTO_CALIB
+                    if (calib_mode) {
+                        bool found = false;
+                        for (uint8_t i = 0; i < multi_results.count; i++) {
+                            sys_ranging_result_t *res = &multi_results.results[i];
+                            if (res->valid && res->anchor_id == CALIB_ANCHOR_ID) {
+                                found = true;
+                                if (tag_calib_add_sample(res->distance_m)) {
+                                    s_tag_app_state = TAG_STATE_CALIB_CALCULATE;
+                                    tag_calib_calculate_and_adjust();
+                                }
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            RLOG_W(LOG_OBJECT_CODE_TAG,
+                                   "[CALIB] No valid result from anchor %u",
+                                   CALIB_ANCHOR_ID);
+                        }
+                    } else {
+                        process_ranging_results(multi_results.results, multi_results.count);
+                    }
+#else
                     process_ranging_results(multi_results.results, multi_results.count);
+#endif
                 } else {
                     s_error_count++;
+#if ENABLE_TAG_AUTO_CALIB
+                    if (calib_mode) {
+                        RLOG_W(LOG_OBJECT_CODE_TAG, "[CALIB] No TDMA results available");
+                    } else {
+                        RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
+                    }
+#else
                     RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
+#endif
                 }
             } else {
                 s_error_count++;
