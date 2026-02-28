@@ -194,7 +194,7 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
   
   HAL_FLASH_Unlock();
 
-  /* Erase all application sectors (2, 3, 4) */
+  /* Erase all application sectors (3, 4, 5) */
   uint32_t SectorError = 0;
   FLASH_EraseInitTypeDef EraseInitStruct;
   
@@ -202,16 +202,16 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
   EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
   EraseInitStruct.NbSectors = 1;
   
-  /* Erase Sector 2 (16KB @ 0x08008000) */
-  EraseInitStruct.Sector = 2;
-  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-  
   /* Erase Sector 3 (16KB @ 0x0800C000) */
   EraseInitStruct.Sector = 3;
   HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
   
   /* Erase Sector 4 (64KB @ 0x08010000) */
   EraseInitStruct.Sector = 4;
+  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+
+  /* Erase Sector 5 (128KB @ 0x08020000) */
+  EraseInitStruct.Sector = 5;
   HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
   
   /* Mark as erased for write callback */
@@ -234,10 +234,10 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
   /* USER CODE BEGIN 3 */
   g_dfu_last_activity = HAL_GetTick();
 
-  /* Verify destination is in application space (sector 2-4 only) */
+  /* Verify destination is in application space (sector 3-5 only) */
   uint32_t addr = (uint32_t)dest;
-  if (addr < APP_ADDRESS || addr >= 0x08020000) {
-    /* Reject writes to bootloader (< 0x08008000) or data storage (>= 0x08020000) */
+  if (addr < MEM_APP_START || addr >= MEM_APP_END) {
+    /* Reject writes to bootloader area (< MEM_APP_START) or data storage (>= MEM_APP_END) */
     return USBD_FAIL;
   }
 
@@ -254,11 +254,11 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
     EraseInitStruct.NbSectors = 1;
     
     /* Erase all app sectors */
-    EraseInitStruct.Sector = 2;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
     EraseInitStruct.Sector = 3;
     HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
     EraseInitStruct.Sector = 4;
+    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    EraseInitStruct.Sector = 5;
     HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
   }
 

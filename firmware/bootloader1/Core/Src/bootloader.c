@@ -12,8 +12,18 @@ extern USBD_HandleTypeDef hUsbDeviceFS;
 
 bool bl_app_vector_valid(void)
 {
-  const uint32_t msp = *(uint32_t*)APP_ADDRESS;;
-  return (msp >= SRAM_BASE_ADDR) && (msp <= SRAM_END_ADDR);
+  const uint32_t msp = *(uint32_t*)MEM_APP_START;
+  const uint32_t reset_handler = *(uint32_t*)(MEM_APP_START + 4U);
+
+  if (msp < SRAM_BASE_ADDR || msp > SRAM_END_ADDR) {
+    return false;
+  }
+
+  if (reset_handler < MEM_APP_START || reset_handler >= MEM_APP_END) {
+    return false;
+  }
+
+  return true;
 }
 
 bool bl_should_enter_dfu(void)
@@ -28,7 +38,7 @@ void bl_jump_to_app(void)
   HAL_DeInit();
   HAL_RCC_DeInit();
 
-  __set_MSP(*(uint32_t*)APP_ADDRESS);
+  __set_MSP(*(uint32_t*)MEM_APP_START);
 
-  ((void (*)(void))(*(uint32_t*)(APP_ADDRESS + 4U)))();
+  ((void (*)(void))(*(uint32_t*)(MEM_APP_START + 4U)))();
 }
