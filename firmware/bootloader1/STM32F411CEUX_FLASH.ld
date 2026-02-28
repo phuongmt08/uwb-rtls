@@ -1,7 +1,9 @@
-/* Bootloader: 0x08000000 .. 0x08007FFF (32KB) */
+/* Bootloader partition:
+ * - Code: 0x08000000 .. 0x0800BFFF (48KB, sectors 0-2)
+ */
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 32K
+  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 48K
   RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
