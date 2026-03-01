@@ -77,6 +77,9 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
 
   *received_length = 0;
 
+  /* Clear stale software IRQ latch before arming RX. */
+  bsp_uwb_clear_irq_event();
+
   /* Initial RX enable with full setup */
   if (bsp_uwb_enable_rx(0) != BSP_OK) {  /* 0 = no HW timeout, use SW timeout */
     return -1;
@@ -85,8 +88,6 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
   if (timeout_ms == 0) {
     timeout_ms = 1;
   }
-
-  bsp_uwb_clear_irq_event();
 
   if (!bsp_uwb_wait_for_irq_event(timeout_ms)) {
     return -1; /* Timeout */
