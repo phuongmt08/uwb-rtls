@@ -140,14 +140,48 @@ typedef struct __attribute__((packed)) {
         uint64_t t4 = ts->t4 & 0x000000FFFFFFFFFFULL;
         uint64_t t5 = ts->t5 & 0x000000FFFFFFFFFFULL;
         uint64_t t6 = ts->t6 & 0x000000FFFFFFFFFFULL;
-        
+
         int64_t Ra = (int64_t)t4 - (int64_t)t1;
         int64_t Rb = (int64_t)t6 - (int64_t)t3;
         int64_t Da = (int64_t)t5 - (int64_t)t2;
         int64_t Db = (int64_t)t3 - (int64_t)t2;
-        
+
         double tof_dw = (double)(Ra * Rb - Da * Db) / (double)(Ra + Rb + Da + Db);
         return (float)(tof_dw * DWT_TIME_UNITS * SPEED_OF_LIGHT);
+    }
+
+    static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
+                                   uint16_t *received_length, uint32_t timeout_us)
+    {
+        uint32_t timeout_ms = (timeout_us + 999) / 1000;
+
+        if (!buffer || !received_length) {
+            return -1;
+        }
+        *received_length = 0;
+
+        bsp_uwb_clear_irq_event();
+
+        if (bsp_uwb_enable_rx(0) != BSP_OK) {
+            return -1;
+        }
+
+        if (timeout_ms == 0) {
+            timeout_ms = 1;
+        }
+
+        if (!bsp_uwb_wait_for_irq_event(timeout_ms)) {
+            return -1;
+        }
+
+        {
+            bsp_err_t err = bsp_uwb_rx(buffer, buffer_size, received_length);
+            if (err == BSP_OK && *received_length > 0) {
+                return 0;
+            }
+        }
+
+        return -1;
     }
 
     static void format_distance_m(char *buf, size_t len, float distance_m)
@@ -193,6 +227,44 @@ typedef struct __attribute__((packed)) {
         if (data[0] != expected_type) return false;
         
         return true;
+    }
+
+    static int hal_rx_wait_valid_msg(uint8_t *buffer,
+                                     uint16_t buffer_size,
+                                     uint16_t *received_length,
+                                     uint8_t expected_type,
+                                     uint32_t timeout_us)
+    {
+        uint32_t timeout_ms = (timeout_us + 999U) / 1000U;
+        uint32_t start_tick = HAL_GetTick();
+
+        if (timeout_ms == 0U) {
+            timeout_ms = 1U;
+        }
+
+        if (!buffer || !received_length) {
+            return -1;
+        }
+        *received_length = 0;
+
+        while ((HAL_GetTick() - start_tick) < timeout_ms) {
+            uint32_t elapsed_ms = HAL_GetTick() - start_tick;
+            uint32_t remain_ms = (elapsed_ms < timeout_ms) ? (timeout_ms - elapsed_ms) : 0U;
+            uint32_t slice_us = ((remain_ms > 5U) ? 5U : remain_ms) * 1000U;
+
+            if (slice_us == 0U) {
+                break;
+            }
+
+            if (hal_rx_with_timeout(buffer, buffer_size, received_length, slice_us) == 0) {
+                if (validate_msg_type(buffer, *received_length, expected_type)) {
+                    return 0;
+                }
+            }
+        }
+
+        *received_length = 0;
+        return -1;
     }
 
     static void state_machine_reset(void)
@@ -270,24 +342,8 @@ typedef struct __attribute__((packed)) {
 
         RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Listening for POLL (timeout=%luus)...", (unsigned long)rx_timeout_us);
 
-        if (bsp_uwb_enable_rx(0) != BSP_OK) {
-            RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] Failed to enable RX for POLL");
-            s_ranging_busy = false;
-            return -1;
-        }
-
-        uint64_t start_dw = bsp_uwb_get_current_time_dw();
-        uint64_t poll_timeout_dw = tdma_us_to_dw(rx_timeout_us);
-
-        while (bsp_uwb_get_current_time_dw() - start_dw < poll_timeout_dw) {
-            bsp_err_t err = bsp_uwb_rx(poll_buf, sizeof(poll_buf), &poll_len);
-            if (err == BSP_OK && poll_len > 0 && validate_msg_type(poll_buf, poll_len, MW_DSTWR_MSG_TYPE_POLL)) {
-                break;
-            }
-            __NOP();
-        }
-
-        if (poll_len == 0) {
+        if (hal_rx_wait_valid_msg(poll_buf, sizeof(poll_buf), &poll_len,
+                                  MW_DSTWR_MSG_TYPE_POLL, rx_timeout_us) != 0) {
             s_ranging_busy = false;
             return -2;
         }
@@ -353,24 +409,8 @@ typedef struct __attribute__((packed)) {
                         s_tdma_anchor.schedule.resp_to_final_delay_us + 5000;
         if (final_timeout_us > 100000) final_timeout_us = 100000; /* Max 100ms */
 
-        if (bsp_uwb_enable_rx(0) != BSP_OK) {
-            RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] Failed to enable RX for FINAL");
-            s_ranging_busy = false;
-            return -1;
-        }
-
-        uint64_t final_rx_start_dw = bsp_uwb_get_current_time_dw();
-        uint64_t final_timeout_dw = tdma_us_to_dw(final_timeout_us);
-
-        while (bsp_uwb_get_current_time_dw() - final_rx_start_dw < final_timeout_dw) {
-            bsp_err_t err = bsp_uwb_rx(final_buf, sizeof(final_buf), &final_len);
-            if (err == BSP_OK && final_len > 0 && validate_msg_type(final_buf, final_len, MW_DSTWR_MSG_TYPE_FINAL)) {
-                break;
-            }
-            __NOP();
-        }
-
-        if (final_len == 0) {
+        if (hal_rx_wait_valid_msg(final_buf, sizeof(final_buf), &final_len,
+                                  MW_DSTWR_MSG_TYPE_FINAL, final_timeout_us) != 0) {
             RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] No FINAL received (timeout=%luus)", (unsigned long)final_timeout_us);
             s_ranging_busy = false;
             return -1;
