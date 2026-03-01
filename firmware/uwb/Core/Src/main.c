@@ -126,7 +126,7 @@ static void test_send_position(void)
 void app_reset_config(void)
 {
   __disable_irq();
-  SCB->VTOR = 0x08008000;
+  SCB->VTOR = 0x0800C000;
   SysTick->CTRL = 0; 
   SysTick->LOAD = 0; 
   SysTick->VAL = 0;

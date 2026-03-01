@@ -249,8 +249,17 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
     /* Cache TX antenna delay for later use in delayed TX calculations */
     s_tx_antenna_delay = cfg->tx_antenna_delay;
 
+    /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
+    dwt_setinterrupt((uint32)(DWT_INT_RFCG |
+                              DWT_INT_RFTO |
+                              DWT_INT_RXPTO |
+                              DWT_INT_RFCE |
+                              DWT_INT_RPHE |
+                              DWT_INT_RFSL), 1);
+
     dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
     dwt_forcetrxoff();
+    s_irq_event_pending = 0;
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)", 
            cfg->tx_antenna_delay, cfg->rx_antenna_delay);
@@ -454,13 +463,14 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
         dwt_setrxtimeout(0);  /* 0 = continuous RX mode */
     }
     
+    /* Clear SW IRQ latch before enabling RX to avoid stale event. */
+    s_irq_event_pending = 0;
+
     /* Enable RX */
     if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] dwt_rxenable failed");
         return BSP_ERR;
     }
-
-    s_irq_event_pending = 0;
     
     return BSP_OK;
 }
@@ -641,6 +651,11 @@ bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
     while ((HAL_GetTick() - start_tick) < timeout_ms) {
         if (s_irq_event_pending) {
             s_irq_event_pending = 0;
+            return true;
+        }
+
+        /* Fallback path: if EXTI edge was missed, poll DW1000 status bits. */
+        if (bsp_uwb_is_rx_ready()) {
             return true;
         }
     }

@@ -10,10 +10,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "../../../common/memorylayout.h"
 
-/* Application base address (after 32KB bootloader) */
-#define APP_ADDRESS        (0x08008000UL)
-
+/* Flash layout (STM32F411CE, 512KB)
+ * - 0x08000000..0x0800BFFF: Bootloader code (48KB, sectors 0-2)
+ * - 0x0800C000..0x0803FFFF: Application image (sectors 3-5)
+ * - 0x08040000..0x0807FFFF: Data storage (sectors 6-7)
+ */
 /* SRAM range for MSP sanity check (F411 has 96KB SRAM) */
 #define SRAM_BASE_ADDR     (0x20000000UL)
 #define SRAM_END_ADDR      (0x20018000UL)

@@ -1,20 +1,16 @@
-/**
- * @file       network_cmd.c
- * @brief 
-
-/* Includes ----------------------------------------------------------------- */
 #include "network_cmd.h"
-#include "sys_stream.h"
 #include "sys_logger.h"
 #include "stm32f4xx_hal.h"
+
 #include <string.h>
 
-/* Private defines ---------------------------------------------------------- */
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
 #define RESP_RETRY_MAX 2
 #define RESP_RETRY_DELAY_MS 200
 
-/* Private types ------------------------------------------------------------ */
+#define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
+#define CHECK_VOID(_cond) do { if (!(_cond)) return; } while (0)
+
 typedef void (*cmd_handler_t)(network_cmd_t *cmd, const protocol_packet_t *pkt);
 
 typedef struct {
@@ -23,47 +19,24 @@ typedef struct {
     const char *name;
 } network_cmd_entry_t;
 
-/* Private variables -------------------------------------------------------- */
 static network_cmd_t *g_network_cmd_instance = NULL;
 
-/* Private function prototypes ---------------------------------------------- */
 static bool _network_cmd_packet_handler(const protocol_packet_t *pkt);
 static void _network_cmd_retry_pending(network_cmd_t *cmd);
-static void _queue_resp_retry(network_cmd_t *cmd, const protocol_packet_t *pkt);
 static void _send_packet(network_cmd_t *cmd, protocol_packet_t *pkt);
 static void _handle_unimplemented(network_cmd_t *cmd, const protocol_packet_t *pkt);
 
-/* Command table placeholder ------------------------------------------------ */
 static const network_cmd_entry_t network_cmd_table[] = {
-    /* Keep empty intentionally - user will rebuild commands */
 };
 
 #define NETWORK_CMD_TABLE_SIZE (sizeof(network_cmd_table) / sizeof(network_cmd_entry_t))
 
-/* Private implementations -------------------------------------------------- */
-
-static void _queue_resp_retry(network_cmd_t *cmd, const protocol_packet_t *pkt)
-{
-    if (!cmd || !pkt) {
-        return;
-    }
-
-    cmd->last_resp = *pkt;
-    cmd->resp_pending = true;
-    cmd->resp_retry_left = RESP_RETRY_MAX;
-    cmd->resp_deadline_ms = HAL_GetTick() + RESP_RETRY_DELAY_MS;
-}
-
 static void _network_cmd_retry_pending(network_cmd_t *cmd)
 {
-    if (!cmd || !cmd->resp_pending) {
-        return;
-    }
+    CHECK_VOID(cmd && cmd->resp_pending);
 
     uint32_t now = HAL_GetTick();
-    if ((int32_t)(now - cmd->resp_deadline_ms) < 0) {
-        return;
-    }
+    CHECK_VOID((int32_t)(now - cmd->resp_deadline_ms) >= 0);
 
     if (cmd->resp_retry_left == 0) {
         cmd->resp_pending = false;
@@ -79,53 +52,38 @@ static void _network_cmd_retry_pending(network_cmd_t *cmd)
 
 static void _send_packet(network_cmd_t *cmd, protocol_packet_t *pkt)
 {
-    if (!cmd || !cmd->stream || !pkt) {
-        return;
-    }
-
-    sys_stream_send_packet(cmd->stream, pkt->hdr.addr.dst, pkt);
+    CHECK_VOID(cmd && cmd->stream && pkt);
+    (void)network_core_send_packet(cmd->stream, pkt->hdr.addr.dst, pkt);
 }
 
 static void _handle_unimplemented(network_cmd_t *cmd, const protocol_packet_t *pkt)
 {
     (void)cmd;
-    if (!pkt) {
-        return;
-    }
-
+    CHECK_VOID(pkt);
     RLOG_W(OBJECT_CODE, "No command handler for payload tag=%u", (unsigned)pkt->which_payload);
 }
 
-/* Public implementations --------------------------------------------------- */
-
-bool network_cmd_init(network_cmd_t *cmd, sys_stream_t *stream)
+bool network_cmd_init(network_cmd_t *cmd, network_core_t *stream)
 {
-    if (!cmd || !stream) {
-        return false;
-    }
+    CHECK(cmd && stream, false);
 
     memset(cmd, 0, sizeof(network_cmd_t));
     cmd->stream = stream;
     cmd->enabled = true;
 
     g_network_cmd_instance = cmd;
-    return sys_stream_register_packet_handler(stream, _network_cmd_packet_handler);
+    return network_core_register_packet_handler(stream, _network_cmd_packet_handler);
 }
 
 void network_cmd_process(network_cmd_t *cmd)
 {
-    if (!cmd || !cmd->enabled) {
-        return;
-    }
-
+    CHECK_VOID(cmd && cmd->enabled);
     _network_cmd_retry_pending(cmd);
 }
 
 bool network_cmd_process_packet(network_cmd_t *cmd, const protocol_packet_t *pkt)
 {
-    if (!cmd || !pkt || !cmd->enabled) {
-        return false;
-    }
+    CHECK(cmd && pkt && cmd->enabled, false);
 
     if (pkt->which_payload == protocol_packet_t_ack_tag) {
         return true;
@@ -137,9 +95,7 @@ bool network_cmd_process_packet(network_cmd_t *cmd, const protocol_packet_t *pkt
 
 void network_cmd_dispatch(network_cmd_t *cmd, const protocol_packet_t *pkt)
 {
-    if (!cmd || !pkt || !cmd->enabled) {
-        return;
-    }
+    CHECK_VOID(cmd && pkt && cmd->enabled);
 
     if (pkt->which_payload == protocol_packet_t_ack_tag) {
         return;
@@ -169,12 +125,7 @@ bool network_cmd_is_log_streaming(const network_cmd_t *cmd)
 
 static bool _network_cmd_packet_handler(const protocol_packet_t *pkt)
 {
-    if (!g_network_cmd_instance || !pkt) {
-        return false;
-    }
-
+    CHECK(g_network_cmd_instance && pkt, false);
     network_cmd_dispatch(g_network_cmd_instance, pkt);
     return true;
 }
-
-/* End of file -------------------------------------------------------------- */
