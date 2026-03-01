@@ -52,6 +52,5 @@ python main.py
 ## Lưu ý
 
 - App chỉ được phép flash trong vùng `0x0800C000 .. 0x0803FFFF`.
-- Nếu verify lỗi do target reset/disconnect sau download manifest, connect lại rồi verify lần nữa.
 - Nếu không connect được trên Windows, kiểm tra driver bằng Zadig (WinUSB) cho interface DFU.
 - Nếu báo `No backend available`: PyUSB chưa thấy `libusb`. Dùng Python `3.12` cho venv, cài `libusb-package`, và cài driver DFU bằng Zadig (WinUSB/libusbK).
