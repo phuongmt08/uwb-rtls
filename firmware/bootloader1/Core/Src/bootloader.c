@@ -34,9 +34,26 @@ bool bl_should_enter_dfu(void)
 }
 void bl_jump_to_app(void)
 {
+  __disable_irq();
+
+  SysTick->CTRL = 0;
+  SysTick->LOAD = 0;
+  SysTick->VAL  = 0;
+
+  USBD_Stop(&hUsbDeviceFS);
+  USBD_DeInit(&hUsbDeviceFS);
 
   HAL_DeInit();
   HAL_RCC_DeInit();
+
+  for (uint32_t i = 0; i < 8; i++) {
+    NVIC->ICER[i] = 0xFFFFFFFFU;
+    NVIC->ICPR[i] = 0xFFFFFFFFU;
+  }
+
+  SCB->VTOR = MEM_APP_START;
+  __DSB();
+  __ISB();
 
   __set_MSP(*(uint32_t*)MEM_APP_START);
 
