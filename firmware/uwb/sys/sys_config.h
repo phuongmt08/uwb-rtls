@@ -2,12 +2,12 @@
  * @file       sys_config.h
  * @copyright
  * @license
- * @version    1.1.0
- * @date       2025-12-24
+ * @version    1.2.0
+ * @date       2026-03-05
  * @author     Phuong Mai
- * @brief      
- * @note       None
- * @example    None
+ * @brief      System configuration — runtime config IS protobuf_sys_config_t
+ * @note       sys_config_t is a typedef for protobuf_sys_config_t.
+ *             device_type is stored separately (device_type_set/get commands).
  */
 #ifndef __SYS_CONFIG_H
 #define __SYS_CONFIG_H
@@ -20,102 +20,80 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "config.h"
-#include "positioning_config.h"
+#include "protos/protocol.pb.h"
+
+/* Type aliases ------------------------------------------------------------- */
+typedef protobuf_device_role_t device_role_t;
+typedef protobuf_device_type_t device_type_t;
+
+#define DEVICE_ROLE_UNSPECIFIED protobuf_DEVICE_ROLE_UNSPECIFIED
+#define DEVICE_ROLE_TAG         protobuf_DEVICE_ROLE_TAG
+#define DEVICE_ROLE_ANCHOR      protobuf_DEVICE_ROLE_ANCHOR
+
+#define DEVICE_TYPE_UNSPECIFIED protobuf_DEVICE_TYPE_UNSPECIFIED
+#define DEVICE_TYPE_TAG         protobuf_DEVICE_TYPE_TAG
+#define DEVICE_TYPE_ANCHOR      protobuf_DEVICE_TYPE_ANCHOR
+#define DEVICE_TYPE_GATEWAY     protobuf_DEVICE_TYPE_GATEWAY
+#define DEVICE_TYPE_DEBUG_TOOL  protobuf_DEVICE_TYPE_DEBUG_TOOL
 
 /**
- * @brief Device role enumeration
- */
-typedef enum {
-    DEVICE_ROLE_TAG = 0x01,
-    DEVICE_ROLE_ANCHOR = 0x02
-} device_role_t;
-
-/**
- * @brief Ranging method enumeration
- */
-typedef enum {
-    RANGING_DS_TWR = 0x01,       /* Double-Sided Two-Way Ranging */
-    RANGING_TDOA = 0x02          /* Time Difference of Arrival */
-} ranging_method_t;
-
-/**
- * @brief Device runtime configuration
+ * @brief System configuration stored in flash and RAM.
+ *        config_version and device_type are non-protobuf bookkeeping fields.
+ *        uwb contains the full UWB runtime config as protobuf_uwb_cfg_t.
  */
 typedef struct {
-  /* Config version - increment to force reset on firmware update */
-  uint8_t config_version;
-  
-  /* Device identity */
-  device_role_t role;
-  uint8_t device_id;
-  
-  /* Ranging parameters */
-  ranging_method_t method;
-  uint16_t ranging_period_ms;  /* Ranging interval (ms) - synced with RANGING_INTERVAL_MS default */
-  uint32_t rx_timeout_ms;
-  
-  /* UWB radio configuration */
-  uint8_t uwb_channel;        // 1-7
-  uint8_t uwb_prf;            // 16 or 64 MHz
-  uint8_t uwb_data_rate;      // 0=110kbps, 1=850kbps, 2=6.8Mbps
-  uint8_t uwb_preamble_code;  // 9-24
-  
-  /* Antenna delay calibration (in DWT units) */
-  uint16_t tx_antenna_delay;
-  uint16_t rx_antenna_delay;
-  
-  /* Power settings */
-  uint32_t tx_power;          // TX power register value
-  
-  /* Multiple anchor support */
-  uint8_t anchor_count;       // Number of anchors in list (0 = broadcast to all)
-  uint8_t anchor_list[NUM_ANCHORS]; // List of anchor IDs to range with
-  
-  uint8_t reserved[16];
-  
-  /* CRC32 checksum (must be last) */
-  uint32_t crc32;
+    uint8_t             config_version; /* bump → forces flash reset on upgrade */
+    uint8_t             _pad[3];
+    device_type_t       device_type;
+    protobuf_uwb_cfg_t  uwb;            /* maps to sys_config_set/resp.config */
 } sys_config_t;
 
-/* Default values */
-#define CONFIG_VERSION              9
+/* Default values ----------------------------------------------------------- */
+#define CONFIG_VERSION              12  /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR
+#define DEFAULT_DEVICE_TYPE         DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_ID           0x01
-#define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
 
-#define DEFAULT_RANGING_PERIOD_MS   150 
+#define DEFAULT_RANGING_PERIOD_MS   150
 #define DEFAULT_RX_TIMEOUT_MS       75
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
-#define DEFAULT_UWB_DATA_RATE       0   // 0=110kbps, 1=850kbps, 2=6.8Mbps
+#define DEFAULT_UWB_DATA_RATE       0   /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
 #define DEFAULT_UWB_PREAMBLE_CODE   10
 #define DEFAULT_TX_ANT_DLY          16436
 #define DEFAULT_RX_ANT_DLY          16436
 #define DEFAULT_TX_POWER            0x1F1F1F1FUL
+
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
 /* ========================================================================== */
 
-
 void sys_config_init(void);
-sys_config_t* sys_config_get(void);
-/* Setters */
+
+/**
+ * @brief Get pointer to live config struct (protobuf_sys_config_t).
+ *        Callers may read/write fields directly — call sys_config_save() to persist.
+ */
+sys_config_t *sys_config_get(void);
+
+/* Identity setters (validated) */
 int sys_config_set_role(device_role_t role);
+int sys_config_set_device_type(device_type_t device_type);
 int sys_config_set_device_id(uint8_t id);
-int sys_config_set_ranging_method(ranging_method_t method);
-int sys_config_set_uwb_channel(uint8_t channel);
-int sys_config_set_ranging_period(uint16_t period_ms);
-int sys_config_set_rx_timeout(uint32_t timeout_ms);
-int sys_config_set_antenna_delay(uint16_t tx_delay, uint16_t rx_delay);
-int sys_config_set_tx_power(uint32_t power);
+device_type_t sys_config_get_device_type(void);
 
 /* Storage */
-int sys_config_save(void);
-int sys_config_load(void);
+int  sys_config_save(void);
+int  sys_config_load(void);
 void sys_config_reset_to_defaults(void);
 void sys_config_print(void);
+
+/* Protobuf helpers — export/import only the uwb field (protobuf_uwb_cfg_t) */
+void sys_config_export_protobuf(protobuf_uwb_cfg_t *dst);
+int  sys_config_import_protobuf(const protobuf_uwb_cfg_t *src);
+
 #ifdef __cplusplus
 }
 #endif

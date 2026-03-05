@@ -8,7 +8,7 @@
  * @brief      Simple RAM logger with USB CDC output
  * 
  * @details    This module implements a circular buffer logger that stores log records
- *             in RAM and transmits them via USB CDC (or other interfaces like BLE).
+ *             in RAM
  * 
  *             Log Record Format:
  *             +----------+----------+-------------+--------+-------------+
@@ -16,26 +16,7 @@
  *             | 1 byte   | 1 byte   | 6 bytes     | 1 byte | LEN bytes   |
  *             +----------+----------+-------------+--------+-------------+
  *             Total Header: 9 bytes (LOG_HEADER_LEN)
- * 
- *             Flow Diagram:
- *             
- *             User Code                RAM Buffer              USB CDC / BLE
- *                |                          |                        |
- *                |  LOGI("hello")           |                        |
- *                |------------------------->|                        |
- *                |   [Pack record]          |                        |
- *                |   [Write to buffer]      |                        |
- *                |                          |                        |
- *                |                          |                        |
- *                |  sys_logger_task()       |                        |
- *                |------------------------->|                        |
- *                |                          |  Read chunk            |
- *                |                          |----------------------->|
- *                |                          |    CDC_Transmit_FS()   |
- *                |                          |<-----------------------|
- *                |                          |  [Pop sent data]       |
- *                |                          |                        |
- * 
+
  */
 /* Define to prevent recursive inclusion ------------------------------------ */
 #ifndef __SYS_LOGGER_H
@@ -46,7 +27,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include "log_config.h"
-
+#include "err.h"
 /* Public defines ----------------------------------------------------------- */
 /**
  * @brief Total RAM buffer size for logger (4KB)
@@ -147,6 +128,100 @@ uint16_t sys_logger_space_count(void);
  * @return Number of bytes waiting to be transmitted
  */
 uint16_t sys_logger_data_count(void);
+
+/**
+ * @brief Non-destructive peek: copy up to @p max_len bytes from the tail of
+ *        the circular buffer into @p out without removing them.
+ *
+ * @param[out] out     Destination buffer
+ * @param[in]  max_len Maximum bytes to copy
+ * @return Number of bytes actually copied (0 if buffer empty)
+ * @note  May return fewer bytes than available when the data wraps around
+ *        the circular buffer end.  Call again after consuming the first chunk.
+ */
+uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len);
+
+/**
+ * @brief Remove @p len bytes from the tail of the circular buffer.
+ *
+ * @param[in] len Number of bytes to discard
+ * @note  Typically called after the bytes peeked by sys_logger_peek() have
+ *        been successfully persisted or transmitted.
+ */
+void sys_logger_consume(uint16_t len);
+
+/* ── Flash persistence API (HAVE_FLASH_STORAGE only) ───────────────────────
+ *
+ *  Flash log sub-partition layout (64 KB, append-only):
+ *    Records stored sequentially:
+ *    [LEN_LO(1)][LEN_HI(1)][LOG_TYPE(1)][OBJ_CODE(1)][TIMESTAMP(6)][DATA_LEN(1)][MSG...][PAD to 4B]
+ *
+ *  Two-index model:
+ *    g_flash_log_write_pos  — next byte to write (owner: sys_logger_flash_persist)
+ *    g_flash_log_read_pos   — next byte host has NOT yet confirmed receiving
+ *                             (owner: sys_logger_flash_consume)
+ *
+ *  Read flow (non-destructive):
+ *    1. sys_logger_flash_persist()        — flush RAM → flash
+ *    2. sys_logger_flash_read_chunk()     — send pending bytes from read_pos
+ *    3. sys_logger_flash_consume(length)  — host confirms receipt; advance read_pos
+ *
+ *  On boot, write_pos is recovered by scanning flash.  read_pos always resets
+ *  to 0 — unconfirmed data is re-sent to the host on next request.
+ * ───────────────────────────────────────────────────────────────────────── */
+#ifdef HAVE_FLASH_STORAGE
+
+/**
+ * @brief  Flush pending RAM log records to the flash log sub-partition.
+ *
+ *         Reads all available data from the RAM circular buffer and writes it
+ *         to flash at the current write position.  Advances write_pos by the
+ *         number of bytes persisted.  Stops when the RAM buffer is empty or
+ *         the flash partition is full.
+ *
+ * @return Number of RAM bytes actually flushed to flash (0 if nothing to do).
+ */
+uint32_t sys_logger_flash_persist(void);
+
+/**
+ * @brief  Number of bytes in flash that the host has not yet confirmed.
+ *         Equal to (write_pos - read_pos).
+ * @return Pending byte count (0 = nothing to send).
+ */
+uint32_t sys_logger_flash_pending_bytes(void);
+
+/**
+ * @brief  Current value of the flash log read cursor.
+ *         Returned alongside log_data so the host can echo it in log_clear.
+ * @return Byte offset of the next unconfirmed byte (== g_flash_log_read_pos).
+ */
+uint32_t sys_logger_flash_read_pos(void);
+
+/**
+ * @brief  Read a chunk of un-confirmed flash log data.
+ *
+ *         Reads up to @p max_len bytes starting at g_flash_log_read_pos.
+ *         Does NOT advance the read cursor — call sys_logger_flash_consume()
+ *         after the host confirms receipt.
+ *
+ * @param[out] out      Destination buffer (must be at least max_len bytes)
+ * @param[in]  max_len  Maximum bytes to copy
+ * @return Number of bytes copied (0 if no pending data or error).
+ */
+uint32_t sys_logger_flash_read_chunk(uint8_t *out, uint16_t max_len);
+
+/**
+ * @brief  Advance the read cursor by @p length bytes.
+ *
+ *         Called when the host confirms it has successfully received @p length
+ *         bytes starting at the current read_pos.  When read_pos catches up
+ *         with write_pos both pointers are reset to 0 (log is empty).
+ *
+ * @param[in] length Number of bytes the host confirmed receiving.
+ */
+void sys_logger_flash_consume(uint32_t length);
+
+#endif /* HAVE_FLASH_STORAGE */
 
 /* -------------------------------------------------------------------------- */
 

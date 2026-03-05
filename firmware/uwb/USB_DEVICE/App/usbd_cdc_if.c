@@ -31,7 +31,8 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-
+/** Set to 1 when host opens the COM port (DTR asserted via SET_CONTROL_LINE_STATE) */
+static uint8_t g_cdc_port_open = 0u;
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -228,7 +229,8 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
     break;
 
     case CDC_SET_CONTROL_LINE_STATE:
-
+      /* length carries wValue: bit 0 = DTR (host opened port), bit 1 = RTS */
+      g_cdc_port_open = (length & 0x01U) ? 1u : 0u;
     break;
 
     case CDC_SEND_BREAK:
@@ -316,6 +318,16 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+
+/**
+  * @brief  Check whether the host has opened the CDC virtual COM port.
+  * @note   Returns 1 when DTR was asserted via SET_CONTROL_LINE_STATE.
+  * @retval 1 = port open, 0 = port closed / not connected
+  */
+uint8_t CDC_IsPortOpen(void)
+{
+  return g_cdc_port_open;
+}
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 
