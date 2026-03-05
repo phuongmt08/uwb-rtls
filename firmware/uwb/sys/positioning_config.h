@@ -37,7 +37,7 @@
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (0.93f)
+#define ANCHOR_HEIGHT_M         (0.415f)
 
 /**
  * @brief Height offset between Anchor and Tag (meters)

@@ -20,7 +20,22 @@ static const network_core_packet_size_t network_core_packet_size[] = {
 
 static const uint16_t network_core_packet_size_count = sizeof(network_core_packet_size) / sizeof(network_core_packet_size_t);
 
-static bool network_core_try_receive(network_core_t *core, stream_type_t in_stream, protocol_packet_t *out_pkt)
+static const uint16_t network_core_skip_ack_tb[] = {
+    protobuf_packet_t_ack_tag,
+    protobuf_packet_t_ble_adv_status_tag,
+    protobuf_packet_t_log_data_tag,
+    // protobuf_packet_t_log_erase_tag,
+    protobuf_packet_t_anchor_distance_tag,
+    protobuf_packet_t_tag_position_tag,
+    protobuf_packet_t_flash_write_tag
+};
+
+static bool network_core_is_ack_positive(protobuf_packet_ack_response_t response)
+{
+    return response == protobuf_packet_ack_response_t_PACKET_ACK_RESPONSE_ACK;
+}
+
+static bool network_core_try_receive(network_core_t *core, stream_type_t in_stream, protobuf_packet_t *out_pkt)
 {
     CHECK(core && out_pkt, false);
 
@@ -39,10 +54,10 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
     return true;
 }
 
-static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protocol_packet_t *packet)
+static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
 {
     for (uint16_t i = 0; i < network_core_packet_size_count; i++) {
-        if (packet->which_payload == network_core_packet_size[i].protobuf_tag) {
+        if (packet->which_params == network_core_packet_size[i].protobuf_tag) {
             (void)_write(tx_stream, (char *)packet, network_core_packet_size[i].data_size, 0);
             return;
         }
@@ -70,7 +85,7 @@ static stream_type_t network_core_get_forward_stream(stream_type_t in_stream)
     return STREAM_MAX;
 }
 
-static void network_core_forward_packet(network_core_t *core, const protocol_packet_t *packet, stream_type_t in_stream)
+static void network_core_forward_packet(network_core_t *core, const protobuf_packet_t *packet, stream_type_t in_stream)
 {
     CHECK_VOID(core && packet);
     CHECK_VOID(packet->has_hdr && packet->hdr.has_addr);
@@ -92,30 +107,42 @@ static void network_core_forward_packet(network_core_t *core, const protocol_pac
     }
 }
 
-static void network_core_update_ack_trackers(network_core_t *core, const protocol_packet_t *packet)
+static void network_core_update_ack_trackers(network_core_t *core, const protobuf_packet_t *packet)
 {
+    CHECK_VOID(core && packet && packet->has_hdr);
+
     for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
         network_ack_tracker_t *t = &core->ack_tracker[i];
-        if (t->state == NETWORK_CORE_ACK_STATE_WAITING && t->packet_header.seq == packet->hdr.seq) {
-            if (packet->which_payload == protocol_packet_t_ack_tag) {
-                t->state = (packet->payload.ack.response == protocol_response_status_RESPONSE_OK) ?
-                           NETWORK_CORE_ACK_STATE_FOUND : NETWORK_CORE_NACK_STATE_FOUND;
-            } else {
-                t->state = NETWORK_CORE_ACK_STATE_FOUND;
-            }
-
-            if (t->callback) {
-                t->callback(t, packet);
-            }
-
-            t->state = NETWORK_CORE_ACK_STATE_NONE;
+        if (t->state != NETWORK_CORE_ACK_STATE_WAITING) {
+            continue;
         }
+
+        if (packet->which_params == protobuf_packet_t_ack_tag) {
+            if (packet->params.ack.ack_seq != t->packet_header.seq) {
+                continue;
+            }
+
+            t->state = network_core_is_ack_positive(packet->params.ack.response) ?
+                       NETWORK_CORE_ACK_STATE_FOUND : NETWORK_CORE_NACK_STATE_FOUND;
+        } else {
+            if (packet->hdr.seq != t->packet_header.seq) {
+                continue;
+            }
+
+            t->state = NETWORK_CORE_ACK_STATE_FOUND;
+        }
+
+        if (t->callback) {
+            t->callback(t, packet);
+        }
+
+        t->state = NETWORK_CORE_ACK_STATE_NONE;
     }
 }
 
 static bool network_core_process_one_stream(network_core_t *core, stream_type_t in_stream)
 {
-    protocol_packet_t packet;
+    protobuf_packet_t packet;
 
     if (!network_core_try_receive(core, in_stream, &packet)) {
         return false;
@@ -186,7 +213,7 @@ bool network_core_process(network_core_t *core)
     return true;
 }
 
-bool network_core_send_packet(network_core_t *core, uint8_t dst, protocol_packet_t *packet)
+bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet_t *packet)
 {
     CHECK(core && packet, false);
 
@@ -235,17 +262,31 @@ int network_core_wait_ack(network_core_t *core, uint8_t seq, uint32_t timeout_ms
     return -1;
 }
 
-void network_core_send_ack(network_core_t *core, uint8_t dst, uint32_t rx_seq, uint8_t response)
+bool network_core_send_ack(network_core_t *core,
+                           const protobuf_packet_t *rx_packet,
+                           protobuf_packet_ack_response_t response)
 {
-    protocol_packet_t p;
+    CHECK(core && rx_packet, false);
+    CHECK(rx_packet->has_hdr && rx_packet->hdr.has_addr, false);
+
+    for (uint16_t i = 0; i < (uint16_t)(sizeof(network_core_skip_ack_tb) / sizeof(network_core_skip_ack_tb[0])); i++) {
+        if (rx_packet->which_params == network_core_skip_ack_tb[i]) {
+            return false;
+        }
+    }
+
+    protobuf_packet_t p;
     memset(&p, 0, sizeof(p));
-    p.payload.ack.ack_seq = rx_seq;
-    p.payload.ack.response = (protocol_response_status)response;
-    p.which_payload = protocol_packet_t_ack_tag;
-    (void)network_core_send_packet(core, dst, &p);
+    p.params.ack.ack_seq = rx_packet->hdr.seq;
+    p.params.ack.response = response;
+    p.which_params = protobuf_packet_t_ack_tag;
+
+    return network_core_send_packet(core,
+                                    (uint8_t)rx_packet->hdr.addr.src,
+                                    &p);
 }
 
-bool network_core_encode_packet(const protocol_packet_t *encode_msg, uint8_t *buff, uint32_t buff_len, uint32_t *len)
+bool network_core_encode_packet(const protobuf_packet_t *encode_msg, uint8_t *buff, uint32_t buff_len, uint32_t *len)
 {
     pb_ostream_t stream;
     bool status;
@@ -253,18 +294,18 @@ bool network_core_encode_packet(const protocol_packet_t *encode_msg, uint8_t *bu
     CHECK(encode_msg && buff && len, false);
 
     stream = pb_ostream_from_buffer(buff, buff_len);
-    status = pb_encode(&stream, protocol_packet_t_fields, encode_msg);
+    status = pb_encode(&stream, protobuf_packet_t_fields, encode_msg);
     *len = stream.bytes_written;
 
     return status;
 }
 
-bool network_core_decode_packet(const uint8_t *buff, uint32_t len, protocol_packet_t *decode_msg)
+bool network_core_decode_packet(const uint8_t *buff, uint32_t len, protobuf_packet_t *decode_msg)
 {
     pb_istream_t stream;
 
     CHECK(buff && decode_msg && len > 0, false);
 
     stream = pb_istream_from_buffer(buff, len);
-    return pb_decode(&stream, protocol_packet_t_fields, decode_msg);
+    return pb_decode(&stream, protobuf_packet_t_fields, decode_msg);
 }
