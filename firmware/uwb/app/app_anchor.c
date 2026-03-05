@@ -92,7 +92,7 @@ static void calib_reset(void)
   memset(&s_calib, 0, sizeof(s_calib));
   
   sys_config_t *cfg = sys_config_get();
-  s_calib.current_delay = cfg->tx_antenna_delay;
+  s_calib.current_delay = cfg->uwb.tx_antenna_delay;
   s_calib.delta_step = 100;
   s_calib.last_error = 999.0f;
   s_calib.converged = false;
@@ -192,16 +192,10 @@ static void calib_calculate_and_adjust(void)
   s_calib.last_error = s_calib.error;
   s_calib.current_delay = (uint16_t)new_delay;
   
-  bsp_uwb_config_t uwb_cfg;
   sys_config_t *cfg = sys_config_get();
-  uwb_cfg.channel = cfg->uwb_channel;
-  uwb_cfg.prf = cfg->uwb_prf;
-  uwb_cfg.data_rate = cfg->uwb_data_rate;
-  uwb_cfg.preamble_code = cfg->uwb_preamble_code;
-  uwb_cfg.tx_antenna_delay = s_calib.current_delay;
-  uwb_cfg.rx_antenna_delay = cfg->rx_antenna_delay;
-  uwb_cfg.tx_power = cfg->tx_power;
-  bsp_uwb_configure(&uwb_cfg);
+  protobuf_uwb_cfg_t tmp = cfg->uwb;
+  tmp.tx_antenna_delay = s_calib.current_delay;
+  bsp_uwb_configure(&tmp);
   
   s_calib.count = 0;
   memset(s_calib.distances, 0, sizeof(s_calib.distances));
@@ -214,7 +208,7 @@ static void calib_apply_and_save(void)
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saving TX delay=%u...", s_calib.current_delay);
   
   sys_config_t *cfg = sys_config_get();
-  cfg->tx_antenna_delay = s_calib.current_delay;
+  cfg->uwb.tx_antenna_delay = s_calib.current_delay;
   
   if (sys_config_save() == 0) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saved! Restarting...");
@@ -239,8 +233,8 @@ void app_anchor_on_button(bsp_io_button_event_t event)
   } else if (event == BSP_IO_EVENT_DOUBLE_CLICK) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Reset to factory...");
     sys_config_t *cfg = sys_config_get();
-    cfg->tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
-    cfg->rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
+    cfg->uwb.tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
+    cfg->uwb.rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
     sys_config_save();
     s_app_state = ANCHOR_STATE_IDLE;
   }
@@ -254,18 +248,18 @@ app_err_t app_anchor_init(void)
 {
   sys_config_t *cfg = sys_config_get();
   
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "===== ANCHOR #%u =====", cfg->device_id);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "===== ANCHOR #%u =====", cfg->uwb.device_id);
   
   /* Force antenna delay to default values if enabled */
 #if ENABLE_FORCE_DEFAULT_ANT_DLY
-  cfg->tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
-  cfg->rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
+  cfg->uwb.tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
+  cfg->uwb.rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Ant Delay: TX=%u RX=%u (FORCED DEFAULT)",
-         cfg->tx_antenna_delay, cfg->rx_antenna_delay);
+         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
   sys_config_save();
 #else
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Ant Delay: TX=%u RX=%u",
-         cfg->tx_antenna_delay, cfg->rx_antenna_delay);
+         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
 #endif
   
 #if ENABLE_ANCHOR_AUTO_CALIB

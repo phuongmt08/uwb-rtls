@@ -210,6 +210,24 @@ void bsp_delay_ms(uint32_t ms)
   }
 }
 
+bsp_util_status_t bsp_util_get_serial_number(uint32_t *serial_number)
+{
+  uint32_t uid0;
+  uint32_t uid1;
+  uint32_t uid2;
+
+  if (serial_number == NULL) {
+    return BSP_UTIL_ERR;
+  }
+
+  uid0 = HAL_GetUIDw0();
+  uid1 = HAL_GetUIDw1();
+  uid2 = HAL_GetUIDw2();
+
+  *serial_number = uid0 ^ uid1 ^ uid2;
+  return BSP_UTIL_OK;
+}
+
 /* ===================================================================== */
 /*                        PRIVATE FUNCTIONS                              */
 /* ===================================================================== */
