@@ -18,7 +18,9 @@
 #define FW_VERSION_MAJOR 1
 #define FW_VERSION_MINOR 0
 #define FW_VERSION_PATCH 0
-#define FW_VERSION_BUILD 1
+
+/* FW_VERSION_BUILD is auto-updated by Python programmer before each build */
+#include "version_build.h"
 
 #define FW_VERSION_GITSHA FW_VERSION_GITSHA_HEX
 
@@ -27,6 +29,6 @@
 #define XSTR(x) STR(x)
 #define STR(x) #x
 
-#pragma message "Program Firmware version " XSTR(FW_VERSION)
+#pragma message "=== FW VERSION " XSTR(FW_VERSION_MAJOR) "." XSTR(FW_VERSION_MINOR) "." XSTR(FW_VERSION_PATCH) "." XSTR(FW_VERSION_BUILD) " ==="
 
 #endif /* APPLICATION_VERSION_H_ */
