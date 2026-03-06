@@ -45,13 +45,8 @@ static void network_cmd_sys_ranging_cfg_get(network_cmd_t *cmd, const protobuf_p
 static void network_cmd_sys_ranging_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 
-/*
- * Command lookup table notes:
- * - Keep entries sparse and indexed by protobuf tag using CMD_INFO.
- * - For command/response pair, register handler on *_get/*_set and route unsupported/no-handler packets to unimplemented.
- * - Passive event packets that are not handled should map to network_cmd_unimplemented.
- */
 /*
  * Command lookup table.
  * - Entries are sparse and indexed by protobuf tag using CMD_INFO.
@@ -107,6 +102,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
 
     CMD_INFO(protobuf_packet_t_log_data_tag,               network_cmd_log_data_get,                "log_data"),           /* 36 */
     CMD_INFO(protobuf_packet_t_log_clear_tag,              network_cmd_log_clear,                   "log_clear"),          /* 37 */
+    CMD_INFO(protobuf_packet_t_host_transport_set_tag,     network_cmd_host_transport_set,          "host_transport_set"), /* 38 */
     //      +=================================================+=======================================+========================+
 };
 
@@ -336,7 +332,7 @@ static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t
     protobuf_packet_t resp;
     memset(&resp, 0, sizeof(resp));
     resp.which_params        = protobuf_packet_t_log_data_tag;
-    resp.params.log_data.type = protobuf_LOG_TYPE_DEVICE_LOG;
+    resp.params.log_data.type = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
 
     uint16_t max_payload = (uint16_t)sizeof(resp.params.log_data.data.bytes);
     uint32_t n = sys_logger_flash_read_chunk(resp.params.log_data.data.bytes, max_payload);
@@ -359,6 +355,21 @@ static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *p
         sys_logger_flash_consume(length);
     }
 #endif /* HAVE_FLASH_STORAGE */
+}
+
+static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(cmd && pkt);
+
+    if (sys_config_set_host_transport(pkt->params.host_transport_set.transport) != 0) {
+        RLOG_W(OBJECT_CODE, "Invalid host transport value: %u",
+               (unsigned)pkt->params.host_transport_set.transport);
+        return;
+    }
+
+    if (sys_config_save() != 0) {
+        RLOG_W(OBJECT_CODE, "Failed to persist host transport from host");
+    }
 }
 
 bool network_cmd_init(network_cmd_t *cmd, network_core_t *stream)

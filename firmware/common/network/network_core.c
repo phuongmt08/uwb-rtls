@@ -25,8 +25,8 @@ static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ble_adv_status_tag,
     protobuf_packet_t_log_data_tag,
     // protobuf_packet_t_log_erase_tag,
-    protobuf_packet_t_anchor_distance_tag,
-    protobuf_packet_t_tag_position_tag,
+//    protobuf_packet_t_anchor_distance_tag,
+//    protobuf_packet_t_tag_position_tag,
     protobuf_packet_t_flash_write_tag
 };
 
@@ -74,12 +74,12 @@ static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_
 
 static stream_type_t network_core_get_forward_stream(stream_type_t in_stream)
 {
-    if (in_stream == STREAM_UART_RX) {
+    if (in_stream == STREAM_SERIAL_RX) {
         return STREAM_BLE_TX;
     }
 
     if (in_stream == STREAM_BLE_RX) {
-        return STREAM_UART_TX;
+        return STREAM_SERIAL_TX;
     }
 
     return STREAM_MAX;
@@ -207,8 +207,8 @@ bool network_core_process(network_core_t *core)
         }
     }
 
-    (void)network_core_process_one_stream(core, STREAM_UART_RX);
-    (void)network_core_process_one_stream(core, STREAM_BLE_RX);
+    (void)network_core_process_one_stream(core, STREAM_SERIAL_RX);
+    // (void)network_core_process_one_stream(core, STREAM_BLE_RX);
 
     return true;
 }

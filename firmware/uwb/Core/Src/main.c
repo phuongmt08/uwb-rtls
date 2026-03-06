@@ -30,6 +30,9 @@
 #include "app_tag.h"
 #include "app_anchor.h"
 #include "positioning_config.h"
+#include "serial/serial.h"
+#include "network/network_core.h"
+#include "network/network_cmd.h"
 #include <string.h>
 /* USER CODE END Includes */
 
@@ -69,6 +72,10 @@
 
 /* USER CODE BEGIN PV */
 static bool s_ranging_enabled = true;
+
+static network_core_t s_network_core;
+static network_cmd_t  s_network_cmd;
+static uint8_t        s_network_rx_buf[512];
 
 #if TEST_SEND_POS
 static float s_test_x = TEST_POS_START_X;
@@ -201,6 +208,15 @@ int main(void)
   
   sys_config_init();
   sys_config_t *cfg = sys_config_get();
+
+  serial_init();
+  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf))) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
+  } else if (!network_cmd_init(&s_network_cmd, &s_network_core)) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
+  } else {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+  }
   
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
@@ -341,9 +357,11 @@ int main(void)
 #endif
 
 #if TEST_SEND_POS
-    /* Test mode: Send dummy position periodically */
     test_send_position();
 #endif
+
+  (void)network_core_process(&s_network_core);
+  network_cmd_process(&s_network_cmd);
 
     sys_logger_task();
     bsp_delay_ms(1);
