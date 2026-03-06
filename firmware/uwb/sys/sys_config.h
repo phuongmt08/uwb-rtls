@@ -25,6 +25,7 @@ extern "C" {
 /* Type aliases ------------------------------------------------------------- */
 typedef protobuf_device_role_t device_role_t;
 typedef protobuf_device_type_t device_type_t;
+typedef protobuf_host_transport_t host_transport_t;
 
 #define DEVICE_ROLE_UNSPECIFIED protobuf_DEVICE_ROLE_UNSPECIFIED
 #define DEVICE_ROLE_TAG         protobuf_DEVICE_ROLE_TAG
@@ -36,6 +37,10 @@ typedef protobuf_device_type_t device_type_t;
 #define DEVICE_TYPE_GATEWAY     protobuf_DEVICE_TYPE_GATEWAY
 #define DEVICE_TYPE_DEBUG_TOOL  protobuf_DEVICE_TYPE_DEBUG_TOOL
 
+#define HOST_TRANSPORT_UNSPECIFIED protobuf_HOST_TRANSPORT_UNSPECIFIED
+#define HOST_TRANSPORT_USB         protobuf_HOST_TRANSPORT_USB
+#define HOST_TRANSPORT_UART        protobuf_HOST_TRANSPORT_UART
+
 /**
  * @brief System configuration stored in flash and RAM.
  *        config_version and device_type are non-protobuf bookkeeping fields.
@@ -45,14 +50,16 @@ typedef struct {
     uint8_t             config_version; /* bump → forces flash reset on upgrade */
     uint8_t             _pad[3];
     device_type_t       device_type;
+    host_transport_t    host_transport;
     protobuf_uwb_cfg_t  uwb;            /* maps to sys_config_set/resp.config */
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION              12  /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION              13  /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR
 #define DEFAULT_DEVICE_TYPE         DEVICE_TYPE_ANCHOR
+#define DEFAULT_HOST_TRANSPORT      HOST_TRANSPORT_USB
 #define DEFAULT_DEVICE_ID           0x01
 
 #define DEFAULT_RANGING_PERIOD_MS   150
@@ -81,8 +88,10 @@ sys_config_t *sys_config_get(void);
 /* Identity setters (validated) */
 int sys_config_set_role(device_role_t role);
 int sys_config_set_device_type(device_type_t device_type);
+int sys_config_set_host_transport(host_transport_t host_transport);
 int sys_config_set_device_id(uint8_t id);
 device_type_t sys_config_get_device_type(void);
+host_transport_t sys_config_get_host_transport(void);
 
 /* Storage */
 int  sys_config_save(void);

@@ -5,7 +5,7 @@
  * @version    1.0.0
  * @date       2025
  * @author	   Phuong Mai
- * @brief      Simple RAM logger with USB CDC output
+ * @brief      Simple logger with USB CDC output for testing
  * 
  * @details    This module implements a circular buffer logger that stores log records
  *             in RAM
@@ -28,6 +28,8 @@
 #include <stdarg.h>
 #include "log_config.h"
 #include "err.h"
+#include "config.h"
+
 /* Public defines ----------------------------------------------------------- */
 /**
  * @brief Total RAM buffer size for logger (4KB)

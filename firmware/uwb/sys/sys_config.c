@@ -14,7 +14,6 @@
 #include "sys_logger.h"
 #include <string.h>
 #include <stddef.h>
-
 #ifdef HAVE_FLASH_STORAGE
 #include "sys_flash_storage.h"
 #include "bsp_util.h"
@@ -59,6 +58,13 @@ static bool sys_config_device_type_valid(device_type_t device_type)
            device_type == DEVICE_TYPE_ANCHOR ||
            device_type == DEVICE_TYPE_GATEWAY ||
            device_type == DEVICE_TYPE_DEBUG_TOOL;
+}
+
+static bool sys_config_host_transport_valid(host_transport_t host_transport)
+{
+    return host_transport == HOST_TRANSPORT_UNSPECIFIED ||
+           host_transport == HOST_TRANSPORT_USB ||
+           host_transport == HOST_TRANSPORT_UART;
 }
 
 static device_type_t sys_config_default_device_type_from_role(device_role_t role)
@@ -144,6 +150,24 @@ int sys_config_set_device_type(device_type_t device_type)
     }
     g_storage.config.device_type = device_type;
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device type set to: %u", (unsigned)device_type);
+    return 0;
+}
+
+int sys_config_set_host_transport(host_transport_t host_transport)
+{
+    if (!sys_config_host_transport_valid(host_transport)) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM,
+               "Invalid host_transport: %d", host_transport);
+        return -1;
+    }
+
+    if (host_transport == HOST_TRANSPORT_UNSPECIFIED) {
+        host_transport = HOST_TRANSPORT_USB;
+    }
+
+    g_storage.config.host_transport = host_transport;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Host transport set to: %s",
+           host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
     return 0;
 }
 
@@ -242,6 +266,15 @@ int sys_config_load(void)
         temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
     }
 
+    if (!sys_config_host_transport_valid(temp_storage.config.host_transport)) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid host_transport in flash, forcing USB");
+        temp_storage.config.host_transport = HOST_TRANSPORT_USB;
+    }
+
+    if (temp_storage.config.host_transport == HOST_TRANSPORT_UNSPECIFIED) {
+        temp_storage.config.host_transport = HOST_TRANSPORT_USB;
+    }
+
     if (temp_storage.config.device_type == DEVICE_TYPE_UNSPECIFIED) {
         temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
     }
@@ -302,6 +335,7 @@ void sys_config_reset_to_defaults(void)
 
     g_storage.config.config_version            = CONFIG_VERSION;
     g_storage.config.device_type               = DEFAULT_DEVICE_TYPE;
+    g_storage.config.host_transport            = DEFAULT_HOST_TRANSPORT;
     g_storage.config.uwb.role                  = DEFAULT_DEVICE_ROLE;
     g_storage.config.uwb.device_id             = DEFAULT_DEVICE_ID;
     g_storage.config.uwb.uwb_channel           = DEFAULT_UWB_CHANNEL;
@@ -324,6 +358,8 @@ void sys_config_print(void)
            g_storage.config.uwb.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR",
            (unsigned)g_storage.config.uwb.role);
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Type  : %u", (unsigned)g_storage.config.device_type);
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Host I/O     : %s",
+            g_storage.config.host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device ID    : 0x%02X", (unsigned)g_storage.config.uwb.device_id);
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- UWB RADIO --------------");
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Channel      : %lu", g_storage.config.uwb.uwb_channel);
@@ -344,6 +380,14 @@ void sys_config_print(void)
 device_type_t sys_config_get_device_type(void)
 {
     return g_storage.config.device_type;
+}
+
+host_transport_t sys_config_get_host_transport(void)
+{
+    if (g_storage.config.host_transport == HOST_TRANSPORT_UNSPECIFIED) {
+        return HOST_TRANSPORT_USB;
+    }
+    return g_storage.config.host_transport;
 }
 
 void sys_config_export_protobuf(protobuf_uwb_cfg_t *dst)

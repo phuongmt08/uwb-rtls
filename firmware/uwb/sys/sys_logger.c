@@ -12,6 +12,7 @@
 
 #include "log_config.h"
 #include "usbd_cdc_if.h"
+#include "stm32f4xx_hal.h"
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
@@ -119,6 +120,7 @@ static void logger_pop_data(uint16_t len);
  * @note Checks magic number to determine if this is first boot or reset
  */
 static void logger_init(void);
+static void logger_test_stub_1s(void);
 
 /* Private implementations -------------------------------------------------- */
 static uint16_t logger_space_count(void)
@@ -226,6 +228,28 @@ static void logger_init(void)
   }
   // If magic matches, preserve existing buffer (useful after reset)
   initialized = true;
+}
+
+static void logger_test_stub_1s(void)
+{
+  static uint8_t  tick_init = 0u;
+  static uint32_t last_tick_ms = 0u;
+  static uint32_t seq = 0u;
+  uint32_t now_ms = HAL_GetTick();
+
+  if (tick_init == 0u)
+  {
+    last_tick_ms = now_ms;
+    tick_init = 1u;
+    return;
+  }
+
+  if ((uint32_t)(now_ms - last_tick_ms) < 1000u)
+    return;
+
+  last_tick_ms = now_ms;
+  (void)RLOG_I(LOG_OBJECT_CODE_TASK, "stub-log seq=%lu", (unsigned long)seq);
+  seq++;
 }
 
 /* Public implementations --------------------------------------------------- */
@@ -336,14 +360,15 @@ uint32_t sys_logger_flash_persist(void)
         != BSP_FLASH_OK)
       break;
 
-    if (actual_pos != g_flash_log_write_pos) {
-      /* Sector wrapped: inactive sector was erased and write started at pos 0.
-       * Old sector's unread data is gone — reset both indices so the next
-       * read_chunk picks up from the new sector. */
+    if (actual_pos == 0u && g_flash_log_write_pos != 0u) {
+      /* Real sector wrap: append restarted from offset 0 in new active sector. */
       g_flash_log_read_pos  = 0u;
-      g_flash_log_write_pos = actual_pos + padded;
+      g_flash_log_write_pos = padded;
     } else {
-      g_flash_log_write_pos += padded;
+      /* Normal append (or cursor resync after reboot): trust actual_pos. */
+      g_flash_log_write_pos = actual_pos + padded;
+      if (g_flash_log_read_pos > g_flash_log_write_pos)
+        g_flash_log_read_pos = g_flash_log_write_pos;
     }
     total_flushed += rec_total;
   }
@@ -384,11 +409,8 @@ void sys_logger_flash_consume(uint32_t length)
 
   g_flash_log_read_pos += length;
 
-  /* If host has confirmed all data, reset both pointers */
-  if (g_flash_log_read_pos >= g_flash_log_write_pos) {
-    g_flash_log_read_pos  = 0u;
-    g_flash_log_write_pos = 0u;
-  }
+  if (g_flash_log_read_pos > g_flash_log_write_pos)
+    g_flash_log_read_pos = g_flash_log_write_pos;
 
   /* Persist the updated read cursor to flash metadata so it survives reset */
   (void)sys_flash_log_update_read_pos(g_flash_log_read_pos);
@@ -488,11 +510,10 @@ void sys_logger_task(void)
   if (!initialized)
     return;
 
+  logger_test_stub_1s();
+
 #ifdef HAVE_FLASH_STORAGE
   sys_logger_flash_persist();
-
-  if (!CDC_IsPortOpen())
-    return;
 
   /* Need at least the 2-byte length prefix + one full header in flash */
   if (sys_logger_flash_pending_bytes() < (FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN))
@@ -553,14 +574,11 @@ void sys_logger_task(void)
   (void)out_len;
   sys_logger_flash_consume(entry_padded);
 #else
-  if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
-    sys_logger_flash_consume(entry_padded);
+  // if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
+  //   sys_logger_flash_consume(entry_padded);
 #endif
 
 #else  /* !HAVE_FLASH_STORAGE — fallback: direct RAM → USB */
-
-  if (!CDC_IsPortOpen())
-    return;
 
   if (logger_data_count() < LOG_HEADER_LEN)
     return;
@@ -606,8 +624,8 @@ void sys_logger_task(void)
   (void)out_len;
   logger_pop_data(LOG_HEADER_LEN + msg_len);
 #else
-  if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
-    logger_pop_data(LOG_HEADER_LEN + msg_len);
+  // if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
+  //   logger_pop_data(LOG_HEADER_LEN + msg_len);
 #endif
 
 #endif /* HAVE_FLASH_STORAGE */
