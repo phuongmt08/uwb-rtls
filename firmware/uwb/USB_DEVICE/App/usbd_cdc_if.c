@@ -23,6 +23,9 @@
 
 /* USER CODE BEGIN INCLUDE */
 
+#include <string.h>
+#include "serial/serial.h"
+
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,8 +34,7 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-/** Set to 1 when host opens the COM port (DTR asserted via SET_CONTROL_LINE_STATE) */
-static uint8_t g_cdc_port_open = 0u;
+
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -229,8 +231,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
     break;
 
     case CDC_SET_CONTROL_LINE_STATE:
-      /* length carries wValue: bit 0 = DTR (host opened port), bit 1 = RTS */
-      g_cdc_port_open = (length & 0x01U) ? 1u : 0u;
+
     break;
 
     case CDC_SEND_BREAK:
@@ -263,6 +264,11 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
+  if ((Buf != NULL) && (Len != NULL) && (*Len > 0u))
+  {
+    serial_uart_rx_push(Buf, *Len);
+  }
+
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);
@@ -284,11 +290,29 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 {
   uint8_t result = USBD_OK;
   /* USER CODE BEGIN 7 */
+  if ((Buf == NULL) || (Len == 0u))
+  {
+    return USBD_FAIL;
+  }
+
+  if ((hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) || (hUsbDeviceFS.pClassData == NULL))
+  {
+    return USBD_FAIL;
+  }
+
   USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
-  if (hcdc->TxState != 0){
+  if (hcdc->TxState != 0)
+  {
     return USBD_BUSY;
   }
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
+
+  if (Len > APP_TX_DATA_SIZE)
+  {
+    Len = APP_TX_DATA_SIZE;
+  }
+
+  memcpy(UserTxBufferFS, Buf, Len);
+  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, Len);
   result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
   /* USER CODE END 7 */
   return result;
@@ -318,16 +342,6 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
-
-/**
-  * @brief  Check whether the host has opened the CDC virtual COM port.
-  * @note   Returns 1 when DTR was asserted via SET_CONTROL_LINE_STATE.
-  * @retval 1 = port open, 0 = port closed / not connected
-  */
-uint8_t CDC_IsPortOpen(void)
-{
-  return g_cdc_port_open;
-}
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 

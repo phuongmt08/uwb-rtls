@@ -1,5 +1,5 @@
 #include "serial.h"
-#include "uart_debug.h"
+#include "debug_serial.h"
 #include "ble_bridge.h"
 
 #define CHECK(cond, ret) if (!(cond)) return (ret)
@@ -13,11 +13,11 @@ void serial_init(void)
         stream[i] = 0;
     }
 
-    uart_debug_init();
+    debug_serial_init();
     ble_bridge_init();
 
-    stream[STREAM_UART_RX] = uart_debug_read;
-    stream[STREAM_UART_TX] = uart_debug_write;
+    stream[STREAM_SERIAL_RX] = debug_serial_read;
+    stream[STREAM_SERIAL_TX] = debug_serial_write;
     stream[STREAM_BLE_RX] = ble_bridge_read;
     stream[STREAM_BLE_TX] = ble_bridge_write;
 
@@ -26,8 +26,8 @@ void serial_init(void)
 
 void serial_register_tx_handler(stream_type_t stream_id, serial_func_t func)
 {
-    if (stream_id == STREAM_UART_TX) {
-        uart_debug_set_tx_handler(func);
+    if (stream_id == STREAM_SERIAL_TX) {
+        debug_serial_set_tx_handler(func);
     } else if (stream_id == STREAM_BLE_TX) {
         ble_bridge_set_tx_handler(func);
     }
@@ -36,7 +36,7 @@ void serial_register_tx_handler(stream_type_t stream_id, serial_func_t func)
 void serial_uart_rx_push(const uint8_t *data, uint32_t len)
 {
     if (!data || len == 0) return;
-    uart_debug_rx_push(data, len);
+    debug_serial_rx_push(data, len);
 }
 
 void serial_ble_rx_push(const uint8_t *data, uint32_t len)
@@ -52,12 +52,12 @@ void serial_set_network_transport(serial_network_transport_t transport)
 
 stream_type_t serial_get_network_rx_stream(void)
 {
-    return (s_network_transport == SERIAL_NETWORK_TRANSPORT_BLE) ? STREAM_BLE_RX : STREAM_UART_RX;
+    return (s_network_transport == SERIAL_NETWORK_TRANSPORT_BLE) ? STREAM_BLE_RX : STREAM_SERIAL_RX;
 }
 
 stream_type_t serial_get_network_tx_stream(void)
 {
-    return (s_network_transport == SERIAL_NETWORK_TRANSPORT_BLE) ? STREAM_BLE_TX : STREAM_UART_TX;
+    return (s_network_transport == SERIAL_NETWORK_TRANSPORT_BLE) ? STREAM_BLE_TX : STREAM_SERIAL_TX;
 }
 
 int _read(int file, char *ptr, int maxlen, uint8_t type)
