@@ -91,6 +91,12 @@ typedef enum _protobuf_ble_state_t {
     protobuf_BLE_STATE_CONNECTED = 4
 } protobuf_ble_state_t;
 
+typedef enum _protobuf_host_transport_t {
+    protobuf_HOST_TRANSPORT_UNSPECIFIED = 0,
+    protobuf_HOST_TRANSPORT_USB = 1,
+    protobuf_HOST_TRANSPORT_UART = 2
+} protobuf_host_transport_t;
+
 /* Struct definitions */
 typedef struct _protobuf_addr_t {
     protobuf_device_addr_t src;
@@ -359,6 +365,10 @@ typedef struct _protobuf_log_clear_t {
     uint32_t length; /* number of bytes to clear */
 } protobuf_log_clear_t;
 
+typedef struct _protobuf_host_transport_set_t {
+    protobuf_host_transport_t transport;
+} protobuf_host_transport_set_t;
+
 typedef struct _protobuf_ranging_status_get_t {
     uint32_t dummy;
 } protobuf_ranging_status_get_t;
@@ -428,6 +438,8 @@ typedef struct _protobuf_packet_t {
         /* Log */
         protobuf_log_data_t log_data;
         protobuf_log_clear_t log_clear;
+        /* Host transport control */
+        protobuf_host_transport_set_t host_transport_set;
     } params;
 } protobuf_packet_t;
 
@@ -527,6 +539,13 @@ extern "C" {
 #define protobuf_ble_state_t_BLE_STATE_ADVERTISING protobuf_BLE_STATE_ADVERTISING
 #define protobuf_ble_state_t_BLE_STATE_CONNECTED protobuf_BLE_STATE_CONNECTED
 
+#define _protobuf_host_transport_t_MIN protobuf_HOST_TRANSPORT_UNSPECIFIED
+#define _protobuf_host_transport_t_MAX protobuf_HOST_TRANSPORT_UART
+#define _protobuf_host_transport_t_ARRAYSIZE ((protobuf_host_transport_t)(protobuf_HOST_TRANSPORT_UART+1))
+#define protobuf_host_transport_t_HOST_TRANSPORT_UNSPECIFIED protobuf_HOST_TRANSPORT_UNSPECIFIED
+#define protobuf_host_transport_t_HOST_TRANSPORT_USB protobuf_HOST_TRANSPORT_USB
+#define protobuf_host_transport_t_HOST_TRANSPORT_UART protobuf_HOST_TRANSPORT_UART
+
 #define protobuf_addr_t_src_ENUMTYPE protobuf_device_addr_t
 #define protobuf_addr_t_dst_ENUMTYPE protobuf_device_addr_t
 
@@ -583,6 +602,8 @@ extern "C" {
 
 #define protobuf_log_clear_t_type_ENUMTYPE protobuf_log_type_t
 
+#define protobuf_host_transport_set_t_transport_ENUMTYPE protobuf_host_transport_t
+
 
 
 
@@ -631,6 +652,7 @@ extern "C" {
 #define protobuf_tag_position_t_init_default     {0, 0, 0, 0, 0}
 #define protobuf_log_data_t_init_default         {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_default        {_protobuf_log_type_t_MIN, 0, 0}
+#define protobuf_host_transport_set_t_init_default {_protobuf_host_transport_t_MIN}
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
@@ -677,6 +699,7 @@ extern "C" {
 #define protobuf_tag_position_t_init_zero        {0, 0, 0, 0, 0}
 #define protobuf_log_data_t_init_zero            {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_zero           {_protobuf_log_type_t_MIN, 0, 0}
+#define protobuf_host_transport_set_t_init_zero  {_protobuf_host_transport_t_MIN}
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
@@ -788,6 +811,7 @@ extern "C" {
 #define protobuf_log_clear_t_type_tag            1
 #define protobuf_log_clear_t_offset_tag          2
 #define protobuf_log_clear_t_length_tag          3
+#define protobuf_host_transport_set_t_transport_tag 1
 #define protobuf_ranging_status_get_t_dummy_tag  1
 #define protobuf_ranging_status_resp_t_ranging_period_ms_tag 1
 #define protobuf_ranging_status_resp_t_ranging_total_count_tag 2
@@ -835,6 +859,7 @@ extern "C" {
 #define protobuf_packet_t_ble_adv_status_tag     35
 #define protobuf_packet_t_log_data_tag           36
 #define protobuf_packet_t_log_clear_tag          37
+#define protobuf_packet_t_host_transport_set_tag 38
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1124,6 +1149,11 @@ X(a, STATIC,   SINGULAR, UINT32,   length,            3)
 #define protobuf_log_clear_t_CALLBACK NULL
 #define protobuf_log_clear_t_DEFAULT NULL
 
+#define protobuf_host_transport_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UENUM,    transport,         1)
+#define protobuf_host_transport_set_t_CALLBACK NULL
+#define protobuf_host_transport_set_t_DEFAULT NULL
+
 #define protobuf_ranging_status_get_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_ranging_status_get_t_CALLBACK NULL
@@ -1179,7 +1209,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_status_get,params.ble_status_get)
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_status_resp,params.ble_status_resp),  34) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_adv_status,params.ble_adv_status),  35) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,log_data,params.log_data),  36) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,log_clear,params.log_clear),  37)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,log_clear,params.log_clear),  37) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,host_transport_set,params.host_transport_set),  38)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1219,6 +1250,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,log_clear,params.log_clear),  37)
 #define protobuf_packet_t_params_ble_adv_status_MSGTYPE protobuf_ble_adv_status_t
 #define protobuf_packet_t_params_log_data_MSGTYPE protobuf_log_data_t
 #define protobuf_packet_t_params_log_clear_MSGTYPE protobuf_log_clear_t
+#define protobuf_packet_t_params_host_transport_set_MSGTYPE protobuf_host_transport_set_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1263,6 +1295,7 @@ extern const pb_msgdesc_t protobuf_anchor_distance_t_msg;
 extern const pb_msgdesc_t protobuf_tag_position_t_msg;
 extern const pb_msgdesc_t protobuf_log_data_t_msg;
 extern const pb_msgdesc_t protobuf_log_clear_t_msg;
+extern const pb_msgdesc_t protobuf_host_transport_set_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_packet_t_msg;
@@ -1311,6 +1344,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_tag_position_t_fields &protobuf_tag_position_t_msg
 #define protobuf_log_data_t_fields &protobuf_log_data_t_msg
 #define protobuf_log_clear_t_fields &protobuf_log_clear_t_msg
+#define protobuf_host_transport_set_t_fields &protobuf_host_transport_set_t_msg
 #define protobuf_ranging_status_get_t_fields &protobuf_ranging_status_get_t_msg
 #define protobuf_ranging_status_resp_t_fields &protobuf_ranging_status_resp_t_msg
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
@@ -1341,6 +1375,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_flash_erase_t_size              8
 #define protobuf_flash_read_t_size               12
 #define protobuf_hdr_t_size                      18
+#define protobuf_host_transport_set_t_size       2
 #define protobuf_log_clear_t_size                14
 #define protobuf_log_data_t_size                 133
 #define protobuf_none_t_size                     6

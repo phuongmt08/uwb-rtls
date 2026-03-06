@@ -103,6 +103,12 @@ enum ble_state_t {
     BLE_STATE_CONNECTED   = 4;
 }
 
+enum host_transport_t {
+    HOST_TRANSPORT_UNSPECIFIED  = 0;
+    HOST_TRANSPORT_USB          = 1;
+    HOST_TRANSPORT_UART         = 2;
+}
+
 /* Common messages ---------------------------------------------------------- */
 
 message addr_t {
@@ -392,6 +398,10 @@ message log_clear_t {
     uint32 length     = 3;  /* number of bytes to clear   */
 }
 
+message host_transport_set_t {
+    host_transport_t transport = 1;
+}
+
 
 /* Status / diagnostics ----------------------------------------------------- */
 
@@ -478,6 +488,9 @@ message packet_t {
         /* Log */
         log_data_t                log_data                = 36;
         log_clear_t               log_clear               = 37;
+
+        /* Host transport control */
+        host_transport_set_t      host_transport_set      = 38;
     }
 }
 

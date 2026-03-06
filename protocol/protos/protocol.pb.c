@@ -135,6 +135,9 @@ PB_BIND(protobuf_log_data_t, protobuf_log_data_t, AUTO)
 PB_BIND(protobuf_log_clear_t, protobuf_log_clear_t, AUTO)
 
 
+PB_BIND(protobuf_host_transport_set_t, protobuf_host_transport_set_t, AUTO)
+
+
 PB_BIND(protobuf_ranging_status_get_t, protobuf_ranging_status_get_t, AUTO)
 
 
@@ -142,6 +145,8 @@ PB_BIND(protobuf_ranging_status_resp_t, protobuf_ranging_status_resp_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, AUTO)
+
+
 
 
 
