@@ -10,6 +10,7 @@
 #include "bsp_util.h"
 #include "stm32f4xx_hal.h"
 #include <string.h>
+#include "memorylayout.h"
 
 /* External peripherals from CubeMX */
 extern CRC_HandleTypeDef hcrc;
@@ -210,22 +211,25 @@ void bsp_delay_ms(uint32_t ms)
   }
 }
 
-bsp_util_status_t bsp_util_get_serial_number(uint32_t *serial_number)
+uint32_t bsp_util_get_serial_number(void)
 {
   uint32_t uid0;
   uint32_t uid1;
   uint32_t uid2;
 
-  if (serial_number == NULL) {
-    return BSP_UTIL_ERR;
-  }
-
   uid0 = HAL_GetUIDw0();
   uid1 = HAL_GetUIDw1();
   uid2 = HAL_GetUIDw2();
 
-  *serial_number = uid0 ^ uid1 ^ uid2;
-  return BSP_UTIL_OK;
+  return uid0 ^ uid1 ^ uid2;
+}
+bsp_util_status_t bsp_util_device_reset(void)
+{
+
+  *(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;
+  __DSB(); __ISB();
+  NVIC_SystemReset();
+
 }
 
 /* ===================================================================== */

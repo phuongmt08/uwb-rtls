@@ -109,10 +109,11 @@ void bsp_delay_ms(uint32_t ms);
 
 /**
  * @brief Get compact serial number derived from chip unique ID.
- * @param serial_number Output serial number (32-bit)
- * @return BSP_UTIL_OK on success
+ * @return 32-bit serial number
  */
-bsp_util_status_t bsp_util_get_serial_number(uint32_t *serial_number);
+uint32_t bsp_util_get_serial_number(void);
+
+bsp_util_status_t bsp_util_device_reset(void);
 
 #ifdef __cplusplus
 }

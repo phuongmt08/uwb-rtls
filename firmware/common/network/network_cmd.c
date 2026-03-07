@@ -43,9 +43,14 @@ static void network_cmd_time_sync_set(network_cmd_t *cmd, const protobuf_packet_
 static void network_cmd_ble_status_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_pos_calib_cfg_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_pos_calib_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_anchor_layout_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 
 /*
  * Command lookup table.
@@ -57,52 +62,61 @@ static const network_cmd_entry_t network_cmd_table[] = {
     //      +=================================================+=======================================+========================+
     //      | cmd_id (proto tag)                              | Handler                               | cmd string             |
     //      +-------------------------------------------------+---------------------------------------+------------------------+
-    CMD_INFO(protobuf_packet_t_none_tag,                   network_cmd_none,                        "none"),               /* 2  */
-    CMD_INFO(protobuf_packet_t_ack_tag,                    network_cmd_ack,                         "ack"),                /* 3  */
-    CMD_INFO(protobuf_packet_t_device_information_get_tag, network_cmd_device_information_get,      "dev_info_get"),       /* 4  */
-    CMD_INFO(protobuf_packet_t_device_information_resp_tag, network_cmd_unimplemented,              "dev_info_resp"),      /* 5  */
+    CMD_INFO(protobuf_packet_t_none_tag,                      network_cmd_none,                        "none"),               /* 2  */
+    CMD_INFO(protobuf_packet_t_ack_tag,                       network_cmd_ack,                         "ack"),                /* 3  */
+    CMD_INFO(protobuf_packet_t_device_information_get_tag,    network_cmd_device_information_get,      "dev_info_get"),       /* 4  */
+    CMD_INFO(protobuf_packet_t_device_information_resp_tag,   network_cmd_unimplemented,               "dev_info_resp"),      /* 5  */
 
-    CMD_INFO(protobuf_packet_t_time_sync_get_tag,          network_cmd_time_sync_get,               "time_sync_get"),      /* 6  */
-    CMD_INFO(protobuf_packet_t_time_sync_set_tag,          network_cmd_time_sync_set,               "time_sync_set"),      /* 7  */
-    CMD_INFO(protobuf_packet_t_time_sync_resp_tag,         network_cmd_unimplemented,               "time_sync_resp"),     /* 8  */
+    CMD_INFO(protobuf_packet_t_time_sync_get_tag,             network_cmd_time_sync_get,               "time_sync_get"),      /* 6  */
+    CMD_INFO(protobuf_packet_t_time_sync_set_tag,             network_cmd_time_sync_set,               "time_sync_set"),      /* 7  */
+    CMD_INFO(protobuf_packet_t_time_sync_resp_tag,            network_cmd_unimplemented,               "time_sync_resp"),     /* 8  */
 
-    CMD_INFO(protobuf_packet_t_sys_config_get_tag,         network_cmd_sys_config_get,              "cfg_get"),            /* 9  */
-    CMD_INFO(protobuf_packet_t_sys_config_set_tag,         network_cmd_sys_config_set,              "cfg_set"),            /* 10 */
-    CMD_INFO(protobuf_packet_t_sys_config_resp_tag,        network_cmd_unimplemented,               "cfg_resp"),           /* 11 */
+    CMD_INFO(protobuf_packet_t_sys_config_get_tag,            network_cmd_sys_config_get,              "cfg_get"),            /* 9  */
+    CMD_INFO(protobuf_packet_t_sys_config_set_tag,            network_cmd_sys_config_set,              "cfg_set"),            /* 10 */
+    CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 11 */
 
-    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,    network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 12 */
-    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_set_tag,    network_cmd_sys_ranging_cfg_set,         "rng_cfg_set"),        /* 13 */
-    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,   network_cmd_unimplemented,               "rng_cfg_resp"),       /* 14 */
-    CMD_INFO(protobuf_packet_t_ranging_start_tag,          network_cmd_unimplemented,               "rng_start"),          /* 15 */
-    CMD_INFO(protobuf_packet_t_ranging_stop_tag,           network_cmd_unimplemented,               "rng_stop"),           /* 16 */
-    CMD_INFO(protobuf_packet_t_ranging_result_tag,         network_cmd_unimplemented,               "rng_result"),         /* 17 */
-    CMD_INFO(protobuf_packet_t_ranging_status_get_tag,     network_cmd_unimplemented,               "rng_status_get"),     /* 18 */
-    CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,    network_cmd_unimplemented,               "rng_status_resp"),    /* 19 */
+    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 12 */
+    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_set_tag,       network_cmd_sys_ranging_cfg_set,         "rng_cfg_set"),        /* 13 */
+    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,      network_cmd_unimplemented,               "rng_cfg_resp"),       /* 14 */
+    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_unimplemented,               "rng_start"),          /* 15 */
+    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_unimplemented,               "rng_stop"),           /* 16 */
+    CMD_INFO(protobuf_packet_t_ranging_result_tag,            network_cmd_unimplemented,               "rng_result"),         /* 17 */
+    CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 18 */
+    CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,       network_cmd_unimplemented,               "rng_status_resp"),    /* 19 */
 
-    CMD_INFO(protobuf_packet_t_filter_cfg_get_tag,         network_cmd_unimplemented,               "flt_cfg_get"),        /* 20 */
-    CMD_INFO(protobuf_packet_t_filter_cfg_set_tag,         network_cmd_unimplemented,               "flt_cfg_set"),        /* 21 */
-    CMD_INFO(protobuf_packet_t_filter_cfg_resp_tag,        network_cmd_unimplemented,               "flt_cfg_resp"),       /* 22 */
+    CMD_INFO(protobuf_packet_t_filter_cfg_get_tag,            network_cmd_unimplemented,               "flt_cfg_get"),        /* 20 */
+    CMD_INFO(protobuf_packet_t_filter_cfg_set_tag,            network_cmd_unimplemented,               "flt_cfg_set"),        /* 21 */
+    CMD_INFO(protobuf_packet_t_filter_cfg_resp_tag,           network_cmd_unimplemented,               "flt_cfg_resp"),       /* 22 */
+      
+    CMD_INFO(protobuf_packet_t_device_reset_tag,              network_cmd_device_reset,                "dev_reset"),          /* 23 */
+    CMD_INFO(protobuf_packet_t_uwb_reset_tag,                 network_cmd_unimplemented,               "uwb_reset"),          /* 24 */
+    CMD_INFO(protobuf_packet_t_factory_config_reset_tag,      network_cmd_unimplemented,               "factory_reset"),      /* 25 */
+    CMD_INFO(protobuf_packet_t_device_type_set_tag,           network_cmd_device_type_set,             "dev_type_set"),       /* 26 */
+    CMD_INFO(protobuf_packet_t_device_type_get_tag,           network_cmd_device_type_get,             "dev_type_get"),       /* 27 */
+#ifdef HAVE_FOTA_FIRMWARE
+    CMD_INFO(protobuf_packet_t_flash_erase_tag,               network_cmd_unimplemented,               "flash_erase"),        /* 28 */
+    CMD_INFO(protobuf_packet_t_flash_read_tag,                network_cmd_unimplemented,               "flash_read"),         /* 29 */
+    CMD_INFO(protobuf_packet_t_flash_data_tag,                network_cmd_unimplemented,               "flash_data"),         /* 30 */
+    CMD_INFO(protobuf_packet_t_flash_write_tag,               network_cmd_unimplemented,               "flash_write"),        /* 31 */
+#endif
+#ifdef HAVE_BLE_PERIPHERAL
+    CMD_INFO(protobuf_packet_t_ble_enable_tag,                network_cmd_unimplemented,               "ble_enable"),         /* 32 */
+    CMD_INFO(protobuf_packet_t_ble_status_get_tag,            network_cmd_ble_status_get,              "ble_status_get"),     /* 33 */
+    CMD_INFO(protobuf_packet_t_ble_status_resp_tag,           network_cmd_unimplemented,               "ble_status_resp"),    /* 34 */
 
-    CMD_INFO(protobuf_packet_t_device_reset_tag,           network_cmd_unimplemented,               "dev_reset"),          /* 23 */
-    CMD_INFO(protobuf_packet_t_uwb_reset_tag,              network_cmd_unimplemented,               "uwb_reset"),          /* 24 */
-    CMD_INFO(protobuf_packet_t_factory_config_reset_tag,   network_cmd_unimplemented,               "factory_reset"),      /* 25 */
-    CMD_INFO(protobuf_packet_t_device_type_set_tag,        network_cmd_device_type_set,             "dev_type_set"),       /* 26 */
-    CMD_INFO(protobuf_packet_t_device_type_get_tag,        network_cmd_device_type_get,             "dev_type_get"),       /* 27 */
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_unimplemented,               "ble_adv_status"),     /* 35 */
+#endif
+    CMD_INFO(protobuf_packet_t_log_data_tag,                  network_cmd_log_data_get,                "log_data"),           /* 36 */
+    CMD_INFO(protobuf_packet_t_log_clear_tag,                 network_cmd_log_clear,                   "log_clear"),          /* 37 */
+    CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_host_transport_set,          "host_transport_set"), /* 38 */
 
-    CMD_INFO(protobuf_packet_t_flash_erase_tag,            network_cmd_unimplemented,               "flash_erase"),        /* 28 */
-    CMD_INFO(protobuf_packet_t_flash_read_tag,             network_cmd_unimplemented,               "flash_read"),         /* 29 */
-    CMD_INFO(protobuf_packet_t_flash_data_tag,             network_cmd_unimplemented,               "flash_data"),         /* 30 */
-    CMD_INFO(protobuf_packet_t_flash_write_tag,            network_cmd_unimplemented,               "flash_write"),        /* 31 */
+    CMD_INFO(protobuf_packet_t_pos_calib_cfg_get_tag,         network_cmd_pos_calib_cfg_get,           "calib_cfg_get"),      /* 39 */
+    CMD_INFO(protobuf_packet_t_pos_calib_cfg_set_tag,         network_cmd_pos_calib_cfg_set,           "calib_cfg_set"),      /* 40 */
+    CMD_INFO(protobuf_packet_t_pos_calib_cfg_resp_tag,        network_cmd_unimplemented,               "calib_cfg_resp"),     /* 41 */
 
-    CMD_INFO(protobuf_packet_t_ble_enable_tag,             network_cmd_unimplemented,               "ble_enable"),         /* 32 */
-    CMD_INFO(protobuf_packet_t_ble_status_get_tag,         network_cmd_ble_status_get,              "ble_status_get"),     /* 33 */
-    CMD_INFO(protobuf_packet_t_ble_status_resp_tag,        network_cmd_unimplemented,               "ble_status_resp"),    /* 34 */
-
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,         network_cmd_unimplemented,               "ble_adv_status"),     /* 35 */
-
-    CMD_INFO(protobuf_packet_t_log_data_tag,               network_cmd_log_data_get,                "log_data"),           /* 36 */
-    CMD_INFO(protobuf_packet_t_log_clear_tag,              network_cmd_log_clear,                   "log_clear"),          /* 37 */
-    CMD_INFO(protobuf_packet_t_host_transport_set_tag,     network_cmd_host_transport_set,          "host_transport_set"), /* 38 */
+    CMD_INFO(protobuf_packet_t_anchor_layout_get_tag,         network_cmd_anchor_layout_get,           "anchor_layout_get"),  /* 42 */
+    CMD_INFO(protobuf_packet_t_anchor_layout_set_tag,         network_cmd_anchor_layout_set,           "anchor_layout_set"),  /* 43 */
+    CMD_INFO(protobuf_packet_t_anchor_layout_resp_tag,        network_cmd_unimplemented,               "anchor_layout_resp"), /* 44 */
     //      +=================================================+=======================================+========================+
 };
 
@@ -130,14 +144,14 @@ static void network_cmd_retry_pending(network_cmd_t *cmd)
 static void network_cmd_send_packet(network_cmd_t *cmd, protobuf_packet_t *pkt)
 {
     CHECK_VOID(cmd && cmd->stream && pkt);
-    (void)network_core_send_packet(cmd->stream, pkt->hdr.addr.dst, pkt);
+    network_core_send_packet(cmd->stream, pkt->hdr.addr.dst, pkt);
 }
 
 static void network_cmd_unimplemented(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
     CHECK_VOID(cmd && cmd->stream && pkt);
 
-    (void)network_core_send_ack(cmd->stream,
+    network_core_send_ack(cmd->stream,
                                 pkt,
                                 protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED);
 
@@ -168,7 +182,7 @@ static void network_cmd_device_information_get(network_cmd_t *cmd, const protobu
 
     resp.which_params = protobuf_packet_t_device_information_resp_tag;
 
-    (void)bsp_util_get_serial_number(&resp.params.device_information_resp.serial_number);
+    resp.params.device_information_resp.serial_number = bsp_util_get_serial_number();
 
     {
         const sys_config_t *cfg = sys_config_get();
@@ -214,13 +228,15 @@ static void network_cmd_device_type_get(network_cmd_t *cmd, const protobuf_packe
 static void network_cmd_sys_config_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
     protobuf_packet_t resp;
+    const sys_config_t *cfg;
 
     CHECK_VOID(cmd && pkt && cmd->stream);
 
+    cfg = sys_config_get();
     memset(&resp, 0, sizeof(resp));
     resp.which_params = protobuf_packet_t_sys_config_resp_tag;
     resp.params.sys_config_resp.has_config = true;
-    sys_config_export_protobuf(&resp.params.sys_config_resp.config);
+    resp.params.sys_config_resp.config = cfg->uwb;
     resp.hdr.addr.dst = pkt->hdr.addr.src;
 
     network_cmd_send_packet(cmd, &resp);
@@ -228,14 +244,33 @@ static void network_cmd_sys_config_get(network_cmd_t *cmd, const protobuf_packet
 
 static void network_cmd_sys_config_set(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
+    sys_config_t *cfg;
+
     CHECK_VOID(cmd && pkt);
 
     if (!pkt->params.sys_config_set.has_config) {
         return;
     }
 
-    if (sys_config_import_protobuf(&pkt->params.sys_config_set.config) != 0) {
+    if (pkt->params.sys_config_set.config.role != DEVICE_ROLE_TAG &&
+        pkt->params.sys_config_set.config.role != DEVICE_ROLE_ANCHOR) {
+        RLOG_W(OBJECT_CODE, "Invalid role in sys_config_set: %u",
+               (unsigned)pkt->params.sys_config_set.config.role);
         return;
+    }
+
+    if (pkt->params.sys_config_set.config.uwb_channel < 1u ||
+        pkt->params.sys_config_set.config.uwb_channel > 7u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB channel in sys_config_set: %u",
+               (unsigned)pkt->params.sys_config_set.config.uwb_channel);
+        return;
+    }
+
+    cfg = sys_config_get();
+    cfg->uwb = pkt->params.sys_config_set.config;
+
+    if (cfg->device_type == DEVICE_TYPE_UNSPECIFIED) {
+        cfg->device_type = (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_TYPE_TAG : DEVICE_TYPE_ANCHOR;
     }
 
     if (sys_config_save() != 0) {
@@ -278,6 +313,13 @@ static void network_cmd_sys_ranging_cfg_set(network_cmd_t *cmd, const protobuf_p
         RLOG_W(OBJECT_CODE, "Failed to persist ranging_cfg from host");
     }
 }
+static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    (void)cmd;
+    (void)pkt;
+
+    bsp_util_device_reset();
+}
 
 static void network_cmd_time_sync_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
@@ -303,6 +345,9 @@ static void network_cmd_time_sync_set(network_cmd_t *cmd, const protobuf_packet_
 static void network_cmd_ble_status_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
     protobuf_packet_t resp;
+    //TODO: not implemented yet
+    network_cmd_unimplemented(cmd, pkt);
+    return;
 
     CHECK_VOID(cmd && pkt && cmd->stream);
 
@@ -369,6 +414,88 @@ static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_pa
 
     if (sys_config_save() != 0) {
         RLOG_W(OBJECT_CODE, "Failed to persist host transport from host");
+    }
+}
+
+static void network_cmd_pos_calib_cfg_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    protobuf_packet_t resp_pkt;
+    const sys_calib_cfg_t *calib_cfg;
+
+    CHECK_VOID(cmd && pkt && cmd->stream);
+
+    calib_cfg = sys_config_get_calib();
+    if (!calib_cfg) {
+        RLOG_E(OBJECT_CODE, ERR_UWB_CALIBRATION, "Failed to get calibration config");
+        return;
+    }
+
+    memset(&resp_pkt, 0, sizeof(resp_pkt));
+    resp_pkt.hdr = pkt->hdr;
+    resp_pkt.which_params = protobuf_packet_t_pos_calib_cfg_resp_tag;
+    resp_pkt.params.pos_calib_cfg_resp.config = *calib_cfg;
+
+    network_cmd_send_packet(cmd, &resp_pkt);
+}
+
+static void network_cmd_pos_calib_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(cmd && pkt);
+
+    if (sys_config_set_calib(&pkt->params.pos_calib_cfg_set.config) != 0) {
+        RLOG_W(OBJECT_CODE, "Invalid calibration config received from host");
+        return;
+    }
+
+    if (sys_config_save() != 0) {
+        RLOG_W(OBJECT_CODE, "Failed to persist calibration config to flash");
+    }
+}
+
+static void network_cmd_anchor_layout_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    protobuf_packet_t resp_pkt;
+    sys_anchor_layout_t anchors[SYS_CONFIG_MAX_ANCHORS];
+    uint32_t count = 0;
+
+    CHECK_VOID(cmd && pkt && cmd->stream);
+
+    sys_config_get_anchor_layout(anchors, &count);
+    if (count == 0 || count > SYS_CONFIG_MAX_ANCHORS) {
+        RLOG_W(OBJECT_CODE, "Invalid anchor layout count: %lu", count);
+        count = 0;
+    }
+
+    memset(&resp_pkt, 0, sizeof(resp_pkt));
+    resp_pkt.hdr = pkt->hdr;
+    resp_pkt.which_params = protobuf_packet_t_anchor_layout_resp_tag;
+    resp_pkt.params.anchor_layout_resp.anchors_count = count;
+    
+    memcpy(resp_pkt.params.anchor_layout_resp.anchors, anchors,
+           (size_t)count * sizeof(sys_anchor_layout_t));
+
+    network_cmd_send_packet(cmd, &resp_pkt);
+}
+
+static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    uint32_t count;
+
+    CHECK_VOID(cmd && pkt);
+
+    count = pkt->params.anchor_layout_set.anchors_count;
+    if (count == 0 || count > SYS_CONFIG_MAX_ANCHORS) {
+        RLOG_W(OBJECT_CODE, "Invalid anchor layout count: %lu", count);
+        return;
+    }
+
+    if (sys_config_set_anchor_layout(pkt->params.anchor_layout_set.anchors, count) != 0) {
+        RLOG_W(OBJECT_CODE, "Invalid anchor layout received from host");
+        return;
+    }
+
+    if (sys_config_save() != 0) {
+        RLOG_W(OBJECT_CODE, "Failed to persist anchor layout to flash");
     }
 }
 
