@@ -369,6 +369,55 @@ typedef struct _protobuf_host_transport_set_t {
     protobuf_host_transport_t transport;
 } protobuf_host_transport_set_t;
 
+typedef struct _protobuf_pos_calib_cfg_t {
+    bool enable_anchor_auto_calib;
+    bool enable_tag_auto_calib;
+    float ref_distance_xy_m;
+    float tag_height_m;
+    float anchor_height_m;
+    uint32_t calib_anchor_id;
+    uint32_t samples;
+    float error_threshold_m;
+    uint32_t min_delta_step;
+    uint32_t max_rounds;
+    float max_std_m;
+} protobuf_pos_calib_cfg_t;
+
+typedef struct _protobuf_pos_calib_cfg_get_t {
+    uint32_t dummy;
+} protobuf_pos_calib_cfg_get_t;
+
+typedef struct _protobuf_pos_calib_cfg_set_t {
+    bool has_config;
+    protobuf_pos_calib_cfg_t config;
+} protobuf_pos_calib_cfg_set_t;
+
+typedef struct _protobuf_pos_calib_cfg_resp_t {
+    bool has_config;
+    protobuf_pos_calib_cfg_t config;
+} protobuf_pos_calib_cfg_resp_t;
+
+typedef struct _protobuf_anchor_layout_item_t {
+    uint32_t anchor_id;
+    float x_m;
+    float y_m;
+    float z_m;
+} protobuf_anchor_layout_item_t;
+
+typedef struct _protobuf_anchor_layout_get_t {
+    uint32_t dummy;
+} protobuf_anchor_layout_get_t;
+
+typedef struct _protobuf_anchor_layout_set_t {
+    pb_size_t anchors_count;
+    protobuf_anchor_layout_item_t anchors[4];
+} protobuf_anchor_layout_set_t;
+
+typedef struct _protobuf_anchor_layout_resp_t {
+    pb_size_t anchors_count;
+    protobuf_anchor_layout_item_t anchors[4];
+} protobuf_anchor_layout_resp_t;
+
 typedef struct _protobuf_ranging_status_get_t {
     uint32_t dummy;
 } protobuf_ranging_status_get_t;
@@ -440,6 +489,14 @@ typedef struct _protobuf_packet_t {
         protobuf_log_clear_t log_clear;
         /* Host transport control */
         protobuf_host_transport_set_t host_transport_set;
+        /* Calibration config */
+        protobuf_pos_calib_cfg_get_t pos_calib_cfg_get;
+        protobuf_pos_calib_cfg_set_t pos_calib_cfg_set;
+        protobuf_pos_calib_cfg_resp_t pos_calib_cfg_resp;
+        /* Anchor layout */
+        protobuf_anchor_layout_get_t anchor_layout_get;
+        protobuf_anchor_layout_set_t anchor_layout_set;
+        protobuf_anchor_layout_resp_t anchor_layout_resp;
     } params;
 } protobuf_packet_t;
 
@@ -608,6 +665,14 @@ extern "C" {
 
 
 
+
+
+
+
+
+
+
+
 /* Initializer values for message structs */
 #define protobuf_addr_t_init_default             {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
 #define protobuf_hdr_t_init_default              {false, protobuf_addr_t_init_default, 0, 0}
@@ -653,6 +718,14 @@ extern "C" {
 #define protobuf_log_data_t_init_default         {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_default        {_protobuf_log_type_t_MIN, 0, 0}
 #define protobuf_host_transport_set_t_init_default {_protobuf_host_transport_t_MIN}
+#define protobuf_pos_calib_cfg_t_init_default    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_pos_calib_cfg_get_t_init_default {0}
+#define protobuf_pos_calib_cfg_set_t_init_default {false, protobuf_pos_calib_cfg_t_init_default}
+#define protobuf_pos_calib_cfg_resp_t_init_default {false, protobuf_pos_calib_cfg_t_init_default}
+#define protobuf_anchor_layout_item_t_init_default {0, 0, 0, 0}
+#define protobuf_anchor_layout_get_t_init_default {0}
+#define protobuf_anchor_layout_set_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
+#define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
@@ -700,6 +773,14 @@ extern "C" {
 #define protobuf_log_data_t_init_zero            {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_zero           {_protobuf_log_type_t_MIN, 0, 0}
 #define protobuf_host_transport_set_t_init_zero  {_protobuf_host_transport_t_MIN}
+#define protobuf_pos_calib_cfg_t_init_zero       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_pos_calib_cfg_get_t_init_zero   {0}
+#define protobuf_pos_calib_cfg_set_t_init_zero   {false, protobuf_pos_calib_cfg_t_init_zero}
+#define protobuf_pos_calib_cfg_resp_t_init_zero  {false, protobuf_pos_calib_cfg_t_init_zero}
+#define protobuf_anchor_layout_item_t_init_zero  {0, 0, 0, 0}
+#define protobuf_anchor_layout_get_t_init_zero   {0}
+#define protobuf_anchor_layout_set_t_init_zero   {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
+#define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
@@ -812,6 +893,27 @@ extern "C" {
 #define protobuf_log_clear_t_offset_tag          2
 #define protobuf_log_clear_t_length_tag          3
 #define protobuf_host_transport_set_t_transport_tag 1
+#define protobuf_pos_calib_cfg_t_enable_anchor_auto_calib_tag 1
+#define protobuf_pos_calib_cfg_t_enable_tag_auto_calib_tag 2
+#define protobuf_pos_calib_cfg_t_ref_distance_xy_m_tag 3
+#define protobuf_pos_calib_cfg_t_tag_height_m_tag 4
+#define protobuf_pos_calib_cfg_t_anchor_height_m_tag 5
+#define protobuf_pos_calib_cfg_t_calib_anchor_id_tag 6
+#define protobuf_pos_calib_cfg_t_samples_tag     7
+#define protobuf_pos_calib_cfg_t_error_threshold_m_tag 8
+#define protobuf_pos_calib_cfg_t_min_delta_step_tag 9
+#define protobuf_pos_calib_cfg_t_max_rounds_tag  10
+#define protobuf_pos_calib_cfg_t_max_std_m_tag   11
+#define protobuf_pos_calib_cfg_get_t_dummy_tag   1
+#define protobuf_pos_calib_cfg_set_t_config_tag  1
+#define protobuf_pos_calib_cfg_resp_t_config_tag 1
+#define protobuf_anchor_layout_item_t_anchor_id_tag 1
+#define protobuf_anchor_layout_item_t_x_m_tag    2
+#define protobuf_anchor_layout_item_t_y_m_tag    3
+#define protobuf_anchor_layout_item_t_z_m_tag    4
+#define protobuf_anchor_layout_get_t_dummy_tag   1
+#define protobuf_anchor_layout_set_t_anchors_tag 1
+#define protobuf_anchor_layout_resp_t_anchors_tag 1
 #define protobuf_ranging_status_get_t_dummy_tag  1
 #define protobuf_ranging_status_resp_t_ranging_period_ms_tag 1
 #define protobuf_ranging_status_resp_t_ranging_total_count_tag 2
@@ -860,6 +962,12 @@ extern "C" {
 #define protobuf_packet_t_log_data_tag           36
 #define protobuf_packet_t_log_clear_tag          37
 #define protobuf_packet_t_host_transport_set_tag 38
+#define protobuf_packet_t_pos_calib_cfg_get_tag  39
+#define protobuf_packet_t_pos_calib_cfg_set_tag  40
+#define protobuf_packet_t_pos_calib_cfg_resp_tag 41
+#define protobuf_packet_t_anchor_layout_get_tag  42
+#define protobuf_packet_t_anchor_layout_set_tag  43
+#define protobuf_packet_t_anchor_layout_resp_tag 44
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1154,6 +1262,63 @@ X(a, STATIC,   SINGULAR, UENUM,    transport,         1)
 #define protobuf_host_transport_set_t_CALLBACK NULL
 #define protobuf_host_transport_set_t_DEFAULT NULL
 
+#define protobuf_pos_calib_cfg_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enable_anchor_auto_calib,   1) \
+X(a, STATIC,   SINGULAR, BOOL,     enable_tag_auto_calib,   2) \
+X(a, STATIC,   SINGULAR, FLOAT,    ref_distance_xy_m,   3) \
+X(a, STATIC,   SINGULAR, FLOAT,    tag_height_m,      4) \
+X(a, STATIC,   SINGULAR, FLOAT,    anchor_height_m,   5) \
+X(a, STATIC,   SINGULAR, UINT32,   calib_anchor_id,   6) \
+X(a, STATIC,   SINGULAR, UINT32,   samples,           7) \
+X(a, STATIC,   SINGULAR, FLOAT,    error_threshold_m,   8) \
+X(a, STATIC,   SINGULAR, UINT32,   min_delta_step,    9) \
+X(a, STATIC,   SINGULAR, UINT32,   max_rounds,       10) \
+X(a, STATIC,   SINGULAR, FLOAT,    max_std_m,        11)
+#define protobuf_pos_calib_cfg_t_CALLBACK NULL
+#define protobuf_pos_calib_cfg_t_DEFAULT NULL
+
+#define protobuf_pos_calib_cfg_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_pos_calib_cfg_get_t_CALLBACK NULL
+#define protobuf_pos_calib_cfg_get_t_DEFAULT NULL
+
+#define protobuf_pos_calib_cfg_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
+#define protobuf_pos_calib_cfg_set_t_CALLBACK NULL
+#define protobuf_pos_calib_cfg_set_t_DEFAULT NULL
+#define protobuf_pos_calib_cfg_set_t_config_MSGTYPE protobuf_pos_calib_cfg_t
+
+#define protobuf_pos_calib_cfg_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
+#define protobuf_pos_calib_cfg_resp_t_CALLBACK NULL
+#define protobuf_pos_calib_cfg_resp_t_DEFAULT NULL
+#define protobuf_pos_calib_cfg_resp_t_config_MSGTYPE protobuf_pos_calib_cfg_t
+
+#define protobuf_anchor_layout_item_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   anchor_id,         1) \
+X(a, STATIC,   SINGULAR, FLOAT,    x_m,               2) \
+X(a, STATIC,   SINGULAR, FLOAT,    y_m,               3) \
+X(a, STATIC,   SINGULAR, FLOAT,    z_m,               4)
+#define protobuf_anchor_layout_item_t_CALLBACK NULL
+#define protobuf_anchor_layout_item_t_DEFAULT NULL
+
+#define protobuf_anchor_layout_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_anchor_layout_get_t_CALLBACK NULL
+#define protobuf_anchor_layout_get_t_DEFAULT NULL
+
+#define protobuf_anchor_layout_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   REPEATED, MESSAGE,  anchors,           1)
+#define protobuf_anchor_layout_set_t_CALLBACK NULL
+#define protobuf_anchor_layout_set_t_DEFAULT NULL
+#define protobuf_anchor_layout_set_t_anchors_MSGTYPE protobuf_anchor_layout_item_t
+
+#define protobuf_anchor_layout_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   REPEATED, MESSAGE,  anchors,           1)
+#define protobuf_anchor_layout_resp_t_CALLBACK NULL
+#define protobuf_anchor_layout_resp_t_DEFAULT NULL
+#define protobuf_anchor_layout_resp_t_anchors_MSGTYPE protobuf_anchor_layout_item_t
+
 #define protobuf_ranging_status_get_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_ranging_status_get_t_CALLBACK NULL
@@ -1210,7 +1375,13 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_status_resp,params.ble_status_res
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_adv_status,params.ble_adv_status),  35) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,log_data,params.log_data),  36) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,log_clear,params.log_clear),  37) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,host_transport_set,params.host_transport_set),  38)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,host_transport_set,params.host_transport_set),  38) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_get,params.pos_calib_cfg_get),  39) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_set,params.pos_calib_cfg_set),  40) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_resp,params.pos_calib_cfg_resp),  41) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_get,params.anchor_layout_get),  42) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_set,params.anchor_layout_set),  43) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layout_resp),  44)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1251,6 +1422,12 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,host_transport_set,params.host_transp
 #define protobuf_packet_t_params_log_data_MSGTYPE protobuf_log_data_t
 #define protobuf_packet_t_params_log_clear_MSGTYPE protobuf_log_clear_t
 #define protobuf_packet_t_params_host_transport_set_MSGTYPE protobuf_host_transport_set_t
+#define protobuf_packet_t_params_pos_calib_cfg_get_MSGTYPE protobuf_pos_calib_cfg_get_t
+#define protobuf_packet_t_params_pos_calib_cfg_set_MSGTYPE protobuf_pos_calib_cfg_set_t
+#define protobuf_packet_t_params_pos_calib_cfg_resp_MSGTYPE protobuf_pos_calib_cfg_resp_t
+#define protobuf_packet_t_params_anchor_layout_get_MSGTYPE protobuf_anchor_layout_get_t
+#define protobuf_packet_t_params_anchor_layout_set_MSGTYPE protobuf_anchor_layout_set_t
+#define protobuf_packet_t_params_anchor_layout_resp_MSGTYPE protobuf_anchor_layout_resp_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1296,6 +1473,14 @@ extern const pb_msgdesc_t protobuf_tag_position_t_msg;
 extern const pb_msgdesc_t protobuf_log_data_t_msg;
 extern const pb_msgdesc_t protobuf_log_clear_t_msg;
 extern const pb_msgdesc_t protobuf_host_transport_set_t_msg;
+extern const pb_msgdesc_t protobuf_pos_calib_cfg_t_msg;
+extern const pb_msgdesc_t protobuf_pos_calib_cfg_get_t_msg;
+extern const pb_msgdesc_t protobuf_pos_calib_cfg_set_t_msg;
+extern const pb_msgdesc_t protobuf_pos_calib_cfg_resp_t_msg;
+extern const pb_msgdesc_t protobuf_anchor_layout_item_t_msg;
+extern const pb_msgdesc_t protobuf_anchor_layout_get_t_msg;
+extern const pb_msgdesc_t protobuf_anchor_layout_set_t_msg;
+extern const pb_msgdesc_t protobuf_anchor_layout_resp_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_packet_t_msg;
@@ -1345,6 +1530,14 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_log_data_t_fields &protobuf_log_data_t_msg
 #define protobuf_log_clear_t_fields &protobuf_log_clear_t_msg
 #define protobuf_host_transport_set_t_fields &protobuf_host_transport_set_t_msg
+#define protobuf_pos_calib_cfg_t_fields &protobuf_pos_calib_cfg_t_msg
+#define protobuf_pos_calib_cfg_get_t_fields &protobuf_pos_calib_cfg_get_t_msg
+#define protobuf_pos_calib_cfg_set_t_fields &protobuf_pos_calib_cfg_set_t_msg
+#define protobuf_pos_calib_cfg_resp_t_fields &protobuf_pos_calib_cfg_resp_t_msg
+#define protobuf_anchor_layout_item_t_fields &protobuf_anchor_layout_item_t_msg
+#define protobuf_anchor_layout_get_t_fields &protobuf_anchor_layout_get_t_msg
+#define protobuf_anchor_layout_set_t_fields &protobuf_anchor_layout_set_t_msg
+#define protobuf_anchor_layout_resp_t_fields &protobuf_anchor_layout_resp_t_msg
 #define protobuf_ranging_status_get_t_fields &protobuf_ranging_status_get_t_msg
 #define protobuf_ranging_status_resp_t_fields &protobuf_ranging_status_resp_t_msg
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
@@ -1356,6 +1549,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ack_t_size                      8
 #define protobuf_addr_t_size                     4
 #define protobuf_anchor_distance_t_size          23
+#define protobuf_anchor_layout_get_t_size        6
+#define protobuf_anchor_layout_item_t_size       21
+#define protobuf_anchor_layout_resp_t_size       92
+#define protobuf_anchor_layout_set_t_size        92
 #define protobuf_anchor_ranging_t_size           23
 #define protobuf_ble_adv_status_t_size           44
 #define protobuf_ble_enable_t_size               2
@@ -1379,6 +1576,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_log_clear_t_size                14
 #define protobuf_log_data_t_size                 133
 #define protobuf_none_t_size                     6
+#define protobuf_pos_calib_cfg_get_t_size        6
+#define protobuf_pos_calib_cfg_resp_t_size       55
+#define protobuf_pos_calib_cfg_set_t_size        55
+#define protobuf_pos_calib_cfg_t_size            53
 #define protobuf_ranging_result_t_size           141
 #define protobuf_ranging_start_t_size            2
 #define protobuf_ranging_status_get_t_size       6

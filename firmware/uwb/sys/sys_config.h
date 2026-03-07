@@ -20,26 +20,34 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "config.h"
+#include "positioning_config.h"
 #include "protos/protocol.pb.h"
+#include "bsp_util.h"
 
 /* Type aliases ------------------------------------------------------------- */
-typedef protobuf_device_role_t device_role_t;
-typedef protobuf_device_type_t device_type_t;
-typedef protobuf_host_transport_t host_transport_t;
+typedef protobuf_device_role_t                  device_role_t;
+typedef protobuf_device_type_t                  device_type_t;
+typedef protobuf_host_transport_t               host_transport_t;
+typedef protobuf_pos_calib_cfg_t                sys_calib_cfg_t;
+typedef protobuf_anchor_layout_item_t           sys_anchor_layout_t;
 
-#define DEVICE_ROLE_UNSPECIFIED protobuf_DEVICE_ROLE_UNSPECIFIED
-#define DEVICE_ROLE_TAG         protobuf_DEVICE_ROLE_TAG
-#define DEVICE_ROLE_ANCHOR      protobuf_DEVICE_ROLE_ANCHOR
+#define DEVICE_ROLE_UNSPECIFIED                 protobuf_DEVICE_ROLE_UNSPECIFIED
+#define DEVICE_ROLE_TAG                         protobuf_DEVICE_ROLE_TAG
+#define DEVICE_ROLE_ANCHOR                      protobuf_DEVICE_ROLE_ANCHOR
 
-#define DEVICE_TYPE_UNSPECIFIED protobuf_DEVICE_TYPE_UNSPECIFIED
-#define DEVICE_TYPE_TAG         protobuf_DEVICE_TYPE_TAG
-#define DEVICE_TYPE_ANCHOR      protobuf_DEVICE_TYPE_ANCHOR
-#define DEVICE_TYPE_GATEWAY     protobuf_DEVICE_TYPE_GATEWAY
-#define DEVICE_TYPE_DEBUG_TOOL  protobuf_DEVICE_TYPE_DEBUG_TOOL
+#define DEVICE_TYPE_UNSPECIFIED                 protobuf_DEVICE_TYPE_UNSPECIFIED
+#define DEVICE_TYPE_TAG                         protobuf_DEVICE_TYPE_TAG
+#define DEVICE_TYPE_ANCHOR                      protobuf_DEVICE_TYPE_ANCHOR
+#define DEVICE_TYPE_GATEWAY                     protobuf_DEVICE_TYPE_GATEWAY
+#define DEVICE_TYPE_DEBUG_TOOL                  protobuf_DEVICE_TYPE_DEBUG_TOOL
 
-#define HOST_TRANSPORT_UNSPECIFIED protobuf_HOST_TRANSPORT_UNSPECIFIED
-#define HOST_TRANSPORT_USB         protobuf_HOST_TRANSPORT_USB
-#define HOST_TRANSPORT_UART        protobuf_HOST_TRANSPORT_UART
+#define HOST_TRANSPORT_UNSPECIFIED              protobuf_HOST_TRANSPORT_UNSPECIFIED
+#define HOST_TRANSPORT_USB                      protobuf_HOST_TRANSPORT_USB
+#define HOST_TRANSPORT_UART                     protobuf_HOST_TRANSPORT_UART
+
+#define SYS_CONFIG_MAX_ANCHORS                  NUM_ANCHORS
+#define SYS_CONFIG_CALIB_MAX_SAMPLES            64
+
 
 /**
  * @brief System configuration stored in flash and RAM.
@@ -52,26 +60,27 @@ typedef struct {
     device_type_t       device_type;
     host_transport_t    host_transport;
     protobuf_uwb_cfg_t  uwb;            /* maps to sys_config_set/resp.config */
+    sys_calib_cfg_t     calib;
+    uint32_t            anchor_count;
+    sys_anchor_layout_t anchor_layout[SYS_CONFIG_MAX_ANCHORS];
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION              13  /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION                          14  /* bump → forces flash reset on upgrade */
 
-#define DEFAULT_DEVICE_ROLE         DEVICE_ROLE_ANCHOR
-#define DEFAULT_DEVICE_TYPE         DEVICE_TYPE_ANCHOR
-#define DEFAULT_HOST_TRANSPORT      HOST_TRANSPORT_USB
-#define DEFAULT_DEVICE_ID           0x01
-
-#define DEFAULT_RANGING_PERIOD_MS   150
-#define DEFAULT_RX_TIMEOUT_MS       75
-
-#define DEFAULT_UWB_CHANNEL         5
-#define DEFAULT_UWB_PRF             64
-#define DEFAULT_UWB_DATA_RATE       0   /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
-#define DEFAULT_UWB_PREAMBLE_CODE   10
-#define DEFAULT_TX_ANT_DLY          16436
-#define DEFAULT_RX_ANT_DLY          16436
-#define DEFAULT_TX_POWER            0x1F1F1F1FUL
+#define DEFAULT_DEVICE_ROLE                     DEVICE_ROLE_ANCHOR
+#define DEFAULT_DEVICE_TYPE                     DEVICE_TYPE_ANCHOR
+#define DEFAULT_HOST_TRANSPORT                  HOST_TRANSPORT_USB
+#define DEFAULT_DEVICE_ID                       0x01
+#define DEFAULT_RANGING_PERIOD_MS               150
+#define DEFAULT_RX_TIMEOUT_MS                   75
+#define DEFAULT_UWB_CHANNEL                     5
+#define DEFAULT_UWB_PRF                         64
+#define DEFAULT_UWB_DATA_RATE                   0   /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
+#define DEFAULT_UWB_PREAMBLE_CODE               10
+#define DEFAULT_TX_ANT_DLY                      16436
+#define DEFAULT_RX_ANT_DLY                      16436
+#define DEFAULT_TX_POWER                        0x1F1F1F1FUL
 
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
@@ -92,16 +101,16 @@ int sys_config_set_host_transport(host_transport_t host_transport);
 int sys_config_set_device_id(uint8_t id);
 device_type_t sys_config_get_device_type(void);
 host_transport_t sys_config_get_host_transport(void);
+const sys_calib_cfg_t *sys_config_get_calib(void);
+int sys_config_set_calib(const sys_calib_cfg_t *calib);
+void sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);
+int sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count);
 
 /* Storage */
 int  sys_config_save(void);
 int  sys_config_load(void);
 void sys_config_reset_to_defaults(void);
 void sys_config_print(void);
-
-/* Protobuf helpers — export/import only the uwb field (protobuf_uwb_cfg_t) */
-void sys_config_export_protobuf(protobuf_uwb_cfg_t *dst);
-int  sys_config_import_protobuf(const protobuf_uwb_cfg_t *src);
 
 #ifdef __cplusplus
 }

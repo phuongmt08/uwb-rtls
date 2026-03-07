@@ -51,7 +51,6 @@
 #define ENABLE_ANCHOR_AUTO_CALIB    0
 #define ENABLE_TAG_AUTO_CALIB       0
 
-#if (ENABLE_ANCHOR_AUTO_CALIB || ENABLE_TAG_AUTO_CALIB)
 #define CALIB_REF_DISTANCE_XY_M   7.32f   /* Horizontal distance Tag-Anchor (m) */
 #define CALIB_TAG_HEIGHT_M        TAG_HEIGHT_M
 #define CALIB_ANCHOR_HEIGHT_M     ANCHOR_HEIGHT_M
@@ -63,7 +62,6 @@
 #define CALIB_MAX_ROUNDS          12      /* Max 10 rounds */
 #define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
 #define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
-#endif
 
 /* ===================================================================
  * ANCHOR LAYOUT

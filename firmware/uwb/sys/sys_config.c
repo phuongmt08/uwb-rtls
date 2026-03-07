@@ -14,13 +14,14 @@
 #include "sys_logger.h"
 #include <string.h>
 #include <stddef.h>
+#include "version.h"
 #ifdef HAVE_FLASH_STORAGE
 #include "sys_flash_storage.h"
-#include "bsp_util.h"
 #endif
 
 /* Private defines ---------------------------------------------------------- */
 #define CONFIG_RAM_MAGIC    0xC0FEC0DE
+#define CFG_LOG(fmt, ...) RLOG_I(LOG_OBJECT_CODE_SYS_CFG, fmt, ##__VA_ARGS__)
 
 /* Flash sector addresses are defined in sys_flash_storage.h */
 
@@ -275,10 +276,6 @@ int sys_config_load(void)
         temp_storage.config.host_transport = HOST_TRANSPORT_USB;
     }
 
-    if (temp_storage.config.device_type == DEVICE_TYPE_UNSPECIFIED) {
-        temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
-    }
-
     if (temp_storage.config.uwb.uwb_channel < 1 || temp_storage.config.uwb.uwb_channel > 7) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid channel in flash");
         return -1;
@@ -333,48 +330,113 @@ void sys_config_reset_to_defaults(void)
 
     memset(&g_storage, 0, sizeof(sys_config_storage_t));
 
-    g_storage.config.config_version            = CONFIG_VERSION;
-    g_storage.config.device_type               = DEFAULT_DEVICE_TYPE;
-    g_storage.config.host_transport            = DEFAULT_HOST_TRANSPORT;
-    g_storage.config.uwb.role                  = DEFAULT_DEVICE_ROLE;
-    g_storage.config.uwb.device_id             = DEFAULT_DEVICE_ID;
-    g_storage.config.uwb.uwb_channel           = DEFAULT_UWB_CHANNEL;
-    g_storage.config.uwb.ranging_period_ms     = DEFAULT_RANGING_PERIOD_MS;
-    g_storage.config.uwb.rx_timeout_ms         = DEFAULT_RX_TIMEOUT_MS;
-    g_storage.config.uwb.uwb_prf               = DEFAULT_UWB_PRF;
-    g_storage.config.uwb.uwb_data_rate         = DEFAULT_UWB_DATA_RATE;
-    g_storage.config.uwb.uwb_preamble_code     = DEFAULT_UWB_PREAMBLE_CODE;
-    g_storage.config.uwb.tx_antenna_delay      = DEFAULT_TX_ANT_DLY;
-    g_storage.config.uwb.rx_antenna_delay      = DEFAULT_RX_ANT_DLY;
-    g_storage.config.uwb.tx_power              = DEFAULT_TX_POWER;
-    g_storage.config.uwb.anchor_list.size      = 0;
+    /* ================================================================================================
+       CONFIGURATION PARAMETERS TABLE
+       Configuration Parameter                              |           Value
+       ================================================================================================
+       Device Config
+       ---------- */
+    g_storage.config.config_version                         =           CONFIG_VERSION;
+    g_storage.config.device_type                            =           DEFAULT_DEVICE_TYPE;
+    g_storage.config.host_transport                         =           DEFAULT_HOST_TRANSPORT;
+    
+    /* UWB Base Configuration
+       ---------- */
+    g_storage.config.uwb.role                               =           DEFAULT_DEVICE_ROLE;
+    g_storage.config.uwb.device_id                          =           DEFAULT_DEVICE_ID;
+    
+    /* UWB Radio Parameters
+       ---------- */
+    g_storage.config.uwb.uwb_channel                        =           DEFAULT_UWB_CHANNEL;
+    g_storage.config.uwb.uwb_prf                            =           DEFAULT_UWB_PRF;
+    g_storage.config.uwb.uwb_data_rate                      =           DEFAULT_UWB_DATA_RATE;
+    g_storage.config.uwb.uwb_preamble_code                  =           DEFAULT_UWB_PREAMBLE_CODE;
+    
+    /* UWB Antenna Calibration
+       ---------- */
+    g_storage.config.uwb.tx_antenna_delay                   =           DEFAULT_TX_ANT_DLY;
+    g_storage.config.uwb.rx_antenna_delay                   =           DEFAULT_RX_ANT_DLY;
+    g_storage.config.uwb.tx_power                           =           DEFAULT_TX_POWER;
+    
+    /* UWB Timing Parameters
+       ---------- */
+    g_storage.config.uwb.ranging_period_ms                  =           DEFAULT_RANGING_PERIOD_MS;
+    g_storage.config.uwb.rx_timeout_ms                      =           DEFAULT_RX_TIMEOUT_MS;
+    g_storage.config.uwb.anchor_list.size                   =           0;
+    
+    /* Calibration Configuration
+       ---------- */
+    g_storage.config.calib.enable_anchor_auto_calib         =           ENABLE_ANCHOR_AUTO_CALIB;
+    g_storage.config.calib.enable_tag_auto_calib            =           ENABLE_TAG_AUTO_CALIB;
+    g_storage.config.calib.ref_distance_xy_m                =           CALIB_REF_DISTANCE_XY_M;
+    g_storage.config.calib.tag_height_m                     =           CALIB_TAG_HEIGHT_M;
+    g_storage.config.calib.anchor_height_m                  =           CALIB_ANCHOR_HEIGHT_M;
+    g_storage.config.calib.calib_anchor_id                  =           CALIB_ANCHOR_ID;
+    g_storage.config.calib.samples                          =           CALIB_SAMPLES;
+    g_storage.config.calib.error_threshold_m                =           CALIB_ERROR_THRESHOLD_M;
+    g_storage.config.calib.min_delta_step                   =           CALIB_MIN_DELTA_STEP;
+    g_storage.config.calib.max_rounds                       =           CALIB_MAX_ROUNDS;
+    g_storage.config.calib.max_std_m                        =           CALIB_MAX_STD_M;
+
+    /* Anchor Layout Positions (X, Y, Z in meters)
+       ================================================================================================
+       ID  |    X_M     |    Y_M     |    Z_M
+       ================================================================================================ */
+    g_storage.config.anchor_count                           =           SYS_CONFIG_MAX_ANCHORS;
+
+    g_storage.config.anchor_layout[0].anchor_id             =           1;
+    g_storage.config.anchor_layout[0].x_m                   =           ANCHOR_1_X;
+    g_storage.config.anchor_layout[0].y_m                   =           ANCHOR_1_Y;
+    g_storage.config.anchor_layout[0].z_m                   =           ANCHOR_1_Z;
+
+    g_storage.config.anchor_layout[1].anchor_id             =           2;
+    g_storage.config.anchor_layout[1].x_m                   =           ANCHOR_2_X;
+    g_storage.config.anchor_layout[1].y_m                   =           ANCHOR_2_Y;
+    g_storage.config.anchor_layout[1].z_m                   =           ANCHOR_2_Z;
+
+    g_storage.config.anchor_layout[2].anchor_id             =           3;
+    g_storage.config.anchor_layout[2].x_m                   =           ANCHOR_3_X;
+    g_storage.config.anchor_layout[2].y_m                   =           ANCHOR_3_Y;
+    g_storage.config.anchor_layout[2].z_m                   =           ANCHOR_3_Z;
+
+    g_storage.config.anchor_layout[3].anchor_id             =           4;
+    g_storage.config.anchor_layout[3].x_m                   =           ANCHOR_4_X;
+    g_storage.config.anchor_layout[3].y_m                   =           ANCHOR_4_Y;
+    g_storage.config.anchor_layout[3].z_m                   =           ANCHOR_4_Z;
+    /* ================================================================================================ */
 }
 
 void sys_config_print(void)
 {
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "========== DEVICE CONFIGURATION ==========");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Role  : %s (0x%02X)",
+    CFG_LOG("");
+    CFG_LOG("=========== FIRMWARE VERSION ===========");
+    CFG_LOG("FW Version    : %d.%d.%d.%d", FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH, FW_VERSION_BUILD);
+    CFG_LOG("Git SHA       : %016llX", (unsigned long long)FW_VERSION_GITSHA_HEX);
+    CFG_LOG("Timestamp     : %lu", (unsigned long)FW_IMAGE_TIMESTAMP);
+    CFG_LOG("========== DEVICE INFORMATION ==========");
+    CFG_LOG("Config Ver    : %u", (unsigned)g_storage.config.config_version);
+    CFG_LOG("Device Serial : 0x%08lX", (unsigned long)bsp_util_get_serial_number());
+    CFG_LOG("Device Role   : %s (0x%02X)",
            g_storage.config.uwb.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR",
            (unsigned)g_storage.config.uwb.role);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Type  : %u", (unsigned)g_storage.config.device_type);
-        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Host I/O     : %s",
-            g_storage.config.host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device ID    : 0x%02X", (unsigned)g_storage.config.uwb.device_id);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- UWB RADIO --------------");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Channel      : %lu", g_storage.config.uwb.uwb_channel);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "PRF          : %lu MHz", g_storage.config.uwb.uwb_prf);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Data Rate    : %lu", g_storage.config.uwb.uwb_data_rate);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Preamble Code: %lu", g_storage.config.uwb.uwb_preamble_code);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- CALIBRATION ------------");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "TX Ant Delay : %lu", g_storage.config.uwb.tx_antenna_delay);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX Ant Delay : %lu", g_storage.config.uwb.rx_antenna_delay);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "TX Power     : 0x%08lX", g_storage.config.uwb.tx_power);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- TIMING -----------------");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "==========================================");
-    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "");
+    CFG_LOG("Device Type   : %u", (unsigned)g_storage.config.device_type);
+    CFG_LOG("Host I/O      : %s",
+           g_storage.config.host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
+    CFG_LOG("Device ID     : 0x%02X", (unsigned)g_storage.config.uwb.device_id);
+    CFG_LOG("-------------- UWB RADIO --------------");
+    CFG_LOG("Channel       : %lu", g_storage.config.uwb.uwb_channel);
+    CFG_LOG("PRF           : %lu MHz", g_storage.config.uwb.uwb_prf);
+    CFG_LOG("Data Rate     : %lu", g_storage.config.uwb.uwb_data_rate);
+    CFG_LOG("Preamble Code : %lu", g_storage.config.uwb.uwb_preamble_code);
+    CFG_LOG("-------------- CALIBRATION ------------");
+    CFG_LOG("TX Ant Delay  : %lu", g_storage.config.uwb.tx_antenna_delay);
+    CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
+    CFG_LOG("TX Power      : 0x%08lX", g_storage.config.uwb.tx_power);
+    CFG_LOG("-------------- TIMING -----------------");
+    CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
+    CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
+    CFG_LOG("==========================================");
+    CFG_LOG("");
 }
 
 device_type_t sys_config_get_device_type(void)
@@ -390,34 +452,33 @@ host_transport_t sys_config_get_host_transport(void)
     return g_storage.config.host_transport;
 }
 
-void sys_config_export_protobuf(protobuf_uwb_cfg_t *dst)
+const sys_calib_cfg_t *sys_config_get_calib(void)
 {
-    if (!dst) return;
-    memcpy(dst, &g_storage.config.uwb, sizeof(protobuf_uwb_cfg_t));
+    return &g_storage.config.calib;
 }
 
-int sys_config_import_protobuf(const protobuf_uwb_cfg_t *src)
+int sys_config_set_calib(const sys_calib_cfg_t *calib)
 {
-    if (!src) return -1;
+    if (!calib) return -1;
+    g_storage.config.calib = *calib;
+    return 0;
+}
 
-    if (!sys_config_device_role_valid(src->role)) {
-        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM,
-               "Invalid role in protobuf config: %d", src->role);
-        return -1;
-    }
+void sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count)
+{
+    if (!anchors || !count) return;
+    uint32_t n = g_storage.config.anchor_count;
+    if (n == 0u || n > SYS_CONFIG_MAX_ANCHORS) n = SYS_CONFIG_MAX_ANCHORS;
+    memcpy(anchors, g_storage.config.anchor_layout, (size_t)n * sizeof(sys_anchor_layout_t));
+    *count = n;
+}
 
-    if (src->uwb_channel < 1 || src->uwb_channel > 7) {
-        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM,
-               "Invalid UWB channel in protobuf config: %lu", src->uwb_channel);
-        return -1;
-    }
-
-    memcpy(&g_storage.config.uwb, src, sizeof(protobuf_uwb_cfg_t));
-
-    if (g_storage.config.device_type == DEVICE_TYPE_UNSPECIFIED) {
-        g_storage.config.device_type = sys_config_default_device_type_from_role(g_storage.config.uwb.role);
-    }
-
+int sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count)
+{
+    if (!anchors || count == 0u || count > SYS_CONFIG_MAX_ANCHORS) return -1;
+    memset(g_storage.config.anchor_layout, 0, sizeof(g_storage.config.anchor_layout));
+    memcpy(g_storage.config.anchor_layout, anchors, (size_t)count * sizeof(sys_anchor_layout_t));
+    g_storage.config.anchor_count = count;
     return 0;
 }
 
