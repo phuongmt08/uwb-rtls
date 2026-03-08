@@ -15,6 +15,7 @@ AllowShortCaseLabelsOnASingleLine: true
 AllowShortEnumsOnASingleLine: false
 AllowShortLoopsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: false
+AlignArrayOfStructures: Left
 BinPackArguments: true
 BinPackParameters: false
 BitFieldColonSpacing: After

@@ -120,7 +120,7 @@ static void logger_pop_data(uint16_t len);
  * @note Checks magic number to determine if this is first boot or reset
  */
 static void logger_init(void);
-static void logger_test_stub_1s(void);
+static void logger_test_stub(void);
 
 /* Private implementations -------------------------------------------------- */
 static uint16_t logger_space_count(void)
@@ -230,7 +230,7 @@ static void logger_init(void)
   initialized = true;
 }
 
-static void logger_test_stub_1s(void)
+static void logger_test_stub(void)
 {
   static uint8_t  tick_init = 0u;
   static uint32_t last_tick_ms = 0u;
@@ -244,7 +244,7 @@ static void logger_test_stub_1s(void)
     return;
   }
 
-  if ((uint32_t)(now_ms - last_tick_ms) < 1000u)
+  if ((uint32_t)(now_ms - last_tick_ms) < 100u)
     return;
 
   last_tick_ms = now_ms;
@@ -510,7 +510,7 @@ void sys_logger_task(void)
   if (!initialized)
     return;
 
-  logger_test_stub_1s();
+  logger_test_stub();
 
 #ifdef HAVE_FLASH_STORAGE
   sys_logger_flash_persist();
@@ -574,8 +574,8 @@ void sys_logger_task(void)
   (void)out_len;
   sys_logger_flash_consume(entry_padded);
 #else
-  // if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
-  //   sys_logger_flash_consume(entry_padded);
+  if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
+    sys_logger_flash_consume(entry_padded);
 #endif
 
 #else  /* !HAVE_FLASH_STORAGE — fallback: direct RAM → USB */
