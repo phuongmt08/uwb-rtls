@@ -63,10 +63,10 @@ static const float ICM42688_ACCEL_SENS_LUT[4] =
 
 static const icm42688_aaf_param_t s_aaf_lut[] =
 {
-  /* ICM42688_AAF_258HZ   */ { 63, 3968, 15 },
-  /* ICM42688_AAF_536HZ   */ {  6,   36, 10 },
-  /* ICM42688_AAF_997HZ   */ {  1,    1,  1 },
-  /* ICM42688_AAF_1962HZ  */ {  1,    1,  1 },
+  /* ICM42688_AAF_258HZ   */ {  6,    36, 10 },
+  /* ICM42688_AAF_536HZ   */ { 12,   144,  8 },
+  /* ICM42688_AAF_997HZ   */ { 21,   440,  6 },
+  /* ICM42688_AAF_1962HZ  */ { 37,  1376,  4 },
 };
 
 /* Public function implementation ------------------------------------------- */
@@ -311,8 +311,8 @@ icm42688_err_t icm42688_set_accel_odr(icm42688_dev_t *dev, icm42688_odr_t odr)
 icm42688_err_t icm42688_set_aaf_filter(icm42688_dev_t *dev, icm42688_aaf_t gyro_aaf, icm42688_aaf_t accel_aaf)
 {
 	/* Configure Gyro AAF (Bank 1)
-	 * GYRO_CONFIG_STATIC2 bit[0]: GYRO_AAF_DIS (1=disable)
-	 * GYRO_CONFIG_STATIC3 [7:0]:  DELT
+	 * GYRO_CONFIG_STATIC2 bit[1]: GYRO_AAF_DIS (1=disable)
+	 * GYRO_CONFIG_STATIC3 [5:0]:  DELT
 	 * GYRO_CONFIG_STATIC4 [7:0]:  DELTSQR low byte
 	 * GYRO_CONFIG_STATIC5 [3:0]:  DELTSQR high nibble | [7:4]: BITSHIFT
 	 */
@@ -322,7 +322,7 @@ icm42688_err_t icm42688_set_aaf_filter(icm42688_dev_t *dev, icm42688_aaf_t gyro_
 	CHECK_ERR(icm42688_select_bank(dev, 1) == ICM42688_OK, ICM42688_ERR);
 	// DELT
 	CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC3, &data, 1) == ICM42688_OK, ICM42688_ERR);
-	data = (data & 0xC0) | p->delt;
+	data = (data & 0xC0) | (p->delt & 0x3F);
 	CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC3, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
 	// DELTSQR
@@ -338,7 +338,7 @@ icm42688_err_t icm42688_set_aaf_filter(icm42688_dev_t *dev, icm42688_aaf_t gyro_
 	CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC5, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
 	/* Configure Accel AAF (Bank 2)
-	 * ACCEL_CONFIG_STATIC2 [7:1]: DELT | [0]: ACCEL_AAF_DIS (1=disable)
+	 * ACCEL_CONFIG_STATIC2 [6:1]: DELT | [0]: ACCEL_AAF_DIS (1=disable)
 	 * ACCEL_CONFIG_STATIC3 [7:0]: DELTSQR low byte
 	 * ACCEL_CONFIG_STATIC4 [3:0]: DELTSQR high nibble | [7:4]: BITSHIFT
 	 */
@@ -381,7 +381,7 @@ icm42688_err_t icm42688_set_ui_filter_order(icm42688_dev_t        *dev,
 
     /* ACCEL_CONFIG1: [4:3]=ACCEL_UI_FILT_ORD, [2:1]=DEC2_M2_ORD(fixed=0x02) */
     CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_ACCEL_CONFIG1, &data, 1) == ICM42688_OK, ICM42688_ERR);
-    data = (data & 0xE0) | ((accel_ord & 0x03) << 3) | (0x02 << 1);
+    data = (data & 0xE1) | ((accel_ord & 0x03) << 3) | (0x02 << 1);
     CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_ACCEL_CONFIG1, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
     dev->config.gyro_ui_filt_ord  = gyro_ord;
@@ -403,8 +403,8 @@ icm42688_err_t icm42688_set_ui_filter_bw(icm42688_dev_t *dev, icm42688_ui_filt_b
 		   ((gyro_bw  & 0x0F));
 	CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_ACCEL_CONFIG0, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
-	dev->config.gyro_ui_filt_ord  = gyro_bw;
-	dev->config.accel_ui_filt_ord = accel_bw;
+	dev->config.gyro_ui_filt_bw  = gyro_bw;
+	dev->config.accel_ui_filt_bw = accel_bw;
 	return ICM42688_OK;
 }
 
@@ -417,7 +417,7 @@ icm42688_err_t icm42688_set_temp_filter_bw(icm42688_dev_t *dev, icm42688_temp_fi
 	/* GYRO_CONFIG1: [7:5] = TEMP_FILT_BW, [3:2]=GYRO_UI_FILT_ORD, [1:0]=DEC2_M2_ORD(fixed=0x02) */
 	CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
 	CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_GYRO_CONFIG1, &data, 1) == ICM42688_OK, ICM42688_ERR);
-	data = ((temp_bw & 0x03) << 5) | (data & 0x1F);
+	data = ((temp_bw & 0x07) << 5) | (data & 0x1F);
 	CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_CONFIG1, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
 	return ICM42688_OK;
@@ -435,7 +435,7 @@ icm42688_err_t icm42688_set_gyro_notch_filter(icm42688_dev_t        *dev,
     uint8_t reg;
     CHECK_ERR(icm42688_select_bank(dev, 3) == ICM42688_OK, ICM42688_ERR);
     CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_CLKDIV, &reg, 1) == ICM42688_OK, ICM42688_ERR);
-    uint8_t clkdiv = reg & 0x3F;
+    uint8_t clkdiv = reg & 0x7F;
 
     /* Fdrv = 19200 kHz / (clkdiv * 10), freq_x/y/z đơn vị Hz → ÷1000 để ra kHz */
     float Fdrv = 19200.0f / ((float)clkdiv * 10.0f);
@@ -639,47 +639,26 @@ icm42688_err_t icm42688_set_hardware_offsets(icm42688_dev_t *dev)
 
 icm42688_err_t icm42688_set_filter(icm42688_dev_t *dev, bool gyro_filter, bool accel_filter)
 {
-	uint8_t data;
-	CHECK_ERR(icm42688_select_bank(dev, 1) == ICM42688_OK, ICM42688_ERR);
-	if(gyro_filter == true)
-	{
-		/* GYRO_CONFIG_STATIC2: [7:3]= rsd, [1]=GYRO_AAF_DIS, [0]=GYRO_NF_DIS */
-		CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
-		CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-		data = (data & 0x7C) | 0x00;
-		CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-	}
-	else
-	{
-		/* GYRO_CONFIG_STATIC2: [7:3]= rsd, [1]=GYRO_AAF_DIS, [0]=GYRO_NF_DIS */
-		CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
-		CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-		data = (data & 0x7C) | 0x03;
-		CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-	}
+    uint8_t data;
 
-	CHECK_ERR(icm42688_select_bank(dev, 2) == ICM42688_OK, ICM42688_ERR);
-	if(accel_filter == true)
-	{
-		/* ACCEL_CONFIG_STATIC2: [7]= rsd, [6:1]=ACCEL_AAF_DELT, [0]=ACCEL_AAF_DIS */
-		CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
-		CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_ACCEL_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-		data = (data & 0x7E) | 0x00;
-		CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_ACCEL_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-	}
-	else
-	{
-		/* ACCEL_CONFIG_STATIC2: [7]= rsd, [6:1]=ACCEL_AAF_DELT, [0]=ACCEL_AAF_DIS */
-		CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
-		CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_ACCEL_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-		data = (data & 0x7E) | 0x01;
-		CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_ACCEL_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
-	}
+    /* Gyro filter: GYRO_CONFIG_STATIC2 ở Bank 1 */
+    CHECK_ERR(icm42688_select_bank(dev, 1) == ICM42688_OK, ICM42688_ERR);
+    CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
+    data = gyro_filter ? ((data & 0x7C) | 0x00) : ((data & 0x7C) | 0x03);
+    CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_GYRO_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
-	dev->config.gyro_filter_enable 	= gyro_filter;
-	dev->config.accel_filter_enable = accel_filter;
+    /* Accel filter: ACCEL_CONFIG_STATIC2 ở Bank 2 */
+    CHECK_ERR(icm42688_select_bank(dev, 2) == ICM42688_OK, ICM42688_ERR);
+    CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_ACCEL_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
+    data = accel_filter ? ((data & 0x7E) | 0x00) : ((data & 0x7E) | 0x01);
+    CHECK_ERR(icm42688_write_reg(dev, ICM42688_REG_ACCEL_CONFIG_STATIC2, &data, 1) == ICM42688_OK, ICM42688_ERR);
 
-	return ICM42688_OK;
+    CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
+
+    dev->config.gyro_filter_enable  = gyro_filter;
+    dev->config.accel_filter_enable = accel_filter;
+
+    return ICM42688_OK;
 }
 
 icm42688_err_t icm42688_get_calibration(const icm42688_dev_t *dev, icm42688_calibration_t *calib)
@@ -772,12 +751,10 @@ icm42688_err_t icm42688_self_test(icm42688_dev_t *dev)
 /* Private function implementation ------------------------------------------ */
 static inline uint8_t icm42688_who_am_i(icm42688_dev_t *dev)
 {
-	uint8_t data;
-
-	CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
-	CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_WHO_AM_I, &data, 1) == ICM42688_OK, ICM42688_ERR);
-
-	return data;
+    uint8_t data = 0;
+    if (icm42688_select_bank(dev, 0) != ICM42688_OK) return 0;
+    if (icm42688_read_reg(dev, ICM42688_REG_WHO_AM_I, &data, 1) != ICM42688_OK) return 0;
+    return data;
 }
 
 icm42688_err_t icm42688_read_reg(icm42688_dev_t *dev, uint8_t reg, uint8_t *data, uint16_t len)
