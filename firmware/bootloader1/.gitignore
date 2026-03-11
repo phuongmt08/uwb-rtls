@@ -23,6 +23,7 @@
 !.project
 !.cproject
 !.settings/
+!bootloader1 Debug.launch
 
 # (Optional) Keep .gitignore files even in subfolders, for future use
 !.gitignore

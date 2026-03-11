@@ -12,7 +12,12 @@ _autosave-*
 *.zip
 *.bak
 *.kicad_pcb-bak
+*.kicad_sch-bak
 *.sch-bak
+*.bk.kicad_pcb
+*.bk.kicad_sch
+*.bk.kicad_prl
+*.bk.kicad_pro
 
 # Cache
 fp-info-cache

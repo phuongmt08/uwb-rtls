@@ -1,10 +1,10 @@
 /**
  * @file       sys_logger.h
- * @copyright
- * @license
+ * @copyright  Copyright (C) 2019 ITRVN.
+ * @license    This project is released under the Fiot License.
  * @version    1.0.0
  * @date       2025
- * @author
+ * @author	   Phuong Mai
  * @brief      Simple RAM logger with USB CDC output
  * 
  * @details    This module implements a circular buffer logger that stores log records
@@ -67,15 +67,6 @@
 
 
 /* Public macros ------------------------------------------------------------ */
-/**
- * @brief Log an informational message
- * @param _OBJ_CODE Object code identifying the component
- * @param _FORMAT printf-style format string
- * @param ... Variable arguments
- */
-#define RLOG_I(_OBJ_CODE, _FORMAT, ...) \
-	sys_logger_write_record(INFO_LOG, _OBJ_CODE, _FORMAT, ##__VA_ARGS__)
-
 /**
  * @brief Log an informational message
  * @param _OBJ_CODE Object code identifying the component

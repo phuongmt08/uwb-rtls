@@ -1,5 +1,7 @@
 /**
  * @file       bsp_flash.h
+ * @copyright  Copyright (C) 2019 ITRVN.
+ * @license    This project is released under the Fiot License.
  * @version    1.2.1
  * @date       2025-6-12
  * @author     Phuong Mai
@@ -130,18 +132,18 @@ bsp_flash_status_t bsp_flash_dual_init(bsp_flash_dual_t      *dr,
 
     /* Write empty first entry (no data config yet) */
     bsp_flash_metadata_entry_t init_entry;
-    memset(&init_entry, 0xFF, sizeof(init_entry));
     init_entry.marker      = BSP_FLASH_ENTRY_MARKER;
     init_entry.gen         = 0u;
     init_entry.data_offset = 0u;
-    init_entry.data_length = 0u; /* No config data yet */
+    init_entry.data_length = 0u;
     init_entry.timestamp   = 0u;
     init_entry.crc32       = 0u;
+    init_entry.entry_crc   = 0u;
+    init_entry.reserved    = 0xFFFFFFFFu;
 
     /* Calculate entry CRC (first 6 words) */
     uint32_t entry_crc = crc32_fn ? crc32_fn(&init_entry, 24u) : 0u;
     init_entry.entry_crc = entry_crc;
-    init_entry.reserved  = 0xFFFFFFFFu;
 
     HAL_FLASH_Unlock();
     if (flash_write_block(base0, &init_entry, sizeof(init_entry)) != BSP_FLASH_OK)
@@ -419,14 +421,13 @@ static bsp_flash_status_t append_metadata_entry(uint32_t           meta_base,
 {
   /* Prepare entry */
   bsp_flash_metadata_entry_t entry;
-  memset(&entry, 0xFF, sizeof(entry));
-
   entry.marker      = BSP_FLASH_ENTRY_MARKER;
   entry.gen         = gen;
   entry.data_offset = data_offset;
   entry.data_length = data_length;
   entry.timestamp   = timestamp;
   entry.crc32       = data_crc;
+  entry.entry_crc   = 0u;
   entry.reserved    = 0xFFFFFFFFu;
 
   /* Calculate entry CRC (first 6 words: marker through crc32) */

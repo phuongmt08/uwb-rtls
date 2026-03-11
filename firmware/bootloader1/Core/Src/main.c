@@ -102,21 +102,26 @@ int main(void)
    */
   
   uint32_t t0 = HAL_GetTick();
+  bool dfu_active = false;  /* Track if DFU activity occurred */
   
   while (1)
   {
     uint32_t now = HAL_GetTick();
     
-    /* If we had DFU activity, check inactivity timeout */
+    /* If we had DFU activity, wait for user button press to exit */
     if (g_dfu_last_activity != 0) {
-      uint32_t inactive_time = now - g_dfu_last_activity;
+      dfu_active = true;
       
-      /* If inactive for more than threshold, exit to app */
-      if (inactive_time >= BL_DFU_INACTIVITY_MS) {
-        break;
+      /* Check if USER button (PA0) is pressed */
+      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
+        /* Button pressed - exit to app */
+        HAL_Delay(50);  /* Debounce delay */
+        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
+          break;  /* Confirmed button press - exit DFU */
+        }
       }
       
-      /* Still within inactivity window - blink fast to show active */
+      /* Blink fast to show DFU active + waiting for user button */
       bl_led_tick();
       HAL_Delay(100);
       continue;

@@ -1,10 +1,10 @@
 /**
  * @file       sys_logger.c
- * @copyright
- * @license
+ * @copyright  Copyright (C) 2019 ITRVN.
+ * @license    This project is released under the Fiot License.
  * @version    1.0.0
  * @date       2025
- * @author
+ * @author     Phuong Mai
  * @brief      Simple RAM logger with USB CDC output
  */
 /* Public includes ---------------------------------------------------------- */
@@ -12,7 +12,6 @@
 
 #include "log_config.h"
 #include "usbd_cdc_if.h"
-#include "platform_config.h"
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>

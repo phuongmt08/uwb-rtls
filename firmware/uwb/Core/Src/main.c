@@ -2,23 +2,17 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  * @brief          : DS-TWR Tag/Anchor Application with Calibration
+  * @version        : 3.1.0
+  * @date           : 2025-12-24
   ******************************************************************************
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "crc.h"
 #include "i2c.h"
+#include "rtc.h"
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
@@ -27,12 +21,16 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "bsp_uwb.h"
-#include "string.h"
-#include "bsp_delay.h"
-#include "sys_task.h"
+#include "sys_config.h"
 #include "sys_logger.h"
-
+#include "bsp_uwb.h"
+#include "bsp_io.h"
+#include "bsp_util.h"
+#include "common.h"
+#include "app_tag.h"
+#include "app_anchor.h"
+#include "positioning_config.h"
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,16 +40,24 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Magic flag in SRAM to request DFU after soft reset */
 #define BL_MAGIC_ADDR      (0x2001FFF0UL)
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
-#if 0
-// Set magic and perform a clean system reset
-*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;  // request DFU
-__DSB(); __ISB();
-NVIC_SystemReset();
-}
+
+/* ========== Position Test Mode ========== */
+#define TEST_SEND_POS           0     /* 0=disabled, 1=enabled */
+
+#if TEST_SEND_POS
+  #define TEST_DISABLE_RANGING    1     /* 1=disable ranging (UART only), 0=keep ranging */
+  #define TEST_POS_INTERVAL_MS    100   /* Send interval (ms) */
+  #define TEST_POS_START_X        1.0f  /* Start X coordinate */
+  #define TEST_POS_START_Y        1.0f  /* Start Y coordinate */
+  #define TEST_POS_END_X          5.0f  /* End X coordinate */
+  #define TEST_POS_END_Y          5.0f  /* End Y coordinate */
+  #define TEST_POS_STEP           0.5f  /* Step increment 	*/
+  #define TEST_POS_Z              0.5f  /* Fixed Z coordinate */
+  #define TEST_POS_ERROR          0.1f  /* Fixed error estimate */
 #endif
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -62,65 +68,79 @@ NVIC_SystemReset();
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static bool s_ranging_enabled = true;
 
+#if TEST_SEND_POS
+static float s_test_x = TEST_POS_START_X;
+static float s_test_y = TEST_POS_START_Y;
+static uint32_t s_last_test_send_tick = 0;
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void task_toggle_led(void *arg)
+
+#if TEST_SEND_POS
+/**
+ * @brief Test function to send dummy position data via UART
+ * @note Non-blocking, called periodically from main loop
+ */
+static void test_send_position(void)
 {
-//	bsp_uwb_tx(test_frame, strlen(test_frame));
-	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+  uint32_t current_tick = HAL_GetTick();
+  
+  /* Check if enough time has passed */
+  if ((current_tick - s_last_test_send_tick) < TEST_POS_INTERVAL_MS) {
+    return;
+  }
+  
+  s_last_test_send_tick = current_tick;
+  
+  /* Send current position */
+  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, TEST_POS_ERROR);
+  
+  if (ret == BSP_OK) {
+    /* Update position for next send */
+    s_test_x += TEST_POS_STEP;
+    
+    /* Check X boundary */
+    if (s_test_x > TEST_POS_END_X) {
+      s_test_x = TEST_POS_START_X;
+      s_test_y += TEST_POS_STEP;
+      
+      /* Check Y boundary - loop back */
+      if (s_test_y > TEST_POS_END_Y) {
+        s_test_y = TEST_POS_START_Y;
+      }
+    }
+  }
+  /* If BSP_ERR (busy), just skip this interval and try next time */
 }
-static void task_sys_logger_test(void *arg)
+#endif
+
+void app_reset_config(void)
 {
-    static bool inited = false;
-    static uint32_t cnt = 0;
-
-    if (!inited) {
-        sys_logger_init();
-        RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Logger init OK");
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System started, buffer size=%d bytes", SYS_LOGGER_BUF_SIZE);
-        inited = true;
-    }
-
-    // Routine logs with timestamp
-    RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Tick=%lu, Free=%u, Used=%u",
-           cnt, sys_logger_space_count(), sys_logger_data_count());
-
-    // Periodic warning
-    if ((cnt % 10) == 0) {
-        RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Periodic check at tick %lu", cnt);
-    }
-    
-    // Simulated error
-    if ((cnt % 33) == 0) {
-        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_TIMEOUT, "Simulated error: code=%d", -123);
-    }
-
-    // Stress test: long message near SYS_LOGGER_MAX_MSG_LEN
-    if ((cnt % 25) == 0) {
-        char big[220];
-        for (size_t i = 0; i < sizeof(big) - 1; i++) big[i] = 'A';
-        big[sizeof(big) - 1] = '\0';
-        RLOG_D(LOG_OBJECT_CODE_APPLICATION, "Long msg test: %s", big);  // Will be truncated
-    }
-    
-    // Test different components
-    if ((cnt % 50) == 0) {
-        RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "UWB module status check");
-        RLOG_D(LOG_OBJECT_CODE_RANGING, "Distance measurement ready");
-    }
-
-
-    cnt++;
+  __disable_irq();
+  SCB->VTOR = 0x0800C000;
+  SysTick->CTRL = 0; 
+  SysTick->LOAD = 0; 
+  SysTick->VAL = 0;
+  
+  for (uint32_t i = 0; i < 8; i++) {
+    NVIC->ICER[i] = 0xFFFFFFFF;
+    NVIC->ICPR[i] = 0xFFFFFFFF;
+  }
+  
+  __DSB(); 
+  __ISB();
+  __enable_irq();
 }
+
 /* USER CODE END 0 */
 
 /**
@@ -131,12 +151,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	__disable_irq();
-	SCB->VTOR = 0x08008000;
-	SysTick->CTRL = 0; SysTick->LOAD = 0; SysTick->VAL = 0;
-	for (uint32_t i=0;i<8;i++){ NVIC->ICER[i]=0xFFFFFFFF; NVIC->ICPR[i]=0xFFFFFFFF; }
-	__DSB(); __ISB();
-	__enable_irq();
+  app_reset_config();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -164,38 +179,185 @@ int main(void)
   MX_TIM10_Init();
   MX_USB_DEVICE_Init();
   MX_TIM11_Init();
+  MX_CRC_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
+  
+  sys_logger_init();
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
+  
+#if TEST_SEND_POS
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)", 
+         TEST_POS_START_X, TEST_POS_START_Y, TEST_POS_END_X, TEST_POS_END_Y);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
+#if TEST_DISABLE_RANGING
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
+#endif
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+#endif
+  
+  sys_config_init();
+  sys_config_t *cfg = sys_config_get();
+  
+#if TEST_SEND_POS && TEST_DISABLE_RANGING
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
+#else
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
+  
+  if (bsp_uwb_init() != 0) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
+  }
+  
+  if (cfg->role == DEVICE_ROLE_TAG) {
+    cfg->tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+    cfg->rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u", TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
+  }
 
-  HAL_Delay(1000);
-//  if (bsp_uwb_init() != BSP_OK) {
-//    // stay here if initialization failed
-//    while (1);
-//  }
-//  const char test_frame[] = "HELLO_UWB";
-  sys_task_init();
-  int id = sys_task_add(task_toggle_led, NULL, 1000, 0);
-  sys_task_start(id);
-  int id_log = sys_task_add(task_sys_logger_test, NULL, 1000, 0);  // 20 ms period
-  sys_task_start(id_log);
-
+  bsp_uwb_config_t uwb_cfg = {
+    .channel           = cfg->uwb_channel,
+    .prf               = cfg->uwb_prf,
+    .data_rate         = cfg->uwb_data_rate,
+    .preamble_code     = cfg->uwb_preamble_code,
+    .tx_antenna_delay  = cfg->tx_antenna_delay,
+    .rx_antenna_delay  = cfg->rx_antenna_delay,
+    .tx_power          = cfg->tx_power,
+  };
+  
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u", 
+         uwb_cfg.channel, uwb_cfg.prf, uwb_cfg.data_rate, uwb_cfg.preamble_code);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", 
+         uwb_cfg.tx_antenna_delay, uwb_cfg.rx_antenna_delay);
+  
+  bsp_uwb_configure(&uwb_cfg);
+#endif
+  
+  bsp_io_init();
+  bsp_io_led_off();
+  
+#if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
+  /* Read DIP switch - ALWAYS OVERRIDES saved config */
+  uint8_t dip_value = bsp_io_dip_read();
+  if (dip_value == 0) {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->device_id);
+  } else {
+    sys_config_set_device_id(dip_value);
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
+  }
+  
+  cfg = sys_config_get();
+  
+  /* Initialize application based on role */
+  if (cfg->role == DEVICE_ROLE_TAG) {
+    app_tag_init();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
+  } else {
+    app_anchor_init();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
+  }
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  sys_task_process();
+    bsp_io_button_event_t btn_event = bsp_io_button_event();
+    
+#if ENABLE_ANCHOR_AUTO_CALIB
+    /* In calibration build, anchor button events handled differently */
+    if (cfg->role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE) {
+      app_anchor_on_button(btn_event);
+      btn_event = BSP_IO_EVENT_NONE;  /* Prevent normal button handling */
+    }
+#endif
 
-	// Pump buffer to USB CDC
-	sys_logger_task();
-//	HAL_Delay(1000);
+#if ENABLE_TAG_AUTO_CALIB
+    /* In calibration build, tag button events handled differently */
+    if (cfg->role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE) {
+      app_tag_on_button(btn_event);
+      btn_event = BSP_IO_EVENT_NONE;
+    }
+#endif
+    
+    switch (btn_event)
+    {
+#if !ENABLE_ANCHOR_AUTO_CALIB
+      case BSP_IO_EVENT_HOLD:
+        /* Toggle TAG/ANCHOR role and save to flash */
+        {
+          sys_config_t *cfg_curr = sys_config_get();
+          device_role_t new_role = (cfg_curr->role == DEVICE_ROLE_TAG) ? 
+                                    DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
+          
+          sys_config_set_role(new_role);
+          sys_config_save();
+          
+          /* Quick LED blink to indicate save */
+          for (uint8_t i = 0; i < 3; i++) {
+            bsp_io_led_on();
+            bsp_delay_ms(50);
+            bsp_io_led_off();
+            bsp_delay_ms(50);
+          }
+          
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed to: %s",
+                 new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
+          bsp_delay_ms(100);
+          HAL_NVIC_SystemReset();
+        }
+        break;
+#endif
+        
+      case BSP_IO_EVENT_DOUBLE_CLICK:
+        /* Stop ranging */
+        if (s_ranging_enabled) {
+          s_ranging_enabled = false;
+          bsp_uwb_idle();
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
+        }
+        break;
+        
+      case BSP_IO_EVENT_CLICK:
+        /* Start ranging */
+        if (!s_ranging_enabled) {
+          s_ranging_enabled = true;
+          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
+        }
+        break;
+        
+      default:
+        break;
+    }
+    
+    /* Process ranging if enabled */
+#if TEST_SEND_POS && TEST_DISABLE_RANGING
+    /* Ranging disabled in test mode */
+#else
+    if (s_ranging_enabled)
+    {
+      sys_config_t *cfg_curr = sys_config_get();
+      if (cfg_curr->role == DEVICE_ROLE_TAG) {
+        app_tag_process();
+      } else {
+        app_anchor_process(NULL);
+      }
+    }
+#endif
 
-//	if (HAL_GetTick() >= 5000) {
-//		*(volatile uint32_t*)BL_MAGIC_ADDR = BL_MAGIC_VALUE;
-//		__DSB(); __ISB();
-//		NVIC_SystemReset();
-//	}
+#if TEST_SEND_POS
+    /* Test mode: Send dummy position periodically */
+    test_send_position();
+#endif
 
+    sys_logger_task();
+    bsp_delay_ms(1);
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -249,7 +411,6 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
 /* USER CODE END 4 */
 
 /**
@@ -259,12 +420,10 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
-	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	HAL_Delay(100);
+  while (1) {
+    bsp_io_led_toggle();
+    HAL_Delay(100);
   }
   /* USER CODE END Error_Handler_Debug */
 }
@@ -279,8 +438,6 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

@@ -29,4 +29,11 @@
 		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
 		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>protocol</name>
+			<type>2</type>
+			<location>C:/Users/USER/Desktop/uwb-rtls/protocol</location>
+		</link>
+	</linkedResources>
 </projectDescription>

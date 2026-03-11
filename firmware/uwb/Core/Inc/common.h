@@ -8,13 +8,28 @@
 
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
+
+#ifndef CHECK
+#define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
+#endif
+
+#ifndef CHECK_VOID
+#define CHECK_VOID(_cond) do { if (!(_cond)) return; } while (0)
+#endif
+
 typedef enum
 {
   BSP_OK = 0,
   BSP_ERR,
   BSP_ERR_PARAM,
+  BSP_ERR_BUSY,
+  BSP_ERR_TIMEOUT,
 } bsp_err_t;
-
+typedef enum
+{
+  APP_OK = 0,
+  APP_ERR = -1
+} app_err_t;
 #define UWB_RST_PIN GPIO_PIN_2
 #define UWB_RST_PORT GPIOB
 

@@ -1,10 +1,19 @@
 /**
- * @file       icm45686.c
- * @brief      ICM-45686 driver implementation
+ * @file       icm45686.h
+ * @copyright
+ * @license
+ * @version    0.1.0
+ * @date       2025
+ * @author     Phuong Mai
+ * @brief      ICM-45686 6-axis IMU driver với low-noise configuration
+ * @note       SPI mode 0/3, max 24MHz, MSB first
+ * @example    None
  */
 
 #include "icm45686.h"
 #include <string.h>
+#include <math.h>
+#include <stdlib.h>
 
 /* Private defines ---------------------------------------------------------- */
 #define ICM_SPI_READ  0x80
@@ -24,26 +33,34 @@ icm_err_t icm_read_reg(icm45686_t *dev, uint8_t reg, uint8_t *data, uint16_t len
   if (!dev || !data || len == 0)
     return ICM_ERR_PARAM;
 
-  uint8_t tx_buf[1] = {reg | ICM_SPI_READ};
+  uint8_t tx_buf[257];  /* 1 byte address + up to 256 data bytes */
+  uint8_t rx_buf[257];
+  
+  if (len + 1 > sizeof(tx_buf))
+    return ICM_ERR_PARAM;
+
+  /* Prepare TX buffer: address + dummy bytes for RX */
+  tx_buf[0] = reg | ICM_SPI_READ;
+  for (uint16_t i = 1; i <= len; i++)
+    tx_buf[i] = 0x00;  /* Dummy bytes */
 
   dev->bus.set_cs(true);
-  dev->bus.delay_us(1);
+  dev->bus.delay_us(10);  /* Longer setup time */
   
-  /* Send register address */
-  if (!dev->bus.spi_transfer(tx_buf, NULL, 1))
+  /* Send address + read data in one transaction */
+  if (!dev->bus.spi_transfer(tx_buf, rx_buf, len + 1))
   {
     dev->bus.set_cs(false);
     return ICM_ERR;
   }
   
-  /* Read data */
-  if (!dev->bus.spi_transfer(NULL, data, len))
-  {
-    dev->bus.set_cs(false);
-    return ICM_ERR;
-  }
-  
+  dev->bus.delay_us(10);  /* Longer hold time */
   dev->bus.set_cs(false);
+  
+  /* Copy received data (skip first byte which is during address transmission) */
+  for (uint16_t i = 0; i < len; i++)
+    data[i] = rx_buf[i + 1];
+  
   return ICM_OK;
 }
 
@@ -293,7 +310,7 @@ icm_err_t icm_set_filter_config(icm45686_t *dev, const icm_filter_config_t *filt
   /* Gyro notch filter */
   if (filter->gyro_notch.enable)
   {
-    float odr_hz = 1000.0f; /* Adjust theo config */
+    float odr_hz = 1000.0f; /* Adjust according to config */
     float normalized_freq = (float)filter->gyro_notch.frequency_hz / odr_hz;
     float coswz = cosf(2.0f * 3.14159f * normalized_freq);
     int16_t coswz_val = (int16_t)(coswz * 16384.0f);
@@ -496,9 +513,12 @@ icm_err_t icm_calibrate_gyro_offset(icm45686_t *dev, uint16_t num_samples)
   }
 
   /* Calculate average offset */
-  dev->calib.gyro_offset.x = (int16_t)(sum_x / num_samples);
-  dev->calib.gyro_offset.y = (int16_t)(sum_y / num_samples);
-  dev->calib.gyro_offset.z = (int16_t)(sum_z / num_samples);
+  if (num_samples > 0)
+  {
+    dev->calib.gyro_offset.x = (int16_t)(sum_x / num_samples);
+    dev->calib.gyro_offset.y = (int16_t)(sum_y / num_samples);
+    dev->calib.gyro_offset.z = (int16_t)(sum_z / num_samples);
+  }
 
   return ICM_OK;
 }
@@ -545,9 +565,12 @@ icm_err_t icm_calibrate_accel_offset(icm45686_t *dev, uint16_t num_samples)
   }
 
   /* Calculate offset: X/Y should be 0, Z should be 1g */
-  dev->calib.accel_offset.x = (int16_t)(sum_x / num_samples);
-  dev->calib.accel_offset.y = (int16_t)(sum_y / num_samples);
-  dev->calib.accel_offset.z = (int16_t)(sum_z / num_samples) - one_g;
+  if (num_samples > 0)
+  {
+    dev->calib.accel_offset.x = (int16_t)(sum_x / num_samples);
+    dev->calib.accel_offset.y = (int16_t)(sum_y / num_samples);
+    dev->calib.accel_offset.z = (int16_t)(sum_z / num_samples) - one_g;
+  }
 
   return ICM_OK;
 }
