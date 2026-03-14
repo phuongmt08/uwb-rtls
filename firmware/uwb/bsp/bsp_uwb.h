@@ -37,7 +37,8 @@
 /**
  * @brief  UWB radio configuration
  */
-typedef struct {
+typedef struct
+{
   uint8_t  channel;
   uint8_t  prf;
   uint8_t  data_rate;
@@ -113,6 +114,26 @@ void bsp_uwb_idle(void);
  *         Returns 0 if no valid RX or error
  */
 int8_t bsp_uwb_get_rssi(void);
+
+/**
+ * @brief Get cached RSSI of the last successfully received frame.
+ * @return RSSI in dBm, or -100 when unavailable.
+ */
+int8_t bsp_uwb_get_last_rx_rssi(void);
+
+/**
+ * @brief Get cached RX timestamp of the last successfully received frame.
+ * @param[out] timestamp 40-bit timestamp in DW units.
+ * @return BSP_OK on success, BSP_ERR if unavailable.
+ */
+bsp_err_t bsp_uwb_get_last_rx_timestamp(uint64_t *timestamp);
+
+/**
+ * @brief Get cached TX timestamp of the last completed TX frame.
+ * @param[out] timestamp 40-bit timestamp in DW units.
+ * @return BSP_OK on success, BSP_ERR if unavailable.
+ */
+bsp_err_t bsp_uwb_get_last_tx_timestamp(uint64_t *timestamp);
 
 /**
  * @brief Get configured TX antenna delay

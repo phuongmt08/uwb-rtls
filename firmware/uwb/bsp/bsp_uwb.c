@@ -1,654 +1,719 @@
 /**
  * @file       bsp_uwb.c
- * @brief      Board Support Package for UWB (DW1000) - FIXED & OPTIMIZED
- * @version    0.5.0
+ * @brief      Board Support Package for UWB (DW1000)
+ * @version    1.5.0
  * @date       2026-01-31
  */
 
 /* Includes ----------------------------------------------------------- */
+/* DecaWave driver */
 #include "bsp_uwb.h"
+
 #include "bsp_util.h"
-#include "mw_tdma_scheduler.h"
+#include "deca_device_api.h"
+#include "deca_regs.h"
 #include "err.h"
+#include "mw_tdma_scheduler.h"
 #include "spi.h"
 #include "sys_logger.h"
 
-/* DecaWave driver */
-#include "deca_device_api.h"
-#include "deca_regs.h"
-#include "sys_logger.h"
-#include <string.h>
-#include <stdio.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 /* Private defines ---------------------------------------------------- */
-#define DW1000_DEVICE_ID        0xDECA0130UL
-#define RX_TIMEOUT_MS           1000
-#ifndef DWT_START_RX_IMMEDIATE
-#define DWT_START_RX_IMMEDIATE  0
-#endif
-#define TX_MAX_PAYLOAD          120
-#define DW1000_CRC_LENGTH       2
+#define DW1000_DEVICE_ID       0xDECA0130UL
+#define RX_TIMEOUT_MS          1000
+#define DWT_START_RX_IMMEDIATE 0
+#define TX_MAX_PAYLOAD         120
+#define DW1000_CRC_LENGTH      2
 
-#define RX_TIME_ID              0x15
-#define TX_TIME_ID              0x17
+#define DW_MASK_40             0x000000FFFFFFFFFFULL
+#define DW_FMT                 "0x%08lX%08lX"
+#define DW_ARG(x)              (unsigned long) ((x) >> 32), (unsigned long) ((x) & 0xFFFFFFFFUL)
+
+static inline uint64_t dw_read_ts5(const uint8_t *buf)
+{
+  return ((uint64_t) buf[0]) | ((uint64_t) buf[1] << 8) | ((uint64_t) buf[2] << 16)
+         | ((uint64_t) buf[3] << 24) | ((uint64_t) buf[4] << 32);
+}
+
+#define RX_TIME_ID 0x15
+#define TX_TIME_ID 0x17
 
 /* Private variables -------------------------------------------------- */
-static bool s_initialized = false;
-static uint64_t s_last_rx_timestamp = 0;  /* Cached RX timestamp */
-static uint64_t s_last_tx_timestamp = 0;  /* Cached TX timestamp */
-static uint16_t s_tx_antenna_delay = 0;   /* Cached TX antenna delay */
-static uint16_t s_rx_antenna_delay = 0;   /* Cached RX antenna delay */
+static bool     s_initialized       = false;
+static uint64_t s_last_rx_timestamp = 0;    /* Cached RX timestamp */
+static uint64_t s_last_tx_timestamp = 0;    /* Cached TX timestamp */
+static int8_t   s_last_rx_rssi      = -100; /* Cached RSSI for last good RX frame */
+static uint16_t s_tx_antenna_delay  = 0;    /* Cached TX antenna delay */
+static uint16_t s_rx_antenna_delay  = 0;    /* Cached RX antenna delay */
 
 static volatile uint8_t s_irq_event_pending = 0;
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
 /* Private function prototypes ---------------------------------------- */
-static void reset_DW1000(void);
-static void port_set_dw1000_slowrate(void);
-static void port_set_dw1000_fastrate(void);
+static void     reset_DW1000(void);
+static void     port_set_dw1000_slowrate(void);
+static void     port_set_dw1000_fastrate(void);
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms);
 
-/* SPI functions ------------------------------------------------------ */
+/* Private functions ------------------------------------------------------ */
 /* Note: Keep writetospi and readfromspi compatible with deca_driver */
 
-int writetospi(uint16 headerLength, const uint8 *headerBuffer,
-               uint32 bodylength, const uint8 *bodyBuffer)
+int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength, const uint8 *bodyBuffer)
 {
-    HAL_StatusTypeDef status;
-    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_RESET);
+  HAL_StatusTypeDef status;
+  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_RESET);
 
-    if (headerLength > 0) {
-        status = HAL_SPI_Transmit(&hspi1, (uint8_t *)headerBuffer, headerLength, HAL_MAX_DELAY);
-        if (status != HAL_OK) {
-            HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-            return -1;
-        }
+  if (headerLength > 0)
+  {
+    status = HAL_SPI_Transmit(&hspi1, (uint8_t *) headerBuffer, headerLength, HAL_MAX_DELAY);
+    if (status != HAL_OK)
+    {
+      HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+      return -1;
     }
+  }
 
-    if (bodylength > 0) {
-        status = HAL_SPI_Transmit(&hspi1, (uint8_t *)bodyBuffer, bodylength, HAL_MAX_DELAY);
-        if (status != HAL_OK) {
-            HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-            return -1;
-        }
+  if (bodylength > 0)
+  {
+    status = HAL_SPI_Transmit(&hspi1, (uint8_t *) bodyBuffer, bodylength, HAL_MAX_DELAY);
+    if (status != HAL_OK)
+    {
+      HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+      return -1;
     }
+  }
 
-    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-    return 0;
+  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+  return 0;
 }
 
-int readfromspi(uint16 headerLength, const uint8 *headerBuffer,
-                uint32 readlength, uint8 *readBuffer)
+int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlength, uint8 *readBuffer)
 {
-    HAL_StatusTypeDef status;
-    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_RESET);
+  HAL_StatusTypeDef status;
+  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_RESET);
 
-    if (headerLength > 0) {
-        status = HAL_SPI_Transmit(&hspi1, (uint8_t *)headerBuffer, headerLength, HAL_MAX_DELAY);
-        if (status != HAL_OK) {
-            HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-            return -1;
-        }
+  if (headerLength > 0)
+  {
+    status = HAL_SPI_Transmit(&hspi1, (uint8_t *) headerBuffer, headerLength, HAL_MAX_DELAY);
+    if (status != HAL_OK)
+    {
+      HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+      return -1;
     }
+  }
 
-    if (readlength > 0) {
-        status = HAL_SPI_Receive(&hspi1, readBuffer, readlength, HAL_MAX_DELAY);
-        if (status != HAL_OK) {
-            HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-            return -1;
-        }
+  if (readlength > 0)
+  {
+    status = HAL_SPI_Receive(&hspi1, readBuffer, readlength, HAL_MAX_DELAY);
+    if (status != HAL_OK)
+    {
+      HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+      return -1;
     }
+  }
 
-    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-    return 0;
+  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+  return 0;
 }
-
-/* Helper functions --------------------------------------------------- */
 
 static void reset_DW1000(void)
 {
-    HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
-    HAL_Delay(2);
-    HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
-    HAL_Delay(2);
+  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
+  HAL_Delay(2);
+  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
+  HAL_Delay(2);
 }
 
 static void port_set_dw1000_slowrate(void)
 {
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
-    HAL_SPI_Init(&hspi1);
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
+  HAL_SPI_Init(&hspi1);
 }
 
 static void port_set_dw1000_fastrate(void)
 {
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
-    HAL_SPI_Init(&hspi1);
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  HAL_SPI_Init(&hspi1);
 }
 
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
 {
-    /* 1 unit = ~1.0256 μs */
-    uint32_t units = (timeout_ms * 1000u * 1000u) / 10256u;
-    if (units > 0xFFFFu) {
-        units = 0xFFFFu;
-    }
-    return (uint16_t)units;
+  /* 1 unit = ~1.0256 μs */
+  uint32_t units = (timeout_ms * 1000u * 1000u) / 10256u;
+  if (units > 0xFFFFu)
+  {
+    units = 0xFFFFu;
+  }
+  return (uint16_t) units;
 }
 
 /* Public functions --------------------------------------------------- */
 
 bsp_err_t bsp_uwb_init(void)
 {
-    uint32_t dev_id;
+  uint32_t dev_id;
 
-    bsp_util_init();
-    reset_DW1000();
-    port_set_dw1000_slowrate();
+  bsp_util_init();
+  reset_DW1000();
+  port_set_dw1000_slowrate();
 
-    /* Load LDE microcode - CRITICAL for accurate RX timestamps */
-    if (dwt_initialise(DWT_LOADUCODE) != DWT_SUCCESS) {
-        RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT, "dwt_initialise failed");
-        return BSP_ERR;
-    }
+  /* Load LDE microcode - CRITICAL for accurate RX timestamps */
+  if (dwt_initialise(DWT_LOADUCODE) != DWT_SUCCESS)
+  {
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT, "dwt_initialise failed");
+    return BSP_ERR;
+  }
 
-    dev_id = dwt_readdevid();
-    if (dev_id != DW1000_DEVICE_ID) {
-        RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT, "Wrong Device ID: 0x%08X", dev_id);
-        return BSP_ERR;
-    }
+  dev_id = dwt_readdevid();
+  if (dev_id != DW1000_DEVICE_ID)
+  {
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT, "Wrong Device ID: 0x%08X", dev_id);
+    return BSP_ERR;
+  }
 
-    port_set_dw1000_fastrate();
-    dwt_setleds(1);
+  port_set_dw1000_fastrate();
+  dwt_setleds(1);
 
-    s_initialized = true;
-    return BSP_OK;
+  s_initialized = true;
+  return BSP_OK;
 }
 
 bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
 {
-    CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
-    CHECK_PARAM(s_initialized, BSP_ERR);
+  CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
+  CHECK_PARAM(s_initialized, BSP_ERR);
 
-    dwt_config_t dw_cfg = {
-        .chan           = cfg->channel,
-        .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_1024,
-        .rxPAC          = DWT_PAC32,
-        .txCode         = 9,
-        .rxCode         = 9,
-        .nsSFD          = 0,
-        .dataRate       = cfg->data_rate,
-        .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = (1024 + 64)   
-    };
-    
-    if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS) {
-        return BSP_ERR;
-    }
+  dwt_config_t dw_cfg = { .chan           = cfg->channel,
+                          .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
+                          .txPreambLength = DWT_PLEN_1024,
+                          .rxPAC          = DWT_PAC32,
+                          .txCode         = 9,
+                          .rxCode         = 9,
+                          .nsSFD          = 0,
+                          .dataRate       = cfg->data_rate,
+                          .phrMode        = DWT_PHRMODE_STD,
+                          .sfdTO          = (1024 + 64) };
 
-    dwt_txconfig_t tx_cfg;
-    tx_cfg.power = cfg->tx_power;
-    tx_cfg.PGdly = 0xC2;
-    dwt_configuretxrf(&tx_cfg);
+  if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS)
+  {
+    return BSP_ERR;
+  }
 
-    dwt_setrxantennadelay(cfg->rx_antenna_delay);
-    dwt_settxantennadelay(cfg->tx_antenna_delay);
-    
-    s_tx_antenna_delay = cfg->tx_antenna_delay;
-    s_rx_antenna_delay = cfg->rx_antenna_delay;
-    /* Start fresh */
+  dwt_txconfig_t tx_cfg;
+  tx_cfg.power = cfg->tx_power;
+  tx_cfg.PGdly = 0xC2;
+  dwt_configuretxrf(&tx_cfg);
 
-    /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
-    dwt_setinterrupt((uint32)(DWT_INT_RFCG |
-                              DWT_INT_RFTO |
-                              DWT_INT_RXPTO |
-                              DWT_INT_RFCE |
-                              DWT_INT_RPHE |
-                              DWT_INT_RFSL), 1);
+  dwt_setrxantennadelay(cfg->rx_antenna_delay);
+  dwt_settxantennadelay(cfg->tx_antenna_delay);
 
-    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
-    dwt_forcetrxoff();
-    s_irq_event_pending = 0;
-    
-    return BSP_OK;
+  s_tx_antenna_delay = cfg->tx_antenna_delay;
+  s_rx_antenna_delay = cfg->rx_antenna_delay;
+  /* Start fresh */
+
+  /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
+  dwt_setinterrupt(
+    (uint32) (DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO | DWT_INT_RFCE | DWT_INT_RPHE | DWT_INT_RFSL), 1);
+
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  dwt_forcetrxoff();
+  s_irq_event_pending = 0;
+
+  return BSP_OK;
 }
 
 bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
 {
-    if (!data || length == 0 || length > TX_MAX_PAYLOAD)
-        return BSP_ERR;
+  if (!data || length == 0 || length > TX_MAX_PAYLOAD)
+    return BSP_ERR;
 
-    /* Ensure idle and clear all flags */
-    dwt_forcetrxoff();
-    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  /* Ensure idle and clear all flags */
+  dwt_forcetrxoff();
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
 
-    dwt_writetxdata(length, (uint8_t*)data, 0);
-    dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);
+  dwt_writetxdata(length, (uint8_t *) data, 0);
+  dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);
 
-    if (dwt_starttx(DWT_START_TX_IMMEDIATE) != DWT_SUCCESS) {
-        return BSP_ERR;
+  if (dwt_starttx(DWT_START_TX_IMMEDIATE) != DWT_SUCCESS)
+  {
+    return BSP_ERR;
+  }
+
+  /* Wait TX complete (Blocking) */
+  /* NOTE: Consider using interrupts or OS semaphores in future */
+  uint32_t timeout = HAL_GetTick() + 10;
+  uint32_t status  = 0;
+
+  while (!(status & SYS_STATUS_TXFRS))
+  {
+    status = dwt_read32bitreg(SYS_STATUS_ID);
+
+    if (status & SYS_STATUS_CLKPLL_LL)
+    {
+      return BSP_ERR;
     }
 
-    /* Wait TX complete (Blocking) */
-    /* NOTE: Consider using interrupts or OS semaphores in future */
-    uint32_t timeout = HAL_GetTick() + 10;
-    uint32_t status = 0;
-
-    while (!(status & SYS_STATUS_TXFRS)) {
-        status = dwt_read32bitreg(SYS_STATUS_ID);
-
-        if (status & SYS_STATUS_CLKPLL_LL) {
-            return BSP_ERR;
-        }
-
-        if (HAL_GetTick() > timeout) {
-            return BSP_ERR;
-        }
+    if (HAL_GetTick() > timeout)
+    {
+      return BSP_ERR;
     }
+  }
 
-    /* Cache TX timestamp */
-    uint8_t ts_buf[5];
-    dwt_readtxtimestamp(ts_buf);
-    s_last_tx_timestamp = ((uint64_t)ts_buf[0]) |
-                          ((uint64_t)ts_buf[1] << 8) |
-                          ((uint64_t)ts_buf[2] << 16) |
-                          ((uint64_t)ts_buf[3] << 24) |
-                          ((uint64_t)ts_buf[4] << 32);
+  /* Cache TX timestamp */
+  uint8_t ts_buf[5];
+  dwt_readtxtimestamp(ts_buf);
+  s_last_tx_timestamp = dw_read_ts5(ts_buf);
 
-    dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+  dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
 
-    return BSP_OK;
+  return BSP_OK;
 }
 
 bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
 {
-    CHECK_PARAM(data && out_len, BSP_ERR_PARAM);
-    CHECK_PARAM(s_initialized, BSP_ERR);
+  CHECK_PARAM(data && out_len, BSP_ERR_PARAM);
+  CHECK_PARAM(s_initialized, BSP_ERR);
 
-    uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+  uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
 
-    /* Good frame received */
-    if (status & SYS_STATUS_RXFCG) {
-        
-        /* 1. Wait for LDE processing done */
-        /* CRITICAL: LDE must complete for accurate RX timestamp */
-        uint32_t lde_timeout = HAL_GetTick() + 2;
-        while (!(dwt_read32bitreg(SYS_STATUS_ID) & SYS_STATUS_LDEDONE)) {
-            if (HAL_GetTick() > lde_timeout) {
-                RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] LDE timeout - DROP FRAME");
-                
-                /* DROP frame - timestamp would be inaccurate */
-                dwt_write32bitreg(SYS_STATUS_ID, 
-                                  SYS_STATUS_RXFCG | SYS_STATUS_RXDFR | 
-                                  SYS_STATUS_RXPRD | SYS_STATUS_RXSFDD | 
-                                  SYS_STATUS_RXPHD | SYS_STATUS_LDEDONE);
-                dwt_forcetrxoff();
-                dwt_rxreset();
-                dwt_rxenable(DWT_START_RX_IMMEDIATE);
-                
-                s_last_rx_timestamp = 0;
-                *out_len = 0;
-                return BSP_ERR; /* Frame dropped */
-            }
-        }
+  /* Good frame received */
+  if (status & SYS_STATUS_RXFCG)
+  {
+    /* 1. Wait for LDE processing done */
+    /* CRITICAL: LDE must complete for accurate RX timestamp */
+    uint32_t lde_timeout = HAL_GetTick() + 2;
+    while (!(dwt_read32bitreg(SYS_STATUS_ID) & SYS_STATUS_LDEDONE))
+    {
+      if (HAL_GetTick() > lde_timeout)
+      {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] LDE timeout - DROP FRAME");
 
-        /* 2. Read RX timestamp and compensate antenna delay */
-        /* CRITICAL: RX timestamp MUST include antenna delay so upper layer
-         * can calculate TX time correctly: tx_time = rx_time + offset
-         * Without this, anchor RESP timing will be wrong by antenna delay! */
-        uint8_t ts_buf[5];
-        dwt_readrxtimestamp(ts_buf);
-        uint64_t raw_rx_ts = ((uint64_t)ts_buf[0]) |
-                             ((uint64_t)ts_buf[1] << 8) |
-                             ((uint64_t)ts_buf[2] << 16) |
-                             ((uint64_t)ts_buf[3] << 24) |
-                             ((uint64_t)ts_buf[4] << 32);
-        
-        /* Compensate RX antenna delay to get true RF arrival time */
-        s_last_rx_timestamp = (raw_rx_ts + s_rx_antenna_delay) & 0x000000FFFFFFFFFFULL;
-
-        /* 3. Read Frame Info to get length */
-        uint32_t rxfi = dwt_read32bitreg(RX_FINFO_ID);
-        uint16_t frame_len_onair = (uint16_t)(rxfi & 0x03FF); 
-
-        /* 4. Calculate payload length (exclude CRC) */
-        uint16_t payload_len = 0;
-        if (frame_len_onair >= DW1000_CRC_LENGTH) {
-            payload_len = frame_len_onair - DW1000_CRC_LENGTH;
-        }
-
-        /* 5. Copy DIRECTLY to user buffer (OPTIMIZATION) */
-        /* Avoid double buffering on stack */
-        uint16_t copy_len = (payload_len < length) ? payload_len : length;
-        
-        if (copy_len > 0) {
-            dwt_readrxdata((uint8_t *)data, copy_len, 0);
-        }
-        
-        *out_len = payload_len;
-
-        /* 6. Clear RX flags */
-        dwt_write32bitreg(SYS_STATUS_ID, 
-                          SYS_STATUS_RXFCG | SYS_STATUS_RXDFR | 
-                          SYS_STATUS_RXPRD | SYS_STATUS_RXSFDD | 
-                          SYS_STATUS_RXPHD | SYS_STATUS_LDEDONE);
-        
-        return BSP_OK;
-    }
-
-    /* RX timeout */
-    if (status & (SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO)) {
-        /* Clear flags */
-        dwt_write32bitreg(SYS_STATUS_ID,
-                          SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO |
-                          SYS_STATUS_RXDFR  | SYS_STATUS_RXPRD |
-                          SYS_STATUS_RXSFDD | SYS_STATUS_RXPHD |
-                          SYS_STATUS_LDEDONE);
-        
-        /* Re-enable RX */
-        dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        
-        s_last_rx_timestamp = 0;
-        *out_len = 0;
-        return BSP_ERR_TIMEOUT;
-    }
-
-    /* RX frame errors */
-    if (status & (SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL)) {
-        /* Clear flags */
-        dwt_write32bitreg(SYS_STATUS_ID, 
-                          SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL |
-                          SYS_STATUS_RXDFR | SYS_STATUS_RXSFDD | SYS_STATUS_RXPRD |
-                          SYS_STATUS_LDEDONE);
-        
-        /* Reset RX logic */
+        /* DROP frame - timestamp would be inaccurate */
+        dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_RXDFR | SYS_STATUS_RXPRD
+                                           | SYS_STATUS_RXSFDD | SYS_STATUS_RXPHD | SYS_STATUS_LDEDONE);
         dwt_forcetrxoff();
-        dwt_rxreset();     
+        dwt_rxreset();
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        
+
         s_last_rx_timestamp = 0;
-        *out_len = 0;
-        return BSP_ERR; /* Return error to indicate bad frame */
+        *out_len            = 0;
+        return BSP_ERR; /* Frame dropped */
+      }
     }
 
-    return BSP_ERR; /* Still busy receiving */
+    /* 2. Read RX timestamp */
+    /* Note: dwt_setrxantennadelay() is already configured in hardware.
+     * Adding s_rx_antenna_delay again here causes a large positive bias in range. */
+    uint8_t ts_buf[5];
+    dwt_readrxtimestamp(ts_buf);
+    s_last_rx_timestamp = dw_read_ts5(ts_buf) & DW_MASK_40;
+
+    /* Capture RSSI immediately while diagnostics still match this frame. */
+    {
+      dwt_rxdiag_t diag;
+      dwt_readdignostics(&diag);
+      if (diag.firstPathAmp1 == 0 || diag.rxPreamCount == 0)
+      {
+        s_last_rx_rssi = -100;
+      }
+      else
+      {
+        float ratio    = (float) diag.firstPathAmp1 / (float) diag.rxPreamCount;
+        float log_val  = 20.0f * log10f(ratio);
+        s_last_rx_rssi = (int8_t) (log_val - 62.0f);
+      }
+    }
+
+    /* 3. Read Frame Info to get length */
+    uint32_t rxfi            = dwt_read32bitreg(RX_FINFO_ID);
+    uint16_t frame_len_onair = (uint16_t) (rxfi & 0x03FF);
+
+    /* 4. Calculate payload length (exclude CRC) */
+    uint16_t payload_len = 0;
+    if (frame_len_onair >= DW1000_CRC_LENGTH)
+    {
+      payload_len = frame_len_onair - DW1000_CRC_LENGTH;
+    }
+
+    /* 5. Copy DIRECTLY to user buffer (OPTIMIZATION) */
+    /* Avoid double buffering on stack */
+    uint16_t copy_len = (payload_len < length) ? payload_len : length;
+
+    if (copy_len > 0)
+    {
+      dwt_readrxdata((uint8_t *) data, copy_len, 0);
+    }
+
+    *out_len = payload_len;
+
+    /* 6. Clear RX flags */
+    dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_RXDFR | SYS_STATUS_RXPRD
+                                       | SYS_STATUS_RXSFDD | SYS_STATUS_RXPHD | SYS_STATUS_LDEDONE);
+
+    /* Keep receiver running for back-to-back frames in the same TDMA phase
+     * (e.g. TAG collecting multiple RESP/RESULT packets). */
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+    return BSP_OK;
+  }
+
+  /* RX timeout */
+  if (status & (SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO))
+  {
+    /* Clear flags */
+    dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO | SYS_STATUS_RXDFR
+                                       | SYS_STATUS_RXPRD | SYS_STATUS_RXSFDD | SYS_STATUS_RXPHD
+                                       | SYS_STATUS_LDEDONE);
+
+    /* Re-enable RX */
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+    s_last_rx_timestamp = 0;
+    s_last_rx_rssi      = -100;
+    *out_len            = 0;
+    return BSP_ERR_TIMEOUT;
+  }
+
+  /* RX frame errors */
+  if (status & (SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL))
+  {
+    /* Clear flags */
+    dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL
+                                       | SYS_STATUS_RXDFR | SYS_STATUS_RXSFDD | SYS_STATUS_RXPRD
+                                       | SYS_STATUS_LDEDONE);
+
+    /* Reset RX logic */
+    dwt_forcetrxoff();
+    dwt_rxreset();
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+    s_last_rx_timestamp = 0;
+    s_last_rx_rssi      = -100;
+    *out_len            = 0;
+    return BSP_ERR; /* Return error to indicate bad frame */
+  }
+
+  return BSP_ERR; /* Still busy receiving */
 }
 
 bsp_err_t bsp_uwb_read_40bit(uint8_t reg_addr, uint8_t sub_addr, uint64_t *timestamp)
 {
-    CHECK_PARAM(timestamp, BSP_ERR_PARAM);
-    
-    if (reg_addr == RX_TIME_ID && sub_addr == 0) {
-        if (s_last_rx_timestamp == 0) return BSP_ERR;
-        *timestamp = s_last_rx_timestamp;
-    } else if (reg_addr == TX_TIME_ID && sub_addr == 0) {
-        *timestamp = s_last_tx_timestamp;
-    } else {
-        uint8_t buf[5];
-        dwt_readfromdevice(reg_addr, sub_addr, 5, buf);
-        *timestamp = ((uint64_t)buf[0]) | 
-                    ((uint64_t)buf[1] << 8) | 
-                    ((uint64_t)buf[2] << 16) |
-                    ((uint64_t)buf[3] << 24) | 
-                    ((uint64_t)buf[4] << 32);
-    }
-    return BSP_OK;
+  CHECK_PARAM(timestamp, BSP_ERR_PARAM);
+
+  if (reg_addr == RX_TIME_ID && sub_addr == 0)
+  {
+    if (s_last_rx_timestamp == 0)
+      return BSP_ERR;
+    *timestamp = s_last_rx_timestamp;
+  }
+  else if (reg_addr == TX_TIME_ID && sub_addr == 0)
+  {
+    *timestamp = s_last_tx_timestamp;
+  }
+  else
+  {
+    uint8_t buf[5];
+    dwt_readfromdevice(reg_addr, sub_addr, 5, buf);
+    *timestamp = dw_read_ts5(buf);
+  }
+  return BSP_OK;
 }
 
 void bsp_uwb_reset(bool active)
 {
-    if (active) {
-        HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
-    } else {
-        HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
-    }
+  if (active)
+  {
+    HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
+  }
 }
 
 bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
 {
-    CHECK_PARAM(s_initialized, BSP_ERR);
-    
-    dwt_forcetrxoff();
-    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
-    
-    if (timeout_ms > 0 && timeout_ms <= 67) {
-        uint16_t timeout_units = ms_to_dw1000_rxtimeout_units(timeout_ms);
-        dwt_setrxtimeout(timeout_units);
-    } else {
-        dwt_setrxtimeout(0);
-    }
-    
-    /* Clear SW IRQ latch before enabling RX to avoid stale event. */
-    s_irq_event_pending = 0;
+  CHECK_PARAM(s_initialized, BSP_ERR);
 
-    /* Enable RX */
-    if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
-        return BSP_ERR;
-    }
-    
-    return BSP_OK;
+  dwt_forcetrxoff();
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+
+  if (timeout_ms > 0 && timeout_ms <= 67)
+  {
+    uint16_t timeout_units = ms_to_dw1000_rxtimeout_units(timeout_ms);
+    dwt_setrxtimeout(timeout_units);
+  }
+  else
+  {
+    dwt_setrxtimeout(0);
+  }
+
+  /* Clear SW IRQ latch before enabling RX to avoid stale event. */
+  s_irq_event_pending = 0;
+
+  /* Enable RX */
+  if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS)
+  {
+    return BSP_ERR;
+  }
+
+  return BSP_OK;
 }
 
 void bsp_uwb_idle(void)
 {
-    dwt_forcetrxoff();
-    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  dwt_forcetrxoff();
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
 }
 
 int8_t bsp_uwb_get_rssi(void)
 {
-    dwt_rxdiag_t diag;
-    dwt_readdignostics(&diag);
-    
-    /* 
-     * RSSI Formula for PRF64 (from DW1000 User Manual):
-     * RSL ≈ 20*log10(F1/N) - 62.42
-     */
-    
-    if (diag.firstPathAmp1 == 0 || diag.rxPreamCount == 0) {
-        return -100;
-    }
-    
-    float ratio = (float)diag.firstPathAmp1 / (float)diag.rxPreamCount;
-    
-    /* Optimized: Use log10f for FPU support on STM32F4 */
-    float log_val = 20.0f * log10f(ratio);
-    int8_t rssi_dbm = (int8_t)(log_val - 62.0f);
-    
-    return rssi_dbm;
+  dwt_rxdiag_t diag;
+  dwt_readdignostics(&diag);
+
+  /*
+   * RSSI Formula for PRF64 (from DW1000 User Manual):
+   * RSL ≈ 20*log10(F1/N) - 62.42
+   */
+
+  if (diag.firstPathAmp1 == 0 || diag.rxPreamCount == 0)
+  {
+    return -100;
+  }
+
+  float ratio = (float) diag.firstPathAmp1 / (float) diag.rxPreamCount;
+
+  float  log_val  = 20.0f * log10f(ratio);
+  int8_t rssi_dbm = (int8_t) (log_val - 62.0f);
+
+  return rssi_dbm;
+}
+
+int8_t bsp_uwb_get_last_rx_rssi(void)
+{
+  return s_last_rx_rssi;
+}
+
+bsp_err_t bsp_uwb_get_last_rx_timestamp(uint64_t *timestamp)
+{
+  CHECK_PARAM(timestamp, BSP_ERR_PARAM);
+  if (s_last_rx_timestamp == 0ULL)
+  {
+    return BSP_ERR;
+  }
+  *timestamp = s_last_rx_timestamp;
+  return BSP_OK;
+}
+
+bsp_err_t bsp_uwb_get_last_tx_timestamp(uint64_t *timestamp)
+{
+  CHECK_PARAM(timestamp, BSP_ERR_PARAM);
+  if (s_last_tx_timestamp == 0ULL)
+  {
+    return BSP_ERR;
+  }
+  *timestamp = s_last_tx_timestamp;
+  return BSP_OK;
 }
 
 bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_timestamp)
 {
-    CHECK_PARAM(s_initialized, BSP_ERR);
-    CHECK_PARAM(data != NULL, BSP_ERR);
-    CHECK_PARAM(length > 0 && length <= TX_MAX_PAYLOAD, BSP_ERR);
+  CHECK_PARAM(s_initialized, BSP_ERR);
+  CHECK_PARAM(data != NULL, BSP_ERR);
+  CHECK_PARAM(length > 0 && length <= TX_MAX_PAYLOAD, BSP_ERR);
 
-    dwt_forcetrxoff();
-    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  dwt_forcetrxoff();
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
 
-    dwt_writetxdata(length, (uint8_t *)data, 0);
-    dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);
-    
-    if (tx_timestamp < s_tx_antenna_delay) {
-        RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP , "[TX_DELAY] tx_timestamp < antenna_delay");
-        return BSP_ERR;
-    }
-    uint64_t scheduled_time = (tx_timestamp - s_tx_antenna_delay) & 0x000000FFFFFFFFFFULL;
+  dwt_writetxdata(length, (uint8_t *) data, 0);
+  dwt_writetxfctrl(length + DW1000_CRC_LENGTH, 0);
 
-    uint8_t sys_time_buf[5];
-    dwt_readsystime(sys_time_buf);
-    
-    uint64_t now = ((uint64_t)sys_time_buf[0]) |
-                   ((uint64_t)sys_time_buf[1] << 8) |
-                   ((uint64_t)sys_time_buf[2] << 16) |
-                   ((uint64_t)sys_time_buf[3] << 24) |
-                   ((uint64_t)sys_time_buf[4] << 32);
-    now &= 0x000000FFFFFFFFFFULL;
-    
-    /* Minimum guard time for DW1000 to schedule TX reliably */
-    /* CRITICAL: 1 DW tick ≈ 15.65ps, NOT 1µs!
-     * Formula: guard_dw = guard_us * (1e-6 / 15.65e-12) ≈ guard_us * 63898
-     * For 400µs safety margin: 400 * 63898 ≈ 25,559,200 DW ticks
-     */
-    const uint64_t DW_TICK_PER_US = 63898ULL;
-    const uint32_t MIN_GUARD_US = 400; /* 400µs safety margin */
-    const uint64_t MIN_GUARD_DW = MIN_GUARD_US * DW_TICK_PER_US; /* ~25.5M ticks */
-    
-    /* Check if scheduled time is in valid future */
-    int64_t diff = (int64_t)scheduled_time - (int64_t)now;
-    
-    if (diff <= (int64_t)MIN_GUARD_DW) {
-        uint32_t diff_dw = (diff >= 0) ? (uint32_t)diff : (uint32_t)(-diff);
-        uint32_t diff_us = tdma_dw_to_us((uint64_t)diff_dw);
-        RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER,
-               "[TX_DELAY] TOO LATE! diff=%ld DW (~%lu us), min=%lu DW",
-               (long)diff, (unsigned long)diff_us, (unsigned long)MIN_GUARD_DW);
-        return BSP_ERR;
-    }
-
-    /* Clear HPDWARN before scheduling (prevent stale warning) */
-    dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
-
-    uint32_t dx_time = (uint32_t)(scheduled_time >> 8);
-    dwt_setdelayedtrxtime(dx_time);
-
-    if (dwt_starttx(DWT_START_TX_DELAYED) != DWT_SUCCESS) {
-        return BSP_ERR;
-    }
-
-    /* Wait for TX complete */
-    uint32_t timeout_ms = 100;
-    uint32_t start = HAL_GetTick();
-
-    while ((HAL_GetTick() - start) < timeout_ms) {
-        uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
-        
-        if (status & SYS_STATUS_TXFRS) {
-            uint8_t ts_buf[5];
-            dwt_readtxtimestamp(ts_buf);
-            s_last_tx_timestamp = ((uint64_t)ts_buf[0]) |
-                                  ((uint64_t)ts_buf[1] << 8) |
-                                  ((uint64_t)ts_buf[2] << 16) |
-                                  ((uint64_t)ts_buf[3] << 24) |
-                                  ((uint64_t)ts_buf[4] << 32);
-            
-            dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
-            return BSP_OK;
-        }
-        
-        /* HPDWARN: Half Period Warning - Chip rejected time because it's too late */
-        if (status & SYS_STATUS_HPDWARN) {
-            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAY] HPDWARN (Late TX)");
-            dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
-            dwt_forcetrxoff();
-            return BSP_ERR;
-        }
-    }
-    
-    dwt_forcetrxoff();
+  if (tx_timestamp < s_tx_antenna_delay)
+  {
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP, "[TX_DELAY] tx_timestamp < antenna_delay");
     return BSP_ERR;
+  }
+  uint64_t scheduled_time = (tx_timestamp - s_tx_antenna_delay) & DW_MASK_40;
+
+  uint8_t sys_time_buf[5];
+  dwt_readsystime(sys_time_buf);
+
+  uint64_t now = dw_read_ts5(sys_time_buf) & DW_MASK_40;
+
+  /* Minimum guard time for DW1000 to schedule TX reliably.
+   * Formula: guard_dw = guard_us * (1e-6 / 15.65e-12) ≈ guard_us * 63898
+   * For 400µs safety margin: 400 * 63898 ≈ 25,559,200 DW ticks
+   */
+  const uint64_t DW_TICK_PER_US = 63898ULL;
+  const uint32_t MIN_GUARD_US   = 400;                           /* 400µs safety margin */
+  const uint64_t MIN_GUARD_DW   = MIN_GUARD_US * DW_TICK_PER_US; /* ~25.5M ticks */
+
+  /* Check if scheduled time is in valid future.
+   * Direct signed subtraction is wrong near 40-bit wrap and can mark a
+   * valid future timestamp as "too late", especially for later slots. */
+  const uint64_t MAX_REASONABLE_AHEAD_DW = tdma_us_to_dw(200000U); /* 200 ms */
+  uint64_t       ahead_dw                = (scheduled_time - now) & DW_MASK_40;
+
+  if (ahead_dw <= MIN_GUARD_DW || ahead_dw > MAX_REASONABLE_AHEAD_DW)
+  {
+    uint32_t ahead_us = tdma_dw_to_us(ahead_dw);
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP,
+           "[TX_DELAY] TOO LATE/INVALID! ahead=%lu DW (~%lu us), min=%lu DW", (unsigned long) ahead_dw,
+           (unsigned long) ahead_us, (unsigned long) MIN_GUARD_DW);
+    return BSP_ERR;
+  }
+
+  /* Clear HPDWARN before scheduling (prevent stale warning) */
+  dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
+
+  uint32_t dx_time = (uint32_t) (scheduled_time >> 8);
+  dx_time &= 0xFFFFFFFEUL; /* DW1000 delayed-TX uses 9-bit overall quantization. */
+  dwt_setdelayedtrxtime(dx_time);
+
+  if (dwt_starttx(DWT_START_TX_DELAYED) != DWT_SUCCESS)
+  {
+    uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP,
+           "[TX_DELAY] dwt_starttx delayed failed (status=0x%08lX, dx_time=0x%08lX)", (unsigned long) status,
+           (unsigned long) dx_time);
+    return BSP_ERR;
+  }
+
+  /* Wait for TX complete */
+  uint32_t timeout_ms = 100;
+  uint32_t start      = HAL_GetTick();
+  uint32_t status     = 0;
+
+  while ((HAL_GetTick() - start) < timeout_ms)
+  {
+    status = dwt_read32bitreg(SYS_STATUS_ID);
+
+    if (status & SYS_STATUS_TXFRS)
+    {
+      uint8_t ts_buf[5];
+      dwt_readtxtimestamp(ts_buf);
+      s_last_tx_timestamp = dw_read_ts5(ts_buf);
+
+      dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+      return BSP_OK;
+    }
+
+    /* HPDWARN: Half Period Warning - Chip rejected time because it's too late */
+    if (status & SYS_STATUS_HPDWARN)
+    {
+      RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAY] HPDWARN (Late TX)");
+      dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
+      dwt_forcetrxoff();
+      return BSP_ERR;
+    }
+  }
+
+  RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP, "[TX_DELAY] TXFRS timeout (status=0x%08lX)",
+         (unsigned long) status);
+
+  dwt_forcetrxoff();
+  return BSP_ERR;
 }
 
 bool bsp_uwb_is_rx_ready(void)
 {
-    if (!s_initialized) return false;
+  if (!s_initialized)
+    return false;
 
-    uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
-    
-    /* Check for any event that stops RX: Good Frame, Error, or Timeout */
-    uint32_t mask = SYS_STATUS_RXFCG | 
-                    SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO | 
-                    SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL;
+  uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
 
-    return (status & mask) != 0;
+  /* Check for any event that stops RX: Good Frame, Error, or Timeout */
+  uint32_t mask = SYS_STATUS_RXFCG | SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO | SYS_STATUS_RXFCE
+                  | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL;
+
+  return (status & mask) != 0;
 }
 
 uint64_t bsp_uwb_get_current_time_dw(void)
 {
-    if (!s_initialized) return 0;
-    
-    uint8_t ts_buf[5];
-    dwt_readsystime(ts_buf);  // Read SYS_TIME register
-    
-    uint64_t timestamp = ((uint64_t)ts_buf[0]) |
-                        ((uint64_t)ts_buf[1] << 8) |
-                        ((uint64_t)ts_buf[2] << 16) |
-                        ((uint64_t)ts_buf[3] << 24) |
-                        ((uint64_t)ts_buf[4] << 32);
-    
-    return timestamp & 0x000000FFFFFFFFFFULL;  /* Mask to 40 bits */
+  if (!s_initialized)
+    return 0;
+
+  uint8_t ts_buf[5];
+  dwt_readsystime(ts_buf);  // Read SYS_TIME register
+
+  return dw_read_ts5(ts_buf) & DW_MASK_40;
 }
 
 bsp_err_t bsp_uwb_validate_delayed_tx(uint64_t tx_timestamp_dw, uint64_t min_guard_dw)
 {
-    if (!s_initialized) return BSP_ERR;
-    
-    /* Get current time */
-    uint64_t current_time_dw = bsp_uwb_get_current_time_dw();
-    
-    /* Mask to 40 bits */
-    tx_timestamp_dw &= 0x000000FFFFFFFFFFULL;
-    current_time_dw &= 0x000000FFFFFFFFFFULL;
-    
-    /* TX must be in future */
-    if (tx_timestamp_dw <= current_time_dw) {
-        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, 
-               "[TX_VALIDATE] TX time in past (now=%08x%08x, tx=%08x%08x)",
-               (uint32_t)(current_time_dw >> 32), (uint32_t)current_time_dw,
-               (uint32_t)(tx_timestamp_dw >> 32), (uint32_t)tx_timestamp_dw);
-        return BSP_ERR;
-    }
-    
-    /* Check minimum guard time */
-    uint64_t time_diff = tx_timestamp_dw - current_time_dw;
-    
-    if (time_diff < min_guard_dw) {
-        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
-               "[TX_VALIDATE] Guard time too small (diff=%lu DW, min=%lu DW)",
-               (uint32_t)time_diff, (uint32_t)min_guard_dw);
-        return BSP_ERR;
-    }
-    
-    return BSP_OK;
+  if (!s_initialized)
+    return BSP_ERR;
+
+  /* Get current time */
+  uint64_t current_time_dw = bsp_uwb_get_current_time_dw();
+
+  /* Mask to 40 bits */
+  tx_timestamp_dw &= DW_MASK_40;
+  current_time_dw &= DW_MASK_40;
+
+  /* TX must be in future */
+  if (tx_timestamp_dw <= current_time_dw)
+  {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_VALIDATE] TX time in past (now=" DW_FMT ", tx=" DW_FMT ")",
+           DW_ARG(current_time_dw), DW_ARG(tx_timestamp_dw));
+    return BSP_ERR;
+  }
+
+  /* Check minimum guard time */
+  uint64_t time_diff = tx_timestamp_dw - current_time_dw;
+
+  if (time_diff < min_guard_dw)
+  {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_VALIDATE] Guard time too small (diff=%lu DW, min=%lu DW)",
+           (uint32_t) time_diff, (uint32_t) min_guard_dw);
+    return BSP_ERR;
+  }
+
+  return BSP_OK;
 }
 
 uint16_t bsp_uwb_get_rx_antenna_delay(void)
 {
-    return s_rx_antenna_delay;
+  return s_rx_antenna_delay;
 }
 uint16_t bsp_uwb_get_tx_antenna_delay(void)
 {
-    return s_tx_antenna_delay;
+  return s_tx_antenna_delay;
 }
 void bsp_uwb_on_irq(void)
 {
-    s_irq_event_pending = 1;
+  s_irq_event_pending = 1;
 }
 
 void bsp_uwb_clear_irq_event(void)
 {
-    s_irq_event_pending = 0;
+  s_irq_event_pending = 0;
 }
 
 bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
 {
-    uint32_t start_tick = HAL_GetTick();
+  uint32_t start_tick = HAL_GetTick();
 
-    while ((HAL_GetTick() - start_tick) < timeout_ms) {
-        if (s_irq_event_pending) {
-            s_irq_event_pending = 0;
-            return true;
-        }
-
-        /* Fallback path: if EXTI edge was missed, poll DW1000 status bits. */
-        if (bsp_uwb_is_rx_ready()) {
-            return true;
-        }
+  while ((HAL_GetTick() - start_tick) < timeout_ms)
+  {
+    if (s_irq_event_pending)
+    {
+      s_irq_event_pending = 0;
+      return true;
     }
 
-    return false;
+    /* Fallback path: if EXTI edge was missed, poll DW1000 status bits. */
+    if (bsp_uwb_is_rx_ready())
+    {
+      return true;
+    }
+  }
+
+  return false;
 }
 /* End of file -------------------------------------------------------- */
