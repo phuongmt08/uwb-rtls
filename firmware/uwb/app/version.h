@@ -20,7 +20,11 @@
 #define FW_VERSION_PATCH 0
 
 /* FW_VERSION_BUILD is auto-updated by Python programmer before each build */
+#if __has_include("version_build.h")
 #include "version_build.h"
+#else
+#define FW_VERSION_BUILD 0
+#endif
 
 #define FW_VERSION_GITSHA FW_VERSION_GITSHA_HEX
 
