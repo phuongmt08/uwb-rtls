@@ -1,13 +1,9 @@
-/* ============================== mw_tdma_scheduler.c (FIXED) ==============================
+/* ============================== mw_tdma_scheduler.c ==============================
  * @file       mw_tdma_scheduler.c
- * @brief      TDMA Time Slot Scheduler Implementation - CRITICAL FIXES APPLIED
+ * @brief      TDMA Time Slot Scheduler
  * @version    2.0.0
  * @date       2026-02-01
  * 
- * @note       CRITICAL FIX #1 APPLIED:
- *             - Guard time: 8ms → 300-500µs (proper TDMA guard)
- *             - Processing margin: separated and explicit
- *             - Slot timing model corrected
  */
 
 #include "mw_tdma_scheduler.h"
@@ -47,17 +43,6 @@ static void build_slot_table(tdma_scheduler_t *tdma)
     }
 }
 
-static uint32_t calculate_safe_guard_time(uint8_t num_anchors)
-{
-    if (num_anchors >= 6) {
-        return TDMA_SAFE_GUARD_TIME_US;  /* 500µs for dense networks */
-    } else if (num_anchors >= 4) {
-        return TDMA_CONSERVATIVE_GUARD_TIME_US;  /* 400µs for medium */
-    } else {
-        return TDMA_DEFAULT_GUARD_TIME_US;  /* 300µs default */
-    }
-}
-
 /* Public API --------------------------------------------------------- */
 
 tdma_err_t tdma_init(tdma_scheduler_t *tdma,
@@ -84,7 +69,7 @@ tdma_err_t tdma_init(tdma_scheduler_t *tdma,
     
     sched->slot_duration_us = TDMA_DEFAULT_SLOT_DURATION_US;
     
-    sched->guard_time_us = calculate_safe_guard_time(num_anchors);
+    sched->guard_time_us = TDMA_DEFAULT_GUARD_TIME_US;
     
     sched->processing_margin_us = TDMA_PROCESSING_MARGIN_US; 
     
@@ -378,7 +363,7 @@ tdma_err_t tdma_calculate_slot_start_time(const tdma_scheduler_t *tdma,
     if (!slot_start_dw) return TDMA_ERR_PARAM;
     if (slot_id > tdma->schedule.num_anchors) return TDMA_ERR_INVALID_SLOT;
     
-    /* FIXED: slot_start = superframe_start + slot_id * (slot_duration + guard) */
+    /* Calculate slot start time */
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
     *slot_start_dw = tdma->superframe_start_dw + 
                      tdma_us_to_dw(slot_id * effective_slot_us);
@@ -396,7 +381,7 @@ bool tdma_is_in_slot(const tdma_scheduler_t *tdma,
     if (!tdma || !tdma->initialized || !tdma->synchronized) return false;
     if (slot_id > tdma->schedule.num_anchors) return false;
     
-    /* FIXED: Calculate slot boundaries with guard time */
+    /* Calculate slot boundaries with guard time */
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
     uint64_t slot_start_dw = tdma->superframe_start_dw + 
                              tdma_us_to_dw(slot_id * effective_slot_us);
@@ -439,8 +424,13 @@ tdma_err_t tdma_get_slot_rx_window(const tdma_scheduler_t *tdma,
     
     if (slot_id < 0) return TDMA_ERR_INVALID_PARAM;
 
-    #define RX_EARLY_MARGIN_US  100
-    #define RX_LATE_MARGIN_US   300
+    /* RXFCG is raised at frame end, so late margin must include PHY airtime
+     * and software jitter; using fixed +300us is too tight at low data rates. */
+    uint32_t rx_early_margin_us = (tdma->schedule.guard_time_us >= 300U) ? 300U : tdma->schedule.guard_time_us;
+    uint32_t rx_late_margin_us = tdma->schedule.guard_time_us +
+                                 tdma->schedule.processing_margin_us +
+                                 TDMA_CLOCK_GUARD_US +
+                                 2500U;
     
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
     
@@ -449,8 +439,8 @@ tdma_err_t tdma_get_slot_rx_window(const tdma_scheduler_t *tdma,
                                 tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us);
     
     /* RX window: [expected - early, expected + late] */
-    *rx_start_dw = expected_resp_dw - tdma_us_to_dw(RX_EARLY_MARGIN_US);
-    *rx_end_dw = expected_resp_dw + tdma_us_to_dw(RX_LATE_MARGIN_US);
+    *rx_start_dw = expected_resp_dw - tdma_us_to_dw(rx_early_margin_us);
+    *rx_end_dw = expected_resp_dw + tdma_us_to_dw(rx_late_margin_us);
     
     *rx_start_dw = tdma_mask_40bit(*rx_start_dw);
     *rx_end_dw = tdma_mask_40bit(*rx_end_dw);

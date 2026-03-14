@@ -123,32 +123,6 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors,
 sys_ranging_err_t sys_ranging_tag_get_results_tdma(sys_ranging_multi_result_t *results);
 
 /**
- * @brief Execute Tag TDMA ranging (blocking, direct call - no start/process split)
- * @param num_anchors Number of anchors
- * @param anchor_ids Array of anchor IDs
- * @param sequence_num Sequence number
- * @param rx_timeout_ms RX timeout in milliseconds
- * @return SYS_RANGING_OK if successful
- */
-sys_ranging_err_t sys_ranging_tag_run_tdma_blocking(uint8_t num_anchors,
-                                                    const uint8_t *anchor_ids,
-                                                    uint8_t sequence_num,
-                                                    uint32_t rx_timeout_ms);
-
-/**
- * @brief Run Anchor ranging in TDMA mode (blocking - one complete cycle)
- * @param anchor_id This anchor's ID (1-8)
- * @param num_anchors Total number of anchors in network
- * @param anchor_ids Array of all anchor IDs in network
- * @param rx_timeout_ms RX timeout in milliseconds
- * @return SYS_RANGING_OK if successful, SYS_RANGING_ERR on failure
- */
-sys_ranging_err_t sys_ranging_anchor_run_tdma_blocking(uint8_t anchor_id,
-                                                       uint8_t num_anchors,
-                                                       const uint8_t *anchor_ids,
-                                                       uint32_t rx_timeout_ms);
-
-/**
  * @brief Get last anchor ranging result
  * @param result Pointer to result structure
  * @return SYS_RANGING_OK if valid result available
@@ -246,20 +220,17 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
  */
 void sys_ranging_reset_stats(void);
 
-/* ====================================================================
- * LEGACY API (deprecated but maintained for compatibility)
- * ==================================================================== */
-
-#ifdef MULTIPLE_ANCHOR
 /**
- * @brief Range with multiple anchors sequentially (blocking, legacy)
- * @deprecated Use sys_ranging_tag_start_tdma() instead
+ * @brief Enable/disable anchor-side distance smoothing filter at runtime.
+ * @param enable true to enable smoothing, false to bypass (raw distance).
  */
-int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
-                                 uint8_t num_anchors,
-                                 sys_ranging_result_t *results,
-                                 uint8_t sequence_num,
-                                 uint32_t rx_timeout_ms);
-#endif
+void sys_ranging_set_distance_smoothing(bool enable);
+
+/**
+ * @brief Get current anchor-side distance smoothing state.
+ * @return true if smoothing is enabled.
+ */
+bool sys_ranging_is_distance_smoothing_enabled(void);
+
 
 #endif /* __SYS_RANGING_H */

@@ -1,13 +1,8 @@
-/* ============================== mw_tdma_scheduler.h (FIXED) ==============================
+/* ============================== mw_tdma_scheduler.h ==============================
  * @file       mw_tdma_scheduler.h
- * @brief      TDMA Time Slot Scheduler - CRITICAL FIXES APPLIED
+ * @brief      TDMA Time Slot Scheduler
  * @version    2.0.0
  * @date       2026-02-01
- * 
- * @note       CRITICAL FIX #1 - GUARD TIME CORRECTED:
- *             - Guard time reduced from 8ms → 300-500µs (TRUE TDMA guard)
- *             - Processing margin separated from guard time
- *             - Slot timing model now correct
  */
 
 #ifndef MW_TDMA_SCHEDULER_H
@@ -20,36 +15,60 @@
 extern "C" {
 #endif
 
-/* ====================================================================
- * CRITICAL FIX #1: PROPER GUARD TIME DEFINITION
- * ==================================================================== */
 
-/* FIX: Separate processing margin from guard time */
 #define TDMA_PROCESSING_MARGIN_US    400      /* SPI + HAL overhead (300-500µs) */
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
-/* TRUE guard time for TDMA (clock drift + jitter ONLY) */
-#define TDMA_MIN_GUARD_TIME_US       200      /* Absolute minimum guard (was 8000µs!) */
-#define TDMA_DEFAULT_GUARD_TIME_US   1000      /* Standard guard (was 8000µs!) */
-#define TDMA_CONSERVATIVE_GUARD_TIME_US  400  /* Conservative guard (was 12000µs!) */
-#define TDMA_SAFE_GUARD_TIME_US      500      /* Maximum guard for dense networks (was 16000µs!) */
+#define TDMA_MIN_GUARD_TIME_US       200      /* Absolute minimum guard */
+#define TDMA_DEFAULT_GUARD_TIME_US   1500      /* Standard guard (stability profile) */
 
-/* Warning threshold - anything above 1ms is suspicious */
-#define TDMA_WARN_GUARD_TIME_US      1000     /* Warn if guard > 1ms */
+/* Warning threshold - keep in sync with default guard profile. */
+#define TDMA_WARN_GUARD_TIME_US      1500
 
 /* ====================================================================
  * TIMING CONSTANTS
  * ==================================================================== */
 #define TDMA_MAX_ANCHORS             8
 
-#define TDMA_DEFAULT_SLOT_DURATION_US      2000   /* 2ms per slot */
-#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 1000   /* 1ms delay */
-#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 1000  /* 1ms delay */
-#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 1000 /* 1ms delay */
-
+#define TDMA_DEFAULT_SLOT_DURATION_US      2500   /* 2.5ms payload window per slot */
+#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 1500   /* 1.5ms delay */
+#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 1500  /* 1.5ms delay */
+#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 1500 /* 1.5ms delay */
 /* DW1000 time unit conversions */
 #define DW_TIME_UNIT_NS              15.65f   /* ~15.65 ps per tick */
-#define DW_TICKS_PER_US              64103    /* Approx ticks per microsecond */
+#define DW_TICKS_PER_US              63898ULL /* Approx ticks per microsecond */
+/*
+ * Superframe layout:
+ * +--------+ +----------------------+ +---------------------------+ +---------+ +----------------------+ +---------------------------+
+ * | TAG    | |                      | | N ANCHOR                  | | TAG     | |                      | | N ANCHOR                  |
+ * +--------+ +----------------------+ +---------------------------+ +---------+ +----------------------+ +---------------------------+
+ * |  POLL  | | poll_to_resp_delay   | | RESP slots 1→N            | |  FINAL  | | final_to_result_delay| | RESULT slots 1→N          |
+ * |  tx    | | 1500 us (default)    | | N * (2500 + 1500) us      | |  tx     | | 1500 us (default)    | | N * (2500 + 1500) us      |
+ * +--------+ +----------------------+ +---------------------------+ +---------+ +----------------------+ +---------------------------+
+ *                           ^ each RESP/RESULT slot = slot_duration_us + guard_time_us = 4000 us (default)
+ *
+ * Full timing formula (default macros):
+ *   poll_to_resp_delay_us
+ * + N * (slot_duration_us + guard_time_us)
+ * + resp_to_final_delay_us
+ * + final_to_result_delay_us
+ * + N * (slot_duration_us + guard_time_us)
+ *
+ * => T_superframe(N) = 1500 + N*4000 + 1500 + 1500 + N*4000 (us)
+ *                   = 4500 + 8000*N (us)
+ *
+ * Example:
+ *   N=4 anchors:  T = 36500 us = 36.5 ms
+ *   N=8 anchors:  T = 68500 us = 68.5 ms
+ *
+ * Guard time notes:
+ * - guard_time_us is a safety gap inside each slot to absorb clock drift and PHY jitter.
+ * - Practical sizing rule:
+ *     guard_time >= drift_margin + timestamp_quantization + ISR/SPI jitter margin
+ * - Drift margin is roughly proportional to elapsed time between sync points.
+ *   If you increase superframe duration or anchor count, guard should be reviewed.
+ */
+
 
 /* ====================================================================
  * TYPES
@@ -128,12 +147,12 @@ typedef struct {
 
 /* Convert microseconds to DW1000 time units */
 static inline uint64_t tdma_us_to_dw(uint32_t us) {
-    return ((uint64_t)us * 64103ULL) >> 10;  /* Optimized: * 64103 / 1024 */
+    return (uint64_t)us * DW_TICKS_PER_US;
 }
 
 /* Convert DW1000 time units to microseconds */
 static inline uint32_t tdma_dw_to_us(uint64_t dw) {
-    return (uint32_t)((dw * 1024ULL) / 64103ULL);
+    return (uint32_t)(dw / DW_TICKS_PER_US);
 }
 
 /* Mask timestamp to 40 bits */
