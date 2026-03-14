@@ -202,7 +202,7 @@ int sys_config_save(void)
     }
 
 #ifdef HAVE_RTC
-    uint32_t timestamp = bsp_rtc_get_timestamp();
+    uint32_t timestamp = bsp_rtc_get_timestamp_s();
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config saved to flash (CRC: 0x%08X, TS: %lu)", g_storage.crc32, timestamp);
 #else
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config saved to flash (CRC: 0x%08X)", g_storage.crc32);

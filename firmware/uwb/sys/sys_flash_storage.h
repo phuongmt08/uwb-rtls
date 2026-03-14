@@ -5,8 +5,6 @@
  * @author     Phuong Mai
  * @brief      Shared dual-sector flash storage singleton
  *
- * @details    Owns the single bsp_flash_dual_t that maps to S6 + S7 (256 KB
- *             total).
  */
 
 /* Define to prevent recursive inclusion ------------------------------------ */

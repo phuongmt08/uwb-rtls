@@ -4,12 +4,6 @@
  * @date       2026-03-05
  * @author     Phuong Mai
  * @brief      Shared dual-sector flash storage singleton
- *
- * @details    Owns the single bsp_flash_dual_t that covers S6 + S7.
- *             sys_config and sys_log_store both obtain the handle via
- *             sys_flash_storage_get() instead of each managing their own
- *             bsp_flash_dual_t — a single init, a single active-sector
- *             state machine, shared by all subsystems.
  */
 
 /* Includes ----------------------------------------------------------------- */
@@ -17,6 +11,7 @@
 #include "sys_logger.h"
 #include "bsp_util.h"
 #include <string.h>
+#include "config.h"
 
 #ifdef HAVE_FLASH_STORAGE
 #include "stm32f4xx_hal.h"
@@ -24,9 +19,8 @@
 
 /* Private defines ---------------------------------------------------------- */
 #ifdef HAVE_FLASH_STORAGE
-/* Select timestamp source at compile time */
 #ifdef HAVE_RTC
-#  define SYS_FLASH_TIMESTAMP_FN   bsp_rtc_get_timestamp
+#  define SYS_FLASH_TIMESTAMP_FN   bsp_rtc_get_timestamp_s
 #else
 #  define SYS_FLASH_TIMESTAMP_FN   HAL_GetTick
 #endif

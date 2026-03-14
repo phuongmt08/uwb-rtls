@@ -17,10 +17,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-#ifdef HAVE_RTC
-#include "bsp_util.h"  // For bsp_rtc_get_timestamp()
-#endif
+#include "config.h"
+#include "bsp_util.h"
+#include "config.h"
 
 #ifdef HAVE_FLASH_STORAGE
 #include "sys_flash_storage.h"
@@ -456,7 +455,7 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
 
 // Timestamp (6 bytes)
 #ifdef HAVE_RTC
-  uint64_t timestamp_ms = (uint64_t) bsp_rtc_get_timestamp();  // Use RTC timestamp
+  uint64_t timestamp_ms = (uint64_t) bsp_rtc_get_timestamp_ms();  // Use RTC timestamp
 #else
   uint64_t timestamp_ms = (uint64_t) log_seq_num++;  // Use sequence number
 #endif

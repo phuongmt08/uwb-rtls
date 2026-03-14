@@ -1,5 +1,6 @@
 #include "network_cmd.h"
 #include "sys_logger.h"
+#include "config.h"
 #include "stm32f4xx_hal.h"
 #include "bsp_flash.h"
 #include "bsp_util.h"
@@ -324,13 +325,27 @@ static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t
 static void network_cmd_time_sync_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
     protobuf_packet_t resp;
+    uint64_t unix_time_ms = 0;
+    int32_t timezone_offset = 0;
 
     CHECK_VOID(cmd && pkt && cmd->stream);
 
     memset(&resp, 0, sizeof(resp));
     resp.which_params = protobuf_packet_t_time_sync_resp_tag;
-    resp.params.time_sync_resp.unix_time_ms = HAL_GetTick();
-    resp.params.time_sync_resp.timezone_offset = 0;
+
+#ifdef HAVE_RTC
+    if (bsp_rtc_sync_get(&unix_time_ms, &timezone_offset) != BSP_UTIL_OK) {
+        RLOG_W(OBJECT_CODE, "RTC sync get failed, using fallback tick");
+        unix_time_ms = (uint64_t)HAL_GetTick();
+        timezone_offset = 0;
+    }
+#else
+    unix_time_ms = (uint64_t)HAL_GetTick();
+    timezone_offset = 0;
+#endif
+
+    resp.params.time_sync_resp.unix_time_ms = unix_time_ms;
+    resp.params.time_sync_resp.timezone_offset = timezone_offset;
     resp.hdr.addr.dst = pkt->hdr.addr.src;
 
     network_cmd_send_packet(cmd, &resp);
@@ -338,8 +353,27 @@ static void network_cmd_time_sync_get(network_cmd_t *cmd, const protobuf_packet_
 
 static void network_cmd_time_sync_set(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
-    (void)cmd;
-    (void)pkt;
+    CHECK_VOID(cmd && pkt);
+
+    bsp_rtc_time_t rtc_time;
+
+    if (bsp_rtc_sync_set(pkt->params.time_sync_set.unix_time_ms,
+                         pkt->params.time_sync_set.timezone_offset) != BSP_UTIL_OK) {
+        RLOG_W(OBJECT_CODE, "RTC sync set failed");
+        return;
+    }
+
+    bsp_rtc_get_time(&rtc_time);
+    RLOG_I(OBJECT_CODE,
+            "RTC synced: datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
+            (unsigned)rtc_time.day,
+            (unsigned)rtc_time.month,
+            (unsigned)(2000u + rtc_time.year),
+            (unsigned)rtc_time.hour,
+            (unsigned)rtc_time.minute,
+            (unsigned)rtc_time.second,
+            (long)pkt->params.time_sync_set.timezone_offset);
+
 }
 
 static void network_cmd_ble_status_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
