@@ -356,6 +356,7 @@ int main(void)
 #endif
 
     sys_logger_task();
+    bsp_io_task();
     bsp_delay_ms(1);
     
     /* USER CODE END WHILE */
