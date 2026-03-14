@@ -7,7 +7,6 @@
  * @author     Phuong Mai
  * @brief      Non-blocking Anchor with binary search auto-calibration & TDMA
  * 
- * FIX #6: Corrected RX timeout from 1000ms → 10ms for TDMA
  */
 /* Includes ----------------------------------------------------------- */
 #include "app_anchor.h"
@@ -60,6 +59,7 @@ typedef struct {
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
 static anchor_app_state_t s_app_state = ANCHOR_STATE_IDLE;
+static bool s_anchor_ranging_started = false;
 
 #if ENABLE_ANCHOR_AUTO_CALIB
 static calib_state_t s_calib = {0};
@@ -217,7 +217,7 @@ static void calib_calculate_and_adjust(void)
   uwb_cfg.data_rate = cfg->uwb_data_rate;
   uwb_cfg.preamble_code = cfg->uwb_preamble_code;
   uwb_cfg.tx_antenna_delay = s_calib.current_delay;
-  uwb_cfg.rx_antenna_delay = cfg->rx_antenna_delay;
+  uwb_cfg.rx_antenna_delay = s_calib.current_delay;
   uwb_cfg.tx_power = cfg->tx_power;
   
   bsp_uwb_configure(&uwb_cfg); /* Hardware re-config */
@@ -234,6 +234,7 @@ static void calib_apply_and_save(void)
   
   sys_config_t *cfg = sys_config_get();
   cfg->tx_antenna_delay = s_calib.current_delay;
+  cfg->rx_antenna_delay = s_calib.current_delay;
   
   if (sys_config_save() == 0) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saved! Restarting...");
@@ -267,7 +268,7 @@ void app_anchor_on_button(bsp_io_button_event_t event)
 
 #endif
 
-/* Public function definitions ---------------------------------------- */
+/* Public functions ---------------------------------------- */
 
 app_err_t app_anchor_init(void)
 {
@@ -304,22 +305,38 @@ app_err_t app_anchor_init(void)
 void app_anchor_process(void *arg)
 {
   (void)arg;
+  static uint32_t s_last_diag_log = 0;
+  uint32_t now = HAL_GetTick();
   sys_config_t *cfg = sys_config_get();
+  uint32_t rx_timeout_ms = (cfg->rx_timeout_ms < 5U) ? 5U : cfg->rx_timeout_ms;
   uint8_t my_id = 0;
-  uint8_t num_anchors = 1;
+  uint8_t num_anchors = NUM_ANCHORS;
   uint8_t anchor_ids[NUM_ANCHORS] = {0};
 
   get_tdma_config(&my_id, &num_anchors, anchor_ids);
 
-  /* FIX #6: Use short timeout (10ms) for TDMA - should detect POLL quickly */
-  /* In TDMA, if TAG isn't sending, anchor should timeout fast and retry */
-  /* This allows anchor to be responsive in main loop without blocking too long */
-  sys_ranging_err_t err = sys_ranging_anchor_run_tdma_blocking(my_id, num_anchors, anchor_ids, 10);
+  if (!s_anchor_ranging_started) {
+    sys_ranging_err_t start_err = sys_ranging_anchor_start_tdma(my_id, num_anchors, anchor_ids, rx_timeout_ms);
+    if (start_err == SYS_RANGING_OK) {
+      s_anchor_ranging_started = true;
+    } else if (start_err != SYS_RANGING_ERR_BUSY && (now - s_last_diag_log) >= 1000U) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR,
+             "[ANCHOR] start err=%d id=%u n=%u timeout=%lums",
+             start_err,
+             my_id,
+             num_anchors,
+             (unsigned long)rx_timeout_ms);
+      s_last_diag_log = now;
+      bsp_io_led_blink(5);
+    }
+    return;
+  }
+
+  sys_ranging_err_t err = sys_ranging_anchor_process_tdma(num_anchors, anchor_ids, rx_timeout_ms);
 
   if (err == SYS_RANGING_OK) {
-    /* Get result */
     sys_ranging_result_t result;
-    if (sys_ranging_anchor_get_last_result(&result) == SYS_RANGING_OK && result.valid) {
+    if (sys_ranging_anchor_get_result_tdma(&result) == SYS_RANGING_OK && result.valid) {
       s_success_count++;
       s_error_count = 0;
 
@@ -338,20 +355,31 @@ void app_anchor_process(void *arg)
       }
 #endif
 
-      /* Visual feedback */
-      bsp_io_led_on();
-      bsp_delay_ms(5);
-      bsp_io_led_off();
     }
-  } else if (err == SYS_RANGING_ERR_TIMEOUT) {
-    /* Normal - no TAG polling at this time */
-    /* Don't increment error count for timeouts in TDMA */
+    s_anchor_ranging_started = false;
+  } else if (err == SYS_RANGING_ERR_TIMEOUT || err == SYS_RANGING_ERR_NOT_STARTED) {
+    if ((now - s_last_diag_log) >= 1000U) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR,
+             "[ANCHOR] process state miss err=%d timeout=%lums",
+             err,
+             (unsigned long)rx_timeout_ms);
+      s_last_diag_log = now;
+      bsp_io_led_blink(5);
+    }
+    if (err == SYS_RANGING_ERR_NOT_STARTED) {
+      s_anchor_ranging_started = false;
+    }
+  } else if (err == SYS_RANGING_ERR_BUSY) {
+    /* Still processing */
   } else {
     /* Real error */
     s_error_count++;
+    s_anchor_ranging_started = false;
+    bsp_io_led_blink(5);
     if (s_error_count >= MAX_CONSECUTIVE_ERR) {
       RLOG_W(LOG_OBJECT_CODE_ANCHOR, "Many errors (%lu)", s_error_count);
       s_error_count = 0;
     }
   }
 }
+/* End of file -------------------------------------------------------- */
