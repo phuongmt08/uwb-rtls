@@ -20,7 +20,7 @@ extern "C" {
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
 #define TDMA_MIN_GUARD_TIME_US       200      /* Absolute minimum guard */
-#define TDMA_DEFAULT_GUARD_TIME_US   1500      /* Standard guard (stability profile) */
+#define TDMA_DEFAULT_GUARD_TIME_US   1500     /* Standard guard (stability profile) */
 
 /* Warning threshold - keep in sync with default guard profile. */
 #define TDMA_WARN_GUARD_TIME_US      1500
@@ -32,7 +32,7 @@ extern "C" {
 
 #define TDMA_DEFAULT_SLOT_DURATION_US      2500   /* 2.5ms payload window per slot */
 #define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 1500   /* 1.5ms delay */
-#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 1500  /* 1.5ms delay */
+#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 3500  /* 3.5ms delay */
 #define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 1500 /* 1.5ms delay */
 /* DW1000 time unit conversions */
 #define DW_TIME_UNIT_NS              15.65f   /* ~15.65 ps per tick */

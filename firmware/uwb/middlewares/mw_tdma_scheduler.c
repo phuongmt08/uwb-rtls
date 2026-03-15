@@ -247,11 +247,19 @@ tdma_err_t tdma_calculate_final_time(const tdma_scheduler_t *tdma,
     if (!tx_timestamp_dw) return TDMA_ERR_PARAM;
     
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
-    uint64_t last_anchor_slot_end_dw = tdma->superframe_start_dw + 
+
+    /* FIX: poll_to_resp_delay_us was missing from the formula.
+     * RESP slots are offset from superframe_start by poll_to_resp_delay, so
+     * slot-N ends at: superframe_start + poll_to_resp_delay + N*eff
+     * Without this term, FINAL was scheduled 1500us too early, coinciding
+     * with the slot-N RESP TX — causing the RESP window cap to close before
+     * slot-N RESP could arrive at TAG. */
+    uint64_t last_anchor_slot_end_dw = tdma->superframe_start_dw +
+                                        tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us) +
                                         tdma_us_to_dw(tdma->schedule.num_anchors * effective_slot_us);
-    
+
     /* final_tx = last_anchor_slot_end + resp_to_final_delay */
-    *tx_timestamp_dw = last_anchor_slot_end_dw + 
+    *tx_timestamp_dw = last_anchor_slot_end_dw +
                        tdma_us_to_dw(tdma->schedule.resp_to_final_delay_us);
     
     /* Mask to 40 bits */
@@ -424,13 +432,14 @@ tdma_err_t tdma_get_slot_rx_window(const tdma_scheduler_t *tdma,
     
     if (slot_id < 0) return TDMA_ERR_INVALID_PARAM;
 
-    /* RXFCG is raised at frame end, so late margin must include PHY airtime
-     * and software jitter; using fixed +300us is too tight at low data rates. */
-    uint32_t rx_early_margin_us = (tdma->schedule.guard_time_us >= 300U) ? 300U : tdma->schedule.guard_time_us;
-    uint32_t rx_late_margin_us = tdma->schedule.guard_time_us +
-                                 tdma->schedule.processing_margin_us +
-                                 TDMA_CLOCK_GUARD_US +
-                                 2500U;
+    /* rx_late_margin: how long after expected_resp we still accept a frame.
+     * guard_time_us already covers clock drift + PHY jitter (it is sized for that).
+     * processing_margin_us covers SPI/HAL read latency after RXFCG fires.
+     * TDMA_CLOCK_GUARD_US and the old hardcoded +2500us were double-counting
+     * what guard_time already provides — removed. */
+    uint32_t rx_early_margin_us = tdma->schedule.guard_time_us;
+    uint32_t rx_late_margin_us  = tdma->schedule.guard_time_us +
+                                  tdma->schedule.processing_margin_us;
     
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
     

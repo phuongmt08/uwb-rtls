@@ -7,11 +7,11 @@
 
 /* Includes ----------------------------------------------------------- */
 /* DecaWave driver */
-#include "bsp_uwb.h"
-
-#include "bsp_util.h"
 #include "deca_device_api.h"
 #include "deca_regs.h"
+
+#include "bsp_uwb.h"
+#include "bsp_util.h"
 #include "err.h"
 #include "mw_tdma_scheduler.h"
 #include "spi.h"
@@ -32,7 +32,7 @@
 #define DW_FMT                 "0x%08lX%08lX"
 #define DW_ARG(x)              (unsigned long) ((x) >> 32), (unsigned long) ((x) & 0xFFFFFFFFUL)
 
-static inline uint64_t dw_read_ts5(const uint8_t *buf)
+static inline uint64_t dw_read_timestamp(const uint8_t *buf)
 {
   return ((uint64_t) buf[0]) | ((uint64_t) buf[1] << 8) | ((uint64_t) buf[2] << 16)
          | ((uint64_t) buf[3] << 24) | ((uint64_t) buf[4] << 32);
@@ -266,7 +266,7 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
   /* Cache TX timestamp */
   uint8_t ts_buf[5];
   dwt_readtxtimestamp(ts_buf);
-  s_last_tx_timestamp = dw_read_ts5(ts_buf);
+  s_last_tx_timestamp = dw_read_timestamp(ts_buf);
 
   dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
 
@@ -310,7 +310,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
      * Adding s_rx_antenna_delay again here causes a large positive bias in range. */
     uint8_t ts_buf[5];
     dwt_readrxtimestamp(ts_buf);
-    s_last_rx_timestamp = dw_read_ts5(ts_buf) & DW_MASK_40;
+    s_last_rx_timestamp = dw_read_timestamp(ts_buf) & DW_MASK_40;
 
     /* Capture RSSI immediately while diagnostics still match this frame. */
     {
@@ -339,7 +339,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
       payload_len = frame_len_onair - DW1000_CRC_LENGTH;
     }
 
-    /* 5. Copy DIRECTLY to user buffer (OPTIMIZATION) */
+    /* 5. Copy DIRECTLY to user buffer*/
     /* Avoid double buffering on stack */
     uint16_t copy_len = (payload_len < length) ? payload_len : length;
 
@@ -418,7 +418,7 @@ bsp_err_t bsp_uwb_read_40bit(uint8_t reg_addr, uint8_t sub_addr, uint64_t *times
   {
     uint8_t buf[5];
     dwt_readfromdevice(reg_addr, sub_addr, 5, buf);
-    *timestamp = dw_read_ts5(buf);
+    *timestamp = dw_read_timestamp(buf);
   }
   return BSP_OK;
 }
@@ -542,7 +542,7 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
   uint8_t sys_time_buf[5];
   dwt_readsystime(sys_time_buf);
 
-  uint64_t now = dw_read_ts5(sys_time_buf) & DW_MASK_40;
+  uint64_t now = dw_read_timestamp(sys_time_buf) & DW_MASK_40;
 
   /* Minimum guard time for DW1000 to schedule TX reliably.
    * Formula: guard_dw = guard_us * (1e-6 / 15.65e-12) ≈ guard_us * 63898
@@ -596,7 +596,7 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
     {
       uint8_t ts_buf[5];
       dwt_readtxtimestamp(ts_buf);
-      s_last_tx_timestamp = dw_read_ts5(ts_buf);
+      s_last_tx_timestamp = dw_read_timestamp(ts_buf);
 
       dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
       return BSP_OK;
@@ -641,7 +641,7 @@ uint64_t bsp_uwb_get_current_time_dw(void)
   uint8_t ts_buf[5];
   dwt_readsystime(ts_buf);  // Read SYS_TIME register
 
-  return dw_read_ts5(ts_buf) & DW_MASK_40;
+  return dw_read_timestamp(ts_buf) & DW_MASK_40;
 }
 
 bsp_err_t bsp_uwb_validate_delayed_tx(uint64_t tx_timestamp_dw, uint64_t min_guard_dw)

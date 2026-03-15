@@ -157,7 +157,7 @@ typedef struct
 static anchor_distance_filter_t s_anchor_filters[9] = { 0 }; /* anchor_id: 1..8 */
 
 // Distance smoothing enabled by default, can be disabled for testing/debugging
-static bool s_distance_smoothing_enabled = true;
+static bool s_distance_smoothing_enabled = false;
 
 /* Static guard */
 static bool s_ranging_busy = false;
@@ -653,7 +653,9 @@ static uint64_t tdma_compute_resp_rx_window_end(const tdma_scheduler_t *tdma,
     return fallback_start_dw + tdma_us_to_dw(fallback_us);
   }
 
-  return (max_rx_end_dw + tdma_us_to_dw(2000U)) & DW_MASK_40;
+  /* tdma_get_slot_rx_window already includes guard + processing margin.
+   * The old +2000us was an unexplained extra layer on top — removed. */
+  return max_rx_end_dw & DW_MASK_40;
 }
 
 static uint64_t tdma_compute_result_rx_window_end(const tdma_scheduler_t *tdma,
@@ -1156,9 +1158,13 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
    * We leave processing_margin_us of headroom before FINAL to build the message. */
   {
     uint32_t effective_slot_us = tdma_effective_slot_us(tdma);
+    /* FIX: include poll_to_resp_delay_us to mirror tdma_calculate_final_time() exactly.
+     * Without it, planned_dw was 1500us too early → cap fired too soon → slot-4 RESP missed. */
     uint64_t final_tx_planned_dw =
       tdma->superframe_start_dw
-      + tdma_us_to_dw((uint32_t) num_anchors * effective_slot_us + tdma->schedule.resp_to_final_delay_us);
+      + tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us
+                      + (uint32_t) num_anchors * effective_slot_us
+                      + tdma->schedule.resp_to_final_delay_us);
     uint64_t final_tx_headroom_dw =
       final_tx_planned_dw - tdma_us_to_dw(tdma->schedule.processing_margin_us + 500U);
     final_tx_headroom_dw &= DW_MASK_40;
@@ -1452,7 +1458,12 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
           tag_result->t2 = anchor_resp[i].poll_rx_ts;
           tag_result->t3 = anchor_resp[i].resp_tx_ts;
           tag_result->t4 = anchor_resp[i].resp_rx_ts;
-          tag_result->t5 = t6_actual;
+          /* FIX Bug-T5: t5 = predicted FINAL TX antenna time (sent in FINAL payload),
+           * NOT t6_actual. t5 and t6 are different timestamps:
+           *   t5 = FINAL TX timestamp as seen by anchor (predicted, embedded in payload)
+           *   t6 = actual FINAL TX timestamp read from DW1000 TX_TIME register after TX.
+           * Using t6_actual for both caused DS-TWR self-validation to always show delta=0. */
+          tag_result->t5 = t5_payload;
           tag_result->t6 = t6_actual;
 
           if (result->anchor_id > 0U && result->anchor_id <= 8U)
