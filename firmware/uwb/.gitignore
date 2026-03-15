@@ -10,6 +10,8 @@
 !Core/**
 !app/
 !app/**
+# Ignore auto-generated version_build.h
+app/version_build.h
 !bsp/
 !bsp/**
 !Drivers/

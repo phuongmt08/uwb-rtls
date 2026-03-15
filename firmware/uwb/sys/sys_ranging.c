@@ -226,7 +226,7 @@ sys_ranging_err_t sys_ranging_tag_start(uint8_t sequence_num, uint32_t rx_timeou
   /* Get timeout from config if not specified */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   state_machine_reset();
@@ -330,7 +330,7 @@ sys_ranging_err_t sys_ranging_anchor_start(uint32_t rx_timeout_ms)
   /* If timeout = 0, use config default */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   s_ctx.mw_config.sequence_num = 0;
@@ -427,7 +427,7 @@ sys_ranging_err_t sys_ranging_tag_start_with_anchor(uint8_t anchor_id,
   /* Get timeout from config if not specified */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   state_machine_reset();
@@ -462,7 +462,7 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
   /* Get timeout from config if not specified */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   /* Use longer timeout for multi-anchor to handle delays */

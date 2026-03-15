@@ -1,9 +1,5 @@
 build/
 
-# Generated files
-protos/*.pb.c
-protos/*.pb.h
-
 # Python junk
 __pycache__/
 *.pyc

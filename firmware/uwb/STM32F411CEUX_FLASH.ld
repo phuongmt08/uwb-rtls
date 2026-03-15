@@ -44,7 +44,9 @@ _Min_Stack_Size = 0x800; /* required amount of stack */
 /* Memories definition */
 MEMORY
 {
-  FLASH        (rx)  : ORIGIN = 0x0800C000, LENGTH = 208K      /* Sectors 3-5: Application code */
+  APP_HEADER   (rx)  : ORIGIN = 0x0800C000, LENGTH = 1K
+  /* Remaining 207 KB: application code + rodata + .data load image */
+  FLASH        (rx)  : ORIGIN = 0x0800C400, LENGTH = 207K
   DATA_STORAGE (rx)  : ORIGIN = 0x08040000, LENGTH = 256K      /* Sectors 6-7: Dual-sector data storage */
   RAM          (xrw) : ORIGIN = 0x20000000, LENGTH = 96K
 }
@@ -53,13 +55,22 @@ MEMORY
 SECTIONS
 {
 
-  /* The startup code into "FLASH" Rom type memory */
+  /* ISR vector table — must be first in APP_HEADER, hardware requires it at app base */
   .isr_vector :
   {
     . = ALIGN(4);
-    KEEP(*(.isr_vector)) /* Startup code */
+    KEEP(*(.isr_vector))
     . = ALIGN(4);
-  } >FLASH
+  } >APP_HEADER
+
+  /* Application image header — fixed at APP_START + 0x200 (256-byte aligned).
+   * Bootloader and bsp_flash_read_app_header() read it from MEM_APP_HEADER_ADDR. */
+  .app_header :
+  {
+    . = ALIGN(256);
+    KEEP(*(.app_header))
+    . = ALIGN(4);
+  } >APP_HEADER
 
   /* The program code and other data into "FLASH" Rom type memory */
   .text :
