@@ -2,14 +2,13 @@
  * @file       max17048.h
  * @copyright
  * @license
- * @version    1.0.1
- * @date       2026-03-12
- * @author     Trung Quan
+ * @version    1.1.0
+ * @date       2026-03-17
+ * @author
  * @brief      MAX17048 Li+ ModelGauge fuel gauge driver (I2C mode)
  * @note       I2C slave address: 0x36 (7-bit), fixed by manufacturer
  *             Hardware: STM32F411CEUx
  *             I2C3 — SCL: PA8 | SDA: PC9
- *             LED PWM indicator — PC13
  *             Based on MAX17048/MAX17049 datasheet Rev 1; 4/12
  * @example    None
  */
@@ -27,10 +26,10 @@
 #define MAX17048_I2C_ADDR              0x36
 
 /* Register map — all registers are 16-bit, MSB first */
-#define MAX17048_REG_VCELL             0x02   /* Cell voltage (R)              */
-#define MAX17048_REG_SOC               0x04   /* State of charge (R)           */
+#define MAX17048_REG_VCELL             0x02   /* Read cell voltage (R)              */
+#define MAX17048_REG_SOC               0x04   /* Read state of charge (R)           */
 #define MAX17048_REG_MODE              0x06   /* Mode control (W)              */
-#define MAX17048_REG_VERSION           0x08   /* IC production version (R)     */
+#define MAX17048_REG_VERSION           0x08   /* Check IC production version (R)     */
 #define MAX17048_REG_HIBRT             0x0A   /* Hibernate thresholds (R/W)    */
 #define MAX17048_REG_CONFIG            0x0C   /* Configuration (R/W)           */
 #define MAX17048_REG_VALRT             0x14   /* Voltage alert thresholds (R/W)*/
@@ -43,7 +42,7 @@
 /* MODE register (0x06)
  * Datasheet p.11 — Figure 8
  * bit15    = X (don't care)
- * bit14    = QuickStart
+ * bit14    = QuickStart                              
  * bit13    = EnSleep
  * bit12    = HibStat (read only)
  * bit11..0 = X (don't care)
@@ -105,12 +104,6 @@
 #define MAX17048_HIBRT_DISABLE         0x0000  /* disable hibernate mode        */
 #define MAX17048_HIBRT_ALWAYS          0xFFFF  /* always stay in hibernate mode */
 
-/* LED PWM thresholds applied in max17048_update_led() */
-#define MAX17048_LED_SOC_CRITICAL      5       /* SOC <= 5%  -> duty 10%        */
-#define MAX17048_LED_SOC_LOW           20      /* SOC <= 20% -> duty 30%        */
-#define MAX17048_LED_SOC_MID           50      /* SOC <= 50% -> duty 60%        */
-                                               /* SOC >  50% -> duty 100%       */
-
 /* Public enumerate/structure ----------------------------------------------- */
 
 /**
@@ -146,7 +139,8 @@ typedef enum
 } max17048_empty_alert_t;
 
 /**
- * @brief Fuel-gauge data snapshot
+ * @brief Raw fuel-gauge data — internal use by driver and BSP only
+ * @note  Upper layers should use bsp_battery_data_t, not this struct directly
  */
 typedef struct
 {
@@ -175,23 +169,19 @@ typedef struct
 } max17048_config_t;
 
 /**
- * @brief I2C and peripheral interface — fill with your BSP functions
+ * @brief I2C interface — fill with your BSP functions
+ * @note  pwm_set_duty and get_tick_ms are NOT here — LED and timing
+ *        are hardware concerns owned by the BSP layer, not the driver
  */
 typedef struct
 {
   /* Write len bytes to reg_addr, return 0 on success */
-  int32_t  (*i2c_write)   (uint8_t dev_addr, uint8_t reg_addr,
-                            const uint8_t *data, uint16_t len);
+  int32_t (*i2c_write)(uint8_t dev_addr, uint8_t reg_addr,
+                        const uint8_t *data, uint16_t len);
 
   /* Read len bytes from reg_addr, return 0 on success */
-  int32_t  (*i2c_read)    (uint8_t dev_addr, uint8_t reg_addr,
-                            uint8_t *data, uint16_t len);
-
-  /* Set PWM duty cycle 0-100% on PC13 */
-  void     (*pwm_set_duty)(uint8_t duty_pct);
-
-  /* Return system tick in milliseconds */
-  uint32_t (*get_tick_ms) (void);
+  int32_t (*i2c_read) (uint8_t dev_addr, uint8_t reg_addr,
+                        uint8_t *data, uint16_t len);
 } max17048_bus_t;
 
 /**
@@ -345,32 +335,6 @@ max17048_err_t max17048_set_voltage_alert(max17048_dev_t *dev, uint16_t min_mv, 
  * @return MAX17048_OK on success
  */
 max17048_err_t max17048_clear_alert(max17048_dev_t *dev);
-
-/**
- * @brief  Update PC13 LED PWM brightness based on current SOC
- * @param  dev  Driver instance
- * @note   Reads SOC internally then calls bus.pwm_set_duty()
- * @return MAX17048_OK on success
- */
-max17048_err_t max17048_update_led(max17048_dev_t *dev);
-
-/**
- * @brief  Write a 16-bit register, MSB sent first
- * @param  dev      Driver instance
- * @param  reg_addr Register address
- * @param  value    16-bit value to write
- * @return MAX17048_OK on success
- */
-max17048_err_t max17048_write_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t value);
-
-/**
- * @brief  Read a 16-bit register, MSB received first
- * @param  dev      Driver instance
- * @param  reg_addr Register address
- * @param  value    Output: 16-bit register value
- * @return MAX17048_OK on success
- */
-max17048_err_t max17048_read_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t *value);
 
 #endif /* __MAX17048_H */
 

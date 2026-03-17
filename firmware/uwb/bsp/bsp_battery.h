@@ -2,115 +2,110 @@
  * @file       bsp_battery.h
  * @copyright
  * @license
- * @version    1.0.0
- * @date       2026-03-14
- * @author     Trung Quan
+ * @version    1.1.0
+ * @date       2026-03-17
+ * @author
  * @brief      BSP layer for MAX17048 fuel gauge
  * @note       Hardware: STM32F411CEUx
- *             I2C3  — SCL: PA8 | SDA: PC9
- *             LED   — PWM on PC13 via TIM1_CH3
+ *             I2C3 — SCL: PA8 | SDA: PC9
+ *             Upper layers only need to include this file — not max17048.h
  */
 
 #ifndef __BSP_BATTERY_H
 #define __BSP_BATTERY_H
 
 /* Includes ----------------------------------------------------------------- */
-#include "max17048.h"
 #include "main.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 /* Public defines ----------------------------------------------------------- */
 
 /* --- I2C peripheral ------------------------------------------------------- */
 #ifndef BSP_BATTERY_I2C_HANDLE
-  #define BSP_BATTERY_I2C_HANDLE         hi2c3
+  #define BSP_BATTERY_I2C_HANDLE      hi2c3
 #endif
 
 #ifndef BSP_BATTERY_I2C_TIMEOUT_MS
-  #define BSP_BATTERY_I2C_TIMEOUT_MS     100
-#endif
-
-/* --- PWM timer for LED (PC13 = TIM1_CH3) ---------------------------------- */
-#ifndef BSP_BATTERY_TIM_HANDLE
-  #define BSP_BATTERY_TIM_HANDLE         htim1
-#endif
-
-#ifndef BSP_BATTERY_TIM_CHANNEL
-  #define BSP_BATTERY_TIM_CHANNEL        TIM_CHANNEL_3
+  #define BSP_BATTERY_I2C_TIMEOUT_MS  100
 #endif
 
 /* --- Battery config (1-cell lipo) ----------------------------------------- */
 
 /* Alert when voltage drops below 3.0V — lipo cutoff */
 #ifndef BSP_BATTERY_VALRT_MIN_MV
-  #define BSP_BATTERY_VALRT_MIN_MV       3000
+  #define BSP_BATTERY_VALRT_MIN_MV    3000
 #endif
 
 /* Alert when voltage exceeds 4.2V — lipo full charge */
 #ifndef BSP_BATTERY_VALRT_MAX_MV
-  #define BSP_BATTERY_VALRT_MAX_MV       4200
+  #define BSP_BATTERY_VALRT_MAX_MV    4200
 #endif
 
 /*
- * Reset threshold: below = battery removed, above = new battery inserted
- * Set to 2400mV — safely below lipo cutoff (3.0V) so normal discharge
+ * Reset threshold — below this = battery removed, above = new battery inserted
+ * 2400mV is safely below lipo cutoff (3.0V) so normal discharge
  * does not trigger a false reset
  */
 #ifndef BSP_BATTERY_VRESET_MV
-  #define BSP_BATTERY_VRESET_MV          2400
+  #define BSP_BATTERY_VRESET_MV       2400
 #endif
 
-/* SOC threshold to fire empty alert */
-#ifndef BSP_BATTERY_EMPTY_ALERT
-  #define BSP_BATTERY_EMPTY_ALERT        MAX17048_EMPTY_ALERT_10PCT
+/* SOC threshold to fire low battery alert */
+#ifndef BSP_BATTERY_EMPTY_ALERT_PCT
+  #define BSP_BATTERY_EMPTY_ALERT_PCT 10
+#endif
+
+/*
+ * Assumed battery temperature in degrees Celsius
+ * Used for RCOMP compensation — IC nearby runs warm so fixed at 40°C
+ * Update this if a temperature sensor is added later
+ */
+#ifndef BSP_BATTERY_TEMP_DEGC
+  #define BSP_BATTERY_TEMP_DEGC       40
 #endif
 
 /* Public enumerate/structure ----------------------------------------------- */
 
-/* Re-use driver error codes directly */
-typedef max17048_err_t  bsp_battery_err_t;
+/**
+ * @brief Battery BSP return codes
+ */
+typedef enum
+{
+  BSP_BATTERY_OK         =  0,
+  BSP_BATTERY_ERR        = -1,
+  BSP_BATTERY_ERR_BUS    = -2,
+  BSP_BATTERY_ERR_PARAM  = -3,
+  BSP_BATTERY_ERR_NO_DEV = -4,
+} bsp_battery_err_t;
 
-#define BSP_BATTERY_OK          MAX17048_OK
-#define BSP_BATTERY_ERR         MAX17048_ERR
-#define BSP_BATTERY_ERR_BUS     MAX17048_ERR_BUS
-#define BSP_BATTERY_ERR_PARAM   MAX17048_ERR_PARAM
-#define BSP_BATTERY_ERR_NO_DEV  MAX17048_ERR_NO_DEV
-
-/* Re-use driver data struct directly */
-typedef max17048_data_t  bsp_battery_data_t;
+/**
+ * @brief Battery status — what upper layers need to know about the battery
+ * @note  Internal details like alert flags, hibernation, raw register values
+ *        are handled by the BSP layer and not exposed here
+ */
+typedef struct
+{
+  uint16_t voltage_mv;    /* Cell voltage in mV                              */
+  uint8_t  soc_pct;       /* State of charge, integer 0-100 %               */
+  uint8_t  soc_frac;      /* SOC fractional part 0-255, unit 1/256 %        */
+  int16_t  crate_mphph;   /* Charge rate in milli-%/hr, negative = discharge */
+} bsp_battery_data_t;
 
 /* Public function prototypes ----------------------------------------------- */
 
 /**
- * @brief  Initialize fuel gauge: bind HAL functions, apply lipo config, start PWM
+ * @brief  Initialize fuel gauge — bind HAL, apply lipo config, set temp comp
  * @return BSP_BATTERY_OK on success
  */
 bsp_battery_err_t bsp_battery_init(void);
 
 /**
- * @brief  Read all fuel gauge data in one call
- * @param  data  Output: voltage, SOC, CRATE, status
+ * @brief  Read battery data — voltage, SOC, charge rate
+ * @param  data  Output struct
  * @return BSP_BATTERY_OK on success
  */
 bsp_battery_err_t bsp_battery_read(bsp_battery_data_t *data);
-
-/**
- * @brief  Update LED PWM brightness based on current SOC
- * @return BSP_BATTERY_OK on success
- */
-bsp_battery_err_t bsp_battery_update_led(void);
-
-/**
- * @brief  Update temperature compensation — call once after init
- * @param  temp_degc  Battery temperature in degrees Celsius
- * @return BSP_BATTERY_OK on success
- */
-bsp_battery_err_t bsp_battery_update_temp(int8_t temp_degc);
-
-/**
- * @brief  Clear ALRT pin after servicing an alert
- * @return BSP_BATTERY_OK on success
- */
-bsp_battery_err_t bsp_battery_clear_alert(void);
 
 /**
  * @brief  Check if IC is present on I2C bus

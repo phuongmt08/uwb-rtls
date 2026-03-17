@@ -2,9 +2,9 @@
  * @file       max17048.c
  * @copyright
  * @license
- * @version    1.0.2
- * @date       2026-03-12
- * @author     Trung Quan
+ * @version    1.1.0
+ * @date       2026-03-17
+ * @author
  * @brief      MAX17048 Li+ ModelGauge fuel gauge driver implementation
  * @note       Based on MAX17048/MAX17049 datasheet Rev 1; 4/12
  * @example    None
@@ -21,7 +21,7 @@
  * voltage_mv = (uint64_t)raw * 78125 / 1,000,000
  * Must use uint64_t: 65535 * 78125 = 5,120,703,125 exceeds uint32_t max
  */
-#define VCELL_LSB_UV      78125
+#define VCELL_LSB_UV      78125 /* 1 Lsb = 78.125 uV in microvolts */
 
 /*
  * CRATE register — datasheet p.13
@@ -50,15 +50,14 @@
 #define TEMPCO_COLD       (-5.0f)   /* RCOMP change per degC below 20 */
 
 /* Private function prototypes ---------------------------------------------- */
+static max17048_err_t s_write_reg   (max17048_dev_t *dev, uint8_t reg_addr, uint16_t value);
+static max17048_err_t s_read_reg    (max17048_dev_t *dev, uint8_t reg_addr, uint16_t *value);
 static max17048_err_t s_apply_config(max17048_dev_t *dev);
 
-/* Public function implementation ------------------------------------------- */
+/* Private function implementation ------------------------------------------ */
 
-max17048_err_t max17048_write_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t value)
+static max17048_err_t s_write_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t value)
 {
-  if (!dev)
-    return MAX17048_ERR_PARAM;
-
   uint8_t buf[2];
 
   /* MAX17048 expects MSB first — datasheet p.17 */
@@ -71,11 +70,8 @@ max17048_err_t max17048_write_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_
   return MAX17048_OK;
 }
 
-max17048_err_t max17048_read_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t *value)
+static max17048_err_t s_read_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t *value)
 {
-  if (!dev || !value)
-    return MAX17048_ERR_PARAM;
-
   uint8_t buf[2];
 
   if (dev->bus.i2c_read(MAX17048_I2C_ADDR, reg_addr, buf, 2) != 0)
@@ -86,6 +82,100 @@ max17048_err_t max17048_read_reg(max17048_dev_t *dev, uint8_t reg_addr, uint16_t
 
   return MAX17048_OK;
 }
+
+static max17048_err_t s_apply_config(max17048_dev_t *dev)
+{
+  max17048_err_t err;
+
+  /*
+   * CONFIG register — datasheet p.12
+   * bits[15:8] = RCOMP
+   * bit7       = SLEEP  (0 = normal)
+   * bit6       = ALSC   (1 = enable SOC 1% change alert)
+   * bit5       = ALRT   (0 = no pending alert)
+   * bits[4:0]  = ATHD   (empty alert threshold)
+   */
+  uint16_t config_reg = 0;
+
+  config_reg |= (uint16_t)dev->config.rcomp << 8;
+  config_reg |= (uint16_t)(dev->config.empty_alert & MAX17048_CONFIG_ATHD_MASK);
+
+  if (dev->config.en_soc_change_alert)
+    config_reg |= MAX17048_CONFIG_ALSC;
+
+  err = s_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
+  if (err != MAX17048_OK)
+    return err;
+
+  /*
+   * VALRT register — datasheet p.13
+   * bits[15:8] = VALRT.MIN, bits[7:0] = VALRT.MAX, 1 LSb = 20 mV
+   * Clamp raw values to valid range 0x00-0xFF
+   */
+  uint16_t min_raw = dev->config.valrt_min_mv / VALRT_LSB_MV;
+  uint16_t max_raw = dev->config.valrt_max_mv / VALRT_LSB_MV;
+
+  if (min_raw > VALRT_RAW_MAX) min_raw = VALRT_RAW_MAX;
+  if (max_raw > VALRT_RAW_MAX) max_raw = VALRT_RAW_MAX;
+
+  err = s_write_reg(dev, MAX17048_REG_VALRT,
+                    ((uint16_t)min_raw << 8) | (uint16_t)max_raw);
+  if (err != MAX17048_OK)
+    return err;
+
+  /*
+   * VRESET/ID register — datasheet p.13
+   * bits[15:9] = VRESET threshold (writable), 1 LSb = 40 mV
+   * bit8       = Dis              (writable)
+   * bits[7:1]  = ID               (factory, read only — must preserve)
+   * bit0       = reserved
+   *
+   * Read first to preserve ID, modify only VRESET and Dis bits
+   * Clamp VRESET to valid range 2280-3480 mV (raw 57-87)
+   */
+  uint16_t vreset_reg = 0;
+  err = s_read_reg(dev, MAX17048_REG_VRESET_ID, &vreset_reg);
+  if (err != MAX17048_OK)
+    return err;
+
+  vreset_reg &= ~(MAX17048_VRESET_MASK | MAX17048_VRESET_DIS);
+
+  uint8_t vreset_raw = (uint8_t)(dev->config.vreset_mv / VRESET_LSB_MV);
+  if (vreset_raw < VRESET_RAW_MIN) vreset_raw = VRESET_RAW_MIN;
+  if (vreset_raw > VRESET_RAW_MAX) vreset_raw = VRESET_RAW_MAX;
+
+  vreset_reg |= (uint16_t)vreset_raw << MAX17048_VRESET_SHIFT;
+
+  if (dev->config.dis_hibernate_comp)
+    vreset_reg |= MAX17048_VRESET_DIS;
+
+  err = s_write_reg(dev, MAX17048_REG_VRESET_ID, vreset_reg);
+  if (err != MAX17048_OK)
+    return err;
+
+  /*
+   * STATUS register — datasheet p.14
+   * bit14 = EnVR: enable voltage reset alert
+   * Read-modify-write to preserve existing alert flags
+   */
+  uint16_t status_reg = 0;
+  err = s_read_reg(dev, MAX17048_REG_STATUS, &status_reg);
+  if (err != MAX17048_OK)
+    return err;
+
+  if (dev->config.en_vreset_alert)
+    status_reg |= MAX17048_STATUS_ENVR;
+  else
+    status_reg &= ~MAX17048_STATUS_ENVR;
+
+  err = s_write_reg(dev, MAX17048_REG_STATUS, status_reg);
+  if (err != MAX17048_OK)
+    return err;
+
+  return MAX17048_OK;
+}
+
+/* Public function implementation ------------------------------------------- */
 
 void max17048_default_config(max17048_config_t *config)
 {
@@ -109,7 +199,7 @@ bool max17048_is_present(max17048_dev_t *dev)
 
   uint16_t version = 0;
 
-  if (max17048_read_reg(dev, MAX17048_REG_VERSION, &version) != MAX17048_OK)
+  if (s_read_reg(dev, MAX17048_REG_VERSION, &version) != MAX17048_OK)
     return false;
 
   /* Datasheet p.11: VERSION register always returns 0x0011 */
@@ -121,17 +211,14 @@ max17048_err_t max17048_init(max17048_dev_t *dev, const max17048_config_t *confi
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /* Verify bus functions are bound before doing anything */
   if (!dev->bus.i2c_write || !dev->bus.i2c_read)
     return MAX17048_ERR_PARAM;
 
   dev->ready = false;
 
-  /* Verify IC is present and responding */
   if (!max17048_is_present(dev))
     return MAX17048_ERR_NO_DEV;
 
-  /* Use caller config or fall back to defaults */
   if (config != NULL)
     dev->config = *config;
   else
@@ -146,20 +233,16 @@ max17048_err_t max17048_init(max17048_dev_t *dev, const max17048_config_t *confi
   if (err != MAX17048_OK)
     return err;
 
-  /*
-   * Read STATUS and clear RI (Reset Indicator)
-   * RI is set every time IC powers on or resets
-   * Clear it after config is applied to acknowledge
-   */
+  /* Clear RI (Reset Indicator) after config is applied */
   uint16_t status = 0;
-  err = max17048_read_reg(dev, MAX17048_REG_STATUS, &status);
+  err = s_read_reg(dev, MAX17048_REG_STATUS, &status);
   if (err != MAX17048_OK)
     return err;
 
   if (status & MAX17048_STATUS_RI)
   {
     status &= ~MAX17048_STATUS_RI;
-    err = max17048_write_reg(dev, MAX17048_REG_STATUS, status);
+    err = s_write_reg(dev, MAX17048_REG_STATUS, status);
     if (err != MAX17048_OK)
       return err;
   }
@@ -176,19 +259,14 @@ max17048_err_t max17048_read_voltage(max17048_dev_t *dev, uint16_t *voltage_mv)
 
   uint16_t raw = 0;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_VCELL, &raw);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_VCELL, &raw);
   if (err != MAX17048_OK)
     return err;
 
   /*
    * Datasheet p.10: VCELL, 16-BIT LSb = 78.125 uV/cell
    * voltage_mv = raw * 78125 / 1,000,000
-   *
-   * uint64_t required — 65535 * 78125 = 5,120,703,125 > uint32_t max
-   *
-   * Example lipo 1 cell at 3.7V:
-   *   raw = 3,700,000 uV / 78.125 uV/LSb = 47,360
-   *   47,360 * 78125 / 1,000,000 = 3700 mV  OK
+   * uint64_t required: 65535 * 78125 = 5,120,703,125 > uint32_t max
    */
   *voltage_mv = (uint16_t)((uint64_t)raw * VCELL_LSB_UV / 1000000);
 
@@ -202,7 +280,7 @@ max17048_err_t max17048_read_soc(max17048_dev_t *dev, uint8_t *soc_pct)
 
   uint16_t raw = 0;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_SOC, &raw);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_SOC, &raw);
   if (err != MAX17048_OK)
     return err;
 
@@ -223,7 +301,7 @@ max17048_err_t max17048_read_soc_full(max17048_dev_t *dev, uint8_t *soc_pct, uin
 
   uint16_t raw = 0;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_SOC, &raw);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_SOC, &raw);
   if (err != MAX17048_OK)
     return err;
 
@@ -240,17 +318,14 @@ max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_mphph)
 
   uint16_t raw = 0;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_CRATE, &raw);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_CRATE, &raw);
   if (err != MAX17048_OK)
     return err;
 
   /*
    * Datasheet p.13: CRATE, signed 16-bit, 1 LSb = 0.208 %/hr
-   * Negative = discharging, positive = charging
-   *
    * (int16_t)raw       — reinterpret bits as signed
    * (int32_t)(int16_t) — widen BEFORE multiplying to avoid overflow
-   *                      max: 32767 * 208 = 6,815,536 fits in int32_t
    */
   *crate_mphph = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000 / 1000);
 
@@ -262,15 +337,14 @@ max17048_err_t max17048_read_status(max17048_dev_t *dev, uint16_t *status, uint1
   if (!dev || !status)
     return MAX17048_ERR_PARAM;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_STATUS, status);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_STATUS, status);
   if (err != MAX17048_OK)
     return err;
 
-  /* Optionally clear specified alert bits after reading */
   if (clear_flags != 0)
   {
     uint16_t new_val = *status & ~clear_flags;
-    err = max17048_write_reg(dev, MAX17048_REG_STATUS, new_val);
+    err = s_write_reg(dev, MAX17048_REG_STATUS, new_val);
     if (err != MAX17048_OK)
       return err;
   }
@@ -298,13 +372,11 @@ max17048_err_t max17048_read_all(max17048_dev_t *dev, max17048_data_t *data)
     return err;
 
   /*
-   * Datasheet p.11: MODE register is marked Write Only in the register summary,
-   * but HibStat (bit12) is explicitly described as a readable status bit.
-   * Reading MODE returns valid HibStat — confirmed by Maxim reference code.
-   * All other bits read back as 0 (don't care on write).
+   * Datasheet p.11: MODE register is marked Write Only but HibStat (bit12)
+   * is explicitly described as a readable status bit.
    */
   uint16_t mode = 0;
-  err = max17048_read_reg(dev, MAX17048_REG_MODE, &mode);
+  err = s_read_reg(dev, MAX17048_REG_MODE, &mode);
   if (err != MAX17048_OK)
     return err;
 
@@ -312,14 +384,14 @@ max17048_err_t max17048_read_all(max17048_dev_t *dev, max17048_data_t *data)
 
   /* Check alert flag from CONFIG register */
   uint16_t config_reg = 0;
-  err = max17048_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
+  err = s_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
   if (err != MAX17048_OK)
     return err;
 
   data->alert_active = (config_reg & MAX17048_CONFIG_ALRT) != 0;
 
-  /* Save raw STATUS for caller to inspect individual alert bits */
-  err = max17048_read_reg(dev, MAX17048_REG_STATUS, &data->status_reg);
+  /* Save raw STATUS for BSP to inspect individual alert bits */
+  err = s_read_reg(dev, MAX17048_REG_STATUS, &data->status_reg);
   if (err != MAX17048_OK)
     return err;
 
@@ -331,12 +403,7 @@ max17048_err_t max17048_quick_start(max17048_dev_t *dev)
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /*
-   * Datasheet p.9, p.11: Quick-Start via MODE register bit14
-   * MODE is Write Only — write only the QuickStart bit, others = 0
-   * Writing 0 to other bits is safe per datasheet (they are don't-care on write)
-   */
-  return max17048_write_reg(dev, MAX17048_REG_MODE, MAX17048_MODE_QUICKSTART);
+  return s_write_reg(dev, MAX17048_REG_MODE, MAX17048_MODE_QUICKSTART);
 }
 
 max17048_err_t max17048_por(max17048_dev_t *dev)
@@ -345,11 +412,9 @@ max17048_err_t max17048_por(max17048_dev_t *dev)
     return MAX17048_ERR_PARAM;
 
   /*
-   * Datasheet p.14: write 0x5400 to CMD register (0xFE)
-   * IC resets completely. It does NOT send I2C ACK after this command
-   * so i2c_write will return an error — expected, ignore it
+   * IC does NOT send I2C ACK after this command — expected, ignore error
    */
-  max17048_write_reg(dev, MAX17048_REG_CMD, MAX17048_CMD_POR);
+  s_write_reg(dev, MAX17048_REG_CMD, MAX17048_CMD_POR);
   dev->ready = false;
 
   return MAX17048_OK;
@@ -362,28 +427,20 @@ max17048_err_t max17048_enter_sleep(max17048_dev_t *dev)
 
   max17048_err_t err;
 
-  /*
-   * Datasheet p.10: two steps to enter sleep mode
-   * Step 1: write MODE.EnSleep = 1
-   *         MODE is Write Only — write only EnSleep bit, others = 0
-   *         Other bits are don't-care on write per datasheet
-   * Step 2: set CONFIG.SLEEP = 1 via read-modify-write
-   */
-
-  /* Step 1 — MODE is write only, just write EnSleep */
-  err = max17048_write_reg(dev, MAX17048_REG_MODE, MAX17048_MODE_ENSLEEP);
+  /* Step 1: MODE.EnSleep = 1 — MODE is write only */
+  err = s_write_reg(dev, MAX17048_REG_MODE, MAX17048_MODE_ENSLEEP);
   if (err != MAX17048_OK)
     return err;
 
-  /* Step 2 — CONFIG needs read-modify-write to preserve RCOMP and ATHD */
+  /* Step 2: CONFIG.SLEEP = 1 — read-modify-write to preserve RCOMP and ATHD */
   uint16_t config_reg = 0;
-  err = max17048_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
+  err = s_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
   if (err != MAX17048_OK)
     return err;
 
   config_reg |= MAX17048_CONFIG_SLEEP;
 
-  return max17048_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
+  return s_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
 }
 
 max17048_err_t max17048_exit_sleep(max17048_dev_t *dev)
@@ -391,16 +448,15 @@ max17048_err_t max17048_exit_sleep(max17048_dev_t *dev)
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /* Clear CONFIG.SLEEP = 0 via read-modify-write */
   uint16_t config_reg = 0;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
   if (err != MAX17048_OK)
     return err;
 
   config_reg &= ~MAX17048_CONFIG_SLEEP;
 
-  return max17048_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
+  return s_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
 }
 
 max17048_err_t max17048_force_hibernate(max17048_dev_t *dev)
@@ -408,8 +464,7 @@ max17048_err_t max17048_force_hibernate(max17048_dev_t *dev)
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /* HIBRT = 0xFFFF: both thresholds at max, IC always stays in hibernate */
-  return max17048_write_reg(dev, MAX17048_REG_HIBRT, MAX17048_HIBRT_ALWAYS);
+  return s_write_reg(dev, MAX17048_REG_HIBRT, MAX17048_HIBRT_ALWAYS);
 }
 
 max17048_err_t max17048_disable_hibernate(max17048_dev_t *dev)
@@ -417,8 +472,7 @@ max17048_err_t max17048_disable_hibernate(max17048_dev_t *dev)
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /* HIBRT = 0x0000: both thresholds at 0, IC never enters hibernate */
-  return max17048_write_reg(dev, MAX17048_REG_HIBRT, MAX17048_HIBRT_DISABLE);
+  return s_write_reg(dev, MAX17048_REG_HIBRT, MAX17048_HIBRT_DISABLE);
 }
 
 max17048_err_t max17048_update_temp_comp(max17048_dev_t *dev, int8_t temp_degc)
@@ -431,7 +485,6 @@ max17048_err_t max17048_update_temp_comp(max17048_dev_t *dev, int8_t temp_degc)
    *   if temp > 20: RCOMP = RCOMP0 + (20 - temp) * TempCoHot
    *   if temp < 20: RCOMP = RCOMP0 + (20 - temp) * TempCoCold
    *   if temp = 20: RCOMP = RCOMP0
-   * Clamp result to valid 8-bit range 0x00-0xFF
    */
   float rcomp_f;
 
@@ -447,18 +500,15 @@ max17048_err_t max17048_update_temp_comp(max17048_dev_t *dev, int8_t temp_degc)
 
   uint8_t rcomp = (uint8_t)rcomp_f;
 
-  /*
-   * RCOMP lives in bits[15:8] of CONFIG register
-   * Read-modify-write: replace only upper byte, keep lower byte intact
-   */
+  /* RCOMP lives in bits[15:8] of CONFIG — read-modify-write */
   uint16_t config_reg = 0;
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
   if (err != MAX17048_OK)
     return err;
 
   config_reg = (config_reg & 0x00FF) | ((uint16_t)rcomp << 8);
 
-  return max17048_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
+  return s_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
 }
 
 max17048_err_t max17048_set_voltage_alert(max17048_dev_t *dev, uint16_t min_mv, uint16_t max_mv)
@@ -466,21 +516,14 @@ max17048_err_t max17048_set_voltage_alert(max17048_dev_t *dev, uint16_t min_mv, 
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /*
-   * Datasheet p.13: VALRT register
-   * bits[15:8] = VALRT.MIN, 1 LSb = 20 mV
-   * bits[7:0]  = VALRT.MAX, 1 LSb = 20 mV
-   * Alert while VCELL > VALRT.MAX or VCELL < VALRT.MIN
-   * Clamp to valid raw range 0x00-0xFF
-   */
   uint16_t min_raw = min_mv / VALRT_LSB_MV;
   uint16_t max_raw = max_mv / VALRT_LSB_MV;
 
   if (min_raw > VALRT_RAW_MAX) min_raw = VALRT_RAW_MAX;
   if (max_raw > VALRT_RAW_MAX) max_raw = VALRT_RAW_MAX;
 
-  return max17048_write_reg(dev, MAX17048_REG_VALRT,
-                            ((uint16_t)min_raw << 8) | (uint16_t)max_raw);
+  return s_write_reg(dev, MAX17048_REG_VALRT,
+                     ((uint16_t)min_raw << 8) | (uint16_t)max_raw);
 }
 
 max17048_err_t max17048_clear_alert(max17048_dev_t *dev)
@@ -488,153 +531,15 @@ max17048_err_t max17048_clear_alert(max17048_dev_t *dev)
   if (!dev)
     return MAX17048_ERR_PARAM;
 
-  /* Read-modify-write: clear only ALRT bit, leave all other bits unchanged */
   uint16_t config_reg = 0;
 
-  max17048_err_t err = max17048_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
+  max17048_err_t err = s_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
   if (err != MAX17048_OK)
     return err;
 
   config_reg &= ~MAX17048_CONFIG_ALRT;
 
-  return max17048_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
-}
-
-max17048_err_t max17048_update_led(max17048_dev_t *dev)
-{
-  if (!dev)
-    return MAX17048_ERR_PARAM;
-
-  if (!dev->bus.pwm_set_duty)
-    return MAX17048_ERR_PARAM;
-
-  uint8_t soc = 0;
-
-  max17048_err_t err = max17048_read_soc(dev, &soc);
-  if (err != MAX17048_OK)
-    return err;
-
-  /*
-   * Map SOC level to PWM duty cycle on PC13
-   * Thresholds defined in max17048.h
-   *   SOC <= 5%  -> 10%  duty
-   *   SOC <= 20% -> 30%  duty
-   *   SOC <= 50% -> 60%  duty
-   *   SOC >  50% -> 100% duty
-   */
-  uint8_t duty;
-
-  if (soc <= MAX17048_LED_SOC_CRITICAL)
-    duty = 10;
-  else if (soc <= MAX17048_LED_SOC_LOW)
-    duty = 30;
-  else if (soc <= MAX17048_LED_SOC_MID)
-    duty = 60;
-  else
-    duty = 100;
-
-  dev->bus.pwm_set_duty(duty);
-
-  return MAX17048_OK;
-}
-
-/* Private function implementation ------------------------------------------ */
-
-/**
- * @brief  Write all fields of dev->config into the corresponding IC registers
- * @param  dev  Driver instance with config already populated
- * @return MAX17048_OK on success
- */
-static max17048_err_t s_apply_config(max17048_dev_t *dev)
-{
-  max17048_err_t err;
-
-  /*
-   * CONFIG register — datasheet p.12
-   * bits[15:8] = RCOMP
-   * bit7       = SLEEP  (0 = normal)
-   * bit6       = ALSC   (1 = enable SOC 1% change alert)
-   * bit5       = ALRT   (0 = no pending alert)
-   * bits[4:0]  = ATHD   (empty alert threshold)
-   */
-  uint16_t config_reg = 0;
-
-  config_reg |= (uint16_t)dev->config.rcomp << 8;
-  config_reg |= (uint16_t)(dev->config.empty_alert & MAX17048_CONFIG_ATHD_MASK);
-
-  if (dev->config.en_soc_change_alert)
-    config_reg |= MAX17048_CONFIG_ALSC;
-
-  err = max17048_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
-  if (err != MAX17048_OK)
-    return err;
-
-  /*
-   * VALRT register — datasheet p.13
-   * bits[15:8] = VALRT.MIN, bits[7:0] = VALRT.MAX, 1 LSb = 20 mV
-   * Clamp raw values to valid range 0x00-0xFF
-   */
-  uint16_t min_raw = dev->config.valrt_min_mv / VALRT_LSB_MV;
-  uint16_t max_raw = dev->config.valrt_max_mv / VALRT_LSB_MV;
-
-  if (min_raw > VALRT_RAW_MAX) min_raw = VALRT_RAW_MAX;
-  if (max_raw > VALRT_RAW_MAX) max_raw = VALRT_RAW_MAX;
-
-  err = max17048_write_reg(dev, MAX17048_REG_VALRT,
-                           ((uint16_t)min_raw << 8) | (uint16_t)max_raw);
-  if (err != MAX17048_OK)
-    return err;
-
-  /*
-   * VRESET/ID register — datasheet p.13
-   * bits[15:9] = VRESET threshold (writable), 1 LSb = 40 mV
-   * bit8       = Dis              (writable)
-   * bits[7:1]  = ID               (factory, read only — must preserve)
-   * bit0       = reserved
-   *
-   * Read first to preserve ID, modify only VRESET and Dis bits
-   * Clamp VRESET to valid range 2280-3480 mV (raw 57-87)
-   */
-  uint16_t vreset_reg = 0;
-  err = max17048_read_reg(dev, MAX17048_REG_VRESET_ID, &vreset_reg);
-  if (err != MAX17048_OK)
-    return err;
-
-  vreset_reg &= ~(MAX17048_VRESET_MASK | MAX17048_VRESET_DIS);
-
-  uint8_t vreset_raw = (uint8_t)(dev->config.vreset_mv / VRESET_LSB_MV);
-  if (vreset_raw < VRESET_RAW_MIN) vreset_raw = VRESET_RAW_MIN;
-  if (vreset_raw > VRESET_RAW_MAX) vreset_raw = VRESET_RAW_MAX;
-
-  vreset_reg |= (uint16_t)vreset_raw << MAX17048_VRESET_SHIFT;
-
-  if (dev->config.dis_hibernate_comp)
-    vreset_reg |= MAX17048_VRESET_DIS;
-
-  err = max17048_write_reg(dev, MAX17048_REG_VRESET_ID, vreset_reg);
-  if (err != MAX17048_OK)
-    return err;
-
-  /*
-   * STATUS register — datasheet p.14
-   * bit14 = EnVR: enable voltage reset alert
-   * Read-modify-write to preserve existing alert flags
-   */
-  uint16_t status_reg = 0;
-  err = max17048_read_reg(dev, MAX17048_REG_STATUS, &status_reg);
-  if (err != MAX17048_OK)
-    return err;
-
-  if (dev->config.en_vreset_alert)
-    status_reg |= MAX17048_STATUS_ENVR;
-  else
-    status_reg &= ~MAX17048_STATUS_ENVR;
-
-  err = max17048_write_reg(dev, MAX17048_REG_STATUS, status_reg);
-  if (err != MAX17048_OK)
-    return err;
-
-  return MAX17048_OK;
+  return s_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
 }
 
 /* End of file -------------------------------------------------------------- */
