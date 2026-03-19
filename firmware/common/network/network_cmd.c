@@ -11,6 +11,8 @@
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
 #define RESP_RETRY_MAX 2
 #define RESP_RETRY_DELAY_MS 200
+#define WAIT_TIME_TO_RESEND_ACK_MS 30000u
+#define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
 
 #define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
 #define CHECK_VOID(_cond) do { if (!(_cond)) return; } while (0)
@@ -52,6 +54,24 @@ static void network_cmd_pos_calib_cfg_get(network_cmd_t *cmd, const protobuf_pac
 static void network_cmd_pos_calib_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length);
+static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
+static bool network_cmd_host_active(const network_cmd_t *cmd);
+
+typedef struct {
+    bool waiting_ack;
+    uint32_t log_len;
+    int tracker_id;
+} network_log_tracker_t;
+
+static network_log_tracker_t s_log_tracker = {
+    .waiting_ack = false,
+    .log_len = 0u,
+    .tracker_id = -1
+};
+
+static bool s_log_stream_enabled = false;
+static uint8_t s_log_stream_dst = protobuf_PACKET_ADDR_HOST;
 
 /*
  * Command lookup table.
@@ -94,11 +114,16 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_factory_config_reset_tag,      network_cmd_unimplemented,               "factory_reset"),      /* 25 */
     CMD_INFO(protobuf_packet_t_device_type_set_tag,           network_cmd_device_type_set,             "dev_type_set"),       /* 26 */
     CMD_INFO(protobuf_packet_t_device_type_get_tag,           network_cmd_device_type_get,             "dev_type_get"),       /* 27 */
-#ifdef HAVE_FOTA_FIRMWARE
+#ifdef BOOTLOADER
     CMD_INFO(protobuf_packet_t_flash_erase_tag,               network_cmd_unimplemented,               "flash_erase"),        /* 28 */
     CMD_INFO(protobuf_packet_t_flash_read_tag,                network_cmd_unimplemented,               "flash_read"),         /* 29 */
     CMD_INFO(protobuf_packet_t_flash_data_tag,                network_cmd_unimplemented,               "flash_data"),         /* 30 */
     CMD_INFO(protobuf_packet_t_flash_write_tag,               network_cmd_unimplemented,               "flash_write"),        /* 31 */
+#else
+    CMD_INFO(protobuf_packet_t_flash_erase_tag,               network_cmd_unimplemented,               "flash_erase"),        /* 28 */
+    CMD_INFO(protobuf_packet_t_flash_read_tag,                network_cmd_unimplemented,               "flash_read"),         /* 29 */
+    CMD_INFO(protobuf_packet_t_flash_data_tag,                network_cmd_unimplemented,               "flash_data"),         /* 30 */
+    CMD_INFO(protobuf_packet_t_flash_write_tag,               network_cmd_unimplemented,               "flash_write"),        /* 31 */  
 #endif
 #ifdef HAVE_BLE_PERIPHERAL
     CMD_INFO(protobuf_packet_t_ble_enable_tag,                network_cmd_unimplemented,               "ble_enable"),         /* 32 */
@@ -400,27 +425,12 @@ static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t
     CHECK_VOID(cmd && pkt && cmd->stream);
 
 #ifdef HAVE_FLASH_STORAGE
-    /* Flush any pending RAM records to flash first */
-    (void)sys_logger_flash_persist();
+    s_log_stream_enabled = true;
+    s_log_stream_dst = (uint8_t)pkt->hdr.addr.src;
 
-    if (sys_logger_flash_pending_bytes() == 0u) {
-        /* Nothing to send — the ACK from dispatch is sufficient */
-        return;
-    }
-
-    protobuf_packet_t resp;
-    memset(&resp, 0, sizeof(resp));
-    resp.which_params        = protobuf_packet_t_log_data_tag;
-    resp.params.log_data.type = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
-
-    uint16_t max_payload = (uint16_t)sizeof(resp.params.log_data.data.bytes);
-    uint32_t n = sys_logger_flash_read_chunk(resp.params.log_data.data.bytes, max_payload);
-    if (n == 0u) {
-        return;
-    }
-    resp.params.log_data.data.size = (pb_size_t)n;
-    resp.hdr.addr.dst              = pkt->hdr.addr.src;
-    network_cmd_send_packet(cmd, &resp);
+    protobuf_packet_t sample;
+    uint16_t max_payload = (uint16_t)sizeof(sample.params.log_data.data.bytes);
+    network_send_log(cmd, s_log_stream_dst, max_payload);
 #endif /* HAVE_FLASH_STORAGE */
 }
 
@@ -440,9 +450,17 @@ static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_pa
 {
     CHECK_VOID(cmd && pkt);
 
+    const sys_config_t *cfg = sys_config_get();
+    host_transport_t old_transport = cfg ? cfg->host_transport : HOST_TRANSPORT_UNSPECIFIED;
+
     if (sys_config_set_host_transport(pkt->params.host_transport_set.transport) != 0) {
         RLOG_W(OBJECT_CODE, "Invalid host transport value: %u",
                (unsigned)pkt->params.host_transport_set.transport);
+        return;
+    }
+
+    cfg = sys_config_get();
+    if (cfg && cfg->host_transport == old_transport) {
         return;
     }
 
@@ -533,6 +551,87 @@ static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_pac
     }
 }
 
+static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length)
+{
+    CHECK_VOID(cmd && cmd->stream);
+
+#ifdef HAVE_FLASH_STORAGE
+    if (s_log_tracker.waiting_ack) {
+        return;
+    }
+
+    if (sys_logger_flash_pending_bytes() == 0u) {
+        return;
+    }
+
+    protobuf_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.which_params = protobuf_packet_t_log_data_tag;
+    packet.params.log_data.type = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
+
+    uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
+    uint16_t send_len = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
+    uint32_t read_len = sys_logger_flash_read_packet(packet.params.log_data.data.bytes, send_len);
+    if (read_len == 0u) {
+        return;
+    }
+
+    packet.params.log_data.data.size = (pb_size_t)read_len;
+    if (!network_core_send_packet(cmd->stream, dst, &packet)) {
+        return;
+    }
+
+    s_log_tracker.waiting_ack = true;
+    s_log_tracker.log_len = read_len;
+    s_log_tracker.tracker_id = network_core_wait_ack(cmd->stream,
+                                                     packet.hdr.seq,
+                                                     WAIT_TIME_TO_RESEND_ACK_MS,
+                                                     log_tracker_callback,
+                                                     &s_log_tracker);
+    if (s_log_tracker.tracker_id < 0) {
+        s_log_tracker.waiting_ack = false;
+        s_log_tracker.log_len = 0u;
+    }
+#else
+    (void)dst;
+    (void)data_length;
+#endif
+}
+
+static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet)
+{
+    (void)packet;
+
+#ifdef HAVE_FLASH_STORAGE
+    CHECK_VOID(p_tracker != NULL);
+
+    network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;
+    CHECK_VOID(tracker != NULL);
+
+    if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
+        sys_logger_flash_consume(tracker->log_len);
+    }
+
+    tracker->waiting_ack = false;
+    tracker->log_len = 0u;
+    tracker->tracker_id = -1;
+#else
+    (void)p_tracker;
+#endif
+}
+
+static bool network_cmd_host_active(const network_cmd_t *cmd)
+{
+    CHECK(cmd && cmd->stream, false);
+
+    uint32_t last_tick = cmd->stream->latest_packet_tick;
+    if (last_tick == 0u) {
+        return false;
+    }
+
+    return (uint32_t)(HAL_GetTick() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
+}
+
 bool network_cmd_init(network_cmd_t *cmd, network_core_t *stream)
 {
     CHECK(cmd && stream, false);
@@ -549,6 +648,10 @@ void network_cmd_process(network_cmd_t *cmd)
 {
     CHECK_VOID(cmd && cmd->enabled);
     network_cmd_retry_pending(cmd);
+
+    if (s_log_stream_enabled && network_cmd_host_active(cmd)) {
+        network_send_log(cmd, s_log_stream_dst, 0xFFFFu);
+    }
 }
 
 bool network_cmd_process_packet(network_cmd_t *cmd, const protobuf_packet_t *pkt)
@@ -618,3 +721,4 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
     network_cmd_dispatch(g_network_cmd_instance, pkt);
     return true;
 }
+

@@ -162,6 +162,7 @@ uint32_t sys_flash_log_read(void *out, uint32_t offset, uint32_t length)
     bsp_flash_dual_t *fh = sys_flash_storage_get();
     if (!fh || !out || length == 0u)
         return 0u;
+
     if (offset >= BSP_FLASH_LOG_DATA_LENGTH)
         return 0u;
 

@@ -79,27 +79,6 @@ static device_type_t sys_config_default_device_type_from_role(device_role_t role
     return DEVICE_TYPE_UNSPECIFIED;
 }
 
-/* Private function prototypes ---------------------------------------------- */
-#ifdef HAVE_FLASH_STORAGE
-static int flash_storage_init(void);
-#endif
-
-/* ========================================================================== */
-/*                         PRIVATE FUNCTIONS                                 */
-/* ========================================================================== */
-
-#ifdef HAVE_FLASH_STORAGE
-
-/**
- * @brief Proxy: delegate flash initialisation to the shared singleton.
- */
-static int flash_storage_init(void)
-{
-    return sys_flash_storage_init();
-}
-
-#endif
-
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
 /* ========================================================================== */
@@ -107,22 +86,17 @@ static int flash_storage_init(void)
 void sys_config_init(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Initializing configuration...");
-    
-    /* Always start with defaults first */
-    sys_config_reset_to_defaults();
-    
-#ifdef HAVE_FLASH_STORAGE
-    /* Delegate to shared singleton — also handles bsp_util_init internally */
-    if (flash_storage_init() != 0) {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Flash init failed, using RAM only");
-    }
-#endif
-    
-    /* Try to load from flash/RAM (will override defaults if valid) */
+
+    /* Load persisted config first; fall back to defaults only if invalid/missing. */
     if (sys_config_load() != 0) {
-        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "No saved config, using defaults");
+        sys_config_reset_to_defaults();
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "No valid saved config, using defaults");
+
+        if (sys_config_save() != 0) {
+            RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Failed to persist default config");
+        }
     }
-    
+
     sys_config_print();
 }
 
