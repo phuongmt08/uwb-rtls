@@ -32,9 +32,9 @@
 
 /* Public defines ----------------------------------------------------------- */
 /**
- * @brief Total RAM buffer size for logger (4KB)
+ * @brief Total RAM buffer size for logger (16KB)
  */
-#define SYS_LOGGER_BUF_SIZE        (4096U)
+#define SYS_LOGGER_BUF_SIZE        (16384U)
 
 /**
  * @brief Maximum message length per log record (180 bytes)
@@ -211,6 +211,19 @@ uint32_t sys_logger_flash_read_pos(void);
  * @return Number of bytes copied (0 if no pending data or error).
  */
 uint32_t sys_logger_flash_read_chunk(uint8_t *out, uint16_t max_len);
+
+/**
+ * @brief  Read a record-aligned chunk of flash logs.
+ *
+ *         Returns a byte count that always ends on a full on-disk entry
+ *         boundary: [LEN(2)][RECORD][PAD to 4B]. This prevents host ACK/consume
+ *         from cutting an entry in half.
+ *
+ * @param[out] out      Destination buffer
+ * @param[in]  max_len  Maximum bytes to copy
+ * @return Number of bytes copied (0 if nothing suitable).
+ */
+uint32_t sys_logger_flash_read_packet(uint8_t *out, uint16_t max_len);
 
 /**
  * @brief  Advance the read cursor by @p length bytes.

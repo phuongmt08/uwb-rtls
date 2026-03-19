@@ -28,6 +28,8 @@
 /* Private includes --------------------------------------------------------- */
 /* Private defines ---------------------------------------------------------- */
 #define LOGGER_MAGIC (0xA5C3E91F)  // Magic number for initialized state detection
+#define LOGGER_FLASH_SYNC_PERIOD_MS (10000u)
+#define LOGGER_STUB_PERIOD_MS (500u)
 
 /* Flash log entry on-disk format:
  *   [LEN_LO (1)][LEN_HI (1)][RAW_RECORD (LEN bytes)][PAD to 4-byte boundary]
@@ -36,8 +38,8 @@
  *   RAW_RECORD bytes are identical to the RAM circular buffer format:
  *     [LOG_TYPE(1)][OBJ_CODE(1)][TIMESTAMP(6)][DATA_LEN(1)][MESSAGE(DATA_LEN)]
  */
-#define FLASH_LOG_LEN_FIELD  2u                              /* bytes for the LEN prefix  */
-#define FLASH_LOG_MAX_ENTRY  (FLASH_LOG_LEN_FIELD + RLOG_MAX_RECORD_SIZE + 4u) /* worst-case with pad */
+#define FLASH_LOG_LEN_FIELD   2u
+#define FLASH_LOG_BATCH_SIZE  1024u
 
 /* Private enumerate/structure ---------------------------------------------- */
 /**
@@ -65,8 +67,10 @@ static uint32_t log_seq_num = 0;  // Sequence number for logs when no RTC
 static uint32_t g_flash_log_write_pos = 0u;
 /** Byte offset of the next byte the host has NOT yet confirmed receiving. */
 static uint32_t g_flash_log_read_pos  = 0u;
+/** Timestamp of last RAM->flash sync. */
+static uint32_t g_flash_sync_last_ms  = 0u;
 /** Temporary write buffer (static to avoid large stack allocs). */
-static uint8_t  s_flash_batch[FLASH_LOG_MAX_ENTRY];
+static uint8_t  s_flash_batch[FLASH_LOG_BATCH_SIZE];
 #endif
 
 /* Private prototypes ------------------------------------------------------- */
@@ -243,11 +247,15 @@ static void logger_test_stub(void)
     return;
   }
 
-  if ((uint32_t)(now_ms - last_tick_ms) < 100u)
+  uint32_t elapsed_ms = (uint32_t)(now_ms - last_tick_ms);
+  if (elapsed_ms < LOGGER_STUB_PERIOD_MS)
     return;
 
   last_tick_ms = now_ms;
-  (void)RLOG_I(LOG_OBJECT_CODE_TASK, "stub-log seq=%lu", (unsigned long)seq);
+  (void)RLOG_I(LOG_OBJECT_CODE_TASK,
+               "stub-log seq=%lu dt=%lums",
+               (unsigned long)seq,
+               (unsigned long)elapsed_ms);
   seq++;
 }
 
@@ -261,6 +269,7 @@ void sys_logger_init(void)
    * entries, runs once at boot.  No raw-byte scan needed. */
   g_flash_log_write_pos = 0u;
   g_flash_log_read_pos  = 0u;
+  g_flash_sync_last_ms  = HAL_GetTick();
   (void)sys_flash_log_get_positions(&g_flash_log_write_pos, &g_flash_log_read_pos);
 #endif
 }
@@ -310,66 +319,68 @@ uint32_t sys_logger_flash_persist(void)
 
   while (logger_data_count() >= LOG_HEADER_LEN)
   {
-    /* Check if we have space for at least one minimal entry */
-    if ((g_flash_log_write_pos + FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN + 4u)
-        > BSP_FLASH_LOG_DATA_LENGTH)
-      break;  /* flash log partition full */
+    uint16_t temp_tail = g_logger.tail;
+    uint32_t available = logger_data_count();
+    uint32_t ram_consume = 0u;
+    uint32_t batch_len = 0u;
 
-    /* -- Step 1: peek the next record header to learn its total length -- */
-    uint8_t  hdr[LOG_HEADER_LEN];
-    uint16_t got = sys_logger_peek(hdr, LOG_HEADER_LEN);
-    if (got < LOG_HEADER_LEN)
-      break;  /* not enough data for a full header */
-
-    uint8_t  data_len  = hdr[LOG_HEADER_IDX_DATA_LEN];
-    uint16_t rec_total = (uint16_t)(LOG_HEADER_LEN + data_len);
-
-    if (data_len > SYS_LOGGER_MAX_MSG_LEN)
-      break;  /* corrupted record in RAM buffer */
-    if (logger_data_count() < rec_total)
-      break;  /* record not fully in buffer yet */
-
-    /* -- Step 2: peek the complete record into s_flash_batch[2..] -- */
-    s_flash_batch[0] = (uint8_t)(rec_total & 0xFFu);        /* LEN low  */
-    s_flash_batch[1] = (uint8_t)((rec_total >> 8) & 0xFFu); /* LEN high */
-
-    uint16_t n = 0u;
-    while (n < rec_total)
+    while (available >= LOG_HEADER_LEN)
     {
-      uint16_t chunk = logger_read_linear(s_flash_batch + FLASH_LOG_LEN_FIELD + n,
-                                          rec_total - n);
-      if (chunk == 0u)
+      uint8_t hdr[LOG_HEADER_LEN];
+      uint16_t htail = temp_tail;
+      for (uint16_t i = 0u; i < LOG_HEADER_LEN; i++) {
+        hdr[i] = g_logger.buffer[htail];
+        htail = (uint16_t)((htail + 1u) % SYS_LOGGER_BUF_SIZE);
+      }
+
+      uint8_t data_len = hdr[LOG_HEADER_IDX_DATA_LEN];
+      uint16_t rec_total = (uint16_t)(LOG_HEADER_LEN + data_len);
+      if (data_len > SYS_LOGGER_MAX_MSG_LEN)
         break;
-      logger_pop_data(chunk);
-      n += chunk;
+      if (available < rec_total)
+        break;
+
+      uint32_t entry_len = FLASH_LOG_LEN_FIELD + rec_total;
+      uint32_t padded = (entry_len + 3u) & ~3u;
+      if ((batch_len + padded) > FLASH_LOG_BATCH_SIZE)
+        break;
+
+      s_flash_batch[batch_len + 0u] = (uint8_t)(rec_total & 0xFFu);
+      s_flash_batch[batch_len + 1u] = (uint8_t)((rec_total >> 8) & 0xFFu);
+
+      uint16_t rtail = temp_tail;
+      for (uint16_t i = 0u; i < rec_total; i++) {
+        s_flash_batch[batch_len + FLASH_LOG_LEN_FIELD + i] = g_logger.buffer[rtail];
+        rtail = (uint16_t)((rtail + 1u) % SYS_LOGGER_BUF_SIZE);
+      }
+
+      if (padded > entry_len) {
+        memset(&s_flash_batch[batch_len + entry_len], 0x00u, padded - entry_len);
+      }
+
+      temp_tail = rtail;
+      available -= rec_total;
+      ram_consume += rec_total;
+      batch_len += padded;
     }
-    if (n < rec_total)
-      break;  /* failed to read complete record */
 
-    /* -- Step 3: pad entry to 4-byte boundary, fill with zeros -- */
-    uint32_t entry_len = FLASH_LOG_LEN_FIELD + rec_total;
-    uint32_t padded    = (entry_len + 3u) & ~3u;
-    if (padded > entry_len)
-      memset(s_flash_batch + entry_len, 0x00u, padded - entry_len);
+    if ((batch_len == 0u) || (ram_consume == 0u))
+      break;
 
-    /* -- Step 4: write to flash, embedding current read_pos in metadata -- */
     uint32_t actual_pos;
     if (sys_flash_log_write_at(g_flash_log_read_pos,
-                               s_flash_batch, padded, &actual_pos)
+                               s_flash_batch, batch_len, &actual_pos)
         != BSP_FLASH_OK)
       break;
 
-    if (actual_pos == 0u && g_flash_log_write_pos != 0u) {
-      /* Real sector wrap: append restarted from offset 0 in new active sector. */
-      g_flash_log_read_pos  = 0u;
-      g_flash_log_write_pos = padded;
-    } else {
-      /* Normal append (or cursor resync after reboot): trust actual_pos. */
-      g_flash_log_write_pos = actual_pos + padded;
-      if (g_flash_log_read_pos > g_flash_log_write_pos)
-        g_flash_log_read_pos = g_flash_log_write_pos;
-    }
-    total_flushed += rec_total;
+    (void)actual_pos;
+    (void)sys_flash_log_get_positions(&g_flash_log_write_pos, &g_flash_log_read_pos);
+    if (g_flash_log_read_pos > g_flash_log_write_pos)
+      g_flash_log_read_pos = g_flash_log_write_pos;
+
+    /* Consume only after successful flash write to avoid silent data loss. */
+    logger_pop_data((uint16_t)ram_consume);
+    total_flushed += ram_consume;
   }
 
   return total_flushed;
@@ -399,6 +410,45 @@ uint32_t sys_logger_flash_read_chunk(uint8_t *out, uint16_t max_len)
   uint16_t n     = (max_len < (uint16_t)avail) ? max_len : (uint16_t)avail;
 
   return sys_flash_log_read(out, g_flash_log_read_pos, n);
+}
+
+uint32_t sys_logger_flash_read_packet(uint8_t *out, uint16_t max_len)
+{
+  if (!out || max_len < (FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN))
+    return 0u;
+  if (g_flash_log_read_pos >= g_flash_log_write_pos)
+    return 0u;
+
+  uint32_t cursor = g_flash_log_read_pos;
+  uint32_t copied = 0u;
+
+  while ((copied + FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN) <= max_len)
+  {
+    if ((cursor + FLASH_LOG_LEN_FIELD) > g_flash_log_write_pos)
+      break;
+
+    uint8_t len_buf[FLASH_LOG_LEN_FIELD];
+    if (sys_flash_log_read(len_buf, cursor, FLASH_LOG_LEN_FIELD) < FLASH_LOG_LEN_FIELD)
+      break;
+
+    uint16_t rec_len = (uint16_t)len_buf[0] | ((uint16_t)len_buf[1] << 8u);
+    if (rec_len == 0u || rec_len > RLOG_MAX_RECORD_SIZE)
+      break;
+
+    uint32_t entry_padded = ((uint32_t)FLASH_LOG_LEN_FIELD + rec_len + 3u) & ~3u;
+    if ((copied + entry_padded) > max_len)
+      break;
+    if ((cursor + entry_padded) > g_flash_log_write_pos)
+      break;
+
+    if (sys_flash_log_read(out + copied, cursor, (uint16_t)entry_padded) < (uint16_t)entry_padded)
+      break;
+
+    copied += entry_padded;
+    cursor += entry_padded;
+  }
+
+  return copied;
 }
 
 void sys_logger_flash_consume(uint32_t length)
@@ -512,122 +562,13 @@ void sys_logger_task(void)
   logger_test_stub();
 
 #ifdef HAVE_FLASH_STORAGE
-  sys_logger_flash_persist();
-
-  /* Need at least the 2-byte length prefix + one full header in flash */
-  if (sys_logger_flash_pending_bytes() < (FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN))
-    return;
-
-  /* Read the 2-byte on-disk length prefix at current read_pos */
-  uint8_t len_buf[FLASH_LOG_LEN_FIELD];
-  if (sys_flash_log_read(len_buf, g_flash_log_read_pos, FLASH_LOG_LEN_FIELD)
-      < FLASH_LOG_LEN_FIELD)
-    return;
-
-  uint16_t rec_len = (uint16_t)len_buf[0] | ((uint16_t)len_buf[1] << 8u);
-
-  /* Sanity check: skip a corrupted prefix */
-  if (rec_len == 0u || rec_len > RLOG_MAX_RECORD_SIZE)
-  {
-    sys_logger_flash_consume(FLASH_LOG_LEN_FIELD);
-    return;
+  uint32_t now_ms = HAL_GetTick();
+  if ((uint32_t)(now_ms - g_flash_sync_last_ms) >= LOGGER_FLASH_SYNC_PERIOD_MS) {
+    (void)sys_logger_flash_persist();
+    g_flash_sync_last_ms = now_ms;
   }
 
-  /* Full on-disk entry (length-prefix + record + padding) must be present */
-  uint32_t entry_padded = ((uint32_t)FLASH_LOG_LEN_FIELD + rec_len + 3u) & ~3u;
-  if (sys_logger_flash_pending_bytes() < entry_padded)
-    return;
-
-  /* Read the raw record (after the 2-byte prefix) into s_flash_batch */
-  if (sys_flash_log_read(s_flash_batch, g_flash_log_read_pos + FLASH_LOG_LEN_FIELD, rec_len)
-      < rec_len)
-    return;
-
-  /* Parse record fields and format as human-readable text */
-  uint64_t    timestamp = 0u;
-  memcpy(&timestamp, &s_flash_batch[LOG_HEADER_IDX_TIMESTAMP], 6u);
-
-  uint8_t     log_type  = s_flash_batch[LOG_HEADER_IDX_LOG_TYPE];
-  uint8_t     obj_code  = s_flash_batch[LOG_HEADER_IDX_OBJ_CODE];
-  uint8_t     data_len  = s_flash_batch[LOG_HEADER_IDX_DATA_LEN];
-
-  if (data_len > SYS_LOGGER_MAX_MSG_LEN)
-    data_len = SYS_LOGGER_MAX_MSG_LEN;
-
-  char msg[SYS_LOGGER_MAX_MSG_LEN + 1u];
-  memcpy(msg, &s_flash_batch[LOG_HEADER_IDX_DATA], data_len);
-  msg[data_len] = '\0';
-
-  const char *level_str;
-  if      (log_type == INFO_LOG)    level_str = "INFO";
-  else if (log_type == DEBUG_LOG)   level_str = "DEBUG";
-  else if (log_type == WARNING_LOG) level_str = "WARN";
-  else                              level_str = "ERROR";
-
-  char output[SYS_LOGGER_MAX_MSG_LEN + 50u];
-  int  out_len = snprintf(output, sizeof(output), "[%lu][%s][%02X] %s\r\n",
-                          (uint32_t)timestamp, level_str, obj_code, msg);
-
-#ifdef USE_BLE_LOGGER
-  /* TODO: send via BLE */
-  (void)out_len;
-  sys_logger_flash_consume(entry_padded);
-#else
-  if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
-    sys_logger_flash_consume(entry_padded);
 #endif
-
-#else  /* !HAVE_FLASH_STORAGE — fallback: direct RAM → USB */
-
-  if (logger_data_count() < LOG_HEADER_LEN)
-    return;
-
-  /* Peek header from RAM circular buffer */
-  uint8_t  header[LOG_HEADER_LEN];
-  uint16_t tail_temp = g_logger.tail;
-  for (uint16_t i = 0u; i < LOG_HEADER_LEN; i++)
-  {
-    header[i]  = g_logger.buffer[tail_temp];
-    tail_temp  = (uint16_t)((tail_temp + 1u) % SYS_LOGGER_BUF_SIZE);
-  }
-
-  uint8_t msg_len = header[LOG_HEADER_IDX_DATA_LEN];
-  if (logger_data_count() < (LOG_HEADER_LEN + msg_len))
-    return;
-
-  char message[SYS_LOGGER_MAX_MSG_LEN + 1u];
-  tail_temp = (uint16_t)((g_logger.tail + LOG_HEADER_LEN) % SYS_LOGGER_BUF_SIZE);
-  for (uint16_t i = 0u; i < msg_len; i++)
-  {
-    message[i] = g_logger.buffer[tail_temp];
-    tail_temp  = (uint16_t)((tail_temp + 1u) % SYS_LOGGER_BUF_SIZE);
-  }
-  message[msg_len] = '\0';
-
-  uint64_t    timestamp = 0u;
-  memcpy(&timestamp, &header[LOG_HEADER_IDX_TIMESTAMP], 6u);
-  uint8_t     log_type  = header[LOG_HEADER_IDX_LOG_TYPE];
-  uint8_t     obj_code  = header[LOG_HEADER_IDX_OBJ_CODE];
-
-  const char *level_str;
-  if      (log_type == INFO_LOG)    level_str = "INFO";
-  else if (log_type == DEBUG_LOG)   level_str = "DEBUG";
-  else if (log_type == WARNING_LOG) level_str = "WARN";
-  else                              level_str = "ERROR";
-
-  char output[SYS_LOGGER_MAX_MSG_LEN + 50u];
-  int  out_len = snprintf(output, sizeof(output), "[%lu][%s][%02X] %s\r\n",
-                          (uint32_t)timestamp, level_str, obj_code, message);
-
-#ifdef USE_BLE_LOGGER
-  (void)out_len;
-  logger_pop_data(LOG_HEADER_LEN + msg_len);
-#else
-  // if (CDC_Transmit_FS((uint8_t *)output, (uint16_t)out_len) == USBD_OK)
-  //   logger_pop_data(LOG_HEADER_LEN + msg_len);
-#endif
-
-#endif /* HAVE_FLASH_STORAGE */
 }
 
 /* End of file -------------------------------------------------------------- */

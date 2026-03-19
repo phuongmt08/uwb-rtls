@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "sys_config.h"
 #include "sys_logger.h"
+#include "sys_flash_storage.h"
 #include "bsp_uwb.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -189,8 +190,13 @@ int main(void)
   MX_CRC_Init();
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
+
+  int flash_storage_init_status = sys_flash_storage_init();
   
   sys_logger_init();
+  if (flash_storage_init_status != 0) {
+    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
+  }
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
   
 #if TEST_SEND_POS

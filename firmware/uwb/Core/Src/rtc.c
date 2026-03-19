@@ -42,8 +42,12 @@ void MX_RTC_Init(void)
   */
   hrtc.Instance = RTC;
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 127;
-  hrtc.Init.SynchPrediv = 255;
+  /* RTC clock source is HSE/12.
+   * With 12 MHz HSE => RTC input = 1 MHz.
+   * Need (AsynchPrediv+1)*(SynchPrediv+1) = 1,000,000 for 1 Hz calendar tick.
+   */
+  hrtc.Init.AsynchPrediv = 124;
+  hrtc.Init.SynchPrediv = 7999;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
   hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
@@ -64,6 +68,14 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef* rtcHandle)
   if(rtcHandle->Instance==RTC)
   {
   /* USER CODE BEGIN RTC_MspInit 0 */
+
+  /* Force a clean backup domain so RTC prescaler configuration is applied
+   * deterministically on every boot.
+   */
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+    __HAL_RCC_BACKUPRESET_FORCE();
+    __HAL_RCC_BACKUPRESET_RELEASE();
 
   /* USER CODE END RTC_MspInit 0 */
 
