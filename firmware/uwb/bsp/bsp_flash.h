@@ -17,18 +17,18 @@
 
 /* Public defines ----------------------------------------------------- */
 #define BSP_FLASH_ENTRY_MARKER  0xC0DEC0DEu   /* Valid metadata entry marker */
-#define BSP_FLASH_METADATA_SIZE (32u * 1024u) /* 32 KB metadata region */
+#define BSP_FLASH_METADATA_SIZE (40u * 1024u) /* 40 KB metadata region */
 #define BSP_FLASH_ENTRY_SIZE    32u           /* Size of one metadata entry (bytes) */
 
 /* ── Data-region sub-partitions (offset relative to DATA region start) ───────
  *
- *  Each sector = 32 KB metadata + 96 KB data region.
- *  [0x00000 – 0x03FFF]  16 KB  config   (latest record only)
- *  [0x04000 – 0x17FFF]  80 KB  log      (append-only)
- *  Total = 96 KB, no waste.
+ *  Each sector = 40 KB metadata + 88 KB data region.
+ *  [0x00000 – 0x01FFF]   8 KB  config   (latest record only)
+ *  [0x02000 – 0x15FFF]  80 KB  log      (append-only)
+ *  Total = 88 KB, no waste.
  * ─────────────────────────────────────────────────────────────────────────── */
 #define BSP_FLASH_CFG_DATA_OFFSET  (0u)                           /**< Config start in data region */
-#define BSP_FLASH_CFG_DATA_LENGTH  (16u * 1024u)                  /**< Config size = 16 KB         */
+#define BSP_FLASH_CFG_DATA_LENGTH  (8u * 1024u)                   /**< Config size = 8 KB          */
 #define BSP_FLASH_LOG_DATA_OFFSET  (BSP_FLASH_CFG_DATA_LENGTH)    /**< Log start  = 0x04000        */
 #define BSP_FLASH_LOG_DATA_LENGTH  (80u * 1024u)                  /**< Log size   = 80 KB          */
 
