@@ -91,17 +91,22 @@ class FlashLogStreamParser:
 
         msg = rec[9 : 9 + msg_len].decode("utf-8", errors="replace")
 
-        if log_type == 1:
+        if log_type == 0xFE:
             level = "INFO"
-        elif log_type == 2:
+            color = "\033[37m"  # white
+        elif log_type == 0xFF:
             level = "DEBUG"
-        elif log_type == 3:
+            color = "\033[36m"  # cyan
+        elif log_type == 0xFD:
             level = "WARN"
+            color = "\033[33m"  # yellow
         else:
             level = "ERROR"
+            color = "\033[31m"  # red
 
         ts_text = FlashLogStreamParser._format_timestamp(timestamp)
-        return f"[{ts_text}] [{level:<5}] [0x{obj_code:02X}] {msg}"
+        reset = "\033[0m"
+        return f"{color}[{ts_text}] [{level:<5}] [0x{obj_code:02X}] {msg}{reset}"
 
 
 class LogRealtimeTester:
