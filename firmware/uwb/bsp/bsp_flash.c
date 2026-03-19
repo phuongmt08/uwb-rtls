@@ -108,8 +108,10 @@ bsp_flash_status_t bsp_flash_dual_init(bsp_flash_dual_t      *dr,
   dr->timestamp_cb = timestamp_fn;
 
   /* Validate sector addresses and sizes */
-  if (addr_to_sector(base0) < 0 || addr_to_sector(base1) < 0)
+  if (addr_to_sector(base0) < 0 || addr_to_sector(base1) < 0) {
+    RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_INVALID_PARAM, "Invalid sector address: base0=0x%08lX base1=0x%08lX", (unsigned long)base0, (unsigned long)base1);
     return BSP_FLASH_ERR_INVALID_ARG;
+  }
 
   /* Size must be > 16KB (metadata) + at least 256 bytes data */
   uint32_t min_size = BSP_FLASH_METADATA_SIZE + 256u;
@@ -151,14 +153,15 @@ bsp_flash_status_t bsp_flash_dual_init(bsp_flash_dual_t      *dr,
   }
   else
   {
-    /* No valid metadata: erase sector 0 and write first entry */
-    if (flash_erase_sector(base0) != BSP_FLASH_OK)
+    RLOG_W(LOG_OBJECT_CODE_FLASH, " No valid metadata found. Erasing sector0 and writing first entry.");
+    if (flash_erase_sector(base0) != BSP_FLASH_OK) {
+      RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_HAL, "Erase sector0 failed");
       return BSP_FLASH_ERR_ERASE;
-
-    /* Write first metadata entry via the standard helper */
+    }
     if (append_metadata_entry(base0, 0u, 0u,
                                0u, 0u, 0u, 0u,
-                               0xFFFFFFFFu, crc32_fn) != BSP_FLASH_OK)
+                               0xFFFFFFFFu, crc32_fn) != BSP_FLASH_OK) {
+      RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_HAL, "Write first metadata entry failed");
       return BSP_FLASH_ERR_PROGRAM;
 
     dr->active = 0u;
@@ -540,24 +543,30 @@ static bsp_flash_status_t swap_sector(bsp_flash_dual_t *dr,
   const bsp_flash_region_t *old     = &dr->sectors[dr->active];
   bsp_flash_region_t       *nr      = &dr->sectors[new_idx];
 
-  /* Erase new sector */
-  if (flash_erase_sector(nr->base) != BSP_FLASH_OK)
+  RLOG_W(LOG_OBJECT_CODE_FLASH, "Swapping sector: old=%u new=%u", dr->active, new_idx);
+  if (flash_erase_sector(nr->base) != BSP_FLASH_OK) {
+    RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_HAL, "Erase new sector failed: idx=%u base=0x%08lX", new_idx, (unsigned long)nr->base);
     return BSP_FLASH_ERR_ERASE;
+  }
 
   /* Determine new generation */
   uint32_t                   old_offset = 0u;
   bsp_flash_metadata_entry_t *old_entry = find_latest_metadata(old, &old_offset);
   uint32_t new_gen = 0u;
-  if (old_entry && is_entry_valid(old_entry, dr->crc32_cb))
+  if (old_entry && is_entry_valid(old_entry, dr->crc32_cb)) {
     new_gen = old_entry->gen + 1u;
+    RLOG_I(LOG_OBJECT_CODE_FLASH, "old_entry valid. old_gen=%lu new_gen=%lu", (unsigned long)old_entry->gen, (unsigned long)new_gen);
+  } else {
+    RLOG_W(LOG_OBJECT_CODE_FLASH, "No valid old_entry. new_gen=0");
+  }
 
   /* Write data at sub_offset in the new sector's data region */
   uint32_t write_addr = nr->base + BSP_FLASH_METADATA_SIZE + sub_offset;
 
   HAL_FLASH_Unlock();
-  if (flash_write_block(write_addr, data, size) != BSP_FLASH_OK)
-  {
+  if (flash_write_block(write_addr, data, size) != BSP_FLASH_OK) {
     HAL_FLASH_Lock();
+    RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_HAL, "Write data failed at addr=0x%08lX size=%lu", (unsigned long)write_addr, (unsigned long)size);
     return BSP_FLASH_ERR_PROGRAM;
   }
   HAL_FLASH_Lock();
@@ -570,12 +579,14 @@ static bsp_flash_status_t swap_sector(bsp_flash_dual_t *dr,
                              sub_offset, size,
                              timestamp, data_crc,
                              0xFFFFFFFFu,
-                             dr->crc32_cb) != BSP_FLASH_OK)
+                             dr->crc32_cb) != BSP_FLASH_OK) {
+    RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_HAL, "Write metadata failed");
     return BSP_FLASH_ERR_PROGRAM;
+  }
 
   /* Switch active sector */
   dr->active = new_idx;
-
+  RLOG_I(LOG_OBJECT_CODE_FLASH, " Swap done. Now active=%u", dr->active);
   return BSP_FLASH_OK;
 }
 
