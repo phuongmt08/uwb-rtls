@@ -9,14 +9,6 @@
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 
-#ifndef CHECK
-#define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
-#endif
-
-#ifndef CHECK_VOID
-#define CHECK_VOID(_cond) do { if (!(_cond)) return; } while (0)
-#endif
-
 typedef enum
 {
   BSP_OK = 0,

@@ -2,3 +2,5 @@ PySide6>=6.6
 PyQt6>=6.7
 pyusb>=1.2.1
 libusb-package>=1.0.26.1
+protobuf>=5.26
+pyserial>=3.5

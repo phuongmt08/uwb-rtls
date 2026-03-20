@@ -1,7 +1,6 @@
 #include "network_core.h"
 #include "sys_logger.h"
-#include "stm32f4xx_hal.h"
-
+#include "bsp_util.h"
 #include <string.h>
 
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
@@ -20,7 +19,55 @@ static const network_core_packet_size_t network_core_packet_size[] = {
 
 static const uint16_t network_core_packet_size_count = sizeof(network_core_packet_size) / sizeof(network_core_packet_size_t);
 
-static bool network_core_try_receive(network_core_t *core, stream_type_t in_stream, protocol_packet_t *out_pkt)
+static const uint16_t network_core_skip_ack_tb[] = {
+    protobuf_packet_t_ack_tag,
+    protobuf_packet_t_ble_adv_status_tag,
+    // protobuf_packet_t_log_erase_tag,
+//    protobuf_packet_t_anchor_distance_tag,
+//    protobuf_packet_t_tag_position_tag,
+    protobuf_packet_t_flash_write_tag
+};
+
+static bool network_core_encode_and_send(network_core_t *core,
+                                         stream_type_t stream,
+                                         const protobuf_packet_t *packet)
+{
+    uint8_t buf[core->rx_buffer_size];
+    uint32_t len = 0;
+
+    if (!network_core_encode_packet(packet, buf, sizeof(buf), &len)) {
+        return false;
+    }
+
+    return (_write(stream, (char *)buf, (int)len, 0) > 0);
+}
+
+static void network_core_finalize_tracker(network_ack_tracker_t *t,
+                                          const protobuf_packet_t *packet)
+{
+    if (t->callback) {
+        t->callback(t, packet);
+    }
+    t->state = NETWORK_CORE_ACK_STATE_NONE;
+}
+
+static network_ack_tracker_t *network_core_find_tracker(network_core_t *core,
+                                                         network_core_ack_state_t state)
+{
+    for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
+        if (core->ack_tracker[i].state == state) {
+            return &core->ack_tracker[i];
+        }
+    }
+    return NULL;
+}
+
+static bool network_core_is_ack_positive(protobuf_packet_ack_response_t response)
+{
+    return response == protobuf_packet_ack_response_t_PACKET_ACK_RESPONSE_ACK;
+}
+
+static bool network_core_try_receive(network_core_t *core, stream_type_t in_stream, protobuf_packet_t *out_pkt)
 {
     CHECK(core && out_pkt, false);
 
@@ -39,38 +86,32 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
     return true;
 }
 
-static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protocol_packet_t *packet)
+static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
 {
     for (uint16_t i = 0; i < network_core_packet_size_count; i++) {
-        if (packet->which_payload == network_core_packet_size[i].protobuf_tag) {
+        if (packet->which_params == network_core_packet_size[i].protobuf_tag) {
             (void)_write(tx_stream, (char *)packet, network_core_packet_size[i].data_size, 0);
             return;
         }
     }
 
-    {
-        uint8_t buf[core->rx_buffer_size];
-        uint32_t len = 0;
-        if (network_core_encode_packet(packet, buf, sizeof(buf), &len)) {
-            (void)_write(tx_stream, (char *)buf, (int)len, 0);
-        }
-    }
+    (void)network_core_encode_and_send(core, tx_stream, packet);
 }
 
 static stream_type_t network_core_get_forward_stream(stream_type_t in_stream)
 {
-    if (in_stream == STREAM_UART_RX) {
+    if (in_stream == STREAM_SERIAL_RX) {
         return STREAM_BLE_TX;
     }
 
     if (in_stream == STREAM_BLE_RX) {
-        return STREAM_UART_TX;
+        return STREAM_SERIAL_TX;
     }
 
     return STREAM_MAX;
 }
 
-static void network_core_forward_packet(network_core_t *core, const protocol_packet_t *packet, stream_type_t in_stream)
+static void network_core_forward_packet(network_core_t *core, const protobuf_packet_t *packet, stream_type_t in_stream)
 {
     CHECK_VOID(core && packet);
     CHECK_VOID(packet->has_hdr && packet->hdr.has_addr);
@@ -84,44 +125,64 @@ static void network_core_forward_packet(network_core_t *core, const protocol_pac
     if (forward_stream == STREAM_BLE_TX) {
         network_core_send_ble_packet(core, forward_stream, packet);
     } else {
-        uint8_t buf[core->rx_buffer_size];
-        uint32_t len = 0;
-        if (network_core_encode_packet(packet, buf, sizeof(buf), &len)) {
-            (void)_write(forward_stream, (char*)buf, (int)len, 0);
-        }
+        network_core_encode_and_send(core, forward_stream, packet);
     }
 }
 
-static void network_core_update_ack_trackers(network_core_t *core, const protocol_packet_t *packet)
+static void network_core_update_ack_trackers(network_core_t *core, const protobuf_packet_t *packet)
+{
+    CHECK_VOID(core && packet && packet->has_hdr);
+
+    if (packet->which_params != protobuf_packet_t_ack_tag) {
+        return;
+    }
+
+    for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
+        network_ack_tracker_t *t = &core->ack_tracker[i];
+
+        if (t->state != NETWORK_CORE_ACK_STATE_WAITING) {
+            continue;
+        }
+
+        if (packet->params.ack.ack_seq != t->packet_header.seq) {
+            continue;
+        }
+
+        t->state = network_core_is_ack_positive(packet->params.ack.response) ?
+                   NETWORK_CORE_ACK_STATE_FOUND : NETWORK_CORE_NACK_STATE_FOUND;
+
+        network_core_finalize_tracker(t, packet);
+        return;
+    }
+}
+
+static void network_core_check_tracker_timeouts(network_core_t *core)
 {
     for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
         network_ack_tracker_t *t = &core->ack_tracker[i];
-        if (t->state == NETWORK_CORE_ACK_STATE_WAITING && t->packet_header.seq == packet->hdr.seq) {
-            if (packet->which_payload == protocol_packet_t_ack_tag) {
-                t->state = (packet->payload.ack.response == protocol_response_status_RESPONSE_OK) ?
-                           NETWORK_CORE_ACK_STATE_FOUND : NETWORK_CORE_NACK_STATE_FOUND;
-            } else {
-                t->state = NETWORK_CORE_ACK_STATE_FOUND;
-            }
 
-            if (t->callback) {
-                t->callback(t, packet);
-            }
-
-            t->state = NETWORK_CORE_ACK_STATE_NONE;
+        if (t->state != NETWORK_CORE_ACK_STATE_WAITING) {
+            continue;
         }
+
+        if ((uint32_t)(bsp_util_get_ticks() - t->start_time) < t->timeout) {
+            continue;
+        }
+
+        t->state = NETWORK_CORE_ACK_STATE_TIMEOUT;
+        network_core_finalize_tracker(t, NULL);
     }
 }
 
 static bool network_core_process_one_stream(network_core_t *core, stream_type_t in_stream)
 {
-    protocol_packet_t packet;
+    protobuf_packet_t packet;
 
     if (!network_core_try_receive(core, in_stream, &packet)) {
         return false;
     }
 
-    core->latest_packet_tick = HAL_GetTick();
+    core->latest_packet_tick = bsp_util_get_ticks();
 
     if (core->packet_handler) {
         core->packet_handler(&packet);
@@ -148,9 +209,8 @@ bool network_core_init(network_core_t *core,
     core->rx_buffer_size = rx_buffer_len;
     core->tx_seq = 0;
 
-    for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
-        core->ack_tracker[i].state = NETWORK_CORE_ACK_STATE_NONE;
-    }
+    _Static_assert(NETWORK_CORE_ACK_STATE_NONE == 0,
+                   "ACK state NONE must be 0 for memset-init to work");
 
     return true;
 }
@@ -167,51 +227,35 @@ bool network_core_process(network_core_t *core)
 {
     CHECK(core && core->enabled, false);
 
-    for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
-        network_ack_tracker_t *t = &core->ack_tracker[i];
-        if (t->state == NETWORK_CORE_ACK_STATE_WAITING &&
-            (uint32_t)(HAL_GetTick() - t->start_time) >= t->timeout)
-        {
-            t->state = NETWORK_CORE_ACK_STATE_TIMEOUT;
-            if (t->callback) {
-                t->callback(t, NULL);
-            }
-            t->state = NETWORK_CORE_ACK_STATE_NONE;
-        }
-    }
+    network_core_check_tracker_timeouts(core);
 
-    (void)network_core_process_one_stream(core, STREAM_UART_RX);
-    (void)network_core_process_one_stream(core, STREAM_BLE_RX);
+    network_core_process_one_stream(core, STREAM_SERIAL_RX);
+    // network_core_process_one_stream(core, STREAM_BLE_RX);
 
     return true;
 }
 
-bool network_core_send_packet(network_core_t *core, uint8_t dst, protocol_packet_t *packet)
+bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet_t *packet)
 {
     CHECK(core && packet, false);
 
-    {
-        uint8_t buf[core->rx_buffer_size];
-        uint32_t len = 0;
+    packet->has_hdr = true;
+    packet->hdr.has_addr = true;
+    packet->hdr.addr.src = (uint8_t)core->tx_stream;
+    packet->hdr.addr.dst = dst;
+    packet->hdr.seq = (core->tx_seq)++;
 
-        packet->has_hdr = true;
-        packet->hdr.has_addr = true;
-        packet->hdr.addr.src = (uint8_t)core->tx_stream;
-        packet->hdr.addr.dst = dst;
-        packet->hdr.seq = (core->tx_seq)++;
-
-        if (core->tx_stream == STREAM_BLE_TX) {
-            network_core_send_ble_packet(core, core->tx_stream, packet);
-            return true;
-        }
-
-        if (!network_core_encode_packet(packet, buf, sizeof(buf), &len)) {
-            RLOG_E(OBJECT_CODE, 0x01, "encode fail");
-            return false;
-        }
-
-        return (_write(core->tx_stream, (char*)buf, (int)len, 0) > 0);
+    if (core->tx_stream == STREAM_BLE_TX) {
+        network_core_send_ble_packet(core, core->tx_stream, packet);
+        return true;
     }
+
+    if (!network_core_encode_and_send(core, core->tx_stream, packet)) {
+        RLOG_E(OBJECT_CODE, 0x01, "encode fail");
+        return false;
+    }
+
+    return true;
 }
 
 int network_core_wait_ack(network_core_t *core, uint8_t seq, uint32_t timeout_ms,
@@ -219,33 +263,44 @@ int network_core_wait_ack(network_core_t *core, uint8_t seq, uint32_t timeout_ms
 {
     CHECK(core && callback, -1);
 
-    for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
-        network_ack_tracker_t *t = &core->ack_tracker[i];
-        if (t->state == NETWORK_CORE_ACK_STATE_NONE) {
-            t->packet_header.seq = seq;
-            t->start_time = HAL_GetTick();
-            t->timeout = timeout_ms;
-            t->callback = callback;
-            t->callback_arg = callback_arg;
-            t->state = NETWORK_CORE_ACK_STATE_WAITING;
-            return i;
+    network_ack_tracker_t *t = network_core_find_tracker(core, NETWORK_CORE_ACK_STATE_NONE);
+    if (!t) {
+        return -1;
+    }
+
+    t->packet_header.seq = seq;
+    t->start_time = bsp_util_get_ticks();
+    t->timeout = timeout_ms;
+    t->callback = callback;
+    t->callback_arg = callback_arg;
+    t->state = NETWORK_CORE_ACK_STATE_WAITING;
+
+    return (int)(t - core->ack_tracker);
+}
+
+bool network_core_send_ack(network_core_t *core,
+                           const protobuf_packet_t *rx_packet,
+                           protobuf_packet_ack_response_t response)
+{
+    CHECK(core && rx_packet, false);
+    CHECK(rx_packet->has_hdr && rx_packet->hdr.has_addr, false);
+
+    for (uint16_t i = 0; i < (uint16_t)(sizeof(network_core_skip_ack_tb) / sizeof(network_core_skip_ack_tb[0])); i++) {
+        if (rx_packet->which_params == network_core_skip_ack_tb[i]) {
+            return false;
         }
     }
 
-    return -1;
-}
-
-void network_core_send_ack(network_core_t *core, uint8_t dst, uint32_t rx_seq, uint8_t response)
-{
-    protocol_packet_t p;
+    protobuf_packet_t p;
     memset(&p, 0, sizeof(p));
-    p.payload.ack.ack_seq = rx_seq;
-    p.payload.ack.response = (protocol_response_status)response;
-    p.which_payload = protocol_packet_t_ack_tag;
-    (void)network_core_send_packet(core, dst, &p);
+    p.params.ack.ack_seq = rx_packet->hdr.seq;
+    p.params.ack.response = response;
+    p.which_params = protobuf_packet_t_ack_tag;
+
+    return network_core_send_packet(core, (uint8_t)rx_packet->hdr.addr.src, &p);
 }
 
-bool network_core_encode_packet(const protocol_packet_t *encode_msg, uint8_t *buff, uint32_t buff_len, uint32_t *len)
+bool network_core_encode_packet(const protobuf_packet_t *encode_msg, uint8_t *buff, uint32_t buff_len, uint32_t *len)
 {
     pb_ostream_t stream;
     bool status;
@@ -253,18 +308,18 @@ bool network_core_encode_packet(const protocol_packet_t *encode_msg, uint8_t *bu
     CHECK(encode_msg && buff && len, false);
 
     stream = pb_ostream_from_buffer(buff, buff_len);
-    status = pb_encode(&stream, protocol_packet_t_fields, encode_msg);
+    status = pb_encode(&stream, protobuf_packet_t_fields, encode_msg);
     *len = stream.bytes_written;
 
     return status;
 }
 
-bool network_core_decode_packet(const uint8_t *buff, uint32_t len, protocol_packet_t *decode_msg)
+bool network_core_decode_packet(const uint8_t *buff, uint32_t len, protobuf_packet_t *decode_msg)
 {
     pb_istream_t stream;
 
     CHECK(buff && decode_msg && len > 0, false);
 
     stream = pb_istream_from_buffer(buff, len);
-    return pb_decode(&stream, protocol_packet_t_fields, decode_msg);
+    return pb_decode(&stream, protobuf_packet_t_fields, decode_msg);
 }
