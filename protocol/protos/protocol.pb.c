@@ -168,6 +168,9 @@ PB_BIND(protobuf_ranging_status_get_t, protobuf_ranging_status_get_t, AUTO)
 PB_BIND(protobuf_ranging_status_resp_t, protobuf_ranging_status_resp_t, AUTO)
 
 
+PB_BIND(protobuf_battery_info_t, protobuf_battery_info_t, AUTO)
+
+
 PB_BIND(protobuf_packet_t, protobuf_packet_t, AUTO)
 
 

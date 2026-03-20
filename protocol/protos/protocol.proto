@@ -466,6 +466,14 @@ message ranging_status_resp_t {
 
 /* OTA (simple flash workflow) --------------------------------------------- */
 
+
+/* Battery information -----------------------------------------------------------*/
+
+message battery_info_t {
+    uint32 bat_voltage_mv  = 1;
+    uint32 bat_soc_percent = 2;
+    int32 crate_time       = 3;
+}
 /* Packet ------------------------------------------------------------------- */
 
 message packet_t {
@@ -544,6 +552,8 @@ message packet_t {
         anchor_layout_get_t       anchor_layout_get       = 42;
         anchor_layout_set_t       anchor_layout_set       = 43;
         anchor_layout_resp_t      anchor_layout_resp      = 44;
+        /* Battery */
+        battery_info_t            battery_info_t          = 45;
     }
 }
 
