@@ -23,7 +23,7 @@
 
 /* --- I2C peripheral ------------------------------------------------------- */
 #ifndef BSP_BATTERY_I2C_HANDLE
-  #define BSP_BATTERY_I2C_HANDLE      hi2c3
+  #define BSP_BATTERY_I2C_HANDLE      hi2c1
 #endif
 
 #ifndef BSP_BATTERY_I2C_TIMEOUT_MS
