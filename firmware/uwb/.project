@@ -31,6 +31,11 @@
 	</natures>
 	<linkedResources>
 		<link>
+			<name>common</name>
+			<type>2</type>
+			<location>C:/Users/USER/Desktop/uwb-rtls/firmware/common</location>
+		</link>
+		<link>
 			<name>protocol</name>
 			<type>2</type>
 			<location>C:/Users/USER/Desktop/uwb-rtls/protocol</location>

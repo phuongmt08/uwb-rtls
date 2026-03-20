@@ -312,7 +312,7 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   uint8_t target_anchor = poll->target_anchor;
 
   /* Check if this POLL is for us (0xFF means broadcast) */
-  if (target_anchor != 0xFF && target_anchor != sys_cfg->device_id) {
+  if (target_anchor != 0xFF && target_anchor != sys_cfg->uwb.device_id) {
     /* Not for us, ignore silently */
     return MW_DSTWR_OK;
   }
@@ -332,7 +332,7 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
   mw_dstwr_resp_msg_t resp_msg = {
     .msg_type = MW_DSTWR_MSG_TYPE_RESP,
     .sequence_num = poll_seq,
-    .anchor_id = sys_cfg->device_id,  /* Send our anchor ID */
+    .anchor_id = sys_cfg->uwb.device_id,  /* Send our anchor ID */
     .rssi_last = 0,
     .padding = {0}
   };
@@ -403,10 +403,10 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
     .sequence_num = poll_seq,
     .distance_mm = distance_mm,
 #ifdef ENABLE_RSSI
-    .anchor_id = sys_cfg->device_id,
+    .anchor_id = sys_cfg->uwb.device_id,
     .rssi_final = (uint8_t)(rssi_final & 0xFF),
 #else
-    .anchor_id = sys_cfg->device_id,
+    .anchor_id = sys_cfg->uwb.device_id,
     .rssi_final = 0,
 #endif
     .padding = {0}
@@ -481,7 +481,7 @@ mw_dstwr_err_t mw_dstwr_execute_anchor(const mw_dstwr_config_t *config,
     result->timestamps.t5 = t5;
     result->timestamps.t6 = t6;
     result->distance_m = distance;
-    result->anchor_id = sys_cfg->device_id;  /* Always set anchor ID */
+    result->anchor_id = sys_cfg->uwb.device_id;  /* Always set anchor ID */
 #ifdef ENABLE_RSSI
     result->rssi = (int8_t)(rssi_final & 0xFF);
 #else

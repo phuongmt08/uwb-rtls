@@ -539,6 +539,80 @@ class MainWindow(QMainWindow):
         repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
         return os.path.join(repo_root, "firmware", "uwb")
 
+    def _update_version(self):
+        """Update FW_VERSION_BUILD in app/version_build.h before building."""
+        import re
+        try:
+            uwb_dir = self._get_uwb_project_dir()
+            version_file = os.path.join(uwb_dir, "app", "version.h")
+            version_build_file = os.path.join(uwb_dir, "app", "version_build.h")
+            
+            # Read current version from version.h
+            if not os.path.exists(version_file):
+                self.signals.log.emit(f"[VERSION] ERROR: Missing {version_file}")
+                return False
+            
+            with open(version_file, 'r') as f:
+                version_content = f.read()
+            
+            # Extract MAJOR.MINOR.PATCH
+            major = int(re.search(r'#define\s+FW_VERSION_MAJOR\s+(\d+)', version_content).group(1))
+            minor = int(re.search(r'#define\s+FW_VERSION_MINOR\s+(\d+)', version_content).group(1))
+            patch = int(re.search(r'#define\s+FW_VERSION_PATCH\s+(\d+)', version_content).group(1))
+            
+            self.signals.log.emit(f"[VERSION] Current: {major}.{minor}.{patch}")
+            
+            # Read old version and build from version_build.h
+            old_major = old_minor = old_patch = old_build = 0
+            if os.path.exists(version_build_file):
+                try:
+                    with open(version_build_file, 'r') as f:
+                        build_content = f.read()
+                    
+                    m = re.search(r'#define\s+FW_VERSION_MAJOR_OLD\s+(\d+)', build_content)
+                    if m: old_major = int(m.group(1))
+                    m = re.search(r'#define\s+FW_VERSION_MINOR_OLD\s+(\d+)', build_content)
+                    if m: old_minor = int(m.group(1))
+                    m = re.search(r'#define\s+FW_VERSION_PATCH_OLD\s+(\d+)', build_content)
+                    if m: old_patch = int(m.group(1))
+                    m = re.search(r'#define\s+FW_VERSION_BUILD\s+(\d+)', build_content)
+                    if m: old_build = int(m.group(1))
+                except Exception as e:
+                    self.signals.log.emit(f"[VERSION] Build file read error: {e}")
+            
+            # Determine new BUILD number
+            if f"{major}.{minor}.{patch}" == f"{old_major}.{old_minor}.{old_patch}":
+                new_build = old_build + 1
+                self.signals.log.emit(f"[VERSION] Version unchanged → INCREMENT to {new_build}")
+            else:
+                new_build = 0
+                self.signals.log.emit(f"[VERSION] Version changed → RESET to 0")
+            
+            # Write version_build.h
+            with open(version_build_file, 'w') as f:
+                f.write(f"""/*
+ * version_build.h - AUTO-GENERATED
+ * Do not commit this file to git
+ * Updated by Python programmer before each build
+ */
+
+#ifndef APPLICATION_VERSION_BUILD_H_
+#define APPLICATION_VERSION_BUILD_H_
+
+#define FW_VERSION_MAJOR_OLD {major}
+#define FW_VERSION_MINOR_OLD {minor}
+#define FW_VERSION_PATCH_OLD {patch}
+#define FW_VERSION_BUILD {new_build}
+
+#endif /* APPLICATION_VERSION_BUILD_H_ */
+""")
+            
+            self.signals.log.emit(f"[VERSION] {major}.{minor}.{patch}.{new_build}")
+            return True
+        except Exception as e:
+            self.signals.log.emit(f"[VERSION] ERROR: {e}")
+            return False
+
     def _resolve_make_command(self) -> str:
         for cmd in ("make", "mingw32-make"):
             if shutil.which(cmd):
@@ -555,14 +629,17 @@ class MainWindow(QMainWindow):
         cmd = [make_cmd, "-f", "Makefile", target]
 
         self.signals.log.emit(f"Running build command: {' '.join(cmd)}")
+        # Convert list cmd to string for shell=True to work
+        cmd_str = " ".join(cmd)
         process = subprocess.Popen(
-            cmd,
+            cmd_str,
             cwd=uwb_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
+            shell=True,
         )
 
         assert process.stdout is not None
@@ -1099,6 +1176,12 @@ class MainWindow(QMainWindow):
 
     def on_build(self):
         def job():
+            self.signals.log.emit("=" * 60)
+            self.signals.log.emit("[BUILD] Starting update version routine...")
+            self.signals.log.emit("=" * 60)
+            result = self._update_version()
+            self.signals.log.emit(f"[BUILD] Version update result: {result}")
+            self.signals.log.emit("=" * 60)
             self.signals.log.emit("Cleaning firmware before build...")
             self._run_make_target("clean")
             self.signals.log.emit("Building firmware...")

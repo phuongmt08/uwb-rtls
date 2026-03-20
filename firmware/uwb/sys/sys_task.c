@@ -61,7 +61,6 @@ sys_task_err_t sys_task_init(void)
 
     return SRV_TASK_OK;
 }
-
 int sys_task_add(sys_task_cb_t cb, void *arg, uint32_t period_ms, uint32_t delay_ms)
 {
   if (cb == NULL || period_ms == 0u)

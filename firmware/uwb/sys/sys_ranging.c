@@ -70,7 +70,7 @@ static int hal_tx(const void *data, uint16_t length)
   return (err == BSP_OK) ? 0 : -1;
 }
 
-static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
+static int hal_rx_with_timeout(void *buffer, uint16_t buffer_size,
                                uint16_t *received_length, uint32_t timeout_us)
 {
   uint32_t timeout_ms = (timeout_us + 999) / 1000;
@@ -103,9 +103,9 @@ static int hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size,
   return -1;
 }
 
-static int hal_read_timestamp(uint8_t reg_addr, uint8_t sub_addr, uint64_t *timestamp)
+static int hal_read_timestamp(uint8_t reg_addr, uint16_t sub_addr, uint64_t *timestamp)
 {
-  bsp_err_t err = bsp_uwb_read_40bit(reg_addr, sub_addr, timestamp);
+  bsp_err_t err = bsp_uwb_read_40bit(reg_addr, (uint8_t)sub_addr, timestamp);
   return (err == BSP_OK) ? 0 : -1;
 }
 
@@ -226,7 +226,7 @@ sys_ranging_err_t sys_ranging_tag_start(uint8_t sequence_num, uint32_t rx_timeou
   /* Get timeout from config if not specified */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   state_machine_reset();
@@ -330,7 +330,7 @@ sys_ranging_err_t sys_ranging_anchor_start(uint32_t rx_timeout_ms)
   /* If timeout = 0, use config default */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   s_ctx.mw_config.sequence_num = 0;
@@ -427,7 +427,7 @@ sys_ranging_err_t sys_ranging_tag_start_with_anchor(uint8_t anchor_id,
   /* Get timeout from config if not specified */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   state_machine_reset();
@@ -462,7 +462,7 @@ int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
   /* Get timeout from config if not specified */
   if (rx_timeout_ms == 0) {
     sys_config_t *cfg = sys_config_get();
-    rx_timeout_ms = cfg->rx_timeout_ms;
+    rx_timeout_ms = cfg->uwb.rx_timeout_ms;
   }
   
   /* Use longer timeout for multi-anchor to handle delays */

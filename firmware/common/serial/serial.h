@@ -5,8 +5,8 @@
 
 typedef enum
 {
-    STREAM_UART_RX = 0,
-    STREAM_UART_TX,
+    STREAM_SERIAL_RX = 0,
+    STREAM_SERIAL_TX,
     STREAM_BLE_RX,
     STREAM_BLE_TX,
     STREAM_MAX
@@ -22,7 +22,6 @@ typedef int (*serial_func_t)(int file, char *ptr, int len, uint8_t type);
 
 void serial_init(void);
 void serial_register_tx_handler(stream_type_t stream, serial_func_t func);
-void serial_uart_rx_push(const uint8_t *data, uint32_t len);
 void serial_ble_rx_push(const uint8_t *data, uint32_t len);
 void serial_set_network_transport(serial_network_transport_t transport);
 stream_type_t serial_get_network_rx_stream(void);

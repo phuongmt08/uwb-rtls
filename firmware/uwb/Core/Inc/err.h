@@ -40,4 +40,8 @@
 	do { \
 		if (!(condition)) return; \
 	} while(0)
+
+#define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
+
+
 #endif /* __ERR_H */

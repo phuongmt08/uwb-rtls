@@ -1,9 +1,5 @@
 build/
 
-# Generated files
-protos/*.pb.c
-protos/*.pb.h
-
 # Python junk
 __pycache__/
 *.pyc
@@ -13,4 +9,3 @@ __pycache__/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
-Makefile
