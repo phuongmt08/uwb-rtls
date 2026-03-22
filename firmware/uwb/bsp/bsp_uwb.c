@@ -182,21 +182,28 @@ bsp_err_t bsp_uwb_init(void)
   return BSP_OK;
 }
 
-bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
+bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 {
   CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
   CHECK_PARAM(s_initialized, BSP_ERR);
 
-  dwt_config_t dw_cfg = { .chan           = cfg->channel,
-                          .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-                          .txPreambLength = DWT_PLEN_1024,
-                          .rxPAC          = DWT_PAC32,
-                          .txCode         = 9,
-                          .rxCode         = 9,
-                          .nsSFD          = 0,
-                          .dataRate       = cfg->data_rate,
-                          .phrMode        = DWT_PHRMODE_STD,
-                          .sfdTO          = (1024 + 64) };
+    dwt_config_t dw_cfg = {
+        .chan           = cfg->uwb_channel,
+        .prf            = (cfg->uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
+        .txPreambLength = DWT_PLEN_1024,
+        .rxPAC          = DWT_PAC32,
+        .txCode         = 9,
+        .rxCode         = 9,
+        .nsSFD          = 0,
+        .dataRate       = cfg->uwb_data_rate,
+        .phrMode        = DWT_PHRMODE_STD,
+        .sfdTO          = (1024 + 64)   
+    };
+    
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
+           dw_cfg.chan, cfg->uwb_prf, dw_cfg.dataRate, dw_cfg.txCode);
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=256 PAC=16 SFD=%u nsSFD=%u PHR=%u",
+           dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
 
   if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS)
   {
@@ -211,9 +218,20 @@ bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
   dwt_setrxantennadelay(cfg->rx_antenna_delay);
   dwt_settxantennadelay(cfg->tx_antenna_delay);
 
-  s_tx_antenna_delay = cfg->tx_antenna_delay;
-  s_rx_antenna_delay = cfg->rx_antenna_delay;
-  /* Start fresh */
+    /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
+    dwt_setinterrupt((uint32)(DWT_INT_RFCG |
+                              DWT_INT_RFTO |
+                              DWT_INT_RXPTO |
+                              DWT_INT_RFCE |
+                              DWT_INT_RPHE |
+                              DWT_INT_RFSL), 1);
+
+    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+    dwt_forcetrxoff();
+    s_irq_event_pending = 0;
+    
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)", 
+           cfg->tx_antenna_delay, cfg->rx_antenna_delay);
 
   /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
   dwt_setinterrupt(
@@ -458,6 +476,7 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
   /* Enable RX */
   if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS)
   {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] dwt_rxenable failed");
     return BSP_ERR;
   }
 
@@ -699,17 +718,14 @@ bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
 {
   uint32_t start_tick = HAL_GetTick();
 
-  while ((HAL_GetTick() - start_tick) < timeout_ms)
-  {
-    if (s_irq_event_pending)
-    {
+  while ((HAL_GetTick() - start_tick) < timeout_ms) {
+    if (s_irq_event_pending) {
       s_irq_event_pending = 0;
       return true;
     }
 
     /* Fallback path: if EXTI edge was missed, poll DW1000 status bits. */
-    if (bsp_uwb_is_rx_ready())
-    {
+    if (bsp_uwb_is_rx_ready()) {
       return true;
     }
   }

@@ -64,6 +64,7 @@ static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
 #endif
 };
 
+/* Private variables -------------------------------------------------- */
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
 static uint32_t s_last_ranging_tick = 0;
@@ -114,7 +115,7 @@ static void init_filters(void)
 #endif
 
     sys_config_t *cfg = sys_config_get();
-    float dt = cfg->ranging_period_ms / 1000.0f;
+    float dt = cfg->uwb.ranging_period_ms / 1000.0f;
 
     mw_filter_init(&s_filters.filter, init_x, init_y, dt,
                    DES_ALPHA_BASE, DES_BETA,
@@ -210,7 +211,7 @@ static void tag_calib_reset(void)
     memset(&s_tag_calib, 0, sizeof(s_tag_calib));
 
     sys_config_t *cfg = sys_config_get();
-    s_tag_calib.current_delay = cfg->tx_antenna_delay;
+    s_tag_calib.current_delay = cfg->uwb.tx_antenna_delay;
     s_tag_calib.delta_step = 100;
     s_tag_calib.last_error = 999.0f;
     s_tag_calib.converged = false;
@@ -310,17 +311,11 @@ static void tag_calib_calculate_and_adjust(void)
     s_tag_calib.last_error = s_tag_calib.error;
     s_tag_calib.current_delay = (uint16_t)new_delay;
 
-    bsp_uwb_config_t uwb_cfg;
     sys_config_t *cfg = sys_config_get();
-    uwb_cfg.channel = cfg->uwb_channel;
-    uwb_cfg.prf = cfg->uwb_prf;
-    uwb_cfg.data_rate = cfg->uwb_data_rate;
-    uwb_cfg.preamble_code = cfg->uwb_preamble_code;
-    uwb_cfg.tx_antenna_delay = s_tag_calib.current_delay;
-    uwb_cfg.rx_antenna_delay = s_tag_calib.current_delay;
-    uwb_cfg.tx_power = cfg->tx_power;
-
-    bsp_uwb_configure(&uwb_cfg);
+    protobuf_uwb_cfg_t tmp = cfg->uwb;
+    tmp.tx_antenna_delay = s_tag_calib.current_delay;
+    tmp.rx_antenna_delay = s_tag_calib.current_delay;
+    bsp_uwb_configure(&tmp);
     s_tag_calib.count = 0;
     s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
 }
@@ -332,8 +327,8 @@ static void tag_calib_apply_and_save(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saving TX/RX delay=%u...", s_tag_calib.current_delay);
 
     sys_config_t *cfg = sys_config_get();
-    cfg->tx_antenna_delay = s_tag_calib.current_delay;
-    cfg->rx_antenna_delay = s_tag_calib.current_delay;
+    cfg->uwb.tx_antenna_delay = s_tag_calib.current_delay;
+    cfg->uwb.rx_antenna_delay = s_tag_calib.current_delay;
 
     if (sys_config_save() == 0) {
         RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saved! Restarting...");
@@ -357,8 +352,8 @@ void app_tag_on_button(bsp_io_button_event_t event)
     } else if (event == BSP_IO_EVENT_DOUBLE_CLICK) {
         RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Reset to factory...");
         sys_config_t *cfg = sys_config_get();
-        cfg->tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-        cfg->rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+        cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+        cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
         sys_config_save();
         s_tag_app_state = TAG_STATE_IDLE;
     }
@@ -513,13 +508,13 @@ app_err_t app_tag_init(void)
     sys_config_t *cfg = sys_config_get();
     uint8_t cfg_num_anchors = 1;
     uint8_t cfg_anchor_ids[NUM_ANCHORS] = {0};
-    RLOG_I(LOG_OBJECT_CODE_TAG, "========== TAG INIT (TDMA) ==========");
-    RLOG_I(LOG_OBJECT_CODE_TAG, "ID: %d | Interval: %dms", cfg->device_id, cfg->ranging_period_ms);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "========== TAG INIT ==========");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "ID: %d | Interval: %dms", cfg->uwb.device_id, cfg->uwb.ranging_period_ms);
     
     /* Log ranging period from config */
-    uint32_t update_hz = (cfg->ranging_period_ms > 0) ? (1000 / cfg->ranging_period_ms) : 0;
+    uint32_t update_hz = (cfg->uwb.ranging_period_ms > 0) ? (1000 / cfg->uwb.ranging_period_ms) : 0;
     RLOG_I(LOG_OBJECT_CODE_TAG, "Update rate: %dms (%luHz)",
-           cfg->ranging_period_ms, update_hz);
+           cfg->uwb.ranging_period_ms, update_hz);
 
     /* Log height configuration */
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
@@ -564,17 +559,17 @@ app_err_t app_tag_init(void)
                (unsigned long)est_4_ms,
                (unsigned long)est_6_ms);
 
-        if (cfg->ranging_period_ms < est_cfg_ms) {
+        if (cfg->uwb.ranging_period_ms < est_cfg_ms) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
                    "Configured period %ums < estimated stable %lums for %u anchors",
-                   cfg->ranging_period_ms,
+                   cfg->uwb.ranging_period_ms,
                    (unsigned long)est_cfg_ms,
                    cfg_num_anchors);
         }
     }
 
     s_last_ranging_tick = HAL_GetTick();
-    s_next_due_tick = s_last_ranging_tick + cfg->ranging_period_ms;
+    s_next_due_tick = s_last_ranging_tick + cfg->uwb.ranging_period_ms;
     s_cycle_start_tick = 0;
     s_period_miss_count = 0;
     s_period_overrun_count = 0;
@@ -607,7 +602,7 @@ void app_tag_process(void)
         uint32_t delta = now - s_last_ranging_tick;
         RLOG_I(LOG_OBJECT_CODE_TAG, "[D] act=%d last=%lu now=%lu delta=%lu period=%lu OK=%d",
                s_is_ranging_active, s_last_ranging_tick, now, delta, 
-               cfg->ranging_period_ms, (delta >= cfg->ranging_period_ms));
+               cfg->uwb.ranging_period_ms, (delta >= cfg->uwb.ranging_period_ms));
         last_log = now;
     }
 
@@ -617,7 +612,7 @@ void app_tag_process(void)
             RLOG_W(LOG_OBJECT_CODE_TAG,
                    "Period slip before start: late=%lums target=%ums",
                    (unsigned long)lateness_ms,
-                   (unsigned)cfg->ranging_period_ms);
+                   (unsigned)cfg->uwb.ranging_period_ms);
             last_warn_log = now;
         }
     }
@@ -642,7 +637,7 @@ void app_tag_process(void)
         sys_ranging_err_t start_err = sys_ranging_tag_start_tdma(num_anchors,
                                                                   anchor_ids,
                                                                   s_sequence_num,
-                                                                  cfg->rx_timeout_ms);
+                                                                  cfg->uwb.rx_timeout_ms);
         if (start_err == SYS_RANGING_OK) {
             s_sequence_num++;
             s_pending_num_anchors = num_anchors;
@@ -675,7 +670,7 @@ void app_tag_process(void)
 
     sys_ranging_err_t err = sys_ranging_tag_process_tdma(s_pending_num_anchors,
                                                           s_pending_anchor_ids,
-                                                          cfg->rx_timeout_ms);
+                                                          cfg->uwb.rx_timeout_ms);
 
     if (err == SYS_RANGING_OK) {
         sys_ranging_multi_result_t multi_results;
@@ -719,18 +714,18 @@ void app_tag_process(void)
         s_last_ranging_tick = HAL_GetTick();
         if (s_cycle_start_tick != 0U) {
             uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
-            if (cycle_ms > cfg->ranging_period_ms) {
+            if (cycle_ms > cfg->uwb.ranging_period_ms) {
                 s_period_overrun_count++;
                 if ((s_period_overrun_count % 5U) == 1U) {
                     RLOG_W(LOG_OBJECT_CODE_TAG,
                            "Cycle overrun: %lums > period %ums (count=%lu)",
                            (unsigned long)cycle_ms,
-                           (unsigned)cfg->ranging_period_ms,
+                           (unsigned)cfg->uwb.ranging_period_ms,
                            (unsigned long)s_period_overrun_count);
                 }
             }
         }
-        update_period_schedule(s_last_ranging_tick, cfg->ranging_period_ms);
+        update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
         if ((s_period_miss_count % 10U) == 1U && s_period_miss_count > 0U) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
                    "Period miss accumulated: %lu",
@@ -748,7 +743,7 @@ void app_tag_process(void)
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Ranging failed");
         }
         s_last_ranging_tick = HAL_GetTick();
-        update_period_schedule(s_last_ranging_tick, cfg->ranging_period_ms);
+        update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
         s_is_ranging_active = false;
     }
     

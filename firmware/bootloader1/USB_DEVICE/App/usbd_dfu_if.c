@@ -62,15 +62,10 @@ static uint8_t g_erase_done = 0;  /* Flag to track if erase was done */
   * @{
   */
 
-/* DFU descriptor string for STM32F411CE:
- * Format must match: @name/base_address/sectors
- * STM32CubeProgrammer parses this to show memory layout
- * Sector 2: 16KB @ 0x08008000
- * Sector 3: 16KB @ 0x0800C000  
- * Sector 4: 64KB @ 0x08010000
- * Each sector listed individually with 'g' flag (readable+writable)
+/* DFU descriptor string (DfuSe memory map format).
+ * Full STM32F411 512KB flash layout (S0..S7).
  */
-#define FLASH_DESC_STR      "@Internal Flash  /0x08008000/01*016Kg,01*016Kg,01*064Kg"
+#define FLASH_DESC_STR      "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,03*128Kg"
 
 /* USER CODE BEGIN PRIVATE_DEFINES */
 
@@ -132,6 +127,9 @@ static uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len);
 static uint8_t *MEM_If_Read_FS(uint8_t *src, uint8_t *dest, uint32_t Len);
 static uint16_t MEM_If_DeInit_FS(void);
 static uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer);
+static uint16_t DFU_Erase_AppSectors(void);
+static uint16_t DFU_Erase_UserSectors(void);
+static uint32_t DFU_GetSectorFromAddress(uint32_t address);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
 
@@ -179,6 +177,101 @@ uint16_t MEM_If_DeInit_FS(void)
   /* USER CODE END 1 */
 }
 
+static uint16_t DFU_Erase_AppSectors(void)
+{
+  uint32_t SectorError = 0;
+  FLASH_EraseInitTypeDef EraseInitStruct;
+
+  EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+  EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+  EraseInitStruct.NbSectors = 1;
+
+  EraseInitStruct.Sector = FLASH_SECTOR_3;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_4;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_5;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  g_erase_done = 1;
+  return USBD_OK;
+}
+
+static uint16_t DFU_Erase_UserSectors(void)
+{
+  uint32_t SectorError = 0;
+  FLASH_EraseInitTypeDef EraseInitStruct;
+
+  EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+  EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+  EraseInitStruct.NbSectors = 1;
+
+  EraseInitStruct.Sector = FLASH_SECTOR_3;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_4;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_5;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_6;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_7;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  g_erase_done = 1;
+  return USBD_OK;
+}
+
+static uint32_t DFU_GetSectorFromAddress(uint32_t address)
+{
+  if (address < 0x08010000UL)
+  {
+    return FLASH_SECTOR_3;
+  }
+  if (address < 0x08020000UL)
+  {
+    return FLASH_SECTOR_4;
+  }
+  if (address < 0x08040000UL)
+  {
+    return FLASH_SECTOR_5;
+  }
+  if (address < 0x08060000UL)
+  {
+    return FLASH_SECTOR_6;
+  }
+  return FLASH_SECTOR_7;
+}
+
 /**
   * @brief  Erase sector.
   * @param  Add: Address of sector to be erased.
@@ -189,36 +282,38 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
   /* USER CODE BEGIN 2 */
   g_dfu_last_activity = HAL_GetTick();
 
-  /* Accept any address for erase - will erase all app sectors */
-  /* This handles both individual sector erase and full chip erase */
-  
   HAL_FLASH_Unlock();
 
-  /* Erase all application sectors (2, 3, 4) */
-  uint32_t SectorError = 0;
-  FLASH_EraseInitTypeDef EraseInitStruct;
-  
-  EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-  EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-  EraseInitStruct.NbSectors = 1;
-  
-  /* Erase Sector 2 (16KB @ 0x08008000) */
-  EraseInitStruct.Sector = 2;
-  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-  
-  /* Erase Sector 3 (16KB @ 0x0800C000) */
-  EraseInitStruct.Sector = 3;
-  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-  
-  /* Erase Sector 4 (64KB @ 0x08010000) */
-  EraseInitStruct.Sector = 4;
-  HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-  
-  /* Mark as erased for write callback */
-  g_erase_done = 1;
+  uint16_t status = USBD_FAIL;
+
+  /* Mass erase from host tool: erase all user sectors (keep bootloader sectors 0-2). */
+  if ((Add == 0xFFFFFFFFUL) ||
+      (Add == 0x00000000UL) ||
+      (Add == 0x08000000UL) ||
+      (Add == MEM_APP_START))
+  {
+    status = DFU_Erase_AppSectors();
+  }
+  /* Selected erase: erase the addressed app sector only. */
+  else if ((Add >= MEM_APP_START) && (Add < MEM_DATA_STORAGE_END))
+  {
+    uint32_t SectorError = 0;
+    FLASH_EraseInitTypeDef EraseInitStruct;
+
+    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+    EraseInitStruct.NbSectors = 1;
+    EraseInitStruct.Sector = DFU_GetSectorFromAddress(Add);
+
+    if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) == HAL_OK)
+    {
+      status = USBD_OK;
+      g_erase_done = 1;
+    }
+  }
 
   HAL_FLASH_Lock();
-  return (USBD_OK);
+  return status;
   /* USER CODE END 2 */
 }
 
@@ -234,32 +329,21 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
   /* USER CODE BEGIN 3 */
   g_dfu_last_activity = HAL_GetTick();
 
-  /* Verify destination is in application space (sector 2-4 only) */
+  /* Verify destination is in application space (sector 3-5 only) */
   uint32_t addr = (uint32_t)dest;
-  if (addr < APP_ADDRESS || addr >= 0x08020000) {
-    /* Reject writes to bootloader (< 0x08008000) or data storage (>= 0x08020000) */
+  if (addr < MEM_APP_START || addr >= MEM_APP_END) {
+    /* Reject writes to bootloader area (< MEM_APP_START) or data storage (>= MEM_APP_END) */
     return USBD_FAIL;
   }
 
   HAL_FLASH_Unlock();
   
-  /* Auto-erase on first write (since Mass Erase doesn't call erase callback) */
+  /* Auto-erase on first write as a safety fallback if host skipped erase command */
   if (!g_erase_done) {
-    g_erase_done = 1;
-    
-    uint32_t SectorError = 0;
-    FLASH_EraseInitTypeDef EraseInitStruct;
-    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    EraseInitStruct.NbSectors = 1;
-    
-    /* Erase all app sectors */
-    EraseInitStruct.Sector = 2;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-    EraseInitStruct.Sector = 3;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-    EraseInitStruct.Sector = 4;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    if (DFU_Erase_AppSectors() != USBD_OK) {
+      HAL_FLASH_Lock();
+      return USBD_FAIL;
+    }
   }
 
   /* Write data word by word (32-bit) */
@@ -326,28 +410,8 @@ uint8_t *MEM_If_Read_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
 uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer)
 {
   /* USER CODE BEGIN 5 */
-  
-  /* Detect Mass Erase request - some DFU tools send special address */
-  if (Cmd == DFU_MEDIA_ERASE && (Add == 0xFFFFFFFF || Add == 0x00000000)) {
-    /* Mass Erase requested - erase all app sectors */
-    HAL_FLASH_Unlock();
-    
-    uint32_t SectorError = 0;
-    FLASH_EraseInitTypeDef EraseInitStruct;
-    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    EraseInitStruct.NbSectors = 1;
-    
-    EraseInitStruct.Sector = 2;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-    EraseInitStruct.Sector = 3;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-    EraseInitStruct.Sector = 4;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-    
-    HAL_FLASH_Lock();
-    g_erase_done = 1;
-  }
+
+  UNUSED(Add);
 
   switch (Cmd)
   {

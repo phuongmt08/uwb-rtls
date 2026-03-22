@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "sys_config.h"
 #include "sys_logger.h"
+#include "sys_flash_storage.h"
 #include "bsp_uwb.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -30,6 +31,9 @@
 #include "app_tag.h"
 #include "app_anchor.h"
 #include "positioning_config.h"
+#include "serial/serial.h"
+#include "network/network_core.h"
+#include "network/network_cmd.h"
 #include <string.h>
 /* USER CODE END Includes */
 
@@ -69,6 +73,10 @@
 
 /* USER CODE BEGIN PV */
 static bool s_ranging_enabled = true;
+
+static network_core_t s_network_core;
+static network_cmd_t  s_network_cmd;
+static uint8_t        s_network_rx_buf[512];
 
 #if TEST_SEND_POS
 static float s_test_x = TEST_POS_START_X;
@@ -126,7 +134,7 @@ static void test_send_position(void)
 void app_reset_config(void)
 {
   __disable_irq();
-  SCB->VTOR = 0x08008000;
+  SCB->VTOR = 0x0800C000;
   SysTick->CTRL = 0; 
   SysTick->LOAD = 0; 
   SysTick->VAL = 0;
@@ -182,8 +190,13 @@ int main(void)
   MX_CRC_Init();
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
+
+  int flash_storage_init_status = sys_flash_storage_init();
   
   sys_logger_init();
+  if (flash_storage_init_status != 0) {
+    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
+  }
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
   
 #if TEST_SEND_POS
@@ -201,6 +214,15 @@ int main(void)
   
   sys_config_init();
   sys_config_t *cfg = sys_config_get();
+
+  serial_init();
+  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf))) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
+  } else if (!network_cmd_init(&s_network_cmd, &s_network_core)) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
+  } else {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+  }
   
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
@@ -212,28 +234,18 @@ int main(void)
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
   
-  if (cfg->role == DEVICE_ROLE_TAG) {
-    cfg->tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-    cfg->rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u", TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
   }
 
-  bsp_uwb_config_t uwb_cfg = {
-    .channel           = cfg->uwb_channel,
-    .prf               = cfg->uwb_prf,
-    .data_rate         = cfg->uwb_data_rate,
-    .preamble_code     = cfg->uwb_preamble_code,
-    .tx_antenna_delay  = cfg->tx_antenna_delay,
-    .rx_antenna_delay  = cfg->rx_antenna_delay,
-    .tx_power          = cfg->tx_power,
-  };
-  
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u", 
-         uwb_cfg.channel, uwb_cfg.prf, uwb_cfg.data_rate, uwb_cfg.preamble_code);
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", 
-         uwb_cfg.tx_antenna_delay, uwb_cfg.rx_antenna_delay);
-  
-  bsp_uwb_configure(&uwb_cfg);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
+         cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u",
+         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
+
+  bsp_uwb_configure(&cfg->uwb);
 #endif
   
   bsp_io_init();
@@ -243,7 +255,7 @@ int main(void)
   /* Read DIP switch - ALWAYS OVERRIDES saved config */
   uint8_t dip_value = bsp_io_dip_read();
   if (dip_value == 0) {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->device_id);
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
   } else {
     sys_config_set_device_id(dip_value);
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
@@ -252,7 +264,7 @@ int main(void)
   cfg = sys_config_get();
   
   /* Initialize application based on role */
-  if (cfg->role == DEVICE_ROLE_TAG) {
+  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
     app_tag_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
   } else {
@@ -270,7 +282,7 @@ int main(void)
     
 #if ENABLE_ANCHOR_AUTO_CALIB
     /* In calibration build, anchor button events handled differently */
-    if (cfg->role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE) {
+    if (cfg->uwb.role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE) {
       app_anchor_on_button(btn_event);
       btn_event = BSP_IO_EVENT_NONE;  /* Prevent normal button handling */
     }
@@ -278,7 +290,7 @@ int main(void)
 
 #if ENABLE_TAG_AUTO_CALIB
     /* In calibration build, tag button events handled differently */
-    if (cfg->role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE) {
+    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE) {
       app_tag_on_button(btn_event);
       btn_event = BSP_IO_EVENT_NONE;
     }
@@ -291,7 +303,7 @@ int main(void)
         /* Toggle TAG/ANCHOR role and save to flash */
         {
           sys_config_t *cfg_curr = sys_config_get();
-          device_role_t new_role = (cfg_curr->role == DEVICE_ROLE_TAG) ? 
+          device_role_t new_role = (cfg_curr->uwb.role == DEVICE_ROLE_TAG) ? 
                                     DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
           
           sys_config_set_role(new_role);
@@ -342,7 +354,7 @@ int main(void)
     if (s_ranging_enabled)
     {
       sys_config_t *cfg_curr = sys_config_get();
-      if (cfg_curr->role == DEVICE_ROLE_TAG) {
+      if (cfg_curr->uwb.role == DEVICE_ROLE_TAG) {
         app_tag_process();
       } else {
         app_anchor_process(NULL);
@@ -351,9 +363,11 @@ int main(void)
 #endif
 
 #if TEST_SEND_POS
-    /* Test mode: Send dummy position periodically */
     test_send_position();
 #endif
+
+  (void)network_core_process(&s_network_core);
+  network_cmd_process(&s_network_cmd);
 
     sys_logger_task();
     bsp_io_task();

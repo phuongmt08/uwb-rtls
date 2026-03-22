@@ -15,6 +15,7 @@
 /* Includes ----------------------------------------------------------- */
 #include "common.h"
 #include <stdbool.h>
+#include "protos/protocol.pb.h"
 
 /* Pin definitions (based on BU01 schematic) ------------------------- */
 /* SPI pins - connected to SPI1 peripheral */
@@ -33,21 +34,6 @@
 
 /* Note: RX/TX LEDs are controlled by DW1000 GPIO2/GPIO3 directly, not STM32 */
 
-/* Public enumerate/structure ----------------------------------------- */
-/**
- * @brief  UWB radio configuration
- */
-typedef struct
-{
-  uint8_t  channel;
-  uint8_t  prf;
-  uint8_t  data_rate;
-  uint8_t  preamble_code;
-  uint16_t tx_antenna_delay;
-  uint16_t rx_antenna_delay;
-  uint32_t tx_power;
-} bsp_uwb_config_t;
-
 /* Public function prototypes ----------------------------------------- */
 /**
  * @brief Initialize DW1000 device
@@ -56,11 +42,11 @@ typedef struct
 bsp_err_t bsp_uwb_init(void);
 
 /**
- * @brief Configure UWB radio parameters
- * @param[in] cfg  Pointer to configuration structure
+ * @brief Configure UWB radio parameters from protobuf UWB config.
+ * @param[in] cfg  Pointer to protobuf_uwb_cfg_t (sys_config.uwb)
  * @return BSP_OK on success, BSP_ERR on failure
  */
-bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg);
+bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg);
 
 /**
  * @brief Transmit a frame (blocking until complete)

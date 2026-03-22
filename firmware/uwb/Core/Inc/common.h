@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
+
 typedef enum
 {
   BSP_OK = 0,
