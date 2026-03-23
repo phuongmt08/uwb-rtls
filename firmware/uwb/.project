@@ -33,12 +33,12 @@
 		<link>
 			<name>common</name>
 			<type>2</type>
-			<location>C:/Users/USER/Desktop/final_project/uwb-rtls/firmware/common</location>
+			<locationURI>PARENT-1-PROJECT_LOC/common</locationURI>
 		</link>
 		<link>
 			<name>protocol</name>
 			<type>2</type>
-			<location>C:/Users/USER/Desktop/final_project/uwb-rtls/protocol</location>
+			<locationURI>PARENT-2-PROJECT_LOC/protocol</locationURI>
 		</link>
 	</linkedResources>
 </projectDescription>
