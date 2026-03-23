@@ -98,7 +98,7 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="USB_DEVICE"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="app"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="bsp"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="common"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="common"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="deca"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="middlewares"/>
 						<entry excluding="nanopb/.github/|nanopb/build-tests/|nanopb/conan-wrapper/|nanopb/docs/|nanopb/examples/|nanopb/extra/|nanopb/generator/|nanopb/spm_headers/|nanopb/spm_resources/|nanopb/spm-test/|nanopb/tests/|nanopb/tools/|nanopb/zephyr/" flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="protocol"/>
@@ -191,17 +191,16 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Middlewares"/>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="USB_DEVICE"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="app"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="bsp"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="common"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="deca"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="sys"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Middlewares"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="middlewares"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
-						<entry excluding="nanopb/.github/|nanopb/build-tests/|nanopb/conan-wrapper/|nanopb/docs/|nanopb/examples/|nanopb/extra/|nanopb/generator/|nanopb/spm_headers/|nanopb/spm_resources/|nanopb/spm-test/|nanopb/tests/|nanopb/tools/|nanopb/zephyr/" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="protocol"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="USB_DEVICE"/>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="sys"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="common"/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>

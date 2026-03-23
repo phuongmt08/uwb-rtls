@@ -291,7 +291,7 @@ static void network_cmd_sys_config_set(network_cmd_t *cmd, const protobuf_packet
         return;
     }
 
-    const protobuf_uwb_config_t *new_cfg = &pkt->params.sys_config_set.config;
+    const protobuf_uwb_cfg_t *new_cfg = &pkt->params.sys_config_set.config;
 
     if (new_cfg->role != DEVICE_ROLE_TAG && new_cfg->role != DEVICE_ROLE_ANCHOR) {
         RLOG_W(OBJECT_CODE, "Invalid role in sys_config_set: %u", (unsigned)new_cfg->role);
