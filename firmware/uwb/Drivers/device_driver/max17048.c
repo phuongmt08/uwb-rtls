@@ -532,13 +532,13 @@ max17048_err_t max17048_clear_alert(max17048_dev_t *dev)
     return MAX17048_ERR_PARAM;
 
   uint16_t config_reg = 0;
-
+  /* Clear ALRT bit in CONFIG register — read-modify-write to preserve other settings */
   max17048_err_t err = s_read_reg(dev, MAX17048_REG_CONFIG, &config_reg);
   if (err != MAX17048_OK)
     return err;
-
+  /* ALRT is bit5 of CONFIG */
   config_reg &= ~MAX17048_CONFIG_ALRT;
-
+  /* Write back modified CONFIG to clear alert */
   return s_write_reg(dev, MAX17048_REG_CONFIG, config_reg);
 }
 
