@@ -1,116 +1,103 @@
 /**
  * @file       bsp_util.h
- * @version    1.0.0
- * @date       2025-11-18
+ * @version    2.0.0
+ * @date       2025-3-14
  * @author     Phuong Mai
  * @brief      BSP Utilities: CRC, RTC, Delay (STM32F4)
  */
+#ifndef BSP_UTIL_H
+#define BSP_UTIL_H
+#undef BSP_TICK_SOURCE_RTC /* uncomment to use RTC subseconds */
 
-#ifndef __BSP_UTIL_H
-#define __BSP_UTIL_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* Includes ----------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
+#include "stm32f4xx_hal.h"
+#ifdef BSP_TICK_SOURCE_RTC
+#include "stm32f4xx_ll_rtc.h"
+#endif
 
-/* Public defines ----------------------------------------------------- */
-/* Public enumerate/structure ----------------------------------------- */
-typedef enum
-{
-  BSP_UTIL_OK = 0,
-  BSP_UTIL_ERR
+/* ===================================================================== */
+/*                              TYPES                                    */
+/* ===================================================================== */
+
+typedef enum {
+  BSP_UTIL_OK  = 0,
+  BSP_UTIL_ERR = 1,
 } bsp_util_status_t;
 
-/**
- * @brief RTC date/time structure
- */
-typedef struct
-{
-  uint8_t  year;    /**< Year (0-99, offset from 2000) */
-  uint8_t  month;   /**< Month (1-12) */
-  uint8_t  day;     /**< Day (1-31) */
-  uint8_t  hour;    /**< Hour (0-23) */
-  uint8_t  minute;  /**< Minute (0-59) */
-  uint8_t  second;  /**< Second (0-59) */
+typedef struct {
+  uint8_t year;    /*!< offset from 2000, e.g. 26 = 2026 */
+  uint8_t month;   /*!< 1–12  */
+  uint8_t day;     /*!< 1–31  */
+  uint8_t hour;    /*!< 0–23  */
+  uint8_t minute;  /*!< 0–59  */
+  uint8_t second;  /*!< 0–59  */
 } bsp_rtc_time_t;
 
-/* Public macros ------------------------------------------------------ */
-/* Public variables --------------------------------------------------- */
-/* Public function prototypes ----------------------------------------- */
+/* ===================================================================== */
+/*                         FUNCTION DECLARATIONS                         */
+/* ===================================================================== */
 
-/**
- * @brief Initialize BSP utilities (CRC, RTC, Delay timer)
- * @return BSP_UTIL_OK on success, BSP_UTIL_ERR on failure
- */
+/* Init --------------------------------------------------------------- */
 bsp_util_status_t bsp_util_init(void);
 
-/* ===================================================================== */
-/*                          CRC FUNCTIONS                                */
-/* ===================================================================== */
+/* CRC ---------------------------------------------------------------- */
+uint32_t          bsp_crc32(const void *data, uint32_t len);
+void              bsp_crc_reset(void);
 
-/**
- * @brief Calculate CRC32 using hardware CRC peripheral
- * @param data Pointer to data buffer
- * @param len  Length of data in bytes
- * @return CRC32 checksum value
- * @note Uses STM32 hardware CRC (polynomial 0x04C11DB7, init 0xFFFFFFFF)
- */
-uint32_t bsp_crc32(const void *data, uint32_t len);
-
-/**
- * @brief Reset CRC calculation unit
- */
-void bsp_crc_reset(void);
-
-/* ===================================================================== */
-/*                          RTC FUNCTIONS                                */
-/* ===================================================================== */
-
-/**
- * @brief Set RTC date and time
- * @param time Pointer to time structure
- * @return BSP_UTIL_OK on success, BSP_UTIL_ERR on failure
- */
+/* RTC  --------------------------------------------------------------- */
 bsp_util_status_t bsp_rtc_set_time(const bsp_rtc_time_t *time);
-
-/**
- * @brief Get current RTC date and time
- * @param time Pointer to time structure to store result
- * @return BSP_UTIL_OK on success, BSP_UTIL_ERR on failure
- */
 bsp_util_status_t bsp_rtc_get_time(bsp_rtc_time_t *time);
 
 /**
- * @brief Get RTC timestamp as Unix epoch time
- * @return Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
+ * @brief  Read SSR via LL and return UTC milliseconds since Unix epoch.
+ *         This is the primary timestamp function — use this instead of
+ *         HAL_GetTick() wherever ms-accurate UTC time is needed.
  */
-uint32_t bsp_rtc_get_timestamp(void);
-
-/* ===================================================================== */
-/*                         DELAY FUNCTIONS                               */
-/* ===================================================================== */
+uint64_t          bsp_rtc_get_timestamp_ms(void);
+uint32_t          bsp_rtc_get_timestamp_s(void);
 
 /**
- * @brief Delay for specified microseconds
- * @param us Microseconds to delay
- * @note Uses TIM9 for accurate microsecond timing
+ * @brief  Handle time_sync_set_t: program RTC + store timezone.
+ * @param  unix_time_ms      proto field unix_time_ms   (UTC ms)
+ * @param  timezone_offset_s proto field timezone_offset (s east of UTC)
  */
-void bsp_delay_us(uint32_t us);
+bsp_util_status_t bsp_rtc_sync_set(uint64_t unix_time_ms, int32_t timezone_offset_s);
 
 /**
- * @brief Delay for specified milliseconds
- * @param ms Milliseconds to delay
+ * @brief  Handle time_sync_get_t: fill time_sync_resp_t fields.
+ * @param  unix_time_ms      [out] UTC ms
+ * @param  timezone_offset_s [out] s east of UTC
  */
-void bsp_delay_ms(uint32_t ms);
+bsp_util_status_t bsp_rtc_sync_get(uint64_t *unix_time_ms, int32_t *timezone_offset_s);
 
-#ifdef __cplusplus
-}
+bool              bsp_rtc_is_synced(void);
+void              bsp_rtc_mark_unsynced(void);
+int32_t           bsp_rtc_timezone_get(void);
+void              bsp_rtc_timezone_restore(int32_t offset_s);  /*!< call at boot with flash value */
+static inline uint32_t bsp_util_get_ticks(void)
+{
+#ifdef BSP_TICK_SOURCE_RTC
+  uint32_t prediv_s = LL_RTC_GetSynchPrescaler(hrtc.Instance);
+  uint32_t ssr      = LL_RTC_TIME_GetSubSecond(hrtc.Instance);
+  uint32_t time_reg = LL_RTC_TIME_Get(hrtc.Instance);
+
+  uint32_t subsec_ms = ((prediv_s - ssr) * 1000U) / (prediv_s + 1U);
+  uint32_t h         = __LL_RTC_CONVERT_BCD2BIN(__LL_RTC_GET_HOUR(time_reg));
+  uint32_t min       = __LL_RTC_CONVERT_BCD2BIN(__LL_RTC_GET_MINUTE(time_reg));
+  uint32_t sec       = __LL_RTC_CONVERT_BCD2BIN(__LL_RTC_GET_SECOND(time_reg));
+
+  return (h * 3600UL + min * 60UL + sec) * 1000UL + subsec_ms;
+#else
+  return HAL_GetTick();
 #endif
+}
+/* Delay -------------------------------------------------------------- */
+void              bsp_delay_us(uint32_t us);
+void              bsp_delay_ms(uint32_t ms);
 
-#endif /* __BSP_UTIL_H */
+/* System ------------------------------------------------------------- */
+uint32_t          bsp_util_get_serial_number(void);
+bsp_util_status_t bsp_util_device_reset(void);
 
-/* End of file -------------------------------------------------------- */
+#endif /* BSP_UTIL_H */

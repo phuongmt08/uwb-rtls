@@ -12,8 +12,21 @@ extern USBD_HandleTypeDef hUsbDeviceFS;
 
 bool bl_app_vector_valid(void)
 {
+  const uint32_t app_hdr_magic = *(uint32_t *)(MEM_APP_HEADER_ADDR + 0U);
+  const uint32_t app_hdr_ver   = *(uint32_t *)(MEM_APP_HEADER_ADDR + 4U);
+  const uint32_t app_hdr_size  = *(uint32_t *)(MEM_APP_HEADER_ADDR + 8U);
   const uint32_t msp = *(uint32_t*)MEM_APP_START;
   const uint32_t reset_handler = *(uint32_t*)(MEM_APP_START + 4U);
+
+  if (app_hdr_magic != APP_IMAGE_HEADER_MAGIC) {
+    return false;
+  }
+
+  if (app_hdr_ver != APP_IMAGE_HEADER_VERSION ||
+      app_hdr_size == 0U ||
+      app_hdr_size > MEM_APP_HEADER_SIZE) {
+    return false;
+  }
 
   if (msp < SRAM_BASE_ADDR || msp > SRAM_END_ADDR) {
     return false;

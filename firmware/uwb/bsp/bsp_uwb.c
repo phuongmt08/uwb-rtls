@@ -210,26 +210,26 @@ bsp_err_t bsp_uwb_init(void)
     return BSP_OK;
 }
 
-bsp_err_t bsp_uwb_configure(const bsp_uwb_config_t *cfg)
+bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 {
     CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
     CHECK_PARAM(s_initialized, BSP_ERR);
 
     dwt_config_t dw_cfg = {
-        .chan           = cfg->channel,
-        .prf            = (cfg->prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
+        .chan           = cfg->uwb_channel,
+        .prf            = (cfg->uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
         .txPreambLength = DWT_PLEN_1024,
         .rxPAC          = DWT_PAC32,
         .txCode         = 9,
         .rxCode         = 9,
         .nsSFD          = 0,
-        .dataRate       = cfg->data_rate,
+        .dataRate       = cfg->uwb_data_rate,
         .phrMode        = DWT_PHRMODE_STD,
         .sfdTO          = (1024 + 64)   
     };
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
-           dw_cfg.chan, cfg->prf, dw_cfg.dataRate, dw_cfg.txCode);
+           dw_cfg.chan, cfg->uwb_prf, dw_cfg.dataRate, dw_cfg.txCode);
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=256 PAC=16 SFD=%u nsSFD=%u PHR=%u",
            dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
 
