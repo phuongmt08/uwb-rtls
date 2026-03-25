@@ -15,7 +15,8 @@
 
 /* Includes ----------------------------------------------------------- */
 #include "icm42688.h"
-#include "main.h"
+//#include "main.h"
+#include "stm32f4xx_hal.h"
 
 /* Public defines ----------------------------------------------------- */
 /* =============================================================================
@@ -33,8 +34,8 @@
 
 /* --- Chip-select GPIO ----------------------------------------------- */
 #ifndef BSP_IMU_CS_GPIO_PORT
-	#define BSP_IMU_CS_GPIO_PORT  GPIOA
-	#define BSP_IMU_CS_GPIO_PIN   GPIO_PIN_4
+	#define BSP_IMU_CS_GPIO_PORT  GPIOB
+	#define BSP_IMU_CS_GPIO_PIN   GPIO_PIN_13
 #endif
 
 /* =============================================================================
