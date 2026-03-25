@@ -18,7 +18,6 @@
  *   uint16_t mv     = bsp_battery_get_voltage();
  *   uint8_t  soc    = bsp_battery_get_soc();
  *   int16_t  rate   = bsp_battery_get_crate();
- *   bsp_battery_status_t st = bsp_battery_get_status();
  *   bool present = bsp_battery_is_present();
  *
  * Internal:
@@ -33,10 +32,7 @@
 #include "sys_logger.h"
 #include "log_config.h"
 /* Private defines ---------------------------------------------------------- */
-#define SOC_THRESHOLD_FULL      70u
-#define SOC_THRESHOLD_LOW       20u
-#define SOC_THRESHOLD_CRITICAL  10u
-
+#define SOC_THRESHOLD_LOW 20
 /* Private variables -------------------------------------------------------- */
 extern I2C_HandleTypeDef BSP_BATTERY_I2C_HANDLE;
 static max17048_dev_t dev;
@@ -46,6 +42,10 @@ static max17048_data_t bat_data;
  * Warning fires every BSP_BATTERY_WARN_STEP_PCT (2%) drop below 20%.
  * Reset to SOC_THRESHOLD_LOW on init so the first warning fires at 20%. */
 static uint8_t s_last_warn_soc = SOC_THRESHOLD_LOW;
+
+/* Tracks if critical warning has been issued below 10%.
+ * Only logs once when SOC first drops below 10%. */
+static bool s_critical_warn_issued = false;
 
 static const max17048_config_t s_lipo_cfg =
 {
@@ -64,27 +64,46 @@ static int32_t              s_i2c_write              (uint8_t dev_addr, uint8_t 
                                                        const uint8_t *data, uint16_t len);
 static int32_t              s_i2c_read               (uint8_t dev_addr, uint8_t reg_addr,
                                                        uint8_t *data, uint16_t len);
-static bsp_battery_status_t s_get_status             (uint8_t soc_pct);
 static void                 s_handle_alerts          (void);
 static void                 s_check_low_battery_warn (uint8_t soc_pct);
 
 /* Public function implementation ------------------------------------------- */
 bsp_battery_err_t bsp_battery_task(void)
 {
+  /* Read all data from the IC in one shot — voltage, SOC, charge rate, hibernate state, alert flags.
+   * This also clears the alert flags on the IC, so we won't miss any alerts even if bsp_battery_task is called infrequently (e.g. every 10s). */
   max17048_err_t err = max17048_read_all(&dev, &bat_data);
+
+  /* If read fails, log the error and skip the rest of the function — we'll try again on the next bsp_battery_task() call. */
   if (err != MAX17048_OK)
   {
     uint8_t err_code = (err == MAX17048_ERR_BUS) ? ERR_BATTERY_I2C : ERR_BATTERY_READ;
     RLOG_E(LOG_OBJECT_CODE_BATTERY, err_code, "Read failed: %d", err);
     return BSP_BATTERY_ERR;
   }
-
-  bsp_battery_status_t status = s_get_status(bat_data.soc_pct);
-  const char *status_str = (status == BSP_BATTERY_STATUS_FULL)     ? "FULL"     :
-                           (status == BSP_BATTERY_STATUS_HALF)     ? "HALF"     :
-                           (status == BSP_BATTERY_STATUS_LOW)      ? "LOW"      :
-                                                                      "CRITICAL";
-
+  /* Read SOC battery */
+  if (bat_data.soc_pct > 95)
+  {
+    RLOG_I(LOG_OBJECT_CODE_BATTERY, "Battery nearly full: SOC = %u%%", bat_data.soc_pct);
+  }
+  else if (bat_data.soc_pct > SOC_THRESHOLD_LOW)
+  {
+    RLOG_I(LOG_OBJECT_CODE_BATTERY, "Battery healthy: SOC = %u%%", bat_data.soc_pct);
+  }  
+  /* Check low battery warnings below 20% SOC and notify if below 10% below */
+  if (bat_data.soc_pct <= 20){
+    s_check_low_battery_warn(bat_data.soc_pct);
+  }
+  if (bat_data.soc_pct <= 10 && !s_critical_warn_issued){
+    s_critical_warn_issued = true;
+    RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_CRITICAL, "Battery critically low: SOC = %u%%", bat_data.soc_pct);
+  }
+  /* Reset critical flag if SOC recovers above 10% */
+  if (bat_data.soc_pct > 10){
+    s_critical_warn_issued = false;
+  }
+  
+  /* Determine charge level status */
   const char *charge_str = (bat_data.crate_mphph > 10)  ? "Charging"    :
                            (bat_data.crate_mphph < -10) ? "Discharging" :
                                                              "Idle";
@@ -94,7 +113,6 @@ bsp_battery_err_t bsp_battery_task(void)
   RLOG_I(LOG_OBJECT_CODE_BATTERY, "SOC      : %u.%02u%%",           bat_data.soc_pct,
                                                (bat_data.soc_frac * 100u) / 256u);
   RLOG_I(LOG_OBJECT_CODE_BATTERY, "CRate    : %d milli%%/hr (%s)",  bat_data.crate_mphph, charge_str);
-  RLOG_I(LOG_OBJECT_CODE_BATTERY, "Status   : %s",                  status_str);
   RLOG_I(LOG_OBJECT_CODE_BATTERY, "Hibernate: %s",                  bat_data.is_hibernating ? "YES" : "NO");
 
   /* Check CRATE warnings */
@@ -111,8 +129,6 @@ bsp_battery_err_t bsp_battery_task(void)
 
   if (bat_data.alert_active)
     s_handle_alerts();
-
-  s_check_low_battery_warn(bat_data.soc_pct);
   return BSP_BATTERY_OK;
 }
 
@@ -153,26 +169,12 @@ int16_t bsp_battery_get_crate(void)
   return bat_data.crate_mphph;
 }
 
-bsp_battery_status_t bsp_battery_get_status(void)
-{
-  return s_get_status(bat_data.soc_pct);
-}
-
 bool bsp_battery_is_present(void)
 {
   return max17048_is_present(&dev);
 }
 
-
 /* Private function implementation ------------------------------------------ */
-static bsp_battery_status_t s_get_status(uint8_t soc_pct)
-{
-  if (soc_pct < SOC_THRESHOLD_CRITICAL) return BSP_BATTERY_STATUS_CRITICAL;
-  if (soc_pct < SOC_THRESHOLD_LOW)      return BSP_BATTERY_STATUS_LOW;
-  if (soc_pct < SOC_THRESHOLD_FULL)     return BSP_BATTERY_STATUS_HALF;
-  return BSP_BATTERY_STATUS_FULL;
-}
-
 static void s_check_low_battery_warn(uint8_t soc_pct)
 {
   /* Only active below 20%. Fires once per BSP_BATTERY_WARN_STEP_PCT (2%) drop.
@@ -182,7 +184,7 @@ static void s_check_low_battery_warn(uint8_t soc_pct)
    *   19% → skip  (19 > 20 - 2 = 18)
    *   18% → warn, tracker = 18 ... and so on
    */
-  if (soc_pct >= SOC_THRESHOLD_LOW)
+  if (soc_pct > SOC_THRESHOLD_LOW)
   {
     s_last_warn_soc = SOC_THRESHOLD_LOW;
     return;
@@ -209,18 +211,19 @@ static void s_handle_alerts(void)
   {
     /* Battery was removed and a new one was swapped.
      * IC already re-estimated SOC automatically. */
-    s_last_warn_soc = SOC_THRESHOLD_LOW;
+    s_last_warn_soc = SOC_THRESHOLD_LOW;  /* reset low battery warning tracker to current SOC */
+    s_critical_warn_issued = false;
     RLOG_I(LOG_OBJECT_CODE_BATTERY, "Battery swapped — SOC re-estimated: %u%%", bat_data.soc_pct);
   }
-
   if (status & MAX17048_STATUS_HD)
   {
     /* SOC dropped below empty alert threshold (10%) — critically low */
-    RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_CRITICAL, "Battery critically low: SOC = %u%%", bat_data.soc_pct);
-
+     if (!s_critical_warn_issued){
+      s_critical_warn_issued = true;
+      RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_CRITICAL, "Battery critically low (HD alert): SOC = %u%%", bat_data.soc_pct);
+     }
     /* TODO: ble_battery_critical_notify(); */
   }
-
   if (status & MAX17048_STATUS_VL)
   {
     /* Voltage dropped below VALRT.MIN (3000mV) */
@@ -228,13 +231,11 @@ static void s_handle_alerts(void)
 
     /* TODO: same action as HD */
   }
-
   if (status & MAX17048_STATUS_VH)
   {
     /* Voltage exceeded VALRT.MAX (4200mV) — overcharge */
     RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_OVERVOLT, "Overvoltage detected: %u mV", bat_data.voltage_mv);
   }
-
   /* Always clear the alert flag after handling — must not skip this */
   max17048_clear_alert(&dev);
 }

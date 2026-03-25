@@ -16,7 +16,6 @@
  *   uint16_t mv     = bsp_battery_get_voltage();
  *   uint8_t  soc    = bsp_battery_get_soc();
  *   int16_t  rate   = bsp_battery_get_crate();
- *   bsp_battery_status_t s = bsp_battery_get_status();
  *
  * Log output (printed by bsp_battery_task on every call):
  *   [BATTERY] --- Battery Status ---
@@ -29,7 +28,6 @@
  * Sending to app via BLE (implement later):
  *   payload.voltage_mv     = bsp_battery_get_voltage();
  *   payload.soc_pct        = bsp_battery_get_soc();
- *   payload.battery_status = (uint8_t)bsp_battery_get_status();
  *   ble_battery_notify(&payload, sizeof(payload));
  *
  * Hardware:
@@ -115,7 +113,6 @@ typedef enum
  * CRITICAL — SOC < 10%,  charge immediately
  *
  * Cast to uint8_t when putting into a BLE payload:
- *   payload.battery_status = (uint8_t)bsp_battery_get_status();
  */
 typedef enum
 {
@@ -173,8 +170,8 @@ int16_t bsp_battery_get_crate(void);
 bsp_battery_status_t bsp_battery_get_status(void);
 
 /**
- * @brief  Check if the IC is present on the I2C bus
- * @return true if IC responds
+ * @brief  Check if battery is present (IC responds on I2C bus)
+ * @return true if present, false if not detected
  */
 bool bsp_battery_is_present(void);
 
