@@ -469,10 +469,14 @@ message ranging_status_resp_t {
 
 /* Battery information -----------------------------------------------------------*/
 
-message battery_info_t {
+message battery_info_resp_t {
     uint32 bat_voltage_mv  = 1;
     uint32 bat_soc_percent = 2;
-    int32 crate_time       = 3;
+    int32  remaining_min      = 3;
+    bool   is_charging     = 4;
+}
+message battery_info_get_t {
+    uint32 dummy = 1;
 }
 /* Packet ------------------------------------------------------------------- */
 
@@ -553,7 +557,8 @@ message packet_t {
         anchor_layout_set_t       anchor_layout_set       = 43;
         anchor_layout_resp_t      anchor_layout_resp      = 44;
         /* Battery */
-        battery_info_t            battery_info_t          = 45;
+        battery_info_resp_t       battery_info_resp       = 45;
+        battery_info_get_t        battery_info_get        = 46;
     }
 }
 

@@ -432,11 +432,16 @@ typedef struct _protobuf_ranging_status_resp_t {
     uint32_t last_update_timestamp_ms;
 } protobuf_ranging_status_resp_t;
 
-typedef struct _protobuf_battery_info_t {
+typedef struct _protobuf_battery_info_resp_t {
     uint32_t bat_voltage_mv;
     uint32_t bat_soc_percent;
-    int32_t crate_time;
-} protobuf_battery_info_t;
+    int32_t remaining_min;
+    bool is_charging;
+} protobuf_battery_info_resp_t;
+
+typedef struct _protobuf_battery_info_get_t {
+    uint32_t dummy;
+} protobuf_battery_info_get_t;
 
 typedef struct _protobuf_packet_t {
     bool has_hdr;
@@ -502,7 +507,8 @@ typedef struct _protobuf_packet_t {
         protobuf_anchor_layout_set_t anchor_layout_set;
         protobuf_anchor_layout_resp_t anchor_layout_resp;
         /* Battery */
-        protobuf_battery_info_t battery_info_t;
+        protobuf_battery_info_resp_t battery_info_resp;
+        protobuf_battery_info_get_t battery_info_get;
     } params;
 } protobuf_packet_t;
 
@@ -679,6 +685,7 @@ extern "C" {
 
 
 
+
 /* Initializer values for message structs */
 #define protobuf_addr_t_init_default             {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
 #define protobuf_hdr_t_init_default              {false, protobuf_addr_t_init_default, 0, 0}
@@ -734,7 +741,8 @@ extern "C" {
 #define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
-#define protobuf_battery_info_t_init_default     {0, 0, 0}
+#define protobuf_battery_info_resp_t_init_default {0, 0, 0, 0}
+#define protobuf_battery_info_get_t_init_default {0}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
 #define protobuf_addr_t_init_zero                {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
 #define protobuf_hdr_t_init_zero                 {false, protobuf_addr_t_init_zero, 0, 0}
@@ -790,7 +798,8 @@ extern "C" {
 #define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
-#define protobuf_battery_info_t_init_zero        {0, 0, 0}
+#define protobuf_battery_info_resp_t_init_zero   {0, 0, 0, 0}
+#define protobuf_battery_info_get_t_init_zero    {0}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -930,9 +939,11 @@ extern "C" {
 #define protobuf_ranging_status_resp_t_last_rms_error_m_tag 7
 #define protobuf_ranging_status_resp_t_last_avg_rssi_dbm_tag 8
 #define protobuf_ranging_status_resp_t_last_update_timestamp_ms_tag 9
-#define protobuf_battery_info_t_bat_voltage_mv_tag 1
-#define protobuf_battery_info_t_bat_soc_percent_tag 2
-#define protobuf_battery_info_t_crate_time_tag   3
+#define protobuf_battery_info_resp_t_bat_voltage_mv_tag 1
+#define protobuf_battery_info_resp_t_bat_soc_percent_tag 2
+#define protobuf_battery_info_resp_t_remaining_min_tag 3
+#define protobuf_battery_info_resp_t_is_charging_tag 4
+#define protobuf_battery_info_get_t_dummy_tag    1
 #define protobuf_packet_t_hdr_tag                1
 #define protobuf_packet_t_none_tag               2
 #define protobuf_packet_t_ack_tag                3
@@ -977,7 +988,8 @@ extern "C" {
 #define protobuf_packet_t_anchor_layout_get_tag  42
 #define protobuf_packet_t_anchor_layout_set_tag  43
 #define protobuf_packet_t_anchor_layout_resp_tag 44
-#define protobuf_packet_t_battery_info_t_tag     45
+#define protobuf_packet_t_battery_info_resp_tag  45
+#define protobuf_packet_t_battery_info_get_tag   46
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1345,12 +1357,18 @@ X(a, STATIC,   SINGULAR, UINT32,   last_update_timestamp_ms,   9)
 #define protobuf_ranging_status_resp_t_CALLBACK NULL
 #define protobuf_ranging_status_resp_t_DEFAULT NULL
 
-#define protobuf_battery_info_t_FIELDLIST(X, a) \
+#define protobuf_battery_info_resp_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   bat_voltage_mv,    1) \
 X(a, STATIC,   SINGULAR, UINT32,   bat_soc_percent,   2) \
-X(a, STATIC,   SINGULAR, INT32,    crate_time,        3)
-#define protobuf_battery_info_t_CALLBACK NULL
-#define protobuf_battery_info_t_DEFAULT NULL
+X(a, STATIC,   SINGULAR, INT32,    remaining_min,     3) \
+X(a, STATIC,   SINGULAR, BOOL,     is_charging,       4)
+#define protobuf_battery_info_resp_t_CALLBACK NULL
+#define protobuf_battery_info_resp_t_DEFAULT NULL
+
+#define protobuf_battery_info_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_battery_info_get_t_CALLBACK NULL
+#define protobuf_battery_info_get_t_DEFAULT NULL
 
 #define protobuf_packet_t_FIELDLIST(X, a) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  hdr,               1) \
@@ -1397,7 +1415,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_resp,params.pos_calib_c
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_get,params.anchor_layout_get),  42) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_set,params.anchor_layout_set),  43) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layout_resp),  44) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_t,params.battery_info_t),  45)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_resp,params.battery_info_resp),  45) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_get,params.battery_info_get),  46)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1444,7 +1463,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_t,params.battery_info_t)
 #define protobuf_packet_t_params_anchor_layout_get_MSGTYPE protobuf_anchor_layout_get_t
 #define protobuf_packet_t_params_anchor_layout_set_MSGTYPE protobuf_anchor_layout_set_t
 #define protobuf_packet_t_params_anchor_layout_resp_MSGTYPE protobuf_anchor_layout_resp_t
-#define protobuf_packet_t_params_battery_info_t_MSGTYPE protobuf_battery_info_t
+#define protobuf_packet_t_params_battery_info_resp_MSGTYPE protobuf_battery_info_resp_t
+#define protobuf_packet_t_params_battery_info_get_MSGTYPE protobuf_battery_info_get_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1500,7 +1520,8 @@ extern const pb_msgdesc_t protobuf_anchor_layout_set_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_layout_resp_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
-extern const pb_msgdesc_t protobuf_battery_info_t_msg;
+extern const pb_msgdesc_t protobuf_battery_info_resp_t_msg;
+extern const pb_msgdesc_t protobuf_battery_info_get_t_msg;
 extern const pb_msgdesc_t protobuf_packet_t_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -1558,7 +1579,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_resp_t_fields &protobuf_anchor_layout_resp_t_msg
 #define protobuf_ranging_status_get_t_fields &protobuf_ranging_status_get_t_msg
 #define protobuf_ranging_status_resp_t_fields &protobuf_ranging_status_resp_t_msg
-#define protobuf_battery_info_t_fields &protobuf_battery_info_t_msg
+#define protobuf_battery_info_resp_t_fields &protobuf_battery_info_resp_t_msg
+#define protobuf_battery_info_get_t_fields &protobuf_battery_info_get_t_msg
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -1573,7 +1595,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_resp_t_size       92
 #define protobuf_anchor_layout_set_t_size        92
 #define protobuf_anchor_ranging_t_size           23
-#define protobuf_battery_info_t_size             23
+#define protobuf_battery_info_get_t_size         6
+#define protobuf_battery_info_resp_t_size        25
 #define protobuf_ble_adv_status_t_size           36
 #define protobuf_ble_enable_t_size               2
 #define protobuf_ble_status_get_t_size           6
