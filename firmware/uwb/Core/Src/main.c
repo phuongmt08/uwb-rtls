@@ -137,7 +137,47 @@ static void test_send_position(void)
   }
   /* If BSP_ERR (busy), just skip this interval and try next time */
 }
+
+static void test_send_pos_task(void *arg)
+{
+  test_send_position();
+}
 #endif
+
+static void ranging_process_task(void *arg)
+{
+#if TEST_SEND_POS && TEST_DISABLE_RANGING
+  /* Ranging disabled in test mode */
+#else
+  if (s_ranging_enabled)
+  {
+    sys_config_t *cfg_curr = sys_config_get();
+    if (cfg_curr->uwb.role == DEVICE_ROLE_TAG)
+    {
+      app_tag_process();
+    }
+    else
+    {
+      app_anchor_process(NULL);
+    }
+  }
+#endif
+}
+
+static void logger_process_task(void *arg)
+{
+  sys_logger_task();
+}
+
+static void network_core_process_task(void *arg)
+{
+  network_core_process(&s_network_core);
+}
+
+static void network_cmd_process_task(void *arg)
+{
+  network_cmd_process(&s_network_cmd);
+}
 
 void app_reset_config(void)
 {
@@ -270,7 +310,28 @@ int main(void)
 
   sys_task_init();
   bsp_battery_init();
-  sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, 1000, 0);
+  int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
+  if (bat_task_id >= 0)
+  {
+    sys_task_start(bat_task_id);
+  }
+
+  int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
+  if (rng_task_id >= 0) sys_task_start(rng_task_id);
+
+  int log_task_id = sys_task_add((sys_task_cb_t)logger_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
+  if (log_task_id >= 0) sys_task_start(log_task_id);
+
+  int net_core_task_id = sys_task_add((sys_task_cb_t)network_core_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
+  if (net_core_task_id >= 0) sys_task_start(net_core_task_id);
+
+  int net_cmd_task_id = sys_task_add((sys_task_cb_t)network_cmd_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
+  if (net_cmd_task_id >= 0) sys_task_start(net_cmd_task_id);
+
+#if TEST_SEND_POS
+  int test_pos_task_id = sys_task_add((sys_task_cb_t)test_send_pos_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
+  if (test_pos_task_id >= 0) sys_task_start(test_pos_task_id);
+#endif
   
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
   /* Read DIP switch - ALWAYS OVERRIDES saved config */
@@ -379,31 +440,7 @@ int main(void)
     default: break;
     }
 
-    /* Process ranging if enabled */
-#if TEST_SEND_POS && TEST_DISABLE_RANGING
-    /* Ranging disabled in test mode */
-#else
-    if (s_ranging_enabled)
-    {
-      if (cfg_curr->uwb.role == DEVICE_ROLE_TAG)
-      {
-        app_tag_process();
-      }
-      else
-      {
-        app_anchor_process(NULL);
-      }
-    }
-#endif
-
-#if TEST_SEND_POS
-    test_send_position();
-#endif
     sys_task_process();
-    sys_logger_task();
-    network_core_process(&s_network_core);
-    network_cmd_process(&s_network_cmd);
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
