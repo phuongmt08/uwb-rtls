@@ -61,11 +61,11 @@ enum device_role_t {
 }
 
 enum device_addr_t {
-    PACKET_ADDR_UNSPECIFIED = 0x0;
-    PACKET_ADDR_TAG         = 0x1;
-    PACKET_ADDR_ANCHOR      = 0x2;
-    PACKET_ADDR_GATEWAY     = 0x3;
-    PACKET_ADDR_HOST        = 0x4;
+    PACKET_ADDR_UNSPECIFIED = 0;
+    PACKET_ADDR_TAG         = 1;
+    PACKET_ADDR_ANCHOR      = 2;
+    PACKET_ADDR_GATEWAY     = 3;
+    PACKET_ADDR_BLE         = 4;
     PACKET_ADDR_DEBUG       = 0x7;
     PACKET_ADDR_BCAST       = 0xF;
 }
@@ -97,8 +97,8 @@ enum flash_addr_region_t {
 
 enum ble_state_t {
     BLE_STATE_UNSPECIFIED = 0;
-    BLE_STATE_DISABLED    = 1;
-    BLE_STATE_IDLE        = 2;
+    BLE_STATE_IDLE        = 1;
+    BLE_STATE_SCANNING    = 2;
     BLE_STATE_ADVERTISING = 3;
     BLE_STATE_CONNECTED   = 4;
 }
@@ -168,6 +168,12 @@ message time_sync_set_t {
 message time_sync_resp_t {
     uint64 unix_time_ms       = 1;
     int32 timezone_offset     = 2;
+}
+message time_sync_adv_set_t {
+    device_type_t device_type  = 1;
+    uint32 device_id           = 2;
+    uint64 unix_time_ms        = 3;
+    int32 timezone_offset      = 4;
 }
 
 /* UWB configuration -------------------------------------------------------- */
@@ -340,12 +346,13 @@ message ble_status_resp_t {
 }
 
 message ble_adv_status_t {
-    uint32 anchor_id          = 3; /* 0 for non-anchor */
-    uint32 battery_level_pct  = 4;
-    uint32 status_flags       = 5;
-    uint32 warning_count      = 6;
-    uint32 error_count        = 7;
-    uint32 local_timestamp_ms = 8;
+    device_type_t device      = 0
+    uint32 device_id          = 1;
+    uint32 bat_soc_percent    = 2;
+    uint32 status_flags       = 3;
+    uint32 warning_count      = 4;
+    uint32 error_count        = 5;
+    uint32 local_timestamp_ms = 6;
 }
 
 /*
@@ -466,6 +473,18 @@ message ranging_status_resp_t {
 
 /* OTA (simple flash workflow) --------------------------------------------- */
 
+
+/* Battery information -----------------------------------------------------------*/
+
+message battery_info_resp_t {
+    uint32 bat_voltage_mv  = 1;
+    uint32 bat_soc_percent = 2;
+    int32  remaining_min   = 3;
+    bool   is_charging     = 4;
+}
+message battery_info_get_t {
+    uint32 dummy = 1;
+}
 /* Packet ------------------------------------------------------------------- */
 
 message packet_t {
@@ -544,6 +563,9 @@ message packet_t {
         anchor_layout_get_t       anchor_layout_get       = 42;
         anchor_layout_set_t       anchor_layout_set       = 43;
         anchor_layout_resp_t      anchor_layout_resp      = 44;
+        /* Battery */
+        battery_info_resp_t       battery_info_resp       = 45;
+        battery_info_get_t        battery_info_get        = 46;
     }
 }
 
