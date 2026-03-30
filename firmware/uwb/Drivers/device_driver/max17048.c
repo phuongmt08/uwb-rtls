@@ -184,11 +184,11 @@ void max17048_default_config(max17048_config_t *config)
 
   config->rcomp               = RCOMP0;
   config->empty_alert         = MAX17048_EMPTY_ALERT_4PCT;
-  config->valrt_max_mv        = 4200;   /* 0xFF * 20mV — alert disabled */
-  config->valrt_min_mv        = 2600;      /* 0x00 * 20mV — alert disabled */
-  config->vreset_mv           = 2500;   /* 3.0V reset threshold         */
+  config->valrt_max_mv        = 5100;   /* 0xFF * 20mV — alert disabled */
+  config->valrt_min_mv        = 0;      /* 0x00 * 20mV — alert disabled */
+  config->vreset_mv           = 3000;   /* 3.0V reset threshold         */
   config->en_soc_change_alert = false;
-  config->en_vreset_alert     = true;   /* Enable VRESET alert */
+  config->en_vreset_alert     = false;
   config->dis_hibernate_comp  = false;
 }
 
@@ -311,9 +311,9 @@ max17048_err_t max17048_read_soc_full(max17048_dev_t *dev, uint8_t *soc_pct, uin
   return MAX17048_OK;
 }
 
-max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_phr)
+max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_mphph)
 {
-  if (!dev || !crate_phr)
+  if (!dev || !crate_mphph)
     return MAX17048_ERR_PARAM;
 
   uint16_t raw = 0;
@@ -324,14 +324,10 @@ max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_phr)
 
   /*
    * Datasheet p.13: CRATE, signed 16-bit, 1 LSb = 0.208 %/hr
-   * Output in %/hr (not milli-%/hr)
-   * (int16_t)raw       — reinterpret bits as signed 16-bit
+   * (int16_t)raw       — reinterpret bits as signed
    * (int32_t)(int16_t) — widen BEFORE multiplying to avoid overflow
-   * Multiply by 208 (milli-%/hr per LSb) then divide by 1000 to get %/hr
-   * max 32767 * 208 = 6,815,536 fits in int32_t
-   * Example: raw=24 → (24*208)/1000 = 4992/1000 = 4 %/hr
    */
-  *crate_phr = (int16_t)(((int32_t)(int16_t)raw * CRATE_LSB_X1000) / 1000);
+  *crate_mphph = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000 / 1000);
 
   return MAX17048_OK;
 }
@@ -371,7 +367,7 @@ max17048_err_t max17048_read_all(max17048_dev_t *dev, max17048_data_t *data)
   if (err != MAX17048_OK)
     return err;
 
-  err = max17048_read_crate(dev, &data->crate_phr);
+  err = max17048_read_crate(dev, &data->crate_mphph);
   if (err != MAX17048_OK)
     return err;
 
