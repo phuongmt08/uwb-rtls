@@ -30,16 +30,14 @@
 #define VRESET_MV                  2500 /**< Battery-swap detection threshold          */
 
 /* Charge-rate anomaly thresholds */
+#define CRATE_IDLE_THRESHOLD       1    /**< Below ±1 %/hr → device is idle (no charge/discharge) */
 #define CRATE_OVERCHARGE_WARN      50   /**< %/hr — charging too fast            */
 #define CRATE_OVERDISCHARGE_WARN   -100 /**< %/hr — discharging too fast         */
 #define CRATE_SLOW_CHARGE_WARN     2    /**< %/hr — charging suspiciously slowly */
-#define CRATE_IDLE_THRESHOLD       1    /**< |crate| < this → considered Idle    */
 
 /* Hardware configuration */
 #define TEMP_COMP_DEGC             40 /**< Fixed temp compensation (~40°C board temp) */
 #define EMPTY_ALERT_PCT            10 /**< IC fires HD alert when SOC < this          */
-
-#define CRATE_IDLE_THRESHOLD       208 /* 1 LSB of MAX17048 CRATE register */
 /* Private variables -------------------------------------------------------- */
 extern I2C_HandleTypeDef BSP_BATTERY_I2C_HANDLE;
 
