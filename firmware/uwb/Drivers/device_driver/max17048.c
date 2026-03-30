@@ -288,7 +288,7 @@ max17048_err_t max17048_read_soc(max17048_dev_t *dev, uint8_t *soc_pct)
    * Datasheet p.10: SOC register
    * bits[15:8] = integer percent, 1 LSb = 1%
    * bits[7:0]  = fractional,      1 LSb = 1/256 %
-   */
+   */ 
   *soc_pct = (uint8_t)(raw >> 8);
 
   return MAX17048_OK;
@@ -327,7 +327,7 @@ max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_mphph)
    * (int16_t)raw       — reinterpret bits as signed
    * (int32_t)(int16_t) — widen BEFORE multiplying to avoid overflow
    */
-  *crate_mphph = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000 / 1000);
+  *crate_mphph = (int32_t)(int16_t)raw * CRATE_LSB_X1000;
 
   return MAX17048_OK;
 }

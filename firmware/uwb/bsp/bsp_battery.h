@@ -68,7 +68,7 @@ typedef struct
 {
   uint16_t             voltage_mv;      /**< Battery voltage in mV                       */
   uint8_t              soc_pct;         /**< State of charge, 0–100 %                     */
-  int16_t              crate_mphph;     /**< Charge rate in milli-%/hr (+charge, -discharge) */
+  int32_t              crate_mphph;     /**< Charge rate in milli-%/hr (+charge, -discharge) */
   int32_t              remaining_min;   /**< Estimated remaining time in minutes*/
   bsp_battery_status_t status;          /**< Charge level: CRITICAL / LOW / HALF / FULL   */
   bool                 is_charging;     /**< true if crate > +10 milli-%/hr               */
@@ -127,7 +127,7 @@ uint8_t bsp_battery_get_soc(void);
  * @brief  Get last measured charge/discharge rate.
  * @return Rate in milli-%/hr — positive = charging, negative = discharging.
  */
-int16_t bsp_battery_get_crate(void);
+int32_t bsp_battery_get_crate(void);
 
 /**
  * @brief  Get current charge level status.

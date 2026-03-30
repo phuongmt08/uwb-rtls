@@ -7,7 +7,7 @@
  */
 
 /* Includes ----------------------------------------------------------------- */
-#include "bsp_battery.h"
+#include "bsp_battery.h" 
 
 #include "log_config.h"
 #include "max17048.h"
@@ -27,13 +27,12 @@
 /* Voltage alert thresholds (MAX17048 VALRT register) */
 #define VALRT_MIN_MV               3000 /**< Alert if voltage drops below this         */
 #define VALRT_MAX_MV               4200 /**< Alert if voltage exceeds this             */
-#define VRESET_MV                  2400 /**< Battery-swap detection threshold          */
+#define VRESET_MV                  2900 /**< Battery-swap detection threshold          */
 
 /* Charge-rate anomaly thresholds */
 #define CRATE_OVERCHARGE_WARN      5000   /**< milli-%/hr — charging too fast            */
 #define CRATE_OVERDISCHARGE_WARN   -10000 /**< milli-%/hr — discharging too fast         */
 #define CRATE_SLOW_CHARGE_WARN     500    /**< milli-%/hr — charging suspiciously slowly */
-#define CRATE_IDLE_THRESHOLD       10     /**< |crate| < this → considered Idle         */
 
 /* Hardware configuration */
 #define TEMP_COMP_DEGC             40 /**< Fixed temp compensation (~40°C board temp) */
@@ -150,7 +149,7 @@ uint8_t bsp_battery_get_soc(void)
   return s_bat.soc_pct;
 }
 
-int16_t bsp_battery_get_crate(void)
+int32_t bsp_battery_get_crate(void)
 {
   return s_bat.crate_mphph;
 }
@@ -277,8 +276,15 @@ static void s_handle_alerts(void)
     /* Voltage exceeded VALRT_MAX_MV — possible overcharge */
     RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_OVERVOLT, "Overvoltage detected: %u mV", s_bat.voltage_mv);
   }
-
   /* Must always clear alert pin after handling */
+  uint16_t to_clear = status & (MAX17048_STATUS_VR | MAX17048_STATUS_HD |
+                                 MAX17048_STATUS_VL | MAX17048_STATUS_VH |
+                                 MAX17048_STATUS_MD);
+  if (to_clear != 0)
+  {
+    uint16_t dummy = 0;
+    max17048_read_status(&s_dev, &dummy, to_clear);
+  }
   max17048_clear_alert(&s_dev);
 }
 
