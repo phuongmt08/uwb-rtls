@@ -25,21 +25,19 @@
 #define I2C_TIMEOUT_MS             100
 
 /* Voltage alert thresholds (MAX17048 VALRT register) */
-#define VALRT_MIN_MV               3000 /**< Alert if voltage drops below this         */
+#define VALRT_MIN_MV               2600 /**< Alert if voltage drops below this         */
 #define VALRT_MAX_MV               4200 /**< Alert if voltage exceeds this             */
-#define VRESET_MV                  2400 /**< Battery-swap detection threshold          */
+#define VRESET_MV                  2500/**< Battery-swap detection threshold          */
 
-/* Charge-rate anomaly thresholds */
-#define CRATE_OVERCHARGE_WARN      5000   /**< milli-%/hr — charging too fast            */
-#define CRATE_OVERDISCHARGE_WARN   -10000 /**< milli-%/hr — discharging too fast         */
-#define CRATE_SLOW_CHARGE_WARN     500    /**< milli-%/hr — charging suspiciously slowly */
-#define CRATE_IDLE_THRESHOLD       10     /**< |crate| < this → considered Idle         */
+/* Charge-rate anomaly thresholds (%/hr) */
+#define CRATE_OVERCHARGE_WARN      50     /**< %/hr — charging too fast            */
+#define CRATE_OVERDISCHARGE_WARN   -100   /**< %/hr — discharging too fast         */
+#define CRATE_SLOW_CHARGE_WARN     1     /**< %/hr — charging suspiciously slowly */
+#define CRATE_IDLE_THRESHOLD       1     /**< |crate| < this → considered Idle    */
 
 /* Hardware configuration */
 #define TEMP_COMP_DEGC             40 /**< Fixed temp compensation (~40°C board temp) */
 #define EMPTY_ALERT_PCT            10 /**< IC fires HD alert when SOC < this         */
-
-#define CRATE_IDLE_THRESHOLD       208 /* 1 LSB of MAX17048 CRATE register */
 /* Private variables -------------------------------------------------------- */
 extern I2C_HandleTypeDef BSP_BATTERY_I2C_HANDLE;
 
@@ -106,17 +104,16 @@ bsp_battery_err_t bsp_battery_task(void)
     return BSP_BATTERY_ERR;
   }
 
-  s_check_soc();
   s_check_crate();
 
-  const char          *charge_str   = (s_bat.crate_mphph > CRATE_IDLE_THRESHOLD)    ? "Charging"
-                                      : (s_bat.crate_mphph < -CRATE_IDLE_THRESHOLD) ? "Discharging"
-                                                                                    : "Idle";
+  const char *charge_str      = (s_bat.crate_phr > CRATE_IDLE_THRESHOLD)    ? "Charging"
+                                : (s_bat.crate_phr < -CRATE_IDLE_THRESHOLD) ? "Discharging"
+                                                                             : "Idle";
   const char          *status_str[] = { "CRITICAL", "LOW", "HALF", "FULL" };
   bsp_battery_status_t st           = s_resolve_status(s_bat.soc_pct);
 
-  RLOG_I(LOG_OBJECT_CODE_BATTERY, "Voltage: %u mV | SOC: %u%% | CRate: %d milli%%/hr | Status: %s | %s",
-         s_bat.voltage_mv, s_bat.soc_pct, s_bat.crate_mphph, status_str[st], charge_str);
+  RLOG_I(LOG_OBJECT_CODE_BATTERY, "Voltage: %u mV | SOC: %u%% | CRate: %d %%/hr | Status: %s | %s",
+         s_bat.voltage_mv, s_bat.soc_pct, s_bat.crate_phr, status_str[st], charge_str);
 
   if (s_bat.alert_active)
     s_handle_alerts();
@@ -131,9 +128,9 @@ bsp_battery_err_t bsp_battery_get_info(bsp_battery_info_t *info)
 
   info->voltage_mv    = s_bat.voltage_mv;
   info->soc_pct       = s_bat.soc_pct;
-  info->crate_mphph   = s_bat.crate_mphph;
+  info->crate_phr     = s_bat.crate_phr;
   info->status        = s_resolve_status(s_bat.soc_pct);
-  info->is_charging   = (s_bat.crate_mphph > CRATE_IDLE_THRESHOLD);
+  info->is_charging   = (s_bat.crate_phr > CRATE_IDLE_THRESHOLD);
   info->is_present    = max17048_is_present(&s_dev);
   info->remaining_min = bsp_battery_get_remaining_time();
 
@@ -152,7 +149,7 @@ uint8_t bsp_battery_get_soc(void)
 
 int16_t bsp_battery_get_crate(void)
 {
-  return s_bat.crate_mphph;
+  return s_bat.crate_phr;
 }
 
 bsp_battery_status_t bsp_battery_get_status(void)
@@ -162,17 +159,17 @@ bsp_battery_status_t bsp_battery_get_status(void)
 
 int32_t bsp_battery_get_remaining_time(void)
 {
-  int16_t crate = s_bat.crate_mphph;
+  int16_t crate_phr = s_bat.crate_phr;
 
-  if (crate > -CRATE_IDLE_THRESHOLD && crate < CRATE_IDLE_THRESHOLD)
+  if (crate_phr > -CRATE_IDLE_THRESHOLD && crate_phr < CRATE_IDLE_THRESHOLD)
     return INT32_MIN; /* Idle — indeterminate */
 
-  if (crate > 0)
-    /* Charging: time to full (positive) */
-    return ((int32_t) (100 - s_bat.soc_pct) * 60000) / (int32_t) crate;
+  if (crate_phr > 0)
+    /* Charging: time to full (positive) in minutes */
+    return (int32_t) ((100 - s_bat.soc_pct) * 60 / crate_phr);
   else
-    /* Discharging: time to empty (negative) */
-    return -((int32_t) s_bat.soc_pct * 60000) / (int32_t) (-crate);
+    /* Discharging: time to empty (negative) in minutes */
+    return (int32_t) (-(s_bat.soc_pct * 60 / (-crate_phr)));
 }
 
 bool bsp_battery_is_present(void)
@@ -222,20 +219,20 @@ static void s_check_soc(void)
 
 static void s_check_crate(void)
 {
-  int16_t cr = s_bat.crate_mphph;
+  int16_t cr = s_bat.crate_phr;
 
   if (cr > CRATE_OVERCHARGE_WARN)
   {
-    RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_OVERCHARGE_RATE, "Charge rate too high: %d milli%%/hr", cr);
+    RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_OVERCHARGE_RATE, "Charge rate too high: %d %%/hr", cr);
   }
   else if (cr < CRATE_OVERDISCHARGE_WARN)
   {
-    RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_OVERDISCHARGE_RATE, "Discharge rate too high: %d milli%%/hr",
+    RLOG_E(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_OVERDISCHARGE_RATE, "Discharge rate too high: %d %%/hr",
            cr);
   }
   else if (cr > 0 && cr < CRATE_SLOW_CHARGE_WARN)
   {
-    RLOG_W(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_SLOW_CHARGE, "Charge rate very slow: %d milli%%/hr", cr);
+    RLOG_W(LOG_OBJECT_CODE_BATTERY, ERR_BATTERY_SLOW_CHARGE, "Charge rate very slow: %d %%/hr", cr);
   }
 }
 

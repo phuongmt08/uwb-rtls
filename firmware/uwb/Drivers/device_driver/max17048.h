@@ -147,7 +147,7 @@ typedef struct
   uint16_t voltage_mv;     /* Cell voltage in mV                              */
   uint8_t  soc_pct;        /* State of charge, integer 0-100 %               */
   uint8_t  soc_frac;       /* SOC fractional part 0-255, unit 1/256 %        */
-  int16_t  crate_mphph;    /* Charge rate in milli-%/hr, negative = discharge */
+  int16_t  crate_phr;      /* Charge rate in %/hr, negative = discharge      */
   bool     is_hibernating; /* true when device is in hibernate mode           */
   bool     alert_active;   /* true when ALRT pin is asserted                  */
   uint16_t status_reg;     /* raw STATUS register value                       */
@@ -246,7 +246,7 @@ max17048_err_t max17048_read_soc_full(max17048_dev_t *dev, uint8_t *soc_pct, uin
 /**
  * @brief  Read approximate charge/discharge rate
  * @param  dev         Driver instance
- * @param  crate_mphph Output: rate in milli-%/hr, negative = discharging
+ * @param  crate_mphph Output: rate in %/hr, negative = discharging
  * @return MAX17048_OK on success
  */
 max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_mphph);
