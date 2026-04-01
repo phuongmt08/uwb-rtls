@@ -13,14 +13,14 @@ extern "C" {
 #include "nrf_gpio.h"
 
 // ─── LEDs ────────────────────────────────────────────────────────────────────
-// D8 GREEN LED via R19 (2.2k) connected to P0.02/AIN0 (module pin 11)
+// D8 GREEN LED via R19 (2.2k) connected to P0.03/AIN1 (module pin 12)
 #define LEDS_NUMBER     1
 
-#define LED1_G          NRF_GPIO_PIN_MAP(0, 2)   // P0.02 - Green LED D8
+#define LED1_G          NRF_GPIO_PIN_MAP(0, 3)   // P0.03 - Green LED D8
 
 #define LED_1           LED1_G
 
-#define LEDS_ACTIVE_STATE 0                       // Active LOW (common cathode to GND)
+#define LEDS_ACTIVE_STATE 1                       // Active HIGH (common anode to VCC)
 
 #define LEDS_LIST       { LED_1 }
 #define LEDS_INV_MASK   LEDS_MASK
@@ -45,8 +45,8 @@ extern "C" {
 // BLE_RST   → pin 6 (RESET)
 
 // ─── GPIO khả dụng trên module ────────────────────────────────────────────────
-// Pin 11: P0.02/AIN0  → LED D8
-// Pin 12: P0.03/AIN1  → free
+// Pin 11: P0.02/AIN0  → free
+// Pin 12: P0.03/AIN1  → LED D8
 // Pin 13: P0.04/AIN2  → free
 // Pin 14: P0.05/AIN3  → RTS
 // Pin 15: P0.06       → UART_TX
