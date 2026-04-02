@@ -32,7 +32,7 @@ extern "C" {
 #define BUTTONS_NUMBER  0
 #define BUTTONS_LIST    { }
 
-// ─── UART (nối với gateway nRF52840 qua BLE_TX/BLE_RX) ───────────────────────
+// ─── UART (connect to gateway nRF52840 via BLE_TX/BLE_RX) ───────────────────────
 // FSC-BT630 default UART pins (nRF52832 internal mapping)
 #define RX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 8)   // P0.08 → UART_RX (BLE_RX from gateway)
 #define TX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 6)   // P0.06 → UART_TX (BLE_TX to gateway)
@@ -44,7 +44,7 @@ extern "C" {
 // BLE_SWDIO → pin 8 (SWDIO), BLE_SWDCLK → pin 7 (SWDCLK)
 // BLE_RST   → pin 6 (RESET)
 
-// ─── GPIO khả dụng trên module ────────────────────────────────────────────────
+// ─── GPIO not available on module ────────────────────────────────────────────────
 // Pin 11: P0.02/AIN0  → free
 // Pin 12: P0.03/AIN1  → LED D8
 // Pin 13: P0.04/AIN2  → free
