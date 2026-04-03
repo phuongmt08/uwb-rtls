@@ -101,4 +101,28 @@ float mw_filter_update(mw_filter_cxt_t *filter,
                        float mx_raw, float my_raw,
                        pos_vel_2d_t *out);
 
+typedef struct {
+    float history[5];
+    uint8_t count;
+    uint8_t index;
+} median_filter_1d_t;
+
+typedef struct {
+    median_filter_1d_t anchor_medians[8];
+    float T1;
+    float T2;
+    float R_base;
+    bool initialized;
+} mahalanobis_prefilter_t;
+
+void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
+                                float T1, float T2, float anchor_R_base);
+
+bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
+                                  uint8_t anchor_id, float d_raw,
+                                  float px, float py, float pz,
+                                  float vx, float vy, float vz,
+                                  float ax, float ay, float az,
+                                  float *d_out, float *d2_score, float *R_adaptive);
+
 #endif /* __MW_FILTER_H */
