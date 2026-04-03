@@ -137,8 +137,52 @@ typedef struct
   uint64_t t1, t2, t3, t4, t5, t6;
 } dstwr_timestamps_t;
 
+#if UWB_EVENT_DRIVEN
+typedef enum {
+    SYS_RANGING_EV_SYS_IDLE = 0,
+    
+    SYS_RANGING_EV_TAG_TX_POLL,
+    SYS_RANGING_EV_TAG_WAIT_POLL_TX,
+    SYS_RANGING_EV_TAG_WAIT_RESP,
+    SYS_RANGING_EV_TAG_WAIT_FINAL_TX,
+    SYS_RANGING_EV_TAG_WAIT_RESULT,
+
+    SYS_RANGING_EV_ANCHOR_WAIT_POLL,
+    SYS_RANGING_EV_ANCHOR_WAIT_RESP_TX,
+    SYS_RANGING_EV_ANCHOR_WAIT_FINAL,
+    SYS_RANGING_EV_ANCHOR_WAIT_RESULT_TX
+} sys_ranging_event_step_t;
+
+typedef struct {
+    sys_ranging_event_step_t step;
+    uint32_t                 step_start_tick;
+    uint64_t                 deadline_dw;
+    
+    uint64_t                 poll_tx_ts;     // T1
+    uint64_t                 poll_rx_ts;     // T2
+    uint64_t                 resp_tx_ts;     // T3
+    uint64_t                 expected_final_dw;
+    
+    uint8_t                  num_responses;
+    uint8_t                  my_slot_id;
+    int8_t                   poll_rssi_dbm;
+    
+    struct {
+        uint8_t  anchor_id;
+        uint64_t resp_rx_ts;
+        uint64_t poll_rx_ts;
+        uint64_t resp_tx_ts;
+        int8_t   rssi;
+        bool     valid;
+    } anchor_resp[8];
+} sys_ranging_event_ctx_t;
+#endif
+
 /* Private variables -------------------------------------------------- */
 static ranging_ctx_t    s_ctx         = { 0 };
+#if UWB_EVENT_DRIVEN
+static sys_ranging_event_ctx_t s_sys_ranging_ev = {0};
+#endif
 static tdma_scheduler_t s_tdma_tag    = { 0 };
 static tdma_scheduler_t s_tdma_anchor = { 0 };
 static struct
@@ -405,6 +449,9 @@ static void state_machine_reset(void)
   s_ctx.has_result       = false;
   memset(&s_ctx.result_multi, 0, sizeof(s_ctx.result_multi));
   memset(&s_ctx.result_single, 0, sizeof(s_ctx.result_single));
+#if UWB_EVENT_DRIVEN
+  s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+#endif
   bsp_uwb_idle();
 }
 
@@ -1655,8 +1702,318 @@ sys_ranging_err_t sys_ranging_tag_start_tdma(uint8_t        num_anchors,
   return SYS_RANGING_OK;
 }
 
-sys_ranging_err_t
-sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
+#if UWB_EVENT_DRIVEN
+
+sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
+{
+  if (s_ctx.state == STATE_IDLE) return SYS_RANGING_ERR_NOT_STARTED;
+  if (s_ctx.state != STATE_TAG_RANGING_TDMA) return SYS_RANGING_ERR;
+  
+  uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
+  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
+    state_machine_reset();
+    s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+    return SYS_RANGING_ERR_TIMEOUT;
+  }
+  
+  // Initialization
+  if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE) {
+      memset(&s_sys_ranging_ev, 0, sizeof(s_sys_ranging_ev));
+      if (!tdma_tag_config_matches(num_anchors, anchor_ids)) {
+          tdma_init(&s_tdma_tag, TDMA_ROLE_TAG, 0, num_anchors, anchor_ids);
+      }
+      s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_TX_POLL;
+  }
+  
+  bsp_uwb_event_t evt;
+  bool has_evt = bsp_uwb_get_event(&evt);
+  
+  switch(s_sys_ranging_ev.step) {
+      case SYS_RANGING_EV_TAG_TX_POLL: {
+          poll_msg_t poll_msg = {0};
+          poll_msg.msg_type = MW_DSTWR_MSG_TYPE_POLL;
+          poll_msg.sequence_num = s_ctx.sequence_num;
+          poll_msg.tag_id = 0;
+          poll_msg.num_anchors = num_anchors;
+          for (uint8_t i = 0; i < num_anchors; i++) {
+              if (anchor_ids[i] > 0 && anchor_ids[i] <= 8) poll_msg.anchor_mask |= (1 << (anchor_ids[i] - 1));
+          }
+          if (bsp_uwb_tx(&poll_msg, sizeof(poll_msg)) != BSP_OK) {
+              state_machine_reset();
+              s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+              return SYS_RANGING_ERR;
+          }
+          s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_POLL_TX;
+          break;
+      }
+      case SYS_RANGING_EV_TAG_WAIT_POLL_TX: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              s_sys_ranging_ev.poll_tx_ts = evt.tx_ts; // DW1000 caches exact TX time
+              tdma_start_superframe(&s_tdma_tag, s_sys_ranging_ev.poll_tx_ts);
+              s_sys_ranging_ev.deadline_dw = tdma_compute_resp_rx_window_end(&s_tdma_tag, anchor_ids, num_anchors, bsp_uwb_get_current_time_dw());
+              
+              /* Cap RESP window so it does NOT overrun the planned FINAL TX time */
+              uint64_t final_tx_planned_dw = 0;
+              if (tdma_calculate_final_time(&s_tdma_tag, num_anchors, &final_tx_planned_dw) == TDMA_OK) {
+                  uint64_t final_tx_headroom_dw = (final_tx_planned_dw - tdma_us_to_dw(s_tdma_tag.schedule.processing_margin_us + 500U)) & DW_MASK_40;
+                  if (dw_time_before_deadline(final_tx_headroom_dw, s_sys_ranging_ev.deadline_dw)) {
+                      s_sys_ranging_ev.deadline_dw = final_tx_headroom_dw;
+                  }
+              }
+              
+              bsp_uwb_enable_rx(0);
+              s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_RESP;
+          }
+          break;
+      }
+      case SYS_RANGING_EV_TAG_WAIT_RESP: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK && validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_RESP)) {
+              resp_msg_t *resp = (resp_msg_t*)evt.rx_data;
+              if (resp->sequence_num == s_ctx.sequence_num) {
+                  int idx = -1;
+                  for (uint8_t i = 0; i < num_anchors; i++) if (anchor_ids[i] == resp->anchor_id) { idx = i; break; }
+                  if (idx >= 0 && !s_sys_ranging_ev.anchor_resp[idx].valid) {
+                      s_sys_ranging_ev.anchor_resp[idx].anchor_id = resp->anchor_id;
+                      s_sys_ranging_ev.anchor_resp[idx].resp_rx_ts = evt.rx_ts;
+                      memcpy(&s_sys_ranging_ev.anchor_resp[idx].poll_rx_ts, &resp->poll_rx_ts, sizeof(uint64_t));
+                      memcpy(&s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts, &resp->resp_tx_ts, sizeof(uint64_t));
+                      s_sys_ranging_ev.anchor_resp[idx].poll_rx_ts &= DW_MASK_40;
+                      s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts &= DW_MASK_40;
+                      s_sys_ranging_ev.anchor_resp[idx].rssi = evt.rx_rssi;
+                      s_sys_ranging_ev.anchor_resp[idx].valid = true;
+                      s_sys_ranging_ev.num_responses++;
+                  }
+              }
+          }
+          if (has_evt) bsp_uwb_enable_rx(0); // keep listening
+          
+          if (!dw_time_before_deadline(bsp_uwb_get_current_time_dw(), s_sys_ranging_ev.deadline_dw) || s_sys_ranging_ev.num_responses >= num_anchors) {
+              if (s_sys_ranging_ev.num_responses == 0) {
+                  state_machine_reset(); return SYS_RANGING_ERR;
+              }
+              // Send FINAL
+              uint64_t final_tx_time_dw = 0;
+              tdma_calculate_final_time(&s_tdma_tag, num_anchors, &final_tx_time_dw);
+              final_tx_time_dw = ensure_future_tx(final_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+              if (final_tx_time_dw == 0ULL) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
+              uint64_t t5_payload = predict_delayed_tx_antenna_time(final_tx_time_dw);
+              
+              uint8_t final_buf[256] = {0};
+              final_msg_t *fmsg = (final_msg_t*)final_buf;
+              fmsg->msg_type = MW_DSTWR_MSG_TYPE_FINAL;
+              fmsg->sequence_num = s_ctx.sequence_num;
+              fmsg->num_responses = s_sys_ranging_ev.num_responses;
+              uint64_t ptx_pay = s_sys_ranging_ev.poll_tx_ts & DW_MASK_40;
+              memcpy(&fmsg->poll_tx_ts, &ptx_pay, sizeof(ptx_pay));
+              
+              uint8_t fidx = 0;
+              for (uint8_t i = 0; i < 8; i++) {
+                  if (s_sys_ranging_ev.anchor_resp[i].valid) {
+                      uint8_t *entry = final_buf + sizeof(final_msg_t) + (fidx * sizeof(final_anchor_data_t));
+                      uint64_t rrx_pay = s_sys_ranging_ev.anchor_resp[i].resp_rx_ts & DW_MASK_40;
+                      uint64_t ftx_pay = t5_payload & DW_MASK_40;
+                      entry[0] = s_sys_ranging_ev.anchor_resp[i].anchor_id;
+                      memcpy(entry+1, &rrx_pay, sizeof(rrx_pay));
+                      memcpy(entry+1+sizeof(uint64_t), &ftx_pay, sizeof(ftx_pay));
+                      fidx++;
+                  }
+              }
+              uint16_t flen = sizeof(final_msg_t) + (s_sys_ranging_ev.num_responses * sizeof(final_anchor_data_t));
+              if (bsp_uwb_tx_delayed(final_buf, flen, final_tx_time_dw) != BSP_OK) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
+              s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_FINAL_TX;
+          }
+          break;
+      }
+      case SYS_RANGING_EV_TAG_WAIT_FINAL_TX: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              s_ctx.result_multi.count = 0;
+              s_ctx.result_multi.sequence_num = s_ctx.sequence_num;
+              uint8_t max_slot = 1;
+              for (uint8_t i=0; i<8; i++) if (s_sys_ranging_ev.anchor_resp[i].valid) {
+                  tdma_slot_t slot={0};
+                  if (tdma_get_slot_for_anchor(&s_tdma_tag, s_sys_ranging_ev.anchor_resp[i].anchor_id, &slot)==TDMA_OK) {
+                      if (slot.slot_id > max_slot) max_slot = slot.slot_id;
+                  }
+              }
+              s_sys_ranging_ev.deadline_dw = tdma_compute_result_rx_window_end(&s_tdma_tag, evt.rx_ts, max_slot);
+              bsp_uwb_enable_rx(0);
+              s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_RESULT;
+          }
+          break;
+      }
+      case SYS_RANGING_EV_TAG_WAIT_RESULT: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK && validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_RESULT)) {
+              result_msg_t *res = (result_msg_t*)evt.rx_data;
+              if (res->sequence_num == s_ctx.sequence_num) {
+                  sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
+                  tr->anchor_id = res->anchor_id;
+                  tr->distance_m = res->distance_m;
+                  tr->rssi = res->rssi;
+                  tr->valid = (res->valid == 1);
+                  s_ctx.result_multi.count++;
+              }
+          }
+          if (has_evt) bsp_uwb_enable_rx(0);
+          
+          if (!dw_time_before_deadline(bsp_uwb_get_current_time_dw(), s_sys_ranging_ev.deadline_dw) || s_ctx.result_multi.count >= s_sys_ranging_ev.num_responses) {
+              s_ctx.has_result = true;
+              s_ctx.state = STATE_TAG_COMPLETE;
+              s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+              return SYS_RANGING_OK;
+          }
+          break;
+      }
+      default: break;
+  }
+  return SYS_RANGING_ERR_BUSY;
+}
+
+sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
+{
+  if (s_ctx.state == STATE_IDLE) return SYS_RANGING_ERR_NOT_STARTED;
+  if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA) return SYS_RANGING_ERR;
+  
+  uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
+  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
+    state_machine_reset();
+    s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+    return SYS_RANGING_ERR_TIMEOUT;
+  }
+  
+  if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE) {
+      memset(&s_sys_ranging_ev, 0, sizeof(s_sys_ranging_ev));
+      if (!tdma_anchor_config_matches(s_ctx.anchor_id, num_anchors, anchor_ids)) {
+          tdma_init(&s_tdma_anchor, TDMA_ROLE_ANCHOR, s_ctx.anchor_id, num_anchors, anchor_ids);
+      }
+      tdma_slot_t my_slot = {0};
+      tdma_get_slot_for_anchor(&s_tdma_anchor, s_ctx.anchor_id, &my_slot);
+      s_sys_ranging_ev.my_slot_id = my_slot.slot_id;
+      s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_POLL;
+      bsp_uwb_enable_rx(0);
+  }
+  
+  bsp_uwb_event_t evt;
+  bool has_evt = bsp_uwb_get_event(&evt);
+  
+  switch(s_sys_ranging_ev.step) {
+      case SYS_RANGING_EV_ANCHOR_WAIT_POLL: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK && validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_POLL)) {
+              poll_msg_t *poll = (poll_msg_t*)evt.rx_data;
+              s_ctx.sequence_num = poll->sequence_num;
+              s_sys_ranging_ev.poll_rx_ts = evt.rx_ts;
+              s_sys_ranging_ev.poll_rssi_dbm = evt.rx_rssi;
+              tdma_sync_to_poll(&s_tdma_anchor, s_sys_ranging_ev.poll_rx_ts);
+              
+              uint64_t rtx_dw=0;
+              tdma_calculate_response_time(&s_tdma_anchor, s_ctx.anchor_id, &rtx_dw);
+              rtx_dw = ensure_future_tx(rtx_dw, TDMA_DEFAULT_GUARD_TIME_US);
+              if (rtx_dw == 0ULL) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
+              s_sys_ranging_ev.resp_tx_ts = predict_delayed_tx_antenna_time(rtx_dw);
+              
+              resp_msg_t rmsg = {0};
+              rmsg.msg_type = MW_DSTWR_MSG_TYPE_RESP;
+              rmsg.sequence_num = s_ctx.sequence_num;
+              rmsg.anchor_id = s_ctx.anchor_id;
+              rmsg.slot_id = s_sys_ranging_ev.my_slot_id;
+              uint64_t p_rx = s_sys_ranging_ev.poll_rx_ts & DW_MASK_40;
+              uint64_t r_tx = s_sys_ranging_ev.resp_tx_ts & DW_MASK_40;
+              memcpy(&rmsg.poll_rx_ts, &p_rx, sizeof(p_rx));
+              memcpy(&rmsg.resp_tx_ts, &r_tx, sizeof(r_tx));
+              rmsg.rssi_poll = (uint8_t)s_sys_ranging_ev.poll_rssi_dbm;
+              
+              bsp_uwb_tx_delayed(&rmsg, sizeof(rmsg), rtx_dw);
+              s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_RESP_TX;
+          } else if (has_evt) {
+              bsp_uwb_enable_rx(0);
+          }
+          break;
+      }
+      case SYS_RANGING_EV_ANCHOR_WAIT_RESP_TX: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_FINAL;
+              bsp_uwb_enable_rx(0);
+          }
+          break;
+      }
+      case SYS_RANGING_EV_ANCHOR_WAIT_FINAL: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK && validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_FINAL)) {
+              final_msg_t *fmsg = (final_msg_t*)evt.rx_data;
+              if (fmsg->sequence_num == s_ctx.sequence_num) {
+                  uint64_t ptx_tag=0; memcpy(&ptx_tag, &fmsg->poll_tx_ts, sizeof(ptx_tag)); ptx_tag &= DW_MASK_40;
+                  uint64_t rrx_tag=0, ftx_tag=0;
+                  bool found = false;
+                  for (uint8_t i=0; i<fmsg->num_responses; i++) {
+                      uint8_t *entry = evt.rx_data + sizeof(final_msg_t) + (i*sizeof(final_anchor_data_t));
+                      if (entry[0] == s_ctx.anchor_id) {
+                          memcpy(&rrx_tag, entry+1, sizeof(rrx_tag));
+                          memcpy(&ftx_tag, entry+1+sizeof(uint64_t), sizeof(ftx_tag));
+                          found = true; break;
+                      }
+                  }
+                  if (found) {
+                      dstwr_timestamps_t ts;
+                      ts.t1 = ptx_tag; ts.t2 = s_sys_ranging_ev.poll_rx_ts; ts.t3 = s_sys_ranging_ev.resp_tx_ts;
+                      ts.t4 = rrx_tag & DW_MASK_40; ts.t5 = ftx_tag & DW_MASK_40; ts.t6 = evt.rx_ts;
+                      float dist = calculate_distance(&ts);
+                      s_ctx.result_single.distance_m = dist;
+                      s_ctx.result_single.anchor_id = s_ctx.anchor_id;
+                      s_ctx.result_single.rssi = s_sys_ranging_ev.poll_rssi_dbm;
+                      s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
+                      
+                      uint64_t expected_final_tx_dw = 0;
+                      if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_tx_dw) != TDMA_OK) {
+                          expected_final_tx_dw = evt.rx_ts;
+                      }
+                      
+                      uint32_t rofs = s_tdma_anchor.schedule.final_to_result_delay_us + (s_sys_ranging_ev.my_slot_id * tdma_effective_slot_us(&s_tdma_anchor));
+                      uint64_t res_tx_dw = (expected_final_tx_dw + tdma_us_to_dw(rofs)) & DW_MASK_40;
+                      res_tx_dw = ensure_future_tx(res_tx_dw, TDMA_DEFAULT_GUARD_TIME_US);
+                      if (res_tx_dw == 0ULL) {
+                          state_machine_reset();
+                          return SYS_RANGING_ERR;
+                      }
+                      
+                      result_msg_t res = {0};
+                      res.msg_type = MW_DSTWR_MSG_TYPE_RESULT;
+                      res.sequence_num = s_ctx.sequence_num;
+                      res.anchor_id = s_ctx.anchor_id;
+                      res.slot_id = s_sys_ranging_ev.my_slot_id;
+                      res.valid = s_ctx.result_single.valid ? 1 : 0;
+                      res.distance_m = s_ctx.result_single.distance_m;
+                      res.rssi = (int8_t)s_sys_ranging_ev.poll_rssi_dbm; // Pass old one
+                      bsp_uwb_tx_delayed(&res, sizeof(res), res_tx_dw);
+                      s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_RESULT_TX;
+                  }
+              }
+          } else if (has_evt) {
+              bsp_uwb_enable_rx(0);
+          }
+          break;
+      }
+      case SYS_RANGING_EV_ANCHOR_WAIT_RESULT_TX: {
+          if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              s_ctx.has_result = true;
+              s_ctx.state = STATE_ANCHOR_COMPLETE;
+              s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+              return SYS_RANGING_OK;
+          }
+          break;
+      }
+      default: break;
+  }
+  return SYS_RANGING_ERR_BUSY;
+}
+#else
+sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
 {
   if (s_ctx.state == STATE_IDLE)
     return SYS_RANGING_ERR_NOT_STARTED;
@@ -1690,6 +2047,39 @@ sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uin
     return SYS_RANGING_ERR;
   }
 }
+
+sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
+{
+  if (s_ctx.state == STATE_IDLE)
+    return SYS_RANGING_ERR_NOT_STARTED;
+  if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA)
+    return SYS_RANGING_ERR;
+
+  uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
+  int      ret        = ds_twr_anchor_tdma(s_ctx.anchor_id, num_anchors, anchor_ids, timeout_ms * 1000);
+
+  if (ret == -2)
+  {
+    /* Normal: no POLL in this window. Keep state machine armed. */
+    s_ctx.state_entry_tick = HAL_GetTick();
+    return SYS_RANGING_ERR_BUSY;
+  }
+
+  if (ret == 0)
+  {
+    s_ctx.has_result = true;
+    s_ctx.state      = STATE_ANCHOR_COMPLETE;
+    return SYS_RANGING_OK;
+  }
+  else
+  {
+    RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] TDMA Error");
+    s_stats.error_count++;
+    state_machine_reset();
+    return SYS_RANGING_ERR;
+  }
+}
+#endif
 
 sys_ranging_err_t sys_ranging_tag_get_results_tdma(sys_ranging_multi_result_t *results)
 {
@@ -1737,39 +2127,6 @@ sys_ranging_err_t sys_ranging_anchor_start_tdma(uint8_t        anchor_id,
   s_stats.total_count++;
 
   return SYS_RANGING_OK;
-}
-
-sys_ranging_err_t
-sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
-{
-  if (s_ctx.state == STATE_IDLE)
-    return SYS_RANGING_ERR_NOT_STARTED;
-  if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA)
-    return SYS_RANGING_ERR;
-
-  uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
-  int      ret        = ds_twr_anchor_tdma(s_ctx.anchor_id, num_anchors, anchor_ids, timeout_ms * 1000);
-
-  if (ret == -2)
-  {
-    /* Normal: no POLL in this window. Keep state machine armed. */
-    s_ctx.state_entry_tick = HAL_GetTick();
-    return SYS_RANGING_ERR_BUSY;
-  }
-
-  if (ret == 0)
-  {
-    s_ctx.has_result = true;
-    s_ctx.state      = STATE_ANCHOR_COMPLETE;
-    return SYS_RANGING_OK;
-  }
-  else
-  {
-    RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] TDMA Error");
-    s_stats.error_count++;
-    state_machine_reset();
-    return SYS_RANGING_ERR;
-  }
 }
 
 sys_ranging_err_t sys_ranging_anchor_get_result_tdma(sys_ranging_result_t *result)

@@ -16,6 +16,7 @@
 #include "mw_tdma_scheduler.h"
 #include "spi.h"
 #include "sys_logger.h"
+#include "config.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -58,6 +59,32 @@ static uint32_t s_rx_timeout_count  = 0;
 static uint32_t s_rx_crc_err_count  = 0;
 static uint32_t s_rx_phr_err_count  = 0;
 static uint32_t s_rx_sync_err_count = 0;
+
+#if UWB_EVENT_DRIVEN
+static volatile bool s_isr_event_ready = false;
+static volatile uint8_t s_event_overflow_count = 0;
+static bsp_uwb_event_t s_isr_event;
+static void uwb_tx_cb(const dwt_callback_data_t *cb_data);
+static void uwb_rx_cb(const dwt_callback_data_t *cb_data);
+
+bool bsp_uwb_get_event(bsp_uwb_event_t *out_event)
+{
+    if (!s_isr_event_ready) return false;
+    __disable_irq();
+    *out_event = s_isr_event;
+    s_isr_event_ready = false;
+    __enable_irq();
+    return true;
+}
+
+void bsp_uwb_clear_event(void)
+{
+    __disable_irq();
+    s_isr_event_ready = false;
+    __enable_irq();
+}
+#endif
+
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
@@ -186,6 +213,11 @@ bsp_err_t bsp_uwb_init(void)
   port_set_dw1000_fastrate();
   dwt_setleds(1);
 
+#if UWB_EVENT_DRIVEN
+  /* Register UWB callbacks for foreground event processing */
+  dwt_setcallbacks(uwb_tx_cb, uwb_rx_cb);
+#endif
+
   s_initialized = true;
   return BSP_OK;
 }
@@ -251,6 +283,9 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
     return BSP_ERR;
   }
 
+#if UWB_EVENT_DRIVEN
+  return BSP_OK;
+#else
   /* Wait TX complete (Blocking) */
   /* NOTE: Consider using interrupts or OS semaphores in future */
   uint32_t timeout = HAL_GetTick() + 10;
@@ -279,6 +314,7 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
   dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
 
   return BSP_OK;
+#endif
 }
 
 bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
@@ -595,6 +631,9 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
     return BSP_ERR;
   }
 
+#if UWB_EVENT_DRIVEN
+  return BSP_OK;
+#else
   /* Wait for TX complete */
   uint32_t timeout_ms = 100;
   uint32_t start      = HAL_GetTick();
@@ -629,6 +668,7 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
 
   dwt_forcetrxoff();
   return BSP_ERR;
+#endif
 }
 
 bool bsp_uwb_is_rx_ready(void)
@@ -699,8 +739,65 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void)
 }
 void bsp_uwb_on_irq(void)
 {
+#if UWB_EVENT_DRIVEN
+  dwt_isr();
+#else
   s_irq_event_pending = 1;
+#endif
 }
+
+#if UWB_EVENT_DRIVEN
+static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
+{
+  (void)cb_data;
+  if (s_isr_event_ready) s_event_overflow_count++;
+  s_isr_event.type = BSP_UWB_EVENT_TX_DONE;
+  s_isr_event.rx_len = 0;
+  
+  uint64_t actual_dw = 0;
+  uint8_t ts[5];
+  dwt_readtxtimestamp(ts);
+  actual_dw = ((uint64_t)ts[0]) | ((uint64_t)ts[1] << 8) | ((uint64_t)ts[2] << 16)
+         | ((uint64_t)ts[3] << 24) | ((uint64_t)ts[4] << 32);
+  s_isr_event.tx_ts = actual_dw;
+  
+  s_isr_event_ready = true;
+}
+
+static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
+{
+  if (cb_data->event == DWT_SIG_RX_OKAY)
+  {
+      if (s_isr_event_ready) s_event_overflow_count++;
+      s_isr_event.type = BSP_UWB_EVENT_RX_OK;
+      s_isr_event.rx_len = cb_data->datalength;
+      if (s_isr_event.rx_len > sizeof(s_isr_event.rx_data)) {
+          s_isr_event.rx_len = sizeof(s_isr_event.rx_data);
+      }
+      dwt_readrxdata(s_isr_event.rx_data, s_isr_event.rx_len, 0);
+      
+      uint8_t ts[5];
+      dwt_readrxtimestamp(ts);
+      s_isr_event.rx_ts = ((uint64_t)ts[0]) | ((uint64_t)ts[1] << 8) | ((uint64_t)ts[2] << 16)
+             | ((uint64_t)ts[3] << 24) | ((uint64_t)ts[4] << 32);
+      
+      // We skip RSSI read in ISR to save time, main loop can approximate or we just use -100
+      s_isr_event.rx_rssi = -100;
+  }
+  else if (cb_data->event == DWT_SIG_RX_TIMEOUT || cb_data->event == DWT_SIG_RX_PTOTIMEOUT)
+  {
+      s_isr_event.type = BSP_UWB_EVENT_RX_TIMEOUT;
+      s_isr_event.rx_len = 0;
+  }
+  else
+  {
+      s_isr_event.type = BSP_UWB_EVENT_RX_ERROR;
+      s_isr_event.rx_len = 0;
+  }
+  
+  s_isr_event_ready = true;
+}
+#endif
 
 void bsp_uwb_clear_irq_event(void)
 {
