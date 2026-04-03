@@ -15,4 +15,7 @@
 #define HAVE_TX_DELAY
 #define ENABLE_DEBUG_LOGGING
 
+/* Experimental features */
+#define UWB_EVENT_DRIVEN 1
+
 #endif /* __CONFIG_H */
