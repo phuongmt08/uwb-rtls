@@ -48,6 +48,7 @@ typedef struct {
 } tag_calib_state_t;
 #endif
 typedef struct {
+    mahalanobis_prefilter_t prefilter;
 #if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
     mw_filter_cxt_t filter;
 #endif
@@ -70,6 +71,7 @@ static uint32_t s_success_count = 0;
 static uint32_t s_last_ranging_tick = 0;
 static uint8_t s_sequence_num = 0;
 static filter_state_t s_filters;
+static vec2d_t s_last_position = {.x = 0.0f, .y = 0.0f};
 static bool s_is_ranging_active = false;
 static uint8_t s_pending_num_anchors = 0;
 static uint8_t s_pending_anchor_ids[NUM_ANCHORS] = {0};
@@ -121,7 +123,13 @@ static void init_filters(void)
                    DES_ALPHA_BASE, DES_BETA,
                    AKF_PROCESS_NOISE, AKF_R_BASE,
                    AKF_INNOVATION_ALPHA, AKF_R_SCALE_MIN, AKF_R_SCALE_MAX);
+                   
+    s_last_position.x = init_x;
+    s_last_position.y = init_y;
 #endif
+
+    /* Initialize Mahalanobis Prefilter (T1=6.0, T2=16.0, BaseR=0.1) */
+    mw_filter_mahalanobis_init(&s_filters.prefilter, 6.0f, 16.0f, 0.1f);
 }
 
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
@@ -380,18 +388,37 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
          double r3d = (double)r->distance_m;
          
+         /* 1. Mahalanobis Pre-Filter on raw 3D distance */
+         float d_out = 0.0f, d2_score = 0.0f, r_adapt = 0.0f;
+         bool is_accepted = mw_filter_mahalanobis_update(&s_filters.prefilter,
+                                                         aid - 1, /* array index 0-7 */
+                                                         (float)r3d,
+                                                         (float)s_last_position.x, 
+                                                         (float)s_last_position.y, 
+                                                         (float)TAG_HEIGHT_M, /* pz = tag height */
+                                                         0.0f, 0.0f, 0.0f, /* Tag Velocity vx, vy, vz = 0 for now */
+                                                         (float)ANCHOR_POSITIONS[aid - 1].x,
+                                                         (float)ANCHOR_POSITIONS[aid - 1].y,
+                                                         (float)ANCHOR_POSITIONS[aid - 1].z,
+                                                         &d_out, &d2_score, &r_adapt);
+                                                         
+         if (!is_accepted) {
+             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
+             continue; /* Drop before 2D projection */
+         }
+         
          /* Calculate vertical offset based on specific anchor height */
          double dz = ANCHOR_POSITIONS[aid - 1].z - (double)TAG_HEIGHT_M;
          double r2d = 0.0;
          
-         if (!convert_3d_to_2d_distance(r3d, dz, &r2d)) {
+         if (!convert_3d_to_2d_distance((double)d_out, dz, &r2d)) {
              RLOG_W(LOG_OBJECT_CODE_TAG, 
                  "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)",
-                 aid, (float)r3d, (float)dz);
+                 aid, d_out, (float)dz);
              continue;
          }
          
-         /* Use raw 2D distance - AKF will handle filtering */
+         /* Use projected 2D distance for Trilateration */
          float distance_2d = (float)r2d;
          int8_t rssi = (int8_t)r->rssi;
          
@@ -401,11 +428,13 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
          anchors_by_id[aid].rssi = rssi;
          anchors_by_id[aid].id = aid;
          anchors_by_id[aid].valid = true;
+         anchors_by_id[aid].d2_score = d2_score;
+         anchors_by_id[aid].r_adaptive = r_adapt;
          valid_count++;
          
          RLOG_D(LOG_OBJECT_CODE_TAG,
              "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
-             aid, (float)r3d, (float)r2d, (float)dz);
+             aid, d_out, (float)r2d, (float)dz);
     }
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
@@ -424,7 +453,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         return;
     }
 
-    /* ==== STEP 2: Prepare compact array for trilateration ==== */
+    /* ==== STEP 2.A: Compact Array ==== */
     mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
     uint8_t compact_idx = 0;
     
@@ -434,12 +463,26 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
     }
 
-    /* ==== STEP 3: Trilateration (auto-select best 3) ==== */
+    if (compact_idx < 3) {
+        RLOG_W(LOG_OBJECT_CODE_TAG, "Not enough anchors passed filter (%u/3)", compact_idx);
+        s_error_count++;
+        return;
+    }
+
+    /* ==== STEP 2.B: Sort & Extract Best Exact 3 ==== */
+    mw_tril_anchor_t best_3_anchors[3];
+    uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3);
+    
+    if (best_count < 3) {
+        s_error_count++;
+        return;
+    }
+
+    /* ==== STEP 3: Trilateration ==== */
     vec2d_t tril_position;
     mw_tril_result_t tril_result;
 
-    mw_tril_err_t err = mw_trilateration_2d(anchors_compact, valid_count,
-                                            &tril_position, &tril_result);
+    mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
 
     if (err != MW_TRIL_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
@@ -460,47 +503,24 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 
-    /* ==== STEP 5: Apply Filter ==== */
-#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
-    pos_vel_2d_t final_position;
-
-    float R_scale = mw_filter_update(&s_filters.filter,
-                                     tril_position.x, tril_position.y,
-                                     &final_position);
-
-    s_success_count++;
-    s_error_count = 0;
-
-    float velocity = sqrtf(final_position.vx * final_position.vx +
-                          final_position.vy * final_position.vy);
+    /* ==== STEP 5: Final Handling (No Ext Filters) ==== */
+    s_last_position.x = tril_position.x;
+    s_last_position.y = tril_position.y;
     
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Raw:      X=%.3fm Y=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Filtered: X=%.3fm Y=%.3fm (V=%.3fm/s)",
-           final_position.x, final_position.y, velocity);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Quality:  Error=%.3fm R_adapt=%.2f",
-           (float)tril_result.error_estimate, R_scale);
-
-    if (bsp_io_uart_send_position(final_position.x, final_position.y,
-                                  TAG_HEIGHT_M,
-                                  (float)tril_result.error_estimate) != BSP_OK) {
-        RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
-    }
-
-#else
-    /* No Filter - use raw trilateration */
     s_success_count++;
     s_error_count = 0;
 
-    // RLOG_I(LOG_OBJECT_CODE_TAG, "Position: X=%.3fm Y=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
-    // RLOG_I(LOG_OBJECT_CODE_TAG, "Error:    %.3fm", (float)tril_result.error_estimate);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "D2 Scores: #%u(%.1f) #%u(%.1f) #%u(%.1f)",
+           best_3_anchors[0].id, best_3_anchors[0].d2_score,
+           best_3_anchors[1].id, best_3_anchors[1].d2_score,
+           best_3_anchors[2].id, best_3_anchors[2].d2_score);
 
-    /* Send position via UART */
-    if (bsp_io_uart_send_position((float)tril_position.x, (float)tril_position.y,
+    if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
                                   TAG_HEIGHT_M,
                                   (float)tril_result.error_estimate) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
-#endif
 }
 /* Public functions --------------------------------------------------- */
 app_err_t app_tag_init(void)
