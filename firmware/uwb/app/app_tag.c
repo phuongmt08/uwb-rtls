@@ -49,21 +49,10 @@ typedef struct {
 #endif
 typedef struct {
     mahalanobis_prefilter_t prefilter;
-#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
-    mw_filter_cxt_t filter;
-#endif
+
 } filter_state_t;
 
 /* Private variables --------------------------------------------------- */
-/* Anchor positions with Z from config */
-static const vec3d_t ANCHOR_POSITIONS[NUM_ANCHORS] = {
-    {.x = ANCHOR_1_X, .y = ANCHOR_1_Y, .z = ANCHOR_1_Z},
-    {.x = ANCHOR_2_X, .y = ANCHOR_2_Y, .z = ANCHOR_2_Z},
-    {.x = ANCHOR_3_X, .y = ANCHOR_3_Y, .z = ANCHOR_3_Z}
-#if NUM_ANCHORS > 3
-    ,{.x = ANCHOR_4_X, .y = ANCHOR_4_Y, .z = ANCHOR_4_Z}
-#endif
-};
 
 /* Private variables -------------------------------------------------- */
 static uint32_t s_error_count = 0;
@@ -106,27 +95,21 @@ static void init_filters(void)
 {
     memset(&s_filters, 0, sizeof(s_filters));
 
-#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
-    /* Initialize Adaptive Kalman Filter at center of anchor layout */
-#if NUM_ANCHORS < 4
-    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X) / 3.0f;
-    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y) / 3.0f;
-#else
-    float init_x = (ANCHOR_1_X + ANCHOR_2_X + ANCHOR_3_X + ANCHOR_4_X) / 4.0f;
-    float init_y = (ANCHOR_1_Y + ANCHOR_2_Y + ANCHOR_3_Y + ANCHOR_4_Y) / 4.0f;
-#endif
-
     sys_config_t *cfg = sys_config_get();
-    float dt = cfg->uwb.ranging_period_ms / 1000.0f;
-
-    mw_filter_init(&s_filters.filter, init_x, init_y, dt,
-                   DES_ALPHA_BASE, DES_BETA,
-                   AKF_PROCESS_NOISE, AKF_R_BASE,
-                   AKF_INNOVATION_ALPHA, AKF_R_SCALE_MIN, AKF_R_SCALE_MAX);
+    float init_x = 0.0f;
+    float init_y = 0.0f;
+    
+    if (cfg->anchor_count > 0) {
+        for (uint32_t i = 0; i < cfg->anchor_count; i++) {
+            init_x += cfg->anchor_layout[i].x_m;
+            init_y += cfg->anchor_layout[i].y_m;
+        }
+        init_x /= cfg->anchor_count;
+        init_y /= cfg->anchor_count;
+    }
                    
     s_last_position.x = init_x;
     s_last_position.y = init_y;
-#endif
 
     /* Initialize Mahalanobis Prefilter (T1=6.0, T2=16.0, BaseR=0.1) */
     mw_filter_mahalanobis_init(&s_filters.prefilter, 6.0f, 16.0f, 0.1f);
@@ -376,6 +359,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     
     for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
+    sys_config_t *cfg = sys_config_get();
+
     /* Iterate through the array of results returned by TDMA */
     /* Note: 'num_success' is the number of valid items in the 'results' array */
     for (int i = 0; i < num_success; i++) {
@@ -387,6 +372,22 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (aid < 1 || aid > NUM_ANCHORS) continue;
 
          double r3d = (double)r->distance_m;
+         vec3d_t anchor_pos = {0};
+         bool found = false;
+         for (uint32_t j = 0; j < cfg->anchor_count; j++) {
+             if (cfg->anchor_layout[j].anchor_id == aid) {
+                 anchor_pos.x = (double)cfg->anchor_layout[j].x_m;
+                 anchor_pos.y = (double)cfg->anchor_layout[j].y_m;
+                 anchor_pos.z = (double)cfg->anchor_layout[j].z_m;
+                 found = true;
+                 break;
+             }
+         }
+         
+         if (!found) {
+             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u position not found in flash", aid);
+             continue;
+         }
          
          /* 1. Mahalanobis Pre-Filter on raw 3D distance */
          float d_out = 0.0f, d2_score = 0.0f, r_adapt = 0.0f;
@@ -396,10 +397,10 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
                                                          (float)s_last_position.x, 
                                                          (float)s_last_position.y, 
                                                          (float)TAG_HEIGHT_M, /* pz = tag height */
-                                                         0.0f, 0.0f, 0.0f, /* Tag Velocity vx, vy, vz = 0 for now */
-                                                         (float)ANCHOR_POSITIONS[aid - 1].x,
-                                                         (float)ANCHOR_POSITIONS[aid - 1].y,
-                                                         (float)ANCHOR_POSITIONS[aid - 1].z,
+                                                         0.0f, 0.0f, 0.0f, /* TODO: Integrate tag velocity (vx, vy, vz) from UKF/IMU */
+                                                         (float)anchor_pos.x,
+                                                         (float)anchor_pos.y,
+                                                         (float)anchor_pos.z,
                                                          &d_out, &d2_score, &r_adapt);
                                                          
          if (!is_accepted) {
@@ -408,7 +409,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
          }
          
          /* Calculate vertical offset based on specific anchor height */
-         double dz = ANCHOR_POSITIONS[aid - 1].z - (double)TAG_HEIGHT_M;
+         double dz = anchor_pos.z - (double)TAG_HEIGHT_M;
          double r2d = 0.0;
          
          if (!convert_3d_to_2d_distance((double)d_out, dz, &r2d)) {
@@ -418,12 +419,12 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
              continue;
          }
          
-         /* Use projected 2D distance for Trilateration */
+         /* Use filtered 2D distance for Trilateration */
          float distance_2d = (float)r2d;
          int8_t rssi = (int8_t)r->rssi;
          
          /* Fill anchor data at correct position (indexed by anchor_id) */
-         anchors_by_id[aid].position = ANCHOR_POSITIONS[aid - 1];
+         anchors_by_id[aid].position = anchor_pos;
          anchors_by_id[aid].distance = distance_2d;
          anchors_by_id[aid].rssi = rssi;
          anchors_by_id[aid].id = aid;
@@ -548,22 +549,15 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: MANUAL");
 #endif
 
-#if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Filter: %s%s%s",
-           MW_FILTER_ENABLE_DES ? "DES" : "",
-           (MW_FILTER_ENABLE_DES && MW_FILTER_ENABLE_AKF) ? " + " : "",
-           MW_FILTER_ENABLE_AKF ? "AKF" : "");
-#else
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Filter: DISABLED (Raw trilateration)");
-#endif
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis only");
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor positions:");
-    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-        RLOG_I(LOG_OBJECT_CODE_TAG, "  #%d: X=%.2fm Y=%.2fm Z=%.2fm",
-               i + 1, 
-               (float)ANCHOR_POSITIONS[i].x,
-               (float)ANCHOR_POSITIONS[i].y,
-               (float)ANCHOR_POSITIONS[i].z);
+    for (uint32_t i = 0; i < cfg->anchor_count; i++) {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "  #%lu: X=%.2fm Y=%.2fm Z=%.2fm",
+               (unsigned long)cfg->anchor_layout[i].anchor_id, 
+               (float)cfg->anchor_layout[i].x_m,
+               (float)cfg->anchor_layout[i].y_m,
+               (float)cfg->anchor_layout[i].z_m);
     }
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "==============================");
