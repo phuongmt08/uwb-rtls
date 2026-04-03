@@ -1686,6 +1686,16 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               s_sys_ranging_ev.poll_tx_ts = evt.tx_ts; // DW1000 caches exact TX time
               tdma_start_superframe(&s_tdma_tag, s_sys_ranging_ev.poll_tx_ts);
               s_sys_ranging_ev.deadline_dw = tdma_compute_resp_rx_window_end(&s_tdma_tag, anchor_ids, num_anchors, bsp_uwb_get_current_time_dw());
+              
+              /* Cap RESP window so it does NOT overrun the planned FINAL TX time */
+              uint64_t final_tx_planned_dw = 0;
+              if (tdma_calculate_final_time(&s_tdma_tag, num_anchors, &final_tx_planned_dw) == TDMA_OK) {
+                  uint64_t final_tx_headroom_dw = (final_tx_planned_dw - tdma_us_to_dw(s_tdma_tag.schedule.processing_margin_us + 500U)) & DW_MASK_40;
+                  if (dw_time_before_deadline(final_tx_headroom_dw, s_sys_ranging_ev.deadline_dw)) {
+                      s_sys_ranging_ev.deadline_dw = final_tx_headroom_dw;
+                  }
+              }
+              
               bsp_uwb_enable_rx(0);
               s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_RESP;
           }
@@ -1720,6 +1730,10 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               uint64_t final_tx_time_dw = 0;
               tdma_calculate_final_time(&s_tdma_tag, num_anchors, &final_tx_time_dw);
               final_tx_time_dw = ensure_future_tx(final_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+              if (final_tx_time_dw == 0ULL) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
               uint64_t t5_payload = predict_delayed_tx_antenna_time(final_tx_time_dw);
               
               uint8_t final_buf[256] = {0};
@@ -1834,6 +1848,10 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               uint64_t rtx_dw=0;
               tdma_calculate_response_time(&s_tdma_anchor, s_ctx.anchor_id, &rtx_dw);
               rtx_dw = ensure_future_tx(rtx_dw, TDMA_DEFAULT_GUARD_TIME_US);
+              if (rtx_dw == 0ULL) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
               s_sys_ranging_ev.resp_tx_ts = predict_delayed_tx_antenna_time(rtx_dw);
               
               resp_msg_t rmsg = {0};
@@ -1886,9 +1904,18 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
                       s_ctx.result_single.rssi = s_sys_ranging_ev.poll_rssi_dbm;
                       s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
                       
+                      uint64_t expected_final_tx_dw = 0;
+                      if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_tx_dw) != TDMA_OK) {
+                          expected_final_tx_dw = evt.rx_ts;
+                      }
+                      
                       uint32_t rofs = s_tdma_anchor.schedule.final_to_result_delay_us + (s_sys_ranging_ev.my_slot_id * tdma_effective_slot_us(&s_tdma_anchor));
-                      uint64_t res_tx_dw = (evt.rx_ts + tdma_us_to_dw(rofs)) & DW_MASK_40;
+                      uint64_t res_tx_dw = (expected_final_tx_dw + tdma_us_to_dw(rofs)) & DW_MASK_40;
                       res_tx_dw = ensure_future_tx(res_tx_dw, TDMA_DEFAULT_GUARD_TIME_US);
+                      if (res_tx_dw == 0ULL) {
+                          state_machine_reset();
+                          return SYS_RANGING_ERR;
+                      }
                       
                       result_msg_t res = {0};
                       res.msg_type = MW_DSTWR_MSG_TYPE_RESULT;

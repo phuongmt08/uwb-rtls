@@ -83,6 +83,32 @@ static uint32_t s_rx_timeout_count  = 0;
 static uint32_t s_rx_crc_err_count  = 0;
 static uint32_t s_rx_phr_err_count  = 0;
 static uint32_t s_rx_sync_err_count = 0;
+
+#if UWB_EVENT_DRIVEN
+static volatile bool s_isr_event_ready = false;
+static volatile uint8_t s_event_overflow_count = 0;
+static bsp_uwb_event_t s_isr_event;
+static void uwb_tx_cb(const dwt_callback_data_t *cb_data);
+static void uwb_rx_cb(const dwt_callback_data_t *cb_data);
+
+bool bsp_uwb_get_event(bsp_uwb_event_t *out_event)
+{
+    if (!s_isr_event_ready) return false;
+    __disable_irq();
+    *out_event = s_isr_event;
+    s_isr_event_ready = false;
+    __enable_irq();
+    return true;
+}
+
+void bsp_uwb_clear_event(void)
+{
+    __disable_irq();
+    s_isr_event_ready = false;
+    __enable_irq();
+}
+#endif
+
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
