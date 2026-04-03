@@ -11116,16 +11116,6 @@
 	)
 	(wire
 		(pts
-			(xy 93.98 153.67) (xy 93.98 154.94)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1a2de68c-3253-4139-b3c9-5eae3e6c029b")
-	)
-	(wire
-		(pts
 			(xy 179.07 222.25) (xy 179.07 237.49)
 		)
 		(stroke
@@ -12596,6 +12586,16 @@
 	)
 	(wire
 		(pts
+			(xy 93.98 153.67) (xy 93.98 170.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "70e4ea5a-7980-413d-928f-e87587e13c08")
+	)
+	(wire
+		(pts
 			(xy 71.12 165.1) (xy 71.12 166.37)
 		)
 		(stroke
@@ -13513,16 +13513,6 @@
 			(type default)
 		)
 		(uuid "a0b3d92c-ec96-43ac-834b-8c653e80737b")
-	)
-	(wire
-		(pts
-			(xy 93.98 160.02) (xy 93.98 170.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a18d835c-318d-4713-8e69-7e6a3812c98e")
 	)
 	(wire
 		(pts
@@ -21075,76 +21065,6 @@
 			(project ""
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#FLG02")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:Polyfuse_Small")
-		(at 93.98 157.48 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "4ed5e539-bddc-41f5-88bf-32a723911fb1")
-		(property "Reference" "F1"
-			(at 96.52 156.2099 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "Polyfuse_Small"
-			(at 96.52 158.7499 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Fuse:Fuse_1206_3216Metric"
-			(at 95.25 162.56 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 93.98 157.48 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Resettable fuse, polymeric positive temperature coefficient, small symbol"
-			(at 93.98 157.48 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "2"
-			(uuid "fbd91a36-83fd-4f99-be4a-aa2b0c68ea71")
-		)
-		(pin "1"
-			(uuid "ec7a2004-bb34-4ed0-9d35-0a293280bc69")
-		)
-		(instances
-			(project "tag"
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "F1")
 					(unit 1)
 				)
 			)
