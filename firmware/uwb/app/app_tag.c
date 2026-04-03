@@ -49,6 +49,7 @@ typedef struct {
 #endif
 typedef struct {
     mahalanobis_prefilter_t prefilter;
+    distance_smoother_t smoother;
 
 } filter_state_t;
 
@@ -113,6 +114,12 @@ static void init_filters(void)
 
     /* Initialize Mahalanobis Prefilter (T1=6.0, T2=16.0, BaseR=0.1) */
     mw_filter_mahalanobis_init(&s_filters.prefilter, 6.0f, 16.0f, 0.1f);
+
+    /* Smoothing is enabled by default only when Mahalanobis pre-filter is disabled. */
+    mw_filter_distance_smoother_init(&s_filters.smoother,
+                                     (ENABLE_MAHALANOBIS_PREFILTER == 0),
+                                     0.25f,
+                                     0.30f);
 }
 
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
@@ -389,33 +396,41 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
              continue;
          }
          
-         /* 1. Mahalanobis Pre-Filter on raw 3D distance */
-         float d_out = 0.0f, d2_score = 0.0f, r_adapt = 0.0f;
+         float d_used = (float)r3d;
+         float d2_score = 0.0f;
+         float r_adapt = 0.0f;
+
+#if ENABLE_MAHALANOBIS_PREFILTER
+         /* 1. Mahalanobis pre-filter on raw 3D distance */
          bool is_accepted = mw_filter_mahalanobis_update(&s_filters.prefilter,
                                                          aid - 1, /* array index 0-7 */
-                                                         (float)r3d,
-                                                         (float)s_last_position.x, 
-                                                         (float)s_last_position.y, 
+                                                         d_used,
+                                                         (float)s_last_position.x,
+                                                         (float)s_last_position.y,
                                                          (float)TAG_HEIGHT_M, /* pz = tag height */
                                                          0.0f, 0.0f, 0.0f, /* TODO: Integrate tag velocity (vx, vy, vz) from UKF/IMU */
                                                          (float)anchor_pos.x,
                                                          (float)anchor_pos.y,
                                                          (float)anchor_pos.z,
-                                                         &d_out, &d2_score, &r_adapt);
-                                                         
+                                                         &d_used, &d2_score, &r_adapt);
+
          if (!is_accepted) {
              RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
              continue; /* Drop before 2D projection */
          }
+#else
+         /* Optional smoothing path is used only when Mahalanobis pre-filter is disabled. */
+         d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
+#endif
          
          /* Calculate vertical offset based on specific anchor height */
          double dz = anchor_pos.z - (double)TAG_HEIGHT_M;
          double r2d = 0.0;
          
-         if (!convert_3d_to_2d_distance((double)d_out, dz, &r2d)) {
+         if (!convert_3d_to_2d_distance((double)d_used, dz, &r2d)) {
              RLOG_W(LOG_OBJECT_CODE_TAG, 
                  "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)",
-                 aid, d_out, (float)dz);
+                 aid, d_used, (float)dz);
              continue;
          }
          
@@ -435,7 +450,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
          
          RLOG_D(LOG_OBJECT_CODE_TAG,
              "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
-             aid, d_out, (float)r2d, (float)dz);
+             aid, d_used, (float)r2d, (float)dz);
     }
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
@@ -549,7 +564,11 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: MANUAL");
 #endif
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis only");
+#if ENABLE_MAHALANOBIS_PREFILTER
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON, smoothing OFF");
+#else
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF, smoothing ON");
+#endif
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor positions:");
     for (uint32_t i = 0; i < cfg->anchor_count; i++) {

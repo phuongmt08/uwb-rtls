@@ -192,17 +192,6 @@ static struct
   uint32_t error_count;
 } s_stats = { 0 };
 
-typedef struct
-{
-  bool  initialized;
-  float filtered_m;
-} anchor_distance_filter_t;
-
-static anchor_distance_filter_t s_anchor_filters[9] = { 0 }; /* anchor_id: 1..8 */
-
-// Distance smoothing enabled by default, can be disabled for testing/debugging
-static bool s_distance_smoothing_enabled = false;
-
 /* Static guard */
 static bool s_ranging_busy = false;
 
@@ -470,48 +459,6 @@ static void log_ranging_result(const sys_ranging_result_t *result, const char *r
   format_distance_m(dist_str, sizeof(dist_str), result->distance_m);
   RLOG_I(LOG_OBJECT_CODE_RANGING, "[%s] Distance: %s m [A:%u RSSI:%ddBm]", role, dist_str, result->anchor_id,
          result->rssi);
-}
-
-static float smooth_anchor_distance(uint8_t anchor_id, float raw_distance_m, int8_t rssi_dbm)
-{
-  if (!s_distance_smoothing_enabled)
-  {
-    return raw_distance_m;
-  }
-
-  if (anchor_id == 0U || anchor_id >= (uint8_t) (sizeof(s_anchor_filters) / sizeof(s_anchor_filters[0])))
-  {
-    return raw_distance_m;
-  }
-
-  anchor_distance_filter_t *anchor_dis_flt = &s_anchor_filters[anchor_id];
-  if (!anchor_dis_flt->initialized)
-  {
-    anchor_dis_flt->filtered_m  = raw_distance_m;
-    anchor_dis_flt->initialized = true;
-    return raw_distance_m;
-  }
-
-  float jump_limit_m = 0.30f;
-  float alpha        = 0.25f;
-
-  (void) rssi_dbm;
-
-  float delta               = raw_distance_m - anchor_dis_flt->filtered_m;
-  float bounded_measurement = raw_distance_m;
-
-  if (delta > jump_limit_m)
-  {
-    bounded_measurement = anchor_dis_flt->filtered_m + jump_limit_m;
-  }
-  else if (delta < -jump_limit_m)
-  {
-    bounded_measurement = anchor_dis_flt->filtered_m - jump_limit_m;
-  }
-
-  anchor_dis_flt->filtered_m =
-    anchor_dis_flt->filtered_m + alpha * (bounded_measurement - anchor_dis_flt->filtered_m);
-  return anchor_dis_flt->filtered_m;
 }
 
 static uint64_t ensure_future_tx(uint64_t tx_time_dw, uint32_t guard_us)
@@ -1089,18 +1036,6 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
      * If delta > 1ms → slot was missed → investigate ensure_future_tx logs above. */
     verify_tx_timing("RESULT", anchor_id, my_slot_id, final_msg->sequence_num, result_tx_time_dw,
                      result_tx_predicted_dw);
-  }
-
-  if (s_ctx.result_single.valid)
-  {
-    float filtered_distance =
-      smooth_anchor_distance(anchor_id, s_ctx.result_single.distance_m, s_ctx.result_single.rssi);
-    if (fabsf(filtered_distance - s_ctx.result_single.distance_m) > 0.20f)
-    {
-      RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Dist smooth: raw=%.3fm filt=%.3fm rssi=%ddBm",
-                    s_ctx.result_single.distance_m, filtered_distance, s_ctx.result_single.rssi);
-    }
-    s_ctx.result_single.distance_m = filtered_distance;
   }
 
   /* Keep verbose debug after RESULT TX to avoid missing delayed-TX slot timing. */
@@ -2016,25 +1951,4 @@ void sys_ranging_reset_stats(void)
   s_stats.total_count   = 0;
   s_stats.success_count = 0;
   s_stats.error_count   = 0;
-}
-
-void sys_ranging_set_distance_smoothing(bool enable)
-{
-  if (s_distance_smoothing_enabled == enable)
-  {
-    return;
-  }
-
-  s_distance_smoothing_enabled = enable;
-
-  if (!enable)
-  {
-    /* Reset filter history to avoid stale state when re-enabled later. */
-    memset(s_anchor_filters, 0, sizeof(s_anchor_filters));
-  }
-}
-
-bool sys_ranging_is_distance_smoothing_enabled(void)
-{
-  return s_distance_smoothing_enabled;
 }

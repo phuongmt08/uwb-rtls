@@ -106,6 +106,15 @@
  * =================================================================== */
 
 /**
+ * @brief Enable/Disable Mahalanobis pre-filter on raw 3D distances.
+ *        0 = bypass Mahalanobis gate
+ *        1 = apply Mahalanobis gate
+ */
+#ifndef ENABLE_MAHALANOBIS_PREFILTER
+#define ENABLE_MAHALANOBIS_PREFILTER  1
+#endif
+
+/**
  * @brief Enable/Disable quality gating based on trilateration error
  *        0 = Accept all trilateration results
  *        1 = Reject results with error > MAX_ACCEPTABLE_ERROR_M

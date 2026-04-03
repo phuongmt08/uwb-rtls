@@ -220,17 +220,4 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
  */
 void sys_ranging_reset_stats(void);
 
-/**
- * @brief Enable/disable anchor-side distance smoothing filter at runtime.
- * @param enable true to enable smoothing, false to bypass (raw distance).
- */
-void sys_ranging_set_distance_smoothing(bool enable);
-
-/**
- * @brief Get current anchor-side distance smoothing state.
- * @return true if smoothing is enabled.
- */
-bool sys_ranging_is_distance_smoothing_enabled(void);
-
-
 #endif /* __SYS_RANGING_H */

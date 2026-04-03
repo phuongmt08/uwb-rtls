@@ -38,14 +38,6 @@ enum packet_ack_response_t {
     PACKET_ACK_RESPONSE_NACK_INVALID_TYPE  = 7;
 }
 
-enum warning_code_t {
-    WARNING_CODE_UNSPECIFIED          = 0;
-    WARNING_CODE_QUEUE_NEAR_FULL      = 1;
-    WARNING_CODE_RETRYING             = 2;
-    WARNING_CODE_DEGRADED_MODE        = 3;
-    WARNING_CODE_PARTIAL_DATA         = 4;
-}
-
 enum device_type_t {
     DEVICE_TYPE_UNSPECIFIED = 0;
     DEVICE_TYPE_TAG         = 1;
@@ -100,7 +92,8 @@ enum ble_state_t {
     BLE_STATE_IDLE        = 1;
     BLE_STATE_SCANNING    = 2;
     BLE_STATE_ADVERTISING = 3;
-    BLE_STATE_CONNECTED   = 4;
+    BLE_STATE_CONNECTING  = 4;
+    BLE_STATE_CONNECTED   = 5;
 }
 
 enum host_transport_t {
