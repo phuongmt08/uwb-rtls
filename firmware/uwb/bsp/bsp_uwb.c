@@ -207,6 +207,9 @@ bsp_err_t bsp_uwb_init(void)
 #if UWB_EVENT_DRIVEN
   /* Register UWB callbacks for foreground event processing */
   dwt_setcallbacks(uwb_tx_cb, uwb_rx_cb);
+  /* Enable interrupts for TX done, RX good, RX timeout, RX preamble timeout, RX overflow, RX frame check error, SFD detection, RX preamble header error */
+  dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO |
+                   DWT_INT_RXOVRR | DWT_INT_RFCE | DWT_INT_SFDT | DWT_INT_RPHE, 1);
 #endif
 
   s_initialized = true;
