@@ -6,8 +6,8 @@
  * @date       2025-08-26
  * @author     Phuong Mai
  *
- * @brief      System Services Task Scheduler using TIM3 interrupt.
- */
+ * @brief      System Services Task Scheduler using TIM11 interrupt.
+ *             Provides periodic and free-run task scheduling.
 /* Define to prevent recursive inclusion ------------------------------ */
 #ifndef __SYS_TASK_H
 #define __SYS_TASK_H
@@ -25,6 +25,12 @@ typedef enum
   SRV_TASK_ERR,
   SRV_TASK_ERR_PARAM
 } sys_task_err_t;
+
+typedef enum
+{
+  SYS_TASK_TYPE_PERIODIC = 0,
+  SYS_TASK_TYPE_FREERUN
+} sys_task_type_t;
 typedef void (*sys_task_cb_t)(void *arg);
 
 /* Public macros ------------------------------------------------------ */
@@ -34,7 +40,7 @@ typedef void (*sys_task_cb_t)(void *arg);
 sys_task_err_t sys_task_init(void);
 sys_task_err_t sys_task_process(void);
 
-int            sys_task_add(sys_task_cb_t cb, void *arg, uint32_t period_ms, uint32_t delay_ms);
+int            sys_task_add(sys_task_cb_t cb, void *arg, sys_task_type_t type, uint32_t period_ms, uint32_t delay_ms);
 sys_task_err_t sys_task_del(int id);
 sys_task_err_t sys_task_start(int id);
 sys_task_err_t sys_task_stop(int id);
