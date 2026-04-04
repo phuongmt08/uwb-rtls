@@ -25,7 +25,17 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "app_rtos_handles.h"
+#include "app_anchor.h"
+#include "app_tag.h"
+#include "bsp_battery.h"
+#include "bsp_io.h"
+#include "bsp_uwb.h"
+#include "bsp_util.h"
+#include "network/network_core.h"
+#include "network/network_cmd.h"
+#include "sys_config.h"
+#include "sys_logger.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,6 +55,15 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+
+osMessageQueueId_t g_uwb_distance_queue;
+
+bool g_ranging_enabled = true;
+
+/* Network objects — non-static so main.c can init via extern */
+network_core_t g_network_core;
+network_cmd_t  g_network_cmd;
+uint8_t        g_network_rx_buf[512];
 
 /* USER CODE END Variables */
 /* Definitions for UwbRanging */
@@ -106,10 +125,10 @@ osMutexId_t g_logger_mutexHandle;
 const osMutexAttr_t g_logger_mutex_attributes = {
   .name = "g_logger_mutex"
 };
-/* Definitions for myBinarySem01 */
-osSemaphoreId_t myBinarySem01Handle;
-const osSemaphoreAttr_t myBinarySem01_attributes = {
-  .name = "myBinarySem01"
+/* Definitions for g_uwb_isr_sem */
+osSemaphoreId_t g_uwb_isr_semHandle;
+const osSemaphoreAttr_t g_uwb_isr_sem_attributes = {
+  .name = "g_uwb_isr_sem"
 };
 /* Definitions for g_logger_sem */
 osSemaphoreId_t g_logger_semHandle;
@@ -145,7 +164,6 @@ void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
   */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
   /* Create the mutex(es) */
   /* creation of g_spi1_mutex */
@@ -159,8 +177,8 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_MUTEX */
 
   /* Create the semaphores(s) */
-  /* creation of myBinarySem01 */
-  myBinarySem01Handle = osSemaphoreNew(1, 1, &myBinarySem01_attributes);
+  /* creation of g_uwb_isr_sem */
+  g_uwb_isr_semHandle = osSemaphoreNew(1, 1, &g_uwb_isr_sem_attributes);
 
   /* creation of g_logger_sem */
   g_logger_semHandle = osSemaphoreNew(1, 1, &g_logger_sem_attributes);
@@ -169,7 +187,10 @@ void MX_FREERTOS_Init(void) {
   g_io_btn_semHandle = osSemaphoreNew(1, 1, &g_io_btn_sem_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
+  /* Drain initial count to 0 — signal semaphores must start at 0 so tasks block */
+  osSemaphoreAcquire(g_uwb_isr_semHandle, 0);  /* UWB ISR → UwbRanging  */
+  osSemaphoreAcquire(g_logger_semHandle,   0);  /* logger signal           */
+  osSemaphoreAcquire(g_io_btn_semHandle,   0);  /* button signal           */
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -177,7 +198,7 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
+  g_uwb_distance_queue = osMessageQueueNew(4, sizeof(uwb_distance_msg_t), NULL);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -224,10 +245,26 @@ void uwb_ranging_entry(void *argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN uwb_ranging_entry */
-  /* Infinite loop */
-  for(;;)
+  sys_config_t *cfg = sys_config_get();
+
+  for (;;)
   {
-    osDelay(1);
+    /* Block until DW1000 ISR signals TX done or RX event.            */
+    /* 10 ms timeout as fallback to keep state machine alive.         */
+    osSemaphoreAcquire(myBinarySem01Handle, 10);
+
+    if (!g_ranging_enabled) continue;
+
+    osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+    if (cfg->uwb.role == DEVICE_ROLE_TAG)
+    {
+      app_tag_process();
+    }
+    else
+    {
+      app_anchor_process(NULL);
+    }
+    osMutexRelease(g_spi1_mutexHandle);
   }
   /* USER CODE END uwb_ranging_entry */
 }
@@ -242,10 +279,56 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-  /* Infinite loop */
-  for(;;)
+  /* ── Phase 1: TRILATERATION mode ─────────────────────────────────────────
+   * Wait until UwbRanging has produced at least one valid position via
+   * trilateration. That position is used to:
+   *   a) Provide initial x,y to UKF state vector
+   *   b) Allow IMU calibration offset collection at a known position
+   * ─────────────────────────────────────────────────────────────────────── */
+  float init_x = 0.0f, init_y = 0.0f;
+  while (!app_tag_get_last_position(&init_x, &init_y))
   {
-    osDelay(1);
+    osDelay(50); /* poll until first trilateration result is ready */
+  }
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION,
+         "[SF] Initial position from trilateration: X=%.3f Y=%.3f",
+         init_x, init_y);
+
+  /* ── Switch UwbRanging to SENSOR_FUSION output mode ─────────────────────
+   * From this point, app_tag_process() will push uwb_distance_msg_t to
+   * g_uwb_distance_queue instead of calling trilateration.
+   * ─────────────────────────────────────────────────────────────────────── */
+  app_tag_set_output_mode(APP_TAG_MODE_SENSOR_FUSION);
+
+  /* ── Phase 2: SENSOR_FUSION mode (UKF) ──────────────────────────────────
+   * TODO: sys_sensor_fusion_init(&g_ukf_state, init_x, init_y);
+   * ─────────────────────────────────────────────────────────────────────── */
+  uint32_t tick = osKernelGetTickCount();
+
+  for (;;)
+  {
+    tick += 20U; /* 50 Hz default */
+    osDelayUntil(tick);
+
+    /* TODO: sys_sensor_fusion_predict(&g_ukf_state, 0.020f); */
+
+    uwb_distance_msg_t msg;
+    if (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0) == osOK)
+    {
+      /* TODO: sys_sensor_fusion_update(&g_ukf_state,
+       *           msg.distances[0], msg.distances[1], msg.distances[2]); */
+      (void)msg;
+
+      /* TODO (after UKF implemented):
+#if DEVELOPER_MODE
+       * {
+       *   float ukf_x, ukf_y;
+       *   sys_sensor_fusion_get_position(&g_ukf_state, &ukf_x, &ukf_y);
+       *   bsp_io_uart_send_position(ukf_x, ukf_y, TAG_HEIGHT_M, 0.0f);
+       * }
+#endif
+       */
+    }
   }
   /* USER CODE END sensor_fusion_entry */
 }
@@ -260,10 +343,11 @@ void sensor_fusion_entry(void *argument)
 void network_entry(void *argument)
 {
   /* USER CODE BEGIN network_entry */
-  /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    network_core_process(&g_network_core);
+    network_cmd_process(&g_network_cmd);
+    osDelay(5);
   }
   /* USER CODE END network_entry */
 }
@@ -278,10 +362,11 @@ void network_entry(void *argument)
 void logger_entry(void *argument)
 {
   /* USER CODE BEGIN logger_entry */
-  /* Infinite loop */
-  for(;;)
+  /* Log drain to USB CDC removed — flash persistence handled by FlashStorage task.
+   * Logger task kept as placeholder; logs retrieved via network layer. */
+  for (;;)
   {
-    osDelay(1);
+    osDelay(osWaitForever); /* suspend permanently until future feature added */
   }
   /* USER CODE END logger_entry */
 }
@@ -296,10 +381,12 @@ void logger_entry(void *argument)
 void flash_storage_entry(void *argument)
 {
   /* USER CODE BEGIN flash_storage_entry */
-  /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    osDelay(10000); /* every 10 seconds */
+#ifdef HAVE_FLASH_STORAGE
+    sys_logger_flash_persist();
+#endif
   }
   /* USER CODE END flash_storage_entry */
 }
@@ -314,10 +401,47 @@ void flash_storage_entry(void *argument)
 void io_entry(void *argument)
 {
   /* USER CODE BEGIN io_entry */
-  /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    /* Block until button activity ISR signals (100 ms timeout for LED blink) */
+    osSemaphoreAcquire(g_io_btn_semHandle, 100);
+
+    bsp_io_task(); /* LED blink timeout check */
+
+    bsp_io_button_event_t evt = bsp_io_button_event();
+    sys_config_t *cfg = sys_config_get();
+
+    switch (evt)
+    {
+    case BSP_IO_EVENT_HOLD:
+    {
+      /* Toggle TAG/ANCHOR role and reboot */
+      device_role_t new_role =
+        (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
+      sys_config_set_role(new_role);
+      sys_config_save();
+      for (uint8_t i = 0; i < 3U; i++)
+      {
+        bsp_io_led_on();  osDelay(50);
+        bsp_io_led_off(); osDelay(50);
+      }
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed, rebooting...");
+      osDelay(100);
+      HAL_NVIC_SystemReset();
+      break;
+    }
+    case BSP_IO_EVENT_DOUBLE_CLICK:
+      g_ranging_enabled = false;
+      bsp_uwb_idle();
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped");
+      break;
+    case BSP_IO_EVENT_CLICK:
+      g_ranging_enabled = true;
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
+      break;
+    default:
+      break;
+    }
   }
   /* USER CODE END io_entry */
 }
@@ -332,10 +456,10 @@ void io_entry(void *argument)
 void power_manage_entry(void *argument)
 {
   /* USER CODE BEGIN power_manage_entry */
-  /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    osDelay(1000); /* 1 Hz */
+    bsp_battery_task();
   }
   /* USER CODE END power_manage_entry */
 }

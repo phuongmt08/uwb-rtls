@@ -20,6 +20,8 @@
 #include "config.h"
 #include "bsp_util.h"
 #include "config.h"
+#include "cmsis_os.h"
+#include "app_rtos_handles.h"
 
 #ifdef HAVE_FLASH_STORAGE
 #include "sys_flash_storage.h"
@@ -476,6 +478,12 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
     logger_init();
   }
 
+  /* Protect vsnprintf + circular buffer from concurrent task writes */
+  if (g_logger_mutexHandle != NULL)
+  {
+    osMutexAcquire(g_logger_mutexHandle, osWaitForever);
+  }
+
   // Format message using vsnprintf
   char    msg[SYS_LOGGER_MAX_MSG_LEN];
   va_list args;
@@ -520,12 +528,14 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
   uint16_t record_len = LOG_HEADER_LEN + msg_len;
 
   // Make space if needed by removing oldest records
+  bool result = false;
   for (uint16_t retry = 0; retry < 10; retry++)
   {
     if (logger_space_count() >= record_len)
     {
       logger_write_data(record, record_len);
-      return true;
+      result = true;
+      break;
     }
 
     // Not enough space, pop oldest record
@@ -551,7 +561,14 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
     logger_pop_data(LOG_HEADER_LEN + old_len);
   }
 
-  return false;
+  if (g_logger_mutexHandle != NULL)
+  {
+    osMutexRelease(g_logger_mutexHandle);
+  }
+
+  /* g_logger_sem release removed: USB CDC drain no longer used.
+   * Logs persist to internal flash via FlashStorage task (every 10s). */
+  return result;
 }
 
 void sys_logger_task(void)

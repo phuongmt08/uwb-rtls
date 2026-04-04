@@ -9,6 +9,7 @@
  */
 /* Includes ----------------------------------------------------------- */
 #include "app_tag.h"
+#include "app_rtos_handles.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
 #include "bsp_uwb.h"
@@ -70,6 +71,8 @@ static uint32_t s_next_due_tick = 0;
 static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
+static app_tag_output_mode_t s_output_mode = APP_TAG_MODE_TRILATERATION;
+static bool s_position_valid = false;
 
 #if ENABLE_TAG_AUTO_CALIB
 static tag_calib_state_t s_tag_calib = {0};
@@ -494,10 +497,23 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         return;
     }
 
-    /* ==== STEP 3: Trilateration ==== */
+    /* ==== STEP 3: Handle Output Modes ==== */
+    if (s_output_mode == APP_TAG_MODE_SENSOR_FUSION) {
+        /* In Sensor Fusion mode, we just push filtered distances to the queue.
+         * We do NOT run trilateration here to save CPU and maintain logic separation. */
+        uwb_distance_msg_t msg = {0};
+        msg.count = (best_count < 3U) ? best_count : 3U;
+        for (uint8_t i = 0; i < msg.count; i++) {
+            msg.distances[i]  = best_3_anchors[i].distance;
+            msg.anchor_ids[i] = best_3_anchors[i].id;
+        }
+        osMessageQueuePut(g_uwb_distance_queue, &msg, 0, 0);
+        return;
+    }
+
+    /* ==== STEP 4: Trilateration (TRILATERATION Mode / Calibration) ==== */
     vec2d_t tril_position;
     mw_tril_result_t tril_result;
-
     mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
 
     if (err != MW_TRIL_OK) {
@@ -507,31 +523,26 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         return;
     }
     
-        /* ==== STEP 4: Quality gating ==== */
 #if ENABLE_QUALITY_GATING
     if (tril_result.error_estimate > MAX_ACCEPTABLE_ERROR_M) {
         RLOG_W(LOG_OBJECT_CODE_TAG,
                "[TRIL] Error %.3fm > %.3fm - REJECTED",
                (float)tril_result.error_estimate, MAX_ACCEPTABLE_ERROR_M);
-        RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
         s_error_count++;
         return;
     }
 #endif
 
-    /* ==== STEP 5: Final Handling (No Ext Filters) ==== */
     s_last_position.x = tril_position.x;
     s_last_position.y = tril_position.y;
-    
+    s_position_valid = true;
     s_success_count++;
     s_error_count = 0;
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "D2 Scores: #%u(%.1f) #%u(%.1f) #%u(%.1f)",
-           best_3_anchors[0].id, best_3_anchors[0].d2_score,
-           best_3_anchors[1].id, best_3_anchors[1].d2_score,
-           best_3_anchors[2].id, best_3_anchors[2].d2_score);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm Error=%.3fm", 
+           (float)tril_position.x, (float)tril_position.y, (float)TAG_HEIGHT_M, (float)tril_result.error_estimate);
 
+    /* Send via UART (Trilateration result is the primary output in TRIL mode) */
     if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
                                   TAG_HEIGHT_M,
                                   (float)tril_result.error_estimate) != BSP_OK) {
@@ -539,6 +550,22 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 }
 /* Public functions --------------------------------------------------- */
+
+void app_tag_set_output_mode(app_tag_output_mode_t mode)
+{
+    s_output_mode = mode;
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Output mode - %s",
+           (mode == APP_TAG_MODE_SENSOR_FUSION) ? "SENSOR_FUSION" : "TRILATERATION");
+}
+
+bool app_tag_get_last_position(float *x_m, float *y_m)
+{
+    if (!s_position_valid || !x_m || !y_m) return false;
+    *x_m = (float)s_last_position.x;
+    *y_m = (float)s_last_position.y;
+    return true;
+}
+
 app_err_t app_tag_init(void)
 {
     sys_config_t *cfg = sys_config_get();

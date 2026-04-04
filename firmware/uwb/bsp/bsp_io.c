@@ -11,6 +11,7 @@
 #include "bsp_uwb.h"
 #include "gpio.h"
 #include "stm32f4xx_hal.h"
+#include "app_rtos_handles.h"
 
 #include <string.h>
 
@@ -304,6 +305,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (GPIO_Pin == BSP_IO_BUTTON_PIN)
   {
     s_button_activity = 1;
+    /* Wake IO task from ISR */
+    osSemaphoreRelease(g_io_btn_semHandle);
   }
 
   /* DIP Switch interrupts PB5, PB6, PB7 */

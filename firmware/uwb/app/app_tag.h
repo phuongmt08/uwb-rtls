@@ -26,6 +26,10 @@
 
 /* Public enumerate/structure ----------------------------------------- */
 
+typedef enum {
+    APP_TAG_MODE_TRILATERATION = 0,
+    APP_TAG_MODE_SENSOR_FUSION = 1,
+} app_tag_output_mode_t;
 
 /* Public function prototypes ----------------------------------------- */
 
@@ -39,6 +43,20 @@ app_err_t app_tag_init(void);
  * @brief Main Tag process loop (never returns)
  */
 void app_tag_process(void);
+
+/**
+ * @brief Set the output mode of the ranging pipeline.
+ * @param mode APP_TAG_MODE_TRILATERATION or APP_TAG_MODE_SENSOR_FUSION
+ */
+void app_tag_set_output_mode(app_tag_output_mode_t mode);
+
+/**
+ * @brief Get the last trilateration position (valid after ≥1 successful cycle).
+ * @param[out] x_m  X coordinate in metres
+ * @param[out] y_m  Y coordinate in metres
+ * @return true if position has been computed at least once
+ */
+bool app_tag_get_last_position(float *x_m, float *y_m);
 
 #if ENABLE_TAG_AUTO_CALIB
 /**

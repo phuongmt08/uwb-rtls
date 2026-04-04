@@ -17,6 +17,9 @@
 #include "spi.h"
 #include "sys_logger.h"
 #include "config.h"
+#if UWB_EVENT_DRIVEN
+#include "app_rtos_handles.h"
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -768,6 +771,8 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
   s_isr_event.tx_ts = actual_dw;
   
   s_isr_event_ready = true;
+  /* Signal UwbRanging task from ISR */
+  osSemaphoreRelease(g_uwb_isr_semHandle);
 }
 
 static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
@@ -802,6 +807,8 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
   }
   
   s_isr_event_ready = true;
+  /* Signal UwbRanging task from ISR */
+  osSemaphoreRelease(g_uwb_isr_semHandle);
 }
 #endif
 
