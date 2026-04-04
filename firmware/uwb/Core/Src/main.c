@@ -39,6 +39,7 @@
 #include "sys_task.h"
 
 #include <string.h>
+#include "bsp_imu.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -197,7 +198,7 @@ void app_reset_config(void)
   __ISB();
   __enable_irq();
 }
-
+bsp_imu_data_t imu_data = {0};
 /* USER CODE END 0 */
 
 /**
@@ -238,209 +239,220 @@ int main(void)
   MX_CRC_Init();
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
-
-  int flash_storage_init_status = sys_flash_storage_init();
-
-  sys_logger_init();
-  if (flash_storage_init_status != 0)
-  {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
-  }
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
-
-#if TEST_SEND_POS
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)", TEST_POS_START_X, TEST_POS_START_Y,
-         TEST_POS_END_X, TEST_POS_END_Y);
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
-#if TEST_DISABLE_RANGING
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
-#endif
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
-#endif
-
-  sys_config_init();
-  sys_config_t *cfg = sys_config_get();
-
-  serial_init();
-  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf)))
-  {
-    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
-  }
-  else if (!network_cmd_init(&s_network_cmd, &s_network_core))
-  {
-    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
-  }
-  else
-  {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
-  }
-
-#if TEST_SEND_POS && TEST_DISABLE_RANGING
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
-#else
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
-
-  if (bsp_uwb_init() != 0)
-  {
-    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
-  }
-
-  if (cfg->uwb.role == DEVICE_ROLE_TAG)
-  {
-    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u",
-           TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
-  }
-
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
-         cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", cfg->uwb.tx_antenna_delay,
-         cfg->uwb.rx_antenna_delay);
-
-  bsp_uwb_configure(&cfg->uwb);
-#endif
-
-  bsp_io_init();
-  bsp_io_led_off();
-
-  sys_task_init();
-  bsp_battery_init();
-  int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
-  if (bat_task_id >= 0)
-  {
-    sys_task_start(bat_task_id);
-  }
-
-  int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (rng_task_id >= 0) sys_task_start(rng_task_id);
-
-  int log_task_id = sys_task_add((sys_task_cb_t)logger_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (log_task_id >= 0) sys_task_start(log_task_id);
-
-  int net_core_task_id = sys_task_add((sys_task_cb_t)network_core_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (net_core_task_id >= 0) sys_task_start(net_core_task_id);
-
-  int net_cmd_task_id = sys_task_add((sys_task_cb_t)network_cmd_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (net_cmd_task_id >= 0) sys_task_start(net_cmd_task_id);
-
-#if TEST_SEND_POS
-  int test_pos_task_id = sys_task_add((sys_task_cb_t)test_send_pos_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (test_pos_task_id >= 0) sys_task_start(test_pos_task_id);
-#endif
-  
-#if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-  /* Read DIP switch - ALWAYS OVERRIDES saved config */
-  uint8_t dip_value = bsp_io_dip_read();
-  if (dip_value == 0)
-  {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
-  }
-  else
-  {
-    sys_config_set_device_id(dip_value);
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-  }
-
-  cfg = sys_config_get();
-
-  /* Initialize application based on role */
-  if (cfg->uwb.role == DEVICE_ROLE_TAG)
-  {
-    app_tag_init();
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
-  }
-  else
-  {
-    app_anchor_init();
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
-  }
-#endif
+//  if (bsp_uwb_init() != 0) {
+//      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
+//    }
+//  int flash_storage_init_status = sys_flash_storage_init();
+//
+//  sys_logger_init();
+//  if (flash_storage_init_status != 0) {
+//    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
+//  }
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
+//
+//#if TEST_SEND_POS
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)",
+//         TEST_POS_START_X, TEST_POS_START_Y, TEST_POS_END_X, TEST_POS_END_Y);
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
+//#if TEST_DISABLE_RANGING
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
+//#endif
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+//#endif
+//
+//  sys_config_init();
+//  sys_config_t *cfg = sys_config_get();
+//
+//  serial_init();
+//  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf))) {
+//    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
+//  } else if (!network_cmd_init(&s_network_cmd, &s_network_core)) {
+//    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
+//  } else {
+//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+//  }
+//
+//#if TEST_SEND_POS && TEST_DISABLE_RANGING
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
+//#else
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
+//
+//  uint8_t err = 0;
+//  	if (bsp_imu_init() != BSP_IMU_OK)
+//  	{
+//
+//  		RLOG_I(LOG_OBJECT_CODE_APPLICATION, "IMU INIT FAILED");
+//  		err = 1;
+//  	}
+//
+//  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+//    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+//    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u", TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
+//  }
+//
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
+//         cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
+//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u",
+//         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
+//
+//  bsp_uwb_configure(&cfg->uwb);
+//#endif
+//
+//  bsp_io_init();
+//  bsp_io_led_off();
+//
+//#if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
+//  /* Read DIP switch - ALWAYS OVERRIDES saved config */
+//  uint8_t dip_value = bsp_io_dip_read();
+//  if (dip_value == 0) {
+//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
+//  } else {
+//    sys_config_set_device_id(dip_value);
+//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
+//  }
+//
+//  cfg = sys_config_get();
+//
+//  /* Initialize application based on role */
+//  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+//    app_tag_init();
+//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
+//  } else {
+//    app_anchor_init();
+//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
+//  }
+//#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  bsp_util_init();
+	uint8_t err = 0;
+	if (bsp_imu_init() != BSP_IMU_OK)
+	{
+
+		err = 1;
+	}
+  uint32_t tick = HAL_GetTick();
   while (1)
   {
-    bsp_io_button_event_t btn_event = bsp_io_button_event();
+	  if(bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK && err == 0)
+	  {
 
-#if ENABLE_ANCHOR_AUTO_CALIB
-    /* In calibration build, anchor button events handled differently */
-    if (cfg->uwb.role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE)
-    {
-      app_anchor_on_button(btn_event);
-      btn_event = BSP_IO_EVENT_NONE; /* Prevent normal button handling */
-    }
-#endif
+		  if(HAL_GetTick() - tick >= 3000)
+		  {
+			  tick = HAL_GetTick();
+		  }
 
-#if ENABLE_TAG_AUTO_CALIB
-    /* In calibration build, tag button events handled differently */
-    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE)
-    {
-      app_tag_on_button(btn_event);
-      btn_event = BSP_IO_EVENT_NONE;
-    }
-#endif
-    sys_config_t *cfg_curr = sys_config_get();
+	  }
+	  else
+	  {
+		  if(HAL_GetTick() - tick >= 3000)
+		  {
+			  bsp_io_led_toggle();
+			  tick = HAL_GetTick();
+		  }
+	  }
 
-    switch (btn_event)
-    {
-#if !ENABLE_ANCHOR_AUTO_CALIB
-    case BSP_IO_EVENT_HOLD:
-      /* Toggle TAG/ANCHOR role and save to flash */
-      {
-        sys_config_t *cfg_curr = sys_config_get();
-        device_role_t new_role =
-          (cfg_curr->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
-
-        sys_config_set_role(new_role);
-        sys_config_save();
-
-        /* Quick LED blink to indicate save */
-        for (uint8_t i = 0; i < 3; i++)
-        {
-          bsp_io_led_on();
-          bsp_delay_ms(50);
-          bsp_io_led_off();
-          bsp_delay_ms(50);
-        }
-
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed to: %s",
-               new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
-        bsp_delay_ms(100);
-        HAL_NVIC_SystemReset();
-      }
-      break;
-#endif
-
-    case BSP_IO_EVENT_DOUBLE_CLICK:
-      /* Stop ranging */
-      if (s_ranging_enabled)
-      {
-        s_ranging_enabled = false;
-        bsp_uwb_idle();
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
-      }
-      break;
-
-    case BSP_IO_EVENT_CLICK:
-      /* Start ranging */
-      if (!s_ranging_enabled)
-      {
-        s_ranging_enabled = true;
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
-      }
-      break;
-
-    default: break;
-    }
-
-    sys_task_process();
+//    bsp_io_button_event_t btn_event = bsp_io_button_event();
+//
+//#if ENABLE_ANCHOR_AUTO_CALIB
+//    /* In calibration build, anchor button events handled differently */
+//    if (cfg->uwb.role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE) {
+//      app_anchor_on_button(btn_event);
+//      btn_event = BSP_IO_EVENT_NONE;  /* Prevent normal button handling */
+//    }
+//#endif
+//
+//#if ENABLE_TAG_AUTO_CALIB
+//    /* In calibration build, tag button events handled differently */
+//    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE) {
+//      app_tag_on_button(btn_event);
+//      btn_event = BSP_IO_EVENT_NONE;
+//    }
+//#endif
+//
+//    switch (btn_event)
+//    {
+//#if !ENABLE_ANCHOR_AUTO_CALIB
+//      case BSP_IO_EVENT_HOLD:
+//        /* Toggle TAG/ANCHOR role and save to flash */
+//        {
+//          sys_config_t *cfg_curr = sys_config_get();
+//          device_role_t new_role = (cfg_curr->uwb.role == DEVICE_ROLE_TAG) ?
+//                                    DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
+//
+//          sys_config_set_role(new_role);
+//          sys_config_save();
+//
+//          /* Quick LED blink to indicate save */
+//          for (uint8_t i = 0; i < 3; i++) {
+//            bsp_io_led_on();
+//            bsp_delay_ms(50);
+//            bsp_io_led_off();
+//            bsp_delay_ms(50);
+//          }
+//
+//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed to: %s",
+//                 new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
+//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
+//          bsp_delay_ms(100);
+//          HAL_NVIC_SystemReset();
+//        }
+//        break;
+//#endif
+//
+//      case BSP_IO_EVENT_DOUBLE_CLICK:
+//        /* Stop ranging */
+//        if (s_ranging_enabled) {
+//          s_ranging_enabled = false;
+//          bsp_uwb_idle();
+//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
+//        }
+//        break;
+//
+//      case BSP_IO_EVENT_CLICK:
+//        /* Start ranging */
+//        if (!s_ranging_enabled) {
+//          s_ranging_enabled = true;
+//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
+//        }
+//        break;
+//
+//      default:
+//        break;
+//    }
+//
+//    /* Process ranging if enabled */
+//#if TEST_SEND_POS && TEST_DISABLE_RANGING
+//    /* Ranging disabled in test mode */
+//#else
+//    if (s_ranging_enabled)
+//    {
+//      sys_config_t *cfg_curr = sys_config_get();
+//      if (cfg_curr->uwb.role == DEVICE_ROLE_TAG) {
+//        app_tag_process();
+//      } else {
+//        app_anchor_process(NULL);
+//      }
+//    }
+//#endif
+//
+//#if TEST_SEND_POS
+//    test_send_position();
+//#endif
+//
+//  (void)network_core_process(&s_network_core);
+//  network_cmd_process(&s_network_cmd);
+//
+//    sys_logger_task();
+    bsp_delay_ms(1);
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

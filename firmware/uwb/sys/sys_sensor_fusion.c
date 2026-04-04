@@ -123,6 +123,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 		ukf.Wc_M[i] = w_rest_m;
 	}
 
+	// Matrix
     arm_mat_init_f32(&ukf.mat_P, NUM_STATE, NUM_STATE, ukf.P_data);
     arm_mat_init_f32(&ukf.mat_Q, NUM_PREDICT_NOISE, NUM_PREDICT_NOISE, ukf.Q_data);
     arm_mat_init_f32(&ukf.mat_R, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, ukf.R_data);
@@ -189,7 +190,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 			for(int i=0; i<NUM_STATE; i++) ukf.X_sigma_pred[i][m] = x_sigma[i];
 			for(int i=0; i<NUM_PREDICT_NOISE; i++) ukf.Noise_sigma_pred[i][m] = x_sigma[NUM_STATE+i];
 		}
-
+		/* NOTE */
 		ukf.is_first_frame = false; // Đã tạo xong, các vòng IMU tiếp theo sẽ bỏ qua khối lệnh này
 	}
 
