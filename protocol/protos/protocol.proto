@@ -300,12 +300,17 @@ message flash_read_t {
 }
 
 message flash_data_t {
-    uint32 data = 1;
+    bytes data = 1;
 }
 
 message flash_write_t {
     uint32 address    = 1;
     bytes data        = 2;
+}
+
+message flash_verify_t {
+    uint32 file_size      = 1;
+    uint32 expected_crc32 = 2;
 }
 
 /* BLE ---------------------------------------------------------------------- */
@@ -544,6 +549,9 @@ message packet_t {
         anchor_layout_get_t       anchor_layout_get       = 42;
         anchor_layout_set_t       anchor_layout_set       = 43;
         anchor_layout_resp_t      anchor_layout_resp      = 44;
+
+        /* FOTA Verification */
+        flash_verify_t            flash_verify            = 45;
     }
 }
 

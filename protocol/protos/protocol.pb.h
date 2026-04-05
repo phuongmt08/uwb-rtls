@@ -286,13 +286,18 @@ typedef struct _protobuf_flash_read_t {
 } protobuf_flash_read_t;
 
 typedef struct _protobuf_flash_data_t {
-    uint32_t data;
+    pb_callback_t data;
 } protobuf_flash_data_t;
 
 typedef struct _protobuf_flash_write_t {
     uint32_t address;
     pb_callback_t data;
 } protobuf_flash_write_t;
+
+typedef struct _protobuf_flash_verify_t {
+    uint32_t file_size;
+    uint32_t expected_crc32;
+} protobuf_flash_verify_t;
 
 /* STM32 → nRF : enable or disable BLE stack
  Useful during UWB calibration or power-saving modes. */
@@ -313,13 +318,11 @@ typedef struct _protobuf_ble_status_resp_t {
 } protobuf_ble_status_resp_t;
 
 typedef struct _protobuf_ble_adv_status_t {
-    uint32_t device_id;
-    protobuf_device_type_t device_type;
     uint32_t anchor_id; /* 0 for non-anchor */
     uint32_t battery_level_pct;
     uint32_t status_flags;
-    uint32_t warning_code;
-    uint32_t error_code;
+    uint32_t warning_count;
+    uint32_t error_count;
     uint32_t local_timestamp_ms;
 } protobuf_ble_adv_status_t;
 
@@ -497,6 +500,8 @@ typedef struct _protobuf_packet_t {
         protobuf_anchor_layout_get_t anchor_layout_get;
         protobuf_anchor_layout_set_t anchor_layout_set;
         protobuf_anchor_layout_resp_t anchor_layout_resp;
+        /* FOTA Verification */
+        protobuf_flash_verify_t flash_verify;
     } params;
 } protobuf_packet_t;
 
@@ -649,9 +654,9 @@ extern "C" {
 
 
 
+
 #define protobuf_ble_status_resp_t_state_ENUMTYPE protobuf_ble_state_t
 
-#define protobuf_ble_adv_status_t_device_type_ENUMTYPE protobuf_device_type_t
 
 
 
@@ -707,12 +712,13 @@ extern "C" {
 #define protobuf_device_type_get_t_init_default  {0}
 #define protobuf_flash_erase_t_init_default      {0, _protobuf_flash_addr_region_t_MIN}
 #define protobuf_flash_read_t_init_default       {0, 0}
-#define protobuf_flash_data_t_init_default       {0}
+#define protobuf_flash_data_t_init_default       {{{NULL}, NULL}}
 #define protobuf_flash_write_t_init_default      {0, {{NULL}, NULL}}
+#define protobuf_flash_verify_t_init_default     {0, 0}
 #define protobuf_ble_enable_t_init_default       {0}
 #define protobuf_ble_status_get_t_init_default   {0}
 #define protobuf_ble_status_resp_t_init_default  {_protobuf_ble_state_t_MIN, 0, 0}
-#define protobuf_ble_adv_status_t_init_default   {0, _protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0}
+#define protobuf_ble_adv_status_t_init_default   {0, 0, 0, 0, 0, 0}
 #define protobuf_anchor_distance_t_init_default  {0, 0, 0}
 #define protobuf_tag_position_t_init_default     {0, 0, 0, 0, 0}
 #define protobuf_log_data_t_init_default         {_protobuf_log_type_t_MIN, {0, {0}}}
@@ -762,12 +768,13 @@ extern "C" {
 #define protobuf_device_type_get_t_init_zero     {0}
 #define protobuf_flash_erase_t_init_zero         {0, _protobuf_flash_addr_region_t_MIN}
 #define protobuf_flash_read_t_init_zero          {0, 0}
-#define protobuf_flash_data_t_init_zero          {0}
+#define protobuf_flash_data_t_init_zero          {{{NULL}, NULL}}
 #define protobuf_flash_write_t_init_zero         {0, {{NULL}, NULL}}
+#define protobuf_flash_verify_t_init_zero        {0, 0}
 #define protobuf_ble_enable_t_init_zero          {0}
 #define protobuf_ble_status_get_t_init_zero      {0}
 #define protobuf_ble_status_resp_t_init_zero     {_protobuf_ble_state_t_MIN, 0, 0}
-#define protobuf_ble_adv_status_t_init_zero      {0, _protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0}
+#define protobuf_ble_adv_status_t_init_zero      {0, 0, 0, 0, 0, 0}
 #define protobuf_anchor_distance_t_init_zero     {0, 0, 0}
 #define protobuf_tag_position_t_init_zero        {0, 0, 0, 0, 0}
 #define protobuf_log_data_t_init_zero            {_protobuf_log_type_t_MIN, {0, {0}}}
@@ -866,18 +873,18 @@ extern "C" {
 #define protobuf_flash_data_t_data_tag           1
 #define protobuf_flash_write_t_address_tag       1
 #define protobuf_flash_write_t_data_tag          2
+#define protobuf_flash_verify_t_file_size_tag    1
+#define protobuf_flash_verify_t_expected_crc32_tag 2
 #define protobuf_ble_enable_t_enable_tag         1
 #define protobuf_ble_status_get_t_dummy_tag      1
 #define protobuf_ble_status_resp_t_state_tag     1
 #define protobuf_ble_status_resp_t_connected_tag 2
 #define protobuf_ble_status_resp_t_rssi_dbm_tag  3
-#define protobuf_ble_adv_status_t_device_id_tag  1
-#define protobuf_ble_adv_status_t_device_type_tag 2
 #define protobuf_ble_adv_status_t_anchor_id_tag  3
 #define protobuf_ble_adv_status_t_battery_level_pct_tag 4
 #define protobuf_ble_adv_status_t_status_flags_tag 5
-#define protobuf_ble_adv_status_t_warning_code_tag 6
-#define protobuf_ble_adv_status_t_error_code_tag 7
+#define protobuf_ble_adv_status_t_warning_count_tag 6
+#define protobuf_ble_adv_status_t_error_count_tag 7
 #define protobuf_ble_adv_status_t_local_timestamp_ms_tag 8
 #define protobuf_anchor_distance_t_anchor_id_tag 1
 #define protobuf_anchor_distance_t_distance_mm_tag 2
@@ -968,6 +975,7 @@ extern "C" {
 #define protobuf_packet_t_anchor_layout_get_tag  42
 #define protobuf_packet_t_anchor_layout_set_tag  43
 #define protobuf_packet_t_anchor_layout_resp_tag 44
+#define protobuf_packet_t_flash_verify_tag       45
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1189,8 +1197,8 @@ X(a, STATIC,   SINGULAR, UINT32,   address,           2)
 #define protobuf_flash_read_t_DEFAULT NULL
 
 #define protobuf_flash_data_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   data,              1)
-#define protobuf_flash_data_t_CALLBACK NULL
+X(a, CALLBACK, SINGULAR, BYTES,    data,              1)
+#define protobuf_flash_data_t_CALLBACK pb_default_field_callback
 #define protobuf_flash_data_t_DEFAULT NULL
 
 #define protobuf_flash_write_t_FIELDLIST(X, a) \
@@ -1198,6 +1206,12 @@ X(a, STATIC,   SINGULAR, UINT32,   address,           1) \
 X(a, CALLBACK, SINGULAR, BYTES,    data,              2)
 #define protobuf_flash_write_t_CALLBACK pb_default_field_callback
 #define protobuf_flash_write_t_DEFAULT NULL
+
+#define protobuf_flash_verify_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   file_size,         1) \
+X(a, STATIC,   SINGULAR, UINT32,   expected_crc32,    2)
+#define protobuf_flash_verify_t_CALLBACK NULL
+#define protobuf_flash_verify_t_DEFAULT NULL
 
 #define protobuf_ble_enable_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enable,            1)
@@ -1217,13 +1231,11 @@ X(a, STATIC,   SINGULAR, INT32,    rssi_dbm,          3)
 #define protobuf_ble_status_resp_t_DEFAULT NULL
 
 #define protobuf_ble_adv_status_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   device_id,         1) \
-X(a, STATIC,   SINGULAR, UENUM,    device_type,       2) \
 X(a, STATIC,   SINGULAR, UINT32,   anchor_id,         3) \
 X(a, STATIC,   SINGULAR, UINT32,   battery_level_pct,   4) \
 X(a, STATIC,   SINGULAR, UINT32,   status_flags,      5) \
-X(a, STATIC,   SINGULAR, UINT32,   warning_code,      6) \
-X(a, STATIC,   SINGULAR, UINT32,   error_code,        7) \
+X(a, STATIC,   SINGULAR, UINT32,   warning_count,     6) \
+X(a, STATIC,   SINGULAR, UINT32,   error_count,       7) \
 X(a, STATIC,   SINGULAR, UINT32,   local_timestamp_ms,   8)
 #define protobuf_ble_adv_status_t_CALLBACK NULL
 #define protobuf_ble_adv_status_t_DEFAULT NULL
@@ -1381,7 +1393,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_set,params.pos_calib_cf
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_resp,params.pos_calib_cfg_resp),  41) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_get,params.anchor_layout_get),  42) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_set,params.anchor_layout_set),  43) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layout_resp),  44)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layout_resp),  44) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,flash_verify,params.flash_verify),  45)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1428,6 +1441,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layo
 #define protobuf_packet_t_params_anchor_layout_get_MSGTYPE protobuf_anchor_layout_get_t
 #define protobuf_packet_t_params_anchor_layout_set_MSGTYPE protobuf_anchor_layout_set_t
 #define protobuf_packet_t_params_anchor_layout_resp_MSGTYPE protobuf_anchor_layout_resp_t
+#define protobuf_packet_t_params_flash_verify_MSGTYPE protobuf_flash_verify_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1464,6 +1478,7 @@ extern const pb_msgdesc_t protobuf_flash_erase_t_msg;
 extern const pb_msgdesc_t protobuf_flash_read_t_msg;
 extern const pb_msgdesc_t protobuf_flash_data_t_msg;
 extern const pb_msgdesc_t protobuf_flash_write_t_msg;
+extern const pb_msgdesc_t protobuf_flash_verify_t_msg;
 extern const pb_msgdesc_t protobuf_ble_enable_t_msg;
 extern const pb_msgdesc_t protobuf_ble_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ble_status_resp_t_msg;
@@ -1521,6 +1536,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_flash_read_t_fields &protobuf_flash_read_t_msg
 #define protobuf_flash_data_t_fields &protobuf_flash_data_t_msg
 #define protobuf_flash_write_t_fields &protobuf_flash_write_t_msg
+#define protobuf_flash_verify_t_fields &protobuf_flash_verify_t_msg
 #define protobuf_ble_enable_t_fields &protobuf_ble_enable_t_msg
 #define protobuf_ble_status_get_t_fields &protobuf_ble_status_get_t_msg
 #define protobuf_ble_status_resp_t_fields &protobuf_ble_status_resp_t_msg
@@ -1543,6 +1559,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
 
 /* Maximum encoded size of messages (where known) */
+/* protobuf_flash_data_t_size depends on runtime parameters */
 /* protobuf_flash_write_t_size depends on runtime parameters */
 /* protobuf_packet_t_size depends on runtime parameters */
 #define PROTOBUF_PROTOCOL_PB_H_MAX_SIZE          protobuf_ranging_result_t_size
@@ -1554,7 +1571,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_resp_t_size       92
 #define protobuf_anchor_layout_set_t_size        92
 #define protobuf_anchor_ranging_t_size           23
-#define protobuf_ble_adv_status_t_size           44
+#define protobuf_ble_adv_status_t_size           36
 #define protobuf_ble_enable_t_size               2
 #define protobuf_ble_status_get_t_size           6
 #define protobuf_ble_status_resp_t_size          15
@@ -1568,9 +1585,9 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_filter_cfg_resp_t_size          29
 #define protobuf_filter_cfg_set_t_size           29
 #define protobuf_filter_cfg_t_size               27
-#define protobuf_flash_data_t_size               6
 #define protobuf_flash_erase_t_size              8
 #define protobuf_flash_read_t_size               12
+#define protobuf_flash_verify_t_size             12
 #define protobuf_hdr_t_size                      18
 #define protobuf_host_transport_set_t_size       2
 #define protobuf_log_clear_t_size                14

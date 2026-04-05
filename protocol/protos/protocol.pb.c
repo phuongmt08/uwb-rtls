@@ -111,6 +111,9 @@ PB_BIND(protobuf_flash_data_t, protobuf_flash_data_t, AUTO)
 PB_BIND(protobuf_flash_write_t, protobuf_flash_write_t, AUTO)
 
 
+PB_BIND(protobuf_flash_verify_t, protobuf_flash_verify_t, AUTO)
+
+
 PB_BIND(protobuf_ble_enable_t, protobuf_ble_enable_t, AUTO)
 
 
