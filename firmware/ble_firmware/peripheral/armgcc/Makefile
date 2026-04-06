@@ -4,6 +4,7 @@ OUTPUT_DIRECTORY := _build
 
 SDK_ROOT := ../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560
 PROJ_DIR := ..
+COMMON_DIR := ../../ble_common
 
 $(OUTPUT_DIRECTORY)/nrf52832_xxaa.out: \
   LINKER_SCRIPT  := ble_peripheral.ld
@@ -49,7 +50,6 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/drivers/src/prs/nrfx_prs.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uart.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uarte.c \
-  $(PROJ_DIR)/main.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_Syscalls_GCC.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_printf.c \
@@ -63,7 +63,16 @@ SRC_FILES += \
   $(SDK_ROOT)/components/ble/ble_services/ble_lbs/ble_lbs.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh_ble.c \
-  $(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c \
+  $(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c
+
+# Custom Application & Bridge files
+SRC_FILES += \
+  $(PROJ_DIR)/main.c \
+  $(PROJ_DIR)/ble_peripheral.c \
+  $(COMMON_DIR)/hdlc.c \
+  $(COMMON_DIR)/ble_bridge/bb_app.c \
+  $(COMMON_DIR)/ble_bridge/bb_router.c \
+  $(COMMON_DIR)/ble_bridge/bb_transport.c
 
 # Include folders common to all targets
 INC_FOLDERS += \
@@ -195,6 +204,9 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/nfc/ndef/conn_hand_parser/ac_rec_parser \
   $(SDK_ROOT)/components/libraries/stack_guard \
   $(SDK_ROOT)/components/libraries/log/src \
+  $(PROJ_DIR) \
+  $(COMMON_DIR) \
+  $(COMMON_DIR)/ble_bridge
 
 # Libraries common to all targets
 LIB_FILES += \
@@ -210,6 +222,7 @@ CFLAGS += -DAPP_TIMER_V2
 CFLAGS += -DAPP_TIMER_V2_RTC1_ENABLED
 CFLAGS += -DBOARD_PCA10040
 CFLAGS += -DBLE_PERIPHERAL
+CFLAGS += -DBLE_BRIDGE
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
 CFLAGS += -DFLOAT_ABI_HARD
 CFLAGS += -DINITIALIZE_USER_SECTIONS
