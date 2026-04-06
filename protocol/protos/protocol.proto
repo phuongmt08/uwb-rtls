@@ -65,7 +65,7 @@ enum device_addr_t {
     PACKET_ADDR_TAG         = 0x1;
     PACKET_ADDR_ANCHOR      = 0x2;
     PACKET_ADDR_GATEWAY     = 0x3;
-    PACKET_ADDR_HOST        = 0x4;
+    PACKET_ADDR_PERIPHERAL  = 0x4;
     PACKET_ADDR_DEBUG       = 0x7;
     PACKET_ADDR_BCAST       = 0xF;
 }
@@ -344,6 +344,44 @@ message ble_status_resp_t {
     int32 rssi_dbm      = 3;  /* valid only when connected */
 }
 
+message ble_conn_params_t {
+    uint32 min_interval_ms    = 1;
+    uint32 max_interval_ms    = 2;
+    uint32 slave_latency      = 3;
+    uint32 sup_timeout_ms     = 4;
+}
+
+message ble_conn_params_get_t {
+    uint32 dummy = 1;
+}
+
+message ble_conn_params_set_t {
+    ble_conn_params_t params = 1;
+}
+
+message ble_conn_params_resp_t {
+    ble_conn_params_t params = 1;
+}
+
+message ble_disconnect_t {
+    uint32 reason = 1;
+}
+
+message ble_scan_start_t {
+    uint32 duration_ms   = 1;
+    uint32 interval_ms   = 2;
+    uint32 window_ms     = 3;
+    bool active_scanning = 4;
+}
+
+message ble_scan_stop_t {
+    uint32 dummy = 1;
+}
+
+message ble_connect_t {
+    bytes mac_address = 1;
+}
+
 message ble_adv_status_t {
     uint32 anchor_id          = 3; /* 0 for non-anchor */
     uint32 battery_level_pct  = 4;
@@ -552,6 +590,15 @@ message packet_t {
 
         /* FOTA Verification */
         flash_verify_t            flash_verify            = 45;
+
+        /* BLE config update */
+        ble_conn_params_get_t     ble_conn_params_get     = 46;
+        ble_conn_params_set_t     ble_conn_params_set     = 47;
+        ble_conn_params_resp_t    ble_conn_params_resp    = 48;
+        ble_disconnect_t          ble_disconnect          = 49;
+        ble_scan_start_t          ble_scan_start          = 50;
+        ble_scan_stop_t           ble_scan_stop           = 51;
+        ble_connect_t             ble_connect             = 52;
     }
 }
 
