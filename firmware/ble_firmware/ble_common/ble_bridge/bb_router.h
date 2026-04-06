@@ -37,7 +37,7 @@ ret_code_t bb_router_init(void);
  * inside `bb_transport_init`.
  *
  * Flow Logic:
- *  - Dest = PACKET_ADDR_PERIPHERAL -> Forward to bb_app_handle_packet()
+ *  - Dest = PACKET_ADDR_PERIPHERAL -> Forward to bb_cmd_hdl_process()
  *  - Dest = PACKET_ADDR_TAG / HOST -> Passthrough to correct bb_transport_send_XXX()
  *
  * @param[in] p_evt The transport event containing the fully de-framed protobuf payload.

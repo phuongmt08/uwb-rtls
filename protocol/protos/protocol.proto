@@ -66,6 +66,7 @@ enum device_addr_t {
     PACKET_ADDR_ANCHOR      = 0x2;
     PACKET_ADDR_GATEWAY     = 0x3;
     PACKET_ADDR_PERIPHERAL  = 0x4;
+    PACKET_ADDR_HOST        = 0x5;
     PACKET_ADDR_DEBUG       = 0x7;
     PACKET_ADDR_BCAST       = 0xF;
 }

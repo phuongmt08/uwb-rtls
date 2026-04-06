@@ -1,13 +1,13 @@
 /**
- * @file bb_app.h
+ * @file bb_cmd_hdl.h
  * @brief BLE Bridge Application Controller
  *
  * Parses deep inside the protobuf message targeted natively for this BLE peripheral.
  * Triggers hardware radio actions such as scanning, altering GAP params, or responding
  * with system statuses.
  */
-#ifndef BB_APP_H
-#define BB_APP_H
+#ifndef BB_CMD_HDL_H
+#define BB_CMD_HDL_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -17,7 +17,7 @@
  * @brief Initializes the Application logic bindings.
  * @return NRF_SUCCESS on successful initialization.
  */
-ret_code_t bb_app_init(void);
+ret_code_t bb_cmd_hdl_init(void);
 
 /**
  * @brief Executes the protobuf command destined for the Peripheral device.
@@ -28,6 +28,6 @@ ret_code_t bb_app_init(void);
  * @param[in] length Total size of the payload.
  * @return NRF_SUCCESS if the command was successfully decoded and executed.
  */
-ret_code_t bb_app_handle_cmd(uint8_t const * p_data, uint16_t length);
+ret_code_t bb_cmd_hdl_process(uint8_t const * p_data, uint16_t length);
 
-#endif // BB_APP_H
+#endif // BB_CMD_HDL_H

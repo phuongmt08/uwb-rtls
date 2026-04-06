@@ -70,7 +70,7 @@ SRC_FILES += \
   $(PROJ_DIR)/main.c \
   $(PROJ_DIR)/ble_peripheral.c \
   $(COMMON_DIR)/hdlc.c \
-  $(COMMON_DIR)/ble_bridge/bb_app.c \
+  $(COMMON_DIR)/ble_bridge/bb_cmd_hdl.c \
   $(COMMON_DIR)/ble_bridge/bb_router.c \
   $(COMMON_DIR)/ble_bridge/bb_transport.c
 
