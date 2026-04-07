@@ -4,7 +4,7 @@ speed 4000
 r
 erase
 r
-loadfile ../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/softdevice/s132/hex/s132_nrf52_7.2.0_softdevice.hex
+loadfile ../../soft_device/s132_nrf52_7.2.0_softdevice.hex
 loadfile _build/nrf52832_xxaa.hex
 r
 g
