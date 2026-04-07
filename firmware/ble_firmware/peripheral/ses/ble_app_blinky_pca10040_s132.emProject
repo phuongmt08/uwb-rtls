@@ -28,7 +28,7 @@
       linker_printf_fmt_level="long"
       linker_scanf_fmt_level="long"
       linker_section_placement_file="flash_placement.xml"
-      linker_section_placement_macros="FLASH_PH_START=0x0;FLASH_PH_SIZE=0x80000;RAM_PH_START=0x20000000;RAM_PH_SIZE=0x10000;FLASH_START=0x26000;FLASH_SIZE=0x5a000;RAM_START=0x200022f0;RAM_SIZE=0xdd10"
+      linker_section_placement_macros="FLASH_PH_START=0x0;FLASH_PH_SIZE=0x80000;RAM_PH_START=0x20000000;RAM_PH_SIZE=0x10000;FLASH_START=0x26000;FLASH_SIZE=0x5a000;RAM_START=0x20002B68;RAM_SIZE=0xD498"
       
       linker_section_placements_segments="FLASH1 RX 0x0 0x80000;RAM1 RWX 0x20000000 0x10000"
       project_directory=""
@@ -104,7 +104,7 @@
       <file file_name="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/ble/nrf_ble_qwr/nrf_ble_qwr.c" />
     </folder>
     <folder Name="BLE_Bridge">
-      <file file_name="../../ble_common/ble_bridge/bb_app.c" />
+      <file file_name="../../ble_common/ble_bridge/bb_cmd_hdl.c" />
       <file file_name="../../ble_common/ble_bridge/bb_router.c" />
       <file file_name="../../ble_common/ble_bridge/bb_transport.c" />
       <file file_name="../../ble_common/hdlc.c" />
