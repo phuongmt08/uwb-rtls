@@ -4,6 +4,7 @@
 #include "bsp_flash.h"
 #include "bsp_util.h"
 #include "sys_config.h"
+#include "bsp_battery.h"
 
 #include <string.h>
 // clang-format off
@@ -12,8 +13,6 @@
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
-#define CHECK(_cond, _ret)  do { if (!(_cond)) return (_ret); } while (0)
-#define CHECK_VOID(_cond)   do { if (!(_cond)) return; } while (0)
 
 typedef void (*cmd_handler_t)(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 
@@ -58,6 +57,7 @@ static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_pac
 static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length);
 static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
 static bool network_cmd_host_active(const network_cmd_t *cmd);
+static void network_cmd_battery_info_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 
 static network_cmd_t *g_network_cmd_instance = NULL;
 
@@ -141,6 +141,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_anchor_layout_get_tag,         network_cmd_anchor_layout_get,           "anchor_layout_get"),  /* 42 */
     CMD_INFO(protobuf_packet_t_anchor_layout_set_tag,         network_cmd_anchor_layout_set,           "anchor_layout_set"),  /* 43 */
     CMD_INFO(protobuf_packet_t_anchor_layout_resp_tag,        network_cmd_unimplemented,               "anchor_layout_resp"), /* 44 */
+    CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,           "battery_info_resp"),  /* 45 */
+    CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 46 */
     //      +=================================================+=======================================+========================+
 };
 
@@ -291,7 +293,7 @@ static void network_cmd_sys_config_set(network_cmd_t *cmd, const protobuf_packet
         return;
     }
 
-    const protobuf_uwb_config_t *new_cfg = &pkt->params.sys_config_set.config;
+    const protobuf_uwb_cfg_t *new_cfg = &pkt->params.sys_config_set.config;
 
     if (new_cfg->role != DEVICE_ROLE_TAG && new_cfg->role != DEVICE_ROLE_ANCHOR) {
         RLOG_W(OBJECT_CODE, "Invalid role in sys_config_set: %u", (unsigned)new_cfg->role);
@@ -597,6 +599,25 @@ static bool network_cmd_host_active(const network_cmd_t *cmd)
     }
 
     return (uint32_t)(bsp_util_get_ticks() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
+}
+
+static void network_cmd_battery_info_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(cmd && pkt && cmd->stream);
+
+    bsp_battery_info_t battery_info;
+    if (bsp_battery_get_info(&battery_info) != BSP_UTIL_OK) {
+        RLOG_W(OBJECT_CODE, "Failed to get battery info");
+        return;
+    }
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_battery_info_resp_tag);
+    resp.hdr                             = pkt->hdr;
+    resp.params.battery_info_resp.bat_voltage_mv   = battery_info.voltage_mv;
+    resp.params.battery_info_resp.bat_soc_percent  = battery_info.soc_pct;
+    resp.params.battery_info_resp.remaining_min    = battery_info.remaining_min;
+    resp.params.battery_info_resp.is_charging      = battery_info.is_charging;
+    network_cmd_send_packet(cmd, &resp);
 }
 
 bool network_cmd_init(network_cmd_t *cmd, network_core_t *stream)

@@ -36,6 +36,9 @@ PB_BIND(protobuf_time_sync_set_t, protobuf_time_sync_set_t, AUTO)
 PB_BIND(protobuf_time_sync_resp_t, protobuf_time_sync_resp_t, AUTO)
 
 
+PB_BIND(protobuf_time_sync_adv_set_t, protobuf_time_sync_adv_set_t, AUTO)
+
+
 PB_BIND(protobuf_uwb_cfg_t, protobuf_uwb_cfg_t, AUTO)
 
 
@@ -193,6 +196,12 @@ PB_BIND(protobuf_ranging_status_get_t, protobuf_ranging_status_get_t, AUTO)
 
 
 PB_BIND(protobuf_ranging_status_resp_t, protobuf_ranging_status_resp_t, AUTO)
+
+
+PB_BIND(protobuf_battery_info_resp_t, protobuf_battery_info_resp_t, AUTO)
+
+
+PB_BIND(protobuf_battery_info_get_t, protobuf_battery_info_get_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, AUTO)
