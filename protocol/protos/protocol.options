@@ -2,6 +2,8 @@ protobuf.device_information_resp_t.uid              max_size:12
 protobuf.uwb_cfg_t.anchor_list                      max_size:8
 protobuf.ranging_result_t.anchors                   max_count:4
 protobuf.log_data_t.data                            max_size:128
+protobuf.flash_write_t.data                         max_size:200
+protobuf.flash_data_t.data                          max_size:200
 protobuf.anchor_layout_set_t.anchors                max_count:4
 protobuf.anchor_layout_resp_t.anchors               max_count:4
 

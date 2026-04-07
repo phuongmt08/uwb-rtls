@@ -111,6 +111,9 @@ PB_BIND(protobuf_flash_data_t, protobuf_flash_data_t, AUTO)
 PB_BIND(protobuf_flash_write_t, protobuf_flash_write_t, AUTO)
 
 
+PB_BIND(protobuf_flash_verify_t, protobuf_flash_verify_t, AUTO)
+
+
 PB_BIND(protobuf_ble_enable_t, protobuf_ble_enable_t, AUTO)
 
 
@@ -118,6 +121,30 @@ PB_BIND(protobuf_ble_status_get_t, protobuf_ble_status_get_t, AUTO)
 
 
 PB_BIND(protobuf_ble_status_resp_t, protobuf_ble_status_resp_t, AUTO)
+
+
+PB_BIND(protobuf_ble_conn_params_t, protobuf_ble_conn_params_t, AUTO)
+
+
+PB_BIND(protobuf_ble_conn_params_get_t, protobuf_ble_conn_params_get_t, AUTO)
+
+
+PB_BIND(protobuf_ble_conn_params_set_t, protobuf_ble_conn_params_set_t, AUTO)
+
+
+PB_BIND(protobuf_ble_conn_params_resp_t, protobuf_ble_conn_params_resp_t, AUTO)
+
+
+PB_BIND(protobuf_ble_disconnect_t, protobuf_ble_disconnect_t, AUTO)
+
+
+PB_BIND(protobuf_ble_scan_start_t, protobuf_ble_scan_start_t, AUTO)
+
+
+PB_BIND(protobuf_ble_scan_stop_t, protobuf_ble_scan_stop_t, AUTO)
+
+
+PB_BIND(protobuf_ble_connect_t, protobuf_ble_connect_t, AUTO)
 
 
 PB_BIND(protobuf_ble_adv_status_t, protobuf_ble_adv_status_t, AUTO)

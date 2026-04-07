@@ -53,7 +53,8 @@ typedef enum _protobuf_device_addr_t {
     protobuf_PACKET_ADDR_TAG = 1,
     protobuf_PACKET_ADDR_ANCHOR = 2,
     protobuf_PACKET_ADDR_GATEWAY = 3,
-    protobuf_PACKET_ADDR_HOST = 4,
+    protobuf_PACKET_ADDR_PERIPHERAL = 4,
+    protobuf_PACKET_ADDR_HOST = 5,
     protobuf_PACKET_ADDR_DEBUG = 7,
     protobuf_PACKET_ADDR_BCAST = 15
 } protobuf_device_addr_t;
@@ -285,14 +286,21 @@ typedef struct _protobuf_flash_read_t {
     uint32_t address;
 } protobuf_flash_read_t;
 
+typedef PB_BYTES_ARRAY_T(200) protobuf_flash_data_t_data_t;
 typedef struct _protobuf_flash_data_t {
-    uint32_t data;
+    protobuf_flash_data_t_data_t data;
 } protobuf_flash_data_t;
 
+typedef PB_BYTES_ARRAY_T(200) protobuf_flash_write_t_data_t;
 typedef struct _protobuf_flash_write_t {
     uint32_t address;
-    pb_callback_t data;
+    protobuf_flash_write_t_data_t data;
 } protobuf_flash_write_t;
+
+typedef struct _protobuf_flash_verify_t {
+    uint32_t file_size;
+    uint32_t expected_crc32;
+} protobuf_flash_verify_t;
 
 /* STM32 → nRF : enable or disable BLE stack
  Useful during UWB calibration or power-saving modes. */
@@ -312,14 +320,52 @@ typedef struct _protobuf_ble_status_resp_t {
     int32_t rssi_dbm; /* valid only when connected */
 } protobuf_ble_status_resp_t;
 
+typedef struct _protobuf_ble_conn_params_t {
+    uint32_t min_interval_ms;
+    uint32_t max_interval_ms;
+    uint32_t slave_latency;
+    uint32_t sup_timeout_ms;
+} protobuf_ble_conn_params_t;
+
+typedef struct _protobuf_ble_conn_params_get_t {
+    uint32_t dummy;
+} protobuf_ble_conn_params_get_t;
+
+typedef struct _protobuf_ble_conn_params_set_t {
+    bool has_params;
+    protobuf_ble_conn_params_t params;
+} protobuf_ble_conn_params_set_t;
+
+typedef struct _protobuf_ble_conn_params_resp_t {
+    bool has_params;
+    protobuf_ble_conn_params_t params;
+} protobuf_ble_conn_params_resp_t;
+
+typedef struct _protobuf_ble_disconnect_t {
+    uint32_t reason;
+} protobuf_ble_disconnect_t;
+
+typedef struct _protobuf_ble_scan_start_t {
+    uint32_t duration_ms;
+    uint32_t interval_ms;
+    uint32_t window_ms;
+    bool active_scanning;
+} protobuf_ble_scan_start_t;
+
+typedef struct _protobuf_ble_scan_stop_t {
+    uint32_t dummy;
+} protobuf_ble_scan_stop_t;
+
+typedef struct _protobuf_ble_connect_t {
+    pb_callback_t mac_address;
+} protobuf_ble_connect_t;
+
 typedef struct _protobuf_ble_adv_status_t {
-    uint32_t device_id;
-    protobuf_device_type_t device_type;
     uint32_t anchor_id; /* 0 for non-anchor */
     uint32_t battery_level_pct;
     uint32_t status_flags;
-    uint32_t warning_code;
-    uint32_t error_code;
+    uint32_t warning_count;
+    uint32_t error_count;
     uint32_t local_timestamp_ms;
 } protobuf_ble_adv_status_t;
 
@@ -497,6 +543,16 @@ typedef struct _protobuf_packet_t {
         protobuf_anchor_layout_get_t anchor_layout_get;
         protobuf_anchor_layout_set_t anchor_layout_set;
         protobuf_anchor_layout_resp_t anchor_layout_resp;
+        /* FOTA Verification */
+        protobuf_flash_verify_t flash_verify;
+        /* BLE config update */
+        protobuf_ble_conn_params_get_t ble_conn_params_get;
+        protobuf_ble_conn_params_set_t ble_conn_params_set;
+        protobuf_ble_conn_params_resp_t ble_conn_params_resp;
+        protobuf_ble_disconnect_t ble_disconnect;
+        protobuf_ble_scan_start_t ble_scan_start;
+        protobuf_ble_scan_stop_t ble_scan_stop;
+        protobuf_ble_connect_t ble_connect;
     } params;
 } protobuf_packet_t;
 
@@ -556,6 +612,7 @@ extern "C" {
 #define protobuf_device_addr_t_PACKET_ADDR_TAG protobuf_PACKET_ADDR_TAG
 #define protobuf_device_addr_t_PACKET_ADDR_ANCHOR protobuf_PACKET_ADDR_ANCHOR
 #define protobuf_device_addr_t_PACKET_ADDR_GATEWAY protobuf_PACKET_ADDR_GATEWAY
+#define protobuf_device_addr_t_PACKET_ADDR_PERIPHERAL protobuf_PACKET_ADDR_PERIPHERAL
 #define protobuf_device_addr_t_PACKET_ADDR_HOST protobuf_PACKET_ADDR_HOST
 #define protobuf_device_addr_t_PACKET_ADDR_DEBUG protobuf_PACKET_ADDR_DEBUG
 #define protobuf_device_addr_t_PACKET_ADDR_BCAST protobuf_PACKET_ADDR_BCAST
@@ -649,9 +706,17 @@ extern "C" {
 
 
 
+
 #define protobuf_ble_status_resp_t_state_ENUMTYPE protobuf_ble_state_t
 
-#define protobuf_ble_adv_status_t_device_type_ENUMTYPE protobuf_device_type_t
+
+
+
+
+
+
+
+
 
 
 
@@ -707,12 +772,21 @@ extern "C" {
 #define protobuf_device_type_get_t_init_default  {0}
 #define protobuf_flash_erase_t_init_default      {0, _protobuf_flash_addr_region_t_MIN}
 #define protobuf_flash_read_t_init_default       {0, 0}
-#define protobuf_flash_data_t_init_default       {0}
-#define protobuf_flash_write_t_init_default      {0, {{NULL}, NULL}}
+#define protobuf_flash_data_t_init_default       {{0, {0}}}
+#define protobuf_flash_write_t_init_default      {0, {0, {0}}}
+#define protobuf_flash_verify_t_init_default     {0, 0}
 #define protobuf_ble_enable_t_init_default       {0}
 #define protobuf_ble_status_get_t_init_default   {0}
 #define protobuf_ble_status_resp_t_init_default  {_protobuf_ble_state_t_MIN, 0, 0}
-#define protobuf_ble_adv_status_t_init_default   {0, _protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0}
+#define protobuf_ble_conn_params_t_init_default  {0, 0, 0, 0}
+#define protobuf_ble_conn_params_get_t_init_default {0}
+#define protobuf_ble_conn_params_set_t_init_default {false, protobuf_ble_conn_params_t_init_default}
+#define protobuf_ble_conn_params_resp_t_init_default {false, protobuf_ble_conn_params_t_init_default}
+#define protobuf_ble_disconnect_t_init_default   {0}
+#define protobuf_ble_scan_start_t_init_default   {0, 0, 0, 0}
+#define protobuf_ble_scan_stop_t_init_default    {0}
+#define protobuf_ble_connect_t_init_default      {{{NULL}, NULL}}
+#define protobuf_ble_adv_status_t_init_default   {0, 0, 0, 0, 0, 0}
 #define protobuf_anchor_distance_t_init_default  {0, 0, 0}
 #define protobuf_tag_position_t_init_default     {0, 0, 0, 0, 0}
 #define protobuf_log_data_t_init_default         {_protobuf_log_type_t_MIN, {0, {0}}}
@@ -762,12 +836,21 @@ extern "C" {
 #define protobuf_device_type_get_t_init_zero     {0}
 #define protobuf_flash_erase_t_init_zero         {0, _protobuf_flash_addr_region_t_MIN}
 #define protobuf_flash_read_t_init_zero          {0, 0}
-#define protobuf_flash_data_t_init_zero          {0}
-#define protobuf_flash_write_t_init_zero         {0, {{NULL}, NULL}}
+#define protobuf_flash_data_t_init_zero          {{0, {0}}}
+#define protobuf_flash_write_t_init_zero         {0, {0, {0}}}
+#define protobuf_flash_verify_t_init_zero        {0, 0}
 #define protobuf_ble_enable_t_init_zero          {0}
 #define protobuf_ble_status_get_t_init_zero      {0}
 #define protobuf_ble_status_resp_t_init_zero     {_protobuf_ble_state_t_MIN, 0, 0}
-#define protobuf_ble_adv_status_t_init_zero      {0, _protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0}
+#define protobuf_ble_conn_params_t_init_zero     {0, 0, 0, 0}
+#define protobuf_ble_conn_params_get_t_init_zero {0}
+#define protobuf_ble_conn_params_set_t_init_zero {false, protobuf_ble_conn_params_t_init_zero}
+#define protobuf_ble_conn_params_resp_t_init_zero {false, protobuf_ble_conn_params_t_init_zero}
+#define protobuf_ble_disconnect_t_init_zero      {0}
+#define protobuf_ble_scan_start_t_init_zero      {0, 0, 0, 0}
+#define protobuf_ble_scan_stop_t_init_zero       {0}
+#define protobuf_ble_connect_t_init_zero         {{{NULL}, NULL}}
+#define protobuf_ble_adv_status_t_init_zero      {0, 0, 0, 0, 0, 0}
 #define protobuf_anchor_distance_t_init_zero     {0, 0, 0}
 #define protobuf_tag_position_t_init_zero        {0, 0, 0, 0, 0}
 #define protobuf_log_data_t_init_zero            {_protobuf_log_type_t_MIN, {0, {0}}}
@@ -866,18 +949,32 @@ extern "C" {
 #define protobuf_flash_data_t_data_tag           1
 #define protobuf_flash_write_t_address_tag       1
 #define protobuf_flash_write_t_data_tag          2
+#define protobuf_flash_verify_t_file_size_tag    1
+#define protobuf_flash_verify_t_expected_crc32_tag 2
 #define protobuf_ble_enable_t_enable_tag         1
 #define protobuf_ble_status_get_t_dummy_tag      1
 #define protobuf_ble_status_resp_t_state_tag     1
 #define protobuf_ble_status_resp_t_connected_tag 2
 #define protobuf_ble_status_resp_t_rssi_dbm_tag  3
-#define protobuf_ble_adv_status_t_device_id_tag  1
-#define protobuf_ble_adv_status_t_device_type_tag 2
+#define protobuf_ble_conn_params_t_min_interval_ms_tag 1
+#define protobuf_ble_conn_params_t_max_interval_ms_tag 2
+#define protobuf_ble_conn_params_t_slave_latency_tag 3
+#define protobuf_ble_conn_params_t_sup_timeout_ms_tag 4
+#define protobuf_ble_conn_params_get_t_dummy_tag 1
+#define protobuf_ble_conn_params_set_t_params_tag 1
+#define protobuf_ble_conn_params_resp_t_params_tag 1
+#define protobuf_ble_disconnect_t_reason_tag     1
+#define protobuf_ble_scan_start_t_duration_ms_tag 1
+#define protobuf_ble_scan_start_t_interval_ms_tag 2
+#define protobuf_ble_scan_start_t_window_ms_tag  3
+#define protobuf_ble_scan_start_t_active_scanning_tag 4
+#define protobuf_ble_scan_stop_t_dummy_tag       1
+#define protobuf_ble_connect_t_mac_address_tag   1
 #define protobuf_ble_adv_status_t_anchor_id_tag  3
 #define protobuf_ble_adv_status_t_battery_level_pct_tag 4
 #define protobuf_ble_adv_status_t_status_flags_tag 5
-#define protobuf_ble_adv_status_t_warning_code_tag 6
-#define protobuf_ble_adv_status_t_error_code_tag 7
+#define protobuf_ble_adv_status_t_warning_count_tag 6
+#define protobuf_ble_adv_status_t_error_count_tag 7
 #define protobuf_ble_adv_status_t_local_timestamp_ms_tag 8
 #define protobuf_anchor_distance_t_anchor_id_tag 1
 #define protobuf_anchor_distance_t_distance_mm_tag 2
@@ -968,6 +1065,14 @@ extern "C" {
 #define protobuf_packet_t_anchor_layout_get_tag  42
 #define protobuf_packet_t_anchor_layout_set_tag  43
 #define protobuf_packet_t_anchor_layout_resp_tag 44
+#define protobuf_packet_t_flash_verify_tag       45
+#define protobuf_packet_t_ble_conn_params_get_tag 46
+#define protobuf_packet_t_ble_conn_params_set_tag 47
+#define protobuf_packet_t_ble_conn_params_resp_tag 48
+#define protobuf_packet_t_ble_disconnect_tag     49
+#define protobuf_packet_t_ble_scan_start_tag     50
+#define protobuf_packet_t_ble_scan_stop_tag      51
+#define protobuf_packet_t_ble_connect_tag        52
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1189,15 +1294,21 @@ X(a, STATIC,   SINGULAR, UINT32,   address,           2)
 #define protobuf_flash_read_t_DEFAULT NULL
 
 #define protobuf_flash_data_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   data,              1)
+X(a, STATIC,   SINGULAR, BYTES,    data,              1)
 #define protobuf_flash_data_t_CALLBACK NULL
 #define protobuf_flash_data_t_DEFAULT NULL
 
 #define protobuf_flash_write_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   address,           1) \
-X(a, CALLBACK, SINGULAR, BYTES,    data,              2)
-#define protobuf_flash_write_t_CALLBACK pb_default_field_callback
+X(a, STATIC,   SINGULAR, BYTES,    data,              2)
+#define protobuf_flash_write_t_CALLBACK NULL
 #define protobuf_flash_write_t_DEFAULT NULL
+
+#define protobuf_flash_verify_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   file_size,         1) \
+X(a, STATIC,   SINGULAR, UINT32,   expected_crc32,    2)
+#define protobuf_flash_verify_t_CALLBACK NULL
+#define protobuf_flash_verify_t_DEFAULT NULL
 
 #define protobuf_ble_enable_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enable,            1)
@@ -1216,14 +1327,60 @@ X(a, STATIC,   SINGULAR, INT32,    rssi_dbm,          3)
 #define protobuf_ble_status_resp_t_CALLBACK NULL
 #define protobuf_ble_status_resp_t_DEFAULT NULL
 
+#define protobuf_ble_conn_params_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   min_interval_ms,   1) \
+X(a, STATIC,   SINGULAR, UINT32,   max_interval_ms,   2) \
+X(a, STATIC,   SINGULAR, UINT32,   slave_latency,     3) \
+X(a, STATIC,   SINGULAR, UINT32,   sup_timeout_ms,    4)
+#define protobuf_ble_conn_params_t_CALLBACK NULL
+#define protobuf_ble_conn_params_t_DEFAULT NULL
+
+#define protobuf_ble_conn_params_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_ble_conn_params_get_t_CALLBACK NULL
+#define protobuf_ble_conn_params_get_t_DEFAULT NULL
+
+#define protobuf_ble_conn_params_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  params,            1)
+#define protobuf_ble_conn_params_set_t_CALLBACK NULL
+#define protobuf_ble_conn_params_set_t_DEFAULT NULL
+#define protobuf_ble_conn_params_set_t_params_MSGTYPE protobuf_ble_conn_params_t
+
+#define protobuf_ble_conn_params_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  params,            1)
+#define protobuf_ble_conn_params_resp_t_CALLBACK NULL
+#define protobuf_ble_conn_params_resp_t_DEFAULT NULL
+#define protobuf_ble_conn_params_resp_t_params_MSGTYPE protobuf_ble_conn_params_t
+
+#define protobuf_ble_disconnect_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   reason,            1)
+#define protobuf_ble_disconnect_t_CALLBACK NULL
+#define protobuf_ble_disconnect_t_DEFAULT NULL
+
+#define protobuf_ble_scan_start_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   duration_ms,       1) \
+X(a, STATIC,   SINGULAR, UINT32,   interval_ms,       2) \
+X(a, STATIC,   SINGULAR, UINT32,   window_ms,         3) \
+X(a, STATIC,   SINGULAR, BOOL,     active_scanning,   4)
+#define protobuf_ble_scan_start_t_CALLBACK NULL
+#define protobuf_ble_scan_start_t_DEFAULT NULL
+
+#define protobuf_ble_scan_stop_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_ble_scan_stop_t_CALLBACK NULL
+#define protobuf_ble_scan_stop_t_DEFAULT NULL
+
+#define protobuf_ble_connect_t_FIELDLIST(X, a) \
+X(a, CALLBACK, SINGULAR, BYTES,    mac_address,       1)
+#define protobuf_ble_connect_t_CALLBACK pb_default_field_callback
+#define protobuf_ble_connect_t_DEFAULT NULL
+
 #define protobuf_ble_adv_status_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   device_id,         1) \
-X(a, STATIC,   SINGULAR, UENUM,    device_type,       2) \
 X(a, STATIC,   SINGULAR, UINT32,   anchor_id,         3) \
 X(a, STATIC,   SINGULAR, UINT32,   battery_level_pct,   4) \
 X(a, STATIC,   SINGULAR, UINT32,   status_flags,      5) \
-X(a, STATIC,   SINGULAR, UINT32,   warning_code,      6) \
-X(a, STATIC,   SINGULAR, UINT32,   error_code,        7) \
+X(a, STATIC,   SINGULAR, UINT32,   warning_count,     6) \
+X(a, STATIC,   SINGULAR, UINT32,   error_count,       7) \
 X(a, STATIC,   SINGULAR, UINT32,   local_timestamp_ms,   8)
 #define protobuf_ble_adv_status_t_CALLBACK NULL
 #define protobuf_ble_adv_status_t_DEFAULT NULL
@@ -1381,7 +1538,15 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_set,params.pos_calib_cf
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,pos_calib_cfg_resp,params.pos_calib_cfg_resp),  41) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_get,params.anchor_layout_get),  42) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_set,params.anchor_layout_set),  43) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layout_resp),  44)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layout_resp),  44) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,flash_verify,params.flash_verify),  45) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_conn_params_get,params.ble_conn_params_get),  46) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_conn_params_set,params.ble_conn_params_set),  47) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_conn_params_resp,params.ble_conn_params_resp),  48) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_disconnect,params.ble_disconnect),  49) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_scan_start,params.ble_scan_start),  50) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_scan_stop,params.ble_scan_stop),  51) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_connect,params.ble_connect),  52)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1428,6 +1593,14 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,anchor_layout_resp,params.anchor_layo
 #define protobuf_packet_t_params_anchor_layout_get_MSGTYPE protobuf_anchor_layout_get_t
 #define protobuf_packet_t_params_anchor_layout_set_MSGTYPE protobuf_anchor_layout_set_t
 #define protobuf_packet_t_params_anchor_layout_resp_MSGTYPE protobuf_anchor_layout_resp_t
+#define protobuf_packet_t_params_flash_verify_MSGTYPE protobuf_flash_verify_t
+#define protobuf_packet_t_params_ble_conn_params_get_MSGTYPE protobuf_ble_conn_params_get_t
+#define protobuf_packet_t_params_ble_conn_params_set_MSGTYPE protobuf_ble_conn_params_set_t
+#define protobuf_packet_t_params_ble_conn_params_resp_MSGTYPE protobuf_ble_conn_params_resp_t
+#define protobuf_packet_t_params_ble_disconnect_MSGTYPE protobuf_ble_disconnect_t
+#define protobuf_packet_t_params_ble_scan_start_MSGTYPE protobuf_ble_scan_start_t
+#define protobuf_packet_t_params_ble_scan_stop_MSGTYPE protobuf_ble_scan_stop_t
+#define protobuf_packet_t_params_ble_connect_MSGTYPE protobuf_ble_connect_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1464,9 +1637,18 @@ extern const pb_msgdesc_t protobuf_flash_erase_t_msg;
 extern const pb_msgdesc_t protobuf_flash_read_t_msg;
 extern const pb_msgdesc_t protobuf_flash_data_t_msg;
 extern const pb_msgdesc_t protobuf_flash_write_t_msg;
+extern const pb_msgdesc_t protobuf_flash_verify_t_msg;
 extern const pb_msgdesc_t protobuf_ble_enable_t_msg;
 extern const pb_msgdesc_t protobuf_ble_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ble_status_resp_t_msg;
+extern const pb_msgdesc_t protobuf_ble_conn_params_t_msg;
+extern const pb_msgdesc_t protobuf_ble_conn_params_get_t_msg;
+extern const pb_msgdesc_t protobuf_ble_conn_params_set_t_msg;
+extern const pb_msgdesc_t protobuf_ble_conn_params_resp_t_msg;
+extern const pb_msgdesc_t protobuf_ble_disconnect_t_msg;
+extern const pb_msgdesc_t protobuf_ble_scan_start_t_msg;
+extern const pb_msgdesc_t protobuf_ble_scan_stop_t_msg;
+extern const pb_msgdesc_t protobuf_ble_connect_t_msg;
 extern const pb_msgdesc_t protobuf_ble_adv_status_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_distance_t_msg;
 extern const pb_msgdesc_t protobuf_tag_position_t_msg;
@@ -1521,9 +1703,18 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_flash_read_t_fields &protobuf_flash_read_t_msg
 #define protobuf_flash_data_t_fields &protobuf_flash_data_t_msg
 #define protobuf_flash_write_t_fields &protobuf_flash_write_t_msg
+#define protobuf_flash_verify_t_fields &protobuf_flash_verify_t_msg
 #define protobuf_ble_enable_t_fields &protobuf_ble_enable_t_msg
 #define protobuf_ble_status_get_t_fields &protobuf_ble_status_get_t_msg
 #define protobuf_ble_status_resp_t_fields &protobuf_ble_status_resp_t_msg
+#define protobuf_ble_conn_params_t_fields &protobuf_ble_conn_params_t_msg
+#define protobuf_ble_conn_params_get_t_fields &protobuf_ble_conn_params_get_t_msg
+#define protobuf_ble_conn_params_set_t_fields &protobuf_ble_conn_params_set_t_msg
+#define protobuf_ble_conn_params_resp_t_fields &protobuf_ble_conn_params_resp_t_msg
+#define protobuf_ble_disconnect_t_fields &protobuf_ble_disconnect_t_msg
+#define protobuf_ble_scan_start_t_fields &protobuf_ble_scan_start_t_msg
+#define protobuf_ble_scan_stop_t_fields &protobuf_ble_scan_stop_t_msg
+#define protobuf_ble_connect_t_fields &protobuf_ble_connect_t_msg
 #define protobuf_ble_adv_status_t_fields &protobuf_ble_adv_status_t_msg
 #define protobuf_anchor_distance_t_fields &protobuf_anchor_distance_t_msg
 #define protobuf_tag_position_t_fields &protobuf_tag_position_t_msg
@@ -1543,9 +1734,9 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
 
 /* Maximum encoded size of messages (where known) */
-/* protobuf_flash_write_t_size depends on runtime parameters */
+/* protobuf_ble_connect_t_size depends on runtime parameters */
 /* protobuf_packet_t_size depends on runtime parameters */
-#define PROTOBUF_PROTOCOL_PB_H_MAX_SIZE          protobuf_ranging_result_t_size
+#define PROTOBUF_PROTOCOL_PB_H_MAX_SIZE          protobuf_flash_write_t_size
 #define protobuf_ack_t_size                      8
 #define protobuf_addr_t_size                     4
 #define protobuf_anchor_distance_t_size          23
@@ -1554,8 +1745,15 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_resp_t_size       92
 #define protobuf_anchor_layout_set_t_size        92
 #define protobuf_anchor_ranging_t_size           23
-#define protobuf_ble_adv_status_t_size           44
+#define protobuf_ble_adv_status_t_size           36
+#define protobuf_ble_conn_params_get_t_size      6
+#define protobuf_ble_conn_params_resp_t_size     26
+#define protobuf_ble_conn_params_set_t_size      26
+#define protobuf_ble_conn_params_t_size          24
+#define protobuf_ble_disconnect_t_size           6
 #define protobuf_ble_enable_t_size               2
+#define protobuf_ble_scan_start_t_size           20
+#define protobuf_ble_scan_stop_t_size            6
 #define protobuf_ble_status_get_t_size           6
 #define protobuf_ble_status_resp_t_size          15
 #define protobuf_device_information_get_t_size   6
@@ -1568,9 +1766,11 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_filter_cfg_resp_t_size          29
 #define protobuf_filter_cfg_set_t_size           29
 #define protobuf_filter_cfg_t_size               27
-#define protobuf_flash_data_t_size               6
+#define protobuf_flash_data_t_size               203
 #define protobuf_flash_erase_t_size              8
 #define protobuf_flash_read_t_size               12
+#define protobuf_flash_verify_t_size             12
+#define protobuf_flash_write_t_size              209
 #define protobuf_hdr_t_size                      18
 #define protobuf_host_transport_set_t_size       2
 #define protobuf_log_clear_t_size                14
