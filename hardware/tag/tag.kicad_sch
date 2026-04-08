@@ -2264,6 +2264,148 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "Connector_Generic:Conn_01x02"
+			(pin_names
+				(offset 1.016)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "J"
+				(at 0 2.54 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "Conn_01x02"
+				(at 0 -5.08 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" "~"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Description" "Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_keywords" "connector"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_fp_filters" "Connector*:*_1x??_*"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "Conn_01x02_1_1"
+				(rectangle
+					(start -1.27 1.27)
+					(end 1.27 -3.81)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type background)
+					)
+				)
+				(rectangle
+					(start -1.27 0.127)
+					(end 0 -0.127)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 -2.413)
+					(end 0 -2.667)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(pin passive line
+					(at -5.08 0 0)
+					(length 3.81)
+					(name "Pin_1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 -2.54 0)
+					(length 3.81)
+					(name "Pin_2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 		(symbol "Device:C"
 			(pin_numbers
 				(hide yes)
@@ -4927,396 +5069,6 @@
 						(effects
 							(font
 								(size 1.016 1.016)
-							)
-						)
-					)
-				)
-			)
-			(embedded_fonts no)
-		)
-		(symbol "IRF7309PBF_1"
-			(pin_names
-				(hide yes)
-			)
-			(exclude_from_sim no)
-			(in_bom yes)
-			(on_board yes)
-			(property "Reference" "Q3"
-				(at -4.572 2.794 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(justify left)
-				)
-			)
-			(property "Value" "AO664"
-				(at -5.588 5.08 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(justify left)
-				)
-			)
-			(property "Footprint" "Package_SO:TSOP-6_1.65x3.05mm_P0.95mm"
-				(at 5.08 -1.905 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-						(italic yes)
-					)
-					(justify left)
-					(hide yes)
-				)
-			)
-			(property "Datasheet" ""
-				(at 5.08 -3.81 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(justify left)
-					(hide yes)
-				)
-			)
-			(property "Description" "4A/-3A Id, 30V/-30 Vdss, Dual N and P-Channel MOSFET, HEXFET, 0.050 / 0.10 ohms Rds(on), SOIC-8"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "ki_keywords" "N-Channel"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "ki_fp_filters" "*SOIC*3.9x4.9mm*P1.27mm*"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(symbol "IRF7309PBF_1_0_1"
-				(polyline
-					(pts
-						(xy 0.254 1.905) (xy 0.254 -1.905)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.254 0) (xy -2.54 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 2.286) (xy 0.762 1.27)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 0.508) (xy 0.762 -0.508)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 -1.27) (xy 0.762 -2.286)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 -1.778) (xy 3.302 -1.778) (xy 3.302 1.778) (xy 0.762 1.778)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(circle
-					(center 1.651 0)
-					(radius 2.794)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.54 2.54) (xy 2.54 1.778)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(circle
-					(center 2.54 1.778)
-					(radius 0.254)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(circle
-					(center 2.54 -1.778)
-					(radius 0.254)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.54 -2.54) (xy 2.54 0) (xy 0.762 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-			)
-			(symbol "IRF7309PBF_1_1_1"
-				(polyline
-					(pts
-						(xy 1.016 0) (xy 2.032 0.381) (xy 2.032 -0.381) (xy 1.016 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.794 0.508) (xy 2.921 0.381) (xy 3.683 0.381) (xy 3.81 0.254)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 3.302 0.381) (xy 2.921 -0.254) (xy 3.683 -0.254) (xy 3.302 0.381)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(pin input line
-					(at -5.08 0 0)
-					(length 2.54)
-					(name "G1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at 2.54 5.08 270)
-					(length 2.54)
-					(name "S1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "6"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at 2.54 -5.08 90)
-					(length 2.54)
-					(name "S1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "5"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-			)
-			(symbol "IRF7309PBF_1_2_1"
-				(polyline
-					(pts
-						(xy 2.286 0) (xy 1.27 0.381) (xy 1.27 -0.381) (xy 2.286 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.794 -0.508) (xy 2.921 -0.381) (xy 3.683 -0.381) (xy 3.81 -0.254)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 3.302 -0.381) (xy 2.921 0.254) (xy 3.683 0.254) (xy 3.302 -0.381)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(pin input line
-					(at -5.08 0 0)
-					(length 2.54)
-					(name "G2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "3"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at 2.54 5.08 270)
-					(length 2.54)
-					(name "D2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "4"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at 2.54 -5.08 90)
-					(length 2.54)
-					(name "S2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "2"
-						(effects
-							(font
-								(size 1.27 1.27)
 							)
 						)
 					)
@@ -8587,15 +8339,16 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "Transistor_FET:IRF7309PBF"
+		(symbol "Transistor_FET:AO3400A"
 			(pin_names
+				(offset 0)
 				(hide yes)
 			)
 			(exclude_from_sim no)
 			(in_bom yes)
 			(on_board yes)
-			(property "Reference" "Q3"
-				(at -4.572 2.794 0)
+			(property "Reference" "Q"
+				(at 5.08 1.905 0)
 				(effects
 					(font
 						(size 1.27 1.27)
@@ -8603,8 +8356,8 @@
 					(justify left)
 				)
 			)
-			(property "Value" "AO664"
-				(at -5.588 5.08 0)
+			(property "Value" "AO3400A"
+				(at 5.08 0 0)
 				(effects
 					(font
 						(size 1.27 1.27)
@@ -8612,7 +8365,7 @@
 					(justify left)
 				)
 			)
-			(property "Footprint" "Package_SO:TSOP-6_1.65x3.05mm_P0.95mm"
+			(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
 				(at 5.08 -1.905 0)
 				(effects
 					(font
@@ -8623,7 +8376,7 @@
 					(hide yes)
 				)
 			)
-			(property "Datasheet" ""
+			(property "Datasheet" "http://www.aosmd.com/pdfs/datasheet/AO3400A.pdf"
 				(at 5.08 -3.81 0)
 				(effects
 					(font
@@ -8633,7 +8386,7 @@
 					(hide yes)
 				)
 			)
-			(property "Description" "4A/-3A Id, 30V/-30 Vdss, Dual N and P-Channel MOSFET, HEXFET, 0.050 / 0.10 ohms Rds(on), SOIC-8"
+			(property "Description" "30V Vds, 5.7A Id, N-Channel MOSFET, SOT-23"
 				(at 0 0 0)
 				(effects
 					(font
@@ -8642,7 +8395,7 @@
 					(hide yes)
 				)
 			)
-			(property "ki_keywords" "N-Channel"
+			(property "ki_keywords" "N-Channel MOSFET"
 				(at 0 0 0)
 				(effects
 					(font
@@ -8651,7 +8404,7 @@
 					(hide yes)
 				)
 			)
-			(property "ki_fp_filters" "*SOIC*3.9x4.9mm*P1.27mm*"
+			(property "ki_fp_filters" "SOT?23*"
 				(at 0 0 0)
 				(effects
 					(font
@@ -8660,7 +8413,7 @@
 					(hide yes)
 				)
 			)
-			(symbol "IRF7309PBF_0_1"
+			(symbol "AO3400A_0_1"
 				(polyline
 					(pts
 						(xy 0.254 1.905) (xy 0.254 -1.905)
@@ -8733,6 +8486,18 @@
 						(type none)
 					)
 				)
+				(polyline
+					(pts
+						(xy 1.016 0) (xy 2.032 0.381) (xy 2.032 -0.381) (xy 1.016 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
 				(circle
 					(center 1.651 0)
 					(radius 2.794)
@@ -8790,23 +8555,9 @@
 						(type none)
 					)
 				)
-			)
-			(symbol "IRF7309PBF_1_1"
 				(polyline
 					(pts
-						(xy 1.016 0) (xy 2.032 0.381) (xy 2.032 -0.381) (xy 1.016 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.794 0.508) (xy 2.921 0.381) (xy 3.683 0.381) (xy 3.81 0.254)
+						(xy 2.921 0.381) (xy 3.683 0.381)
 					)
 					(stroke
 						(width 0)
@@ -8828,10 +8579,12 @@
 						(type none)
 					)
 				)
+			)
+			(symbol "AO3400A_1_1"
 				(pin input line
 					(at -5.08 0 0)
 					(length 2.54)
-					(name "G1"
+					(name "G"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -8849,14 +8602,14 @@
 				(pin passive line
 					(at 2.54 5.08 270)
 					(length 2.54)
-					(name "S1"
+					(name "D"
 						(effects
 							(font
 								(size 1.27 1.27)
 							)
 						)
 					)
-					(number "6"
+					(number "3"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -8867,14 +8620,14 @@
 				(pin passive line
 					(at 2.54 -5.08 90)
 					(length 2.54)
-					(name "S1"
+					(name "S"
 						(effects
 							(font
 								(size 1.27 1.27)
 							)
 						)
 					)
-					(number "5"
+					(number "2"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -8883,7 +8636,165 @@
 					)
 				)
 			)
-			(symbol "IRF7309PBF_2_1"
+			(embedded_fonts no)
+		)
+		(symbol "Transistor_FET:AO3401A"
+			(pin_names
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "Q"
+				(at 5.08 1.905 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+				)
+			)
+			(property "Value" "AO3401A"
+				(at 5.08 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+				)
+			)
+			(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
+				(at 5.08 -1.905 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+						(italic yes)
+					)
+					(justify left)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" "http://www.aosmd.com/pdfs/datasheet/AO3401A.pdf"
+				(at 5.08 -3.81 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+					(hide yes)
+				)
+			)
+			(property "Description" "-4.0A Id, -30V Vds, P-Channel MOSFET, SOT-23"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_keywords" "P-Channel MOSFET"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_fp_filters" "SOT?23*"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "AO3401A_0_1"
+				(polyline
+					(pts
+						(xy 0.254 1.905) (xy 0.254 -1.905)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.254 0) (xy -2.54 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.762 2.286) (xy 0.762 1.27)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.762 1.778) (xy 3.302 1.778) (xy 3.302 -1.778) (xy 0.762 -1.778)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.762 0.508) (xy 0.762 -0.508)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.762 -1.27) (xy 0.762 -2.286)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(circle
+					(center 1.651 0)
+					(radius 2.794)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
 				(polyline
 					(pts
 						(xy 2.286 0) (xy 1.27 0.381) (xy 1.27 -0.381) (xy 2.286 0)
@@ -8894,6 +8805,52 @@
 					)
 					(fill
 						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.54 2.54) (xy 2.54 1.778)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(circle
+					(center 2.54 1.778)
+					(radius 0.254)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(circle
+					(center 2.54 -1.778)
+					(radius 0.254)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.54 -2.54) (xy 2.54 0) (xy 0.762 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
 					)
 				)
 				(polyline
@@ -8920,10 +8877,30 @@
 						(type none)
 					)
 				)
+			)
+			(symbol "AO3401A_1_1"
 				(pin input line
 					(at -5.08 0 0)
 					(length 2.54)
-					(name "G2"
+					(name "G"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 2.54 5.08 270)
+					(length 2.54)
+					(name "D"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -8939,27 +8916,9 @@
 					)
 				)
 				(pin passive line
-					(at 2.54 5.08 270)
-					(length 2.54)
-					(name "D2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "4"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
 					(at 2.54 -5.08 90)
 					(length 2.54)
-					(name "S2"
+					(name "S"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -9789,19 +9748,6 @@
 		)
 		(uuid d3112cd2-ddd7-42eb-bc97-d8f4a9fc550b)
 	)
-	(rectangle
-		(start 128.27 144.78)
-		(end 143.51 180.34)
-		(stroke
-			(width 0)
-			(type dash)
-			(color 204 102 0 1)
-		)
-		(fill
-			(type none)
-		)
-		(uuid feb6d35b-16aa-4c31-b49f-599376f527f7)
-	)
 	(text "TRACE 50 Ohm !"
 		(exclude_from_sim no)
 		(at 251.714 51.308 0)
@@ -9902,19 +9848,6 @@
 			)
 		)
 		(uuid "cb74d12a-bfba-4ee9-8c2e-28d110eaf65b")
-	)
-	(text "AO664"
-		(exclude_from_sim no)
-		(at 132.334 179.324 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-				(thickness 0.254)
-				(bold yes)
-				(color 204 102 0 1)
-			)
-		)
-		(uuid "f229ef61-090f-491a-833c-15ac4a3bb804")
 	)
 	(junction
 		(at 80.01 275.59)
@@ -10151,6 +10084,12 @@
 		(uuid "64f2e5a2-2a92-4706-b03e-6a82b5c488fb")
 	)
 	(junction
+		(at 66.04 180.34)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "68faf4e5-0df3-4b7b-be5c-0fedd6b77aa4")
+	)
+	(junction
 		(at 137.16 118.11)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -10167,12 +10106,6 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "72555e7a-f35a-43d8-8c79-fb7f8bb3aa40")
-	)
-	(junction
-		(at 77.47 180.34)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "7fb9981e-ab3b-409f-9f74-95046adcf825")
 	)
 	(junction
 		(at 198.12 166.37)
@@ -10469,10 +10402,6 @@
 		(uuid "fc14da42-62a5-4a21-bb71-0320b0cac789")
 	)
 	(no_connect
-		(at 234.95 236.22)
-		(uuid "02de69e1-84fe-47fc-897a-e42f8c9f84dd")
-	)
-	(no_connect
 		(at 245.11 62.23)
 		(uuid "0afc9f47-0406-440a-aded-22986af63537")
 	)
@@ -10547,6 +10476,10 @@
 	(no_connect
 		(at 245.11 69.85)
 		(uuid "a9c6f654-3d08-4b89-bfde-b7cd45aac645")
+	)
+	(no_connect
+		(at 234.95 236.22)
+		(uuid "a9d22321-6512-459e-9fa0-1d46b5f83cc2")
 	)
 	(no_connect
 		(at 43.18 49.53)
@@ -10926,6 +10859,16 @@
 	)
 	(wire
 		(pts
+			(xy 59.69 219.71) (xy 62.23 219.71)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "10c7e776-4507-4ca7-9f84-8178ee4dd19c")
+	)
+	(wire
+		(pts
 			(xy 179.07 194.31) (xy 184.15 194.31)
 		)
 		(stroke
@@ -11116,16 +11059,6 @@
 	)
 	(wire
 		(pts
-			(xy 93.98 153.67) (xy 93.98 154.94)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1a2de68c-3253-4139-b3c9-5eae3e6c029b")
-	)
-	(wire
-		(pts
 			(xy 179.07 222.25) (xy 179.07 237.49)
 		)
 		(stroke
@@ -11196,6 +11129,16 @@
 	)
 	(wire
 		(pts
+			(xy 66.04 180.34) (xy 59.69 180.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1df4d2c8-847a-43c1-9a25-01989c6ebaf7")
+	)
+	(wire
+		(pts
 			(xy 387.35 167.64) (xy 387.35 177.8)
 		)
 		(stroke
@@ -11223,16 +11166,6 @@
 			(type default)
 		)
 		(uuid "1eeaa111-867a-45bc-984f-4f3fce758f4b")
-	)
-	(wire
-		(pts
-			(xy 270.51 213.36) (xy 274.32 213.36)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1fdf4266-8210-4d46-beed-f7a913340aac")
 	)
 	(wire
 		(pts
@@ -11366,7 +11299,7 @@
 	)
 	(wire
 		(pts
-			(xy 81.28 185.42) (xy 77.47 185.42)
+			(xy 81.28 185.42) (xy 66.04 185.42)
 		)
 		(stroke
 			(width 0)
@@ -11803,6 +11736,16 @@
 			(type default)
 		)
 		(uuid "3ab69d96-becb-4afa-a1eb-e79252169755")
+	)
+	(wire
+		(pts
+			(xy 59.69 217.17) (xy 59.69 219.71)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3c439dad-1c90-491d-89d3-73aaeb351242")
 	)
 	(wire
 		(pts
@@ -12446,7 +12389,7 @@
 	)
 	(wire
 		(pts
-			(xy 77.47 175.26) (xy 81.28 175.26)
+			(xy 66.04 175.26) (xy 81.28 175.26)
 		)
 		(stroke
 			(width 0)
@@ -12506,7 +12449,7 @@
 	)
 	(wire
 		(pts
-			(xy 77.47 175.26) (xy 77.47 180.34)
+			(xy 66.04 175.26) (xy 66.04 180.34)
 		)
 		(stroke
 			(width 0)
@@ -12596,6 +12539,16 @@
 	)
 	(wire
 		(pts
+			(xy 93.98 153.67) (xy 93.98 170.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "70e4ea5a-7980-413d-928f-e87587e13c08")
+	)
+	(wire
+		(pts
 			(xy 71.12 165.1) (xy 71.12 166.37)
 		)
 		(stroke
@@ -12623,16 +12576,6 @@
 			(type default)
 		)
 		(uuid "760d693a-3b79-411f-b0fd-82bf6f27b69c")
-	)
-	(wire
-		(pts
-			(xy 77.47 180.34) (xy 59.69 180.34)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "77a48b23-c6b9-4473-950b-fa3b5a492bd7")
 	)
 	(wire
 		(pts
@@ -13256,6 +13199,16 @@
 	)
 	(wire
 		(pts
+			(xy 274.32 213.36) (xy 270.51 213.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "922f9b18-04c9-4676-8bc5-8c9de15a317e")
+	)
+	(wire
+		(pts
 			(xy 123.19 175.26) (xy 129.54 175.26)
 		)
 		(stroke
@@ -13293,6 +13246,16 @@
 			(type default)
 		)
 		(uuid "9352ea40-339b-452d-bf17-e424da0e452e")
+	)
+	(wire
+		(pts
+			(xy 59.69 222.25) (xy 59.69 224.79)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "936e3429-03ee-46e2-b46b-0b2bb209e59d")
 	)
 	(wire
 		(pts
@@ -13426,6 +13389,16 @@
 	)
 	(wire
 		(pts
+			(xy 71.12 180.34) (xy 81.28 180.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "9a018af2-44f0-4bdb-84e1-47b2d4548830")
+	)
+	(wire
+		(pts
 			(xy 208.28 154.94) (xy 217.17 154.94)
 		)
 		(stroke
@@ -13516,16 +13489,6 @@
 	)
 	(wire
 		(pts
-			(xy 93.98 160.02) (xy 93.98 170.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a18d835c-318d-4713-8e69-7e6a3812c98e")
-	)
-	(wire
-		(pts
 			(xy 127 212.09) (xy 127 215.9)
 		)
 		(stroke
@@ -13553,16 +13516,6 @@
 			(type default)
 		)
 		(uuid "a1f40144-9e77-45b9-9776-73f0d2dcebff")
-	)
-	(wire
-		(pts
-			(xy 77.47 180.34) (xy 81.28 180.34)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a211d2c3-1a4c-4500-b309-9581e66690c1")
 	)
 	(wire
 		(pts
@@ -13733,6 +13686,16 @@
 			(type default)
 		)
 		(uuid "a7db1b9d-a712-4c78-8b3a-bb58de27ab1c")
+	)
+	(wire
+		(pts
+			(xy 59.69 222.25) (xy 62.23 222.25)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a8219fe0-cfcc-48dd-98ce-dd6ec8eb88aa")
 	)
 	(wire
 		(pts
@@ -14246,7 +14209,7 @@
 	)
 	(wire
 		(pts
-			(xy 77.47 180.34) (xy 77.47 185.42)
+			(xy 66.04 180.34) (xy 66.04 185.42)
 		)
 		(stroke
 			(width 0)
@@ -15604,6 +15567,16 @@
 		)
 		(uuid "64b847b2-6e2d-4f60-8ead-0c349352e4c2")
 	)
+	(label "CHARGE_EN"
+		(at 71.12 180.34 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "6916e43c-6b08-4971-977f-ac4310947324")
+	)
 	(label "UWB_LED_RX"
 		(at 400.05 29.21 180)
 		(effects
@@ -16024,6 +15997,16 @@
 		)
 		(uuid "e2ec5f7b-96b5-46c0-881c-0c1d881fd113")
 	)
+	(label "CHARGE_EN"
+		(at 274.32 213.36 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "e594d011-0f30-4862-bbc3-beb1166edb29")
+	)
 	(label "PA0{slash}BTN_USR"
 		(at 295.91 236.22 180)
 		(effects
@@ -16093,16 +16076,6 @@
 			(justify right bottom)
 		)
 		(uuid "f9b89f15-562e-47f9-9144-42044798070b")
-	)
-	(label "LED_PM"
-		(at 274.32 213.36 0)
-		(effects
-			(font
-				(size 1 1)
-			)
-			(justify left bottom)
-		)
-		(uuid "fd0925f7-6206-497c-8ff8-edeb29104504")
 	)
 	(label "UWB_LED_TX"
 		(at 379.73 93.98 180)
@@ -16960,7 +16933,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "I2C"
+		(property "Value" "AUX"
 			(at 397.256 272.288 0)
 			(effects
 				(font
@@ -18169,6 +18142,80 @@
 		)
 	)
 	(symbol
+		(lib_id "Transistor_FET:AO3401A")
+		(at 134.62 172.72 270)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "18217242-f409-4c75-bc2a-718e847be558")
+		(property "Reference" "Q3"
+			(at 134.62 179.07 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "AO3401A"
+			(at 134.62 181.61 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
+			(at 132.715 177.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+					(italic yes)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "http://www.aosmd.com/pdfs/datasheet/AO3401A.pdf"
+			(at 130.81 177.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Description" "-4.0A Id, -30V Vds, P-Channel MOSFET, SOT-23"
+			(at 134.62 172.72 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "9e2e8984-dd2a-4258-99c0-cccf3ae28b03")
+		)
+		(pin "3"
+			(uuid "455a9be3-ff51-43b4-a941-51865b21847a")
+		)
+		(pin "2"
+			(uuid "3765b31e-1c08-4051-8e1b-edeaf984a85b")
+		)
+		(instances
+			(project ""
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "Q3")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:+3.3V")
 		(at 384.81 64.77 0)
 		(unit 1)
@@ -18228,6 +18275,71 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#PWR075")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+BATT")
+		(at 59.69 217.17 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "19ab30be-a02e-4066-833a-2bca32685a09")
+		(property "Reference" "#PWR010"
+			(at 59.69 220.98 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "+BATT"
+			(at 59.69 212.852 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 59.69 217.17 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 59.69 217.17 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+BATT\""
+			(at 59.69 217.17 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "dbb1f329-e473-4456-9302-e15875c7225e")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "#PWR010")
 					(unit 1)
 				)
 			)
@@ -21081,76 +21193,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:Polyfuse_Small")
-		(at 93.98 157.48 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "4ed5e539-bddc-41f5-88bf-32a723911fb1")
-		(property "Reference" "F1"
-			(at 96.52 156.2099 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "Polyfuse_Small"
-			(at 96.52 158.7499 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Fuse:Fuse_1206_3216Metric"
-			(at 95.25 162.56 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 93.98 157.48 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Resettable fuse, polymeric positive temperature coefficient, small symbol"
-			(at 93.98 157.48 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "2"
-			(uuid "fbd91a36-83fd-4f99-be4a-aa2b0c68ea71")
-		)
-		(pin "1"
-			(uuid "ec7a2004-bb34-4ed0-9d35-0a293280bc69")
-		)
-		(instances
-			(project "tag"
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "F1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "power:+3.3V")
 		(at 144.78 95.25 0)
 		(unit 1)
@@ -21745,91 +21787,6 @@
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "#PWR032")
 					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_name "IRF7309PBF_1")
-		(lib_id "Transistor_FET:IRF7309PBF")
-		(at 134.62 172.72 270)
-		(unit 2)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "5d479625-6d0b-4557-87db-0e4645ae521d")
-		(property "Reference" "Q1"
-			(at 137.414 168.148 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "AO664"
-			(at 139.7 167.132 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Package_SO:TSOP-6_1.65x3.05mm_P0.95mm"
-			(at 132.715 177.8 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-					(italic yes)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 130.81 177.8 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 134.62 172.72 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "6"
-			(uuid "6e461b3f-e31e-4f1f-a826-29a73812d09b")
-		)
-		(pin "2"
-			(uuid "eb84632f-5bc5-4ffc-8d4b-c9ecb2e4db23")
-		)
-		(pin "1"
-			(uuid "7bfc4449-c5b8-4b14-bd7d-09b2b51fd747")
-		)
-		(pin "5"
-			(uuid "bd1f8484-2964-494d-8e03-983e6cdc3c34")
-		)
-		(pin "3"
-			(uuid "91a50885-1b96-4f12-8874-df25b411e61f")
-		)
-		(pin "4"
-			(uuid "4031c000-17b5-4932-8fdb-4029ff1b54e7")
-		)
-		(instances
-			(project ""
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "Q1")
-					(unit 2)
 				)
 			)
 		)
@@ -22900,6 +22857,76 @@
 			(project "learningkcad"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "C15")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Connector_Generic:Conn_01x02")
+		(at 67.31 222.25 0)
+		(mirror x)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "6e826f20-b550-4054-b355-ad213c5c7b12")
+		(property "Reference" "J10"
+			(at 69.85 222.2501 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "Conn_01x02"
+			(at 69.85 219.7101 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Connector_Wire:SolderWire-0.5sqmm_1x02_P4.6mm_D0.9mm_OD2.1mm"
+			(at 67.31 222.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 67.31 222.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 67.31 222.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "cf3e40c1-ec28-413e-979c-c306f748f4a1")
+		)
+		(pin "1"
+			(uuid "acdf069d-955f-4045-a9df-7821ec183120")
+		)
+		(instances
+			(project ""
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "J10")
 					(unit 1)
 				)
 			)
@@ -24187,7 +24214,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder"
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 127.9652 223.52 0)
 			(effects
 				(font
@@ -29759,90 +29786,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Transistor_FET:IRF7309PBF")
-		(at 137.16 154.94 180)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "cc074c49-816b-4d7a-9880-0d0b58e0c1ba")
-		(property "Reference" "Q1"
-			(at 141.732 157.734 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "AO664"
-			(at 142.748 160.02 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Package_SO:TSOP-6_1.65x3.05mm_P0.95mm"
-			(at 132.08 153.035 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-					(italic yes)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 132.08 151.13 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 137.16 154.94 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "eb84632f-5bc5-4ffc-8d4b-c9ecb2e4db24")
-		)
-		(pin "6"
-			(uuid "7bfc4449-c5b8-4b14-bd7d-09b2b51fd748")
-		)
-		(pin "5"
-			(uuid "bd1f8484-2964-494d-8e03-983e6cdc3c35")
-		)
-		(pin "3"
-			(uuid "91a50885-1b96-4f12-8874-df25b411e620")
-		)
-		(pin "2"
-			(uuid "3fb8ff0b-da25-44bb-a25f-d5b7dea7f083")
-		)
-		(pin "4"
-			(uuid "4031c000-17b5-4932-8fdb-4029ff1b54e8")
-		)
-		(instances
-			(project ""
-				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
-					(reference "Q1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Connector:TestPoint")
 		(at 441.96 184.15 180)
 		(unit 1)
@@ -31176,6 +31119,71 @@
 	)
 	(symbol
 		(lib_id "power:GND")
+		(at 59.69 224.79 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "efcee642-b258-4598-af8c-33be2515020b")
+		(property "Reference" "#PWR060"
+			(at 59.69 231.14 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 59.944 229.108 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 59.69 224.79 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 59.69 224.79 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 59.69 224.79 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "3028376c-4b8e-4ae5-8f86-6457ea5f4e48")
+		)
+		(instances
+			(project "tag"
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "#PWR060")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
 		(at 34.29 214.63 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -31898,6 +31906,81 @@
 			(project "tag"
 				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
 					(reference "F2")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Transistor_FET:AO3400A")
+		(at 137.16 154.94 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "fc902acc-ffb5-49b4-bdac-6bf4127c4230")
+		(property "Reference" "Q2"
+			(at 141.224 156.464 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "AO3400A"
+			(at 144.526 159.258 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
+			(at 132.08 153.035 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+					(italic yes)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "http://www.aosmd.com/pdfs/datasheet/AO3400A.pdf"
+			(at 132.08 151.13 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Description" "30V Vds, 5.7A Id, N-Channel MOSFET, SOT-23"
+			(at 137.16 154.94 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "5e688ee5-b650-4471-b650-48a3cfb47109")
+		)
+		(pin "1"
+			(uuid "aaa4a132-bdbe-4ba6-b384-2d2fb446366d")
+		)
+		(pin "3"
+			(uuid "535211bc-42b7-4a06-93bb-2ff28084a4d3")
+		)
+		(instances
+			(project ""
+				(path "/36ff3ade-5474-48a6-a94c-a185611a6890"
+					(reference "Q2")
 					(unit 1)
 				)
 			)

@@ -5,9 +5,6 @@
 
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
 
-#define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
-#define CHECK_VOID(_cond) do { if (!(_cond)) return; } while (0)
-
 typedef struct network_core_packet_size_s
 {
     uint16_t protobuf_tag;

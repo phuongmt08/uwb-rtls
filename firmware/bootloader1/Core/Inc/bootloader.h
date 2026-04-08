@@ -35,6 +35,12 @@
 bool bl_app_vector_valid(void);
 bool bl_should_enter_dfu(void);
 void bl_jump_to_app(void);
+
+/* BLE FOTA — runs alongside USB DFU in the bootloader main loop */
+struct network_core_t;
+struct network_cmd_t;
+bool bl_fota_run(struct network_core_t *net_core, struct network_cmd_t *net_cmd, uint32_t timeout_ms);
+
 /* Timestamp of last DFU activity - updated by DFU callbacks */
 extern volatile uint32_t g_dfu_last_activity;
 

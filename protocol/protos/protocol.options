@@ -6,6 +6,10 @@ protobuf.flash_write_t.data                         max_size:200
 protobuf.flash_data_t.data                          max_size:200
 protobuf.anchor_layout_set_t.anchors                max_count:4
 protobuf.anchor_layout_resp_t.anchors               max_count:4
+protobuf.ble_scan_result_t.mac_address              max_size:6
+protobuf.ble_scan_result_t.name                      max_size:32
+protobuf.ble_connect_t.mac_address                   max_size:6
+protobuf.ble_adv_config_t.device_name                    max_size:32
 
 protobuf.common_constant_t                          long_names:false
 protobuf.packet_ack_response_t                      long_names:false
