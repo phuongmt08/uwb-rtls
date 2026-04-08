@@ -52,7 +52,7 @@ typedef enum _protobuf_device_addr_t {
     protobuf_PACKET_ADDR_UNSPECIFIED = 0,
     protobuf_PACKET_ADDR_TAG = 1,
     protobuf_PACKET_ADDR_ANCHOR = 2,
-    protobuf_PACKET_ADDR_GATEWAY = 3,
+    protobuf_PACKET_ADDR_CENTRAL = 3,
     protobuf_PACKET_ADDR_PERIPHERAL = 4,
     protobuf_PACKET_ADDR_HOST = 5,
     protobuf_PACKET_ADDR_DEBUG = 7,
@@ -611,7 +611,7 @@ extern "C" {
 #define protobuf_device_addr_t_PACKET_ADDR_UNSPECIFIED protobuf_PACKET_ADDR_UNSPECIFIED
 #define protobuf_device_addr_t_PACKET_ADDR_TAG protobuf_PACKET_ADDR_TAG
 #define protobuf_device_addr_t_PACKET_ADDR_ANCHOR protobuf_PACKET_ADDR_ANCHOR
-#define protobuf_device_addr_t_PACKET_ADDR_GATEWAY protobuf_PACKET_ADDR_GATEWAY
+#define protobuf_device_addr_t_PACKET_ADDR_CENTRAL protobuf_PACKET_ADDR_CENTRAL
 #define protobuf_device_addr_t_PACKET_ADDR_PERIPHERAL protobuf_PACKET_ADDR_PERIPHERAL
 #define protobuf_device_addr_t_PACKET_ADDR_HOST protobuf_PACKET_ADDR_HOST
 #define protobuf_device_addr_t_PACKET_ADDR_DEBUG protobuf_PACKET_ADDR_DEBUG
