@@ -5945,6 +5945,19 @@
 
 // </e>
 
+// <e> APP_UART_ENABLED - app_uart - UART module with FIFO
+//==========================================================
+#ifndef APP_UART_ENABLED
+#define APP_UART_ENABLED 1
+#endif
+
+// <o> APP_UART_DRIVER_INSTANCE - UART driver instance
+#ifndef APP_UART_DRIVER_INSTANCE
+#define APP_UART_DRIVER_INSTANCE 0
+#endif
+
+// </e>
+
 // <e> USBD_ENABLED - nrf_drv_usbd - Software Component
 //==========================================================
 #ifndef USBD_ENABLED
@@ -12016,6 +12029,12 @@
 // </h> 
 //==========================================================
 
+// <e> APP_FIFO_ENABLED - app_fifo - Software FIFO implementation
+//==========================================================
+#ifndef APP_FIFO_ENABLED
+#define APP_FIFO_ENABLED 1
+#endif
+// </e>
+
 // <<< end of configuration section >>>
 #endif //SDK_CONFIG_H
-
