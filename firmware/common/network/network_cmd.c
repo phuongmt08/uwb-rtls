@@ -1,10 +1,17 @@
 #include "network_cmd.h"
-#include "sys_logger.h"
+#ifdef BOOTLOADER
+    #include "sys_logger_bl.h"
+#else
+    #include "sys_logger.h"
+#endif
 #include "config.h"
-#include "bsp_flash.h"
 #include "bsp_util.h"
-#include "sys_config.h"
-#include "bsp_battery.h"
+
+#ifndef BOOTLOADER
+    #include "bsp_flash.h"
+    #include "sys_config.h"
+    #include "bsp_battery.h"
+#endif
 
 #include <string.h>
 // clang-format off
@@ -36,6 +43,14 @@ static void network_cmd_send_packet(network_cmd_t *cmd, protobuf_packet_t *pkt);
 static void network_cmd_unimplemented(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_none(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_ack(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length);
+static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
+static bool network_cmd_host_active(const network_cmd_t *cmd);
+
+#ifndef BOOTLOADER
 static void network_cmd_device_information_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_device_type_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_device_type_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
@@ -46,18 +61,13 @@ static void network_cmd_time_sync_set(network_cmd_t *cmd, const protobuf_packet_
 static void network_cmd_ble_status_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
-static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t *pkt);
-static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
-static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_packet_t *pkt);
-static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length);
-static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
-static bool network_cmd_host_active(const network_cmd_t *cmd);
 static void network_cmd_battery_info_get(network_cmd_t *cmd, const protobuf_packet_t *pkt);
+#endif /* !BOOTLOADER */
 
 static network_cmd_t *g_network_cmd_instance = NULL;
 
@@ -87,62 +97,84 @@ static const network_cmd_entry_t network_cmd_table[] = {
     //      +-------------------------------------------------+---------------------------------------+------------------------+
     CMD_INFO(protobuf_packet_t_none_tag,                      network_cmd_none,                        "none"),               /* 2  */
     CMD_INFO(protobuf_packet_t_ack_tag,                       network_cmd_ack,                         "ack"),                /* 3  */
+
+#ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_device_information_get_tag,    network_cmd_device_information_get,      "dev_info_get"),       /* 4  */
     CMD_INFO(protobuf_packet_t_device_information_resp_tag,   network_cmd_unimplemented,               "dev_info_resp"),      /* 5  */
 
-    CMD_INFO(protobuf_packet_t_time_sync_get_tag,             network_cmd_time_sync_get,               "time_sync_get"),      /* 6  */
-    CMD_INFO(protobuf_packet_t_time_sync_set_tag,             network_cmd_time_sync_set,               "time_sync_set"),      /* 7  */
-    CMD_INFO(protobuf_packet_t_time_sync_resp_tag,            network_cmd_unimplemented,               "time_sync_resp"),     /* 8  */
+    CMD_INFO(protobuf_packet_t_sys_config_get_tag,            network_cmd_sys_config_get,              "cfg_get"),            /* 10 */
+    CMD_INFO(protobuf_packet_t_sys_config_set_tag,            network_cmd_sys_config_set,              "cfg_set"),            /* 11 */
+    CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 12 */
+#endif /* !BOOTLOADER */
 
-    CMD_INFO(protobuf_packet_t_sys_config_get_tag,            network_cmd_sys_config_get,              "cfg_get"),            /* 9  */
-    CMD_INFO(protobuf_packet_t_sys_config_set_tag,            network_cmd_sys_config_set,              "cfg_set"),            /* 10 */
-    CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 11 */
+    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_unimplemented,               "time_sync_adv_set"),  /* 9  */
 
-    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 12 */
-    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_set_tag,       network_cmd_sys_ranging_cfg_set,         "rng_cfg_set"),        /* 13 */
-    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,      network_cmd_unimplemented,               "rng_cfg_resp"),       /* 14 */
-    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_unimplemented,               "rng_start"),          /* 15 */
-    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_unimplemented,               "rng_stop"),           /* 16 */
-    CMD_INFO(protobuf_packet_t_ranging_result_tag,            network_cmd_unimplemented,               "rng_result"),         /* 17 */
-    CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 18 */
-    CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,       network_cmd_unimplemented,               "rng_status_resp"),    /* 19 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 13 */
+    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_set_tag,       network_cmd_sys_ranging_cfg_set,         "rng_cfg_set"),        /* 14 */
+    CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,      network_cmd_unimplemented,               "rng_cfg_resp"),       /* 15 */
+    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_unimplemented,               "rng_start"),          /* 16 */
+    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_unimplemented,               "rng_stop"),           /* 17 */
+    CMD_INFO(protobuf_packet_t_ranging_result_tag,            network_cmd_unimplemented,               "rng_result"),         /* 18 */
+    CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 19 */
+    CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,       network_cmd_unimplemented,               "rng_status_resp"),    /* 20 */
 
-    CMD_INFO(protobuf_packet_t_filter_cfg_get_tag,            network_cmd_unimplemented,               "flt_cfg_get"),        /* 20 */
-    CMD_INFO(protobuf_packet_t_filter_cfg_set_tag,            network_cmd_unimplemented,               "flt_cfg_set"),        /* 21 */
-    CMD_INFO(protobuf_packet_t_filter_cfg_resp_tag,           network_cmd_unimplemented,               "flt_cfg_resp"),       /* 22 */
+    CMD_INFO(protobuf_packet_t_filter_cfg_get_tag,            network_cmd_unimplemented,               "flt_cfg_get"),        /* 21 */
+    CMD_INFO(protobuf_packet_t_filter_cfg_set_tag,            network_cmd_unimplemented,               "flt_cfg_set"),        /* 22 */
+    CMD_INFO(protobuf_packet_t_filter_cfg_resp_tag,           network_cmd_unimplemented,               "flt_cfg_resp"),       /* 23 */
+#endif /* !BOOTLOADER */
 
-    CMD_INFO(protobuf_packet_t_device_reset_tag,              network_cmd_device_reset,                "dev_reset"),          /* 23 */
-    CMD_INFO(protobuf_packet_t_uwb_reset_tag,                 network_cmd_unimplemented,               "uwb_reset"),          /* 24 */
-    CMD_INFO(protobuf_packet_t_factory_config_reset_tag,      network_cmd_unimplemented,               "factory_reset"),      /* 25 */
-    CMD_INFO(protobuf_packet_t_device_type_set_tag,           network_cmd_device_type_set,             "dev_type_set"),       /* 26 */
-    CMD_INFO(protobuf_packet_t_device_type_get_tag,           network_cmd_device_type_get,             "dev_type_get"),       /* 27 */
+    CMD_INFO(protobuf_packet_t_device_reset_tag,              network_cmd_device_reset,                "dev_reset"),          /* 24 */
+    CMD_INFO(protobuf_packet_t_uwb_reset_tag,                 network_cmd_unimplemented,               "uwb_reset"),          /* 25 */
+    CMD_INFO(protobuf_packet_t_factory_config_reset_tag,      network_cmd_unimplemented,               "factory_reset"),      /* 26 */
 
-    /* Flash commands: same handler in both BOOTLOADER and app builds for now */
-    CMD_INFO(protobuf_packet_t_flash_erase_tag,               network_cmd_unimplemented,               "flash_erase"),        /* 28 */
-    CMD_INFO(protobuf_packet_t_flash_read_tag,                network_cmd_unimplemented,               "flash_read"),         /* 29 */
-    CMD_INFO(protobuf_packet_t_flash_data_tag,                network_cmd_unimplemented,               "flash_data"),         /* 30 */
-    CMD_INFO(protobuf_packet_t_flash_write_tag,               network_cmd_unimplemented,               "flash_write"),        /* 31 */
-
-#ifdef HAVE_BLE_PERIPHERAL
-    CMD_INFO(protobuf_packet_t_ble_enable_tag,                network_cmd_unimplemented,               "ble_enable"),         /* 32 */
-    CMD_INFO(protobuf_packet_t_ble_status_get_tag,            network_cmd_ble_status_get,              "ble_status_get"),     /* 33 */
-    CMD_INFO(protobuf_packet_t_ble_status_resp_tag,           network_cmd_unimplemented,               "ble_status_resp"),    /* 34 */
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_unimplemented,               "ble_adv_status"),     /* 35 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_device_type_set_tag,           network_cmd_device_type_set,             "dev_type_set"),       /* 27 */
+    CMD_INFO(protobuf_packet_t_device_type_get_tag,           network_cmd_device_type_get,             "dev_type_get"),       /* 28 */
 #endif
 
-    CMD_INFO(protobuf_packet_t_log_data_tag,                  network_cmd_log_data_get,                "log_data"),           /* 36 */
-    CMD_INFO(protobuf_packet_t_log_clear_tag,                 network_cmd_log_clear,                   "log_clear"),          /* 37 */
-    CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_host_transport_set,          "host_transport_set"), /* 38 */
+    /* Flash commands — available in both app and bootloader */
+    CMD_INFO(protobuf_packet_t_flash_erase_tag,               network_cmd_unimplemented,               "flash_erase"),        /* 29 */
+    CMD_INFO(protobuf_packet_t_flash_read_tag,                network_cmd_unimplemented,               "flash_read"),         /* 30 */
+    CMD_INFO(protobuf_packet_t_flash_data_tag,                network_cmd_unimplemented,               "flash_data"),         /* 31 */
+    CMD_INFO(protobuf_packet_t_flash_write_tag,               network_cmd_unimplemented,               "flash_write"),        /* 32 */
 
-    CMD_INFO(protobuf_packet_t_pos_calib_cfg_get_tag,         network_cmd_pos_calib_cfg_get,           "calib_cfg_get"),      /* 39 */
-    CMD_INFO(protobuf_packet_t_pos_calib_cfg_set_tag,         network_cmd_pos_calib_cfg_set,           "calib_cfg_set"),      /* 40 */
-    CMD_INFO(protobuf_packet_t_pos_calib_cfg_resp_tag,        network_cmd_unimplemented,               "calib_cfg_resp"),     /* 41 */
+#ifdef HAVE_BLE_PERIPHERAL
+    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,        network_cmd_unimplemented,               "ble_adv_cfg_set"),    /* 33 */
+    CMD_INFO(protobuf_packet_t_ble_status_get_tag,            network_cmd_unimplemented,               "ble_status_get"),     /* 34 */
+    CMD_INFO(protobuf_packet_t_ble_status_resp_tag,           network_cmd_unimplemented,               "ble_status_resp"),    /* 35 */
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_unimplemented,               "ble_adv_status"),     /* 36 */
+#endif
 
-    CMD_INFO(protobuf_packet_t_anchor_layout_get_tag,         network_cmd_anchor_layout_get,           "anchor_layout_get"),  /* 42 */
-    CMD_INFO(protobuf_packet_t_anchor_layout_set_tag,         network_cmd_anchor_layout_set,           "anchor_layout_set"),  /* 43 */
-    CMD_INFO(protobuf_packet_t_anchor_layout_resp_tag,        network_cmd_unimplemented,               "anchor_layout_resp"), /* 44 */
-    CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,           "battery_info_resp"),  /* 45 */
-    CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 46 */
+    CMD_INFO(protobuf_packet_t_log_data_tag,                  network_cmd_log_data_get,                "log_data"),           /* 37 */
+    CMD_INFO(protobuf_packet_t_log_clear_tag,                 network_cmd_log_clear,                   "log_clear"),          /* 38 */
+
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_host_transport_set,          "host_transport_set"), /* 39 */
+
+    CMD_INFO(protobuf_packet_t_pos_calib_cfg_get_tag,         network_cmd_pos_calib_cfg_get,           "calib_cfg_get"),      /* 40 */
+    CMD_INFO(protobuf_packet_t_pos_calib_cfg_set_tag,         network_cmd_pos_calib_cfg_set,           "calib_cfg_set"),      /* 41 */
+    CMD_INFO(protobuf_packet_t_pos_calib_cfg_resp_tag,        network_cmd_unimplemented,               "calib_cfg_resp"),     /* 42 */
+
+    CMD_INFO(protobuf_packet_t_anchor_layout_get_tag,         network_cmd_anchor_layout_get,           "anchor_layout_get"),  /* 43 */
+    CMD_INFO(protobuf_packet_t_anchor_layout_set_tag,         network_cmd_anchor_layout_set,           "anchor_layout_set"),  /* 44 */
+    CMD_INFO(protobuf_packet_t_anchor_layout_resp_tag,        network_cmd_unimplemented,               "anchor_layout_resp"), /* 45 */
+    CMD_INFO(protobuf_packet_t_flash_verify_tag,              network_cmd_unimplemented,               "flash_verify"),       /* 46 */
+
+    /* BLE Central messages */
+    CMD_INFO(protobuf_packet_t_ble_conn_params_get_tag,       network_cmd_unimplemented,               "ble_conn_get"),       /* 47 */
+    CMD_INFO(protobuf_packet_t_ble_conn_params_set_tag,       network_cmd_unimplemented,               "ble_conn_set"),       /* 48 */
+    CMD_INFO(protobuf_packet_t_ble_conn_params_resp_tag,      network_cmd_unimplemented,               "ble_conn_resp"),      /* 49 */
+    CMD_INFO(protobuf_packet_t_ble_disconnect_tag,            network_cmd_unimplemented,               "ble_disc"),           /* 50 */
+    CMD_INFO(protobuf_packet_t_ble_scan_start_tag,            network_cmd_unimplemented,               "ble_scan_start"),     /* 51 */
+    CMD_INFO(protobuf_packet_t_ble_scan_stop_tag,             network_cmd_unimplemented,               "ble_scan_stop"),      /* 52 */
+    CMD_INFO(protobuf_packet_t_ble_connect_tag,               network_cmd_unimplemented,               "ble_connect"),       /* 53 */
+    CMD_INFO(protobuf_packet_t_ble_scan_result_tag,           network_cmd_unimplemented,               "ble_scan_result"),    /* 54 */
+
+    /* Battery */
+    CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,               "battery_info_resp"),  /* 60 */
+    CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 61 */
+#endif /* !BOOTLOADER */
     //      +=================================================+=======================================+========================+
 };
 
@@ -175,6 +207,7 @@ static protobuf_packet_t network_cmd_make_resp(const protobuf_packet_t *req,
     return resp;
 }
 
+#ifndef BOOTLOADER
 /**
  * Persist config to flash and warn on failure.
  */
@@ -184,6 +217,7 @@ static void network_cmd_config_save(const char *context)
         RLOG_W(OBJECT_CODE, "Failed to persist %s from host", context);
     }
 }
+#endif /* !BOOTLOADER */
 
 static void network_cmd_retry_pending(network_cmd_t *cmd)
 {
@@ -228,6 +262,12 @@ static void network_cmd_ack(network_cmd_t *cmd, const protobuf_packet_t *pkt)
     (void)cmd;
     (void)pkt;
 }
+
+/* ─────────────────────────────────────────────
+ * App-only command handlers
+ * ───────────────────────────────────────────── */
+
+#ifndef BOOTLOADER
 
 static void network_cmd_device_information_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
@@ -343,13 +383,6 @@ static void network_cmd_sys_ranging_cfg_set(network_cmd_t *cmd, const protobuf_p
     network_cmd_config_save("ranging_cfg");
 }
 
-static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t *pkt)
-{
-    (void)cmd;
-    (void)pkt;
-    bsp_util_device_reset();
-}
-
 static void network_cmd_time_sync_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
     CHECK_VOID(cmd && pkt && cmd->stream);
@@ -402,101 +435,6 @@ static void network_cmd_ble_status_get(network_cmd_t *cmd, const protobuf_packet
 {
     /* TODO: not implemented yet */
     network_cmd_unimplemented(cmd, pkt);
-}
-
-static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(cmd && pkt && cmd->stream);
-
-#ifdef HAVE_FLASH_STORAGE
-    s_log_stream_enabled = true;
-    s_log_stream_dst     = (uint8_t)pkt->hdr.addr.src;
-
-    protobuf_packet_t sample;
-    uint16_t max_payload = (uint16_t)sizeof(sample.params.log_data.data.bytes);
-    network_send_log(cmd, s_log_stream_dst, max_payload);
-#endif
-}
-
-static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(cmd && pkt);
-
-#ifdef HAVE_FLASH_STORAGE
-    uint32_t length = pkt->params.log_clear.length;
-    if (length > 0u) {
-        sys_logger_flash_consume(length);
-    }
-#endif
-}
-
-static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length)
-{
-    CHECK_VOID(cmd && cmd->stream);
-
-#ifdef HAVE_FLASH_STORAGE
-    if (s_log_tracker.waiting_ack) {
-        return;
-    }
-
-    if (sys_logger_flash_pending_bytes() == 0u) {
-        return;
-    }
-
-    protobuf_packet_t packet;
-    memset(&packet, 0, sizeof(packet));
-    packet.which_params              = protobuf_packet_t_log_data_tag;
-    packet.params.log_data.type      = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
-
-    uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
-    uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
-    uint32_t read_len    = sys_logger_flash_read_packet(packet.params.log_data.data.bytes, send_len);
-    if (read_len == 0u) {
-        return;
-    }
-
-    packet.params.log_data.data.size = (pb_size_t)read_len;
-    if (!network_core_send_packet(cmd->stream, dst, &packet)) {
-        return;
-    }
-
-    s_log_tracker.waiting_ack  = true;
-    s_log_tracker.log_len      = read_len;
-    s_log_tracker.tracker_id   = network_core_wait_ack(cmd->stream,
-                                                        packet.hdr.seq,
-                                                        WAIT_TIME_TO_RESEND_ACK_MS,
-                                                        log_tracker_callback,
-                                                        &s_log_tracker);
-    if (s_log_tracker.tracker_id < 0) {
-        s_log_tracker.waiting_ack = false;
-        s_log_tracker.log_len     = 0u;
-    }
-#else
-    (void)dst;
-    (void)data_length;
-#endif
-}
-
-static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet)
-{
-    (void)packet;
-
-#ifdef HAVE_FLASH_STORAGE
-    CHECK_VOID(p_tracker != NULL);
-
-    network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;
-    CHECK_VOID(tracker != NULL);
-
-    if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
-        sys_logger_flash_consume(tracker->log_len);
-    }
-
-    tracker->waiting_ack = false;
-    tracker->log_len     = 0u;
-    tracker->tracker_id  = -1;
-#else
-    (void)p_tracker;
-#endif
 }
 
 static void network_cmd_host_transport_set(network_cmd_t *cmd, const protobuf_packet_t *pkt)
@@ -589,18 +527,6 @@ static void network_cmd_anchor_layout_set(network_cmd_t *cmd, const protobuf_pac
     network_cmd_config_save("anchor layout");
 }
 
-static bool network_cmd_host_active(const network_cmd_t *cmd)
-{
-    CHECK(cmd && cmd->stream, false);
-
-    uint32_t last_tick = cmd->stream->latest_packet_tick;
-    if (last_tick == 0u) {
-        return false;
-    }
-
-    return (uint32_t)(bsp_util_get_ticks() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
-}
-
 static void network_cmd_battery_info_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
 {
     CHECK_VOID(cmd && pkt && cmd->stream);
@@ -619,6 +545,176 @@ static void network_cmd_battery_info_get(network_cmd_t *cmd, const protobuf_pack
     resp.params.battery_info_resp.is_charging      = battery_info.is_charging;
     network_cmd_send_packet(cmd, &resp);
 }
+
+#endif /* !BOOTLOADER */
+
+/* ─────────────────────────────────────────────
+ * Shared command handlers (app + bootloader)
+ * ───────────────────────────────────────────── */
+
+static void network_cmd_device_reset(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    (void)cmd;
+    (void)pkt;
+    bsp_util_device_reset();
+}
+
+static void network_cmd_log_data_get(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(cmd && pkt && cmd->stream);
+
+    s_log_stream_enabled = true;
+    s_log_stream_dst     = (uint8_t)pkt->hdr.addr.src;
+
+    protobuf_packet_t sample;
+    uint16_t max_payload = (uint16_t)sizeof(sample.params.log_data.data.bytes);
+    network_send_log(cmd, s_log_stream_dst, max_payload);
+}
+
+static void network_cmd_log_clear(network_cmd_t *cmd, const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(cmd && pkt);
+
+#ifdef HAVE_FLASH_STORAGE
+    uint32_t length = pkt->params.log_clear.length;
+    if (length > 0u) {
+        sys_logger_flash_consume(length);
+    }
+#endif
+}
+
+static void network_send_log(network_cmd_t *cmd, uint8_t dst, uint32_t data_length)
+{
+    CHECK_VOID(cmd && cmd->stream);
+
+#ifdef HAVE_FLASH_STORAGE
+    if (s_log_tracker.waiting_ack) {
+        return;
+    }
+
+    if (sys_logger_flash_pending_bytes() == 0u) {
+        return;
+    }
+
+    protobuf_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.which_params              = protobuf_packet_t_log_data_tag;
+    packet.params.log_data.type      = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
+
+    uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
+    uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
+    uint32_t read_len    = sys_logger_flash_read_packet(packet.params.log_data.data.bytes, send_len);
+    if (read_len == 0u) {
+        return;
+    }
+
+    packet.params.log_data.data.size = (pb_size_t)read_len;
+    if (!network_core_send_packet(cmd->stream, dst, &packet)) {
+        return;
+    }
+
+    s_log_tracker.waiting_ack  = true;
+    s_log_tracker.log_len      = read_len;
+    s_log_tracker.tracker_id   = network_core_wait_ack(cmd->stream,
+                                                        packet.hdr.seq,
+                                                        WAIT_TIME_TO_RESEND_ACK_MS,
+                                                        log_tracker_callback,
+                                                        &s_log_tracker);
+    if (s_log_tracker.tracker_id < 0) {
+        s_log_tracker.waiting_ack = false;
+        s_log_tracker.log_len     = 0u;
+    }
+#else
+    /* No flash storage: drain RAM circular buffer directly.
+     * ACK tracking mirrors the flash path — consume only after host ACKs. */
+    if (s_log_tracker.waiting_ack) {
+        return;
+    }
+
+    if (sys_logger_data_count() == 0u) {
+        return;
+    }
+
+    protobuf_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.which_params              = protobuf_packet_t_log_data_tag;
+    packet.params.log_data.type      = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
+
+    uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
+    uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
+    uint16_t read_len    = sys_logger_peek(packet.params.log_data.data.bytes, send_len);
+    if (read_len == 0u) {
+        return;
+    }
+
+    packet.params.log_data.data.size = (pb_size_t)read_len;
+    if (!network_core_send_packet(cmd->stream, dst, &packet)) {
+        return;
+    }
+
+    s_log_tracker.waiting_ack  = true;
+    s_log_tracker.log_len      = read_len;
+    s_log_tracker.tracker_id   = network_core_wait_ack(cmd->stream,
+                                                        packet.hdr.seq,
+                                                        WAIT_TIME_TO_RESEND_ACK_MS,
+                                                        log_tracker_callback,
+                                                        &s_log_tracker);
+    if (s_log_tracker.tracker_id < 0) {
+        s_log_tracker.waiting_ack = false;
+        s_log_tracker.log_len     = 0u;
+    }
+#endif
+}
+
+static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet)
+{
+    (void)packet;
+
+#ifdef HAVE_FLASH_STORAGE
+    CHECK_VOID(p_tracker != NULL);
+
+    network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;
+    CHECK_VOID(tracker != NULL);
+
+    if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
+        sys_logger_flash_consume(tracker->log_len);
+    }
+
+    tracker->waiting_ack = false;
+    tracker->log_len     = 0u;
+    tracker->tracker_id  = -1;
+#else
+    /* No flash: consume from RAM buffer when host ACKs. */
+    CHECK_VOID(p_tracker != NULL);
+
+    network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;
+    CHECK_VOID(tracker != NULL);
+
+    if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
+        sys_logger_consume((uint16_t)tracker->log_len);
+    }
+
+    tracker->waiting_ack = false;
+    tracker->log_len     = 0u;
+    tracker->tracker_id  = -1;
+#endif
+}
+
+static bool network_cmd_host_active(const network_cmd_t *cmd)
+{
+    CHECK(cmd && cmd->stream, false);
+
+    uint32_t last_tick = cmd->stream->latest_packet_tick;
+    if (last_tick == 0u) {
+        return false;
+    }
+
+    return (uint32_t)(bsp_util_get_ticks() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
+}
+
+/* ─────────────────────────────────────────────
+ * Public API
+ * ───────────────────────────────────────────── */
 
 bool network_cmd_init(network_cmd_t *cmd, network_core_t *stream)
 {
