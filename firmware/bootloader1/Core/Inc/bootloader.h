@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../../../common/memorylayout.h"
+#include "network/network_core.h"
+#include "network/network_cmd.h"
 
 /* Flash layout (STM32F411CE, 512KB)
  * - 0x08000000..0x0800BFFF: Bootloader code (48KB, sectors 0-2)
@@ -36,10 +38,7 @@ bool bl_app_vector_valid(void);
 bool bl_should_enter_dfu(void);
 void bl_jump_to_app(void);
 
-/* BLE FOTA — runs alongside USB DFU in the bootloader main loop */
-struct network_core_t;
-struct network_cmd_t;
-bool bl_fota_run(struct network_core_t *net_core, struct network_cmd_t *net_cmd, uint32_t timeout_ms);
+bool bl_fota_run(network_core_t *net_core, network_cmd_t *net_cmd, uint32_t timeout_ms);
 
 /* Timestamp of last DFU activity - updated by DFU callbacks */
 extern volatile uint32_t g_dfu_last_activity;
