@@ -317,8 +317,7 @@ message flash_write_t {
 }
 
 message flash_verify_t {
-    uint32 file_size      = 1;
-    uint32 expected_crc32 = 2;
+    uint32 dummy     = 1;
 }
 
 /* BLE ---------------------------------------------------------------------- */
@@ -334,8 +333,10 @@ message flash_verify_t {
  * STM32 → nRF : enable or disable BLE stack
  * Useful during UWB calibration or power-saving modes.
  */
-message ble_enable_t {
-    bool enable = 1;
+message ble_adv_config_t {
+    bool enable          = 1;
+    uint32 serial_number = 2;
+    string device_name   = 3;
 }
 
 /*
@@ -348,8 +349,14 @@ message ble_status_get_t {
 
 message ble_status_resp_t {
     ble_state_t state   = 1;
-    bool connected      = 2;
-    int32 rssi_dbm      = 3;  /* valid only when connected */
+    int32 rssi_dbm      = 2;  /* valid only when connected */
+}
+
+message ble_scan_result_t {
+    bytes mac_address   = 1;
+    int32 rssi_dbm      = 2;
+    string name         = 3;
+    uint32 serial_number = 4;
 }
 
 message ble_conn_params_t {
@@ -548,81 +555,83 @@ message packet_t {
         time_sync_get_t           time_sync_get           = 6;
         time_sync_set_t           time_sync_set           = 7;
         time_sync_resp_t          time_sync_resp          = 8;
+        time_sync_adv_set_t       time_sync_adv_set        = 9;
 
         /* System config */
-        sys_config_get_t          sys_config_get          = 9;
-        sys_config_set_t          sys_config_set          = 10;
-        sys_config_resp_t         sys_config_resp         = 11;
+        sys_config_get_t          sys_config_get          = 10;
+        sys_config_set_t          sys_config_set          = 11;
+        sys_config_resp_t         sys_config_resp         = 12;
 
         /* Ranging config */
-        sys_ranging_cfg_get_t     sys_ranging_cfg_get     = 12;
-        sys_ranging_cfg_set_t     sys_ranging_cfg_set     = 13;
-        sys_ranging_cfg_resp_t    sys_ranging_cfg_resp    = 14;
+        sys_ranging_cfg_get_t     sys_ranging_cfg_get     = 13;
+        sys_ranging_cfg_set_t     sys_ranging_cfg_set     = 14;
+        sys_ranging_cfg_resp_t    sys_ranging_cfg_resp    = 15;
 
         /* Ranging control & results */
-        ranging_start_t           ranging_start           = 15;
-        ranging_stop_t            ranging_stop            = 16;
-        ranging_result_t          ranging_result          = 17;
-        ranging_status_get_t      ranging_status_get      = 18;
-        ranging_status_resp_t     ranging_status_resp     = 19;
+        ranging_start_t           ranging_start           = 16;
+        ranging_stop_t            ranging_stop            = 17;
+        ranging_result_t          ranging_result          = 18;
+        ranging_status_get_t      ranging_status_get      = 19;
+        ranging_status_resp_t     ranging_status_resp     = 20;
 
         /* Filter config */
-        filter_cfg_get_t          filter_cfg_get          = 20;
-        filter_cfg_set_t          filter_cfg_set          = 21;
-        filter_cfg_resp_t         filter_cfg_resp         = 22;
+        filter_cfg_get_t          filter_cfg_get          = 21;
+        filter_cfg_set_t          filter_cfg_set          = 22;
+        filter_cfg_resp_t         filter_cfg_resp         = 23;
 
         /* System commands */
-        device_reset_t            device_reset            = 23;
-        uwb_reset_t               uwb_reset               = 24;
-        factory_config_reset_t    factory_config_reset    = 25;
-        device_type_set_t         device_type_set         = 26;
-        device_type_get_t         device_type_get         = 27;
+        device_reset_t            device_reset            = 24;
+        uwb_reset_t               uwb_reset               = 25;
+        factory_config_reset_t    factory_config_reset    = 26;
+        device_type_set_t         device_type_set         = 27;
+        device_type_get_t         device_type_get         = 28;
 
         /* Flash */
-        flash_erase_t             flash_erase             = 28;
-        flash_read_t              flash_read              = 29;
-        flash_data_t              flash_data              = 30;
-        flash_write_t             flash_write             = 31;
+        flash_erase_t             flash_erase             = 29;
+        flash_read_t              flash_read              = 30;
+        flash_data_t              flash_data              = 31;
+        flash_write_t             flash_write             = 32;
 
         /* BLE control — STM32 ↔ nRF52832 */
-        ble_enable_t              ble_enable              = 32;
-        ble_status_get_t          ble_status_get          = 33;
-        ble_status_resp_t         ble_status_resp         = 34;
+        ble_adv_config_t          ble_adv_config_set      = 33;
+        ble_status_get_t          ble_status_get          = 34;
+        ble_status_resp_t         ble_status_resp         = 35;
 
         /* BLE data — STM32 → nRF52832 for broadcasting to host */
-        ble_adv_status_t          ble_adv_status          = 35;
+        ble_adv_status_t          ble_adv_status          = 36;
 
         /* Log */
-        log_data_t                log_data                = 36;
-        log_clear_t               log_clear               = 37;
+        log_data_t                log_data                = 37;
+        log_clear_t               log_clear               = 38;
 
         /* Host transport control */
-        host_transport_set_t      host_transport_set      = 38;
+        host_transport_set_t      host_transport_set      = 39;
 
         /* Calibration config */
-        pos_calib_cfg_get_t       pos_calib_cfg_get       = 39;
-        pos_calib_cfg_set_t       pos_calib_cfg_set       = 40;
-        pos_calib_cfg_resp_t      pos_calib_cfg_resp      = 41;
+        pos_calib_cfg_get_t       pos_calib_cfg_get       = 40;
+        pos_calib_cfg_set_t       pos_calib_cfg_set       = 41;
+        pos_calib_cfg_resp_t      pos_calib_cfg_resp      = 42;
 
         /* Anchor layout */
-        anchor_layout_get_t       anchor_layout_get       = 42;
-        anchor_layout_set_t       anchor_layout_set       = 43;
-        anchor_layout_resp_t      anchor_layout_resp      = 44;
+        anchor_layout_get_t       anchor_layout_get       = 43;
+        anchor_layout_set_t       anchor_layout_set       = 44;
+        anchor_layout_resp_t      anchor_layout_resp      = 45;
 
         /* FOTA Verification */
-        flash_verify_t            flash_verify            = 45;
+        flash_verify_t            flash_verify            = 46;
 
-        /* BLE config update */
-        ble_conn_params_get_t     ble_conn_params_get     = 46;
-        ble_conn_params_set_t     ble_conn_params_set     = 47;
-        ble_conn_params_resp_t    ble_conn_params_resp    = 48;
-        ble_disconnect_t          ble_disconnect          = 49;
-        ble_scan_start_t          ble_scan_start          = 50;
-        ble_scan_stop_t           ble_scan_stop           = 51;
-        ble_connect_t             ble_connect             = 52;
+        /* BLE Central messages */
+        ble_conn_params_get_t     ble_conn_params_get     = 47;
+        ble_conn_params_set_t     ble_conn_params_set     = 48;
+        ble_conn_params_resp_t    ble_conn_params_resp    = 49;
+        ble_disconnect_t          ble_disconnect          = 50;
+        ble_scan_start_t          ble_scan_start          = 51;
+        ble_scan_stop_t           ble_scan_stop           = 52;
+        ble_connect_t             ble_connect             = 53;
+        ble_scan_result_t         ble_scan_result         = 54;
         /* Battery */
-        battery_info_resp_t       battery_info_resp       = 53;
-        battery_info_get_t        battery_info_get        = 54;
+        battery_info_resp_t       battery_info_resp       = 60;
+        battery_info_get_t        battery_info_get        = 61;
     }
 }
 
