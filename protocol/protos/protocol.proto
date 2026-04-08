@@ -629,6 +629,11 @@ message packet_t {
         ble_scan_stop_t           ble_scan_stop           = 52;
         ble_connect_t             ble_connect             = 53;
         ble_scan_result_t         ble_scan_result         = 54;
+
+        /* Data samples */
+        anchor_distance_t         anchor_distance         = 55;
+        tag_position_t            tag_position            = 56;
+
         /* Battery */
         battery_info_resp_t       battery_info_resp       = 60;
         battery_info_get_t        battery_info_get        = 61;

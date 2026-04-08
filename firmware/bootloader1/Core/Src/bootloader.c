@@ -110,34 +110,7 @@ typedef struct {
 } bl_fota_ctx_t;
 
 static bl_fota_ctx_t         s_fota;
-static sys_ble_peripheral_t  s_ble;
 static network_core_t       *s_net_core_ref;   /* for packet handler */
-static network_cmd_t        *s_net_cmd_ref;     /* for dispatch fallback */
-
-/* ─────────────────────────────────────────────
- * BLE event callbacks
- * ───────────────────────────────────────────── */
-
-static void on_ble_connected(int32_t rssi_dbm, void *arg)
-{
-    (void)rssi_dbm;
-    (void)arg;
-    RLOG_I(OBJECT_CODE, "BL: BLE connected, waiting for flash_erase");
-}
-
-static void on_ble_disconnected(void *arg)
-{
-    bl_fota_ctx_t *ctx = (bl_fota_ctx_t *)arg;
-
-    if (ctx->state == FOTA_RECEIVING) {
-        RLOG_W(OBJECT_CODE, "BL: disconnected mid-transfer — aborting");
-        ctx->state = FOTA_ABORTED;
-    } else {
-        RLOG_I(OBJECT_CODE, "BL: BLE disconnected (state=%d)", (int)ctx->state);
-    }
-
-    ctx->host_disconnected = true;
-}
 
 /* ─────────────────────────────────────────────
  * FOTA packet handlers (called from bl_packet_handler)
@@ -230,27 +203,27 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
         /* FOTA flow */
         case protobuf_packet_t_flash_erase_tag:
             bl_on_flash_erase(pkt);
-            network_core_send_ack(s_net_cmd_ref->stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+            network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
             return true;
 
         case protobuf_packet_t_flash_write_tag:
             bl_on_flash_write(pkt);
-            network_core_send_ack(s_net_cmd_ref->stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+            network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
             return true;
 
         case protobuf_packet_t_flash_verify_tag:
             bl_on_flash_verify(pkt);
-            network_core_send_ack(s_net_cmd_ref->stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+            network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
             return true;
 
         /* BLE status pushed by nRF — update local state shadow */
         case protobuf_packet_t_ble_status_resp_tag:
-            sys_ble_peripheral_on_status_resp(&s_ble, pkt);
+            sys_ble_peripheral_on_status_resp(pkt);
             return true;
 
         /* Everything else → standard dispatch (log, device_reset, etc.) */
         default:
-            network_cmd_dispatch(s_net_cmd_ref, pkt);
+            network_cmd_dispatch(pkt);
             return true;
     }
 }
@@ -259,63 +232,19 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
  * Public: BLE FOTA entry point
  * ───────────────────────────────────────────── */
 
-bool bl_fota_run(network_core_t *net_core, network_cmd_t *net_cmd, uint32_t timeout_ms)
+bool bl_fota_run(network_core_t *net_core, uint32_t timeout_ms)
 {
     memset(&s_fota, 0, sizeof(s_fota));
     s_fota.state  = FOTA_IDLE;
     s_net_core_ref = net_core;
-    s_net_cmd_ref  = net_cmd;
 
-    /* Set up BLE state observer */
-    sys_ble_callbacks_t cbs = {
-        .on_connected    = on_ble_connected,
-        .on_disconnected = on_ble_disconnected,
-        .user_arg        = &s_fota,
-    };
-
-    if (!sys_ble_peripheral_init(&s_ble, net_core, &cbs)) {
+    if (!sys_ble_peripheral_init(net_core)) {
         RLOG_E(OBJECT_CODE, ERR_NOT_INIT, "BL: BLE init failed");
         return false;
     }
 
-    /* Configure BLE identity (Serial Number + Name) */
-    uint32_t sn = *(volatile uint32_t *)0x1FFF7A10; // MCU Unique ID (part 1)
-    
-    /* Try to read DIP Switch for ID (PB5, PB6, PB7) */
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-    
-    uint8_t id = 0;
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5) == GPIO_PIN_SET) id |= 0x01;
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == GPIO_PIN_SET) id |= 0x02;
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7) == GPIO_PIN_SET) id |= 0x04;
-
-    /* Try to read Role from Flash config (0x08040000) */
-    /* Offset calculation for protobuf_device_role_t in sys_config_t:
-     * config_version(1) + pad(3) + device_type(4) + host_transport(4) + device_id(4) = 16 bytes
-     */
-    volatile uint32_t *flash_cfg_ptr = (volatile uint32_t *)0x08040000;
-    uint32_t role = 0;
-    if (*flash_cfg_ptr == 14) { // 14 is the current CONFIG_VERSION
-        role = flash_cfg_ptr[4]; // role is the 5th uint32 (indices: 0=ver+pad, 1=type, 2=transport, 3=id, 4=role)
-    }
-
-    char name[33];
-    const char *role_str = (role == 1) ? "TAG" : (role == 2 ? "ANC" : "BL");
-
-    if (id > 0) {
-        snprintf(name, sizeof(name), "RTLS-%s-%u", role_str, (unsigned int)id);
-    } else {
-        /* Fallback to last 4 hex digits of SN if no DIP ID set */
-        snprintf(name, sizeof(name), "RTLS-%s-%04X", role_str, (unsigned int)(sn & 0xFFFF));
-    }
-    
-    sys_ble_peripheral_set_config(&s_ble, sn, name);
-    sys_ble_peripheral_enable(&s_ble, true);
+    sys_ble_peripheral_set_config();
+    sys_ble_peripheral_enable(true);
 
     /*
      * Register our combined handler AFTER network_cmd_init.
@@ -327,11 +256,29 @@ bool bl_fota_run(network_core_t *net_core, network_cmd_t *net_cmd, uint32_t time
     RLOG_I(OBJECT_CODE, "BL: FOTA window open (%lu ms)", (unsigned long)timeout_ms);
 
     uint32_t t0 = HAL_GetTick();
+    bool last_connected = false;
 
     while (true) {
         network_core_process(net_core);
-        network_cmd_process(net_cmd);
-        sys_ble_peripheral_process(&s_ble);
+        network_cmd_process();
+        sys_ble_peripheral_process();
+
+        /* Manually track connection edge instead of callback */
+        bool cur_connected = sys_ble_peripheral_is_connected();
+        if (last_connected && !cur_connected) {
+            /* Disconnected event */
+            if (s_fota.state == FOTA_RECEIVING) {
+                RLOG_W(OBJECT_CODE, "BL: disconnected mid-transfer — aborting");
+                s_fota.state = FOTA_ABORTED;
+            } else {
+                RLOG_I(OBJECT_CODE, "BL: BLE disconnected (state=%d)", (int)s_fota.state);
+            }
+            s_fota.host_disconnected = true;
+        } else if (!last_connected && cur_connected) {
+            /* Connected event */
+            RLOG_I(OBJECT_CODE, "BL: BLE connected, waiting for flash_erase");
+        }
+        last_connected = cur_connected;
 
         if ((uint32_t)(HAL_GetTick() - t0) >= timeout_ms) {
             RLOG_I(OBJECT_CODE, "BL: FOTA window expired");

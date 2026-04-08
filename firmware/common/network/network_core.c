@@ -5,17 +5,6 @@
 
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
 
-typedef struct network_core_packet_size_s
-{
-    uint16_t protobuf_tag;
-    uint16_t data_size;
-} network_core_packet_size_t;
-
-static const network_core_packet_size_t network_core_packet_size[] = {
-};
-
-static const uint16_t network_core_packet_size_count = sizeof(network_core_packet_size) / sizeof(network_core_packet_size_t);
-
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
     protobuf_packet_t_ble_adv_status_tag,
@@ -33,10 +22,27 @@ static bool network_core_encode_and_send(network_core_t *core,
     uint32_t len = 0;
 
     if (!network_core_encode_packet(packet, buf, sizeof(buf), &len)) {
+        uint32_t which = packet ? packet->which_params : 0u;
+        uint32_t dst = (packet && packet->has_hdr && packet->hdr.has_addr) ?
+                       (uint32_t)packet->hdr.addr.dst : 0xFFu;
+        RLOG_E(OBJECT_CODE, 0x01,
+               "encode fail tag=%lu dst=%lu stream=%d buf=%lu",
+               which, dst, (int)stream, (unsigned long)sizeof(buf));
         return false;
     }
 
-    return (_write(stream, (char *)buf, (int)len, 0) > 0);
+    int wr = _write(stream, (char *)buf, (int)len, 0);
+    if (wr <= 0) {
+        uint32_t which = packet ? packet->which_params : 0u;
+        uint32_t dst = (packet && packet->has_hdr && packet->hdr.has_addr) ?
+                       (uint32_t)packet->hdr.addr.dst : 0xFFu;
+        RLOG_E(OBJECT_CODE, 0x02,
+               "tx fail tag=%lu dst=%lu stream=%d enc_len=%lu wr=%d",
+               which, dst, (int)stream, (unsigned long)len, wr);
+        return false;
+    }
+
+    return true;
 }
 
 static void network_core_finalize_tracker(network_ack_tracker_t *t,
@@ -85,44 +91,70 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
 
 static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
 {
-    for (uint16_t i = 0; i < network_core_packet_size_count; i++) {
-        if (packet->which_params == network_core_packet_size[i].protobuf_tag) {
-            (void)_write(tx_stream, (char *)packet, network_core_packet_size[i].data_size, 0);
-            return;
+    network_core_encode_and_send(core, tx_stream, packet);
+}
+
+static stream_type_t network_core_dst_to_tx_stream(protobuf_device_addr_t dst)
+{
+    switch (dst) {
+        case protobuf_PACKET_ADDR_TAG:
+        case protobuf_PACKET_ADDR_ANCHOR:
+            /* Device-specific addresses – send over the primary network link */
+            return STREAM_SERIAL_TX;
+        case protobuf_PACKET_ADDR_CENTRAL:
+        case protobuf_PACKET_ADDR_PERIPHERAL:
+            return STREAM_BLE_TX;
+        case protobuf_PACKET_ADDR_HOST:
+            return STREAM_SERIAL_TX;
+        default:
+            return STREAM_MAX;
+    }
+}
+
+/**
+ * Returns true if this packet is addressed to *us* (should be handled locally)
+ * rather than forwarded.
+ * BCAST → both handle AND forward.
+ * Anything else must match our local identity (local_addr).
+ */
+static bool network_core_is_for_us(network_core_t *core, const protobuf_packet_t *packet)
+{
+    if (!packet->has_hdr || !packet->hdr.has_addr) return true; /* no addr → handle */
+
+    protobuf_device_addr_t dst = (protobuf_device_addr_t)packet->hdr.addr.dst;
+    if (dst == protobuf_PACKET_ADDR_BCAST) return true;
+
+    return (dst == core->local_addr);
+}
+
+static void network_core_forward_packet(network_core_t *core, stream_type_t in_stream, const protobuf_packet_t *packet)
+{
+    if (!packet->has_hdr || !packet->hdr.has_addr) return;
+
+    protobuf_device_addr_t dst = (protobuf_device_addr_t)packet->hdr.addr.dst;
+    
+    stream_type_t fwd = network_core_dst_to_tx_stream(dst);
+    if (dst == protobuf_PACKET_ADDR_BCAST) {
+        /* BCAST: route to everything EXCEPT where it came from */
+        if (in_stream != STREAM_SERIAL_RX) {
+            network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
         }
+        if (in_stream != STREAM_BLE_RX) {
+            network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
+        }
+        return;
     }
 
-    (void)network_core_encode_and_send(core, tx_stream, packet);
-}
+    if (fwd == STREAM_MAX) return;          /* unknown dst -> drop */
 
-static stream_type_t network_core_get_forward_stream(stream_type_t in_stream)
-{
-    if (in_stream == STREAM_SERIAL_RX) {
-        return STREAM_BLE_TX;
-    }
+    /* Map in_stream to its tx equivalent to avoid bouncing */
+    stream_type_t in_tx_mapped = (in_stream == STREAM_BLE_RX) ? STREAM_BLE_TX : STREAM_SERIAL_TX;
+    if (fwd == in_tx_mapped) return;        /* already came from this link -> don't loop */
 
-    if (in_stream == STREAM_BLE_RX) {
-        return STREAM_SERIAL_TX;
-    }
-
-    return STREAM_MAX;
-}
-
-static void network_core_forward_packet(network_core_t *core, const protobuf_packet_t *packet, stream_type_t in_stream)
-{
-    CHECK_VOID(core && packet);
-    CHECK_VOID(packet->has_hdr && packet->hdr.has_addr);
-    CHECK_VOID(packet->hdr.addr.src != packet->hdr.addr.dst);
-
-    stream_type_t forward_stream = network_core_get_forward_stream(in_stream);
-    CHECK_VOID(forward_stream != STREAM_MAX);
-    CHECK_VOID(packet->hdr.addr.src != (uint32_t)forward_stream);
-    CHECK_VOID(packet->hdr.addr.dst != (uint32_t)in_stream);
-
-    if (forward_stream == STREAM_BLE_TX) {
-        network_core_send_ble_packet(core, forward_stream, packet);
+    if (fwd == STREAM_BLE_TX) {
+        network_core_send_ble_packet(core, fwd, packet);
     } else {
-        network_core_encode_and_send(core, forward_stream, packet);
+        network_core_encode_and_send(core, fwd, packet);
     }
 }
 
@@ -181,17 +213,29 @@ static bool network_core_process_one_stream(network_core_t *core, stream_type_t 
 
     core->latest_packet_tick = bsp_util_get_ticks();
 
-    if (core->packet_handler) {
-        core->packet_handler(&packet);
+    /* ---- Routing decision based on dst ---- */
+    bool for_us = network_core_is_for_us(core, &packet);
+
+    if (for_us) {
+        /* Let the application layer handle it */
+        if (core->packet_handler) {
+            core->packet_handler(&packet);
+        }
+        network_core_update_ack_trackers(core, &packet);
     }
 
-    network_core_update_ack_trackers(core, &packet);
-    network_core_forward_packet(core, &packet, in_stream);
+    /* BCAST: handle locally AND forward; unicast: only forward if not for us */
+    bool is_bcast = packet.has_hdr && packet.hdr.has_addr &&
+                    ((protobuf_device_addr_t)packet.hdr.addr.dst == protobuf_PACKET_ADDR_BCAST);
+    if (!for_us || is_bcast) {
+        network_core_forward_packet(core, in_stream, &packet);
+    }
 
     return true;
 }
 
 bool network_core_init(network_core_t *core,
+                       protobuf_device_addr_t local_addr,
                        uint8_t *rx_buffer,
                        uint32_t rx_buffer_len)
 {
@@ -199,6 +243,7 @@ bool network_core_init(network_core_t *core,
 
     memset(core, 0, sizeof(*core));
     core->enabled = true;
+    core->local_addr = local_addr;
     core->interface = 0;
     core->rx_stream = serial_get_network_rx_stream();
     core->tx_stream = serial_get_network_tx_stream();
@@ -226,8 +271,13 @@ bool network_core_process(network_core_t *core)
 
     network_core_check_tracker_timeouts(core);
 
+#ifdef BOOTLOADER
+    /* In bootloader mode, keep debug_serial path isolated: process BLE transport only. */
+    network_core_process_one_stream(core, STREAM_BLE_RX);
+#else
     network_core_process_one_stream(core, STREAM_SERIAL_RX);
-    // network_core_process_one_stream(core, STREAM_BLE_RX);
+    network_core_process_one_stream(core, STREAM_BLE_RX);
+#endif
 
     return true;
 }
@@ -238,17 +288,21 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
 
     packet->has_hdr = true;
     packet->hdr.has_addr = true;
-    packet->hdr.addr.src = (uint8_t)core->tx_stream;
+    packet->hdr.addr.src = (uint8_t)core->local_addr;
     packet->hdr.addr.dst = dst;
     packet->hdr.seq = (core->tx_seq)++;
 
-    if (core->tx_stream == STREAM_BLE_TX) {
-        network_core_send_ble_packet(core, core->tx_stream, packet);
+    stream_type_t tx_stream = network_core_dst_to_tx_stream((protobuf_device_addr_t)dst);
+    if (tx_stream == STREAM_MAX) {
+        tx_stream = core->tx_stream;
+    }
+
+    if (tx_stream == STREAM_BLE_TX) {
+        network_core_send_ble_packet(core, tx_stream, packet);
         return true;
     }
 
-    if (!network_core_encode_and_send(core, core->tx_stream, packet)) {
-        RLOG_E(OBJECT_CODE, 0x01, "encode fail");
+    if (!network_core_encode_and_send(core, tx_stream, packet)) {
         return false;
     }
 

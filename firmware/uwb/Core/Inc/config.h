@@ -14,5 +14,6 @@
 #define ENABLE_RSSI
 #define HAVE_TX_DELAY
 #define ENABLE_DEBUG_LOGGING
+#define HAVE_BLE_PERIPHERAL
 
 #endif /* __CONFIG_H */

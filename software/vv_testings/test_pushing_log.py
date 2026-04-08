@@ -271,8 +271,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dst",
         type=int,
-        default=int(VvAddress.ANCHOR),
-        help="Device destination address (default: ANCHOR=2)",
+        default=int(VvAddress.BCAST),
+        help="Device destination address (default: BCAST=15, works for TAG/ANCHOR)",
     )
     parser.add_argument("--verbose", action="store_true", help="Print non-log packets")
     parser.add_argument(

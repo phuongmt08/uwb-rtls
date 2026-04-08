@@ -80,9 +80,11 @@
 static bool s_ranging_enabled = true;
 
 static network_core_t s_network_core;
-static network_cmd_t  s_network_cmd;
-static sys_ble_peripheral_t s_ble_peripheral;
 static uint8_t        s_network_rx_buf[512];
+
+#ifdef HAVE_BLE_PERIPHERAL
+static void ble_peripheral_process_task(void *arg);
+#endif
 
 #if TEST_SEND_POS
 static float    s_test_x              = TEST_POS_START_X;
@@ -178,12 +180,13 @@ static void network_core_process_task(void *arg)
 
 static void network_cmd_process_task(void *arg)
 {
-  network_cmd_process(&s_network_cmd);
+  network_cmd_process();
 }
 
 static void ble_peripheral_process_task(void *arg)
 {
-  sys_ble_peripheral_process(&s_ble_peripheral);
+  (void)arg;
+  sys_ble_peripheral_process();
 }
 
 void app_reset_config(void)
@@ -272,11 +275,14 @@ int main(void)
   sys_config_t *cfg = sys_config_get();
 
   serial_init();
-  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf)))
+  protobuf_device_addr_t local_addr = (cfg->uwb.role == DEVICE_ROLE_TAG) ? 
+                                      protobuf_PACKET_ADDR_TAG : protobuf_PACKET_ADDR_ANCHOR;
+
+  if (!network_core_init(&s_network_core, local_addr, s_network_rx_buf, sizeof(s_network_rx_buf)))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
   }
-  else if (!network_cmd_init(&s_network_cmd, &s_network_core))
+  else if (!network_cmd_init(&s_network_core))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
   }
@@ -316,11 +322,20 @@ int main(void)
   bsp_io_led_off();
 
   sys_task_init();
-  bsp_battery_init();
-  int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
-  if (bat_task_id >= 0)
+  bsp_battery_err_t bat_init_ret = bsp_battery_init();
+  if (bat_init_ret == BSP_BATTERY_OK)
   {
-    sys_task_start(bat_task_id);
+    int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
+    if (bat_task_id >= 0)
+    {
+      sys_task_start(bat_task_id);
+    }
+  }
+  else
+  {
+    RLOG_W(LOG_OBJECT_CODE_APPLICATION,
+           "Battery init failed (%d), battery task disabled",
+           (int)bat_init_ret);
   }
 
   int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
@@ -336,19 +351,10 @@ int main(void)
   if (net_cmd_task_id >= 0) sys_task_start(net_cmd_task_id);
 
   /* BLE Peripheral Init */
-  if (sys_ble_peripheral_init(&s_ble_peripheral, &s_network_core, NULL))
+  if (sys_ble_peripheral_init(&s_network_core))
   {
-      uint32_t sn = bsp_util_get_serial_number();
-      char name[33];
-      
-      if (cfg->uwb.role == DEVICE_ROLE_TAG) {
-          snprintf(name, sizeof(name), "RTLS-Tag-%u", (unsigned int)cfg->uwb.device_id);
-      } else {
-          snprintf(name, sizeof(name), "RTLS-Anchor-%u", (unsigned int)cfg->uwb.device_id);
-      }
-      
-      sys_ble_peripheral_set_config(&s_ble_peripheral, sn, name);
-      sys_ble_peripheral_enable(&s_ble_peripheral, true);
+      sys_ble_peripheral_set_config();
+      sys_ble_peripheral_enable(true);
       
       int ble_task_id = sys_task_add((sys_task_cb_t)ble_peripheral_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
       if (ble_task_id >= 0) sys_task_start(ble_task_id);
@@ -411,7 +417,6 @@ int main(void)
       btn_event = BSP_IO_EVENT_NONE;
     }
 #endif
-    sys_config_t *cfg_curr = sys_config_get();
 
     switch (btn_event)
     {
