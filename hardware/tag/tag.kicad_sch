@@ -10048,7 +10048,7 @@
 		(uuid "569bcc63-dbd8-4e4f-ab58-9eaf0ccc9287")
 	)
 	(junction
-		(at 34.29 212.09)
+		(at 27.94 194.31)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "5986a644-78db-43dc-885e-10e8438538b3")
@@ -10859,7 +10859,7 @@
 	)
 	(wire
 		(pts
-			(xy 59.69 219.71) (xy 62.23 219.71)
+			(xy 29.21 214.63) (xy 31.75 214.63)
 		)
 		(stroke
 			(width 0)
@@ -11739,7 +11739,7 @@
 	)
 	(wire
 		(pts
-			(xy 59.69 217.17) (xy 59.69 219.71)
+			(xy 29.21 212.09) (xy 29.21 214.63)
 		)
 		(stroke
 			(width 0)
@@ -11809,7 +11809,7 @@
 	)
 	(wire
 		(pts
-			(xy 34.29 212.09) (xy 36.83 212.09)
+			(xy 27.94 194.31) (xy 30.48 194.31)
 		)
 		(stroke
 			(width 0)
@@ -12499,7 +12499,7 @@
 	)
 	(wire
 		(pts
-			(xy 34.29 203.2) (xy 34.29 204.47)
+			(xy 27.94 185.42) (xy 27.94 186.69)
 		)
 		(stroke
 			(width 0)
@@ -12536,16 +12536,6 @@
 			(type default)
 		)
 		(uuid "702d5547-e860-49e0-ab3f-bf41533e641d")
-	)
-	(wire
-		(pts
-			(xy 93.98 153.67) (xy 93.98 170.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "70e4ea5a-7980-413d-928f-e87587e13c08")
 	)
 	(wire
 		(pts
@@ -13249,7 +13239,7 @@
 	)
 	(wire
 		(pts
-			(xy 59.69 222.25) (xy 59.69 224.79)
+			(xy 29.21 217.17) (xy 29.21 219.71)
 		)
 		(stroke
 			(width 0)
@@ -13689,7 +13679,7 @@
 	)
 	(wire
 		(pts
-			(xy 59.69 222.25) (xy 62.23 222.25)
+			(xy 29.21 217.17) (xy 31.75 217.17)
 		)
 		(stroke
 			(width 0)
@@ -14229,7 +14219,7 @@
 	)
 	(wire
 		(pts
-			(xy 34.29 212.09) (xy 34.29 214.63)
+			(xy 27.94 194.31) (xy 27.94 196.85)
 		)
 		(stroke
 			(width 0)
@@ -14549,6 +14539,16 @@
 	)
 	(wire
 		(pts
+			(xy 93.98 153.67) (xy 93.98 170.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d8a1984d-5b12-4ec1-a770-f9c82d2f0b82")
+	)
+	(wire
+		(pts
 			(xy 267.97 157.48) (xy 278.13 157.48)
 		)
 		(stroke
@@ -14729,7 +14729,7 @@
 	)
 	(wire
 		(pts
-			(xy 34.29 204.47) (xy 36.83 204.47)
+			(xy 27.94 186.69) (xy 30.48 186.69)
 		)
 		(stroke
 			(width 0)
@@ -14949,7 +14949,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 207.01) (xy 34.29 207.01)
+			(xy 30.48 189.23) (xy 27.94 189.23)
 		)
 		(stroke
 			(width 0)
@@ -15149,7 +15149,7 @@
 	)
 	(wire
 		(pts
-			(xy 34.29 207.01) (xy 34.29 212.09)
+			(xy 27.94 189.23) (xy 27.94 194.31)
 		)
 		(stroke
 			(width 0)
@@ -15698,7 +15698,7 @@
 		(uuid "866922fd-5bd9-4e27-a229-3beaa763199b")
 	)
 	(label "VBUS_PROTECT"
-		(at 93.98 170.18 90)
+		(at 93.98 166.37 90)
 		(effects
 			(font
 				(size 0.9652 0.9652)
@@ -16395,7 +16395,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "1u"
+		(property "Value" "100n"
 			(at 118.364 145.796 90)
 			(effects
 				(font
@@ -18159,7 +18159,7 @@
 				)
 			)
 		)
-		(property "Value" "AO3401A"
+		(property "Value" "AO3407A"
 			(at 134.62 181.61 90)
 			(effects
 				(font
@@ -18282,7 +18282,7 @@
 	)
 	(symbol
 		(lib_id "power:+BATT")
-		(at 59.69 217.17 0)
+		(at 29.21 212.09 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -18290,7 +18290,7 @@
 		(dnp no)
 		(uuid "19ab30be-a02e-4066-833a-2bca32685a09")
 		(property "Reference" "#PWR010"
-			(at 59.69 220.98 0)
+			(at 29.21 215.9 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18299,7 +18299,7 @@
 			)
 		)
 		(property "Value" "+BATT"
-			(at 59.69 212.852 0)
+			(at 29.21 207.772 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18307,7 +18307,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 59.69 217.17 0)
+			(at 29.21 212.09 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18316,7 +18316,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 59.69 217.17 0)
+			(at 29.21 212.09 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18325,7 +18325,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+BATT\""
-			(at 59.69 217.17 0)
+			(at 29.21 212.09 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18494,7 +18494,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "2.2k"
+		(property "Value" "10k"
 			(at 125.73 165.608 90)
 			(effects
 				(font
@@ -20339,7 +20339,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
+		(property "Footprint" "TestPoint:TestPoint_Pad_1.0x1.0mm"
 			(at 425.45 227.33 0)
 			(effects
 				(font
@@ -21391,7 +21391,7 @@
 	)
 	(symbol
 		(lib_id "BM02B-SRSS-TB_LF__SN_:BM02B-SRSS-TB_LF__SN_")
-		(at 46.99 209.55 0)
+		(at 40.64 191.77 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -21399,7 +21399,7 @@
 		(dnp no)
 		(uuid "5223a13e-93d8-4ba3-b3c6-956ce94cf625")
 		(property "Reference" "J2"
-			(at 53.34 207.0099 0)
+			(at 46.99 189.2299 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21408,7 +21408,7 @@
 			)
 		)
 		(property "Value" "BATTERY"
-			(at 53.34 209.5499 0)
+			(at 46.99 191.7699 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21417,7 +21417,7 @@
 			)
 		)
 		(property "Footprint" "Other_Footprint:JST_BM02B-SRSS-TB_LF__SN_"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21427,7 +21427,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21436,7 +21436,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21445,7 +21445,7 @@
 			)
 		)
 		(property "MF" "JST"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21455,7 +21455,7 @@
 			)
 		)
 		(property "MAXIMUM_PACKAGE_HEIGHT" "6.3 mm"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21465,7 +21465,7 @@
 			)
 		)
 		(property "Package" "None"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21475,7 +21475,7 @@
 			)
 		)
 		(property "Price" "None"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21485,7 +21485,7 @@
 			)
 		)
 		(property "Check_prices" "https://www.snapeda.com/parts/BM02B-SRSS-TB%20%20(LF)(SN)/JST/view-part/?ref=eda"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21495,7 +21495,7 @@
 			)
 		)
 		(property "STANDARD" "Manufacturer Recommendations"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21505,7 +21505,7 @@
 			)
 		)
 		(property "PARTREV" "N/A"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21515,7 +21515,7 @@
 			)
 		)
 		(property "SnapEDA_Link" "https://www.snapeda.com/parts/BM02B-SRSS-TB%20%20(LF)(SN)/JST/view-part/?ref=snap"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21525,7 +21525,7 @@
 			)
 		)
 		(property "MP" "BM02B-SRSS-TB  (LF)(SN)"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21535,7 +21535,7 @@
 			)
 		)
 		(property "Description_1" "Socket; wire-board; male; SH,SR; 1mm; PIN: 2; SMT; 50V; 1A; -25÷85°C"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21545,7 +21545,7 @@
 			)
 		)
 		(property "MANUFACTURER" "JST Sales America Inc."
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21555,7 +21555,7 @@
 			)
 		)
 		(property "Availability" "In Stock"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21565,7 +21565,7 @@
 			)
 		)
 		(property "SNAPEDA_PN" "BM02B-SRSS-TB(LF)(SN)"
-			(at 46.99 209.55 0)
+			(at 40.64 191.77 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22146,7 +22146,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "TX"
 			(at 440.436 214.376 0)
 			(effects
 				(font
@@ -22864,7 +22864,7 @@
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_01x02")
-		(at 67.31 222.25 0)
+		(at 36.83 217.17 0)
 		(mirror x)
 		(unit 1)
 		(exclude_from_sim no)
@@ -22873,7 +22873,7 @@
 		(dnp no)
 		(uuid "6e826f20-b550-4054-b355-ad213c5c7b12")
 		(property "Reference" "J10"
-			(at 69.85 222.2501 0)
+			(at 39.37 217.1701 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22882,7 +22882,7 @@
 			)
 		)
 		(property "Value" "Conn_01x02"
-			(at 69.85 219.7101 0)
+			(at 39.37 214.6301 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22890,8 +22890,8 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Connector_Wire:SolderWire-0.5sqmm_1x02_P4.6mm_D0.9mm_OD2.1mm"
-			(at 67.31 222.25 0)
+		(property "Footprint" "Connector_Wire:SolderWire-0.1sqmm_1x02_P3.6mm_D0.4mm_OD1mm"
+			(at 36.83 217.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22900,7 +22900,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 67.31 222.25 0)
+			(at 36.83 217.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22909,7 +22909,7 @@
 			)
 		)
 		(property "Description" "Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"
-			(at 67.31 222.25 0)
+			(at 36.83 217.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -24607,7 +24607,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "RST"
 			(at 440.944 235.966 0)
 			(effects
 				(font
@@ -26021,7 +26021,7 @@
 	)
 	(symbol
 		(lib_id "power:+BATT")
-		(at 34.29 203.2 0)
+		(at 27.94 185.42 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -26029,7 +26029,7 @@
 		(dnp no)
 		(uuid "9221f76e-1d7e-4ec9-963a-f5f54b78f869")
 		(property "Reference" "#PWR04"
-			(at 34.29 207.01 0)
+			(at 27.94 189.23 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26038,7 +26038,7 @@
 			)
 		)
 		(property "Value" "+BATT"
-			(at 34.29 198.882 0)
+			(at 27.94 181.102 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26046,7 +26046,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 34.29 203.2 0)
+			(at 27.94 185.42 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26055,7 +26055,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 34.29 203.2 0)
+			(at 27.94 185.42 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26064,7 +26064,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+BATT\""
-			(at 34.29 203.2 0)
+			(at 27.94 185.42 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26232,7 +26232,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "470K"
+		(property "Value" "10k"
 			(at 149.86 164.084 90)
 			(effects
 				(font
@@ -26505,7 +26505,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "MISO"
 			(at 451.104 169.926 0)
 			(effects
 				(font
@@ -28049,7 +28049,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "CS2"
 			(at 452.374 214.376 0)
 			(effects
 				(font
@@ -28514,7 +28514,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "47K"
+		(property "Value" "100k"
 			(at 125.73 155.448 90)
 			(effects
 				(font
@@ -29737,7 +29737,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "RX"
 			(at 414.274 235.966 0)
 			(effects
 				(font
@@ -29803,7 +29803,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "MOSI"
 			(at 437.896 192.786 0)
 			(effects
 				(font
@@ -30531,7 +30531,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "CS1"
 			(at 452.374 192.786 0)
 			(effects
 				(font
@@ -30866,7 +30866,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TestPoint"
+		(property "Value" "SCK"
 			(at 436.626 169.926 0)
 			(effects
 				(font
@@ -31119,7 +31119,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 59.69 224.79 0)
+		(at 29.21 219.71 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -31127,7 +31127,7 @@
 		(dnp no)
 		(uuid "efcee642-b258-4598-af8c-33be2515020b")
 		(property "Reference" "#PWR060"
-			(at 59.69 231.14 0)
+			(at 29.21 226.06 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31136,7 +31136,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 59.944 229.108 0)
+			(at 29.464 224.028 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31144,7 +31144,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 59.69 224.79 0)
+			(at 29.21 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31153,7 +31153,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 59.69 224.79 0)
+			(at 29.21 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31162,7 +31162,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 59.69 224.79 0)
+			(at 29.21 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31184,7 +31184,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 34.29 214.63 0)
+		(at 27.94 196.85 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -31192,7 +31192,7 @@
 		(dnp no)
 		(uuid "f273cbf0-89cb-4a85-bc10-e5f29f5177de")
 		(property "Reference" "#PWR05"
-			(at 34.29 220.98 0)
+			(at 27.94 203.2 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31201,7 +31201,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 34.544 218.948 0)
+			(at 28.194 201.168 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31209,7 +31209,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 34.29 214.63 0)
+			(at 27.94 196.85 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31218,7 +31218,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 34.29 214.63 0)
+			(at 27.94 196.85 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31227,7 +31227,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 34.29 214.63 0)
+			(at 27.94 196.85 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31929,7 +31929,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "AO3400A"
+		(property "Value" "AO3404A"
 			(at 144.526 159.258 0)
 			(effects
 				(font
