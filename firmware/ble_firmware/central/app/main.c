@@ -44,18 +44,26 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 // #include "nrf_sdh_ble.h"
+#include "nrf.h"
+#include "nrf_drv_clock.h"
 #include "nrf_sdh_soc.h"
 #include "nrf_pwr_mgmt.h"
 #include "app_timer.h"
+#include "boards.h"
+#include "bsp.h"
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
+#include "app_usbd_serial_num.h"
 #include "usb_cdc_acm.h"
 
 #include "app_ble_central.h"
+
+#define APP_ENABLE_USB_CDC_ACM 1
 
 void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
@@ -79,6 +87,11 @@ static void log_init(void)
 static void timer_init(void)
 {
     ret_code_t err_code = app_timer_init();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_ERROR("app_timer_init failed: 0x%08x", err_code);
+        NRF_LOG_FLUSH();
+    }
     APP_ERROR_CHECK(err_code);
 }
 
@@ -88,6 +101,11 @@ static void power_management_init(void)
 {
     ret_code_t err_code;
     err_code = nrf_pwr_mgmt_init();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_ERROR("nrf_pwr_mgmt_init failed: 0x%08x", err_code);
+        NRF_LOG_FLUSH();
+    }
     APP_ERROR_CHECK(err_code);
 }
 
@@ -104,28 +122,78 @@ static void idle_state_handle(void)
 
 int main(void)
 {
+    ret_code_t err_code;
+
     // Initialize basic services
     log_init();
+    NRF_LOG_INFO("Boot: log_init");
+
+    uint32_t resetreas = NRF_POWER->RESETREAS;
+    NRF_POWER->RESETREAS = resetreas;
+    NRF_LOG_INFO("Boot: RESETREAS=0x%08x", resetreas);
+
+    NRF_LOG_INFO("Boot: timer_init");
     timer_init();
+    NRF_LOG_INFO("Boot: power_management_init");
     power_management_init();
 
-    // Initialize BLE (includes stack, GATT, scanning, etc.)
-    ble_central_init();
+#if APP_ENABLE_USB_CDC_ACM
+    NRF_LOG_INFO("Boot: nrf_drv_clock_init");
+    err_code = nrf_drv_clock_init();
+    if (err_code == NRF_ERROR_MODULE_ALREADY_INITIALIZED)
+    {
+        NRF_LOG_INFO("nrf_drv_clock already initialized.");
+        err_code = NRF_SUCCESS;
+    }
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_ERROR("nrf_drv_clock_init failed: 0x%08x", err_code);
+        NRF_LOG_FLUSH();
+    }
+    APP_ERROR_CHECK(err_code);
+
+    nrf_drv_clock_lfclk_request(NULL);
+    while (!nrf_drv_clock_lfclk_is_running())
+    {
+        // Wait for LFCLK like the Nordic USB example.
+    }
+
+    app_usbd_serial_num_generate();
 
     // Initialize USB CDC ACM
-    ret_code_t err_code = usb_cdc_acm_init();
-    APP_ERROR_CHECK(err_code);
+    NRF_LOG_INFO("Boot: usb_cdc_acm_init");
+    err_code = usb_cdc_acm_init();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_ERROR("usb_cdc_acm_init failed: 0x%08x", err_code);
+        NRF_LOG_FLUSH();
+        NRF_LOG_WARNING("USB disabled, continuing BLE only.");
+    }
+    else
+    {
+        NRF_LOG_INFO("USB CDC ACM initialized - ready for communication.");
+    }
+#else
+    NRF_LOG_INFO("Boot: USB CDC ACM disabled");
+#endif
+
+    // Initialize BLE 
+    ble_central_init();
+    NRF_LOG_INFO("Boot: ble_central_init done");
 
     // Start execution
     NRF_LOG_INFO("BLE Central application started.");
-    NRF_LOG_INFO("USB CDC ACM initialized - ready for communication.");
 
     // Enter main loop
     for (;;)
     {
+#if APP_ENABLE_USB_CDC_ACM
         // Process USB CDC ACM events
-        usb_cdc_acm_process();
-        
+        while (usb_cdc_acm_process())
+        {
+            // Drain queued USB events before sleeping.
+        }
+#endif
         idle_state_handle();
     }
 }
