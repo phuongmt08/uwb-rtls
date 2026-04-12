@@ -67,21 +67,6 @@
   * @{
   */
 
-volatile uint32_t g_usbd_dbg_getdesc_count = 0U;
-volatile uint16_t g_usbd_dbg_getdesc_wValue = 0U;
-volatile uint16_t g_usbd_dbg_getdesc_wIndex = 0U;
-volatile uint16_t g_usbd_dbg_getdesc_wLength = 0U;
-volatile uint8_t g_usbd_dbg_getdesc_type = 0U;
-volatile uint8_t g_usbd_dbg_getdesc_str_index = 0U;
-volatile uint8_t g_usbd_dbg_getdesc_userstr_called = 0U;
-volatile uint8_t g_usbd_dbg_getdesc_userstr_class = 0xFFU;
-volatile uint8_t g_usbd_dbg_getdesc_err = 0U;
-volatile uint16_t g_usbd_dbg_getdesc_rsp_len = 0U;
-volatile uint8_t g_usbd_dbg_getdesc_rsp_ascii[96] = {0U};
-volatile uint32_t g_usbd_dbg_getdesc_str_index_count[256] = {0U};
-volatile uint8_t g_usbd_dbg_getdesc_last8_idx[8] = {0U};
-volatile uint8_t g_usbd_dbg_getdesc_last8_pos = 0U;
-
 /**
   * @}
   */
@@ -446,28 +431,6 @@ static void USBD_GetDescriptor(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
   uint8_t *pbuf = NULL;
   uint8_t err = 0U;
 
-  g_usbd_dbg_getdesc_count++;
-  g_usbd_dbg_getdesc_wValue = req->wValue;
-  g_usbd_dbg_getdesc_wIndex = req->wIndex;
-  g_usbd_dbg_getdesc_wLength = req->wLength;
-  g_usbd_dbg_getdesc_type = (uint8_t)(req->wValue >> 8);
-  g_usbd_dbg_getdesc_str_index = (uint8_t)(req->wValue & 0xFFU);
-  if (g_usbd_dbg_getdesc_type == USB_DESC_TYPE_STRING)
-  {
-    uint8_t pos = g_usbd_dbg_getdesc_last8_pos & 0x07U;
-    g_usbd_dbg_getdesc_last8_idx[pos] = g_usbd_dbg_getdesc_str_index;
-    g_usbd_dbg_getdesc_last8_pos = (uint8_t)((pos + 1U) & 0x07U);
-    g_usbd_dbg_getdesc_str_index_count[g_usbd_dbg_getdesc_str_index]++;
-  }
-  g_usbd_dbg_getdesc_userstr_called = 0U;
-  g_usbd_dbg_getdesc_userstr_class = 0xFFU;
-  g_usbd_dbg_getdesc_err = 0U;
-  g_usbd_dbg_getdesc_rsp_len = 0U;
-  for (uint32_t i = 0U; i < sizeof(g_usbd_dbg_getdesc_rsp_ascii); i++)
-  {
-    g_usbd_dbg_getdesc_rsp_ascii[i] = 0U;
-  }
-
   switch (req->wValue >> 8)
   {
 #if ((USBD_LPM_ENABLED == 1U) || (USBD_CLASS_BOS_ENABLED == 1U))
@@ -594,24 +557,13 @@ static void USBD_GetDescriptor(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
           break;
 
         default:
-          /* Compatibility fallback for DFU/DfuSe host tools that request
-             non-standard string indices (e.g. 0x14) for memory map. */
-          if ((LOBYTE(req->wValue) >= USBD_IDX_INTERFACE_STR) &&
-              (pdev->pDesc->GetInterfaceStrDescriptor != NULL))
-          {
-            pbuf = pdev->pDesc->GetInterfaceStrDescriptor(pdev->dev_speed, &len);
-            break;
-          }
-
 #if (USBD_SUPPORT_USER_STRING_DESC == 1U)
           pbuf = NULL;
-          g_usbd_dbg_getdesc_userstr_called = 1U;
 
           for (uint32_t idx = 0U; (idx < pdev->NumClasses); idx++)
           {
             if (pdev->pClass[idx]->GetUsrStrDescriptor != NULL)
             {
-              g_usbd_dbg_getdesc_userstr_class = (uint8_t)idx;
               pdev->classId = idx;
               pbuf = pdev->pClass[idx]->GetUsrStrDescriptor(pdev, LOBYTE(req->wValue), &len);
 
@@ -698,7 +650,6 @@ static void USBD_GetDescriptor(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
 
   if (err != 0U)
   {
-    g_usbd_dbg_getdesc_err = err;
     return;
   }
 
@@ -707,22 +658,6 @@ static void USBD_GetDescriptor(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
     if (len != 0U)
     {
       len = MIN(len, req->wLength);
-
-      g_usbd_dbg_getdesc_rsp_len = len;
-
-      if (((req->wValue >> 8) == USB_DESC_TYPE_STRING) && (pbuf != NULL) && (len >= 2U))
-      {
-        uint8_t out = 0U;
-        uint16_t idx = 2U;
-
-        while ((idx < len) && (out < (sizeof(g_usbd_dbg_getdesc_rsp_ascii) - 1U)))
-        {
-          g_usbd_dbg_getdesc_rsp_ascii[out++] = pbuf[idx];
-          idx += 2U;
-        }
-        g_usbd_dbg_getdesc_rsp_ascii[out] = 0U;
-      }
-
       (void)USBD_CtlSendData(pdev, pbuf, len);
     }
     else

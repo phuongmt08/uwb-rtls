@@ -49,7 +49,7 @@ extern "C" {
 #endif /* USBD_DFU_XFER_SIZE */
 
 #ifndef USBD_DFU_APP_DEFAULT_ADD
-#define USBD_DFU_APP_DEFAULT_ADD       0x0800C000U /* The first 48KB (sectors 0-2) is reserved for bootloader */
+#define USBD_DFU_APP_DEFAULT_ADD       0x08008000U /* The first sector (32 KB) is reserved for DFU code */
 #endif /* USBD_DFU_APP_DEFAULT_ADD */
 
 #ifndef USBD_DFU_BM_ATTRIBUTES
@@ -120,10 +120,6 @@ extern "C" {
 #define DFU_MEDIA_ERASE                0x00U
 #define DFU_MEDIA_PROGRAM              0x01U
 
-#ifndef USBD_DFU_IINTERFACE_STR_IDX
-#define USBD_DFU_IINTERFACE_STR_IDX    0x14U
-#endif /* USBD_DFU_IINTERFACE_STR_IDX */
-
 /**************************************************/
 /* Other defines                                  */
 /**************************************************/
@@ -161,7 +157,7 @@ typedef  void (*pFunction)(void);
   0xFE,   /* bInterfaceClass: Application Specific Class Code */ \
   0x01,   /* bInterfaceSubClass : Device Firmware Upgrade Code */ \
   0x02,   /* nInterfaceProtocol: DFU mode protocol */ \
-  USBD_DFU_IINTERFACE_STR_IDX /* iInterface: DFU memory-map string index */
+  USBD_IDX_INTERFACE_STR + (n) + 1U /* iInterface: Index of string descriptor */
 
 #define TRANSFER_SIZE_BYTES(size)      ((uint8_t)(size)), ((uint8_t)((size) >> 8))
 

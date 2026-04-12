@@ -87,6 +87,18 @@ bool bsp_fl_read_app_header(bsp_fl_app_header_t *out);
  */
 bsp_fl_status_t bsp_fl_app_verify_crc(void);
 
+/**
+ * @brief  Erase all application sectors (sectors 3-5).
+ *         Called by usbd_dfu_if.c. Returns USBD_OK(0) or USBD_FAIL(1).
+ */
+uint16_t DFU_Erase_AppSectors(void);
+
+/**
+ * @brief  Map a flash address to its HAL FLASH_SECTOR_x constant.
+ *         Called by usbd_dfu_if.c for selective sector erase.
+ */
+uint32_t DFU_GetSectorFromAddress(uint32_t address);
+
 #ifdef __cplusplus
 }
-#endif
+#endif
