@@ -143,3 +143,17 @@ bsp_fl_status_t bsp_fl_app_verify_crc(void)
 
     return (computed == hdr.image_crc) ? BSP_FL_OK : BSP_FL_ERR_VERIFY;
 }
+
+uint16_t DFU_Erase_AppSectors(void)
+{
+    return (bsp_fl_app_erase() == BSP_FL_OK) ? 0u /* USBD_OK */ : 1u /* USBD_FAIL */;
+}
+
+uint32_t DFU_GetSectorFromAddress(uint32_t address)
+{
+    if (address < 0x08010000UL) return FLASH_SECTOR_3;   /* 0x0800C000-0x0800FFFF 16 KB */
+    if (address < 0x08020000UL) return FLASH_SECTOR_4;   /* 0x08010000-0x0801FFFF 64 KB */
+    if (address < 0x08040000UL) return FLASH_SECTOR_5;   /* 0x08020000-0x0803FFFF 128 KB */
+    if (address < 0x08060000UL) return FLASH_SECTOR_6;   /* data storage */
+    return FLASH_SECTOR_7;
+}
