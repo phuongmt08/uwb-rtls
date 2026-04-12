@@ -1,16 +1,22 @@
 #include "network_cmd.h"
-#ifdef BOOTLOADER
-    #include "sys_logger_bl.h"
-#else
-    #include "sys_logger.h"
-#endif
+
 #include "config.h"
+#include "memorylayout.h"
+
+#ifdef BOOTLOADER
+#include "bsp_util_bl.h"
+#else
 #include "bsp_util.h"
+#endif
 
 #ifndef BOOTLOADER
     #include "bsp_flash.h"
     #include "sys_config.h"
     #include "bsp_battery.h"
+    #include "sys_logger.h"
+#else
+    #include "sys_logger_bl.h"
+
 #endif
 
 #include <string.h>
@@ -42,11 +48,19 @@ static void network_cmd_unimplemented(const protobuf_packet_t *pkt);
 static void network_cmd_none(const protobuf_packet_t *pkt);
 static void network_cmd_ack(const protobuf_packet_t *pkt);
 static void network_cmd_device_reset(const protobuf_packet_t *pkt);
+#ifndef BOOTLOADER
+static void network_cmd_enter_to_bootloader(const protobuf_packet_t *pkt);
+#endif
 static void network_cmd_log_data_get(const protobuf_packet_t *pkt);
 static void network_cmd_log_clear(const protobuf_packet_t *pkt);
 static void network_send_log(uint8_t dst, uint32_t data_length);
 static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
 static bool network_cmd_host_active(void);
+
+#ifdef HAVE_BLE_PERIPHERAL
+static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
+static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt);
+#endif
 
 #ifndef BOOTLOADER
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt);
@@ -57,10 +71,7 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
 
-#ifdef HAVE_BLE_PERIPHERAL
-static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
-static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt);
-#endif
+
 
 static void network_cmd_sys_ranging_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt);
@@ -144,6 +155,9 @@ static const network_cmd_entry_t network_cmd_table[] = {
 #endif /* !BOOTLOADER */
 
     CMD_INFO(protobuf_packet_t_device_reset_tag,              network_cmd_device_reset,                "dev_reset"),          /* 24 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_enter_to_bootloader_tag,      network_cmd_enter_to_bootloader,         "enter_bootloader"),   /* 62 */
+#endif
     CMD_INFO(protobuf_packet_t_uwb_reset_tag,                 network_cmd_unimplemented,               "uwb_reset"),          /* 25 */
     CMD_INFO(protobuf_packet_t_factory_config_reset_tag,      network_cmd_unimplemented,               "factory_reset"),      /* 26 */
 
@@ -449,20 +463,6 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
 }
 
 
-#ifdef HAVE_BLE_PERIPHERAL
-#include "ble/sys_ble_peripheral.h"
-
-static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt)
-{
-    sys_ble_peripheral_on_status_resp(pkt);
-}
-
-static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
-{
-    /* Log received telemetry from other nodes for debug */
-    RLOG_I(OBJECT_CODE, "Received BLE adv status from 0x%02X", (unsigned)pkt->hdr.addr.src);
-}
-#endif
 
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt)
 {
@@ -579,11 +579,52 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
  * Shared command handlers (app + bootloader)
  * ───────────────────────────────────────────── */
 
+#ifdef HAVE_BLE_PERIPHERAL
+#include "ble/sys_ble_peripheral.h"
+
+static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt)
+{
+    sys_ble_peripheral_on_status_resp(pkt);
+}
+
+static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
+{
+    /* Log received telemetry from other nodes for debug */
+    RLOG_I(OBJECT_CODE, "Received BLE adv status from 0x%02X", (unsigned)pkt->hdr.addr.src);
+}
+#endif
+
 static void network_cmd_device_reset(const protobuf_packet_t *pkt)
 {
     (void)pkt;
     bsp_util_device_reset();
 }
+
+#ifndef BOOTLOADER
+static void network_cmd_enter_to_bootloader(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    if (pkt->params.enter_to_bootloader.magic != BL_MAGIC_VALUE) {
+        RLOG_W(OBJECT_CODE,
+               "Invalid enter_to_bootloader magic: 0x%08lX",
+               (unsigned long)pkt->params.enter_to_bootloader.magic);
+        return;
+    }
+
+    RLOG_I(OBJECT_CODE, "Entering bootloader...");
+
+    /* Send ACK blocks/inline so it reaches the host before we reboot */
+    network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+
+    /* Wait for transmission to finish (USB endpoint flush / UART complete) */
+    bsp_delay_ms(100);
+
+    if (bsp_util_enter_bootloader() != BSP_UTIL_OK) {
+        RLOG_E(OBJECT_CODE, ERR_WRITE, "Failed to enter bootloader");
+    }
+}
+#endif
 
 static void network_cmd_log_data_get(const protobuf_packet_t *pkt)
 {

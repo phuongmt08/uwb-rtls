@@ -12,10 +12,11 @@
 #include "sys_ble_peripheral.h"
 #include "stm32f4xx_hal.h"
 #include "network/network_cmd.h"
-#include "bsp_util.h"
 #ifdef BOOTLOADER
+    #include "bsp_util_bl.h"
     #include "sys_logger_bl.h"
 #else
+    #include "bsp_util.h"
     #include "sys_logger.h"
     #include "sys_config.h"
 #endif

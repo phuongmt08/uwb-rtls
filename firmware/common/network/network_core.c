@@ -1,6 +1,11 @@
 #include "network_core.h"
-#include "sys_logger.h"
+#ifdef BOOTLOADER
+#include "bsp_util_bl.h"
+#include "sys_logger_bl.h"
+#else
 #include "bsp_util.h"
+#include "sys_logger.h"
+#endif
 #include <string.h>
 
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
@@ -103,9 +108,8 @@ static stream_type_t network_core_dst_to_tx_stream(protobuf_device_addr_t dst)
             return STREAM_SERIAL_TX;
         case protobuf_PACKET_ADDR_CENTRAL:
         case protobuf_PACKET_ADDR_PERIPHERAL:
-            return STREAM_BLE_TX;
         case protobuf_PACKET_ADDR_HOST:
-            return STREAM_SERIAL_TX;
+            return STREAM_BLE_TX;
         default:
             return STREAM_MAX;
     }
@@ -291,6 +295,13 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     packet->hdr.addr.src = (uint8_t)core->local_addr;
     packet->hdr.addr.dst = dst;
     packet->hdr.seq = (core->tx_seq)++;
+
+    if (dst == protobuf_PACKET_ADDR_DEBUG) {
+        /* DEBUG is a broadcast to all available interfaces */
+        network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
+        network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
+        return true;
+    }
 
     stream_type_t tx_stream = network_core_dst_to_tx_stream((protobuf_device_addr_t)dst);
     if (tx_stream == STREAM_MAX) {

@@ -287,10 +287,19 @@ uint32_t bsp_util_get_serial_number(void)
 
 bsp_util_status_t bsp_util_device_reset(void)
 {
+  __DSB();
+  __ISB();
+  NVIC_SystemReset();
+  return BSP_UTIL_OK; /* Never reached */
+}
+
+bsp_util_status_t bsp_util_enter_bootloader(void)
+{
   *(volatile uint32_t *) BL_MAGIC_ADDR = BL_MAGIC_VALUE;
   __DSB();
   __ISB();
   NVIC_SystemReset();
+  return BSP_UTIL_OK; /* Never reached */
 }
 
 /* Private functions -------------------------------------------------- */

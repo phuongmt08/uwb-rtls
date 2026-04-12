@@ -2,6 +2,7 @@
 #include "hdlc.h"
 #include "usart.h"
 #include "stm32f4xx_hal.h"
+#include "config.h"
 
 #ifndef BOOTLOADER
 #include "usbd_cdc_if.h"
@@ -108,7 +109,15 @@ int debug_serial_write(int file, char *ptr, int len, uint8_t type)
 #ifndef BOOTLOADER
     host_transport_t host_transport = sys_config_get_host_transport();
     if (host_transport == HOST_TRANSPORT_USB) {
-        return (CDC_Transmit_FS(frame, (uint16_t)frame_len) == USBD_OK) ? len : -1;
+        uint32_t start_ms = HAL_GetTick();
+        uint8_t res;
+        do {
+            res = CDC_Transmit_FS(frame, (uint16_t)frame_len);
+            if (res != USBD_BUSY) {
+                break;
+            }
+        } while ((HAL_GetTick() - start_ms) <= 10u);
+        return (res == USBD_OK) ? len : -1;
     }
 
     if (host_transport == HOST_TRANSPORT_UART) {
