@@ -62,7 +62,7 @@ bsp_imu_err_t bsp_imu_init(void)
 
 bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data)
 {
-	CHECK_ERR(!p_imu_data, BSP_IMU_ERR);
+//	CHECK_ERR(!p_imu_data, BSP_IMU_ERR);
 
 	icm42688_sensor_data_t raw_data;
 

@@ -239,109 +239,109 @@ int main(void)
   MX_CRC_Init();
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
-//  if (bsp_uwb_init() != 0) {
-//      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
-//    }
-//  int flash_storage_init_status = sys_flash_storage_init();
-//
-//  sys_logger_init();
-//  if (flash_storage_init_status != 0) {
-//    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
-//  }
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
-//
-//#if TEST_SEND_POS
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)",
-//         TEST_POS_START_X, TEST_POS_START_Y, TEST_POS_END_X, TEST_POS_END_Y);
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
-//#if TEST_DISABLE_RANGING
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
-//#endif
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
-//#endif
-//
-//  sys_config_init();
-//  sys_config_t *cfg = sys_config_get();
-//
-//  serial_init();
-//  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf))) {
-//    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
-//  } else if (!network_cmd_init(&s_network_cmd, &s_network_core)) {
-//    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
-//  } else {
-//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
-//  }
-//
-//#if TEST_SEND_POS && TEST_DISABLE_RANGING
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
-//#else
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
-//
-//  uint8_t err = 0;
-//  	if (bsp_imu_init() != BSP_IMU_OK)
-//  	{
-//
-//  		RLOG_I(LOG_OBJECT_CODE_APPLICATION, "IMU INIT FAILED");
-//  		err = 1;
-//  	}
-//
-//  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
-//    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-//    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u", TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
-//  }
-//
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
-//         cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
-//  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u",
-//         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
-//
-//  bsp_uwb_configure(&cfg->uwb);
-//#endif
-//
-//  bsp_io_init();
-//  bsp_io_led_off();
-//
-//#if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-//  /* Read DIP switch - ALWAYS OVERRIDES saved config */
-//  uint8_t dip_value = bsp_io_dip_read();
-//  if (dip_value == 0) {
-//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
-//  } else {
-//    sys_config_set_device_id(dip_value);
-//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-//  }
-//
-//  cfg = sys_config_get();
-//
-//  /* Initialize application based on role */
-//  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
-//    app_tag_init();
-//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
-//  } else {
-//    app_anchor_init();
-//    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
-//  }
-//#endif
+
+  int flash_storage_init_status = sys_flash_storage_init();
+
+  sys_logger_init();
+  if (flash_storage_init_status != 0) {
+    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
+  }
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System Starting...");
+
+#if TEST_SEND_POS
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)",
+         TEST_POS_START_X, TEST_POS_START_Y, TEST_POS_END_X, TEST_POS_END_Y);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
+#if TEST_DISABLE_RANGING
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
+#endif
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
+#endif
+
+  sys_config_init();
+  sys_config_t *cfg = sys_config_get();
+
+  serial_init();
+  if (!network_core_init(&s_network_core, s_network_rx_buf, sizeof(s_network_rx_buf))) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
+  } else if (!network_cmd_init(&s_network_cmd, &s_network_core)) {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
+  } else {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+  }
+
+#if TEST_SEND_POS && TEST_DISABLE_RANGING
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
+#else
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
+  if (bsp_uwb_init() != 0) {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
+    }
+  uint8_t err = 0;
+  	if (bsp_imu_init() != BSP_IMU_OK)
+  	{
+
+  		RLOG_I(LOG_OBJECT_CODE_APPLICATION, "IMU INIT FAILED");
+  		err = 1;
+  	}
+
+  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
+    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u", TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
+  }
+
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
+         cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u",
+         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
+
+  bsp_uwb_configure(&cfg->uwb);
+#endif
+
+  bsp_io_init();
+  bsp_io_led_off();
+
+#if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
+  /* Read DIP switch - ALWAYS OVERRIDES saved config */
+  uint8_t dip_value = bsp_io_dip_read();
+  if (dip_value == 0) {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
+  } else {
+    sys_config_set_device_id(dip_value);
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
+  }
+
+  cfg = sys_config_get();
+
+  /* Initialize application based on role */
+  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+    app_tag_init();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
+  } else {
+    app_anchor_init();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
+  }
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  bsp_util_init();
-	uint8_t err = 0;
-	if (bsp_imu_init() != BSP_IMU_OK)
-	{
-
-		err = 1;
-	}
+//  bsp_util_init();
+//	uint8_t err = 0;
+//	if (bsp_imu_init() != BSP_IMU_OK)
+//	{
+//
+//		err = 1;
+//	}
   uint32_t tick = HAL_GetTick();
   while (1)
   {
-	  if(bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK && err == 0)
+	  if(bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK)
 	  {
 
 		  if(HAL_GetTick() - tick >= 3000)
