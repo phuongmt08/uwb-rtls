@@ -52,10 +52,9 @@ void ble_bridge_set_tx_handler(serial_func_t handler)
 void ble_bridge_rx_push(const uint8_t *data, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++) {
-        uint32_t next_head = (s_rx_head + 1u) & BLE_RX_BUF_MASK;
-        if (next_head == s_rx_tail) break; /* buffer full — drop */
+        if ((s_rx_head - s_rx_tail) >= BLE_RX_BUF_SIZE) break; /* buffer full — drop */
         s_rx_buf[s_rx_head & BLE_RX_BUF_MASK] = data[i];
-        s_rx_head = next_head;
+        s_rx_head++;
     }
 }
 

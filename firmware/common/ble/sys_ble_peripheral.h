@@ -17,6 +17,12 @@ extern "C" {
 #endif
 
 /**
+ * Initialize BLE peripheral state manager.
+ * Must be called before any other sys_ble_peripheral_* functions.
+ */
+bool sys_ble_peripheral_init(network_core_t *stream);
+
+/**
  * Configure local identity for connection-mode advertising.
  * Should be called before sys_ble_peripheral_enable().
  */

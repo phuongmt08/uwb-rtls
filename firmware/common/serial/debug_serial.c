@@ -49,13 +49,12 @@ void debug_serial_set_tx_handler(serial_func_t handler)
 void debug_serial_rx_push(const uint8_t *data, uint32_t len)
 {
     for (uint32_t i = 0u; i < len; i++) {
-        uint32_t next_head = (s_rx_head + 1u) & DEBUG_RX_BUF_MASK;
-        if (next_head == s_rx_tail) {
+        if ((s_rx_head - s_rx_tail) >= DEBUG_RX_BUF_SIZE) {
             break; /* buffer full - drop newest bytes */
         }
 
         s_rx_buf[s_rx_head & DEBUG_RX_BUF_MASK] = data[i];
-        s_rx_head = next_head;
+        s_rx_head++;
     }
 }
 

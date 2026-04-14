@@ -62,16 +62,17 @@ static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
 static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt);
 #endif
 
-#ifndef BOOTLOADER
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt);
+#ifndef BOOTLOADER
 static void network_cmd_device_type_set(const protobuf_packet_t *pkt);
 static void network_cmd_device_type_get(const protobuf_packet_t *pkt);
 static void network_cmd_sys_config_get(const protobuf_packet_t *pkt);
 static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
+#endif
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
 
-
+#ifndef BOOTLOADER
 
 static void network_cmd_sys_ranging_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt);
@@ -124,7 +125,6 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_none_tag,                      network_cmd_none,                        "none"),               /* 2  */
     CMD_INFO(protobuf_packet_t_ack_tag,                       network_cmd_ack,                         "ack"),                /* 3  */
 
-#ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_device_information_get_tag,    network_cmd_device_information_get,      "dev_info_get"),       /* 4  */
     CMD_INFO(protobuf_packet_t_device_information_resp_tag,   network_cmd_unimplemented,               "dev_info_resp"),      /* 5  */
 
@@ -132,6 +132,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_time_sync_set_tag,             network_cmd_time_sync_set,               "time_sync_set"),      /* 7  */
     CMD_INFO(protobuf_packet_t_time_sync_resp_tag,            network_cmd_unimplemented,               "time_sync_resp"),     /* 8  */
 
+#ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_sys_config_get_tag,            network_cmd_sys_config_get,              "cfg_get"),            /* 10 */
     CMD_INFO(protobuf_packet_t_sys_config_set_tag,            network_cmd_sys_config_set,              "cfg_set"),            /* 11 */
     CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 12 */
@@ -157,6 +158,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_device_reset_tag,              network_cmd_device_reset,                "dev_reset"),          /* 24 */
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_enter_to_bootloader_tag,      network_cmd_enter_to_bootloader,         "enter_bootloader"),   /* 62 */
+#else
+    CMD_INFO(protobuf_packet_t_enter_to_bootloader_tag,      network_cmd_unimplemented,               "enter_bootloader"),   /* 62 */
 #endif
     CMD_INFO(protobuf_packet_t_uwb_reset_tag,                 network_cmd_unimplemented,               "uwb_reset"),          /* 25 */
     CMD_INFO(protobuf_packet_t_factory_config_reset_tag,      network_cmd_unimplemented,               "factory_reset"),      /* 26 */
@@ -184,7 +187,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
 
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_host_transport_set,          "host_transport_set"), /* 39 */
+#else
+    CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_unimplemented,                        "host_transport_set"), /* 39 */
+#endif
 
+#ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_pos_calib_cfg_get_tag,         network_cmd_pos_calib_cfg_get,           "calib_cfg_get"),      /* 40 */
     CMD_INFO(protobuf_packet_t_pos_calib_cfg_set_tag,         network_cmd_pos_calib_cfg_set,           "calib_cfg_set"),      /* 41 */
     CMD_INFO(protobuf_packet_t_pos_calib_cfg_resp_tag,        network_cmd_unimplemented,               "calib_cfg_resp"),     /* 42 */
@@ -327,6 +334,31 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
     network_cmd_send_packet(&resp);
 }
 
+#else
+
+static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_device_information_resp_tag);
+
+    /* Bootloader responds with minimal identity fields only. */
+    resp.params.device_information_resp.device_type    = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    resp.params.device_information_resp.role           = protobuf_DEVICE_ROLE_UNSPECIFIED;
+    resp.params.device_information_resp.has_fw_version = true;
+    resp.params.device_information_resp.fw_version     = (protobuf_version_t){0};
+    /* Mark as bootloader firmware in fw_version metadata. */
+    resp.params.device_information_resp.fw_version.gitsha = 0x424F4F54ULL; /* 'BOOT' */
+    resp.params.device_information_resp.hw_version     = 0u; /* unknown/not provided in bootloader */
+    resp.params.device_information_resp.serial_number = bsp_util_get_serial_number();
+
+    network_cmd_send_packet(&resp);
+}
+
+#endif /* !BOOTLOADER */
+
+#ifndef BOOTLOADER
+
 static void network_cmd_device_type_set(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
@@ -378,10 +410,7 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 
     sys_config_t *cfg = sys_config_get();
     cfg->uwb = *new_cfg;
-
-    if (cfg->device_type == DEVICE_TYPE_UNSPECIFIED) {
-        cfg->device_type = (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_TYPE_TAG : DEVICE_TYPE_ANCHOR;
-    }
+    cfg->device_type = (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_TYPE_TAG : DEVICE_TYPE_ANCHOR;
 
     network_cmd_config_save("sys_config");
 }
@@ -413,6 +442,8 @@ static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt)
 
     network_cmd_config_save("ranging_cfg");
 }
+
+#endif /* !BOOTLOADER */
 
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt)
 {
@@ -462,6 +493,8 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
            (long)pkt->params.time_sync_set.timezone_offset);
 }
 
+
+#ifndef BOOTLOADER
 
 
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt)
@@ -642,7 +675,7 @@ static void network_cmd_log_clear(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
 
-#ifdef HAVE_FLASH_STORAGE
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     uint32_t length = pkt->params.log_clear.length;
     if (length > 0u) {
         sys_logger_flash_consume(length);
@@ -654,7 +687,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 {
     CHECK_VOID(s_network_cmd.stream);
 
-#ifdef HAVE_FLASH_STORAGE
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     if (s_log_tracker.waiting_ack) {
         return;
     }
@@ -692,7 +725,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
         s_log_tracker.log_len     = 0u;
     }
 #else
-    /* No flash storage: drain RAM circular buffer directly.
+    /* No flash storage: logger returns framed entries from RAM buffer.
      * ACK tracking mirrors the flash path — consume only after host ACKs. */
     if (s_log_tracker.waiting_ack) {
         return;
@@ -737,7 +770,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
 {
     (void)packet;
 
-#ifdef HAVE_FLASH_STORAGE
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     CHECK_VOID(p_tracker != NULL);
 
     network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;

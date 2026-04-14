@@ -112,6 +112,7 @@ int sys_config_set_role(device_role_t role)
         return -1;
     }
     g_storage.config.uwb.role = role;
+    g_storage.config.device_type = sys_config_default_device_type_from_role(role);
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Role set to: %s",
            role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
     return 0;
@@ -199,10 +200,14 @@ int sys_config_load(void)
     }
 
     sys_config_storage_t temp_storage;
+    bool                 normalize_and_save = false;
     uint32_t bytes_read = sys_flash_cfg_read(&temp_storage, sizeof(sys_config_storage_t));
 
     if (bytes_read != sizeof(sys_config_storage_t)) {
-        RLOG_D(LOG_OBJECT_CODE_SYS_CFG, "No valid config in flash");
+        RLOG_D(LOG_OBJECT_CODE_SYS_CFG,
+               "No valid config in flash (bytes_read=%lu expected=%lu)",
+               (unsigned long)bytes_read,
+               (unsigned long)sizeof(sys_config_storage_t));
         return -1;
     }
 
@@ -239,6 +244,14 @@ int sys_config_load(void)
     if (!sys_config_device_type_valid(temp_storage.config.device_type)) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid device_type in flash, deriving from role");
         temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
+        normalize_and_save = true;
+    }
+    else if (temp_storage.config.device_type != sys_config_default_device_type_from_role(temp_storage.config.uwb.role)) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
+               "device_type/role mismatch in flash, normalizing to %s",
+               temp_storage.config.uwb.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
+        temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
+        normalize_and_save = true;
     }
 
     if (!sys_config_host_transport_valid(temp_storage.config.host_transport)) {
@@ -269,6 +282,15 @@ int sys_config_load(void)
 
     memcpy(&g_storage, &temp_storage, sizeof(sys_config_storage_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
+
+    if (normalize_and_save) {
+        if (sys_config_save() == 0) {
+            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Normalized config persisted back to flash");
+        } else {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Normalized config could not be persisted back to flash");
+        }
+    }
+
     return 0;
 #else
     if (g_config_magic == CONFIG_RAM_MAGIC) {

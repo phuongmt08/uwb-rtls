@@ -12,11 +12,10 @@
 
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
-    protobuf_packet_t_ble_adv_status_tag,
+    protobuf_packet_t_ble_adv_status_tag
     // protobuf_packet_t_log_erase_tag,
 //    protobuf_packet_t_anchor_distance_tag,
 //    protobuf_packet_t_tag_position_tag,
-    protobuf_packet_t_flash_write_tag
 };
 
 static bool network_core_encode_and_send(network_core_t *core,
@@ -128,6 +127,14 @@ static bool network_core_is_for_us(network_core_t *core, const protobuf_packet_t
     protobuf_device_addr_t dst = (protobuf_device_addr_t)packet->hdr.addr.dst;
     if (dst == protobuf_PACKET_ADDR_BCAST) return true;
 
+#ifdef BOOTLOADER
+    /* Bootloader should accept both TAG/ANCHOR unicast commands so FOTA tools
+     * do not need role-specific dst handling before app config is known. */
+    if (dst == protobuf_PACKET_ADDR_TAG || dst == protobuf_PACKET_ADDR_ANCHOR) {
+        return true;
+    }
+#endif
+
     return (dst == core->local_addr);
 }
 
@@ -210,7 +217,8 @@ static void network_core_check_tracker_timeouts(network_core_t *core)
 static bool network_core_process_one_stream(network_core_t *core, stream_type_t in_stream)
 {
     protobuf_packet_t packet;
-
+    memset(&packet, 0, sizeof(packet));
+    
     if (!network_core_try_receive(core, in_stream, &packet)) {
         return false;
     }
@@ -275,13 +283,8 @@ bool network_core_process(network_core_t *core)
 
     network_core_check_tracker_timeouts(core);
 
-#ifdef BOOTLOADER
-    /* In bootloader mode, keep debug_serial path isolated: process BLE transport only. */
-    network_core_process_one_stream(core, STREAM_BLE_RX);
-#else
     network_core_process_one_stream(core, STREAM_SERIAL_RX);
     network_core_process_one_stream(core, STREAM_BLE_RX);
-#endif
 
     return true;
 }

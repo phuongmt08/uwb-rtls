@@ -22,6 +22,7 @@
 #endif
 
 #include <string.h>
+#include <stdio.h>
 
 #define OBJECT_CODE             LOG_OBJECT_CODE_BLE
 #define BLE_WATCHDOG_PERIOD_MS  10000u
