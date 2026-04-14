@@ -49,7 +49,10 @@ class VvTestSession:
         return pkt.WhichOneof("params") or "<none>"
 
     def packet_hdr(self, pkt) -> str:
-        return f"src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}"
+        base = f"src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}"
+        if pkt.WhichOneof("params") == "ack":
+            base += f" ack_seq={pkt.ack.ack_seq}"
+        return base
 
     def recv_packets(self, timeout_s: float) -> list:
         if self.ser is None:
@@ -110,9 +113,8 @@ class VvTestSession:
         return ports
 
     @classmethod
-    def auto_probe(cls, debug: bool = True) -> ProbeResult | None:
-        src = int(VvAddress.HOST)
-        dst = int(VvAddress.ANCHOR)
+    def auto_probe(cls, src: int = int(VvAddress.DEBUG), debug: bool = True) -> ProbeResult | None:
+        dst = int(VvAddress.BCAST)
 
         for port_info in cls.prioritized_ports():
             for baud in BAUD_CANDIDATES:

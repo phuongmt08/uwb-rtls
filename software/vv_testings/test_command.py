@@ -11,7 +11,7 @@ import test_time_sync
 
 
 def main() -> int:
-    probe = VvTestSession.auto_probe(debug=True)
+    probe = VvTestSession.auto_probe(debug=False)
     if probe is None:
         print("No compatible anchor response on available ports")
         return 1
@@ -19,8 +19,8 @@ def main() -> int:
     print(f"Connected: {probe.port} @ {probe.baud}")
     print(f"Serial Number: {probe.serial_number}")
 
-    src = int(VvAddress.HOST)
-    dst = int(VvAddress.ANCHOR)
+    src = int(VvAddress.DEBUG)
+    dst = int(VvAddress.BCAST)
 
     all_ok = True
     with VvTestSession(probe.port, baud=probe.baud, debug=True) as session:

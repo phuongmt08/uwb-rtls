@@ -235,7 +235,6 @@ class CommandFactory:
     def ble_status_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.ble_status_resp.state = pb.BLE_STATE_IDLE
-        pkt.ble_status_resp.connected = False
         pkt.ble_status_resp.rssi_dbm = -70
         return pkt
 
@@ -313,6 +312,23 @@ class CommandFactory:
         anchor.anchor_id = 1
         return pkt
 
+    # ── FOTA commands ─────────────────────────────────────────────────────────
+
+    def enter_to_bootloader(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.enter_to_bootloader.magic = 0xDEADB007
+        return pkt
+
+    def flash_verify(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.flash_verify.dummy = 0
+        return pkt
+
+    def fota_state_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.fota_state_resp.state = pb.FOTA_STATE_IDLE
+        return pkt
+
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -361,6 +377,10 @@ class CommandCatalog:
             CommandSpec(42, "anchor_layout_get", self.factory.anchor_layout_get),
             CommandSpec(43, "anchor_layout_set", self.factory.anchor_layout_set),
             CommandSpec(44, "anchor_layout_resp", self.factory.anchor_layout_resp),
+            # FOTA
+            CommandSpec(62, "enter_to_bootloader", self.factory.enter_to_bootloader),
+            CommandSpec(46, "flash_verify", self.factory.flash_verify),
+            CommandSpec(57, "fota_state_resp", self.factory.fota_state_resp),
         ]
 
     def all(self) -> Iterable[CommandSpec]:
