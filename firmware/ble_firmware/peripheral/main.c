@@ -55,6 +55,8 @@
 // System-wide BLE configs
 #include "../ble_common/ble_config.h"
 
+#include "../ble_common/ble_bridge/bb_router.h"
+
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 
@@ -63,6 +65,8 @@
 
 #include "sys_log.h"
 #include "ble_peripheral.h"
+
+#define BLE_PERIPHREAL
 
 /**@brief Function for initializing power management.
  */
@@ -92,11 +96,12 @@ static void idle_state_handle(void)
 int main(void)
 {
     // Initialize.
-    bsp_uart_init();
+    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init) 
     sys_log_init();
     bsp_utils_init();
     power_management_init();
 
+    bb_router_init();
     ble_peripheral_init();
 
     // Start execution.
@@ -106,7 +111,8 @@ int main(void)
 
     // Enter main loop.
     for (;;)
-    {
+    {bb_router_process();
+        
         idle_state_handle();
     }
 }

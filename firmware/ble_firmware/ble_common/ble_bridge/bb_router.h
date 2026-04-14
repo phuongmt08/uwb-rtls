@@ -11,7 +11,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "bb_transport.h"
 #include "sdk_errors.h"
 
 /**
@@ -25,24 +24,27 @@ typedef enum {
 } bb_router_err_t;
 
 /**
- * @brief Initializes the Routing module and links to Transport / App layers.
+ * @brief Represents the internal state of the Router.
+ */
+typedef enum {
+    BB_ROUTER_STATE_IDLE,
+    BB_ROUTER_STATE_CHECK_DST,
+    BB_ROUTER_STATE_PROCESS_CMD,
+    BB_ROUTER_STATE_FORWARD
+} bb_router_state_t;
+
+/**
+ * @brief Initializes the Routing module.
  *
  * @return NRF_SUCCESS on successful configuration.
  */
 ret_code_t bb_router_init(void);
 
 /**
- * @brief The primary gateway function. It inspects the payload and decides where it goes.
- * This function should be registered as the callback (`bb_transport_data_handler_t`)
- * inside `bb_transport_init`.
- *
- * Flow Logic:
- *  - Dest = PACKET_ADDR_PERIPHERAL -> Forward to bb_cmd_hdl_process()
- *  - Dest = PACKET_ADDR_TAG / HOST -> Passthrough to correct bb_transport_send_XXX()
- *
- * @param[in] p_evt The transport event containing the fully de-framed protobuf payload.
- * @return Router processing status.
+ * @brief Runs the central routing state machine.
+ * Periodically calls the transport layer to check for new packets and triggers actions.
+ * Should be called periodically in the main loop.
  */
-bb_router_err_t bb_route_packet_evt(bb_transport_evt_t const * p_evt);
+void bb_router_process(void);
 
 #endif // BB_ROUTER_H

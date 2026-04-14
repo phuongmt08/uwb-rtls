@@ -32,18 +32,17 @@
 /* Private macros ----------------------------------------------------- */
 /* Public variables --------------------------------------------------- */
 /* Private variables -------------------------------------------------- */
-static uint8_t m_uart_data_buffer[BLE_NUS_MAX_DATA_LEN];
-static uint8_t m_buffer_index = 0;
+static bsp_uart_rx_cb_t s_rx_cb = NULL;
 
 /* Private function prototypes ---------------------------------------- */
-static uint32_t uart_send_data(const uint8_t * p_data, uint16_t len);
-static uint32_t uart_data_handler();
 static void uart_event_handler(app_uart_evt_t * p_event);
+static void bsp_uart_read_byte();
 
 /* Function definitions ----------------------------------------------- */
-uint32_t bsp_uart_init(void)
+void bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
 {
-    
+    s_rx_cb = rx_cb;
+
     uint32_t err_code;
     app_uart_comm_params_t const comm_params =
     {
@@ -72,15 +71,23 @@ uint32_t bsp_uart_init(void)
         NRF_LOG_INFO("UART module initialized (115200 8N1)");
     }
     
-    return err_code;
 }
 
-uint32_t bsp_uart_send_string(const char * p_str)
+bool bsp_uart_transmit(const uint8_t *buf, uint16_t len)
 {
-    if (p_str == NULL)
+    if (buf == NULL)
         return NRF_ERROR_NULL;
     
-    return uart_send_data((const uint8_t *)p_str, strlen(p_str));
+    for (uint16_t i = 0; i < len; i++)
+    {
+        uint32_t err_code = app_uart_put(buf[i]);
+        if (err_code != NRF_SUCCESS)
+        {
+            return err_code;
+        }
+    }
+    
+    return NRF_SUCCESS;
 }
 
 /* Private definitions ------------------------------------------------ */
@@ -91,15 +98,15 @@ static void uart_event_handler(app_uart_evt_t * p_event)
     switch (p_event->evt_type)
     {
         case APP_UART_DATA_READY:
-            uart_data_handler();
+            bsp_uart_read_byte();
             break;
 
         case APP_UART_COMMUNICATION_ERROR:
-            NRF_LOG_WARNING("UART Communication Error: 0x%X", p_event->data.error_communication);
+            // NRF_LOG_WARNING("UART Communication Error: 0x%X", p_event->data.error_communication);
             break;
 
         case APP_UART_FIFO_ERROR:
-            NRF_LOG_WARNING("UART FIFO Error: 0x%X", p_event->data.error_code);
+            // NRF_LOG_WARNING("UART FIFO Error: 0x%X", p_event->data.error_code);
             break;
 
         default:
@@ -107,54 +114,17 @@ static void uart_event_handler(app_uart_evt_t * p_event)
     }
 }
 
-static uint32_t uart_send_data(const uint8_t * p_data, uint16_t len)
+static void bsp_uart_read_byte()
 {
-    if (p_data == NULL)
-        return NRF_ERROR_NULL;
-    
-    for (uint16_t i = 0; i < len; i++)
+    uint8_t byte;
+    while (app_uart_get(&byte) == NRF_SUCCESS)
     {
-        uint32_t err_code = app_uart_put(p_data[i]);
-        if (err_code != NRF_SUCCESS)
+        NRF_LOG_DEBUG("Received byte: 0x%02X", byte);
+        if (s_rx_cb != NULL)
         {
-            return err_code;
+            s_rx_cb(byte);
         }
     }
-    
-    return NRF_SUCCESS;
-}
-
-static uint32_t uart_data_handler()
-{
-    UNUSED_VARIABLE(app_uart_get(&m_uart_data_buffer[m_buffer_index]));
-    m_buffer_index++;
-
-    // Check if we received a complete line or buffer is full
-    if ((m_uart_data_buffer[m_buffer_index - 1] == '\n') ||
-        (m_uart_data_buffer[m_buffer_index - 1] == '\r') ||
-        (m_buffer_index >= BLE_NUS_MAX_DATA_LEN))
-    {
-        if (m_buffer_index > 0)
-        {
-            m_uart_data_buffer[m_buffer_index] = '\0';
-            
-            // Remove trailing \n and \r for clean comparison
-            uint8_t clean_len = m_buffer_index;
-            while (clean_len > 0 && (m_uart_data_buffer[clean_len - 1] == '\n' || 
-                                        m_uart_data_buffer[clean_len - 1] == '\r'))
-            {
-                m_uart_data_buffer[clean_len - 1] = '\0';
-                clean_len--;
-            }
-            
-            NRF_LOG_INFO("UART RX: %s", (uint32_t)m_uart_data_buffer);
-            bsp_uart_send_string("\r\nReceived: ");
-            bsp_uart_send_string((const char *)m_uart_data_buffer);
-            bsp_uart_send_string("\n");
-        }
-        m_buffer_index = 0;
-    }
-    return NRF_SUCCESS;
 }
 
 /* End of file -------------------------------------------------------- */
