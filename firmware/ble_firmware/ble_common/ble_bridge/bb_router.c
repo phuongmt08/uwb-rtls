@@ -1,4 +1,3 @@
-// Khuôn cho .c
 /**
  * @file       bb_router.c
  * @copyright  [Your Copyright]
@@ -82,15 +81,21 @@ void bb_router_process(void)
 
         case BB_ROUTER_STATE_PROCESS_CMD:
         {
-            // Xử lý các command dạng protobuf (Decode payload thông qua pointer)
-            if (bb_cmd_hdl_process(protobuf_buffer, protobuf_buffer_len) == NRF_SUCCESS) 
+            // Xử lý các command dạng protobuf (Decode -> Table tra cứu -> Encode đè lên chính mảng buffer)
+            bb_cmd_action_t action = bb_cmd_hdl_process(protobuf_buffer, &protobuf_buffer_len, MAX_PROTOBUF_PAYLOAD_SIZE);
+            if (action == BB_CMD_ACTION_SEND_SERIAL) 
             {
                 m_target_source = BB_SOURCE_SERIAL;
                 m_state = BB_ROUTER_STATE_FORWARD;
             } 
+            else if (action == BB_CMD_ACTION_SEND_BLE)
+            {
+                m_target_source = BB_SOURCE_BLE;
+                m_state = BB_ROUTER_STATE_FORWARD;
+            }
             else 
             {
-                // Nếu process fail (hoặc không cần gửi response), clear m_state để nhận gói mới
+                // Action = NONE (không cần gửi gì) hoặc ERROR (Báo lỗi payload) -> clear cờ chờ gói mới.
                 m_state = BB_ROUTER_STATE_IDLE;
             }
             break;

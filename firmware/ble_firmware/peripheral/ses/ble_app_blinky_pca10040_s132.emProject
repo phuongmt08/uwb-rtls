@@ -117,6 +117,12 @@
       <file file_name="../../ble_common/ble_bridge/bb_transport.c" />
       <file file_name="../../ble_common/hdlc.c" />
     </folder>
+    <folder Name="nanopb">
+      <file file_name="../../../../protocol/nanopb/pb_common.c" />
+      <file file_name="../../../../protocol/nanopb/pb_decode.c" />
+      <file file_name="../../../../protocol/nanopb/pb_encode.c" />
+      <file file_name="../../../../protocol/protos/protocol.pb.c" />
+    </folder>
     <folder Name="UTF8/UTF16 converter">
       <file file_name="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/external/utf_converter/utf.c" />
     </folder>

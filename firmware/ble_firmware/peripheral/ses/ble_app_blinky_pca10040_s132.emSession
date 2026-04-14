@@ -23,6 +23,7 @@
  <Project>
   <ProjectSessionItem path="ble_app_blinky_pca10040_s132"/>
   <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132"/>
+  <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;Application"/>
   <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;BLE_Bridge"/>
  </Project>
  <Register1>
@@ -68,11 +69,13 @@
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="77" useTextEdit="1" path="../bsp_uart.c" left="0" top="38" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="67" y="89" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/ble/ble_services/ble_nus/ble_nus.h" left="0" top="49" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="1" y="52" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/uart/app_uart_fifo.c" left="0" top="12" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="3" y="44" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.h" left="0" top="4" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="27" y="71" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.c" left="0" top="44" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="50" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.h" left="0" selected="1" top="4" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="71" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.c" left="0" top="44" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="4" y="32" useTextEdit="1" path="../../ble_common/ble_bridge/bb_cmd_hdl.c" left="0" top="0" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="35" useTextEdit="1" path="../../../../protocol/protos/protocol.pb.h" left="0" top="0" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="12" y="80" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.c" left="0" selected="1" top="87" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="41" y="116" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.c" left="0" top="64" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="34" y="34" useTextEdit="1" path="ble_app_blinky_pca10040_s132.emProject" left="0" top="0" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="88" y="44" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.h" left="0" top="0" codecName="Default"/>
  </Files>
  <EMStudioWindow activeProject="ble_app_blinky_pca10040_s132" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>
