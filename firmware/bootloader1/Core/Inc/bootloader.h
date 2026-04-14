@@ -1,6 +1,7 @@
 /**
  * @file       bootloader.h
  * @brief      Minimal USB DFU bootloader API for STM32F411CEU6
+ * @author     Phuong Mai
  * @version    1.0.0
  * @date       2025-09-29
  */
@@ -11,7 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../../../common/memorylayout.h"
-#include "network/network_core.h"
+#include "network_core.h"
 
 /* Flash layout (STM32F411CE, 512KB)
  * - 0x08000000..0x0800BFFF: Bootloader code (48KB, sectors 0-2)

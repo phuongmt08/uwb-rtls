@@ -1,6 +1,7 @@
 /**
  * @file    bootloader.c
  * @brief   Minimal USB DFU + BLE FOTA bootloader for STM32F411CEU6
+ * @author  Phuong Mai
  *
  * Boot flow:
  *   1. main() opens a DFU/FOTA window for BL_DFU_TIMEOUT_MS.
@@ -33,10 +34,6 @@ extern USBD_HandleTypeDef hUsbDeviceFS;
 
 #define OBJECT_CODE  LOG_OBJECT_CODE_NETWORK
 
-/* ─────────────────────────────────────────────
- * App vector validation
- * ───────────────────────────────────────────── */
-
 bool bl_app_vector_valid(void)
 {
     const uint32_t magic        = *(uint32_t *)(MEM_APP_HEADER_ADDR + 0U);
@@ -53,10 +50,6 @@ bool bl_app_vector_valid(void)
 
     return true;
 }
-
-/* ─────────────────────────────────────────────
- * DFU magic / jump
- * ───────────────────────────────────────────── */
 
 bool bl_should_enter_dfu(void)
 {
@@ -91,23 +84,15 @@ void bl_jump_to_app(void)
     __set_MSP(*(uint32_t *)MEM_APP_START);
     ((void (*)(void))(*(uint32_t *)(MEM_APP_START + 4U)))();
 }
-
-/* ─────────────────────────────────────────────
- * BLE FOTA — internal state
- * ───────────────────────────────────────────── */
-
 typedef struct {
     protobuf_fota_state_index_t state;
     uint32_t                    bytes_written;
     bool                        host_disconnected;
+    uint32_t                    last_processed_seq;  /* Track last processed packet seq to prevent duplicates */
 } bl_fota_ctx_t;
 
 static bl_fota_ctx_t         s_fota;
 static network_core_t       *s_net_core_ref;   /* for packet handler */
-
-/* ─────────────────────────────────────────────
- * FOTA internal helpers
- * ───────────────────────────────────────────── */
 
 static void bl_send_fota_state(const protobuf_packet_t *req,
                                protobuf_fota_state_index_t state)
@@ -123,9 +108,16 @@ static void bl_send_fota_state(const protobuf_packet_t *req,
     network_core_send_packet(s_net_core_ref, resp.hdr.addr.dst, &resp);
 }
 
-/* ─────────────────────────────────────────────
- * FOTA packet handlers (called from bl_packet_handler)
- * ───────────────────────────────────────────── */
+static void bl_enter_error_and_erase_app(const protobuf_packet_t *req)
+{
+    if (bsp_fl_app_erase() != BSP_FL_OK) {
+        RLOG_E(OBJECT_CODE, ERR_HAL, "BL: app erase on error failed");
+    }
+
+    s_fota.bytes_written = 0u;
+    s_fota.state = protobuf_FOTA_STATE_ERROR;
+    bl_send_fota_state(req, s_fota.state);
+}
 
 static void bl_on_enter_to_bootloader(const protobuf_packet_t *pkt)
 {
@@ -148,8 +140,7 @@ static void bl_on_flash_erase(const protobuf_packet_t *pkt)
 
     if (bsp_fl_app_erase() != BSP_FL_OK) {
         RLOG_E(OBJECT_CODE, ERR_HAL, "BL: erase failed");
-        s_fota.state = protobuf_FOTA_STATE_ERROR;
-        bl_send_fota_state(pkt, s_fota.state);
+        bl_enter_error_and_erase_app(pkt);
         return;
     }
 
@@ -159,10 +150,10 @@ static void bl_on_flash_erase(const protobuf_packet_t *pkt)
     bl_send_fota_state(pkt, s_fota.state);
 }
 
-static void bl_on_flash_write(const protobuf_packet_t *pkt)
+static bool bl_on_flash_write(const protobuf_packet_t *pkt)
 {
     if (s_fota.state != protobuf_FOTA_STATE_RECEIVING) {
-        return;
+        return false;
     }
 
     uint32_t       address = pkt->params.flash_write.address;
@@ -175,17 +166,18 @@ static void bl_on_flash_write(const protobuf_packet_t *pkt)
         RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
                "BL: bad write addr=0x%08lX len=%lu",
                (unsigned long)address, (unsigned long)length);
-        s_fota.state = protobuf_FOTA_STATE_ERROR;
-        return;
+        bl_enter_error_and_erase_app(pkt);
+        return false;
     }
 
     if (bsp_fl_app_write(address, data, length) != BSP_FL_OK) {
         RLOG_E(OBJECT_CODE, ERR_HAL, "BL: flash write failed");
-        s_fota.state = protobuf_FOTA_STATE_ERROR;
-        return;
+        bl_enter_error_and_erase_app(pkt);
+        return false;
     }
 
     s_fota.bytes_written += length;
+    return true;
 }
 
 static void bl_on_flash_verify(const protobuf_packet_t *pkt)
@@ -200,25 +192,46 @@ static void bl_on_flash_verify(const protobuf_packet_t *pkt)
     s_fota.state = protobuf_FOTA_STATE_VERIFYING;
     bl_send_fota_state(pkt, s_fota.state);
 
-    if (bsp_fl_app_verify_crc() == BSP_FL_OK && bl_app_vector_valid()) {
+    uint32_t image_len = 0u;
+    uint32_t expected_crc = 0u;
+    uint32_t computed_crc = 0u;
+    bsp_fl_status_t crc_status = bsp_fl_app_verify_crc_ex(&image_len, &expected_crc, &computed_crc);
+
+    if (crc_status == BSP_FL_OK) {
         RLOG_I(OBJECT_CODE, "BL: image verified (%lu B)",
                (unsigned long)s_fota.bytes_written);
         s_fota.state = protobuf_FOTA_STATE_FINISHED;
         bl_send_fota_state(pkt, s_fota.state);
     } else {
-        RLOG_E(OBJECT_CODE, ERR_CRC, "BL: image verification failed");
-        s_fota.state = protobuf_FOTA_STATE_ERROR;
-        bl_send_fota_state(pkt, s_fota.state);
+        if (crc_status == BSP_FL_ERR_INVALID_ARG) {
+            const bsp_fl_app_header_t *hdr =
+                (const bsp_fl_app_header_t *)MEM_APP_HEADER_ADDR;
+
+            RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
+                   "BL: verify failed (invalid header/len) magic=0x%08lX ver=%lu size=%lu len=%lu crc=0x%08lX",
+                   (unsigned long)hdr->magic,
+                   (unsigned long)hdr->header_version,
+                   (unsigned long)hdr->header_size,
+                   (unsigned long)hdr->image_length,
+                   (unsigned long)hdr->image_crc);
+        } else if (crc_status == BSP_FL_ERR_VERIFY) {
+            RLOG_E(OBJECT_CODE, ERR_CRC,
+                   "BL: verify failed (crc mismatch) len=%lu expected=0x%08lX computed=0x%08lX",
+                   (unsigned long)image_len,
+                   (unsigned long)expected_crc,
+                   (unsigned long)computed_crc);
+        } else {
+            RLOG_E(OBJECT_CODE, ERR_CRC,
+                   "BL: verify failed (crc status=%d) len=%lu expected=0x%08lX computed=0x%08lX",
+                   (int)crc_status,
+                   (unsigned long)image_len,
+                   (unsigned long)expected_crc,
+                   (unsigned long)computed_crc);
+        }
+
+        bl_enter_error_and_erase_app(pkt);
     }
 }
-
-/* ─────────────────────────────────────────────
- * Combined packet handler
- *
- * Intercepts FOTA-specific packets (flash_erase, flash_write,
- * flash_verify, ble_status_resp) and delegates everything else
- * to network_cmd_dispatch for standard handling (log, ack, etc.).
- * ───────────────────────────────────────────── */
 
 static bool bl_packet_handler(const protobuf_packet_t *pkt)
 {
@@ -235,9 +248,30 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
             return true;
 
         case protobuf_packet_t_flash_write_tag:
-            bl_on_flash_write(pkt);
-            network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+        {
+            /* Detect and skip duplicate packets */
+            if (pkt->has_hdr && pkt->hdr.seq == s_fota.last_processed_seq) {
+                RLOG_W(OBJECT_CODE, "BL: duplicate flash_write detected (seq=%d), skipping",
+                       (int)pkt->hdr.seq);
+                /* Don't re-process, but still ACK to prevent retransmit storm */
+                network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                return true;
+            }
+
+            /* Track this sequence number */
+            if (pkt->has_hdr) {
+                s_fota.last_processed_seq = pkt->hdr.seq;
+            }
+
+            /* Process and send ACK only if successful */
+            bool success = bl_on_flash_write(pkt);
+            if (success) {
+                network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+            } else {
+                network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+            }
             return true;
+        }
 
         case protobuf_packet_t_flash_verify_tag:
             bl_on_flash_verify(pkt);
@@ -255,14 +289,11 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
     }
 }
 
-/* ─────────────────────────────────────────────
- * Public: BLE FOTA entry point
- * ───────────────────────────────────────────── */
-
 void bl_fota_init(network_core_t *net_core)
 {
     memset(&s_fota, 0, sizeof(s_fota));
     s_fota.state   = protobuf_FOTA_STATE_IDLE;
+    s_fota.last_processed_seq = 0xFFFFFFFFU;  /* Initialize to invalid sequence number */
     s_net_core_ref = net_core;
 
     if (!sys_ble_peripheral_init(net_core)) {
@@ -271,9 +302,11 @@ void bl_fota_init(network_core_t *net_core)
     }
 
     sys_ble_peripheral_set_config();
-    sys_ble_peripheral_enable(true);
-
+    
+    /* Register packet handler BEFORE enabling to avoid race condition */
     network_core_register_packet_handler(net_core, bl_packet_handler);
+    
+    sys_ble_peripheral_enable(true);
 }
 
 void bl_fota_process(void)
@@ -312,7 +345,7 @@ bool bl_fota_run(network_core_t *net_core, uint32_t timeout_ms)
             /* Disconnected event */
             if (s_fota.state == protobuf_FOTA_STATE_RECEIVING) {
                 RLOG_W(OBJECT_CODE, "BL: disconnected mid-transfer — aborting");
-                s_fota.state = protobuf_FOTA_STATE_ERROR;
+                bl_enter_error_and_erase_app(NULL);
             } else {
                 RLOG_I(OBJECT_CODE, "BL: BLE disconnected (state=%d)", (int)s_fota.state);
             }

@@ -41,7 +41,7 @@ typedef struct {
     uint32_t image_timestamp;
     uint32_t image_length;      /* bytes from MEM_APP_START         */
     uint32_t image_crc;         /* CRC32 of image_length bytes      */
-    uint8_t  reserved[220];     /* pad to MEM_APP_HEADER_SIZE(256)  */
+    uint32_t reserved[5];       /* keep compatible with app header layout */
 } bsp_fl_app_header_t;
 
 /**
@@ -88,6 +88,21 @@ bool bsp_fl_read_app_header(bsp_fl_app_header_t *out);
 bsp_fl_status_t bsp_fl_app_verify_crc(void);
 
 /**
+ * @brief  Verify image CRC and expose verification details.
+ *
+ * @param[out] out_image_length  Optional. Header image_length.
+ * @param[out] out_expected_crc  Optional. Header image_crc.
+ * @param[out] out_computed_crc  Optional. CRC computed over image_length bytes.
+ *
+ * @return BSP_FL_OK on match,
+ *         BSP_FL_ERR_VERIFY on mismatch,
+ *         BSP_FL_ERR_INVALID_ARG if header/length is invalid.
+ */
+bsp_fl_status_t bsp_fl_app_verify_crc_ex(uint32_t *out_image_length,
+                                         uint32_t *out_expected_crc,
+                                         uint32_t *out_computed_crc);
+
+/**
  * @brief  Erase all application sectors (sectors 3-5).
  *         Called by usbd_dfu_if.c. Returns USBD_OK(0) or USBD_FAIL(1).
  */
@@ -101,4 +116,4 @@ uint32_t DFU_GetSectorFromAddress(uint32_t address);
 
 #ifdef __cplusplus
 }
-#endif
+#endif

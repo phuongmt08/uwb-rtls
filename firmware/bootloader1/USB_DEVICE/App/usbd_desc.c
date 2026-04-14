@@ -68,7 +68,7 @@
 #define USBD_PID_FS     57105
 #define USBD_PRODUCT_STRING_FS     "STM32 DownLoad Firmware Update"
 #define USBD_CONFIGURATION_STRING_FS     "DFU Config"
-#define USBD_INTERFACE_STRING_FS     "DFU Interface"
+#define USBD_INTERFACE_STRING_FS     "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,03*128Kg"
 
 #define USB_SIZ_BOS_DESC            0x0C
 

@@ -55,6 +55,7 @@ EndBSPDependencies */
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_dfu.h"
 #include "usbd_ctlreq.h"
+#include "bootloader.h"
 
 
 /** @addtogroup STM32_USB_DEVICE_LIBRARY
@@ -108,6 +109,8 @@ static uint8_t USBD_DFU_SOF(USBD_HandleTypeDef *pdev);
 static uint8_t *USBD_DFU_GetCfgDesc(uint16_t *length);
 static uint8_t *USBD_DFU_GetDeviceQualifierDesc(uint16_t *length);
 #endif /* USE_USBD_COMPOSITE */
+
+volatile uint8_t g_usbd_dbg_dfu_iinterface_alt0 = 0U;
 
 #if (USBD_SUPPORT_USER_STRING_DESC == 1U)
 static uint8_t *USBD_DFU_GetUsrStringDesc(USBD_HandleTypeDef *pdev,
@@ -215,15 +218,15 @@ __ALIGN_BEGIN static uint8_t USBD_DFU_CfgDesc[USB_DFU_CONFIG_DESC_SIZ] __ALIGN_E
   /******************** DFU Functional Descriptor********************/
   0x09,                                                /* blength = 9 Bytes */
   DFU_DESCRIPTOR_TYPE,                                 /* DFU Functional Descriptor */
-  0x0B,                                                /* bmAttribute:
+  USBD_DFU_BM_ATTRIBUTES,                              /* bmAttribute:
                                                           bitCanDnload             = 1      (bit 0)
                                                           bitCanUpload             = 1      (bit 1)
                                                           bitManifestationTolerant = 0      (bit 2)
                                                           bitWillDetach            = 1      (bit 3)
                                                           Reserved                          (bit4-6)
                                                           bitAcceleratedST         = 0      (bit 7) */
-  0xFF,                                                /* DetachTimeOut= 255 ms*/
-  0x00,
+  (uint8_t)(USBD_DFU_DETACH_TIMEOUT & 0xFFU),         /* DetachTimeOut LSB */
+  (uint8_t)((USBD_DFU_DETACH_TIMEOUT >> 8U) & 0xFFU), /* DetachTimeOut MSB */
   /* WARNING: In DMA mode the multiple MPS packets feature is still not supported
    ==> In this case, when using DMA USBD_DFU_XFER_SIZE should be set to 64 in usbd_conf.h */
   TRANSFER_SIZE_BYTES(USBD_DFU_XFER_SIZE),       /* TransferSize = 1024 Byte */
@@ -252,6 +255,10 @@ __ALIGN_BEGIN static uint8_t USBD_DFU_DeviceQualifierDesc[USB_LEN_DEV_QUALIFIER_
 /**
   * @}
   */
+
+volatile uint32_t g_usbd_dbg_dfu_usrstr_count = 0U;
+volatile uint8_t g_usbd_dbg_dfu_usrstr_last_index = 0U;
+volatile uint8_t g_usbd_dbg_dfu_usrstr_last_accept = 0U;
 
 /** @defgroup USBD_DFU_Private_Functions
   * @{
@@ -358,6 +365,11 @@ static uint8_t USBD_DFU_Setup(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *re
   if (hdfu == NULL)
   {
     return (uint8_t)USBD_FAIL;
+  }
+
+  if ((req->bmRequest & USB_REQ_TYPE_MASK) == USB_REQ_TYPE_CLASS)
+  {
+    g_dfu_last_activity = HAL_GetTick();
   }
 
   switch (req->bmRequest & USB_REQ_TYPE_MASK)
@@ -496,6 +508,9 @@ static uint8_t *USBD_DFU_GetCfgDesc(uint16_t *length)
 {
   *length = (uint16_t)sizeof(USBD_DFU_CfgDesc);
 
+  /* Byte 17 = iInterface of first DFU interface descriptor. */
+  g_usbd_dbg_dfu_iinterface_alt0 = USBD_DFU_CfgDesc[17];
+
   return USBD_DFU_CfgDesc;
 }
 #endif /* USE_USBD_COMPOSITE */
@@ -545,6 +560,20 @@ static uint8_t  USBD_DFU_EP0_TxReady(USBD_HandleTypeDef *pdev)
         if (hdfu->buffer.d8[0] == DFU_CMD_GETCOMMANDS)
         {
           /* Nothing to do */
+        }
+        else if (hdfu->buffer.d8[0] == DFU_CMD_ERASE)
+        {
+          /* DfuSe mass erase variant: ERASE command without address payload */
+          if (DfuInterface->Erase(0xFFFFFFFFUL) != USBD_OK)
+          {
+            hdfu->dev_state = DFU_STATE_ERROR;
+            hdfu->dev_status[0] = DFU_ERROR_VENDOR;
+            hdfu->dev_status[1] = 0U;
+            hdfu->dev_status[2] = 0U;
+            hdfu->dev_status[3] = 0U;
+            hdfu->dev_status[4] = hdfu->dev_state;
+            return (uint8_t)USBD_FAIL;
+          }
         }
 #if (USBD_DFU_VENDOR_CMD_ENABLED == 1U)
         else
@@ -803,10 +832,15 @@ static uint8_t *USBD_DFU_GetUsrStringDesc(USBD_HandleTypeDef *pdev, uint8_t inde
   static uint8_t USBD_StrDesc[255];
   USBD_DFU_MediaTypeDef *DfuInterface = (USBD_DFU_MediaTypeDef *)pdev->pUserData[pdev->classId];
 
+  g_usbd_dbg_dfu_usrstr_count++;
+  g_usbd_dbg_dfu_usrstr_last_index = index;
+  g_usbd_dbg_dfu_usrstr_last_accept = 0U;
+
   /* Check if the requested string interface is supported */
-  if (index <= (USBD_IDX_INTERFACE_STR + USBD_DFU_MAX_ITF_NUM))
+  if ((DfuInterface != NULL) && (index >= USBD_IDX_INTERFACE_STR))
   {
     USBD_GetString((uint8_t *)DfuInterface->pStrDesc, USBD_StrDesc, length);
+    g_usbd_dbg_dfu_usrstr_last_accept = 1U;
     return USBD_StrDesc;
   }
   else

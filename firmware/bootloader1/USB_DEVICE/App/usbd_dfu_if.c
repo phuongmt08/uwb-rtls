@@ -62,7 +62,10 @@ static uint8_t g_erase_done = 0;  /* Flag to track if erase was done */
   * @{
   */
 
-#define FLASH_DESC_STR      "@Internal Flash   /0x08000000/03*016Ka,01*016Kg,01*064Kg,07*128Kg,04*016Kg,01*064Kg,07*128Kg"
+/* DFU descriptor string (DfuSe memory map format).
+ * Full STM32F411 512KB flash layout (S0..S7).
+ */
+#define FLASH_DESC_STR      "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,03*128Kg"
 
 /* USER CODE BEGIN PRIVATE_DEFINES */
 
@@ -124,6 +127,9 @@ static uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len);
 static uint8_t *MEM_If_Read_FS(uint8_t *src, uint8_t *dest, uint32_t Len);
 static uint16_t MEM_If_DeInit_FS(void);
 static uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer);
+static uint16_t DFU_Erase_AppSectors(void);
+static uint16_t DFU_Erase_UserSectors(void);
+static uint32_t DFU_GetSectorFromAddress(uint32_t address);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
 
@@ -169,6 +175,101 @@ uint16_t MEM_If_DeInit_FS(void)
   /* USER CODE BEGIN 1 */
   return (USBD_OK);
   /* USER CODE END 1 */
+}
+
+static uint16_t DFU_Erase_AppSectors(void)
+{
+  uint32_t SectorError = 0;
+  FLASH_EraseInitTypeDef EraseInitStruct;
+
+  EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+  EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+  EraseInitStruct.NbSectors = 1;
+
+  EraseInitStruct.Sector = FLASH_SECTOR_3;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_4;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_5;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  g_erase_done = 1;
+  return USBD_OK;
+}
+
+static uint16_t DFU_Erase_UserSectors(void)
+{
+  uint32_t SectorError = 0;
+  FLASH_EraseInitTypeDef EraseInitStruct;
+
+  EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+  EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+  EraseInitStruct.NbSectors = 1;
+
+  EraseInitStruct.Sector = FLASH_SECTOR_3;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_4;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_5;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_6;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  EraseInitStruct.Sector = FLASH_SECTOR_7;
+  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  g_erase_done = 1;
+  return USBD_OK;
+}
+
+static uint32_t DFU_GetSectorFromAddress(uint32_t address)
+{
+  if (address < 0x08010000UL)
+  {
+    return FLASH_SECTOR_3;
+  }
+  if (address < 0x08020000UL)
+  {
+    return FLASH_SECTOR_4;
+  }
+  if (address < 0x08040000UL)
+  {
+    return FLASH_SECTOR_5;
+  }
+  if (address < 0x08060000UL)
+  {
+    return FLASH_SECTOR_6;
+  }
+  return FLASH_SECTOR_7;
 }
 
 /**

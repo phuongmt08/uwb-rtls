@@ -10,21 +10,28 @@
  */
 
 #include "sys_logger_bl.h"
+#include "bsp_util_bl.h"
 #include "stm32f4xx_hal.h"
 
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
 
+#define BL_LOG_LEN_FIELD 2u
+#define LOGGER_MAGIC (0xA5C3E91Fu)
+#define LOGGER_FORMAT_FRAMED (0x00010001u)
+
 
 typedef struct {
-    uint8_t  buf[SYS_LOGGER_BUF_SIZE];
+    uint32_t magic;
+    uint32_t format;
     uint16_t head;
     uint16_t tail;
+    uint32_t reserved;
+    uint8_t  buf[SYS_LOGGER_BUF_SIZE];
 } bl_log_buf_t;
 
-static bl_log_buf_t s_log;
-static uint32_t     s_seq     = 0u;   /* monotonic counter, fills TIMESTAMP field */
+static bl_log_buf_t s_log __attribute__((section(".shared_log"), aligned(4), used));
 static bool         s_inited  = false;
 
 /* ─────────────────────────────────────────────
@@ -83,18 +90,26 @@ static uint16_t buf_read(uint8_t *out, uint16_t max_len)
 /* Drop oldest complete record to make room. */
 static void drop_oldest(void)
 {
-    if (buf_used() < LOG_HEADER_LEN) {
+    if (buf_used() < BL_LOG_LEN_FIELD) {
         s_log.head = s_log.tail = 0u;
         return;
     }
 
-    uint8_t data_len = buf_peek_at(LOG_HEADER_IDX_DATA_LEN);
-    if (data_len > SYS_LOGGER_MAX_MSG_LEN) {
+    uint16_t rec_len = (uint16_t)buf_peek_at(0u) |
+                       ((uint16_t)buf_peek_at(1u) << 8u);
+    if (rec_len == 0u || rec_len > RLOG_MAX_RECORD_SIZE) {
         s_log.head = s_log.tail = 0u;
         return;
     }
 
-    buf_pop((uint16_t)(LOG_HEADER_LEN + data_len));
+    uint16_t entry_len  = (uint16_t)(BL_LOG_LEN_FIELD + rec_len);
+    uint16_t padded_len = (uint16_t)((entry_len + 3u) & ~3u);
+    if (padded_len > buf_used()) {
+        s_log.head = s_log.tail = 0u;
+        return;
+    }
+
+    buf_pop(padded_len);
 }
 
 /* ─────────────────────────────────────────────
@@ -103,8 +118,17 @@ static void drop_oldest(void)
 
 void sys_logger_init(void)
 {
-    memset(&s_log, 0, sizeof(s_log));
-    s_seq    = 0u;
+    bool valid = (s_log.magic == LOGGER_MAGIC) &&
+                 (s_log.format == LOGGER_FORMAT_FRAMED) &&
+                 (s_log.head < SYS_LOGGER_BUF_SIZE) &&
+                 (s_log.tail < SYS_LOGGER_BUF_SIZE);
+
+    if (!valid) {
+        memset(&s_log, 0, sizeof(s_log));
+        s_log.magic  = LOGGER_MAGIC;
+        s_log.format = LOGGER_FORMAT_FRAMED;
+    }
+
     s_inited = true;
 }
 
@@ -138,26 +162,51 @@ bool sys_logger_write_record(uint8_t           log_type,
                     : (uint8_t)n;
 
     uint16_t record_len = (uint16_t)(LOG_HEADER_LEN + msg_len);
+    uint16_t entry_len  = (uint16_t)(BL_LOG_LEN_FIELD + record_len);
+    uint16_t padded_len = (uint16_t)((entry_len + 3u) & ~3u);
+
+    if (padded_len >= SYS_LOGGER_BUF_SIZE) {
+        return false;
+    }
 
     /* Make room — drop oldest records until we have space */
     for (uint8_t retry = 0u; retry < 10u; retry++) {
-        if ((SYS_LOGGER_BUF_SIZE - 1u - buf_used()) >= record_len) {
+        if ((SYS_LOGGER_BUF_SIZE - 1u - buf_used()) >= padded_len) {
             break;
         }
         drop_oldest();
     }
 
-    /* Build and push header */
-    uint8_t hdr[LOG_HEADER_LEN];
-    uint64_t seq64 = (uint64_t)s_seq++;                  /* seq used as timestamp */
+    if ((SYS_LOGGER_BUF_SIZE - 1u - buf_used()) < padded_len) {
+        return false;
+    }
 
-    hdr[LOG_HEADER_IDX_LOG_TYPE] = log_type;
-    hdr[LOG_HEADER_IDX_OBJ_CODE] = (uint8_t)obj_code;
-    memcpy(&hdr[LOG_HEADER_IDX_TIMESTAMP], &seq64, 6u);  /* 6-byte timestamp field */
-    hdr[LOG_HEADER_IDX_DATA_LEN] = msg_len;
+    /* Build full raw record bytes. */
+    uint8_t record[RLOG_MAX_RECORD_SIZE];
+    memset(record, 0, sizeof(record));
 
-    buf_push(hdr, LOG_HEADER_LEN);
-    buf_push((const uint8_t *)msg, msg_len);
+    uint64_t ts64 = bsp_rtc_get_timestamp_ms();
+
+    record[LOG_HEADER_IDX_LOG_TYPE] = log_type;
+    record[LOG_HEADER_IDX_OBJ_CODE] = (uint8_t)obj_code;
+    memcpy(&record[LOG_HEADER_IDX_TIMESTAMP], &ts64, 6u);  /* 6-byte timestamp field */
+    record[LOG_HEADER_IDX_DATA_LEN] = msg_len;
+    memcpy(&record[LOG_HEADER_IDX_DATA], msg, msg_len);
+
+    /* Persist in framed format expected by host parser:
+     * [len_lo][len_hi][record][pad to 4-byte]. */
+    uint8_t len_hdr[BL_LOG_LEN_FIELD];
+    len_hdr[0] = (uint8_t)(record_len & 0xFFu);
+    len_hdr[1] = (uint8_t)((record_len >> 8u) & 0xFFu);
+
+    buf_push(len_hdr, BL_LOG_LEN_FIELD);
+    buf_push(record, record_len);
+
+    uint16_t pad_len = (uint16_t)(padded_len - entry_len);
+    for (uint16_t i = 0u; i < pad_len; i++) {
+        buf_push_byte(0u);
+    }
+
     return true;
 }
 
