@@ -39,11 +39,11 @@ static void uart_event_handler(app_uart_evt_t * p_event);
 static void bsp_uart_read_byte();
 
 /* Function definitions ----------------------------------------------- */
-void bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
+ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
 {
     s_rx_cb = rx_cb;
 
-    uint32_t err_code;
+    ret_code_t err_code;
     app_uart_comm_params_t const comm_params =
     {
         .rx_pin_no    = RX_PIN_NUMBER,
@@ -71,16 +71,20 @@ void bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
         NRF_LOG_INFO("UART module initialized (115200 8N1)");
     }
     
+    return err_code;
 }
 
-bool bsp_uart_transmit(const uint8_t *buf, uint16_t len)
+ret_code_t bsp_uart_transmit(const uint8_t *buf, uint16_t len)
 {
     if (buf == NULL)
         return NRF_ERROR_NULL;
     
+    if (len == 0)
+        return NRF_SUCCESS;
+    
     for (uint16_t i = 0; i < len; i++)
     {
-        uint32_t err_code = app_uart_put(buf[i]);
+        ret_code_t err_code = app_uart_put(buf[i]);
         if (err_code != NRF_SUCCESS)
         {
             return err_code;

@@ -32,7 +32,7 @@ typedef enum
 /**
  * @brief Header Callback khi có frame được nhận đầy đủ (Router đăng ký)
  */
-typedef void (*bb_transport_rx_cb_t)(void);
+typedef void (*bb_transport_state_transition_cb_t)(void);
 
 /* Public macros ------------------------------------------------------ */
 /* Public variables --------------------------------------------------- */
@@ -47,7 +47,7 @@ typedef void (*bb_transport_rx_cb_t)(void);
  * @param[in] cb Hàm callback được gọi khi decode HDLC thành công để chuyển State cho Router
  * @return NRF_SUCCESS on successful initialization.
  */
-ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_rx_cb_t cb);
+ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_state_transition_cb_t cb);
 
 /**
  * @brief Runs the transport state machine (polls bsp_uart, decodes HDLC)

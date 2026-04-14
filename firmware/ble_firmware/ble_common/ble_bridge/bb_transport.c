@@ -21,26 +21,26 @@
 /* Private macros ----------------------------------------------------- */
 /* Public variables --------------------------------------------------- */
 /* Private variables -------------------------------------------------- */
-static uint8_t * m_p_rx_payload_buf = NULL;
-static uint16_t * m_p_rx_payload_len = NULL;
+static uint8_t * p_protobuf_buffer = NULL;
+static uint16_t * p_protobuf_len = NULL;
 static uint16_t m_max_payload_len = 0;
 
 static bool m_is_packet_ready = false;
-static bb_transport_rx_cb_t m_rx_cb = NULL;
+static bb_transport_state_transition_cb_t m_rx_cb = NULL;
 
 static hdlc_parser_t m_hdlc_parser;
 
 /* Private function prototypes ---------------------------------------- */
-static void on_uart_rx_byte(uint8_t byte);
+static void on_rx_byte(uint8_t byte);
 static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t length);
 static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length);
 
 /* Function definitions ----------------------------------------------- */
-ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_rx_cb_t cb)
+ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_state_transition_cb_t cb)
 {
     // Lưu giữ địa chỉ buffer do Router cấp phát để chứa data protobuf
-    m_p_rx_payload_buf = p_payload_buf;
-    m_p_rx_payload_len = p_payload_len;
+    p_protobuf_buffer = p_payload_buf;
+    p_protobuf_len = p_payload_len;
     m_max_payload_len = max_len;
     
     m_rx_cb = cb;
@@ -49,19 +49,21 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     // Khởi tạo state machine HDLC
     hdlc_parser_init(&m_hdlc_parser);
     
+    ret_code_t err_code = NRF_SUCCESS;
+
     // Đăng ký callback nhận byte với UART layer
 #if defined(BLE_PERIPHREAL)
-    bsp_uart_init(on_uart_rx_byte);
+    err_code = bsp_uart_init(on_rx_byte);
 #elif defined(BLE_CENTRAL)
-    // bsp_usb_init(on_uart_rx_byte); // Đợi code api cho central sau
+    // err_code = bsp_usb_init(on_rx_byte); // Đợi code api cho central sau
 #endif
 
-    return NRF_SUCCESS;
+    return err_code;
 }
 
 void bb_transport_process(void)
 {
-    // Cỗ máy trạng thái giờ đây chạy tự động dựa vào event callback (on_uart_rx_byte)
+    // Cỗ máy trạng thái giờ đây chạy tự động dựa vào event callback (on_rx_byte)
     // được ngắt từ UART (APP_UART_DATA_READY) gọi lên.
     // Nên hàm này có thể bỏ trống, hoặc có thể dùng xử lý các tác vụ delay timeout nếu cần sau này.
 }
@@ -97,11 +99,12 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
     if (frame_size > 0) {
         // 3. Đẩy mảng byte đã đóng gói xuống UART nếu là Peripheral
 #if defined(BLE_PERIPHREAL)
-        if (bsp_uart_transmit(tx_buf, (uint16_t)frame_size)) 
+        ret_code_t err_code = bsp_uart_transmit(tx_buf, (uint16_t)frame_size);
+        if (err_code == NRF_SUCCESS) 
         {
             return NRF_SUCCESS;
         }
-        return NRF_ERROR_INTERNAL;
+        return err_code;
 #elif defined(BLE_CENTRAL)
         // bsp_serial_central_transmit(tx_buf, frame_size); // Đợi code api cho central sau
         return NRF_SUCCESS;
@@ -123,11 +126,11 @@ static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
 /**
  * @brief Hàm callback được gọi từ bsp_uart mỗi khi có 1 byte nhận được
  */
-static void on_uart_rx_byte(uint8_t byte)
+static void on_rx_byte(uint8_t byte)
 {
     // Nếu buffer hiện tại chưa được Router xử lý xong thì drop byte mới
     // để đảm bảo không bị ghi đè dữ liệu (nguyên tắc Zero-Copy)
-    if (m_is_packet_ready || m_p_rx_payload_buf == NULL || m_p_rx_payload_len == NULL) {
+    if (m_is_packet_ready || p_protobuf_buffer == NULL || p_protobuf_len == NULL) {
         return;
     }
 
@@ -138,10 +141,10 @@ static void on_uart_rx_byte(uint8_t byte)
         // Copy data payload sang buffer do Router truyền xuống
         if (rx_chunk.len <= m_max_payload_len) 
         {
-            *m_p_rx_payload_len = rx_chunk.len;
+            *p_protobuf_len = rx_chunk.len;
             if (rx_chunk.len > 0) 
             {
-                memcpy(m_p_rx_payload_buf, rx_chunk.data, rx_chunk.len);
+                memcpy(p_protobuf_buffer, rx_chunk.data, rx_chunk.len);
             }
             m_is_packet_ready = true;
             

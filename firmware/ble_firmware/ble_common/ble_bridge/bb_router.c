@@ -34,11 +34,11 @@ static bb_router_state_t m_state;
 static bb_packet_source_t m_target_source;
 
 // Bộ nhớ do Router cấp phát chỉ chứa dữ liệu Protobuf (Zero-Copy flow)
-static uint8_t m_rx_payload_buf[MAX_PROTOBUF_PAYLOAD_SIZE];
-static uint16_t m_rx_payload_len;
+static uint8_t protobuf_buffer[MAX_PROTOBUF_PAYLOAD_SIZE];
+static uint16_t protobuf_buffer_len;
 
 /* Private function prototypes ---------------------------------------- */
-static void bb_router_rx_callback(void);
+static void bb_router_state_transition(void);
 static bool bb_router_check_dst(uint8_t * p_data, uint16_t length);
 
 /* Function definitions ----------------------------------------------- */
@@ -46,10 +46,15 @@ ret_code_t bb_router_init(void)
 {
     m_state = BB_ROUTER_STATE_IDLE;
     
-    // Giao mảng m_rx_payload_buf cho Transport quản lý việc chép payload vào
-    bb_transport_init(m_rx_payload_buf, &m_rx_payload_len, MAX_PROTOBUF_PAYLOAD_SIZE, bb_router_rx_callback);
-    // bb_cmd_hdl_init();
+    // Giao mảng protobuf_buffer cho Transport quản lý việc chép payload vào
+    ret_code_t err_code = bb_transport_init(protobuf_buffer, &protobuf_buffer_len, MAX_PROTOBUF_PAYLOAD_SIZE, bb_router_state_transition);
+    // err_code |= bb_cmd_hdl_init(); // Khi nào implement thì update
     
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+
     return NRF_SUCCESS;
 }
 
@@ -64,7 +69,7 @@ void bb_router_process(void)
         case BB_ROUTER_STATE_CHECK_DST:
         {
             // Kiểm tra con trỏ buf có trỏ tới ta không (chỉ lấy đích dst)
-            bool is_for_me = bb_router_check_dst(m_rx_payload_buf, m_rx_payload_len);
+            bool is_for_me = bb_router_check_dst(protobuf_buffer, protobuf_buffer_len);
 
             if (is_for_me) {
                 m_state = BB_ROUTER_STATE_PROCESS_CMD;
@@ -78,7 +83,7 @@ void bb_router_process(void)
         case BB_ROUTER_STATE_PROCESS_CMD:
         {
             // Xử lý các command dạng protobuf (Decode payload thông qua pointer)
-            if (bb_cmd_hdl_process(m_rx_payload_buf, m_rx_payload_len) == NRF_SUCCESS) 
+            if (bb_cmd_hdl_process(protobuf_buffer, protobuf_buffer_len) == NRF_SUCCESS) 
             {
                 m_target_source = BB_SOURCE_SERIAL;
                 m_state = BB_ROUTER_STATE_FORWARD;
@@ -94,7 +99,7 @@ void bb_router_process(void)
         case BB_ROUTER_STATE_FORWARD:
         {
             // Forward raw payload (Hoặc gói response đã được cmd handler đè lên payload buf nếu cần)
-            bb_transport_send_data(m_rx_payload_buf, m_rx_payload_len, m_target_source);
+            bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
             
             m_state = BB_ROUTER_STATE_IDLE;
             break;
@@ -135,7 +140,7 @@ static bool bb_router_check_dst(uint8_t * p_data, uint16_t length)
     return false;
 }
 
-static void bb_router_rx_callback(void)
+static void bb_router_state_transition(void)
 {
     // Hàm callback chuyển state được gọi khi bb_transport nhận được 1 HDLC frame hoàn chỉnh và pass CRC
     if (m_state == BB_ROUTER_STATE_IDLE) 
