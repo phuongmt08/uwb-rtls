@@ -252,6 +252,9 @@ int main(void)
   int flash_storage_init_status = sys_flash_storage_init();
 
   sys_logger_init();
+  RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
+  RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=               APPLICATION STARTED             =");
+  RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
   if (flash_storage_init_status != 0)
   {
     RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
