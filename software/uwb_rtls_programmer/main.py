@@ -926,14 +926,41 @@ class MainWindow(QMainWindow):
         self._run_task(job)
 
     def _connect_with_device_info(self, selected_device: DeviceInfo):
-        self.dfu.close()
-        self.dfu = DfuDevice(
-            vid=selected_device.vid,
-            pid=selected_device.pid,
-            bus=selected_device.bus,
-            address=selected_device.address,
-        )
-        info = self.dfu.open()
+        attempts = [selected_device]
+        if selected_device.bus is not None or selected_device.address is not None:
+            attempts.append(
+                DeviceInfo(
+                    vid=selected_device.vid,
+                    pid=selected_device.pid,
+                    bus=None,
+                    address=None,
+                    interface_number=selected_device.interface_number,
+                )
+            )
+
+        last_error = None
+        info = None
+        for idx, candidate in enumerate(attempts):
+            self.dfu.close()
+            self.dfu = DfuDevice(
+                vid=candidate.vid,
+                pid=candidate.pid,
+                bus=candidate.bus,
+                address=candidate.address,
+            )
+            try:
+                info = self.dfu.open()
+                break
+            except DfuError as exc:
+                last_error = exc
+                if idx == 0 and len(attempts) > 1:
+                    self.signals.log.emit(
+                        "Auto-connect retry: scanned bus/address changed, retrying by VID/PID only..."
+                    )
+
+        if info is None:
+            raise last_error if last_error is not None else DfuError("Failed to connect DFU device")
+
         self.signals.log.emit(
             f"Connected to {info.vid:04X}:{info.pid:04X}, interface={info.interface_number}, "
             f"bus={info.bus}, addr={info.address}"
