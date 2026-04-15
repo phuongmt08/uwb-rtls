@@ -33,8 +33,6 @@
 #include "ble_lbs_c.h"
 #include "ble_config.h"
 
-#include "../../ble_common/ble_config.h"
-
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_scan.h"
 #include "nrf_log.h"
@@ -44,6 +42,7 @@
 #include "nrf_drv_gpiote.h"
 #include "app_timer.h"
 #include "app_button.h"
+#include "app_util.h"
 
 #include "../bsp/bsp_led.h"
 #include "../bsp/bsp_usbd.h"
@@ -446,9 +445,6 @@ static void lbs_c_init(void)
 
     err_code = ble_lbs_c_init(&m_ble_lbs_c, &lbs_c_init_obj);
     APP_ERROR_CHECK(err_code);
-
-    bsp_board_led_off(CENTRAL_CONNECTED_LED);
-    bsp_board_led_on(CENTRAL_SCANNING_LED);
 }
 
 /* -------------------------------------------------------------------------
@@ -533,7 +529,30 @@ static void cmd_connect_to_mac(const char *cmd)
 
 static void on_usb_rx_line(const char *line)
 {
-    /* Example input: "69:3e:39:55:ae:be" or "69:3E:39:55:AE:BE" */
+    uint16_t min_int, max_int, latency, timeout;
+
+    /* Parse dynamic config command 
+     * Format: "config <min_ms> <max_ms> <latency> <timeout_ms>"
+     * Example: "config 50 75 0 4000"
+     */
+    if (sscanf(line, "config %hu %hu %hu %hu", &min_int, &max_int, &latency, &timeout) == 4)
+    {
+        if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+        {
+            NRF_LOG_INFO("CMD: Config request min=%u, max=%u, lat=%u, to=%u", 
+                         min_int, max_int, latency, timeout);
+            central_update_conn_params(m_current_conn_handle, min_int, max_int, latency, timeout);
+        }
+        else
+        {
+            NRF_LOG_WARNING("CMD: Cannot update params, not connected!");
+        }
+        return;
+    }
+
+    /* Parse MAC address connection request
+     * Example: "69:3E:39:55:AE:BE" 
+     */
     if (strlen(line) >= 17) /* minimum length of MAC */
     {
         cmd_connect_to_mac(line);
@@ -686,6 +705,18 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
         } break;
 
         /* ---- Connection parameter update request -------------------- */
+        case BLE_GAP_EVT_CONN_PARAM_UPDATE:
+        {
+            const ble_gap_conn_params_t *p_updated =
+                &p_gap_evt->params.conn_param_update.conn_params;
+            NRF_LOG_INFO("Connection parameters updated successfully!");
+            NRF_LOG_INFO("New ConnParams: interval=%u.%02u ms latency=%u timeout=%u ms",
+                         (p_updated->max_conn_interval * 125) / 100,
+                         (p_updated->max_conn_interval * 125) % 100,
+                         p_updated->slave_latency,
+                         p_updated->conn_sup_timeout * 10);
+        } break;
+
         case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
         {
             const ble_gap_conn_params_t *p_req =
@@ -817,11 +848,6 @@ void ble_stack_init(void)
 
     NRF_LOG_INFO("BLE: nrf_sdh_enable_request");
     err_code = nrf_sdh_enable_request();
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_ERROR("BLE: nrf_sdh_enable_request failed: 0x%08x", err_code);
-        NRF_LOG_FLUSH();
-    }
     APP_ERROR_CHECK(err_code);
 
     /* Fetch the required RAM start address after configuration. */
@@ -836,11 +862,6 @@ void ble_stack_init(void)
 
     NRF_LOG_INFO("BLE: nrf_sdh_ble_enable");
     err_code = nrf_sdh_ble_enable(&ram_start);
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_ERROR("BLE: nrf_sdh_ble_enable failed: 0x%08x", err_code);
-        NRF_LOG_FLUSH();
-    }
     APP_ERROR_CHECK(err_code);
 
     /* Set TX Power using value from ble_config.h */
@@ -860,11 +881,6 @@ void db_discovery_init(void)
     db_init.p_gatt_queue = &m_ble_gatt_queue;
 
     ret_code_t err_code = ble_db_discovery_init(&db_init);
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_ERROR("BLE: ble_db_discovery_init failed: 0x%08x", err_code);
-        NRF_LOG_FLUSH();
-    }
     APP_ERROR_CHECK(err_code);
 }
 
@@ -897,11 +913,6 @@ void scan_init(void)
     init_scan.p_conn_param       = &conn_param;
 
     err_code = nrf_ble_scan_init(&m_scan, &init_scan, scan_evt_handler);
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_ERROR("BLE: nrf_ble_scan_init failed: 0x%08x", err_code);
-        NRF_LOG_FLUSH();
-    }
     APP_ERROR_CHECK(err_code);
 
     /* Enable UUID filter — only auto-connect to the target UUID. */
@@ -915,11 +926,6 @@ void scan_init(void)
 void gatt_init(void)
 {
     ret_code_t err_code = nrf_ble_gatt_init(&m_gatt, NULL);
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_ERROR("BLE: nrf_ble_gatt_init failed: 0x%08x", err_code);
-        NRF_LOG_FLUSH();
-    }
     APP_ERROR_CHECK(err_code);
 
     /* Update MTU size according to the shared configuration */
@@ -958,6 +964,37 @@ void ble_central_init(void)
 
     NRF_LOG_INFO("BLE: scan_start");
     scan_start();
+}
+
+/**
+ * @brief Update connection parameters for a specific connection.
+ */
+void central_update_conn_params(uint16_t conn_handle, 
+                                uint16_t min_interval_ms, 
+                                uint16_t max_interval_ms, 
+                                uint16_t slave_latency, 
+                                uint16_t conn_sup_timeout_ms)
+{
+    ret_code_t err_code;
+    ble_gap_conn_params_t conn_params;
+
+    if (conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        return; 
+    }
+
+    memset(&conn_params, 0, sizeof(conn_params));
+
+    conn_params.min_conn_interval = MSEC_TO_UNITS(min_interval_ms, UNIT_1_25_MS);
+    conn_params.max_conn_interval = MSEC_TO_UNITS(max_interval_ms, UNIT_1_25_MS);
+    conn_params.slave_latency     = slave_latency;
+    conn_params.conn_sup_timeout  = MSEC_TO_UNITS(conn_sup_timeout_ms, UNIT_10_MS);
+
+    err_code = sd_ble_gap_conn_param_update(conn_handle, &conn_params);
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_ERROR("Failed to update conn params: %x", err_code);
+    }
 }
 
 /* End of file ------------------------------------------------------------- */

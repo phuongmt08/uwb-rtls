@@ -11,6 +11,8 @@
 #ifndef APP_BLE_CENTRAL_H
 #define APP_BLE_CENTRAL_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,6 +44,21 @@ void ble_stack_init(void);
 void db_discovery_init(void);
 void scan_init(void);
 void gatt_init(void);
+
+/**
+ * @brief Update connection parameters for a specific connection.
+ *
+ * @param[in] conn_handle          Handle of the connection.
+ * @param[in] min_interval_ms      Minimum connection interval (ms).
+ * @param[in] max_interval_ms      Maximum connection interval (ms).
+ * @param[in] slave_latency        Slave latency.
+ * @param[in] conn_sup_timeout_ms  Supervision timeout (ms).
+ */
+void central_update_conn_params(uint16_t conn_handle, 
+                                uint16_t min_interval_ms, 
+                                uint16_t max_interval_ms, 
+                                uint16_t slave_latency, 
+                                uint16_t conn_sup_timeout_ms);
 
 #ifdef __cplusplus
 }
