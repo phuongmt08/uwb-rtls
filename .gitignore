@@ -5,3 +5,21 @@
 # Python bytecode
 *.pyc
 __pycache__/
+
+# Build artifacts
+_build/
+**/_build/
+*.o
+*.a
+*.elf
+*.hex
+*.out
+*.bin
+*.map
+*.lst
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~

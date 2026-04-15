@@ -231,8 +231,17 @@ bsp_flash_status_t bsp_flash_log_get_positions(const bsp_flash_dual_t *dr,
  * @note The current write position is derived internally from metadata (same
  *       as bsp_flash_log_append) — the caller does not need to track it.
  */
-bsp_flash_status_t bsp_flash_log_update_read_pos(bsp_flash_dual_t *dr,
-                                                  uint32_t          read_pos);
+bsp_flash_status_t bsp_flash_log_update_read_pos(bsp_flash_dual_t *dr, uint32_t read_pos);
+
+/**
+ * @brief Read log data using virtual offset (generation-aware spanning)
+ * @param[in] dr Dual-sector descriptor
+ * @param[in] virtual_offset Virtual offset (upper 12 bits = gen, lower 20 bits = local offset)
+ * @param[out] out Data buffer
+ * @param[in] length Number of bytes to read
+ * @return Number of bytes actually read
+ */
+uint32_t bsp_flash_log_read_virtual(const bsp_flash_dual_t *dr, uint32_t virtual_offset, void *out, uint32_t length);
 
 /**
  * @brief Append one log record to the log sub-partition via the metadata layer.
