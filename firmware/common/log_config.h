@@ -74,7 +74,8 @@ typedef enum {
 	LOG_OBJECT_CODE_PM = 0x13,
 	LOG_OBJECT_CODE_FUSION = 0x14,
     LOG_OBJECT_CODE_SYS_CFG = 0x15,
-    LOG_OBJECT_CODE_MAX = 0x16
+    LOG_OBJECT_CODE_BATTERY = 0x16,
+    LOG_OBJECT_CODE_MAX = 0x17
 } log_object_code_t;
 
 /**
@@ -164,6 +165,19 @@ typedef enum
 #define ERR_FLASH_PROGRAM      (0x50)  // Flash programming error
 #define ERR_FLASH_ERASE        (0x51)  // Flash erase error
 #define ERR_FLASH_VERIFY       (0x52)  // Flash verify error
+
+/**
+ * @brief Battery error codes (0x60-0x6F)
+ */
+#define ERR_BATTERY_I2C                (0x60)  // Battery I2C communication failed
+#define ERR_BATTERY_INIT               (0x61)  // Battery fuel gauge init failed
+#define ERR_BATTERY_READ               (0x62)  // Battery data read failed
+#define ERR_BATTERY_CRITICAL           (0x63)  // Battery SOC critically low
+#define ERR_BATTERY_LOW                (0x64)  // Battery voltage critically low
+#define ERR_BATTERY_OVERVOLT           (0x65)  // Battery overvoltage detected
+#define ERR_BATTERY_OVERCHARGE_RATE    (0x66)  // Battery charging too fast
+#define ERR_BATTERY_OVERDISCHARGE_RATE (0x67)  // Battery discharging too fast
+#define ERR_BATTERY_SLOW_CHARGE        (0x68)  // Battery charging suspiciously slowly
 
 /* Public macros ------------------------------------------------------------ */
 /* Public variables --------------------------------------------------------- */

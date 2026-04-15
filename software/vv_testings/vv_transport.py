@@ -8,13 +8,15 @@ import protocol_pb2 as pb
 
 
 class VvAddress(IntEnum):
-    NONE = 0x0
-    TAG = 0x1
-    ANCHOR = 0x2
-    GATEWAY = 0x3
-    HOST = 0x4
-    DEBUG = 0x7
-    BCAST = 0xF
+    # Keep values aligned with protocol_pb2 to avoid routing packets to wrong link.
+    NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
+    TAG = int(pb.PACKET_ADDR_TAG)
+    ANCHOR = int(pb.PACKET_ADDR_ANCHOR)
+    CENTRAL = int(pb.PACKET_ADDR_CENTRAL)
+    PERIPHERAL = int(pb.PACKET_ADDR_PERIPHERAL)
+    HOST = int(pb.PACKET_ADDR_HOST)
+    DEBUG = int(pb.PACKET_ADDR_DEBUG)
+    BCAST = int(pb.PACKET_ADDR_BCAST)
 
 
 class HostTransport(IntEnum):

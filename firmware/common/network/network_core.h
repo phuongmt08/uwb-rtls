@@ -39,6 +39,7 @@ typedef struct {
     uint8_t interface;
     stream_type_t rx_stream;
     stream_type_t tx_stream;
+    protobuf_device_addr_t local_addr;
 
     uint8_t *rx_packet;
     uint32_t rx_buffer_size;
@@ -65,6 +66,7 @@ bool network_core_send_ack(network_core_t *core,
 bool network_core_encode_packet(const protobuf_packet_t *encode_msg, uint8_t *buff, uint32_t buff_len, uint32_t *len);
 bool network_core_decode_packet(const uint8_t *buff, uint32_t len, protobuf_packet_t *decode_msg);
 bool network_core_init(network_core_t *core,
+                       protobuf_device_addr_t local_addr,
                        uint8_t *rx_buffer,
                        uint32_t rx_buffer_len);
 
