@@ -35,6 +35,7 @@ typedef struct {
 static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 
 /* Private variables -------------------------------------------------- */
 // Chỉ config mảng những lệnh nào nRF52832 tự xử lý. 
@@ -177,7 +178,7 @@ static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packe
     *p_action = BB_CMD_ACTION_SEND_BLE;
 }
 
-static void handle_ble_unimplemented(const protobuf_packet_t *pkt)
+static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
     // CHECK_VOID(s_network_cmd.stream && pkt);
     // network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED);
