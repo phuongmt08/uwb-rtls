@@ -40,9 +40,15 @@ static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packe
 // Chỉ config mảng những lệnh nào nRF52832 tự xử lý. 
 // Nếu id nào không được config sẽ tự rớt xuống undefined / bỏ qua.
 static const bb_cmd_entry_t m_cmd_table[] = {
-    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_adv_config_set, "ble_adv_config_set"),
     CMD_INFO(protobuf_packet_t_ble_status_get_tag,     handle_ble_status_get,     "ble_status_get"),
+#ifndef BLE_PERIPHERAL
+    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_adv_config_set, "ble_adv_config_set"),
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_adv_status,     "ble_adv_status"),
+#else
+    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_unimplemented, "ble_adv_config_set"),
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_unimplemented,  "ble_adv_status"),
+#endif /* !BLE_PERIPHERAL */
+
 };
 
 uint32_t max_id_table = sizeof(m_cmd_table) / sizeof(m_cmd_table[0]);
@@ -169,6 +175,13 @@ static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packe
     
     *p_out = *p_in;
     *p_action = BB_CMD_ACTION_SEND_BLE;
+}
+
+static void handle_ble_unimplemented(const protobuf_packet_t *pkt)
+{
+    // CHECK_VOID(s_network_cmd.stream && pkt);
+    // network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED);
+    // RLOG_W(OBJECT_CODE, "No command handler for payload tag=%u", (unsigned)pkt->which_params);
 }
 
 /* End of file -------------------------------------------------------- */

@@ -13,8 +13,12 @@
 #include <stddef.h>
 #include "bb_transport.h"
 #include "hdlc.h"
+#if defined(BLE_PERIPHERAL)
 #include "../../peripheral/bsp_uart.h"
 #include "../../peripheral/sys_log.h"
+#elif defined(BLE_CENTRAL)
+
+#endif
 
 /* Private defines ---------------------------------------------------- */
 /* Private enumerate/structure ---------------------------------------- */
@@ -51,10 +55,7 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     
     ret_code_t err_code = NRF_SUCCESS;
 
-    // Đăng ký callback nhận byte với UART layer
-    NRF_LOG_INFO("Initializing UART for Peripheral...");
-    err_code = bsp_uart_init(on_rx_byte);
-#if defined(BLE_PERIPHREAL)
+#if defined(BLE_PERIPHERAL)
     NRF_LOG_INFO("Initializing UART for Peripheral...");
     err_code = bsp_uart_init(on_rx_byte);
 #elif defined(BLE_CENTRAL)
@@ -101,7 +102,7 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
     
     if (frame_size > 0) {
         // 3. Đẩy mảng byte đã đóng gói xuống UART nếu là Peripheral
-#if defined(BLE_PERIPHREAL)
+#if defined(BLE_PERIPHERAL)
         ret_code_t err_code = bsp_uart_transmit(tx_buf, (uint16_t)frame_size);
         if (err_code == NRF_SUCCESS) 
         {
