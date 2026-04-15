@@ -18,7 +18,7 @@
 #include "../../../protocol/protos/protocol.pb.h"
 
 /* Private defines ---------------------------------------------------- */
-#ifdef BLE_PERIPHREAL
+#ifdef BLE_PERIPHERAL
 #define PACKET_ADDR protobuf_PACKET_ADDR_PERIPHERAL
 #elif defined(BLE_CENTRAL)
 #define PACKET_ADDR protobuf_PACKET_ADDR_CENTRAL

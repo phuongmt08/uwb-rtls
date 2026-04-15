@@ -2,7 +2,9 @@
 <session>
  <Bookmarks/>
  <Breakpoints groups="Breakpoints" active_group="Breakpoints">
-  <Exceptions/>
+  <Exceptions>
+   <Group group="V7M Exceptions" set="BusFault;ExceptionEntryReturnFault;HardFault;MemManage;UsageFault_CheckingError;UsageFault_Coprocessor;UsageFault_StateError"/>
+  </Exceptions>
  </Breakpoints>
  <ExecutionProfileWindow/>
  <FrameBuffer>
@@ -25,6 +27,9 @@
   <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132"/>
   <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;Application"/>
   <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;BLE_Bridge"/>
+  <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;Module"/>
+  <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;nanopb"/>
+  <ProjectSessionItem path="ble_app_blinky_pca10040_s132;ble_app_blinky_pca10040_s132;nRF_Libraries"/>
  </Project>
  <Register1>
   <RegisterWindow invisibleNodes="" visibleNodes="CPU - Current Context/r0;CPU - Current Context/r1;CPU - Current Context/r2;CPU - Current Context/r3;CPU - Current Context/r4;CPU - Current Context/r5;CPU - Current Context/r6;CPU - Current Context/r7;CPU - Current Context/r8;CPU - Current Context/r9;CPU - Current Context/r10;CPU - Current Context/r11;CPU - Current Context/r12;CPU - Current Context/sp(r13);CPU - Current Context/lr(r14);CPU - Current Context/pc(r15);CPU - Current Context/apsr;CPU/r0;CPU/r1;CPU/r2;CPU/r3;CPU/r4;CPU/r5;CPU/r6;CPU/r7;CPU/r8;CPU/r9;CPU/r10;CPU/r11;CPU/r12;CPU/sp(r13);CPU/lr(r14);CPU/pc(r15);CPU/xpsr;CPU/MSP;CPU/PSP;CPU/PRIMASK;CPU/BASEPRI;CPU/FAULTMASK;CPU/CONTROL;CPU/internal" binaryNodes="" asciiNodes="" openNodes="CPU - Current Context" name="ble_app_blinky_pca10040_s132_Debug" decimalNodes="" octalNodes="" unsignedNodes=""/>
@@ -45,7 +50,9 @@
   <Trace enabled="Yes"/>
  </TraceWindow>
  <Watch1>
-  <Watches active="1" update="Never"/>
+  <Watches active="1" update="Never">
+   <Watchpoint expression="m_hdlc_parser" name="m_hdlc_parser" radix="-1" linenumber="0" filename=""/>
+  </Watches>
  </Watch1>
  <Watch2>
   <Watches active="0" update="Never"/>
@@ -57,25 +64,28 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="52" useTextEdit="1" path="../../ble_common/boards.h" left="0" top="36" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="31" y="50" useTextEdit="1" path="../../ble_common/boards.h" left="0" top="36" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="51" y="25" useTextEdit="1" path="../../ble_common/boards.c" left="0" top="18" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="37" y="73" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/util/app_error_weak.c" left="0" top="42" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="99" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/util/app_error_weak.c" left="0" top="77" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/external/segger_rtt/SEGGER_RTT.c" left="0" top="846" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/softdevice/common/nrf_sdh_soc.c" left="0" top="0" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/softdevice/common/nrf_sdh_ble.c" left="0" top="138" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/modules/nrfx/mdk/ses_startup_nrf_common.s" left="0" top="0" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../config/peripheral_io.h" left="0" top="0" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="48" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/util/app_error_handler_gcc.c" left="0" top="29" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="77" useTextEdit="1" path="../bsp_uart.c" left="0" top="38" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="67" y="89" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/ble/ble_services/ble_nus/ble_nus.h" left="0" top="49" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="52" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/uart/app_uart_fifo.c" left="0" top="12" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="50" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.h" left="0" selected="1" top="4" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="71" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.c" left="0" top="44" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="4" y="32" useTextEdit="1" path="../../ble_common/ble_bridge/bb_cmd_hdl.c" left="0" top="0" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="35" useTextEdit="1" path="../../../../protocol/protos/protocol.pb.h" left="0" top="0" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="41" y="116" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.c" left="0" top="64" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="34" y="34" useTextEdit="1" path="ble_app_blinky_pca10040_s132.emProject" left="0" top="0" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="88" y="44" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.h" left="0" top="0" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="17" y="125" useTextEdit="1" path="../bsp_uart.c" left="0" top="101" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="67" y="89" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/ble/ble_services/ble_nus/ble_nus.h" left="0" top="61" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="52" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/uart/app_uart_fifo.c" left="0" top="24" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="50" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.h" left="0" top="22" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="131" useTextEdit="1" path="../../ble_common/ble_bridge/bb_transport.c" left="0" top="125" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="32" useTextEdit="1" path="../../ble_common/ble_bridge/bb_cmd_hdl.c" left="0" top="4" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="9" y="5" useTextEdit="1" path="../../../../protocol/protos/protocol.pb.h" left="0" top="0" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="116" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.c" left="0" top="88" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="34" y="34" useTextEdit="1" path="ble_app_blinky_pca10040_s132.emProject" left="0" top="6" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="88" y="44" useTextEdit="1" path="../../ble_common/ble_bridge/bb_router.h" left="0" top="16" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="9" y="1" useTextEdit="1" path="../../ble_common/hdlc.c" left="0" top="111" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="2" y="72" useTextEdit="1" path="../main.c" left="0" selected="1" top="46" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="2" y="67" useTextEdit="1" path="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/components/libraries/uart/app_uart.h" left="0" top="49" codecName="Default"/>
  </Files>
- <EMStudioWindow activeProject="ble_app_blinky_pca10040_s132" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
+ <EMStudioWindow activeProject="ble_app_blinky_pca10040_s132" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3711"/>
 </session>

@@ -33,12 +33,12 @@
 		<link>
 			<name>common</name>
 			<type>2</type>
-			<location>C:/Users/USER/Desktop/final_project/uwb-rtls/firmware/common</location>
+			<location>D:/HOC/S/STM32/IDE/DATN/uwb-rtls/firmware/common</location>
 		</link>
 		<link>
 			<name>protocol</name>
 			<type>2</type>
-			<location>C:/Users/USER/Desktop/final_project/uwb-rtls/protocol</location>
+			<location>D:/HOC/S/STM32/IDE/DATN/uwb-rtls/protocol</location>
 		</link>
 	</linkedResources>
 </projectDescription>

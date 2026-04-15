@@ -66,9 +66,12 @@
 #include "sys_log.h"
 #include "ble_peripheral.h"
 
-#define BLE_PERIPHREAL
 
-/**@brief Function for initializing power management.
+#include "bb_transport.h"
+#include "app_uart.h"
+
+/*
+**@brief Function for initializing power management.
  */
 static void power_management_init(void)
 {
@@ -111,13 +114,25 @@ int main(void)
 
     // Enter main loop.
     for (;;)
-    {bb_router_process();
-        
+    {
+        bb_router_process();
+        bsp_uart_read_byte(); // Đọc byte từ UART để kích hoạt callback on_rx_byte trong bb_transport (được setup trong bb_router_init)
         idle_state_handle();
     }
 }
-
+    // uint8_t cr;
 
 /**
  * @}
  */
+
+//         // 
+//         while (app_u// art_get(&cr) != NRF_SUCCESS);
+//   //       
+//         // Gửi trở lại ngay kí tự
+//  đó (echo/// // NRF_LOG_INFO("Received: %c bytes\n", cr);
+//         // on_rx_byte(cr); // Gọi callback xử lý byte nhận được từ UART (được setup trong bb_transport_init)
+// log)
+//     //     while (app_uart_put(cr) != NRF_SUCCESS);// ////  
+        
+//                 bytebsp_uart_read_byte();

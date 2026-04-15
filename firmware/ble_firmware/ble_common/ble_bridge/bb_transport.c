@@ -31,7 +31,7 @@ static bb_transport_state_transition_cb_t m_rx_cb = NULL;
 static hdlc_parser_t m_hdlc_parser;
 
 /* Private function prototypes ---------------------------------------- */
-static void on_rx_byte(uint8_t byte);
+// static void on_rx_byte(uint8_t byte);
 static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t length);
 static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length);
 
@@ -52,7 +52,10 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     ret_code_t err_code = NRF_SUCCESS;
 
     // Đăng ký callback nhận byte với UART layer
+    NRF_LOG_INFO("Initializing UART for Peripheral...");
+    err_code = bsp_uart_init(on_rx_byte);
 #if defined(BLE_PERIPHREAL)
+    NRF_LOG_INFO("Initializing UART for Peripheral...");
     err_code = bsp_uart_init(on_rx_byte);
 #elif defined(BLE_CENTRAL)
     // err_code = bsp_usb_init(on_rx_byte); // Đợi code api cho central sau
@@ -126,18 +129,22 @@ static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
 /**
  * @brief Hàm callback được gọi từ bsp_uart mỗi khi có 1 byte nhận được
  */
-static void on_rx_byte(uint8_t byte)
+uint32_t count_data = 0;
+void on_rx_byte(uint8_t byte)
 {
     // Nếu buffer hiện tại chưa được Router xử lý xong thì drop byte mới
     // để đảm bảo không bị ghi đè dữ liệu (nguyên tắc Zero-Copy)
-    if (m_is_packet_ready || p_protobuf_buffer == NULL || p_protobuf_len == NULL) {
-        return;
-    }
+    // if (m_is_packet_ready || p_protobuf_buffer == NULL || p_protobuf_len == NULL) {
+    //     return;
+    // }
 
     hdlc_data_chunk_t rx_chunk;
-    
+    NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
+
     if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
+
     {   
+        // NRF_LOG_INFO("Received HDLC payload: len=%u", rx_chunk.len);
         // Copy data payload sang buffer do Router truyền xuống
         if (rx_chunk.len <= m_max_payload_len) 
         {
