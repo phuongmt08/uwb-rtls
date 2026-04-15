@@ -289,6 +289,10 @@ message factory_config_reset_t {
     uint32 magic = 1;
 }
 
+message enter_to_bootloader_t {
+    uint32 magic = 1; /* Special value to prevent accidental jump */
+}
+
 message device_type_set_t {
     device_type_t device_type = 1;
 }
@@ -523,8 +527,21 @@ message ranging_status_resp_t {
     uint32 last_update_timestamp_ms  = 9;
 }
 
-/* OTA (simple flash workflow) --------------------------------------------- */
+/* FOTA --------------------------------------------- */
 
+enum fota_state_index_t {
+  FOTA_STATE_UNSPECIFIED = 0;
+  FOTA_STATE_IDLE        = 1;
+  FOTA_STATE_ERASING     = 2;
+  FOTA_STATE_RECEIVING   = 3;
+  FOTA_STATE_VERIFYING   = 4;
+  FOTA_STATE_FINISHED    = 5;
+  FOTA_STATE_ERROR       = 6;
+}
+
+message fota_state_resp_t {
+  fota_state_index_t state    = 1;
+}
 
 /* Battery information -----------------------------------------------------------*/
 
@@ -634,10 +651,16 @@ message packet_t {
         anchor_distance_t         anchor_distance         = 55;
         tag_position_t            tag_position            = 56;
 
+        /* FOTA State */
+        fota_state_resp_t         fota_state_resp         = 57;
+
         /* Battery */
         battery_info_resp_t       battery_info_resp       = 60;
         battery_info_get_t        battery_info_get        = 61;
+
+        enter_to_bootloader_t     enter_to_bootloader     = 62;
     }
 }
+
 
 /* End ---------------------------------------------------------------------- */

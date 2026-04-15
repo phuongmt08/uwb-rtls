@@ -1,16 +1,7 @@
 /**
  * @file    sys_logger_bl.h
  * @brief   Bootloader logger — RAM circular buffer, output via network_core
- *
- * @details
- *   Drop-in replacement for sys_logger.h so common source
- *   (e.g. network_cmd.c) compiles unchanged in bootloader builds.
- *   Differences from the app logger:
- *     - No flash storage, no USB CDC.
- *     - TIMESTAMP field filled with a monotonic sequence counter.
- *     - sys_logger_task() is a no-op (no flash sync, no test stub).
- *     - Log data is drained by network_cmd via sys_logger_peek/consume,
- *       same ACK-tracked flow as the app.
+ * @author  Phuong Mai
  */
 
 #pragma once
@@ -20,12 +11,14 @@
 #include <stdarg.h>
 #include "log_config.h"
 #include "err.h"
+#include "memorylayout.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define SYS_LOGGER_BUF_SIZE     2048U
+#define SYS_LOGGER_SHARED_META_SIZE 16U
+#define SYS_LOGGER_BUF_SIZE     (MEM_SHARED_LOG_RAM_SIZE - SYS_LOGGER_SHARED_META_SIZE)
 #define SYS_LOGGER_MAX_MSG_LEN  120U
 #define RLOG_MAX_RECORD_SIZE    (LOG_HEADER_LEN + SYS_LOGGER_MAX_MSG_LEN)
 

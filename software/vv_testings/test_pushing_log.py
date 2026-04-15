@@ -110,9 +110,10 @@ class FlashLogStreamParser:
 
 
 class LogRealtimeTester:
-    def __init__(self, ser: serial.Serial, proto: VvProtocol, dst: int, verbose: bool = False, clear_first: bool = False):
+    def __init__(self, ser: serial.Serial, proto: VvProtocol, src: int, dst: int, verbose: bool = False, clear_first: bool = False):
         self.ser = ser
         self.proto = proto
+        self.src = src
         self.dst = dst
         self.verbose = verbose
         self.clear_first = clear_first
@@ -127,7 +128,7 @@ class LogRealtimeTester:
 
     def _build_none(self) -> pb.packet_t:
         pkt = pb.packet_t()
-        pkt.hdr.addr.src = int(VvAddress.HOST)
+        pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.proto.next_seq()
         pkt.none.dummy = 0
@@ -135,7 +136,7 @@ class LogRealtimeTester:
 
     def _build_transport_set(self) -> pb.packet_t:
         pkt = pb.packet_t()
-        pkt.hdr.addr.src = int(VvAddress.HOST)
+        pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.proto.next_seq()
         pkt.host_transport_set.transport = int(HostTransport.USB)
@@ -143,7 +144,7 @@ class LogRealtimeTester:
 
     def _build_log_data_get(self) -> pb.packet_t:
         pkt = pb.packet_t()
-        pkt.hdr.addr.src = int(VvAddress.HOST)
+        pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.proto.next_seq()
         pkt.log_data.type = pb.LOG_TYPE_DEVICE_LOG
@@ -151,7 +152,7 @@ class LogRealtimeTester:
 
     def _build_time_sync_set(self) -> pb.packet_t:
         pkt = pb.packet_t()
-        pkt.hdr.addr.src = int(VvAddress.HOST)
+        pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.proto.next_seq()
 
@@ -165,7 +166,7 @@ class LogRealtimeTester:
 
     def _build_ack(self, ack_seq: int, dst: int) -> pb.packet_t:
         pkt = pb.packet_t()
-        pkt.hdr.addr.src = int(VvAddress.HOST)
+        pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = dst
         pkt.hdr.seq = self.proto.next_seq()
         pkt.ack.ack_seq = ack_seq
@@ -174,7 +175,7 @@ class LogRealtimeTester:
 
     def _build_log_clear_all(self) -> pb.packet_t:
         pkt = pb.packet_t()
-        pkt.hdr.addr.src = int(VvAddress.HOST)
+        pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.proto.next_seq()
         pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
@@ -274,6 +275,12 @@ def parse_args() -> argparse.Namespace:
         default=int(VvAddress.BCAST),
         help="Device destination address (default: BCAST=15, works for TAG/ANCHOR)",
     )
+    parser.add_argument(
+        "--src",
+        type=int,
+        default=int(VvAddress.DEBUG),
+        help="Source address of the script (default: DEBUG=7 for UART-BLE and when testing via USB where HOST routes to BLE)",
+    )
     parser.add_argument("--verbose", action="store_true", help="Print non-log packets")
     parser.add_argument(
         "--clear-first",
@@ -307,6 +314,7 @@ def main() -> int:
             tester = LogRealtimeTester(
                 ser=ser,
                 proto=proto,
+                src=args.src,
                 dst=args.dst,
                 verbose=args.verbose,
                 clear_first=args.clear_first,

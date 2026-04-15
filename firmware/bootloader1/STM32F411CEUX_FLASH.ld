@@ -4,7 +4,8 @@
 MEMORY
 {
   FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 48K
-  RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 96K
+  RAM     (xrw) : ORIGIN = 0x20000000, LENGTH = 92K
+  LOG_RAM (xrw) : ORIGIN = 0x20017000, LENGTH = 4K
 }
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
@@ -39,7 +40,25 @@ SECTIONS
     *(.bss*) *(COMMON)
     _ebss = .;
   } > RAM
+
+  /* Shared boot/app RAM log area. NOLOAD keeps content over software reset.
+   * Place variables with __attribute__((section(".shared_log"))). */
+  .shared_log (NOLOAD) :
+  {
+    . = ALIGN(4);
+    __shared_log_start__ = .;
+    KEEP(*(.shared_log))
+    KEEP(*(.shared_log*))
+    . = ALIGN(4);
+    __shared_log_end__ = .;
+  } > LOG_RAM
+
+  /* Symbols used by sysmem.c (_sbrk). */
+  _end = .;
 }
 
 /* startup uses these */
 PROVIDE(_sidata = LOADADDR(.data));
+PROVIDE(_Min_Stack_Size = 0x400);
+PROVIDE(SHARED_LOG_START = ORIGIN(LOG_RAM));
+PROVIDE(SHARED_LOG_SIZE  = LENGTH(LOG_RAM));

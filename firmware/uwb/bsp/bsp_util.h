@@ -99,5 +99,6 @@ void              bsp_delay_ms(uint32_t ms);
 /* System ------------------------------------------------------------- */
 uint32_t          bsp_util_get_serial_number(void);
 bsp_util_status_t bsp_util_device_reset(void);
+bsp_util_status_t bsp_util_enter_bootloader(void);
 
 #endif /* BSP_UTIL_H */

@@ -37,8 +37,8 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-#ifndef PCA10059_H
-#define PCA10059_H
+#ifndef CENTRAL_IO_H
+#define CENTRAL_IO_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,7 +65,7 @@ extern "C" {
 #define LEDS_LIST { LED_1, LED_2, LED_3, LED_4 }
 
 #define LEDS_INV_MASK  LEDS_MASK
-
+ 
 #define BSP_LED_0      LED_1
 #define BSP_LED_1      LED_2
 #define BSP_LED_2      LED_3
@@ -92,4 +92,4 @@ extern "C" {
 }
 #endif
 
-#endif // PCA10059_H
+#endif // CENTRAL_IO_H

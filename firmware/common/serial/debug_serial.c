@@ -2,6 +2,7 @@
 #include "hdlc.h"
 #include "usart.h"
 #include "stm32f4xx_hal.h"
+#include "config.h"
 
 #ifndef BOOTLOADER
 #include "usbd_cdc_if.h"
@@ -48,13 +49,12 @@ void debug_serial_set_tx_handler(serial_func_t handler)
 void debug_serial_rx_push(const uint8_t *data, uint32_t len)
 {
     for (uint32_t i = 0u; i < len; i++) {
-        uint32_t next_head = (s_rx_head + 1u) & DEBUG_RX_BUF_MASK;
-        if (next_head == s_rx_tail) {
+        if ((s_rx_head - s_rx_tail) >= DEBUG_RX_BUF_SIZE) {
             break; /* buffer full - drop newest bytes */
         }
 
         s_rx_buf[s_rx_head & DEBUG_RX_BUF_MASK] = data[i];
-        s_rx_head = next_head;
+        s_rx_head++;
     }
 }
 
@@ -108,7 +108,15 @@ int debug_serial_write(int file, char *ptr, int len, uint8_t type)
 #ifndef BOOTLOADER
     host_transport_t host_transport = sys_config_get_host_transport();
     if (host_transport == HOST_TRANSPORT_USB) {
-        return (CDC_Transmit_FS(frame, (uint16_t)frame_len) == USBD_OK) ? len : -1;
+        uint32_t start_ms = HAL_GetTick();
+        uint8_t res;
+        do {
+            res = CDC_Transmit_FS(frame, (uint16_t)frame_len);
+            if (res != USBD_BUSY) {
+                break;
+            }
+        } while ((HAL_GetTick() - start_ms) <= 10u);
+        return (res == USBD_OK) ? len : -1;
     }
 
     if (host_transport == HOST_TRANSPORT_UART) {

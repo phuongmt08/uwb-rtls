@@ -96,6 +96,9 @@ PB_BIND(protobuf_uwb_reset_t, protobuf_uwb_reset_t, AUTO)
 PB_BIND(protobuf_factory_config_reset_t, protobuf_factory_config_reset_t, AUTO)
 
 
+PB_BIND(protobuf_enter_to_bootloader_t, protobuf_enter_to_bootloader_t, AUTO)
+
+
 PB_BIND(protobuf_device_type_set_t, protobuf_device_type_set_t, AUTO)
 
 
@@ -201,6 +204,9 @@ PB_BIND(protobuf_ranging_status_get_t, protobuf_ranging_status_get_t, AUTO)
 PB_BIND(protobuf_ranging_status_resp_t, protobuf_ranging_status_resp_t, AUTO)
 
 
+PB_BIND(protobuf_fota_state_resp_t, protobuf_fota_state_resp_t, AUTO)
+
+
 PB_BIND(protobuf_battery_info_resp_t, protobuf_battery_info_resp_t, AUTO)
 
 
@@ -208,6 +214,8 @@ PB_BIND(protobuf_battery_info_get_t, protobuf_battery_info_get_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, AUTO)
+
+
 
 
 

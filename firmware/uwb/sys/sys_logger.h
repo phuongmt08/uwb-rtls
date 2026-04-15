@@ -29,12 +29,18 @@
 #include "log_config.h"
 #include "err.h"
 #include "config.h"
+#include "memorylayout.h"
 
 /* Public defines ----------------------------------------------------------- */
 /**
- * @brief Total RAM buffer size for logger (16KB)
+ * @brief Shared logger metadata bytes stored in MEM_SHARED_LOG_RAM.
  */
-#define SYS_LOGGER_BUF_SIZE        (16384U)
+#define SYS_LOGGER_SHARED_META_SIZE (16U)
+
+/**
+ * @brief Total RAM buffer size for logger in shared noinit RAM.
+ */
+#define SYS_LOGGER_BUF_SIZE        (MEM_SHARED_LOG_RAM_SIZE - SYS_LOGGER_SHARED_META_SIZE)
 
 /**
  * @brief Maximum message length per log record (180 bytes)
@@ -152,7 +158,7 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len);
  */
 void sys_logger_consume(uint16_t len);
 
-/* ── Flash persistence API (HAVE_FLASH_STORAGE only) ───────────────────────
+/* ── Flash persistence API (requires HAVE_FLASH_STORAGE + ENABLE_FLASH_LOG) ─
  *
  *  Flash log sub-partition layout (64 KB, append-only):
  *    Records stored sequentially:
@@ -171,7 +177,7 @@ void sys_logger_consume(uint16_t len);
  *  On boot, write_pos is recovered by scanning flash.  read_pos always resets
  *  to 0 — unconfirmed data is re-sent to the host on next request.
  * ───────────────────────────────────────────────────────────────────────── */
-#ifdef HAVE_FLASH_STORAGE
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
 
 /**
  * @brief  Flush pending RAM log records to the flash log sub-partition.
@@ -236,7 +242,7 @@ uint32_t sys_logger_flash_read_packet(uint8_t *out, uint16_t max_len);
  */
 void sys_logger_flash_consume(uint32_t length);
 
-#endif /* HAVE_FLASH_STORAGE */
+#endif /* defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG) */
 
 /* -------------------------------------------------------------------------- */
 
