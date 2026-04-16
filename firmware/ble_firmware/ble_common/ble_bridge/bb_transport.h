@@ -37,7 +37,6 @@ typedef void (*bb_transport_state_transition_cb_t)(void);
 /* Public macros ------------------------------------------------------ */
 /* Public variables --------------------------------------------------- */
 /* Public function prototypes ----------------------------------------- */
-/**@brief Initialize timer module.
 /**
  * @brief Initializes the transport layer (HDLC state machines, buffer allocations)
  *

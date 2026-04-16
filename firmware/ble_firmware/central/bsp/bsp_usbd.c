@@ -38,7 +38,7 @@
 #define BSP_USBD_USE_POWER_DETECTION  1
 
 /** Number of bytes read per OUT transfer. */
-#define BSP_USBD_READ_SIZE  1
+#define BSP_USBD_READ_SIZE  64
 
 /** Period of the internal stub timer (ms). */
 #define BSP_USBD_STUB_PERIOD_MS     300
@@ -54,11 +54,12 @@ static bool m_stub_pending  = false;   /**< Timer fired; TX not yet ACK-ed. */
 /** Single-byte RX scratch buffer used for the continuous OUT transfer. */
 static char m_rx_buffer[BSP_USBD_READ_SIZE];
 
-static char m_rx_line_buf[64];
-static int  m_rx_line_len = 0;
+// static char m_rx_line_buf[64];
+// static int  m_rx_line_len = 0;
 
 typedef void (*bsp_usbd_rx_line_cb_t)(const char *line);
 static bsp_usbd_rx_line_cb_t m_rx_line_cb = NULL;
+static bsp_usbd_rx_cb_t s_rx_cb = NULL;
 
 void bsp_usbd_rx_line_cb_set(bsp_usbd_rx_line_cb_t cb)
 {
@@ -95,7 +96,7 @@ APP_USBD_CDC_ACM_GLOBAL_DEF(m_usb_cdc_acm,
  * ---------------------------------------------------------------------- */
 
 /** Returns true when a read return code means "no problem, just wait". */
-static bool read_result_is_ok(ret_code_t code)
+static bool __attribute__((unused)) read_result_is_ok(ret_code_t code)
 {
     return (code == NRF_SUCCESS)         ||
            (code == NRF_ERROR_IO_PENDING) ||
@@ -174,11 +175,23 @@ static void cdc_acm_user_event_handler(app_usbd_class_inst_t const *p_inst,
                 NRF_LOG_ERROR("USB: stub_timer start failed: 0x%08x", timer_ret);
             }
 
-            /* Queue the first OUT (RX) transfer. */
-            ret_code_t ret = app_usbd_cdc_acm_read(&m_usb_cdc_acm,
-                                                    m_rx_buffer,
-                                                    BSP_USBD_READ_SIZE);
-            if (!read_result_is_ok(ret))
+            /* Cố gắng đọc toàn bộ dữ liệu có sẵn ngay lúc mở port (nếu có) để mồi luồng Rx */
+            ret_code_t ret;
+            // NOTE: We use read_any to pull whatever is in the USB EP buffer right away.
+            do
+            {
+                ret = app_usbd_cdc_acm_read_any(&m_usb_cdc_acm, m_rx_buffer, sizeof(m_rx_buffer));
+                if (ret == NRF_SUCCESS)
+                {
+                    size_t size = app_usbd_cdc_acm_rx_size(&m_usb_cdc_acm);
+                    for (size_t i = 0; i < size; i++) {
+                        NRF_LOG_INFO("USB Rx init: 0x%02x", (uint8_t)m_rx_buffer[i]);
+                    }
+                    // TODO: Đẩy byte vào bb_transport.h (bb_transport_on_rx_byte)
+                }
+            } while (ret == NRF_SUCCESS);
+
+            if (ret != NRF_ERROR_IO_PENDING)
             {
                 NRF_LOG_ERROR("USB: initial read setup failed: 0x%08x", ret);
             }
@@ -212,56 +225,23 @@ static void cdc_acm_user_event_handler(app_usbd_class_inst_t const *p_inst,
             ret_code_t ret;
             do
             {
-                char c = m_rx_buffer[0];
-
-                /* Echo the received byte back to the terminal. */
-                if (m_port_open)
+                // Lấy kích thước thực tế vừa nhận được
+                size_t rx_len = app_usbd_cdc_acm_rx_size(&m_usb_cdc_acm);
+                
+                // In và đẩy dữ liệu
+                for (size_t i = 0; i < rx_len; i++)
                 {
-                    if (c == '\r' || c == '\n')
-                    {
-                        /* Print CRLF for terminal newline */
-                        bsp_usbd_write((const uint8_t *)"\r\n", 2);
-                    }
-                    else
-                    {
-                        app_usbd_cdc_acm_write(&m_usb_cdc_acm, (const uint8_t *)&c, 1);
-                    }
+                    uint8_t received_byte = m_rx_buffer[i];
+                    s_rx_cb(received_byte); // Gọi callback với byte vừa nhận được
+                    // Nếu bạn có callback để pass dữ liệu lên logic Protocol, gọi ở đây:
+                    // if (m_rx_line_cb)
+                    //     m_rx_line_cb(&m_rx_buffer[i]); // Thích ứng tùy bạn
                 }
 
-                if (c == '\r' || c == '\n')
-                {
-                    if (m_rx_line_len > 0)
-                    {
-                        m_rx_line_buf[m_rx_line_len] = '\0';
-                        if (m_rx_line_cb)
-                        {
-                            m_rx_line_cb(m_rx_line_buf);
-                        }
-                        m_rx_line_len = 0;
-                    }
-                }
-                else if (c == '\b' || c == 0x7F) /* Backspace */
-                {
-                    if (m_rx_line_len > 0)
-                    {
-                        m_rx_line_len--;
-                    }
-                }
-                else if (m_rx_line_len < sizeof(m_rx_line_buf) - 1)
-                {
-                    m_rx_line_buf[m_rx_line_len++] = c;
-                }
+                // Tiếp tục gọi USB stack đọc packet tiếp theo
+                ret = app_usbd_cdc_acm_read_any(&m_usb_cdc_acm, m_rx_buffer, sizeof(m_rx_buffer));
 
-                /* Read next byte synchronously (if available in internal FIFO) or re-arm OUT transfer (if empty) */
-                ret = app_usbd_cdc_acm_read(&m_usb_cdc_acm, m_rx_buffer, BSP_USBD_READ_SIZE);
-
-                if (!read_result_is_ok(ret))
-                {
-                    NRF_LOG_ERROR("USB: re-read failed: 0x%08x", ret);
-                    break;
-                }
-            }
-            while (ret == NRF_SUCCESS);
+            } while (ret == NRF_SUCCESS);
             break;
         }
 
@@ -324,11 +304,12 @@ static void usbd_event_handler(app_usbd_event_type_t event)
 /* -------------------------------------------------------------------------
  * Public API implementation
  * ---------------------------------------------------------------------- */
-
-ret_code_t bsp_usbd_init(void)
+ret_code_t bsp_usbd_init(bsp_usbd_rx_cb_t rx_cb)
 {
     ret_code_t ret;
-
+    if(rx_cb) {
+        s_rx_cb = rx_cb;
+    }
     /* Create the periodic stub timer. */
     ret = app_timer_create(&m_stub_timer, APP_TIMER_MODE_REPEATED, stub_timer_handler);
     if (ret != NRF_SUCCESS)

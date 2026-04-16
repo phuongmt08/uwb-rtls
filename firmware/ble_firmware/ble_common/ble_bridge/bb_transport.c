@@ -13,11 +13,11 @@
 #include <stddef.h>
 #include "bb_transport.h"
 #include "hdlc.h"
+#include "logger.h"
 #if defined(BLE_PERIPHERAL)
 #include "../../peripheral/bsp_uart.h"
-#include "../../peripheral/sys_log.h"
 #elif defined(BLE_CENTRAL)
-
+#include "../../central/bsp/bsp_usbd.h"
 #endif
 
 /* Private defines ---------------------------------------------------- */
@@ -59,7 +59,8 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     NRF_LOG_INFO("Initializing UART for Peripheral...");
     err_code = bsp_uart_init(on_rx_byte);
 #elif defined(BLE_CENTRAL)
-    // err_code = bsp_usb_init(on_rx_byte); // Đợi code api cho central sau
+    NRF_LOG_INFO("Initializing USB CDC ACM for Central...");
+    err_code = bsp_usbd_init(on_rx_byte); // ─ code api cho central sau
 #endif
 
     return err_code;
@@ -111,7 +112,12 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
         return err_code;
 #elif defined(BLE_CENTRAL)
         // bsp_serial_central_transmit(tx_buf, frame_size); // Đợi code api cho central sau
-        return NRF_SUCCESS;
+        ret_code_t err_code = bsp_usbd_write(tx_buf, (size_t)frame_size);
+        if (err_code == NRF_SUCCESS) 
+        {
+            return NRF_SUCCESS;
+        }
+        return err_code;
 #else
         return NRF_ERROR_NOT_SUPPORTED;
 #endif
@@ -140,7 +146,7 @@ void on_rx_byte(uint8_t byte)
     // }
 
     hdlc_data_chunk_t rx_chunk;
-    NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
+    // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
 
     if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
 

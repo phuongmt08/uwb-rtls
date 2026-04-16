@@ -63,7 +63,7 @@
 #include "bsp_uart.h"
 #include "bsp_utils.h"
 
-#include "sys_log.h"
+#include "logger.h"
 #include "ble_peripheral.h"
 
 
@@ -100,7 +100,7 @@ int main(void)
 {
     // Initialize.
     bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init) 
-    sys_log_init();
+    logger_init();
     bsp_utils_init();
     power_management_init();
 

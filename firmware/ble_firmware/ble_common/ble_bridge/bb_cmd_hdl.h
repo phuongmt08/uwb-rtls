@@ -50,4 +50,7 @@ ret_code_t bb_cmd_hdl_init(void);
  */
 bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_t max_len);
 
+void bb_cmd_notify_scan_result(const uint8_t * mac, int8_t rssi, const char * name, uint32_t serial_num);
+void bb_cmd_notify_ble_status(uint8_t state, int32_t rssi_dbm);
+
 #endif // BB_CMD_HDL_H

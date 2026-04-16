@@ -329,6 +329,59 @@ class CommandFactory:
         pkt.fota_state_resp.state = pb.FOTA_STATE_IDLE
         return pkt
 
+    # ── BLE central commands ──────────────────────────────────────────────────────────
+
+    def ble_scan_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_scan_start.duration_ms = 5000  # Default 5 secs
+        pkt.ble_scan_start.interval_ms = 160
+        pkt.ble_scan_start.window_ms = 80
+        pkt.ble_scan_start.active_scanning = True
+        return pkt
+
+    def ble_scan_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_scan_stop.dummy = 0
+        return pkt
+        
+    def ble_connect(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_connect.mac_address = b"\x00\x11\x22\x33\x44\x55"
+        return pkt
+
+    def ble_disconnect(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_disconnect.reason = 0
+        return pkt
+
+    def ble_conn_params_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_conn_params_get.dummy = 0
+        return pkt
+
+    def ble_conn_params_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_conn_params_set.params.min_interval_ms = 15
+        pkt.ble_conn_params_set.params.max_interval_ms = 30
+        pkt.ble_conn_params_set.params.slave_latency = 0
+        pkt.ble_conn_params_set.params.sup_timeout_ms = 4000
+        return pkt
+
+    def ble_conn_params_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_conn_params_resp.params.min_interval_ms = 15
+        pkt.ble_conn_params_resp.params.max_interval_ms = 30
+        pkt.ble_conn_params_resp.params.slave_latency = 0
+        pkt.ble_conn_params_resp.params.sup_timeout_ms = 4000
+        return pkt
+        
+    def ble_scan_result(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_scan_result.mac_address = b"\x00\x11\x22\x33\x44\x55"
+        pkt.ble_scan_result.rssi_dbm = -50
+        pkt.ble_scan_result.serial_number = 12345
+        return pkt
+
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -377,6 +430,14 @@ class CommandCatalog:
             CommandSpec(42, "anchor_layout_get", self.factory.anchor_layout_get),
             CommandSpec(43, "anchor_layout_set", self.factory.anchor_layout_set),
             CommandSpec(44, "anchor_layout_resp", self.factory.anchor_layout_resp),
+            CommandSpec(47, "ble_conn_params_get", self.factory.ble_conn_params_get),
+            CommandSpec(48, "ble_conn_params_set", self.factory.ble_conn_params_set),
+            CommandSpec(49, "ble_conn_params_resp", self.factory.ble_conn_params_resp),
+            CommandSpec(50, "ble_disconnect", self.factory.ble_disconnect),
+            CommandSpec(51, "ble_scan_start", self.factory.ble_scan_start),
+            CommandSpec(52, "ble_scan_stop", self.factory.ble_scan_stop),
+            CommandSpec(53, "ble_connect", self.factory.ble_connect),
+            CommandSpec(54, "ble_scan_result", self.factory.ble_scan_result),            
             # FOTA
             CommandSpec(62, "enter_to_bootloader", self.factory.enter_to_bootloader),
             CommandSpec(46, "flash_verify", self.factory.flash_verify),

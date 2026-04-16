@@ -46,6 +46,7 @@
 
 #include "../bsp/bsp_led.h"
 #include "../bsp/bsp_usbd.h"
+#include "../../ble_common/ble_bridge/bb_cmd_hdl.h"
 
 /* Private defines --------------------------------------------------------- */
 #define SCAN_INTERVAL            0x00A0  /**< Scan interval  (units of 0.625 ms). */
@@ -123,6 +124,7 @@ static bool           m_has_pending_connect = false;
 static ble_gap_addr_t m_pending_target_addr;
 
 static uint16_t       m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
+static ble_gap_conn_params_t m_current_conn_params;
 
 /* Private prototypes ------------------------------------------------------ */
 static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context);
@@ -131,6 +133,29 @@ static void db_disc_handler(ble_db_discovery_evt_t *p_evt);
 static void scan_start(void);
 static void lbs_c_init(void);
 static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool matched);
+
+void app_ble_central_scan_start(uint16_t interval_ms, uint16_t window_ms, uint16_t duration_ms, bool active)
+{
+    nrf_ble_scan_stop();
+    if (interval_ms > 0 && window_ms > 0) {
+        m_scan.scan_params.interval = MSEC_TO_UNITS(interval_ms, UNIT_0_625_MS);
+        m_scan.scan_params.window   = MSEC_TO_UNITS(window_ms, UNIT_0_625_MS);
+        m_scan.scan_params.timeout  = duration_ms / 10;
+        m_scan.scan_params.active   = active ? 1 : 0;
+    }
+    ret_code_t err_code = nrf_ble_scan_start(&m_scan);
+    if (err_code == NRF_SUCCESS) {
+        bsp_led_scanning();
+        m_is_connecting = false;
+        m_has_pending_connect = false;
+    }
+}
+
+void app_ble_central_scan_stop(void)
+{
+    nrf_ble_scan_stop();
+    // TODO: Add bsp led off if there's an API, usually bsp_led library covers state changes automatically
+}
 
 /* -------------------------------------------------------------------------
  * UI — Terminal output over USB CDC ACM
@@ -339,7 +364,7 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
             }
         }
 
-        /* Populate the slot. */
+        /* Initialize the known device fields */
         m_known_devices[known_idx].active = true;
         memcpy(m_known_devices[known_idx].addr,
                p_adv_report->peer_addr.addr,
@@ -350,6 +375,10 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
         m_known_devices[known_idx].rssi      = p_adv_report->rssi;                          /* Signal strength in dBm. */
         m_known_devices[known_idx].last_seen = current_ticks;                               /* Timestamp for aging out old entries. */
         should_redraw = true;                                                               /* New device appeared. */
+        
+        /* Notify via protobuf / serial */
+        bb_cmd_notify_scan_result(m_known_devices[known_idx].addr, m_known_devices[known_idx].rssi, m_known_devices[known_idx].name, 0);
+
     }
     else
     {
@@ -359,6 +388,13 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
         {
             strncpy(m_known_devices[known_idx].name, dev_name, NRF_BLE_SCAN_NAME_MAX_LEN + 1);
             should_redraw = true; /* Name resolved — refresh list. */
+        }
+        
+        if (m_known_devices[known_idx].rssi != p_adv_report->rssi) {
+            m_known_devices[known_idx].rssi = p_adv_report->rssi;
+            
+            /* Notify via protobuf / serial explicitly on rssi change */
+            bb_cmd_notify_scan_result(m_known_devices[known_idx].addr, m_known_devices[known_idx].rssi, m_known_devices[known_idx].name, 0);
         }
 
         if (m_known_devices[known_idx].uuid == 0 && uuid16 != 0)
@@ -602,6 +638,10 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_is_connected = true;
             m_is_connecting = false;
             m_current_conn_handle = p_gap_evt->conn_handle;
+            m_current_conn_params = p_gap_evt->params.connected.conn_params;
+
+            /* Alert PC about connection */
+            bb_cmd_notify_ble_status(5 /* CONNECTED */, 0);
 
             /* Copy device info from the scan list into the connected record. */
             int connected_idx = -1;
@@ -665,6 +705,9 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
             app_ble_ui_redraw();
 
+            /* Alert PC about disconnection */
+            bb_cmd_notify_ble_status(1 /* IDLE */, 0);
+
             if (m_has_pending_connect)
             {
                 m_has_pending_connect = false;
@@ -701,6 +744,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                 m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
                 m_is_connected = false;
                 m_is_connecting = false;
+                bb_cmd_notify_ble_status(1 /* IDLE */, 0);
             }
         } break;
 
@@ -715,6 +759,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                          (p_updated->max_conn_interval * 125) % 100,
                          p_updated->slave_latency,
                          p_updated->conn_sup_timeout * 10);
+            m_current_conn_params = *p_updated;
         } break;
 
         case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
@@ -994,6 +1039,112 @@ void central_update_conn_params(uint16_t conn_handle,
     if (err_code != NRF_SUCCESS)
     {
         NRF_LOG_ERROR("Failed to update conn params: %x", err_code);
+    }
+}
+
+
+/* -------------------------------------------------------------------------
+ * Public APIs for Protocol Bridge
+ * ---------------------------------------------------------------------- */
+void app_ble_central_connect(const uint8_t *mac)
+{
+    uint8_t target_mac[6];
+    memcpy(target_mac, mac, 6);
+
+    int found_idx = -1;
+    for (int i = 0; i < MAX_KNOWN_DEVICES; i++)
+    {
+        if (m_known_devices[i].active &&
+            memcmp(m_known_devices[i].addr, target_mac, 6) == 0)
+        {
+            found_idx = i;
+            break;
+        }
+    }
+
+    if (found_idx != -1)
+    {
+        NRF_LOG_INFO("API: Connecting to MAC...");
+        if (m_is_connected || m_is_connecting || m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+        {
+            memset(&m_pending_target_addr, 0, sizeof(m_pending_target_addr));
+            m_pending_target_addr.addr_id_peer = 0;
+            m_pending_target_addr.addr_type = m_known_devices[found_idx].addr_type;
+            memcpy(m_pending_target_addr.addr, m_known_devices[found_idx].addr, BLE_GAP_ADDR_LEN);
+            m_has_pending_connect = true;
+
+            if (m_is_connected) {
+                sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+            }
+            return;
+        }
+
+        nrf_ble_scan_stop();
+
+        ble_gap_addr_t target_addr;
+        memset(&target_addr, 0, sizeof(target_addr));
+        target_addr.addr_id_peer = 0;
+        target_addr.addr_type = m_known_devices[found_idx].addr_type;
+        memcpy(target_addr.addr, m_known_devices[found_idx].addr, BLE_GAP_ADDR_LEN);
+
+        ret_code_t err_code = sd_ble_gap_connect(&target_addr,
+                                                 &m_scan.scan_params,
+                                                 &m_scan.conn_params,
+                                                 APP_BLE_CONN_CFG_TAG);
+        
+        if (err_code != NRF_SUCCESS)
+        {
+            m_is_connecting = false;
+            scan_start();
+        }
+        else
+        {
+            m_is_connecting = true;
+        }
+    }
+    else
+    {
+        NRF_LOG_WARNING("API: MAC address not found in scanned list.");
+    }
+}
+
+void app_ble_central_disconnect(void)
+{
+    if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+    }
+}
+
+void app_ble_central_conn_params_set(uint16_t min_interval_ms, uint16_t max_interval_ms, uint16_t slave_latency, uint16_t conn_sup_timeout_ms)
+{
+    if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        central_update_conn_params(m_current_conn_handle, min_interval_ms, max_interval_ms, slave_latency, conn_sup_timeout_ms);
+    }
+}
+
+bool app_ble_central_conn_params_get(uint16_t *min_ms, uint16_t *max_ms, uint16_t *lat, uint16_t *to_ms)
+{
+    if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        *min_ms = (m_current_conn_params.min_conn_interval * 125) / 100;
+        *max_ms = (m_current_conn_params.max_conn_interval * 125) / 100;
+        *lat = m_current_conn_params.slave_latency;
+        *to_ms = m_current_conn_params.conn_sup_timeout * 10;
+        return true;
+    }
+    return false;
+}
+
+uint8_t app_ble_central_status_get(void)
+{
+    if (m_is_connected) {
+        return 5; /* protobuf_BLE_STATE_CONNECTED */
+    } else if (m_is_connecting) {
+        return 4; /* protobuf_BLE_STATE_CONNECTING */
+    } else {
+        return 1; /* protobuf_BLE_STATE_IDLE */
     }
 }
 

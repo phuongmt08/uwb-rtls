@@ -60,6 +60,18 @@ void central_update_conn_params(uint16_t conn_handle,
                                 uint16_t slave_latency, 
                                 uint16_t conn_sup_timeout_ms);
 
+/* -------------------------------------------------------------------------
+ * Bridge API
+ * ---------------------------------------------------------------------- */
+#include <stdbool.h>
+void app_ble_central_scan_start(uint16_t interval_ms, uint16_t window_ms, uint16_t duration_ms, bool active);
+void app_ble_central_scan_stop(void);
+void app_ble_central_connect(const uint8_t *mac);
+void app_ble_central_disconnect(void);
+void app_ble_central_conn_params_set(uint16_t min_interval_ms, uint16_t max_interval_ms, uint16_t slave_latency, uint16_t conn_sup_timeout_ms);
+bool app_ble_central_conn_params_get(uint16_t *min_ms, uint16_t *max_ms, uint16_t *lat, uint16_t *to_ms);
+uint8_t app_ble_central_status_get(void);
+
 #ifdef __cplusplus
 }
 #endif
