@@ -1,6 +1,10 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from __future__ import annotations
 
-from vv_commands import CommandCatalog
+from common.commands import CommandCatalog
 from vv_test_session import VvTestSession
 
 from test_common import has_ack_for_seq, packet_name, send_and_print

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from vv_commands import CommandFactory
-from vv_transport import HdlcChunk, HdlcCodec, HostTransport, VvAddress, VvProtocol as _VvProtocol
+from .commands import CommandFactory
+from .transport import HdlcChunk, HdlcCodec, HostTransport, VvAddress, VvProtocol as _VvProtocol
 
 
 class VvProtocol(_VvProtocol):

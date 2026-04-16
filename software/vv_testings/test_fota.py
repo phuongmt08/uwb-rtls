@@ -33,6 +33,9 @@ Memory layout (memorylayout.h):
   MEM_APP_END    = 0x0804_0000  (208 KB app region)
 """
 from __future__ import annotations
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 
 import os
 import struct
@@ -42,10 +45,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import protocol_pb2 as pb
-from vv_commands import CommandFactory
+from common import protocol_pb2 as pb
+from common.commands import CommandFactory
 from vv_test_session import VvTestSession
-from vv_transport import VvAddress
+from common.transport import VvAddress
 from test_common import first_param, send_and_print
 
 # ─── Memory layout (must match memorylayout.h) ────────────────────────────────

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import List, Optional
 
-import protocol_pb2 as pb
+from . import protocol_pb2 as pb
 
 
 class VvAddress(IntEnum):

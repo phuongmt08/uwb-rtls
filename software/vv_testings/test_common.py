@@ -1,8 +1,12 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from __future__ import annotations
 
 from typing import Iterable
 
-import protocol_pb2 as pb
+from common import protocol_pb2 as pb
 from google.protobuf.json_format import MessageToDict
 
 from vv_test_session import VvTestSession

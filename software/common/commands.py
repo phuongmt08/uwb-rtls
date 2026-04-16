@@ -4,9 +4,9 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-import protocol_pb2 as pb
+from . import protocol_pb2 as pb
 
-from vv_transport import HostTransport
+from .transport import HostTransport
 
 
 PacketBuilder = Callable[[int, int, int], pb.packet_t]
@@ -311,8 +311,6 @@ class CommandFactory:
         anchor = pkt.anchor_layout_resp.anchors.add()
         anchor.anchor_id = 1
         return pkt
-
-    # ── FOTA commands ─────────────────────────────────────────────────────────
 
     def enter_to_bootloader(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)

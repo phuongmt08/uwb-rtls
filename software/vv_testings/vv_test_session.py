@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from __future__ import annotations
 
 import time
@@ -7,7 +11,7 @@ import serial
 from serial import SerialException
 from serial.tools import list_ports
 
-from vv_transport import VvAddress, VvProtocol
+from common.transport import VvAddress, VvProtocol
 
 
 READ_TIMEOUT_S = 0.05

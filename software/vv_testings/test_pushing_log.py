@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from __future__ import annotations
 
 import argparse
@@ -10,8 +14,8 @@ import serial
 from serial import SerialException
 from serial.tools import list_ports
 
-import protocol_pb2 as pb
-from parser_protocol import HostTransport, VvAddress, VvProtocol
+from common import protocol_pb2 as pb
+from common.parser_protocol import HostTransport, VvAddress, VvProtocol
 
 BAUD_DEFAULT = 115200
 READ_TIMEOUT_S = 0.05

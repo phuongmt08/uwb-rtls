@@ -1,6 +1,10 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from __future__ import annotations
 
-from vv_transport import VvAddress
+from common.transport import VvAddress
 from vv_test_session import VvTestSession
 
 import test_calibration
