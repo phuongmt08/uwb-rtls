@@ -19,7 +19,6 @@
 #include <math.h>
 
 /* Public defines ----------------------------------------------------- */
-#define SYS_SENSOR_FUSION_PI 3.14159265358979323846f
 #define ANCHOR_0_X  0.0f
 #define ANCHOR_0_Y  0.0f
 #define ANCHOR_1_X  10.0f

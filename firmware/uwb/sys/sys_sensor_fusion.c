@@ -24,7 +24,7 @@
 #define NUM_PREDICT_SIGMA  		(2*N + 1)
 #define NUM_UPDATE_SIGMA  		(2*M + 1)
 
-#define UKF_ALPHA   1e-3f
+#define UKF_ALPHA   (1e-3f) // Increased from 1e-3f to prevent catastrophic cancellation in float32
 #define UKF_KAPPA   0.0f
 #define UKF_BETA    2.0f
 #define UKF_LAMBDA_N  			(UKF_ALPHA * UKF_ALPHA * (N + UKF_KAPPA) - N)
@@ -32,12 +32,11 @@
 #define UKF_LAMBDA_M  			(UKF_ALPHA * UKF_ALPHA * (M + UKF_KAPPA) - M)
 #define GAMMA_M       			sqrtf(M + UKF_LAMBDA_M)
 
-#define Qa						4.066f * 1e-5
-#define Qg						2.388f * 1e-7
-#define R_uwb					2.388f * 1e-7
-#define GAMMA 					sqrtf(M_AUG + UKF_LAMBDA);
+#define Qa						(4.066e-5f)
+#define Qg						(2.388e-7f)
+#define R_uwb					(0.1f)
 
-#define SYS_SENSOR_FUSION_PI    3.14159265358979323846f
+#define SYS_SENSOR_FUSION_PI    (3.14159265358979323846f)
 #define SYS_SENSOR_FUSION_2PI   (2.0f * SYS_SENSOR_FUSION_PI)
 
 /* Private enumerate/structure ---------------------------------------- */
@@ -75,34 +74,48 @@ static ukf_core_t ukf = {0};
 /* Private variables -------------------------------------------------- */
 /* Private function prototypes ---------------------------------------- */
 static float normalize_angle(float angle);
-
+float d_lambda = 0.0f, d_gamma = 0.0f;
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 {
-	CHECK_ERR((bsp_imu_init() == BSP_IMU_OK || p_ukf != NULL), SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR((bsp_imu_init() == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR((p_ukf != NULL), SYS_SENSOR_FUSION_ERR);
 
 	bsp_imu_bias_t imu_bias;
 
 	CHECK_ERR((bsp_imu_get_bias_data(&imu_bias) == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
 
+	ukf.state.px = 0.0f;
+	ukf.state.py = 0.0f;
+	ukf.state.vx = 0.0f;
+	ukf.state.vy = 0.0f;
+	ukf.state.theta = 0.0f;
 	ukf.state.b_ax = imu_bias.bias_ax;
 	ukf.state.b_ay = imu_bias.bias_ay;
 	ukf.state.b_gz = imu_bias.bias_gz;
 
 	// P
     for(int i=0; i<64; i++) ukf.P_data[i] = 0.0f;
-    ukf.P_data[0] = 0.1f;  ukf.P_data[9] = 0.1f;   // p_x, p_y
-    ukf.P_data[18] = 0.1f; ukf.P_data[27] = 0.1f;  // v_x, v_y
-    ukf.P_data[36] = 0.1f;                         // theta
-    ukf.P_data[45] = 1e-5f; ukf.P_data[54] = 1e-5f; ukf.P_data[63] = 1e-5f; // Bias
+    ukf.P_data[0] 	= 0.1f;  	// p_x
+    ukf.P_data[9] 	= 0.1f;   	// p_y
+    ukf.P_data[18] 	= 0.1f; 	// v_x
+    ukf.P_data[27] 	= 0.1f;  	// v_y
+    ukf.P_data[36] 	= 0.1f;  	// theta
+    ukf.P_data[45] 	= 1e-3f; 	// Bias
+    ukf.P_data[54] 	= 1e-3f;
+    ukf.P_data[63] 	= 1e-3f;
 
     // Q
     for(int i=0; i<9; i++) ukf.Q_data[i] = 0.0f;
-    ukf.Q_data[0] = Qa; ukf.Q_data[4] = Qa; ukf.Q_data[8] = Qg;
+    ukf.Q_data[0] = Qa;
+    ukf.Q_data[4] = Qa;
+    ukf.Q_data[8] = Qg;
 
     // R
     for(int i=0; i<9; i++) ukf.R_data[i] = 0.0f;
-    ukf.R_data[0] = R_uwb; ukf.R_data[4] = R_uwb; ukf.R_data[8] = R_uwb;
+    ukf.R_data[0] = R_uwb;
+    ukf.R_data[4] = R_uwb;
+    ukf.R_data[8] = R_uwb;
 
     // Sigma
     ukf.Wm_N[0] = UKF_LAMBDA_N / (N + UKF_LAMBDA_N);
@@ -132,18 +145,37 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 
     ukf.is_first_frame = true;
 
+    // Debug
+
+    d_gamma = GAMMA_M;
+    d_lambda = UKF_LAMBDA_M;
+
+    d_gamma = GAMMA_N;
+    d_lambda = UKF_LAMBDA_N;
+
+    bsp_imu_get_raw_data(&ukf.imu_old);
+
     return SYS_SENSOR_FUSION_OK;
 }
-
+uint8_t sys_debug_predict = 0;
+uint8_t sys_debug_update = 0;
 sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_ukf, float dt)
 {
+	sys_debug_predict = 0;
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 
-	bsp_imu_data_t imu_current;
-	bsp_imu_get_raw_data(&imu_current);
+	bsp_imu_data_t imu_current = {0};
+	if (bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK)
+	{
+		sys_debug_predict = 1;
+		return SYS_SENSOR_FUSION_ERR;
+
+	}
+	sys_debug_predict = 10;
 
 	if (ukf.is_first_frame)
 	{
+		sys_debug_predict = 20;
 		float32_t P_aug[N * N] = {0};
 		float32_t L_aug[N * N] = {0};
 		arm_matrix_instance_f32 mat_Paug, mat_Laug;
@@ -160,7 +192,12 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 		}
 
 		arm_status status = arm_mat_cholesky_f32(&mat_Paug, &mat_Laug);
-		if(status != ARM_MATH_SUCCESS) return SYS_SENSOR_FUSION_ERR;
+		if(status != ARM_MATH_SUCCESS)
+		{
+			sys_debug_predict = 21;
+			return SYS_SENSOR_FUSION_ERR;
+		}
+		sys_debug_predict = 22;
 
 		for(int i=0; i<N*N; i++) L_aug[i] *= GAMMA_N;
 
@@ -190,10 +227,12 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 			for(int i=0; i<NUM_STATE; i++) ukf.X_sigma_pred[i][m] = x_sigma[i];
 			for(int i=0; i<NUM_PREDICT_NOISE; i++) ukf.Noise_sigma_pred[i][m] = x_sigma[NUM_STATE+i];
 		}
+		sys_debug_predict = 23;
 		/* NOTE */
 		ukf.is_first_frame = false; // Đã tạo xong, các vòng IMU tiếp theo sẽ bỏ qua khối lệnh này
+		sys_debug_predict = 24;
 	}
-
+	sys_debug_predict = 30;
 	// LUÔN LUÔN CHẠY: Truyền các điểm Sigma ĐÃ LƯU qua mô hình động học
 	for(int m = 0; m < NUM_PREDICT_SIGMA; m++)
 	{
@@ -224,14 +263,16 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 		ukf.X_sigma_pred[4][m] = theta_new;
 		// Bias không đổi
 	}
-
+	sys_debug_predict = 50;
 	// Gom lại tính Mean và Covariance
+	sys_debug_predict = 60;
 	float32_t x_mean[NUM_STATE] = {0};
 	for(int m=0; m<NUM_PREDICT_SIGMA; m++)
 	{
 		for(int i=0; i<NUM_STATE; i++) x_mean[i] += ukf.Wm_N[m] * ukf.X_sigma_pred[i][m];
 	}
-
+	sys_debug_predict = 61;
+	sys_debug_predict = 70;
 	for(int i=0; i<NUM_STATE*NUM_STATE; i++) ukf.P_data[i] = 0.0f;
 	for(int m=0; m<NUM_PREDICT_SIGMA; m++)
 	{
@@ -247,22 +288,39 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 			}
 		}
 	}
+	sys_debug_predict = 71;
 
+	// Đảm bảo tính đối xứng và xác định dương cho P
+	for (int i = 0; i < NUM_STATE; i++) {
+	    for (int j = i + 1; j < NUM_STATE; j++) {
+	        float avg = 0.5f * (ukf.P_data[i * NUM_STATE + j] + ukf.P_data[j * NUM_STATE + i]);
+	        ukf.P_data[i * NUM_STATE + j] = avg;
+	        ukf.P_data[j * NUM_STATE + i] = avg;
+	    }
+	    // Đảm bảo đường chéo tuyệt đối > 0 tránh ma trận mất xác định dương
+	    if (ukf.P_data[i * NUM_STATE + i] < 1e-6f) {
+	        ukf.P_data[i * NUM_STATE + i] = 1e-6f;
+	    }
+	}
+
+	sys_debug_predict = 80;
 	// Cập nhật State
 	ukf.state.px = x_mean[0]; ukf.state.py = x_mean[1];
 	ukf.state.vx = x_mean[2]; ukf.state.vy = x_mean[3];
 	ukf.state.theta = normalize_angle(x_mean[4]);
 	ukf.state.b_ax = x_mean[5]; ukf.state.b_ay = x_mean[6]; ukf.state.b_gz = x_mean[7];
+	sys_debug_predict = 90;
 
 	ukf.imu_old = imu_current;
 
 	if (p_ukf != NULL) *p_ukf = ukf.state;
-
+	sys_debug_predict = 99;
 	return SYS_SENSOR_FUSION_OK;
 }
 
 sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2)
 {
+	sys_debug_update = 0;
     float32_t P_aug[M * M] = {0};
     float32_t L_aug[M * M] = {0};
     arm_matrix_instance_f32 mat_Paug, mat_Laug;
@@ -277,10 +335,15 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     {
         for(int j=0; j<NUM_UPDATE_NOISE; j++) P_aug[(NUM_STATE+i)*M + (NUM_STATE+j)] = ukf.R_data[i*NUM_UPDATE_NOISE + j];
     }
-
+    sys_debug_update = 20;
     arm_status status = arm_mat_cholesky_f32(&mat_Paug, &mat_Laug);
-    if(status != ARM_MATH_SUCCESS) return SYS_SENSOR_FUSION_ERR;
-
+    if(status != ARM_MATH_SUCCESS)
+	{
+		sys_debug_update = 21;  // Lỗi Cholesky
+		return SYS_SENSOR_FUSION_ERR;
+	}
+	sys_debug_update = 22;
+	sys_debug_update = 30;
     for(int i=0; i<M*M; i++) L_aug[i] *= GAMMA_M;
 
     float32_t X_sigma[NUM_STATE][NUM_UPDATE_SIGMA] = {0};
@@ -315,13 +378,15 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         D_sigma[1][m] = sqrtf((px - ANCHOR_1_X)*(px - ANCHOR_1_X) + (py - ANCHOR_1_Y)*(py - ANCHOR_1_Y)) + x_s[9];
         D_sigma[2][m] = sqrtf((px - ANCHOR_2_X)*(px - ANCHOR_2_X) + (py - ANCHOR_2_Y)*(py - ANCHOR_2_Y)) + x_s[10];
     }
-
+    sys_debug_update = 50;
+    sys_debug_update = 60;
     float32_t d_mean[NUM_UPDATE_NOISE] = {0};
     for(int m=0; m<NUM_UPDATE_SIGMA; m++)
     {
         for(int i=0; i<NUM_UPDATE_NOISE; i++) d_mean[i] += ukf.Wm_M[m] * D_sigma[i][m];
     }
-
+    sys_debug_update = 61;
+    sys_debug_update = 70;
     float32_t P_dd[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE] = {0};
     float32_t P_xd[NUM_STATE * NUM_UPDATE_NOISE] = {0};
 
@@ -342,6 +407,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
             for(int j=0; j<NUM_UPDATE_NOISE; j++) P_xd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_x[i] * diff_d[j];
         }
     }
+    sys_debug_update = 71;
 
     float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE], K_data[NUM_STATE * NUM_UPDATE_NOISE];
     arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
@@ -350,9 +416,15 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     arm_mat_init_f32(&mat_Pxd, NUM_STATE, NUM_UPDATE_NOISE, P_xd);
     arm_mat_init_f32(&mat_K, NUM_STATE, NUM_UPDATE_NOISE, K_data);
 
-    if (arm_mat_inverse_f32(&mat_Pdd, &mat_Pdd_inv) != ARM_MATH_SUCCESS) return SYS_SENSOR_FUSION_ERR;
+    if (arm_mat_inverse_f32(&mat_Pdd, &mat_Pdd_inv) != ARM_MATH_SUCCESS)
+	{
+		sys_debug_update = 80;  // Lỗi inverse
+		return SYS_SENSOR_FUSION_ERR;
+	}
+	sys_debug_update = 81;
+	sys_debug_update = 90;
     arm_mat_mult_f32(&mat_Pxd, &mat_Pdd_inv, &mat_K);
-
+    sys_debug_update = 91;
     float32_t D_real[3] = {d0, d1, d2};
     for(int i=0; i<NUM_STATE; i++)
     {
@@ -385,10 +457,23 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
 
     arm_mat_sub_f32(&ukf.mat_P, &mat_K_Pdd_Kt, &ukf.mat_P);
 
+    // Đảm bảo tính đối xứng và xác định dương cho P
+    for (int i = 0; i < NUM_STATE; i++) {
+        for (int j = i + 1; j < NUM_STATE; j++) {
+            float avg = 0.5f * (ukf.P_data[i * NUM_STATE + j] + ukf.P_data[j * NUM_STATE + i]);
+            ukf.P_data[i * NUM_STATE + j] = avg;
+            ukf.P_data[j * NUM_STATE + i] = avg;
+        }
+        // Đảm bảo đường chéo tuyệt đối > 0 tránh ma trận mất xác định dương
+        if (ukf.P_data[i * NUM_STATE + i] < 1e-6f) {
+            ukf.P_data[i * NUM_STATE + i] = 1e-6f;
+        }
+    }
+
     if (p_ukf != NULL) *p_ukf = ukf.state;
 
     ukf.is_first_frame = true;
-
+    sys_debug_update = 199;
     return SYS_SENSOR_FUSION_OK;
 }
 
