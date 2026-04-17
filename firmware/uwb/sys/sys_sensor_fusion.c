@@ -14,6 +14,8 @@
 #include "err.h"
 #include <stddef.h>
 #include <math.h>
+#include "sys_logger.h"
+#include "log_config.h"
 
 /* Private defines ---------------------------------------------------- */
 #define NUM_STATE     			8
@@ -155,13 +157,73 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 
     bsp_imu_get_raw_data(&ukf.imu_old);
 
+    RLOG_I(0x0F, "===== UKF DEFINE =====");
+	RLOG_I(0x0F, "NUM_STATE = %d", NUM_STATE);
+	RLOG_I(0x0F, "NUM_PREDICT_NOISE = %d", NUM_PREDICT_NOISE);
+	RLOG_I(0x0F, "NUM_UPDATE_NOISE = %d", NUM_UPDATE_NOISE);
+    RLOG_I(0x0F, "N = %d, M = %d", N, M);
+	RLOG_I(0x0F, "NUM_PREDICT_SIGMA = %d", NUM_PREDICT_SIGMA);
+	RLOG_I(0x0F, "NUM_UPDATE_SIGMA = %d", NUM_UPDATE_SIGMA);
+	RLOG_I(0x0F, "UKF_ALPHA = %f", (double)UKF_ALPHA);
+	RLOG_I(0x0F, "UKF_KAPPA = %f", (double)UKF_KAPPA);
+	RLOG_I(0x0F, "UKF_BETA = %f", (double)UKF_BETA);
+	RLOG_I(0x0F, "UKF_LAMBDA_N = %f, GAMMA_N = %f", (double)UKF_LAMBDA_N, (double)GAMMA_N);
+	RLOG_I(0x0F, "UKF_LAMBDA_M = %f, GAMMA_M = %f", (double)UKF_LAMBDA_M, (double)GAMMA_M);
+	RLOG_I(0x0F, "Qa = %f, Qg = %f, R_uwb = %f", (double)Qa, (double)Qg, (double)R_uwb);
+    HAL_Delay(15); 
+
+	RLOG_I(0x0F, "===== UKF INIT =====");
+	RLOG_I(0x0F, "ukf.state = [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f]",
+		   ukf.state.px, ukf.state.py, ukf.state.vx, ukf.state.vy,
+		   ukf.state.theta, ukf.state.b_ax, ukf.state.b_ay, ukf.state.b_gz);
+    HAL_Delay(10);
+
+	RLOG_I(0x0F, "ukf.P_data = [");
+	for(int i = 0; i < NUM_STATE; i++) {
+		RLOG_I(0x0F, "[%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f]",
+			   ukf.P_data[i*NUM_STATE+0], ukf.P_data[i*NUM_STATE+1], ukf.P_data[i*NUM_STATE+2], ukf.P_data[i*NUM_STATE+3],
+			   ukf.P_data[i*NUM_STATE+4], ukf.P_data[i*NUM_STATE+5], ukf.P_data[i*NUM_STATE+6], ukf.P_data[i*NUM_STATE+7]);
+        HAL_Delay(5); 
+	}
+	RLOG_I(0x0F, "]");
+    HAL_Delay(10);
+
+	RLOG_I(0x0F, "ukf.Q_data = [");
+	for(int i = 0; i < NUM_PREDICT_NOISE; i++) {
+		RLOG_I(0x0F, "[%.6f, %.6f, %.6f]", ukf.Q_data[i*NUM_PREDICT_NOISE+0], ukf.Q_data[i*NUM_PREDICT_NOISE+1], ukf.Q_data[i*NUM_PREDICT_NOISE+2]);
+	}
+	RLOG_I(0x0F, "]");
+    HAL_Delay(10);
+
+	RLOG_I(0x0F, "ukf.R_data = [");
+	for(int i = 0; i < NUM_UPDATE_NOISE; i++) {
+		RLOG_I(0x0F, "[%.6f, %.6f, %.6f]", ukf.R_data[i*NUM_UPDATE_NOISE+0], ukf.R_data[i*NUM_UPDATE_NOISE+1], ukf.R_data[i*NUM_UPDATE_NOISE+2]);
+	}
+	RLOG_I(0x0F, "]");
+    HAL_Delay(10);
+
+	RLOG_I(0x0F, "ukf.Wm_N = [%.6f, %.6f, %.6f, %.6f, %.6f, ...]", ukf.Wm_N[0], ukf.Wm_N[1], ukf.Wm_N[2], ukf.Wm_N[3], ukf.Wm_N[4]);
+	RLOG_I(0x0F, "ukf.Wc_N = [%.6f, %.6f, %.6f, %.6f, %.6f, ...]", ukf.Wc_N[0], ukf.Wc_N[1], ukf.Wc_N[2], ukf.Wc_N[3], ukf.Wc_N[4]);
+
+	HAL_Delay(100);
+
     return SYS_SENSOR_FUSION_OK;
 }
+
 uint8_t sys_debug_predict = 0;
 uint8_t sys_debug_update = 0;
+
+uint32_t sys_predict_count = 0;
+uint32_t sys_update_count = 0;
+uint32_t sys_predict_error_at = 0;
+uint32_t sys_update_error_at = 0;
+bool predict_first_error = true;
+bool update_first_error = true;
+
 sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_ukf, float dt)
 {
 	sys_debug_predict = 0;
+    sys_predict_count++;
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 
 	bsp_imu_data_t imu_current = {0};
@@ -185,7 +247,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 		for(int i=0; i<NUM_STATE; i++)
 		{
 			for(int j=0; j<NUM_STATE; j++) P_aug[i*N + j] = ukf.P_data[i*NUM_STATE + j];
-		}
+            }
 		for(int i=0; i<NUM_PREDICT_NOISE; i++)
 		{
 			for(int j=0; j<NUM_PREDICT_NOISE; j++) P_aug[(NUM_STATE+i)*N + (NUM_STATE+j)] = ukf.Q_data[i*NUM_PREDICT_NOISE + j];
@@ -194,6 +256,22 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 		arm_status status = arm_mat_cholesky_f32(&mat_Paug, &mat_Laug);
 		if(status != ARM_MATH_SUCCESS)
 		{
+            if (predict_first_error) {
+                predict_first_error = false;
+                sys_predict_error_at = sys_predict_count;
+                RLOG_E(0x0F, 1, "Predict Cholesky FAILED first time at count %lu!", sys_predict_count);
+                RLOG_I(0x0F, "Nghi ngo nguyen nhan: Ma tran P_aug mat tinh xac dinh duong hoac mat can bang do tham so Q/Beta");
+                RLOG_I(0x0F, "P_aug = [");
+                for(int i = 0; i < N; i++) {
+                    RLOG_I(0x0F, "[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                        P_aug[i*N+0], P_aug[i*N+1], P_aug[i*N+2], P_aug[i*N+3],
+                        P_aug[i*N+4], P_aug[i*N+5], P_aug[i*N+6], P_aug[i*N+7],
+                        P_aug[i*N+8], P_aug[i*N+9], P_aug[i*N+10]);
+                    HAL_Delay(5);
+                }
+                RLOG_I(0x0F, "]");
+                HAL_Delay(10);
+            }
 			sys_debug_predict = 21;
 			return SYS_SENSOR_FUSION_ERR;
 		}
@@ -320,6 +398,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2)
 {
+	sys_update_count++;
 	sys_debug_update = 0;
     float32_t P_aug[M * M] = {0};
     float32_t L_aug[M * M] = {0};
@@ -338,7 +417,23 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     sys_debug_update = 20;
     arm_status status = arm_mat_cholesky_f32(&mat_Paug, &mat_Laug);
     if(status != ARM_MATH_SUCCESS)
-	{
+    {
+        if (update_first_error) {
+            update_first_error = false;
+            sys_update_error_at = sys_update_count;
+            RLOG_E(0x0F, 1, "Update Cholesky FAILED first time at count %lu!", sys_update_count);
+            RLOG_I(0x0F, "Nghi ngo nguyen nhan: Buoc Predict gay sai so tich luy cho P_aug => mat tinh xac dinh duong hoac R chua du on dinh.");
+            RLOG_I(0x0F, "P_aug = [");
+            for(int i = 0; i < M; i++) {
+                RLOG_I(0x0F, "[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                    P_aug[i*M+0], P_aug[i*M+1], P_aug[i*M+2], P_aug[i*M+3],
+                    P_aug[i*M+4], P_aug[i*M+5], P_aug[i*M+6], P_aug[i*M+7],
+                    P_aug[i*M+8], P_aug[i*M+9], P_aug[i*M+10]);
+                HAL_Delay(5);
+            }
+            RLOG_I(0x0F, "]");
+            HAL_Delay(10);
+        }
 		sys_debug_update = 21;  // Lỗi Cholesky
 		return SYS_SENSOR_FUSION_ERR;
 	}
@@ -404,7 +499,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
 
         for(int i=0; i<NUM_STATE; i++)
         {
-            for(int j=0; j<NUM_UPDATE_NOISE; j++) P_xd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_x[i] * diff_d[j];
+		          for(int j=0; j<NUM_UPDATE_NOISE; j++) P_xd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_x[i] * diff_d[j];
         }
     }
     sys_debug_update = 71;
