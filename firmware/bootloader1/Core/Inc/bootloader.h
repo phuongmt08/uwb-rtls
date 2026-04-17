@@ -35,6 +35,9 @@
 /* Inactivity timeout - time to wait after last DFU operation (ms) */
 #define BL_DFU_INACTIVITY_MS  (5000U)  /* 5s should be enough for programmer to complete */
 
+/* FOTA timeout - abort if host stops sending flash_write chunks */
+#define BL_FOTA_FLASH_WRITE_TIMEOUT_MS  (2000U)
+
 bool bl_app_vector_valid(void);
 bool bl_should_enter_dfu(void);
 void bl_jump_to_app(void);
