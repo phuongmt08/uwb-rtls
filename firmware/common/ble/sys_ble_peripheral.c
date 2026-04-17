@@ -167,7 +167,7 @@ void sys_ble_peripheral_process(void)
    if ((uint32_t)(now - s_last_poll_tick) >= BLE_WATCHDOG_PERIOD_MS) {
        s_last_poll_tick = now;
        ble_poll_status();
-       RLOG_W(OBJECT_CODE, "send BLE status message");
+    //    RLOG_W(OBJECT_CODE, "send BLE status message");
    }
 }
 

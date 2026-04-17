@@ -661,7 +661,7 @@ void sys_logger_task(void)
   if (!initialized)
     return;
 
-  logger_test_stub();
+  // logger_test_stub(); // TẮT STUB LOG Ở ĐÂY
 
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
   uint32_t now_ms = HAL_GetTick();
