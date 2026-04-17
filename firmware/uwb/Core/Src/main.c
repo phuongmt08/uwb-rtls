@@ -42,6 +42,7 @@
 #include <string.h>
 #include "bsp_imu.h"
 #include "bsp_imu.h"
+#include "sys_sensor_fusion.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -191,6 +192,25 @@ static void ble_peripheral_process_task(void *arg)
   sys_ble_peripheral_process();
 }
 
+static uint32_t tick_predict_counter = 0;
+bsp_imu_data_t imu_data = {0};
+sys_sensor_fusion_data_t ukf_data = {0};
+uint32_t start_time, end_time, duration;
+
+static void fusion_task(void *arg)
+{
+	sys_sensor_fusion_predict(&ukf_data, 0.01f);
+
+	tick_predict_counter++;
+
+	if(tick_predict_counter >= 10)  // Mỗi 10 lần predict = 100ms
+	{
+		tick_predict_counter = 0;
+
+		sys_sensor_fusion_update(&ukf_data, 0.0f, 10.0f, 10.0f);
+	}
+}
+
 void app_reset_config(void)
 {
   __disable_irq();
@@ -209,7 +229,8 @@ void app_reset_config(void)
   __ISB();
   __enable_irq();
 }
-bsp_imu_data_t imu_data = {0};
+
+
 /* USER CODE END 0 */
 
 /**
@@ -301,11 +322,17 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
 #else
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
-
+  	uint8_t err = 0;
+	if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
+	{
+		err = 1;
+	}
   if (bsp_uwb_init() != 0)
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
+
+
 
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
@@ -355,6 +382,9 @@ int main(void)
   int net_cmd_task_id = sys_task_add((sys_task_cb_t)network_cmd_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
   if (net_cmd_task_id >= 0) sys_task_start(net_cmd_task_id);
 
+  int fusion_task_id = sys_task_add((sys_task_cb_t)fusion_task, NULL, SYS_TASK_TYPE_PERIODIC, 10, 0);
+  if (fusion_task_id >= 0) sys_task_start(fusion_task_id);
+
   /* BLE Peripheral Init */
   if (sys_ble_peripheral_init(&s_network_core))
   {
@@ -397,22 +427,16 @@ int main(void)
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
 #endif
+  bsp_util_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  bsp_util_init();
-	uint8_t err = 0;
-	if (bsp_imu_init() != BSP_IMU_OK)
-	{
 
-		err = 1;
-	}
   uint32_t tick = HAL_GetTick();
   while (1)
   {
     bsp_io_button_event_t btn_event = bsp_io_button_event();
-
 #if ENABLE_ANCHOR_AUTO_CALIB
     /* In calibration build, anchor button events handled differently */
     if (cfg->uwb.role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE)
