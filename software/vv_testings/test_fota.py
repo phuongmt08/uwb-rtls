@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 test_fota.py  —  FOTA over USB-CDC test: flash APP firmware via STM32 bootloader
 ==================================================================================
@@ -32,7 +33,6 @@ Memory layout (memorylayout.h):
   MEM_APP_START  = 0x0800_C000
   MEM_APP_END    = 0x0804_0000  (208 KB app region)
 """
-from __future__ import annotations
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
