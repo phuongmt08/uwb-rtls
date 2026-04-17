@@ -351,6 +351,8 @@ void bb_cmd_notify_ble_status(uint8_t state, int32_t rssi_dbm)
 {
     protobuf_packet_t pkt = protobuf_packet_t_init_zero;
     
+    pkt.has_hdr = true;
+    pkt.hdr.has_addr = true;
     pkt.hdr.addr.src = protobuf_PACKET_ADDR_CENTRAL;
     pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST; 
 
