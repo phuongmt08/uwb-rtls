@@ -89,6 +89,7 @@ typedef struct {
     uint32_t                    bytes_written;
     bool                        host_disconnected;
     uint32_t                    last_processed_seq;  /* Track last processed packet seq to prevent duplicates */
+    uint32_t                    last_flash_write_ms;  /* Last flash_write activity while receiving */
 } bl_fota_ctx_t;
 
 static bl_fota_ctx_t         s_fota;
@@ -110,13 +111,42 @@ static void bl_send_fota_state(const protobuf_packet_t *req,
 
 static void bl_enter_error_and_erase_app(const protobuf_packet_t *req)
 {
-    if (bsp_fl_app_erase() != BSP_FL_OK) {
-        RLOG_E(OBJECT_CODE, ERR_HAL, "BL: app erase on error failed");
-    }
-
     s_fota.bytes_written = 0u;
+    s_fota.last_flash_write_ms = 0u;
     s_fota.state = protobuf_FOTA_STATE_ERROR;
     bl_send_fota_state(req, s_fota.state);
+
+    if (bsp_fl_app_erase() != BSP_FL_OK) {
+        RLOG_E(OBJECT_CODE, ERR_HAL, "BL: app erase on error failed");
+        return;
+    }
+
+    s_fota.state = protobuf_FOTA_STATE_IDLE;
+    s_fota.host_disconnected = false;
+    s_fota.last_processed_seq = 0xFFFFFFFFU;
+    bl_send_fota_state(req, s_fota.state);
+}
+
+static void bl_check_flash_write_timeout(void)
+{
+    if (s_fota.state != protobuf_FOTA_STATE_RECEIVING) {
+        return;
+    }
+
+    if (s_fota.last_flash_write_ms == 0u) {
+        return;
+    }
+
+    uint32_t now = HAL_GetTick();
+    if ((uint32_t)(now - s_fota.last_flash_write_ms) < BL_FOTA_FLASH_WRITE_TIMEOUT_MS) {
+        return;
+    }
+
+    RLOG_E(OBJECT_CODE,
+           ERR_TIMEOUT,
+           "BL: flash_write timeout (%lu ms) - aborting FOTA",
+           (unsigned long)BL_FOTA_FLASH_WRITE_TIMEOUT_MS);
+    bl_enter_error_and_erase_app(NULL);
 }
 
 static void bl_on_enter_to_bootloader(const protobuf_packet_t *pkt)
@@ -146,6 +176,7 @@ static void bl_on_flash_erase(const protobuf_packet_t *pkt)
 
     s_fota.state         = protobuf_FOTA_STATE_RECEIVING;
     s_fota.bytes_written = 0u;
+    s_fota.last_flash_write_ms = HAL_GetTick();
     RLOG_I(OBJECT_CODE, "BL: ready for flash_write chunks");
     bl_send_fota_state(pkt, s_fota.state);
 }
@@ -177,6 +208,7 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
     }
 
     s_fota.bytes_written += length;
+    s_fota.last_flash_write_ms = HAL_GetTick();
     return true;
 }
 
@@ -294,6 +326,7 @@ void bl_fota_init(network_core_t *net_core)
     memset(&s_fota, 0, sizeof(s_fota));
     s_fota.state   = protobuf_FOTA_STATE_IDLE;
     s_fota.last_processed_seq = 0xFFFFFFFFU;  /* Initialize to invalid sequence number */
+    s_fota.last_flash_write_ms = 0u;
     s_net_core_ref = net_core;
 
     if (!sys_ble_peripheral_init(net_core)) {
@@ -314,6 +347,7 @@ void bl_fota_process(void)
     network_core_process(s_net_core_ref);
     network_cmd_process();
     sys_ble_peripheral_process();
+    bl_check_flash_write_timeout();
 }
 
 bool bl_fota_is_active(void)
