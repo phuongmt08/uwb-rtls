@@ -18,7 +18,7 @@
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
 #include "bsp_utils.h"
-#include "sys_log.h"
+#include "logger.h"
 #include "nrf_log.h"
 #include "../ble_common/ble_config.h"
 

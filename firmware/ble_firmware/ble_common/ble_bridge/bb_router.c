@@ -13,6 +13,7 @@
 #include "bb_cmd_hdl.h"
 #include <stddef.h>
 
+#include "logger.h"
 #include "bb_transport.h"
 #include "../../../protocol/nanopb/pb_decode.h"
 #include "../../../protocol/protos/protocol.pb.h"
@@ -67,10 +68,13 @@ void bb_router_process(void)
             
         case BB_ROUTER_STATE_CHECK_DST:
         {
+            NRF_LOG_INFO("checking packet destination...");
+
             // Kiểm tra con trỏ buf có trỏ tới ta không (chỉ lấy đích dst)
             bool is_for_me = bb_router_check_dst(protobuf_buffer, protobuf_buffer_len);
 
             if (is_for_me) {
+                NRF_LOG_INFO("Packet is for this device. Processing command...");
                 m_state = BB_ROUTER_STATE_PROCESS_CMD;
             } else {
                 m_target_source = BB_SOURCE_BLE;

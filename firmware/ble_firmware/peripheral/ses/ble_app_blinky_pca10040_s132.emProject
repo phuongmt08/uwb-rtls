@@ -91,7 +91,7 @@
     </folder>
     <folder Name="Application">
       <file file_name="../main.c" />
-      <file file_name="../sys_log.c" />
+      <file file_name="../logger.c" />
       <file file_name="../ble_peripheral.c" />
       <file file_name="../config/sdk_config.h" />
     </folder>

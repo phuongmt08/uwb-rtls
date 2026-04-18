@@ -70,15 +70,19 @@ SRC_FILES += \
 # Custom Application & Bridge files
 SRC_FILES += \
   $(PROJ_DIR)/main.c \
-  $(PROJ_DIR)/sys_log.c \
   $(PROJ_DIR)/bsp_utils.c \
   $(PROJ_DIR)/bsp_uart.c \
   $(PROJ_DIR)/ble_peripheral.c \
   $(PROJ_DIR)/ble_peripheral.c \
+  $(COMMON_DIR)/logger.c \
   $(COMMON_DIR)/hdlc.c \
   $(COMMON_DIR)/ble_bridge/bb_cmd_hdl.c \
   $(COMMON_DIR)/ble_bridge/bb_router.c \
-  $(COMMON_DIR)/ble_bridge/bb_transport.c
+  $(COMMON_DIR)/ble_bridge/bb_transport.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_common.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_decode.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_encode.c \
+  $(PROJ_DIR)/../../../protocol/protos/protocol.pb.c
 
 # Include folders common to all targets
 INC_FOLDERS += \
@@ -148,7 +152,7 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/scheduler \
   $(SDK_ROOT)/components/libraries/cli \
   $(SDK_ROOT)/components/ble/ble_services/ble_lbs \
-  $(SDK_ROOT)/components/ble/ble_services/ble_hts \
+  ../../../../protocol/nanopb \
   $(SDK_ROOT)/components/libraries/crc16 \
   $(SDK_ROOT)/components/nfc/t4t_parser/apdu \
   $(SDK_ROOT)/components/libraries/util \
