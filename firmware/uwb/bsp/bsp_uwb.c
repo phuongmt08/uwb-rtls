@@ -166,12 +166,16 @@ static void reset_DW1000(void)
 
 static void port_set_dw1000_slowrate(void)
 {
+  /* DW1000 max SPI speed for init is < 3 MHz.
+   * 84MHz / 128 = 656.25 kHz */
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   HAL_SPI_Init(&hspi1);
 }
 
 static void port_set_dw1000_fastrate(void)
 {
+  /* DW1000 max SPI speed for data is < 20 MHz.
+   *  84MHz / 8 = 10.5 MHz*/
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   HAL_SPI_Init(&hspi1);
 }

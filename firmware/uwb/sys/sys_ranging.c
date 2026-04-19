@@ -211,20 +211,15 @@ static bool s_ranging_busy = false;
 
 /* Private functions --------------------------------------------------- */
 
-static bool dstwr_forward_interval_40(uint64_t later, uint64_t earlier, uint64_t *out_delta)
+static inline bool dstwr_forward_interval_40(uint64_t later, uint64_t earlier, uint64_t *out_delta)
 {
   const uint64_t MAX_INTERVAL_DW = tdma_us_to_dw(DSTWR_MAX_INTERVAL_US);
-
   uint64_t delta = (later - earlier) & DW_MASK_40;
-
-  /* Reject impossible/ambiguous ordering for a single DS-TWR exchange. */
   if (delta == 0ULL || delta > MAX_INTERVAL_DW)
   {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "Invalid DW interval: later=" DW_FMT " earlier=" DW_FMT " delta=%lu",
-           DW_ARG(later), DW_ARG(earlier), (unsigned long) delta);
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "Invalid DW interval: delta=%lu", (unsigned long) delta);
     return false;
   }
-
   *out_delta = delta;
   return true;
 }
@@ -300,14 +295,15 @@ static float calculate_distance(const dstwr_timestamps_t *ts)
     return -1.0f;
   }
 
-  double num    = ((double) Ra * (double) Rb) - ((double) Da * (double) Db);
-  double tof_dw = num / (double) den;
-  if (tof_dw <= 0.0)
+  float fRa = (float) Ra, fRb = (float) Rb, fDa = (float) Da, fDb = (float) Db;
+  float num    = (fRa * fRb) - (fDa * fDb);
+  float tof_dw = num / (float) den;
+  if (tof_dw <= 0.0f)
   {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid distance calculation: tof_dw=%.3e", tof_dw);
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Negative tof_dw");
     return -1.0f;
   }
-  return (float) (tof_dw * DWT_TIME_UNITS * SPEED_OF_LIGHT);
+  return tof_dw * (float) DWT_TIME_UNITS * (float) SPEED_OF_LIGHT;
 }
 
 static int
@@ -351,45 +347,46 @@ hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size, uint16_t *received_le
 
 static void format_distance_m(char *buf, size_t len, float distance_m)
 {
+  if (len == 0) return;
   int32_t  mm        = (int32_t) (distance_m * 1000.0f + (distance_m >= 0.0f ? 0.5f : -0.5f));
   int32_t  abs_mm    = (mm >= 0) ? mm : -mm;
   uint32_t m_part    = (uint32_t) (abs_mm / 1000);
   uint32_t frac_part = (uint32_t) (abs_mm % 1000);
-
-  if (mm < 0)
-  {
-    snprintf(buf, len, "-%lu.%03lu", (unsigned long) m_part, (unsigned long) frac_part);
+  char     tmp[16];
+  int      pos = 0;
+  if (mm < 0) tmp[pos++] = '-';
+  /* Integer part */
+  if (m_part == 0) { tmp[pos++] = '0'; }
+  else {
+    char ibuf[8]; int ilen = 0;
+    uint32_t v = m_part;
+    while (v > 0) { ibuf[ilen++] = '0' + (v % 10); v /= 10; }
+    for (int k = ilen - 1; k >= 0; k--) tmp[pos++] = ibuf[k];
   }
-  else
-  {
-    snprintf(buf, len, "%lu.%03lu", (unsigned long) m_part, (unsigned long) frac_part);
-  }
+  tmp[pos++] = '.';
+  /* 3 fractional digits, zero-padded */
+  tmp[pos++] = '0' + (frac_part / 100);
+  tmp[pos++] = '0' + ((frac_part / 10) % 10);
+  tmp[pos++] = '0' + (frac_part % 10);
+  tmp[pos]   = '\0';
+  size_t copy = (size_t) pos < len ? (size_t) pos : len - 1;
+  for (size_t i = 0; i < copy; i++) buf[i] = tmp[i];
+  buf[copy] = '\0';
 }
 
-/* FIX #5: Improved message validation */
-static bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
+static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
 {
-  if (!data)
-    return false;
-
-  /* Check minimum length based on message type */
+  if (!data || data[0] != expected_type) return false;
   uint16_t min_len = 0;
   switch (expected_type)
   {
-  case MW_DSTWR_MSG_TYPE_POLL: min_len = sizeof(poll_msg_t); break;
-  case MW_DSTWR_MSG_TYPE_RESP: min_len = sizeof(resp_msg_t); break;
-  case MW_DSTWR_MSG_TYPE_FINAL: min_len = sizeof(final_msg_t); break;
+  case MW_DSTWR_MSG_TYPE_POLL:   min_len = sizeof(poll_msg_t);   break;
+  case MW_DSTWR_MSG_TYPE_RESP:   min_len = sizeof(resp_msg_t);   break;
+  case MW_DSTWR_MSG_TYPE_FINAL:  min_len = sizeof(final_msg_t);  break;
   case MW_DSTWR_MSG_TYPE_RESULT: min_len = sizeof(result_msg_t); break;
   default: return false;
   }
-
-  /* CRITICAL: validate ONLY - NO side effects! */
-  if (len < min_len)
-    return false;
-  if (data[0] != expected_type)
-    return false;
-
-  return true;
+  return len >= min_len;
 }
 
 static int hal_rx_wait_valid_msg(uint8_t  *buffer,
@@ -589,18 +586,16 @@ static uint64_t ensure_future_tx(uint64_t tx_time_dw, uint32_t guard_us)
 /* Predict actual antenna-domain TX time used by DW1000 delayed TX.
  * DW1000 schedules on a quantized chip-time grid (9 LSB dropped overall), then
  * TX antenna delay is applied to produce the TX timestamp domain used by DS-TWR. */
-static uint64_t predict_delayed_tx_antenna_time(uint64_t requested_tx_time_dw)
+static inline uint64_t predict_delayed_tx_antenna_time(uint64_t requested_tx_time_dw)
 {
   uint64_t tx_ant_dly = (uint64_t) bsp_uwb_get_tx_antenna_delay();
-
-  uint64_t chip_time = (requested_tx_time_dw - tx_ant_dly) & DW_MASK_40;
-  uint32_t dx_time   = (uint32_t) (chip_time >> 8);
-  dx_time &= 0xFFFFFFFEUL; /* Match DW1000 delayed-TX quantization. */
-
+  uint64_t chip_time  = (requested_tx_time_dw - tx_ant_dly) & DW_MASK_40;
+  uint32_t dx_time    = (uint32_t) (chip_time >> 8);
+  dx_time &= 0xFFFFFFFEUL;
   return ((((uint64_t) dx_time) << 8) + tx_ant_dly) & DW_MASK_40;
 }
 
-static uint32_t tdma_effective_slot_us(const tdma_scheduler_t *tdma)
+static inline uint32_t tdma_effective_slot_us(const tdma_scheduler_t *tdma)
 {
   return tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
 }
@@ -778,13 +773,10 @@ static uint64_t tdma_compute_result_rx_window_end(const tdma_scheduler_t *tdma,
   return (final_tx_ts_dw + tdma_us_to_dw(result_phase_us)) & DW_MASK_40;
 }
 
-static bool dw_time_before_deadline(uint64_t now_dw, uint64_t deadline_dw)
+static inline bool dw_time_before_deadline(uint64_t now_dw, uint64_t deadline_dw)
 {
   const uint64_t HALF_RANGE_40 = (1ULL << 39);
   uint64_t       remaining     = (deadline_dw - now_dw) & DW_MASK_40;
-
-  /* "now" is before "deadline" when forward distance is non-zero and
-   * does not cross half-range ambiguity in modulo-40bit arithmetic. */
   return (remaining > 0ULL) && (remaining < HALF_RANGE_40);
 }
 
