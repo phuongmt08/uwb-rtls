@@ -47,6 +47,8 @@ static bool     s_initialized       = false;
 static uint64_t s_last_rx_timestamp = 0;    /* Cached RX timestamp */
 static uint64_t s_last_tx_timestamp = 0;    /* Cached TX timestamp */
 static int8_t   s_last_rx_rssi      = -100; /* Cached RSSI for last good RX frame */
+static uint16_t s_last_diag_f1      = 0;    /* Raw diagnostics for deferred RSSI calc */
+static uint16_t s_last_diag_n       = 0;
 static uint16_t s_tx_antenna_delay  = 0;    /* Cached TX antenna delay */
 static uint16_t s_rx_antenna_delay  = 0;    /* Cached RX antenna delay */
 
@@ -76,6 +78,11 @@ void bsp_uwb_clear_event(void)
     __enable_irq();
 }
 #endif
+/* RX error counters — incremented in bsp_uwb_rx(), read via bsp_uwb_get_rx_error_counts(). */
+static uint32_t s_rx_timeout_count  = 0;
+static uint32_t s_rx_crc_err_count  = 0;
+static uint32_t s_rx_phr_err_count  = 0;
+static uint32_t s_rx_sync_err_count = 0;
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
@@ -412,6 +419,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
 
     /* Keep receiver running for back-to-back frames in the same TDMA phase
      * (e.g. TAG collecting multiple RESP/RESULT packets). */
+    dwt_forcetrxoff();
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     return BSP_OK;
@@ -426,17 +434,24 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
                                        | SYS_STATUS_LDEDONE);
 
     /* Re-enable RX */
+    dwt_forcetrxoff();
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     s_last_rx_timestamp = 0;
     s_last_rx_rssi      = -100;
     *out_len            = 0;
+    s_rx_timeout_count++;
     return BSP_ERR_TIMEOUT;
   }
 
   /* RX frame errors */
   if (status & (SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL))
   {
+    /* Track which error bits fired — helps distinguish CRC fail vs PHY vs sync. */
+    if (status & SYS_STATUS_RXFCE)  s_rx_crc_err_count++;
+    if (status & SYS_STATUS_RXPHE)  s_rx_phr_err_count++;
+    if (status & SYS_STATUS_RXRFSL) s_rx_sync_err_count++;
+
     /* Clear flags */
     dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCE | SYS_STATUS_RXPHE | SYS_STATUS_RXRFSL
                                        | SYS_STATUS_RXDFR | SYS_STATUS_RXSFDD | SYS_STATUS_RXPRD
@@ -529,25 +544,21 @@ void bsp_uwb_idle(void)
 
 int8_t bsp_uwb_get_rssi(void)
 {
-  dwt_rxdiag_t diag;
-  dwt_readdignostics(&diag);
-
-  /*
-   * RSSI Formula for PRF64 (from DW1000 User Manual):
-   * RSL ≈ 20*log10(F1/N) - 62.42
-   */
-
-  if (diag.firstPathAmp1 == 0 || diag.rxPreamCount == 0)
+  if (s_last_diag_f1 == 0 || s_last_diag_n == 0)
   {
     return -100;
   }
 
-  float ratio = (float) diag.firstPathAmp1 / (float) diag.rxPreamCount;
+  /* RSSI Formula for PRF64 (from DW1000 User Manual):
+   * RSL ≈ 20*log10(F1/N) - 62.42
+   * Move heavy log10f calculation here, out of the interrupt/poll RX path. */
+  float  ratio   = (float) s_last_diag_f1 / (float) s_last_diag_n;
+  float  log_val = 20.0f * log10f(ratio);
+  int8_t rssi    = (int8_t) (log_val - 62.0f);
 
-  float  log_val  = 20.0f * log10f(ratio);
-  int8_t rssi_dbm = (int8_t) (log_val - 62.0f);
-
-  return rssi_dbm;
+  /* Cache the result for bsp_uwb_get_last_rx_rssi() */
+  s_last_rx_rssi = rssi;
+  return rssi;
 }
 
 int8_t bsp_uwb_get_last_rx_rssi(void)
@@ -831,4 +842,21 @@ bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
 
   return false;
 }
+void bsp_uwb_get_rx_error_counts(uint32_t *timeout, uint32_t *crc_err,
+                                  uint32_t *phr_err, uint32_t *sync_err)
+{
+  if (timeout)   *timeout   = s_rx_timeout_count;
+  if (crc_err)   *crc_err   = s_rx_crc_err_count;
+  if (phr_err)   *phr_err   = s_rx_phr_err_count;
+  if (sync_err)  *sync_err  = s_rx_sync_err_count;
+}
+
+void bsp_uwb_reset_rx_error_counts(void)
+{
+  s_rx_timeout_count  = 0;
+  s_rx_crc_err_count  = 0;
+  s_rx_phr_err_count  = 0;
+  s_rx_sync_err_count = 0;
+}
+
 /* End of file -------------------------------------------------------- */

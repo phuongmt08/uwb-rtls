@@ -466,19 +466,17 @@ static uint64_t ensure_future_tx(uint64_t tx_time_dw, uint32_t guard_us)
   uint64_t now      = bsp_uwb_get_current_time_dw();
   uint64_t guard_dw = tdma_us_to_dw(guard_us);
 
-  /* FIX Bug-A: use 40-bit modular subtraction - safe against wrap-around.
-   * Old signed cast: (int64_t)(tx_time_dw - now) was WRONG near 40-bit wrap,
-   * causing valid future timestamps to be treated as past. */
+ 
   uint64_t ahead_dw = (tx_time_dw - now) & DW_MASK_40;
-  if (ahead_dw == 0ULL || ahead_dw <= guard_dw)
+  if (ahead_dw == 0ULL || ahead_dw <= guard_dw || ahead_dw >= (1ULL << 39))
   {
-    uint32_t late_us = (ahead_dw == 0ULL) ? 0U : (uint32_t) (guard_us - tdma_dw_to_us(ahead_dw));
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TX] ensure_future: slot missed by ~%luus, pushing to now+guard*2",
+    uint32_t late_us = (ahead_dw == 0ULL || ahead_dw >= (1ULL << 39)) ? 0U : (uint32_t) (guard_us - tdma_dw_to_us(ahead_dw));
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TX] Slot missed by ~%luus - ABORTING TO PREVENT COLLISION",
            (unsigned long) late_us);
-    tx_time_dw = (now + guard_dw * 2ULL) & DW_MASK_40;
+    return 0ULL;
   }
   return tx_time_dw;
-}
+} 
 
 /* Predict actual antenna-domain TX time used by DW1000 delayed TX.
  * DW1000 schedules on a quantized chip-time grid (9 LSB dropped overall), then
@@ -784,6 +782,41 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   (void) poll_len;
 
+  {
+    uint8_t my_mask_bit = (uint8_t) (1U << (anchor_id - 1U));
+    bool poll_targets_me = ((poll->anchor_mask & my_mask_bit) != 0U);
+    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING,
+                  "[ANCHOR%u] RX POLL seq=%u n=%u mask=0x%02X target_me=%u",
+                  anchor_id,
+                  (unsigned) poll->sequence_num,
+                  (unsigned) poll->num_anchors,
+                  (unsigned) poll->anchor_mask,
+                  poll_targets_me ? 1U : 0U);
+
+    if (!poll_targets_me)
+    {
+      RLOG_W(LOG_OBJECT_CODE_RANGING,
+             "[ANCHOR%u] POLL mask does not include this anchor (seq=%u mask=0x%02X)",
+             anchor_id,
+             (unsigned) poll->sequence_num,
+             (unsigned) poll->anchor_mask);
+    }
+
+    if (poll->num_anchors != num_anchors)
+    {
+      RLOG_W(LOG_OBJECT_CODE_RANGING,
+             "[ANCHOR%u] POLL num_anchors mismatch: poll=%u local=%u (seq=%u). Adopting POLL num_anchors.",
+             anchor_id,
+             (unsigned) poll->num_anchors,
+             (unsigned) num_anchors,
+             (unsigned) poll->sequence_num);
+
+      /* Dynamically adopt POLL config to ensure expected_final_tx_dw aligns with TAG's timeline */
+      s_tdma_anchor.schedule.num_anchors = poll->num_anchors;
+      num_anchors = poll->num_anchors;
+    }
+  }
+
   /* Read T2 (POLL RX timestamp on anchor) */
   uint64_t poll_rx_ts = 0;
   if (bsp_uwb_get_last_rx_timestamp(&poll_rx_ts) != BSP_OK)
@@ -813,8 +846,13 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   (void) resp_offset_us;
 
-  /* Ensure future TX */
+  /* Ensure future TX - if missed, abort to avoid colliding with next anchor */
   resp_tx_time_dw = ensure_future_tx(resp_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+  if (resp_tx_time_dw == 0ULL)
+  {
+    s_ranging_busy = false;
+    return -1;
+  }
 
   /* Put actual antenna-domain delayed TX timestamp in payload (T3). */
   uint64_t t3_timestamp_pred = predict_delayed_tx_antenna_time(resp_tx_time_dw);
@@ -863,9 +901,13 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   uint64_t expected_final_dw = 0;
   if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_dw) != TDMA_OK)
   {
-    expected_final_dw = poll_rx_ts
-                        + tdma_us_to_dw(((uint32_t) num_anchors * effective_slot_us)
+    /* Fallback mirrors tdma_calculate_final_time() using superframe_start_dw. */
+    expected_final_dw = s_tdma_anchor.superframe_start_dw
+                        + tdma_us_to_dw(s_tdma_anchor.schedule.poll_to_resp_delay_us
+                                        + ((uint32_t) num_anchors * effective_slot_us)
+                                        + s_tdma_anchor.schedule.slot_duration_us
                                         + s_tdma_anchor.schedule.resp_to_final_delay_us);
+    expected_final_dw &= DW_MASK_40;
   }
   uint64_t now_before_wait_dw = bsp_uwb_get_current_time_dw();
   int64_t  final_left_dw      = (int64_t) (expected_final_dw - now_before_wait_dw);
@@ -885,9 +927,9 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   final_msg_t *final_msg = (final_msg_t *) final_buf;
 
-  RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RX FINAL: len=%u seq=%u tag=%u responses=%u mask=0x%02X",
-                final_len, final_msg->sequence_num, final_msg->tag_id, final_msg->num_responses,
-                final_msg->anchor_resp_mask);
+  //RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RX FINAL: len=%u seq=%u tag=%u responses=%u mask=0x%02X",
+  //              final_len, final_msg->sequence_num, final_msg->tag_id, final_msg->num_responses,
+  //              final_msg->anchor_resp_mask);
 
   /* CRITICAL: Validate FINAL sequence_num matches POLL */
   if (final_msg->sequence_num != poll->sequence_num)
@@ -974,68 +1016,76 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   result_msg.msg_type     = MW_DSTWR_MSG_TYPE_RESULT;
   result_msg.sequence_num = final_msg->sequence_num;
   result_msg.anchor_id    = anchor_id;
-  result_msg.slot_id      = my_slot_id; /* FIX Bug-C: fill slot_id for TAG validation */
+  result_msg.slot_id      = my_slot_id;
   result_msg.valid        = raw_valid ? 1 : 0;
   result_msg.distance_m   = raw_distance_m;
   result_msg.rssi         = poll_rssi_dbm;
 
-  /* RESULT must be based on the actual FINAL RX timestamp at this anchor. */
-  uint64_t final_base_dw = final_rx_ts;
+  /* RESULT TX time is anchored to superframe_start_dw via tdma_calculate_final_time(),
+   * not to final_rx_ts. Each anchor receives FINAL at a slightly different time
+   * (propagation delay), so using final_rx_ts as base would shift RESULT slots
+   * differently per anchor — breaking the shared reference point guarantee.
+   *
+   * result_tx = expected_final_tx + final_to_result_delay + my_slot_id * effective_slot
+   *
+   * my_slot_id * effective_slot ensures slots are evenly separated (4000µs apart),
+   * with slot 1 at +5500µs, slot 2 at +9500µs, etc. after expected FINAL TX. */
+  uint64_t expected_final_tx_dw = 0;
+  if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_tx_dw) != TDMA_OK)
+  {
+    expected_final_tx_dw = final_rx_ts; /* Fallback only — should not happen. */
+  }
 
-  /* FIX Bug-B: use my_slot_id (NOT my_slot_id-1) to mirror the RESP formula.
-   *
-   * OLD (broken): (my_slot_id - 1) * effective_slot
-   *   → slot 1 fires at final_rx + 1500µs
-   *   → distance calculation + message build takes ~1000-1500µs
-   *   → ensure_future_tx detects slot missed, pushes to now+guard*2
-   *   → ALL anchors pushed to ~same time → collision → TAG gets only 1-2 results
-   *
-   * NEW (fixed): my_slot_id * effective_slot  (matches RESP formula)
-   *   → slot 1 fires at final_rx + 1500 + 4000 = final_rx + 5500µs  ← enough headroom
-   *   → slot 2: final_rx + 9500µs
-   *   → slot 3: final_rx + 13500µs
-   *   → slots are evenly separated with no collision
-   *
-   * TAG deadline (tdma_compute_result_rx_window_end) uses max_result_slot*effective_slot
-   * + margins (4700µs), which still covers the last slot comfortably. */
+  /* Debug: verify expected_final_tx_dw is in near future (~ms), not past or far future.
+   * If ahead_ms is large negative → superframe_start_dw is stale or wrong clock domain.
+   * If ahead_ms > 200 → MAX_REASONABLE_AHEAD will reject the TX. */
+  {
+    uint64_t now_dbg    = bsp_uwb_get_current_time_dw();
+    uint64_t ahead_dw   = (expected_final_tx_dw - now_dbg) & DW_MASK_40;
+    int32_t  ahead_ms   = (ahead_dw < (DW_MASK_40 / 2ULL))
+                          ? (int32_t)(tdma_dw_to_us(ahead_dw) / 1000U)
+                          : -(int32_t)(tdma_dw_to_us((now_dbg - expected_final_tx_dw) & DW_MASK_40) / 1000U);
+//    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING,
+//                  "[ANCHOR%u] RESULT ref: superframe=" DW_FMT " final_rx=" DW_FMT
+//                  " expected_final=" DW_FMT " ahead=%ldms",
+//                  anchor_id,
+//                  DW_ARG(s_tdma_anchor.superframe_start_dw),
+//                  DW_ARG(final_rx_ts),
+//                  DW_ARG(expected_final_tx_dw),
+//                  (long) ahead_ms);
+  }
+
   uint32_t result_offset_us =
     s_tdma_anchor.schedule.final_to_result_delay_us + (my_slot_id * effective_slot_us);
-  uint64_t result_tx_time_dw    = (final_base_dw + tdma_us_to_dw(result_offset_us)) & DW_MASK_40;
+  uint64_t result_tx_time_dw    = (expected_final_tx_dw + tdma_us_to_dw(result_offset_us)) & DW_MASK_40;
   uint64_t result_tx_planned_dw = result_tx_time_dw;
   result_tx_time_dw             = ensure_future_tx(result_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
-  if (result_tx_time_dw != result_tx_planned_dw)
+  if (result_tx_time_dw == 0ULL)
   {
-    uint32_t slip_us = tdma_dw_to_us((result_tx_time_dw - result_tx_planned_dw) & DW_MASK_40);
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT slot late -> shifted by %luus (seq=%u slot=%u)",
-           (unsigned long) slip_us, final_msg->sequence_num, my_slot_id);
-  }
-
-  {
-    uint64_t now_dw   = bsp_uwb_get_current_time_dw();
-    uint64_t ahead_dw = (result_tx_time_dw - now_dw) & DW_MASK_40;
-    uint32_t ahead_us = tdma_dw_to_us(ahead_dw);
-    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT plan: seq=%u slot=%u off=%luus ahead=%luus",
-                  final_msg->sequence_num, my_slot_id, (unsigned long) result_offset_us,
-                  (unsigned long) ahead_us);
-  }
-
-  /* Pre-compute prediction for RESULT so we can compare after TX. */
-  uint64_t result_tx_predicted_dw = predict_delayed_tx_antenna_time(result_tx_time_dw);
-
-  if (bsp_uwb_tx_delayed(&result_msg, sizeof(result_msg), result_tx_time_dw) != BSP_OK)
-  {
-    RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
-           "[ANCHOR] Failed to TX RESULT (seq=%u slot=%u off=%luus planned=" DW_FMT ")",
-           final_msg->sequence_num, my_slot_id, (unsigned long) result_offset_us, DW_ARG(result_tx_time_dw));
-    /* Don't fail - distance already calculated */
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT slot missed (seq=%u slot=%u) - ABORTING TX",
+           final_msg->sequence_num, my_slot_id);
+    /* Don't return -1 here, let anchor clean up and finish cycle normally */
   }
   else
   {
-    /* Verify actual TX time from DW1000 TX_TIME register.
-     * This is the TDMA production health-check: planned vs actual.
-     * If delta > 1ms → slot was missed → investigate ensure_future_tx logs above. */
-    verify_tx_timing("RESULT", anchor_id, my_slot_id, final_msg->sequence_num, result_tx_time_dw,
-                     result_tx_predicted_dw);
+    /* Pre-compute prediction for RESULT so we can compare after TX. */
+    uint64_t result_tx_predicted_dw = predict_delayed_tx_antenna_time(result_tx_time_dw);
+
+    if (bsp_uwb_tx_delayed(&result_msg, sizeof(result_msg), result_tx_time_dw) != BSP_OK)
+    {
+      RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
+             "[ANCHOR] Failed to TX RESULT (seq=%u slot=%u off=%luus planned=" DW_FMT ")",
+             final_msg->sequence_num, my_slot_id, (unsigned long) result_offset_us, DW_ARG(result_tx_time_dw));
+      /* Don't fail - distance already calculated */
+    }
+    else
+    {
+      /* Verify actual TX time from DW1000 TX_TIME register.
+       * This is the TDMA production health-check: planned vs actual.
+       * If delta > 1ms → slot was missed → investigate ensure_future_tx logs above. */
+      verify_tx_timing("RESULT", anchor_id, my_slot_id, final_msg->sequence_num, result_tx_time_dw,
+                       result_tx_predicted_dw);
+    }
   }
 
   /* Keep verbose debug after RESULT TX to avoid missing delayed-TX slot timing. */
@@ -1131,25 +1181,36 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   uint64_t resp_window_end_dw =
     tdma_compute_resp_rx_window_end(tdma, anchor_ids, num_anchors, resp_window_start_dw);
 
-  /* FIX Bug-D: Cap RESP window so it does NOT overrun the planned FINAL TX time.
-   * Without this, the last slot's rx_late_margin (4700µs) pushes the window
-   * well past FINAL TX, causing TAG to miss its FINAL deadline when not all
-   * anchors respond - which then causes all anchors to time out waiting for FINAL.
+  /* Cap RESP window so it does NOT overrun the planned FINAL TX time.
+   * Without this cap, the last slot's rx_late_margin pushes the window
+   * past FINAL TX, causing TAG to miss its FINAL deadline when not all
+   * anchors respond — which then causes all anchors to timeout on FINAL.
    *
-   * FINAL is planned at: superframe_start + N*effective_slot + resp_to_final_delay
-   * We leave processing_margin_us of headroom before FINAL to build the message. */
+   * Use tdma_calculate_final_time() as the single source of truth for when
+   * FINAL is scheduled. This is critical after the superframe origin fix:
+   * superframe_start_dw is now (T1 - poll_to_resp_delay), so any inline
+   * formula that adds poll_to_resp_delay back will be correct, but using
+   * the dedicated function avoids divergence if timing params change later. */
   {
-    uint32_t effective_slot_us = tdma_effective_slot_us(tdma);
-    /* FIX: include poll_to_resp_delay_us to mirror tdma_calculate_final_time() exactly.
-     * Without it, planned_dw was 1500us too early → cap fired too soon → slot-4 RESP missed. */
-    uint64_t final_tx_planned_dw =
-      tdma->superframe_start_dw
-      + tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us
-                      + (uint32_t) num_anchors * effective_slot_us
-                      + tdma->schedule.resp_to_final_delay_us);
+    uint64_t final_tx_planned_dw = 0;
+    if (tdma_calculate_final_time(tdma, num_anchors, &final_tx_planned_dw) != TDMA_OK)
+    {
+      /* Fallback must match tdma_calculate_final_time() exactly — including
+       * slot_duration_us which accounts for the last RESP payload airtime. */
+      uint32_t effective_slot_us = tdma_effective_slot_us(tdma);
+      final_tx_planned_dw = tdma->superframe_start_dw
+                            + tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us
+                                            + (uint32_t) num_anchors * effective_slot_us
+                                            + tdma->schedule.slot_duration_us
+                                            + tdma->schedule.resp_to_final_delay_us);
+      final_tx_planned_dw &= DW_MASK_40;
+    }
+
+    /* Leave processing_margin_us + 500us of headroom before FINAL to build
+     * the message, copy timestamps, and call bsp_uwb_tx_delayed(). */
     uint64_t final_tx_headroom_dw =
-      final_tx_planned_dw - tdma_us_to_dw(tdma->schedule.processing_margin_us + 500U);
-    final_tx_headroom_dw &= DW_MASK_40;
+      (final_tx_planned_dw - tdma_us_to_dw(tdma->schedule.processing_margin_us + 500U))
+      & DW_MASK_40;
 
     if (dw_time_before_deadline(final_tx_headroom_dw, resp_window_end_dw))
     {
@@ -1166,6 +1227,8 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     s_ranging_busy = false;
     return -1;
   }
+
+  uint64_t dbg_loop_start_dw = bsp_uwb_get_current_time_dw();
 
   while (dw_time_before_deadline(bsp_uwb_get_current_time_dw(), resp_window_end_dw)
          && (num_responses < num_anchors))
@@ -1240,6 +1303,26 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
            (unsigned) slot_mismatch_count);
   }
 
+  /* Show exactly what DW time range the loop actually covered vs what was needed. */
+  {
+    uint64_t dbg_loop_end_dw = bsp_uwb_get_current_time_dw();
+    uint32_t covered_us = tdma_dw_to_us((dbg_loop_end_dw - dbg_loop_start_dw) & DW_MASK_40);
+    uint32_t start_offset_us = tdma_dw_to_us((dbg_loop_start_dw - tdma->superframe_start_dw) & DW_MASK_40);
+    uint32_t end_offset_us   = tdma_dw_to_us((dbg_loop_end_dw   - tdma->superframe_start_dw) & DW_MASK_40);
+    uint32_t window_end_offset_us = tdma_dw_to_us((resp_window_end_dw - tdma->superframe_start_dw) & DW_MASK_40);
+    uint32_t rx_err_timeout = 0, rx_err_crc = 0, rx_err_phr = 0, rx_err_sync = 0;
+    bsp_uwb_get_rx_error_counts(&rx_err_timeout, &rx_err_crc, &rx_err_phr, &rx_err_sync);
+    bsp_uwb_reset_rx_error_counts();
+    RLOG_I(LOG_OBJECT_CODE_RANGING,
+           "[TAG] RESP window: loop=[+%luus..+%luus] covered=%luus window_end=+%luus got=%u/%u "
+           "rx_errs(to=%lu crc=%lu phr=%lu sync=%lu)",
+           (unsigned long) start_offset_us, (unsigned long) end_offset_us,
+           (unsigned long) covered_us,      (unsigned long) window_end_offset_us,
+           num_responses, num_anchors,
+           (unsigned long) rx_err_timeout, (unsigned long) rx_err_crc,
+           (unsigned long) rx_err_phr,     (unsigned long) rx_err_sync);
+  }
+
   if (num_responses == 0)
   {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] No RESP received from %u anchors", num_anchors);
@@ -1270,6 +1353,11 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   }
 
   final_tx_time_dw = ensure_future_tx(final_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+  if (final_tx_time_dw == 0ULL)
+  {
+    s_ranging_busy = false;
+    return -1;
+  }
 
   /* Put actual antenna-domain delayed TX timestamp in FINAL payload (T5). */
   uint64_t t5_payload = predict_delayed_tx_antenna_time(final_tx_time_dw);
@@ -1470,6 +1558,21 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     }
     __NOP();
   }
+
+  /* Diagnostic: report why the RESULT loop exited.
+   * TIMEOUT  → anchors TX'd but TAG window expired (timing mismatch or RF loss).
+   * EARLY_EXIT → all expected RESULTs received, window closed early (healthy). */
+  {
+    uint64_t now_dw    = bsp_uwb_get_current_time_dw();
+    bool     timed_out = !dw_time_before_deadline(now_dw, result_deadline_dw);
+    uint32_t rem_us    = timed_out ? 0U
+      : tdma_dw_to_us((result_deadline_dw - now_dw) & DW_MASK_40);
+    RLOG_W(LOG_OBJECT_CODE_RANGING,
+           "[TAG] RESULT loop: got=%u/%u mask=0x%02X %s remain=%luus",
+           results_received, num_responses, result_mask,
+           timed_out ? "TIMEOUT" : "EARLY_EXIT", (unsigned long) rem_us);
+  }
+
 
   if (result_slot_mismatch_count > 0U)
   {

@@ -331,6 +331,10 @@ void app_anchor_process(void *arg)
 
   if (err == SYS_RANGING_OK) {
     sys_ranging_result_t result;
+    /* Always call get_result_tdma regardless of result.valid.
+     * This is required to reset the state machine from STATE_ANCHOR_COMPLETE
+     * back to STATE_IDLE. If skipped, the next cycle's anchor_start_tdma
+     * returns SYS_RANGING_ERR_BUSY and the anchor silently drops that cycle. */
     if (sys_ranging_anchor_get_result_tdma(&result) == SYS_RANGING_OK && result.valid) {
       s_success_count++;
       s_error_count = 0;
@@ -377,4 +381,4 @@ void app_anchor_process(void *arg)
     }
   }
 }
-/* End of file -------------------------------------------------------- */
+/* End of file -------------------------------------------------------- */  
