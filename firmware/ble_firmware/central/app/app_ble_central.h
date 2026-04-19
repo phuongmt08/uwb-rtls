@@ -71,6 +71,8 @@ void app_ble_central_disconnect(void);
 void app_ble_central_conn_params_set(uint16_t min_interval_ms, uint16_t max_interval_ms, uint16_t slave_latency, uint16_t conn_sup_timeout_ms);
 bool app_ble_central_conn_params_get(uint16_t *min_ms, uint16_t *max_ms, uint16_t *lat, uint16_t *to_ms);
 uint8_t app_ble_central_status_get(void);
+int32_t app_ble_central_rssi_dbm_get(void);
+uint32_t app_ble_central_disconnect_reason_get(void);
 
 #ifdef __cplusplus
 }

@@ -189,7 +189,15 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
 
     // Load vào out package
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
-    p_out->params.ble_status_resp.state = protobuf_BLE_STATE_CONNECTED; // Mock data
+    p_out->params.ble_status_resp.state = (protobuf_ble_state_t)app_ble_central_status_get();
+    p_out->params.ble_status_resp.rssi_dbm = app_ble_central_rssi_dbm_get();
+    
+    uint32_t active_disconnect_reason = app_ble_central_disconnect_reason_get();
+    if (active_disconnect_reason != 0)
+    {
+        p_out->params.ble_status_resp.has_disconnect_reason = true;
+        p_out->params.ble_status_resp.disconnect_reason = active_disconnect_reason;
+    }
 
     // Gắn nhãn báo cho Router biết hãy ném gói mới này vào đường SERIAL
     *p_action = BB_CMD_ACTION_SEND_SERIAL; 
@@ -234,6 +242,7 @@ static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packe
     // Load vào out package
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_SCANNING; 
+    p_out->params.ble_status_resp.has_disconnect_reason = false;
 
     // Gắn nhãn báo cho Router biết hãy ném gói mới này vào đường SERIAL
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
@@ -247,6 +256,7 @@ static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE; 
+    p_out->params.ble_status_resp.has_disconnect_reason = false;
     
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
@@ -310,6 +320,7 @@ static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_CONNECTING; 
+    p_out->params.ble_status_resp.has_disconnect_reason = false;
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
 
@@ -321,6 +332,7 @@ static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packe
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE; 
+    p_out->params.ble_status_resp.has_disconnect_reason = false;
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
 
@@ -347,7 +359,9 @@ void bb_cmd_notify_scan_result(const uint8_t * mac, int8_t rssi, const char * na
 /**
  * @brief  Sends a BLE status asynchronously to PC/Host on connection changes.
  */
-void bb_cmd_notify_ble_status(uint8_t state, int32_t rssi_dbm)
+void bb_cmd_notify_ble_status(uint8_t state,
+                              int32_t rssi_dbm,
+                              uint32_t disconnect_reason)
 {
     protobuf_packet_t pkt = protobuf_packet_t_init_zero;
     
@@ -359,6 +373,12 @@ void bb_cmd_notify_ble_status(uint8_t state, int32_t rssi_dbm)
     pkt.which_params = protobuf_packet_t_ble_status_resp_tag;
     pkt.params.ble_status_resp.state = (protobuf_ble_state_t)state;
     pkt.params.ble_status_resp.rssi_dbm = rssi_dbm;
+
+    if (disconnect_reason != 0)
+    {
+        pkt.params.ble_status_resp.has_disconnect_reason = true;
+        pkt.params.ble_status_resp.disconnect_reason = disconnect_reason;
+    }
 
     uint8_t buffer[64];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
