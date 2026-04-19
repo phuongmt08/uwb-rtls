@@ -124,6 +124,14 @@ void bsp_uwb_reset(bool active);
 bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms);
 
 /**
+ * @brief Enable RX delayed
+ * @param[in] rx_timestamp_dw 40-bit DW1000 timestamp when to start receiving
+ * @param[in] timeout_ms Timeout in milliseconds
+ * @return BSP_OK on success, BSP_ERR on failure
+ */
+bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_ms);
+
+/**
  * @brief Force DW1000 to idle state (turn off TX/RX)
  * @note Call this when stopping ranging to turn off RX/TX LEDs
  */

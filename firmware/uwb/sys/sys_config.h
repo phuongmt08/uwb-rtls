@@ -39,6 +39,16 @@ typedef enum {
 } ranging_method_t;
 
 /**
+ * @brief Anchor power mode enumeration
+ */
+typedef enum {
+    ANCHOR_POWER_MODE_PERFORMANCE = 0, /* 100% RX on Discovery */
+    ANCHOR_POWER_MODE_BALANCED    = 1, /* 40ms ON / 143ms Interval */
+    ANCHOR_POWER_MODE_ECO         = 2, /* 40ms ON / 307ms Interval */
+    ANCHOR_POWER_MODE_DEEP_ECO    = 3  /* 40ms ON / 503ms Interval */
+} anchor_power_mode_t;
+
+/**
  * @brief Device runtime configuration
  */
 typedef struct {
@@ -71,7 +81,8 @@ typedef struct {
   uint8_t anchor_count;       // Number of anchors in list (0 = broadcast to all)
   uint8_t anchor_list[NUM_ANCHORS]; // List of anchor IDs to range with
   
-  uint8_t reserved[16];
+  uint8_t power_mode;         // Anchor power mode (0-3)
+  uint8_t reserved[15];
   
   /* CRC32 checksum (must be last) */
   uint32_t crc32;
@@ -84,8 +95,9 @@ typedef struct {
 
 #define DEFAULT_RANGING_PERIOD_MS   150 
 #define DEFAULT_RX_TIMEOUT_MS       15 
+#define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_BALANCED
 
-#define CONFIG_VERSION              9
+#define CONFIG_VERSION              10
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
@@ -110,6 +122,7 @@ int sys_config_set_ranging_period(uint16_t period_ms);
 int sys_config_set_rx_timeout(uint32_t timeout_ms);
 int sys_config_set_antenna_delay(uint16_t tx_delay, uint16_t rx_delay);
 int sys_config_set_tx_power(uint32_t power);
+int sys_config_set_power_mode(anchor_power_mode_t mode);
 
 /* Storage */
 int sys_config_save(void);

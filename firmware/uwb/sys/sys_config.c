@@ -355,6 +355,18 @@ int sys_config_set_tx_power(uint32_t power)
     return 0;
 }
 
+int sys_config_set_power_mode(anchor_power_mode_t mode)
+{
+    if (mode > ANCHOR_POWER_MODE_DEEP_ECO) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid power mode: %d", mode);
+        return -1;
+    }
+    
+    g_config.power_mode = mode;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Power mode set to: %d", mode);
+    return 0;
+}
+
 void sys_config_reset_to_defaults(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Resetting to factory defaults");
@@ -368,6 +380,7 @@ void sys_config_reset_to_defaults(void)
     g_config.uwb_channel = DEFAULT_UWB_CHANNEL;
     g_config.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
     g_config.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
+    g_config.power_mode = DEFAULT_ANCHOR_POWER_MODE;
     
     g_config.uwb_prf = DEFAULT_UWB_PRF;
     g_config.uwb_data_rate = DEFAULT_UWB_DATA_RATE;
@@ -406,6 +419,9 @@ void sys_config_print(void)
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Ranging Period: %d ms (%d Hz)", 
                g_config.ranging_period_ms, 1000 / g_config.ranging_period_ms);
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "RX Timeout    : %lu ms", g_config.rx_timeout_ms);
+    } else if (g_config.role == DEVICE_ROLE_ANCHOR) {
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "-------------- TIMING -----------------");
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Power Mode   : %d", g_config.power_mode);
     }
     
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "==========================================");
