@@ -630,15 +630,6 @@ void app_tag_process(void)
     }
 #endif
 
-    /* Debug every 1s */
-    if ((now - last_log) >= 1000) {
-        uint32_t delta = now - s_last_ranging_tick;
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[D] act=%d last=%lu now=%lu delta=%lu period=%lu OK=%d",
-               s_is_ranging_active, s_last_ranging_tick, now, delta, 
-               cfg->uwb.ranging_period_ms, (delta >= cfg->uwb.ranging_period_ms));
-        last_log = now;
-    }
-
     if (!s_is_ranging_active && s_next_due_tick != 0U && (int32_t)(now - s_next_due_tick) > 0) {
         uint32_t lateness_ms = now - s_next_due_tick;
         if ((now - last_warn_log) >= 2000U) {
@@ -747,7 +738,14 @@ void app_tag_process(void)
         s_last_ranging_tick = HAL_GetTick();
         if (s_cycle_start_tick != 0U) {
             uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
-            if (cycle_ms > cfg->uwb.ranging_period_ms) {
+            RLOG_I(LOG_OBJECT_CODE_TAG,
+                   "[TAG] Cycle complete: duration=%lums target_period=%ums anchors=%u valid=%u",
+                   (unsigned long)cycle_ms,
+                     (unsigned)cfg->uwb.ranging_period_ms,
+                   (unsigned)s_pending_num_anchors,
+                   (unsigned)multi_results.count);
+            
+                 if (cycle_ms > cfg->uwb.ranging_period_ms) {
                 s_period_overrun_count++;
                 if ((s_period_overrun_count % 5U) == 1U) {
                     RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -772,10 +770,12 @@ void app_tag_process(void)
         err == SYS_RANGING_ERR ||
         err == SYS_RANGING_ERR_NOT_STARTED) {
         s_error_count++;
-        if (s_error_count % 10 == 0) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Ranging failed");
-        }
         s_last_ranging_tick = HAL_GetTick();
+        uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
+        if (s_error_count % 10 == 0) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Ranging failed: err=%d duration=%lums", err, (unsigned long)cycle_ms);
+        }
+        
         update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
         s_is_ranging_active = false;
     }

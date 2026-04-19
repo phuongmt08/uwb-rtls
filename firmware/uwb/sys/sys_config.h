@@ -45,6 +45,13 @@ typedef protobuf_anchor_layout_item_t sys_anchor_layout_t;
 #define SYS_CONFIG_MAX_ANCHORS       NUM_ANCHORS
 #define SYS_CONFIG_CALIB_MAX_SAMPLES 64
 
+typedef protobuf_anchor_power_mode_t anchor_power_mode_t;
+
+#define ANCHOR_POWER_MODE_PERFORMANCE protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE
+#define ANCHOR_POWER_MODE_BALANCED    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED
+#define ANCHOR_POWER_MODE_ECO         protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO
+#define ANCHOR_POWER_MODE_DEEP_ECO    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO
+
 /**
  * @brief System configuration stored in flash and RAM.
  *        config_version and device_type are non-protobuf bookkeeping fields.
@@ -78,6 +85,7 @@ typedef struct
 #define DEFAULT_TX_ANT_DLY        16436
 #define DEFAULT_RX_ANT_DLY        16436
 #define DEFAULT_TX_POWER          0x1F1F1F1FUL
+#define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_BALANCED
 
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
@@ -102,6 +110,8 @@ const sys_calib_cfg_t *sys_config_get_calib(void);
 int                    sys_config_set_calib(const sys_calib_cfg_t *calib);
 void                   sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);
 int                    sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count);
+int sys_config_set_power_mode(anchor_power_mode_t mode);
+
 
 /* Storage */
 int  sys_config_save(void);

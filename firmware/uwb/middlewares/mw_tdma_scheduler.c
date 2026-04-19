@@ -180,7 +180,7 @@ tdma_err_t tdma_sync_to_poll(tdma_scheduler_t *tdma, uint64_t poll_rx_timestamp)
     if (!tdma || !tdma->initialized) return TDMA_ERR_NOT_INITIALIZED;
     if (tdma->role != TDMA_ROLE_ANCHOR) return TDMA_ERR_PARAM;
 
-    /* Normalize to shared superframe origin:
+    /* NOTE Normalize to shared superframe origin:
      *
      *   origin = T2 - poll_to_resp_delay
      *

@@ -26,6 +26,7 @@
 #define DW1000_DEVICE_ID       0xDECA0130UL
 #define RX_TIMEOUT_MS          1000
 #define DWT_START_RX_IMMEDIATE 0
+#define DWT_START_RX_DELAYED   1
 #define TX_MAX_PAYLOAD         120
 #define DW1000_CRC_LENGTH      2
 
@@ -53,31 +54,6 @@ static uint16_t s_tx_antenna_delay  = 0;    /* Cached TX antenna delay */
 static uint16_t s_rx_antenna_delay  = 0;    /* Cached RX antenna delay */
 
 static volatile uint8_t s_irq_event_pending = 0;
-
-#if UWB_EVENT_DRIVEN
-static volatile bool s_isr_event_ready = false;
-static volatile uint8_t s_event_overflow_count = 0;
-static bsp_uwb_event_t s_isr_event;
-static void uwb_tx_cb(const dwt_callback_data_t *cb_data);
-static void uwb_rx_cb(const dwt_callback_data_t *cb_data);
-
-bool bsp_uwb_get_event(bsp_uwb_event_t *out_event)
-{
-    if (!s_isr_event_ready) return false;
-    __disable_irq();
-    *out_event = s_isr_event;
-    s_isr_event_ready = false;
-    __enable_irq();
-    return true;
-}
-
-void bsp_uwb_clear_event(void)
-{
-    __disable_irq();
-    s_isr_event_ready = false;
-    __enable_irq();
-}
-#endif
 /* RX error counters — incremented in bsp_uwb_rx(), read via bsp_uwb_get_rx_error_counts(). */
 static uint32_t s_rx_timeout_count  = 0;
 static uint32_t s_rx_crc_err_count  = 0;
@@ -556,6 +532,77 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
   if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS)
   {
     RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX] dwt_rxenable failed");
+    return BSP_ERR;
+  }
+
+  return BSP_OK;
+}
+
+bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_ms)
+{
+  CHECK_PARAM(s_initialized, BSP_ERR);
+
+  dwt_forcetrxoff();
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+
+  if (timeout_ms > 0 && timeout_ms <= 67)
+  {
+    uint16_t timeout_units = ms_to_dw1000_rxtimeout_units(timeout_ms);
+    dwt_setrxtimeout(timeout_units);
+  }
+  else
+  {
+    dwt_setrxtimeout(0);
+  }
+
+  /* Clear SW IRQ latch before enabling RX to avoid stale event. */
+  s_irq_event_pending = 0;
+
+  uint8_t sys_time_buf[5];
+  dwt_readsystime(sys_time_buf);
+  uint64_t now = dw_read_timestamp(sys_time_buf) & DW_MASK_40;
+
+  const uint64_t DW_TICK_PER_US = 63898ULL;
+  const uint32_t MIN_GUARD_US   = 400;                           /* 400µs margin */
+  const uint64_t MIN_GUARD_DW   = MIN_GUARD_US * DW_TICK_PER_US;
+
+  const uint64_t MAX_REASONABLE_AHEAD_DW = tdma_us_to_dw(1000000U); /* 1 sec limit */
+  uint64_t       ahead_dw                = (rx_timestamp_dw - now) & DW_MASK_40;
+
+  if (ahead_dw > MAX_REASONABLE_AHEAD_DW)
+  {
+    /* Past or too far future: fallback to immediate RX to catch frame if possible */
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX_DELAY] TOO LATE ahead=%lu (fallback IMMEDIATE)", (unsigned long)ahead_dw);
+    if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) return BSP_ERR;
+    return BSP_OK;
+  }
+  else if (ahead_dw <= MIN_GUARD_DW)
+  {
+    /* Too close: fallback to immediate */
+    if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) return BSP_ERR;
+    return BSP_OK;
+  }
+
+  /* Clear HPDWARN before scheduling (prevent stale warning) */
+  dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
+
+  uint32_t dx_time = (uint32_t) (rx_timestamp_dw >> 8);
+  dx_time &= 0xFFFFFFFEUL;
+  dwt_setdelayedtrxtime(dx_time);
+
+  if (dwt_rxenable(DWT_START_RX_DELAYED) != DWT_SUCCESS)
+  {
+    uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+    if (status & SYS_STATUS_HPDWARN) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[RX_DELAY] HPDWARN (Late RX) - fallback IMMEDIATE");
+        dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
+        dwt_forcetrxoff();
+        if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) return BSP_ERR;
+        return BSP_OK;
+    }
+    
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP,
+           "[RX_DELAY] dwt_rxenable delayed failed (status=0x%08lX)", (unsigned long) status);
     return BSP_ERR;
   }
 
