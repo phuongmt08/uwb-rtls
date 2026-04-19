@@ -16,14 +16,60 @@ import protocol_pb2 as pb
 running = True
 devices = {}  # Format: "AA:BB:CC:DD:EE:FF" -> {"bytes": b'...', "name": "...", "rssi": -60, "last_seen": 1234567.89}
 factory = CommandFactory()
+LOST_DEVICE_TIMEOUT_S = 5.0
+packet_debug_enabled = False
+
+BLE_STATE_NAMES = {
+    pb.BLE_STATE_UNSPECIFIED: "UNSPECIFIED",
+    pb.BLE_STATE_IDLE: "IDLE",
+    pb.BLE_STATE_SCANNING: "SCANNING",
+    pb.BLE_STATE_ADVERTISING: "ADVERTISING",
+    pb.BLE_STATE_CONNECTING: "CONNECTING",
+    pb.BLE_STATE_CONNECTED: "CONNECTED",
+}
+
+def _safe_enum_name(enum_desc, value: int) -> str:
+    item = enum_desc.values_by_number.get(value)
+    return item.name if item else str(value)
+
+def _packet_debug_line(pkt: pb.packet_t) -> str:
+    ptype = pkt.WhichOneof("params") or "<none>"
+
+    seq = "-"
+    src = "-"
+    dst = "-"
+    if pkt.HasField("hdr"):
+        seq = str(pkt.hdr.seq)
+        if pkt.hdr.HasField("addr"):
+            src = _safe_enum_name(pb.device_addr_t.DESCRIPTOR, pkt.hdr.addr.src)
+            dst = _safe_enum_name(pb.device_addr_t.DESCRIPTOR, pkt.hdr.addr.dst)
+
+    detail = ""
+    if ptype == "ble_status_resp":
+        state_name = BLE_STATE_NAMES.get(pkt.ble_status_resp.state, f"UNKNOWN({pkt.ble_status_resp.state})")
+        detail = f" state={state_name} rssi={pkt.ble_status_resp.rssi_dbm}"
+        if pkt.ble_status_resp.HasField("disconnect_reason"):
+            detail += f" disconnect_reason=0x{pkt.ble_status_resp.disconnect_reason:02X}"
+    elif ptype == "ble_scan_result":
+        mac = ":".join(f"{b:02X}" for b in reversed(pkt.ble_scan_result.mac_address))
+        detail = f" mac={mac} name='{pkt.ble_scan_result.name}' rssi={pkt.ble_scan_result.rssi_dbm}"
+    elif ptype == "ble_conn_params_resp":
+        p = pkt.ble_conn_params_resp.params
+        detail = f" min={p.min_interval_ms} max={p.max_interval_ms} lat={p.slave_latency} to={p.sup_timeout_ms}"
+
+    return f"[RX][seq={seq}][src={src}->dst={dst}] {ptype}{detail}"
 
 def rx_thread_func(session: VvTestSession):
-    global running, devices
+    global running, devices, packet_debug_enabled
     while running:
         try:
             # Liên tục đọc gói tin trả về không block, timeout nhỏ
             pkts = session.recv_packets(timeout_s=0.1)
             for pkt in pkts:
+                if packet_debug_enabled:
+                    print(f"\n[DBG] {_packet_debug_line(pkt)}")
+                    print("cmd> ", end="", flush=True)
+
                 # Phân loại luồng gói tin trả về
                 ptype = pkt.WhichOneof("params")
                 
@@ -48,7 +94,19 @@ def rx_thread_func(session: VvTestSession):
                     print("cmd> ", end="", flush=True)
                     
                 elif ptype == "ble_status_resp":
-                    print(f"\n[!] BLE Status -> State Code: {pkt.ble_status_resp.state}")
+                    state_name = BLE_STATE_NAMES.get(pkt.ble_status_resp.state, f"UNKNOWN({pkt.ble_status_resp.state})")
+                    if pkt.ble_status_resp.HasField("disconnect_reason"):
+                        print(f"\n[!] BLE Status -> {state_name} | disconnect_reason=0x{pkt.ble_status_resp.disconnect_reason:02X}")
+                    else:
+                        print(f"\n[!] BLE Status -> {state_name}")
+                    print("cmd> ", end="", flush=True)
+
+            # Firmware gửi scan_result mỗi 2s, nếu quá timeout không thấy cập nhật thì coi là mất.
+            now = time.time()
+            for mac, info in list(devices.items()):
+                if now - info["last_seen"] > LOST_DEVICE_TIMEOUT_S:
+                    print(f"\n[-] Lost Device: {mac} ('{info['name']}') | last RSSI: {info['rssi']} dBm")
+                    del devices[mac]
                     print("cmd> ", end="", flush=True)
                     
         except Exception:
@@ -64,12 +122,13 @@ def print_help():
     print("  disconnect      : Ngắt kết nối thiết bị hiện tại")
     print("  get             : Đọc Connection Params hiện tại (get_params)")
     print("  set             : Ghi Connection Params mới (min=30, max=60)")
+    print("  debug on/off    : Bật/tắt log packet RX từ central")
     print("  help            : Hiển thị bảng lệnh này")
     print("  exit            : Thoát")
     print("--------------------------\n")
 
 def run_interactive(session: VvTestSession, src: int, dst: int):
-    global running, devices
+    global running, devices, packet_debug_enabled
     
     # 1. Start RX background thread
     rx_th = threading.Thread(target=rx_thread_func, args=(session,), daemon=True)
@@ -109,8 +168,8 @@ def run_interactive(session: VvTestSession, src: int, dst: int):
                 now = time.time()
                 active_count = 0
                 for mac, info in list(devices.items()):
-                    # Nếu hơn 10 giây không có tín hiệu mới -> coi như rớt
-                    if now - info["last_seen"] > 10.0:
+                    # Nếu hơn LOST_DEVICE_TIMEOUT_S không có tín hiệu mới -> coi như rớt
+                    if now - info["last_seen"] > LOST_DEVICE_TIMEOUT_S:
                         del devices[mac]
                     else:
                         age = now - info["last_seen"]
@@ -130,6 +189,8 @@ def run_interactive(session: VvTestSession, src: int, dst: int):
                     continue
                     
                 print(f"[+] Gửi lệnh kết nối tới {mac_target} ...")
+                packet_debug_enabled = True
+                print("[DBG] Packet debug ON (để theo dõi packet central trả về khi connect)")
                 # Nên gửi lệnh stop scan trước để an toàn!
                 session.send_packet(factory.ble_scan_stop(src, dst, session.proto.next_seq()))
                 time.sleep(0.5)
@@ -169,6 +230,13 @@ def run_interactive(session: VvTestSession, src: int, dst: int):
                 pkt.ble_conn_params_set.params.slave_latency = 0
                 pkt.ble_conn_params_set.params.sup_timeout_ms = 4000
                 session.send_packet(pkt)
+
+            elif cmd == "debug":
+                if len(cmd_line) < 2 or cmd_line[1].lower() not in ("on", "off"):
+                    print("[!] Sử dụng: debug on|off")
+                    continue
+                packet_debug_enabled = (cmd_line[1].lower() == "on")
+                print(f"[DBG] Packet debug {'ON' if packet_debug_enabled else 'OFF'}")
                 
             else:
                 print(f"[?] Lệnh không hợp lệ: {cmd}. Gõ 'help' để xem các lệnh.")
