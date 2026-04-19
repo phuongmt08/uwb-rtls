@@ -18,16 +18,22 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "rtc.h"
+#include "usart.h"
 #include "usb_device.h"
+#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bootloader.h"
+#include "network_core.h"
+#include "network_cmd.h"
+#include "sys_logger_bl.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+#define OBJECT_CODE LOG_OBJECT_CODE_BOOTLOADER
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -43,12 +49,12 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static network_core_t  s_net_core;
+static uint8_t         s_net_rx_buf[512];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -58,6 +64,20 @@ static void MX_GPIO_Init(void);
 static void bl_led_tick(void)
 {
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
+
+static void bl_log_stub_task(void)
+{
+  static uint32_t s_last_log_ms = 0u;
+  uint32_t now = HAL_GetTick();
+
+  if ((now - s_last_log_ms) >= 500u) {
+    s_last_log_ms = now;
+    (void)sys_logger_write_record(INFO_LOG,
+                    OBJECT_CODE,
+                    "BL stub log tick=%lu",
+                    (unsigned long)now);
+  }
 }
 /* USER CODE END 0 */
 
@@ -85,11 +105,14 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* USER CODE END SysInit */
+  /* USER CODE END SysInitbsp_rtc_get_timestamp_ms */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
+  MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   
   /* Check if app requested DFU mode via magic flag */
@@ -100,52 +123,89 @@ int main(void)
    * 2. App-requested DFU mode (via magic flag)
    * 3. No valid app case (must stay in DFU)
    */
-  
+
+  /* Logger must be initialized before any RLOG/sys_logger_write_record usage. */
+  sys_logger_init();
+  RLOG_D(OBJECT_CODE, "=================================================");
+  RLOG_D(OBJECT_CODE, "=               BOOTLOADER STARTED              =");
+  RLOG_D(OBJECT_CODE, "=================================================");
+  /* Initialize protocol stack */
+  serial_init();  // TEMP: Test
+  network_core_init(&s_net_core, protobuf_device_addr_t_PACKET_ADDR_TAG, s_net_rx_buf, sizeof(s_net_rx_buf));
+  network_cmd_init(&s_net_core);  // TEMP: Test
+  bl_fota_init(&s_net_core);  // TEMP: Disabled to isolate hardfault source
+
   uint32_t t0 = HAL_GetTick();
-  bool dfu_active = false;  /* Track if DFU activity occurred */
-  
+  uint32_t t_last_blink = t0;
+  uint32_t current_timeout = force_dfu ? BL_DFU_EXTENDED_TIMEOUT_MS : BL_DFU_TIMEOUT_MS;
+  bool activity_detected = false;
+
+  RLOG_I(OBJECT_CODE, "BL: Bootup window open (%lu ms)", (unsigned long)current_timeout);
+
   while (1)
   {
     uint32_t now = HAL_GetTick();
+    /* Inject periodic logs so network_cmd has data to send in BL mode. */
+    // bl_log_stub_task();
     
-    /* If we had DFU activity, wait for user button press to exit */
-    if (g_dfu_last_activity != 0) {
-      dfu_active = true;
-      
-      /* Check if USER button (PA0) is pressed */
+    /* Process stacks */
+    bl_fota_process();
+
+    /* 1. Detect Activity */
+    bool ble_active = bl_fota_is_active();
+    bool usb_active = (g_dfu_last_activity != 0);
+
+    if (ble_active || usb_active) {
+      if (!activity_detected) {
+        RLOG_I(OBJECT_CODE, "BL: Activity detected! Switching to Active mode.");
+      }
+      activity_detected = true;
+    }
+
+    /* 2. LED Signaling Logic */
+    uint32_t blink_interval = 500;
+    
+    if (activity_detected) {
+      blink_interval = 100;
+    } else if ((now - t0) >= current_timeout) {
+      blink_interval = 5000;
+    }
+
+    if ((now - t_last_blink) >= blink_interval) {
+      bl_led_tick();
+      t_last_blink = now;
+    }
+
+    /* 3. Exit/Jump Logic */
+    
+    /* Case A: FOTA transfer completed successfully */
+    if (bl_fota_is_finished()) {
+      RLOG_I(OBJECT_CODE, "BL: FOTA finished, jumping to app...");
+      HAL_Delay(500);
+      bl_jump_to_app();
+    }
+
+    /* Case B: Initial timeout reached with NO activity */
+    if (!activity_detected && (now - t0 >= current_timeout)) {
+      if (bl_app_vector_valid()) {
+        RLOG_I(OBJECT_CODE, "BL: Timeout, jumping to app...");
+        bl_jump_to_app();
+      }
+      /* If we are here, app is invalid. Loop continues in IDLE mode (slow blink). */
+      RLOG_I(OBJECT_CODE, "BL: No valid app found, staying in bootloader.");
+    }
+
+    /* Case C: Active USB DFU mode - allow manual exit via USER button */
+    if (activity_detected && !ble_active) {
       if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
-        /* Button pressed - exit to app */
-        HAL_Delay(50);  /* Debounce delay */
+        HAL_Delay(50);
         if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
-          break;  /* Confirmed button press - exit DFU */
+          if (bl_app_vector_valid()) {
+            RLOG_I(OBJECT_CODE, "BL: User requested exit, jumping to app...");
+            bl_jump_to_app();
+          }
         }
       }
-      
-      /* Blink fast to show DFU active + waiting for user button */
-      bl_led_tick();
-      HAL_Delay(100);
-      continue;
-    }
-    
-    /* No activity yet - check initial timeout */
-    if ((now - t0) >= BL_DFU_TIMEOUT_MS) {
-      break;  /* Initial timeout - try to jump to app */
-    }
-    
-    /* Still waiting for connection - blink slow */
-    bl_led_tick();
-    HAL_Delay(300);
-  }
-
-  /* Leave DFU window: chain to application if valid, else stay in BL */
-  if (bl_app_vector_valid()) {
-    bl_jump_to_app();
-  } else {
-    /* No valid app: stay in DFU mode permanently with slow blink */
-    while (1) {
-      bl_led_tick();
-      HAL_Delay(5000);  /* Slow blink to indicate waiting for firmware */
-      /* USB DFU remains active - user can connect anytime to flash */
     }
   }
   /* USER CODE END 2 */
@@ -204,44 +264,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-
-  /* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PC13 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PA0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-
-  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
