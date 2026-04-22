@@ -123,8 +123,8 @@ bool bsp_io_dip_changed(void);
  * @param distance Pointer to anchor distance array (NUM_ANCHORS elements), pass NULL if unavailable
  * @param error Error estimate in meters (from trilateration)
  * @return BSP_OK on success, BSP_ERR on failure
- * @note Frame format: SOF(1) + X(4) + Y(4) + Z(4) + DIST[6](24) + ERROR(4) + LENGTH(1)
- *       SOF = 0xAA, LENGTH = 40 (payload size), unused DIST slots are zero-filled
+ * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + DIST[N](4*N) + ERROR(4)
+ *       SOF = 0xAA, LEN = (3 + N + 1) * 4, N = NUM_ANCHORS
  */
 bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float *distance, float error);
 
