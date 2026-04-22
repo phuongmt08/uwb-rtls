@@ -71,6 +71,7 @@ void bb_transport_process(void)
     // Cỗ máy trạng thái giờ đây chạy tự động dựa vào event callback (on_rx_byte)
     // được ngắt từ UART (APP_UART_DATA_READY) gọi lên.
     // Nên hàm này có thể bỏ trống, hoặc có thể dùng xử lý các tác vụ delay timeout nếu cần sau này.
+    bsp_uart_read_byte();
 }
 
 bool bb_transport_is_packet_ready(void)
@@ -105,6 +106,7 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
         // 3. Đẩy mảng byte đã đóng gói xuống UART nếu là Peripheral
 #if defined(BLE_PERIPHERAL)
         ret_code_t err_code = bsp_uart_transmit(tx_buf, (uint16_t)frame_size);
+        NRF_LOG_INFO("bb_transport: Transmitted %d bytes over UART", frame_size);
         if (err_code == NRF_SUCCESS) 
         {
             return NRF_SUCCESS;
@@ -147,6 +149,7 @@ void on_rx_byte(uint8_t byte)
 
     hdlc_data_chunk_t rx_chunk;
     // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
+    // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
 
     if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
 
@@ -165,10 +168,7 @@ void on_rx_byte(uint8_t byte)
             NRF_LOG_INFO("Received HDLC payload: len=%u", rx_chunk.len);
 
             // Gọi callback chuyển đổi State cho bb_router
-            if (m_rx_cb != NULL) 
-            {
-                m_rx_cb(); 
-            }
+            m_rx_cb();
         }
     }
 }

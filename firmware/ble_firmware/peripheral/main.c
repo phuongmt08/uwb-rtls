@@ -116,8 +116,8 @@ int main(void)
     for (;;)
     {
         bb_router_process();
-        bsp_uart_read_byte(); // Đọc byte từ UART để kích hoạt callback on_rx_byte trong bb_transport (được setup trong bb_router_init)
-        idle_state_handle();
+         // Đọc byte từ UART để kích hoạt callback on_rx_byte trong bb_transport (được setup trong bb_router_init)
+        // idle_state_handle();
     }
 }
     // uint8_t cr;

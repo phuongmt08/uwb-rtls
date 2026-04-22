@@ -26,7 +26,8 @@ typedef enum {
     BB_CMD_ACTION_NONE = 0,         // No action needed (Idle)
     BB_CMD_ACTION_SEND_SERIAL,      // Encode and send response via Serial (HDLC)
     BB_CMD_ACTION_SEND_BLE,         // Encode and send response via BLE
-    BB_CMD_ACTION_ERROR             // Processing failed
+    BB_CMD_ACTION_ERROR,            // Processing failed
+    BB_CMD_ACTION_BUSY              // Still executing
 } bb_cmd_action_t;
 
 /* Public macros ------------------------------------------------------ */

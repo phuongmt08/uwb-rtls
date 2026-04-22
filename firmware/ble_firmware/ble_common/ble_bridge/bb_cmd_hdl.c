@@ -90,32 +90,55 @@ static const bb_cmd_entry_t m_cmd_table[] = {
 
 uint32_t max_id_table = sizeof(m_cmd_table) / sizeof(m_cmd_table[0]);
 
+typedef enum {
+    BB_CMD_HDL_STATE_IDLE,
+    BB_CMD_HDL_STATE_DECODE,
+    BB_CMD_HDL_STATE_PROCESS,
+    BB_CMD_HDL_STATE_ENCODE,
+} bb_cmd_hdl_state_t;
+
+static bb_cmd_hdl_state_t m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+static protobuf_packet_t in_pkt;
+static protobuf_packet_t out_pkt;
+static bb_cmd_handler_t m_current_handler;
+static bb_cmd_action_t m_current_action;
+
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_cmd_hdl_init(void)
 {
     // Cấu hình các flag ban đầu nếu có.
+    m_cmd_state = BB_CMD_HDL_STATE_IDLE;
     return NRF_SUCCESS;
 }
 
-bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_t max_len)
+bb_cmd_action_t bb_cmd_hdl_process(uint8_t *p_buf, uint16_t *p_length, uint16_t max_len)
 {
-    if (p_buf == NULL || p_length == NULL || *p_length == 0 || max_len == 0) 
+    if (m_cmd_state == BB_CMD_HDL_STATE_IDLE)
     {
-        return BB_CMD_ACTION_ERROR;
+        if (p_buf == NULL || p_length == NULL || *p_length == 0 || max_len == 0) 
+        {
+            return BB_CMD_ACTION_ERROR;
+        }
+        m_cmd_state = BB_CMD_HDL_STATE_DECODE;
     }
 
-    protobuf_packet_t in_pkt = PKT_INIT;
-    pb_istream_t stream = pb_istream_from_buffer(p_buf, *p_length);
-    
-    // 1. Decode data
-    if (!pb_decode(&stream, protobuf_packet_t_fields, &in_pkt)) 
+    switch (m_cmd_state)
     {
-        NRF_LOG_ERROR("bb_cmd_hdl: Pb decode err: %s", PB_GET_ERROR(&stream));
-        return BB_CMD_ACTION_ERROR;
-    }
+        case BB_CMD_HDL_STATE_DECODE:
+        {
+            in_pkt = PKT_INIT;
+            pb_istream_t stream = pb_istream_from_buffer(p_buf, *p_length);
+            
+            // 1. Decode data
+            if (!pb_decode(&stream, protobuf_packet_t_fields, &in_pkt)) 
+            {
+                NRF_LOG_ERROR("bb_cmd_hdl: Pb decode err: %s", PB_GET_ERROR(&stream));
+                m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+                return BB_CMD_ACTION_ERROR;
+            }
 
-    uint32_t cmd_idx = in_pkt.which_params;
-    bb_cmd_handler_t handler = NULL;
+            uint32_t cmd_idx = in_pkt.which_params;
+            m_current_handler = NULL;
 
     // 2. Tra bảng Handler tương ứng với message ID
     if (cmd_idx < max_id_table) 
@@ -124,45 +147,70 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
         handler = m_cmd_table[cmd_idx].cmd_hdl;
     }
 
-    if (handler == NULL) 
-    {
-        NRF_LOG_WARNING("bb_cmd_hdl: No handler for param_tag (%d)", cmd_idx);
-        return BB_CMD_ACTION_NONE; 
-    }
+            if (m_current_handler == NULL) 
+            {
+                NRF_LOG_WARNING("bb_cmd_hdl: No handler for param_tag (%d)", cmd_idx);
+                m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+                return BB_CMD_ACTION_NONE; 
+            }
 
-    // 3. Khởi tạo một Gói Response tĩnh
-    protobuf_packet_t out_pkt = PKT_INIT;
-    bb_cmd_action_t action = BB_CMD_ACTION_NONE;
-
-    // Tự động gán Header ngược lại cho gói đáp trả
-    if (in_pkt.has_hdr) 
-    {
-        out_pkt.has_hdr = true;
-        out_pkt.hdr.timestamp = in_pkt.hdr.timestamp; 
-        
-        // Khi nRF trả lời lại STM32, Destination sẽ là Host (STM32)
-        out_pkt.hdr.has_addr = true;
-        out_pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST; 
-    }
-
-    // 4. Gọi Handler thực thi Logic ứng dụng
-    NRF_LOG_INFO("bb_cmd_hdl: Calling handler for cmd_id=%u", cmd_idx);
-    handler(&in_pkt, &out_pkt, &action);
-    // 5. Nếu kết quả sau xử lý là cần GỬI Response, tiến hành encode ĐÈ vào buffer
-    if (action == BB_CMD_ACTION_SEND_SERIAL || action == BB_CMD_ACTION_SEND_BLE) 
-    {
-        pb_ostream_t ostream = pb_ostream_from_buffer(p_buf, max_len);
-        if (!pb_encode(&ostream, protobuf_packet_t_fields, &out_pkt)) 
-        {
-            NRF_LOG_ERROR("bb_cmd_hdl: Pb encode err: %s", PB_GET_ERROR(&ostream));
-            return BB_CMD_ACTION_ERROR;
+            m_cmd_state = BB_CMD_HDL_STATE_PROCESS;
+            return BB_CMD_ACTION_BUSY;
         }
-        
-        // Đổi giá trị *p_length thành kích thước mới sau mã hoá
-        *p_length = ostream.bytes_written;
-    }
 
-    return action;
+        case BB_CMD_HDL_STATE_PROCESS:
+        {
+            // 3. Khởi tạo một Gói Response tĩnh
+            out_pkt = PKT_INIT;
+            m_current_action = BB_CMD_ACTION_NONE;
+
+            // Tự động gán Header ngược lại cho gói đáp trả
+            if (in_pkt.has_hdr) 
+            {
+                out_pkt.has_hdr = true;
+                out_pkt.hdr.timestamp = in_pkt.hdr.timestamp; 
+                
+                // Khi nRF trả lời lại STM32, Destination sẽ là Host (STM32)
+                out_pkt.hdr.has_addr = true;
+                out_pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST; 
+            }
+
+            // 4. Gọi Handler thực thi Logic ứng dụng
+            m_current_handler(&in_pkt, &out_pkt, &m_current_action);
+
+            // 5. Nếu kết quả sau xử lý là cần GỬI Response, chuyển sang state ENCODE
+            if (m_current_action == BB_CMD_ACTION_SEND_SERIAL || m_current_action == BB_CMD_ACTION_SEND_BLE) 
+            {
+                m_cmd_state = BB_CMD_HDL_STATE_ENCODE;
+                return BB_CMD_ACTION_BUSY;
+            }
+
+            m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+            return m_current_action;
+        }
+
+        case BB_CMD_HDL_STATE_ENCODE:
+        {
+            pb_ostream_t ostream = pb_ostream_from_buffer(p_buf, max_len);
+            if (!pb_encode(&ostream, protobuf_packet_t_fields, &out_pkt)) 
+            {
+                NRF_LOG_ERROR("bb_cmd_hdl: Pb encode err: %s", PB_GET_ERROR(&ostream));
+                m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+                return BB_CMD_ACTION_ERROR;
+            }
+            
+            // Đổi giá trị *p_length thành kích thước mới sau mã hoá
+            *p_length = ostream.bytes_written;
+            
+            bb_cmd_action_t final_action = m_current_action;
+            m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+            return final_action;
+        }
+
+        default:
+            m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+            return BB_CMD_ACTION_ERROR;
+    }
 }
 
 /* Private definitions ------------------------------------------------ */
@@ -222,9 +270,18 @@ static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packe
 
 static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    // CHECK_VOID(s_network_cmd.stream && pkt);
-    // network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED);
-    // RLOG_W(OBJECT_CODE, "No command handler for payload tag=%u", (unsigned)pkt->which_params);
+    NRF_LOG_WARNING("No command handler for payload tag=%u", (unsigned)p_in->which_params);
+
+    if (p_in->has_hdr)
+    {
+        p_out->has_hdr = true;
+        p_out->hdr = p_in->hdr;
+    }
+    
+    p_out->which_params = protobuf_packet_t_ack_tag;
+    p_out->params.ack.response = protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED;
+
+    *p_action = BB_CMD_ACTION_SEND_SERIAL; 
     *p_action = BB_CMD_ACTION_NONE;
 }
 
