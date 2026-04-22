@@ -16,17 +16,17 @@
 /* Private defines ---------------------------------------------------- */
 #define UART_SOF           (0xAA)
 #define UART_TX_TIMEOUT_MS (100)
-#define UART_PAYLOAD_LEN_BYTES  ((uint8_t)((3U + NUM_ANCHORS + 1U) * sizeof(float)))
+#define UART_PAYLOAD_LEN_BYTES  ((uint8_t)((3U + 1U + NUM_ANCHORS) * sizeof(float)))
 
 /* Private types ------------------------------------------------------ */
 typedef struct {
   uint8_t sof;        /* Start of frame: 0xAA */
-  uint8_t length;     /* Payload length (4 * (3 + NUM_ANCHORS + 1)) */
+  uint8_t length;     /* Payload length (4 * (3 + 1 + NUM_ANCHORS)) */
   float   x;          /* X position in meters */
   float   y;          /* Y position in meters */
   float   z;          /* Z position in meters */
-  float   distance[NUM_ANCHORS];/* Distance each anchor */
   float   error;      /* Error estimate in meters */
+  float   distance[NUM_ANCHORS];/* Distance each anchor */
 } __attribute__((packed)) uart_position_frame_t;
 
 /* Private variables -------------------------------------------------- */
@@ -227,9 +227,9 @@ bool bsp_io_dip_changed(void)
 
 /* UART Position Sender ----------------------------------------------- */
 
-bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float *distance, float error)
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error, float *distance)
 {
-  if (s_tx_busy) return BSP_ERR; // hoặc queue lại
+    if (s_tx_busy) return BSP_ERR;
 
     s_frame.sof    = UART_SOF;
     s_frame.length = UART_PAYLOAD_LEN_BYTES;

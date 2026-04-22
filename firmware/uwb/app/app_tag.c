@@ -476,8 +476,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     if (bsp_io_uart_send_position(final_position.x, final_position.y,
                                   TAG_HEIGHT_M,
-								  anchor_distance,
-                                  (float)tril_result.error_estimate) != BSP_OK) {
+                                  (float)tril_result.error_estimate,
+                                  anchor_distance) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
 
@@ -493,8 +493,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     /* Send position via UART */
     if (bsp_io_uart_send_position((float)tril_position.x, (float)tril_position.y,
                                   TAG_HEIGHT_M,
-                                  anchor_distance,
-                                  (float)tril_result.error_estimate) != BSP_OK) {
+                                  (float)tril_result.error_estimate,
+                                  anchor_distance) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
 #endif

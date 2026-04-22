@@ -120,13 +120,13 @@ bool bsp_io_dip_changed(void);
  * @param x X coordinate in meters
  * @param y Y coordinate in meters
  * @param z Z coordinate in meters
- * @param distance Pointer to anchor distance array (NUM_ANCHORS elements), pass NULL if unavailable
  * @param error Error estimate in meters (from trilateration)
+ * @param distance Pointer to anchor distance array (NUM_ANCHORS elements), pass NULL if unavailable
  * @return BSP_OK on success, BSP_ERR on failure
- * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + DIST[N](4*N) + ERROR(4)
- *       SOF = 0xAA, LEN = (3 + N + 1) * 4, N = NUM_ANCHORS
+ * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + ERROR(4) + DIST[N](4*N)
+ *       SOF = 0xAA, LEN = (3 + 1 + N) * 4, N = NUM_ANCHORS
  */
-bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float *distance, float error);
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error, float *distance);
 
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

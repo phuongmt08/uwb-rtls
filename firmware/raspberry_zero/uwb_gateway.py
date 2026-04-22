@@ -143,7 +143,7 @@ class UwbGateway:
         Parse UWB frame
         
         Frame format (variable):
-            SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + Dists(4*N) + Error(4)
+            SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + Error(4) + Dists(4*N)
         
         Args:
             frame_bytes: Raw frame data
@@ -173,13 +173,13 @@ class UwbGateway:
             num_anchors = (length // 4) - 4
             
             # Unpack: '<' = little-endian, 'B' = uint8, 'f' = float
-            # Format: SOF(B), LEN(B), X(f), Y(f), Z(f), Distances(f*N), Error(f)
-            fmt = f'<BBfff{num_anchors}ff'
+            # Format: SOF(B), LEN(B), X(f), Y(f), Z(f), Error(f), Distances(f*N)
+            fmt = f'<BBffff{num_anchors}f'
             unpacked = struct.unpack(fmt, frame_bytes)
             
-            sof, length, x, y, z = unpacked[0:5]
-            distances = list(unpacked[5:5+num_anchors])
-            error = unpacked[-1]
+            # unpacked indices: 0=sof, 1=length, 2=x, 3=y, 4=z, 5=error, 6...=distances
+            sof, length, x, y, z, error = unpacked[0:6]
+            distances = list(unpacked[6:6+num_anchors])
             
             # Validate position data
             if not self.validate_frame(x, y, z, error):
@@ -213,17 +213,17 @@ class UwbGateway:
             True if sent successfully, False otherwise
         """
         try:
-            # Format: Binary format with x, y, z, distances, and error
-            # Format: f(float) * (3 + N + 1)
+            # Format: Binary format with x, y, z, error, and distances
+            # Format: f(float) * (4 + N)
             num_dists = len(position.distances)
-            fmt = f'<{3 + num_dists + 1}f'
+            fmt = f'<{4 + num_dists}f'
             
             data = struct.pack(fmt,
                 position.x,
                 position.y,
                 position.z,
-                *position.distances,
-                position.error
+                position.error,
+                *position.distances
             )
             
             self.udp_socket.sendto(data, (self.udp_host, self.udp_port))
