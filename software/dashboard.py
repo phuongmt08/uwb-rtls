@@ -12,6 +12,8 @@ Usage:
 import sys
 import socket
 import struct
+import math
+from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
@@ -44,22 +46,25 @@ class UDPReceiver(QThread):
                 try:
                     data, addr = self.sock.recvfrom(1024)
 
-                    # Parse UDP data (12 bytes for x, y, z)
-                    if len(data) == 12:
-                        x, y, z = struct.unpack('<fff', data)
+                    # Parse UDP data (32 bytes for x, y, z, error, d1, d2, d3, d4)
+                    if len(data) == 32:
+                        x, y, z, error, d1, d2, d3, d4 = struct.unpack('<ffffffff', data)
 
                         position = {
                             'x': x,
                             'y': y,
-                            'z': z
+                            'z': z,
+                            'error': error,
+                            'd1': d1,
+                            'd2': d2,
+                            'd3': d3,
+                            'd4': d4
                         }
 
                         self.position_received.emit(position)
-
-                    if len(data) == 12:
-                        x, y, z = struct.unpack('<fff', data)
-                        position = {'x': x, 'y': y, 'z': z}
-                        self.position_received.emit(position)
+                    else:
+                        print(f"Warning: Received packet of unknown length ({len(data)} bytes). Expected 32 bytes.")
+                        
                 except socket.timeout:
                     continue
                 except Exception as e:
@@ -215,13 +220,13 @@ class ModernPositionCanvas(QWidget):
             painter.drawText(cx + 25, cy, f"({anchor['x']:.1f}, {anchor['y']:.1f})")
             painter.setFont(QFont('Segoe UI', 10, QFont.Bold))
         
-        # Error circle - COMMENTED OUT FOR FUTURE USE
-        # if self.position.get('error', 0) > 0:
-        #     error_radius = int(self.position['error'] * scale)
-        #     painter.setPen(QPen(QColor(239, 68, 68, 60), 2, Qt.DashLine))
-        #     painter.setBrush(QColor(239, 68, 68, 20))
-        #     painter.drawEllipse(px - error_radius, py - error_radius, 
-        #                       error_radius * 2, error_radius * 2)
+        # Error circle
+        if self.position.get('error', 0) > 0:
+            error_radius = int(self.position['error'] * scale)
+            painter.setPen(QPen(QColor(239, 68, 68, 60), 2, Qt.DashLine))
+            painter.setBrush(QColor(239, 68, 68, 20))
+            painter.drawEllipse(int(px - error_radius), int(py - error_radius), 
+                              int(error_radius * 2), int(error_radius * 2))
         
         # Position marker
         painter.setPen(QPen(QColor(37, 99, 235), 3))
@@ -382,6 +387,7 @@ class MainWindow(QMainWindow):
         self.start_time = time.time()
         self.udp_receiver = None
         self.is_listening = False
+        self.record_file = None
         
         self.setup_ui()
         
@@ -467,6 +473,8 @@ class MainWindow(QMainWindow):
         left_panel.setContentsMargins(0, 0, 0, 0)
         
         # Canvas header
+        header_layout = QHBoxLayout()
+        
         canvas_header = QLabel("Real-time Position Tracking")
         canvas_header.setStyleSheet("""
             color: #f1f5f9;
@@ -476,7 +484,24 @@ class MainWindow(QMainWindow):
             background-color: transparent;
         """)
         canvas_header.setFixedHeight(30)
-        left_panel.addWidget(canvas_header)
+        header_layout.addWidget(canvas_header)
+        
+        self.warning_label = QLabel("⚠️ OUT OF ZONE (Tag ngoài vùng an toàn)")
+        self.warning_label.setStyleSheet("""
+            color: white; 
+            font-size: 14px; 
+            font-weight: bold; 
+            background-color: #ef4444; 
+            padding: 2px 10px; 
+            border-radius: 4px;
+        """)
+        self.warning_label.setFixedHeight(25)
+        self.warning_label.setVisible(False)
+        
+        header_layout.addStretch()
+        header_layout.addWidget(self.warning_label)
+        
+        left_panel.addLayout(header_layout)
         
         # Canvas
         self.canvas = ModernPositionCanvas()
@@ -572,6 +597,26 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold;")
         conn_card.content_layout.addWidget(self.status_label)
         
+        # Thêm nút Recording
+        self.record_btn = QPushButton("Start Recording")
+        self.record_btn.setCheckable(True)
+        self.record_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #ef4444;
+            }
+        """)
+        self.record_btn.clicked.connect(self.toggle_recording)
+        conn_card.content_layout.addWidget(self.record_btn)
+        
         right_panel.addWidget(conn_card)
         
         # Position card
@@ -583,7 +628,11 @@ class MainWindow(QMainWindow):
             ("X:", "x_label", "#60a5fa"),
             ("Y:", "y_label", "#60a5fa"),
             ("Z:", "z_label", "#60a5fa"),
-            # ("Error:", "error_label", "#f59e0b")  # Commented out for future use
+            ("D1:", "d1_label", "#a78bfa"),
+            ("D2:", "d2_label", "#a78bfa"),
+            ("D3:", "d3_label", "#a78bfa"),
+            ("D4:", "d4_label", "#a78bfa"),
+            ("Error:", "error_label", "#f59e0b")
         ]
         
         for i, (text, attr, color) in enumerate(labels):
@@ -722,6 +771,29 @@ class MainWindow(QMainWindow):
             self.status_label.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold;")
             self.is_listening = False
     
+    def toggle_recording(self, checked):
+        """Toggle data recording"""
+        if checked:
+            filename = datetime.now().strftime("uwb_data_%Y%m%d_%H%M%S.csv")
+            try:
+                self.record_file = open(filename, "a", encoding="utf-8")
+                
+                # Tạo header: Time, X, Y, Z, D1, D2,...
+                header = "Time(s), X(m), Y(m), Z(m)"
+                for i in range(len(self.anchors)):
+                    header += f", D{i+1}(m)"
+                self.record_file.write(header + "\n")
+                
+                self.record_btn.setText("Stop Recording")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Không thể tạo file: {e}")
+                self.record_btn.setChecked(False)
+        else:
+            if self.record_file:
+                self.record_file.close()
+                self.record_file = None
+            self.record_btn.setText("Start Recording")
+
     def on_position_received(self, position):
         """Handle received position data"""
         self.position = position
@@ -730,8 +802,48 @@ class MainWindow(QMainWindow):
         self.x_label.setText(f"{position['x']:.3f} m")
         self.y_label.setText(f"{position['y']:.3f} m")
         self.z_label.setText(f"{position['z']:.3f} m")
-        # self.error_label.setText(f"{position.get('error', 0):.3f} m")  # Commented out
+        self.d1_label.setText(f"{position.get('d1', 0):.3f} m")
+        self.d2_label.setText(f"{position.get('d2', 0):.3f} m")
+        self.d3_label.setText(f"{position.get('d3', 0):.3f} m")
+        self.d4_label.setText(f"{position.get('d4', 0):.3f} m")
+        self.error_label.setText(f"{position.get('error', 0):.3f} m")
         
+        # 1. Kiểm tra Out of Zone (Bounding Box của Anchors)
+        if self.anchors:
+            min_x = min(a['x'] for a in self.anchors)
+            max_x = max(a['x'] for a in self.anchors)
+            min_y = min(a['y'] for a in self.anchors)
+            max_y = max(a['y'] for a in self.anchors)
+            
+            # Nếu tag nằm ngoài hình chữ nhật tạo bởi các anchor
+            if not (min_x <= position['x'] <= max_x and min_y <= position['y'] <= max_y):
+                self.warning_label.setVisible(True)
+            else:
+                self.warning_label.setVisible(False)
+        else:
+            self.warning_label.setVisible(False)
+            
+        # 2. Lấy khoảng cách và Ghi Record file
+        if hasattr(self, 'record_btn') and self.record_btn.isChecked() and self.record_file:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            log_str = f"{timestamp}, {position['x']:.3f}, {position['y']:.3f}, {position['z']:.3f}"
+            
+            for i, a in enumerate(self.anchors):
+                # Ưu tiên lấy khoảng cách d1, d2, d3, d4 từ package gửi lên (nếu có)
+                dist_key = f'd{i+1}'
+                if dist_key in position:
+                    dist = position[dist_key]
+                else:
+                    # Nếu package cũ (chỉ có x, y, z) thì tự tính lại (Euclid 3D, coi z của anchor = 0)
+                    dx = position['x'] - a['x']
+                    dy = position['y'] - a['y']
+                    dz = position['z'] - 0.0
+                    dist = math.sqrt(dx**2 + dy**2 + dz**2)
+                log_str += f", {dist:.3f}"
+                
+            self.record_file.write(log_str + "\n")
+            self.record_file.flush()
+            
         self.canvas.update_position(position)
     
     def update_stats(self):
@@ -786,6 +898,10 @@ class MainWindow(QMainWindow):
         if self.udp_receiver and self.udp_receiver.isRunning():
             self.udp_receiver.stop()
             self.udp_receiver.wait()
+            
+        if hasattr(self, 'record_file') and self.record_file:
+            self.record_file.close()
+            
         event.accept()
 
 
