@@ -13,6 +13,7 @@ import sys
 import socket
 import struct
 import math
+import os
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -774,12 +775,22 @@ class MainWindow(QMainWindow):
     def toggle_recording(self, checked):
         """Toggle data recording"""
         if checked:
-            filename = datetime.now().strftime("uwb_data_%Y%m%d_%H%M%S.csv")
+            # Lấy thư mục đang chứa file dashboard.py (phương pháp tương đối an toàn nhất)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Tạo đường dẫn tới thư mục logs_data bên trong thư mục software
+            log_dir = os.path.join(current_dir, "logs_data")
+            
+            # Tự động tạo thư mục nếu máy của người khác chưa có
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+                
+            filename = os.path.join(log_dir, datetime.now().strftime("uwb_data_%Y%m%d_%H%M%S.csv"))
             try:
                 self.record_file = open(filename, "a", encoding="utf-8")
                 
-                # Tạo header: Time, X, Y, Z, D1, D2,...
-                header = "Time(s), X(m), Y(m), Z(m)"
+                # Tạo header: Time, X, Y, Z, Error, D1, D2,...
+                header = "Time(s),                  X(m), Y(m), Z(m), Error(m)"
                 for i in range(len(self.anchors)):
                     header += f", D{i+1}(m)"
                 self.record_file.write(header + "\n")
@@ -826,7 +837,8 @@ class MainWindow(QMainWindow):
         # 2. Lấy khoảng cách và Ghi Record file
         if hasattr(self, 'record_btn') and self.record_btn.isChecked() and self.record_file:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            log_str = f"{timestamp}, {position['x']:.3f}, {position['y']:.3f}, {position['z']:.3f}"
+            error_val = position.get('error', 0.0)
+            log_str = f"{timestamp}, {position['x']:.3f}, {position['y']:.3f}, {position['z']:.3f}, {error_val:.3f}"
             
             for i, a in enumerate(self.anchors):
                 # Ưu tiên lấy khoảng cách d1, d2, d3, d4 từ package gửi lên (nếu có)

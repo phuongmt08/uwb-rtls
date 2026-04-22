@@ -23,3 +23,7 @@ _build/
 *.swp
 *.swo
 *~
+
+# Data and Logs
+*.csv
+logs_data/
