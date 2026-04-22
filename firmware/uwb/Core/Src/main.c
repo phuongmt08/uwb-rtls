@@ -119,7 +119,7 @@ static void test_send_position(void)
   s_last_test_send_tick = current_tick;
 
   /* Send current position */
-  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, TEST_POS_ERROR);
+  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, NULL, TEST_POS_ERROR);
 
   if (ret == BSP_OK)
   {

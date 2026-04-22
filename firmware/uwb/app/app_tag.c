@@ -446,6 +446,13 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 
+    float anchor_distance[NUM_ANCHORS] = {0};
+    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+        if (anchors_by_id[id].valid) {
+            anchor_distance[id - 1] = anchors_by_id[id].distance;
+        }
+    }
+
     /* ==== STEP 5: Apply Filter ==== */
 #if (MW_FILTER_ENABLE_DES || MW_FILTER_ENABLE_AKF)
     pos_vel_2d_t final_position;
@@ -469,6 +476,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     if (bsp_io_uart_send_position(final_position.x, final_position.y,
                                   TAG_HEIGHT_M,
+								  anchor_distance,
                                   (float)tril_result.error_estimate) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
@@ -485,6 +493,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     /* Send position via UART */
     if (bsp_io_uart_send_position((float)tril_position.x, (float)tril_position.y,
                                   TAG_HEIGHT_M,
+                                  anchor_distance,
                                   (float)tril_result.error_estimate) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
