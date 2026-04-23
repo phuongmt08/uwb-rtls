@@ -93,11 +93,11 @@ typedef struct {
 #define DEFAULT_DEVICE_ID           0x01
 #define DEFAULT_RANGING_METHOD      RANGING_DS_TWR
 
-#define DEFAULT_RANGING_PERIOD_MS   150 
+#define DEFAULT_RANGING_PERIOD_MS   50 
 #define DEFAULT_RX_TIMEOUT_MS       15 
 #define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_BALANCED
 
-#define CONFIG_VERSION              10
+#define CONFIG_VERSION              11
 
 #define DEFAULT_UWB_CHANNEL         5
 #define DEFAULT_UWB_PRF             64
