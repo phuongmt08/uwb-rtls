@@ -158,6 +158,7 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len);
  *        been successfully persisted or transmitted.
  */
 void sys_logger_consume(uint16_t len);
+uint16_t sys_logger_peek_packet(uint8_t *out, uint16_t max_len);
 
 /* ── Flash persistence API (requires HAVE_FLASH_STORAGE + ENABLE_FLASH_LOG) ─
  *

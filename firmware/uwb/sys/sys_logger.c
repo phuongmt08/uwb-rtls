@@ -354,6 +354,42 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len)
   return logger_read_linear(out, max_len);
 }
 
+uint16_t sys_logger_peek_packet(uint8_t *out, uint16_t max_len)
+{
+  if (!initialized || !out || max_len < (FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN))
+    return 0u;
+
+  uint16_t available = logger_data_count();
+  uint16_t copied = 0u;
+  uint16_t offset = 0u;
+
+  while ((copied + FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN) <= max_len)
+  {
+    if ((offset + FLASH_LOG_LEN_FIELD) > available)
+      break;
+
+    uint16_t rec_len = (uint16_t)logger_peek_at(offset) |
+                       (uint16_t)((uint16_t)logger_peek_at(offset + 1) << 8u);
+
+    if (rec_len == 0u || rec_len > RLOG_MAX_RECORD_SIZE)
+      break;
+
+    uint16_t entry_padded = (uint16_t)((FLASH_LOG_LEN_FIELD + rec_len + 3u) & ~3u);
+    if ((copied + entry_padded) > max_len || (offset + entry_padded) > available)
+      break;
+
+    /* Copy record-aligned chunk from circular buffer */
+    for (uint16_t i = 0; i < entry_padded; i++) {
+        out[copied + i] = logger_peek_at(offset + i);
+    }
+
+    copied += entry_padded;
+    offset += entry_padded;
+  }
+
+  return copied;
+}
+
 void sys_logger_consume(uint16_t len)
 {
   if (!initialized)
@@ -669,7 +705,6 @@ void sys_logger_task(void)
     (void)sys_logger_flash_persist();
     g_flash_sync_last_ms = now_ms;
   }
-
 #endif
 }
 

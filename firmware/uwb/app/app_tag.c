@@ -80,6 +80,7 @@ static tag_app_state_t s_tag_app_state = TAG_STATE_IDLE;
 static void init_filters(void);
 static void process_ranging_results(sys_ranging_result_t *results, int num_success);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
+static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
@@ -158,6 +159,20 @@ static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids)
     for (uint8_t i = 0; i < total; i++) {
         anchor_ids[i] = i + 1;
     }
+}
+
+static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out)
+{
+    sys_config_t *cfg = sys_config_get();
+    for (uint32_t i = 0; i < cfg->anchor_count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == aid) {
+            pos_out->x = (double)cfg->anchor_layout[i].x_m;
+            pos_out->y = (double)cfg->anchor_layout[i].y_m;
+            pos_out->z = (double)cfg->anchor_layout[i].z_m;
+            return true;
+        }
+    }
+    return false;
 }
 
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors)
@@ -367,90 +382,56 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
     sys_config_t *cfg = sys_config_get();
-
-    /* Iterate through the array of results returned by TDMA */
-    /* Note: 'num_success' is the number of valid items in the 'results' array */
+    
+    /* 1. Extract, Filter and Project Ranging Results */
     for (int i = 0; i < num_success; i++) {
         sys_ranging_result_t *r = &results[i];
         if (!r->valid) continue;
 
         uint8_t aid = r->anchor_id;
-        /* Sanity check anchor ID */
         if (aid < 1 || aid > NUM_ANCHORS) continue;
 
-         double r3d = (double)r->distance_m;
-         vec3d_t anchor_pos = {0};
-         bool found = false;
-         for (uint32_t j = 0; j < cfg->anchor_count; j++) {
-             if (cfg->anchor_layout[j].anchor_id == aid) {
-                 anchor_pos.x = (double)cfg->anchor_layout[j].x_m;
-                 anchor_pos.y = (double)cfg->anchor_layout[j].y_m;
-                 anchor_pos.z = (double)cfg->anchor_layout[j].z_m;
-                 found = true;
-                 break;
-             }
-         }
-         
-         if (!found) {
-             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u position not found in flash", aid);
-             continue;
-         }
-         
-         float d_used = (float)r3d;
-         float d2_score = 0.0f;
-         float r_adapt = 0.0f;
+        vec3d_t anchor_pos;
+        if (!get_anchor_position(aid, &anchor_pos)) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u position not found in flash", aid);
+            continue;
+        }
+
+        float d_used = r->distance_m;
+        float d2_score = 0.0f;
+        float r_adapt = 0.0f;
 
 #if ENABLE_MAHALANOBIS_PREFILTER
-         /* 1. Mahalanobis pre-filter on raw 3D distance */
-         bool is_accepted = mw_filter_mahalanobis_update(&s_filters.prefilter,
-                                                         aid - 1, /* array index 0-7 */
-                                                         d_used,
-                                                         (float)s_last_position.x,
-                                                         (float)s_last_position.y,
-                                                         (float)TAG_HEIGHT_M, /* pz = tag height */
-                                                         0.0f, 0.0f, 0.0f, /* TODO: Integrate tag velocity (vx, vy, vz) from UKF/IMU */
-                                                         (float)anchor_pos.x,
-                                                         (float)anchor_pos.y,
-                                                         (float)anchor_pos.z,
-                                                         &d_used, &d2_score, &r_adapt);
-
-         if (!is_accepted) {
-             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
-             continue; /* Drop before 2D projection */
-         }
+        bool is_accepted = mw_filter_mahalanobis_update(&s_filters.prefilter, aid - 1, d_used,
+                                                        (float)s_last_position.x, (float)s_last_position.y, (float)TAG_HEIGHT_M,
+                                                        0.0f, 0.0f, 0.0f, (float)anchor_pos.x, (float)anchor_pos.y, (float)anchor_pos.z,
+                                                        &d_used, &d2_score, &r_adapt);
+        if (!is_accepted) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
+            continue;
+        }
 #else
-         /* Optional smoothing path is used only when Mahalanobis pre-filter is disabled. */
-         d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
+        d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
 #endif
-         
-         /* Calculate vertical offset based on specific anchor height */
-         double dz = anchor_pos.z - (double)TAG_HEIGHT_M;
-         double r2d = 0.0;
-         
-         if (!convert_3d_to_2d_distance((double)d_used, dz, &r2d)) {
-             RLOG_W(LOG_OBJECT_CODE_TAG, 
-                 "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)",
-                 aid, d_used, (float)dz);
-             continue;
-         }
-         
-         /* Use filtered 2D distance for Trilateration */
-         float distance_2d = (float)r2d;
-         int8_t rssi = (int8_t)r->rssi;
-         
-         /* Fill anchor data at correct position (indexed by anchor_id) */
-         anchors_by_id[aid].position = anchor_pos;
-         anchors_by_id[aid].distance = distance_2d;
-         anchors_by_id[aid].rssi = rssi;
-         anchors_by_id[aid].id = aid;
-         anchors_by_id[aid].valid = true;
-         anchors_by_id[aid].d2_score = d2_score;
-         anchors_by_id[aid].r_adaptive = r_adapt;
-         valid_count++;
-         
-         RLOG_D(LOG_OBJECT_CODE_TAG,
-             "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)",
-             aid, d_used, (float)r2d, (float)dz);
+
+        double r2d = 0.0;
+        double dz = anchor_pos.z - (double)TAG_HEIGHT_M;
+        if (!convert_3d_to_2d_distance((double)d_used, dz, &r2d)) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)", aid, d_used, (float)dz);
+            continue;
+        }
+
+        /* Store valid anchor data */
+        anchors_by_id[aid].position = anchor_pos;
+        anchors_by_id[aid].distance = (double)r2d;
+        anchors_by_id[aid].rssi = (int8_t)r->rssi;
+        anchors_by_id[aid].id = aid;
+        anchors_by_id[aid].valid = true;
+        anchors_by_id[aid].d2_score = (double)d2_score;
+        anchors_by_id[aid].r_adaptive = (double)r_adapt;
+        valid_count++;
+
+        RLOG_D(LOG_OBJECT_CODE_TAG, "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)", aid, d_used, (float)r2d, (float)dz);
     }
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {

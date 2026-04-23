@@ -7,7 +7,7 @@
 #define __CONFIG_H
 
 #define HAVE_FLASH_STORAGE
-#define ENABLE_FLASH_LOG
+#undef ENABLE_FLASH_LOG
 #define HAVE_RTC
 
 #define MULTIPLE_ANCHOR
