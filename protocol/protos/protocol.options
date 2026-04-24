@@ -1,0 +1,18 @@
+protobuf.device_information_resp_t.uid              max_size:12
+protobuf.uwb_cfg_t.anchor_list                      max_size:8
+protobuf.ranging_result_t.anchors                   max_count:4
+protobuf.log_data_t.data                            max_size:128
+protobuf.anchor_layout_set_t.anchors                max_count:4
+protobuf.anchor_layout_resp_t.anchors               max_count:4
+
+protobuf.common_constant_t                          long_names:false
+protobuf.packet_ack_response_t                      long_names:false
+protobuf.warning_code_t                             long_names:false
+protobuf.device_type_t                              long_names:false
+protobuf.device_role_t                              long_names:false
+protobuf.device_addr_t                              long_names:false
+protobuf.filter_mode_t                              long_names:false
+protobuf.log_level_t                                long_names:false
+protobuf.host_transport_t                           long_names:false
+protobuf.ble_state_t                                long_names:false
+protobuf.flash_addr_region_t                        long_names:false

@@ -1,0 +1,565 @@
+/******************************************************************************
+ * @file           : protocol.proto
+ * @brief          : UWB Protocol Buffer message definitions
+ ******************************************************************************
+ * @details
+ *    Protocol definitions for UWB RTLS system
+ *    Supports command-response and event streaming patterns
+ *
+ * @version        : 1.1.0
+ * @author         :
+ * @date           : 2026
+ *
+ * @attention
+ * @note       Style guide: https://protobuf.dev/programming-guides/style/
+ * @note       Proto 3 guide: https://protobuf.dev/programming-guides/proto3/
+ *
+ ******************************************************************************/
+
+syntax = "proto3";
+
+package protobuf;
+
+/* Enums -------------------------------------------------------------------- */
+
+enum common_constant_t {
+    UNSPECIFIED  = 0;
+    PROTOCOL_REV = 121;
+}
+
+enum packet_ack_response_t {
+    PACKET_ACK_RESPONSE_UNSPECIFIED        = 0;
+    PACKET_ACK_RESPONSE_ACK                = 1;
+    PACKET_ACK_RESPONSE_NACK_BAD_CRC       = 2;
+    PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED = 3;
+    PACKET_ACK_RESPONSE_NACK_TIMED_OUT     = 4;
+    PACKET_ACK_RESPONSE_NACK_BUSY          = 5;
+    PACKET_ACK_RESPONSE_NACK_CMD_FAILED    = 6;
+    PACKET_ACK_RESPONSE_NACK_INVALID_TYPE  = 7;
+}
+
+enum warning_code_t {
+    WARNING_CODE_UNSPECIFIED          = 0;
+    WARNING_CODE_QUEUE_NEAR_FULL      = 1;
+    WARNING_CODE_RETRYING             = 2;
+    WARNING_CODE_DEGRADED_MODE        = 3;
+    WARNING_CODE_PARTIAL_DATA         = 4;
+}
+
+enum device_type_t {
+    DEVICE_TYPE_UNSPECIFIED = 0;
+    DEVICE_TYPE_TAG         = 1;
+    DEVICE_TYPE_ANCHOR      = 2;
+    DEVICE_TYPE_GATEWAY     = 3;
+    DEVICE_TYPE_DEBUG_TOOL  = 4;
+}
+
+enum device_role_t {
+    DEVICE_ROLE_UNSPECIFIED = 0;
+    DEVICE_ROLE_TAG         = 1;
+    DEVICE_ROLE_ANCHOR      = 2;
+}
+
+enum device_addr_t {
+    PACKET_ADDR_UNSPECIFIED = 0x0;
+    PACKET_ADDR_TAG         = 0x1;
+    PACKET_ADDR_ANCHOR      = 0x2;
+    PACKET_ADDR_GATEWAY     = 0x3;
+    PACKET_ADDR_HOST        = 0x4;
+    PACKET_ADDR_DEBUG       = 0x7;
+    PACKET_ADDR_BCAST       = 0xF;
+}
+
+enum filter_mode_t {
+    FILTER_MODE_UNSPECIFIED = 0;
+    FILTER_MODE_KALMAN      = 1;
+}
+
+enum log_level_t {
+    LOG_LEVEL_UNSPECIFIED = 0;
+    LOG_LEVEL_ERROR       = 1;
+    LOG_LEVEL_WARN        = 2;
+    LOG_LEVEL_INFO        = 3;
+    LOG_LEVEL_DEBUG       = 4;
+}
+
+enum log_type_t {
+    LOG_TYPE_UNSPECIFIED  = 0;
+    LOG_TYPE_DEVICE_LOG   = 1;
+}
+
+enum flash_addr_region_t {
+    FLASH_ADDR_REGION_UNSPECIFIED = 0;
+    FLASH_ADDR_REGION_BOOTLOADER  = 1;
+    FLASH_ADDR_REGION_APPLICATION = 2;
+    FLASH_ADDR_REGION_CONFIG      = 3;
+}
+
+enum ble_state_t {
+    BLE_STATE_UNSPECIFIED = 0;
+    BLE_STATE_DISABLED    = 1;
+    BLE_STATE_IDLE        = 2;
+    BLE_STATE_ADVERTISING = 3;
+    BLE_STATE_CONNECTED   = 4;
+}
+
+enum host_transport_t {
+    HOST_TRANSPORT_UNSPECIFIED  = 0;
+    HOST_TRANSPORT_USB          = 1;
+    HOST_TRANSPORT_UART         = 2;
+}
+
+/* Common messages ---------------------------------------------------------- */
+
+message addr_t {
+    device_addr_t src = 1;
+    device_addr_t dst = 2;
+}
+
+message hdr_t {
+    addr_t addr      = 1;
+    uint32 seq       = 2;
+    uint32 timestamp = 3;
+}
+
+message version_t {
+    uint32 major = 1;
+    uint32 minor = 2;
+    uint32 patch = 3;
+    uint32 build = 4;
+    uint64 gitsha = 5;
+}
+
+message none_t {
+    uint32 dummy = 1;
+}
+
+message ack_t {
+    uint32 ack_seq                = 1;
+    packet_ack_response_t response = 2;
+}
+
+/* Device information ------------------------------------------------------- */
+
+message device_information_get_t {
+    uint32 dummy = 1;
+}
+
+message device_information_resp_t {
+    device_type_t device_type  = 1;
+    device_role_t role         = 2;
+    version_t fw_version       = 3;
+    uint32 hw_version          = 4;
+    uint32 serial_number       = 5;
+    bytes uid                  = 6;
+}
+
+/* Time synchronization ----------------------------------------------------- */
+
+message time_sync_get_t {
+    uint32 dummy = 1;
+}
+
+message time_sync_set_t {
+    uint64 unix_time_ms   = 1;
+    int32 timezone_offset = 2;
+}
+
+message time_sync_resp_t {
+    uint64 unix_time_ms       = 1;
+    int32 timezone_offset     = 2;
+}
+
+/* UWB configuration -------------------------------------------------------- */
+
+message uwb_cfg_t {
+    device_role_t role          = 1;
+    uint32 device_id            = 2;
+    uint32 ranging_period_ms    = 3;
+    uint32 rx_timeout_ms        = 4;
+    uint32 uwb_channel          = 5;
+    uint32 uwb_prf              = 6;
+    uint32 uwb_data_rate        = 7;
+    uint32 uwb_preamble_code    = 8;
+    uint32 tx_antenna_delay     = 9;
+    uint32 rx_antenna_delay     = 10;
+    uint32 tx_power             = 11;
+    bytes anchor_list           = 12;
+}
+
+message sys_config_get_t {
+    uint32 dummy = 1;
+}
+
+message sys_config_set_t {
+    uwb_cfg_t config = 1;
+}
+
+message sys_config_resp_t {
+    uwb_cfg_t config = 1;
+}
+
+/* Ranging configuration and result ---------------------------------------- */
+
+message sys_ranging_cfg_t {
+    uint32 rx_timeout_ms      = 1;
+    uint32 ranging_period_ms  = 2;
+}
+
+message sys_ranging_cfg_get_t {
+    uint32 dummy = 1;
+}
+
+message sys_ranging_cfg_set_t {
+    sys_ranging_cfg_t config = 1;
+}
+
+message sys_ranging_cfg_resp_t {
+    sys_ranging_cfg_t config = 1;
+}
+
+message ranging_start_t {
+    bool reset_filter_state = 1;
+}
+
+message ranging_stop_t {
+    uint32 dummy = 1;
+}
+
+message anchor_ranging_t {
+    uint32 anchor_id      = 1;
+    uint32 distance_mm    = 2;
+    int32 rssi_dbm        = 3;
+}
+
+message ranging_result_t {
+    float pos_x_m          = 1;
+    float pos_y_m          = 2;
+    float pos_z_m          = 3;
+    float covariance_xx    = 4;
+    float covariance_xy    = 5;
+    float covariance_yy    = 6;
+    float rms_error_m      = 7;
+    repeated anchor_ranging_t anchors = 8;
+    uint32 timestamp_ms    = 9;
+}
+
+/* Filter configuration ----------------------------------------------------- */
+
+message filter_cfg_t {
+    filter_mode_t mode       = 1;
+    float q_process_noise    = 2;
+    float r_base             = 3;
+    float innovation_alpha   = 4;
+    float r_scale_min        = 5;
+    float r_scale_max        = 6;
+}
+
+message filter_cfg_get_t {
+    uint32 dummy = 1;
+}
+
+message filter_cfg_set_t {
+    filter_cfg_t filter_cfg = 1;
+}
+
+message filter_cfg_resp_t {
+    filter_cfg_t filter_cfg = 1;
+}
+
+/* Commands ----------------------------------------------------------------- */
+
+message device_reset_t {
+    uint32 dummy = 1;
+}
+
+message uwb_reset_t {
+    uint32 dummy = 1;
+}
+
+message factory_config_reset_t {
+    uint32 magic = 1;
+}
+
+message device_type_set_t {
+    device_type_t device_type = 1;
+}
+
+message device_type_get_t {
+    uint32 dummy = 1;
+}
+
+message flash_erase_t {
+    uint32 partition_id = 1;
+    flash_addr_region_t flash_addr_region = 2;
+}
+
+message flash_read_t {
+    uint32 read_length    = 1;
+    uint32 address        = 2;
+}
+
+message flash_data_t {
+    uint32 data = 1;
+}
+
+message flash_write_t {
+    uint32 address    = 1;
+    bytes data        = 2;
+}
+
+/* BLE ---------------------------------------------------------------------- */
+/*
+ * BLE stack is managed entirely by nRF52832.
+ * STM32 sends data packets for nRF to broadcast/forward.
+ * STM32 can query BLE state (ble_status_get) or receive state-change
+ * notifications pushed by nRF (ble_status_resp, unsolicited).
+ * All other BLE control (cfg, scan, connect) is internal to nRF.
+ */
+
+/*
+ * STM32 → nRF : enable or disable BLE stack
+ * Useful during UWB calibration or power-saving modes.
+ */
+message ble_enable_t {
+    bool enable = 1;
+}
+
+/*
+ * STM32 → nRF : poll current BLE state
+ * nRF  → STM32 : response, also pushed unsolicited on state change
+ */
+message ble_status_get_t {
+    uint32 dummy = 1;
+}
+
+message ble_status_resp_t {
+    ble_state_t state   = 1;
+    bool connected      = 2;
+    int32 rssi_dbm      = 3;  /* valid only when connected */
+}
+
+message ble_adv_status_t {
+    uint32 anchor_id          = 3; /* 0 for non-anchor */
+    uint32 battery_level_pct  = 4;
+    uint32 status_flags       = 5;
+    uint32 warning_count      = 6;
+    uint32 error_count        = 7;
+    uint32 local_timestamp_ms = 8;
+}
+
+/*
+ * Anchor distance sample
+ * - Produced by an anchor while connected to gateway.
+ */
+message anchor_distance_t {
+    uint32 anchor_id          = 1;
+    uint32 distance_mm        = 2;
+    int32 rssi_dbm            = 3;
+}
+
+/*
+ * Tag position sample
+ * - Produced by a tag while connected to gateway.
+ * - Position is absolute in meter unit according to current coordinate frame.
+ */
+message tag_position_t {
+    float pos_x_m             = 1;
+    float pos_y_m             = 2;
+    float pos_z_m             = 3;
+    float rms_error_m         = 4;
+    uint32 timestamp_ms       = 5;
+}
+/*
+ * Log Data
+ * This is a packet used to update the data of the requested passive log
+ * 	- Each packet will contain a finite number of log records 
+ * 	  that can fit the transport layer packet. 
+ *	  All records in the packet are complete and can be parsed.
+ *	- To calculate the uploading progress, the requester needs to count 
+ *	  the total received bytes and compare it with DATA LENGTH in LOG_RESP.
+ */
+message log_data_t {
+  log_type_t type   = 1;
+  bytes data        = 2;
+}
+
+/*
+ * Acknowledge that log data has been successfully sent.
+ * Host sends this after receiving and processing log_data_t.
+ * Device then removes the corresponding segment from flash.
+ * offset + length identifies the exact segment to clear.
+ */
+message log_clear_t {
+    log_type_t type   = 1;
+    uint32 offset     = 2;  /* byte offset in log storage */
+    uint32 length     = 3;  /* number of bytes to clear   */
+}
+
+message host_transport_set_t {
+    host_transport_t transport = 1;
+}
+
+message pos_calib_cfg_t {
+    bool enable_anchor_auto_calib = 1;
+    bool enable_tag_auto_calib    = 2;
+    float ref_distance_xy_m       = 3;
+    float tag_height_m            = 4;
+    float anchor_height_m         = 5;
+    uint32 calib_anchor_id        = 6;
+    uint32 samples                = 7;
+    float error_threshold_m       = 8;
+    uint32 min_delta_step         = 9;
+    uint32 max_rounds             = 10;
+    float max_std_m               = 11;
+}
+
+message pos_calib_cfg_get_t {
+    uint32 dummy = 1;
+}
+
+message pos_calib_cfg_set_t {
+    pos_calib_cfg_t config = 1;
+}
+
+message pos_calib_cfg_resp_t {
+    pos_calib_cfg_t config = 1;
+}
+
+message anchor_layout_item_t {
+    uint32 anchor_id = 1;
+    float x_m        = 2;
+    float y_m        = 3;
+    float z_m        = 4;
+}
+
+message anchor_layout_get_t {
+    uint32 dummy = 1;
+}
+
+message anchor_layout_set_t {
+    repeated anchor_layout_item_t anchors = 1;
+}
+
+message anchor_layout_resp_t {
+    repeated anchor_layout_item_t anchors = 1;
+}
+
+
+/* Status / diagnostics ----------------------------------------------------- */
+
+message ranging_status_get_t {
+    uint32 dummy = 1;
+}
+
+message ranging_status_resp_t {
+    uint32 ranging_period_ms         = 1;
+    uint32 ranging_total_count       = 2;
+    uint32 ranging_success_count     = 3;
+    uint32 ranging_failed_count      = 4;
+    uint32 ranging_timeout_count     = 5;
+    uint32 last_ranging_time_ms      = 6;
+    float last_rms_error_m           = 7;
+    int32 last_avg_rssi_dbm          = 8;
+    uint32 last_update_timestamp_ms  = 9;
+}
+
+/* OTA (simple flash workflow) --------------------------------------------- */
+
+
+/* Battery information -----------------------------------------------------------*/
+
+message battery_info_resp_t {
+    uint32 bat_voltage_mv  = 1;
+    uint32 bat_soc_percent = 2;
+    int32  remaining_min      = 3;
+    bool   is_charging     = 4;
+}
+message battery_info_get_t {
+    uint32 dummy = 1;
+}
+/* Packet ------------------------------------------------------------------- */
+
+message packet_t {
+    hdr_t hdr = 1;
+
+    oneof params {
+        /* Core */
+        none_t                    none                    = 2;
+        ack_t                     ack                     = 3;
+
+        /* Device info */
+        device_information_get_t  device_information_get  = 4;
+        device_information_resp_t device_information_resp = 5;
+
+        /* Time sync */
+        time_sync_get_t           time_sync_get           = 6;
+        time_sync_set_t           time_sync_set           = 7;
+        time_sync_resp_t          time_sync_resp          = 8;
+
+        /* System config */
+        sys_config_get_t          sys_config_get          = 9;
+        sys_config_set_t          sys_config_set          = 10;
+        sys_config_resp_t         sys_config_resp         = 11;
+
+        /* Ranging config */
+        sys_ranging_cfg_get_t     sys_ranging_cfg_get     = 12;
+        sys_ranging_cfg_set_t     sys_ranging_cfg_set     = 13;
+        sys_ranging_cfg_resp_t    sys_ranging_cfg_resp    = 14;
+
+        /* Ranging control & results */
+        ranging_start_t           ranging_start           = 15;
+        ranging_stop_t            ranging_stop            = 16;
+        ranging_result_t          ranging_result          = 17;
+        ranging_status_get_t      ranging_status_get      = 18;
+        ranging_status_resp_t     ranging_status_resp     = 19;
+
+        /* Filter config */
+        filter_cfg_get_t          filter_cfg_get          = 20;
+        filter_cfg_set_t          filter_cfg_set          = 21;
+        filter_cfg_resp_t         filter_cfg_resp         = 22;
+
+        /* System commands */
+        device_reset_t            device_reset            = 23;
+        uwb_reset_t               uwb_reset               = 24;
+        factory_config_reset_t    factory_config_reset    = 25;
+        device_type_set_t         device_type_set         = 26;
+        device_type_get_t         device_type_get         = 27;
+
+        /* Flash */
+        flash_erase_t             flash_erase             = 28;
+        flash_read_t              flash_read              = 29;
+        flash_data_t              flash_data              = 30;
+        flash_write_t             flash_write             = 31;
+
+        /* BLE control — STM32 ↔ nRF52832 */
+        ble_enable_t              ble_enable              = 32;
+        ble_status_get_t          ble_status_get          = 33;
+        ble_status_resp_t         ble_status_resp         = 34;
+
+        /* BLE data — STM32 → nRF52832 for broadcasting to host */
+        ble_adv_status_t          ble_adv_status          = 35;
+
+        /* Log */
+        log_data_t                log_data                = 36;
+        log_clear_t               log_clear               = 37;
+
+        /* Host transport control */
+        host_transport_set_t      host_transport_set      = 38;
+
+        /* Calibration config */
+        pos_calib_cfg_get_t       pos_calib_cfg_get       = 39;
+        pos_calib_cfg_set_t       pos_calib_cfg_set       = 40;
+        pos_calib_cfg_resp_t      pos_calib_cfg_resp      = 41;
+
+        /* Anchor layout */
+        anchor_layout_get_t       anchor_layout_get       = 42;
+        anchor_layout_set_t       anchor_layout_set       = 43;
+        anchor_layout_resp_t      anchor_layout_resp      = 44;
+        /* Battery */
+        battery_info_resp_t       battery_info_resp       = 45;
+        battery_info_get_t        battery_info_get        = 46;
+    }
+}
+
+/* End ---------------------------------------------------------------------- */

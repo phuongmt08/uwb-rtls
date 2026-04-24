@@ -1,0 +1,11 @@
+build/
+
+# Python junk
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake

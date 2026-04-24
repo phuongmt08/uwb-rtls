@@ -1,0 +1,42 @@
+/**
+ * @file       bootloader.h
+ * @brief      Minimal USB DFU bootloader API for STM32F411CEU6
+ * @version    1.0.0
+ * @date       2025-09-29
+ */
+
+#ifndef __BOOTLOADER_H
+#define __BOOTLOADER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "../../../common/memorylayout.h"
+
+/* Flash layout (STM32F411CE, 512KB)
+ * - 0x08000000..0x0800BFFF: Bootloader code (48KB, sectors 0-2)
+ * - 0x0800C000..0x0803FFFF: Application image (sectors 3-5)
+ * - 0x08040000..0x0807FFFF: Data storage (sectors 6-7)
+ */
+/* SRAM range for MSP sanity check (F411 has 96KB SRAM) */
+#define SRAM_BASE_ADDR     (0x20000000UL)
+#define SRAM_END_ADDR      (0x20018000UL)
+
+/* Magic flag in SRAM to request DFU after soft reset */
+#define BL_MAGIC_ADDR      (0x2001FFF0UL)
+#define BL_MAGIC_VALUE     (0xDEADB007UL)
+
+
+/* DFU wait timeout before jumping to app if no host activity (ms) */
+#define BL_DFU_TIMEOUT_MS  (5000U)  /* Wait 3s for user to connect DFU tool */
+
+/* Inactivity timeout - time to wait after last DFU operation (ms) */
+#define BL_DFU_INACTIVITY_MS  (5000U)  /* 5s should be enough for programmer to complete */
+
+bool bl_app_vector_valid(void);
+bool bl_should_enter_dfu(void);
+void bl_jump_to_app(void);
+/* Timestamp of last DFU activity - updated by DFU callbacks */
+extern volatile uint32_t g_dfu_last_activity;
+
+
+#endif /* __BOOTLOADER_H */
