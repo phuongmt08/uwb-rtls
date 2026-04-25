@@ -10,6 +10,7 @@
 
 #include "bsp_uwb.h"
 #include "gpio.h"
+#include "positioning_config.h"
 #include "stm32f4xx_hal.h"
 
 #include <string.h>
@@ -17,16 +18,18 @@
 /* Private defines ---------------------------------------------------- */
 #define UART_SOF           (0xAA)
 #define UART_TX_TIMEOUT_MS (100)
+#define UART_PAYLOAD_LEN_BYTES ((uint8_t) ((3U + NUM_ANCHORS + 1U) * sizeof(float)))
 
 /* Private types ------------------------------------------------------ */
 typedef struct
 {
-  uint8_t sof;    /* Start of frame: 0xAA */
-  float   x;      /* X position in meters */
-  float   y;      /* Y position in meters */
-  float   z;      /* Z position in meters */
-  float   error;  /* Error estimate in meters */
-  uint8_t length; /* Payload length (16 bytes: 4 floats) */
+  uint8_t sof;                   /* Start of frame: 0xAA */
+  uint8_t length;                /* Payload length bytes */
+  float   x;                     /* X position in meters */
+  float   y;                     /* Y position in meters */
+  float   z;                     /* Z position in meters */
+  float   distance[NUM_ANCHORS]; /* Distance each anchor */
+  float   error;                 /* Error estimate in meters */
 } __attribute__((packed)) uart_position_frame_t;
 
 /* Private variables -------------------------------------------------- */
@@ -260,17 +263,30 @@ bool bsp_io_dip_changed(void)
 
 /* UART Position Sender ----------------------------------------------- */
 
-bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error)
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error)
 {
   if (s_tx_busy)
     return BSP_ERR;  // hoặc queue lại
 
   s_frame.sof    = UART_SOF;
+  s_frame.length = UART_PAYLOAD_LEN_BYTES;
   s_frame.x      = x;
   s_frame.y      = y;
   s_frame.z      = z;
   s_frame.error  = error;
-  s_frame.length = 16;
+
+  for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+  {
+    s_frame.distance[id] = 0.0f;
+  }
+
+  if (distance != NULL)
+  {
+    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+    {
+      s_frame.distance[id] = distance[id];
+    }
+  }
 
   s_tx_busy = 1;
   if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_frame, sizeof(s_frame)) != HAL_OK)

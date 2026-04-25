@@ -441,6 +441,13 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
     }
 
+    float uart_distances[NUM_ANCHORS] = {0.0f};
+    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+        if (anchors_by_id[id].valid) {
+            uart_distances[id - 1] = anchors_by_id[id].distance;
+        }
+    }
+
     /* Need at least 3 anchors for trilateration */
     if (valid_count < 3) {
         RLOG_W(LOG_OBJECT_CODE_TAG, 
@@ -515,6 +522,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
                                   TAG_HEIGHT_M,
+                                  uart_distances,
                                   (float)tril_result.error_estimate) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
