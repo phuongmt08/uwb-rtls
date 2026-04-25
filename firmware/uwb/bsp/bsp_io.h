@@ -135,12 +135,13 @@ bool bsp_io_dip_changed(void);
  * @param x X coordinate in meters
  * @param y Y coordinate in meters
  * @param z Z coordinate in meters
+ * @param distance Per-anchor distances in meters (array size NUM_ANCHORS), can be NULL
  * @param error Error estimate in meters (from trilateration)
  * @return BSP_OK on success, BSP_ERR on failure
- * @note Frame format: SOF(1) + X(4) + Y(4) + Z(4) + ERROR(4) + LENGTH(1) = 18 bytes
- *       SOF = 0xAA, LENGTH = 16 (payload size)
+ * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + DISTANCES(4*NUM_ANCHORS) + ERROR(4)
+ *       LEN is payload bytes after LEN field.
  */
-bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error);
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error);
 
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

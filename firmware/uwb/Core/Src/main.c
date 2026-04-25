@@ -44,7 +44,7 @@
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
 
 /* ========== Position Test Mode ========== */
-#define TEST_SEND_POS           0     /* 0=disabled, 1=enabled */
+#define TEST_SEND_POS           1     /* 0=disabled, 1=enabled */
 
 #if TEST_SEND_POS
   #define TEST_DISABLE_RANGING    1     /* 1=disable ranging (UART only), 0=keep ranging */
@@ -100,9 +100,16 @@ static void test_send_position(void)
   }
   
   s_last_test_send_tick = current_tick;
+
+  float test_distances[NUM_ANCHORS] = {
+    s_test_x + 0.10f,
+    s_test_y + 0.20f,
+    s_test_x + s_test_y + 0.30f,
+    (s_test_x * 0.5f) + (s_test_y * 0.5f) + 0.40f
+  };
   
   /* Send current position */
-  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, TEST_POS_ERROR);
+  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, test_distances, TEST_POS_ERROR);
   
   if (ret == BSP_OK) {
     /* Update position for next send */
