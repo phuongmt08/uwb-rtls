@@ -62,8 +62,8 @@ ret_code_t bb_router_init(void)
 }
 void bb_router_process(void)
 {
-    switch (m_state) {
-        
+    switch (m_state) 
+    {
         case BB_ROUTER_STATE_IDLE:
             bb_transport_process();
             break;
@@ -92,9 +92,12 @@ static void bb_router_state_check_dst_handle(void)
     // Kiểm tra con trỏ buf có trỏ tới ta không (chỉ lấy đích dst)
     bool is_for_me = bb_router_check_dst(protobuf_buffer, protobuf_buffer_len);
 
-    if (is_for_me) {
+    if (is_for_me) 
+    {
         m_state = BB_ROUTER_STATE_PROCESS_CMD;
-    } else {
+    } 
+    else 
+    {
         m_target_source = BB_SOURCE_BLE;
         m_state = BB_ROUTER_STATE_FORWARD;
     }

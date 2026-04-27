@@ -12,6 +12,8 @@
 #include "bb_cmd_hdl.h"
 #if defined(BLE_CENTRAL)
 #include "../../central/app/app_ble_central.h"
+#elif defined(BLE_PERIPHERAL)
+#include "../../peripheral/ble_peripheral.h"
 #endif
 #include <stddef.h>
 
@@ -56,12 +58,12 @@ static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packe
 // Chỉ config mảng những lệnh nào nRF52832 tự xử lý. 
 // Nếu id nào không được config sẽ tự rớt xuống undefined / bỏ qua.
 static const bb_cmd_entry_t m_cmd_table[] = {
+#if defined(BLE_PERIPHERAL)
     CMD_INFO(protobuf_packet_t_ble_status_get_tag,     handle_ble_status_get,     "ble_status_get"),
-    
-#ifndef BLE_PERIPHERAL
-    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_adv_config_set, "ble_adv_config_set"),
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_adv_status,     "ble_adv_status"),
+    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_adv_config_set, "ble_adv_config_set"),
 #else
+    CMD_INFO(protobuf_packet_t_ble_status_get_tag,     handle_ble_unimplemented,  "ble_status_get"),
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_unimplemented,  "ble_adv_status"),
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_unimplemented,  "ble_adv_config_set"),
 #endif /* !BLE_PERIPHERAL */
@@ -111,34 +113,25 @@ ret_code_t bb_cmd_hdl_init(void)
     return NRF_SUCCESS;
 }
 
-bb_cmd_action_t bb_cmd_hdl_process(uint8_t *p_buf, uint16_t *p_length, uint16_t max_len)
+bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_t max_len)
 {
-    if (m_cmd_state == BB_CMD_HDL_STATE_IDLE)
+    if (p_buf == NULL || p_length == NULL || *p_length == 0 || max_len == 0) 
     {
-        if (p_buf == NULL || p_length == NULL || *p_length == 0 || max_len == 0) 
-        {
-            return BB_CMD_ACTION_ERROR;
-        }
-        m_cmd_state = BB_CMD_HDL_STATE_DECODE;
+        return BB_CMD_ACTION_ERROR;
     }
 
-    switch (m_cmd_state)
+    protobuf_packet_t in_pkt = PKT_INIT;
+    pb_istream_t stream = pb_istream_from_buffer(p_buf, *p_length);
+    
+    // 1. Decode data
+    if (!pb_decode(&stream, protobuf_packet_t_fields, &in_pkt)) 
     {
-        case BB_CMD_HDL_STATE_DECODE:
-        {
-            in_pkt = PKT_INIT;
-            pb_istream_t stream = pb_istream_from_buffer(p_buf, *p_length);
-            
-            // 1. Decode data
-            if (!pb_decode(&stream, protobuf_packet_t_fields, &in_pkt)) 
-            {
-                NRF_LOG_ERROR("bb_cmd_hdl: Pb decode err: %s", PB_GET_ERROR(&stream));
-                m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-                return BB_CMD_ACTION_ERROR;
-            }
+        NRF_LOG_ERROR("bb_cmd_hdl: Pb decode err: %s", PB_GET_ERROR(&stream));
+        return BB_CMD_ACTION_ERROR;
+    }
 
-            uint32_t cmd_idx = in_pkt.which_params;
-            m_current_handler = NULL;
+    uint32_t cmd_idx = in_pkt.which_params;
+    bb_cmd_handler_t handler = NULL;
 
     // 2. Tra bảng Handler tương ứng với message ID
     if (cmd_idx < max_id_table) 
@@ -147,83 +140,58 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t *p_buf, uint16_t *p_length, uint16_t 
         handler = m_cmd_table[cmd_idx].cmd_hdl;
     }
 
-            if (m_current_handler == NULL) 
-            {
-                NRF_LOG_WARNING("bb_cmd_hdl: No handler for param_tag (%d)", cmd_idx);
-                m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-                return BB_CMD_ACTION_NONE; 
-            }
-
-            m_cmd_state = BB_CMD_HDL_STATE_PROCESS;
-            return BB_CMD_ACTION_BUSY;
-        }
-
-        case BB_CMD_HDL_STATE_PROCESS:
-        {
-            // 3. Khởi tạo một Gói Response tĩnh
-            out_pkt = PKT_INIT;
-            m_current_action = BB_CMD_ACTION_NONE;
-
-            // Tự động gán Header ngược lại cho gói đáp trả
-            if (in_pkt.has_hdr) 
-            {
-                out_pkt.has_hdr = true;
-                out_pkt.hdr.timestamp = in_pkt.hdr.timestamp; 
-                
-                // Khi nRF trả lời lại STM32, Destination sẽ là Host (STM32)
-                out_pkt.hdr.has_addr = true;
-                out_pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST; 
-            }
-
-            // 4. Gọi Handler thực thi Logic ứng dụng
-            m_current_handler(&in_pkt, &out_pkt, &m_current_action);
-
-            // 5. Nếu kết quả sau xử lý là cần GỬI Response, chuyển sang state ENCODE
-            if (m_current_action == BB_CMD_ACTION_SEND_SERIAL || m_current_action == BB_CMD_ACTION_SEND_BLE) 
-            {
-                m_cmd_state = BB_CMD_HDL_STATE_ENCODE;
-                return BB_CMD_ACTION_BUSY;
-            }
-
-            m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-            return m_current_action;
-        }
-
-        case BB_CMD_HDL_STATE_ENCODE:
-        {
-            pb_ostream_t ostream = pb_ostream_from_buffer(p_buf, max_len);
-            if (!pb_encode(&ostream, protobuf_packet_t_fields, &out_pkt)) 
-            {
-                NRF_LOG_ERROR("bb_cmd_hdl: Pb encode err: %s", PB_GET_ERROR(&ostream));
-                m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-                return BB_CMD_ACTION_ERROR;
-            }
-            
-            // Đổi giá trị *p_length thành kích thước mới sau mã hoá
-            *p_length = ostream.bytes_written;
-            
-            bb_cmd_action_t final_action = m_current_action;
-            m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-            return final_action;
-        }
-
-        default:
-            m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-            return BB_CMD_ACTION_ERROR;
+    if (handler == NULL) 
+    {
+        NRF_LOG_WARNING("bb_cmd_hdl: No handler for param_tag (%d)", cmd_idx);
+        return BB_CMD_ACTION_NONE; 
     }
+
+    // 3. Khởi tạo một Gói Response tĩnh
+    protobuf_packet_t out_pkt = PKT_INIT;
+    bb_cmd_action_t action = BB_CMD_ACTION_NONE;
+
+    // Tự động gán Header ngược lại cho gói đáp trả
+    if (in_pkt.has_hdr) 
+    {
+        out_pkt.has_hdr = true;
+        out_pkt.hdr.timestamp = in_pkt.hdr.timestamp; 
+        
+        // Khi nRF trả lời lại STM32, Destination sẽ là Host (STM32)
+        out_pkt.hdr.has_addr = true;
+        out_pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST; 
+    }
+
+    // 4. Gọi Handler thực thi Logic ứng dụng
+    handler(&in_pkt, &out_pkt, &action);
+    // 5. Nếu kết quả sau xử lý là cần GỬI Response, tiến hành encode ĐÈ vào buffer
+    if (action == BB_CMD_ACTION_SEND_SERIAL || action == BB_CMD_ACTION_SEND_BLE) 
+    {
+        pb_ostream_t ostream = pb_ostream_from_buffer(p_buf, max_len);
+        if (!pb_encode(&ostream, protobuf_packet_t_fields, &out_pkt)) 
+        {
+            NRF_LOG_ERROR("bb_cmd_hdl: Pb encode err: %s", PB_GET_ERROR(&ostream));
+            return BB_CMD_ACTION_ERROR;
+        }
+        
+        // Đổi giá trị *p_length thành kích thước mới sau mã hoá
+        *p_length = ostream.bytes_written;
+    }
+
+    return action;
 }
 
 /* Private definitions ------------------------------------------------ */
+/*================BLE_PERIPHERAL=================== */
+#if defined(BLE_PERIPHERAL)
 /**
  * @brief STM32 cấu hình thông số quảng bá (Advertising) của nRF52
  * Mặc định cấu hình xong không cần ping lại response.
  */
 static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("MCU Requested BLE ADV Config Set");
-    // const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
+    const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
     
-    // (Nordic logic API) Bật/Tắt quảng bá ở đây ... 
+    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
 
     *p_action = BB_CMD_ACTION_NONE; 
 }
@@ -237,10 +205,24 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
 
     // Load vào out package
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
+
+#if defined(BLE_CENTRAL)
     p_out->params.ble_status_resp.state = (protobuf_ble_state_t)app_ble_central_status_get();
     p_out->params.ble_status_resp.rssi_dbm = app_ble_central_rssi_dbm_get();
     
     uint32_t active_disconnect_reason = app_ble_central_disconnect_reason_get();
+#elif defined(BLE_PERIPHERAL)
+    p_out->params.ble_status_resp.state = (protobuf_ble_state_t)ble_peripheral_status_get();
+    p_out->params.ble_status_resp.rssi_dbm = 0;
+    
+    uint32_t active_disconnect_reason = 0;
+#else
+    p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE;
+    p_out->params.ble_status_resp.rssi_dbm = 0;
+    
+    uint32_t active_disconnect_reason = 0;
+#endif
+    
     if (active_disconnect_reason != 0)
     {
         p_out->params.ble_status_resp.has_disconnect_reason = true;
@@ -257,15 +239,13 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
 static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
     NRF_LOG_INFO("MCU sent status for BLE Central broadcast");
-    // const protobuf_ble_adv_status_t * p_evt = &p_in->params.ble_adv_status;
+    const protobuf_ble_adv_status_t * p_evt = &p_in->params.ble_adv_status;
 
-    // Gắn nhãn báo cho Router báo gói này là truyền xuống radio BLE
-    // Wait, ta có thể route luôn gói In (đỡ encode lại) nếu Router. 
-    // Nhưng vì cơ chế buffer chung, nên nếu chọn SEND_BLE, hệ thống cũng encode lại nguyên xi.
-    // Thực tế nên để Handler Forwarder độc lập khỏi cmd_hdl này. Tạm ghi mock:
+    ble_peripheral_adv_status_update(p_evt);
     
-    *p_out = *p_in;
-    *p_action = BB_CMD_ACTION_SEND_BLE;
+    // Nếu chỉ là gói broadcast state thì không nhất thiết phải gửi ra radio như Central
+    // Cập nhật lên payload là được.
+    *p_action = BB_CMD_ACTION_NONE;
 }
 
 static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
@@ -284,6 +264,7 @@ static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_pa
     *p_action = BB_CMD_ACTION_SEND_SERIAL; 
     *p_action = BB_CMD_ACTION_NONE;
 }
+#endif /* BLE_PERIPHERAL */
 
 /*================!BLE_CENTRAL=================== */
 #if defined(BLE_CENTRAL)

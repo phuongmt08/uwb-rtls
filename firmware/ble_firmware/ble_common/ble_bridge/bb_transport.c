@@ -16,6 +16,7 @@
 #include "logger.h"
 #if defined(BLE_PERIPHERAL)
 #include "../../peripheral/bsp_uart.h"
+#include "../../peripheral/ble_peripheral.h"
 #elif defined(BLE_CENTRAL)
 #include "../../central/bsp/bsp_usbd.h"
 #endif
@@ -56,7 +57,6 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     ret_code_t err_code = NRF_SUCCESS;
 
 #if defined(BLE_PERIPHERAL)
-    NRF_LOG_INFO("Initializing UART for Peripheral...");
     err_code = bsp_uart_init(on_rx_byte);
 #elif defined(BLE_CENTRAL)
     NRF_LOG_INFO("Initializing USB CDC ACM for Central...");
@@ -130,9 +130,16 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
 
 static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
 {
-    // Gửi byte thuần qua BLE
-    // ble_nus_data_send(...)
+#if defined(BLE_PERIPHERAL)
+    // Gọi hàm truyền data qua BLE peripheral (NUS/GATT custom Service)
+    return ble_peripheral_send_data(p_data, length);
+#elif defined(BLE_CENTRAL)
+    // Tương tự cho BLE Central nếu có
+    // return ble_central_send_data(p_data, length);
     return NRF_SUCCESS;
+#else
+    return NRF_ERROR_NOT_SUPPORTED;
+#endif
 }
 
 /**
@@ -154,7 +161,6 @@ void on_rx_byte(uint8_t byte)
     if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
 
     {   
-        // NRF_LOG_INFO("Received HDLC payload: len=%u", rx_chunk.len);
         // Copy data payload sang buffer do Router truyền xuống
         if (rx_chunk.len <= m_max_payload_len) 
         {
@@ -165,10 +171,11 @@ void on_rx_byte(uint8_t byte)
             }
             m_is_packet_ready = true;
             
-            NRF_LOG_INFO("Received HDLC payload: len=%u", rx_chunk.len);
-
             // Gọi callback chuyển đổi State cho bb_router
-            m_rx_cb();
+            if (m_rx_cb != NULL) 
+            {
+                m_rx_cb(); 
+            }
         }
     }
 }
