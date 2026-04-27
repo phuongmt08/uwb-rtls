@@ -365,9 +365,9 @@ void app_anchor_process(void *arg)
       s_last_diag_log = now;
       bsp_io_led_blink(5);
     }
-    if (err == SYS_RANGING_ERR_NOT_STARTED) {
-      s_anchor_ranging_started = false;
-    }
+    /* Reset so next loop calls start_tdma again. Without this, TIMEOUT causes
+     * repeated NOT_STARTED returns, delaying re-entry and making next_poll_dw stale. */
+    s_anchor_ranging_started = false;
   } else if (err == SYS_RANGING_ERR_BUSY) {
     /* Still processing */
   } else {

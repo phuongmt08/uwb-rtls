@@ -697,8 +697,6 @@ void sys_logger_task(void)
   if (!initialized)
     return;
 
-  logger_test_stub();
-
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
   uint32_t now_ms = HAL_GetTick();
   if ((uint32_t)(now_ms - g_flash_sync_last_ms) >= LOGGER_FLASH_SYNC_PERIOD_MS) {

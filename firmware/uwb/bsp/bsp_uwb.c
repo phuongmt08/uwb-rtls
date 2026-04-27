@@ -264,6 +264,10 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 
   dwt_setrxantennadelay(cfg->rx_antenna_delay);
   dwt_settxantennadelay(cfg->tx_antenna_delay);
+  /* Without this, predict returns (chip_time << 8) + 0 instead of + delay,
+   * causing T5 to be wrong by exactly tx_antenna_delay ticks → ~26m distance error. */
+  s_tx_antenna_delay = cfg->tx_antenna_delay;
+  s_rx_antenna_delay = cfg->rx_antenna_delay;
 
     /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
     dwt_setinterrupt((uint32)(DWT_INT_RFCG |
