@@ -32,7 +32,7 @@
 #define MW_DSTWR_MSG_TYPE_RESULT 0xE4 /* Anchor sends distance to TAG */
 /* Macro definitions -------------------------------------------------- */
 // SYS_RANGING_DEBUG: Enable  detailed debug logs for ranging state machine and calculations
-#define SYS_RANGING_DEBUG     1
+#define SYS_RANGING_DEBUG     0
 
 #if SYS_RANGING_DEBUG
 #define RANGING_LOG_D(...) RLOG_D(__VA_ARGS__)

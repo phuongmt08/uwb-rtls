@@ -15,6 +15,6 @@
 #define HAVE_BLE_PERIPHERAL
 
 /* Experimental features */
-#define UWB_EVENT_DRIVEN 1
+#define UWB_EVENT_DRIVEN 0
 
 #endif /* __CONFIG_H */
