@@ -64,8 +64,6 @@
 #include "bsp_utils.h"
 
 #include "logger.h"
-#include "ble_peripheral.h"
-
 
 #include "bb_transport.h"
 #include "app_uart.h"
@@ -105,34 +103,14 @@ int main(void)
     power_management_init();
 
     bb_router_init();
-    ble_peripheral_init();
+    // BLE is disabled by default, initialized later via STM32 command
 
     // Start execution.
-    NRF_LOG_INFO("Blinky example started.");
+    NRF_LOG_INFO("BLE Peripheral started !");
     
-    ble_peripheral_advertising_start();
-
     // Enter main loop.
     for (;;)
     {
         bb_router_process();
-         // Đọc byte từ UART để kích hoạt callback on_rx_byte trong bb_transport (được setup trong bb_router_init)
-        // idle_state_handle();
     }
 }
-    // uint8_t cr;
-
-/**
- * @}
- */
-
-//         // 
-//         while (app_u// art_get(&cr) != NRF_SUCCESS);
-//   //       
-//         // Gửi trở lại ngay kí tự
-//  đó (echo/// // NRF_LOG_INFO("Received: %c bytes\n", cr);
-//         // on_rx_byte(cr); // Gọi callback xử lý byte nhận được từ UART (được setup trong bb_transport_init)
-// log)
-//     //     while (app_uart_put(cr) != NRF_SUCCESS);// ////  
-        
-//                 bytebsp_uart_read_byte();
