@@ -25,6 +25,10 @@
 #define ANCHOR_DEFAULT_TX_ANT_DLY   16611
 #define ANCHOR_DEFAULT_RX_ANT_DLY   16436
 
+/* During auto-calibration, only TX delay is adjusted.
+ * RX delay is kept fixed at this value for both Tag and Anchor. */
+#define CALIB_FIXED_RX_ANT_DLY      16436
+
 /* ===================================================================
  * HEIGHT CONFIGURATION
  * =================================================================== */

@@ -16,6 +16,7 @@
 #include "bsp_io.h"
 #include "bsp_util.h"
 #include "bsp_uwb.h"
+#include "mw_calibration.h"
 #include "positioning_config.h"
 #include <stdint.h>
 #include <math.h>
@@ -35,24 +36,17 @@ typedef enum {
 } anchor_app_state_t;
 
 #if ENABLE_ANCHOR_AUTO_CALIB
-typedef struct {
-  float distances[CALIB_SAMPLES];
-  uint16_t count;
-  float mean;
-  float error;
-  float last_error;
-  uint16_t current_delay;
-  uint16_t delta_step;
-  uint16_t round;
-  bool converged;
-} calib_state_t;
-
-/* Calibration Constants */
-#define CALIB_ERROR_THRESHOLD_M  0.02f  // 2cm tolerance
-#define CALIB_MIN_DELTA_STEP     3      // Stop if step < 3
-#define CALIB_MAX_ROUNDS         10     // Max iterations
-#define CALIB_SAMPLES_PER_ROUND  25     // Samples per iteration
-#define CALIB_MAX_STD_M          0.1f   // Max standard deviation
+static const mw_calib_config_t s_anchor_calib_cfg = {
+  .samples_per_round = CALIB_SAMPLES,
+  .min_valid_distance_m = 0.1f,
+  .max_valid_distance_m = 50.0f,
+  .error_threshold_m = CALIB_ERROR_THRESHOLD_M,
+  .min_delta_step = CALIB_MIN_DELTA_STEP,
+  .max_rounds = CALIB_MAX_ROUNDS,
+  .max_std_m = CALIB_MAX_STD_M,
+  .initial_delta_step = 100,
+  .initial_last_error = 999.0f
+};
 #endif
 
 /* Private variables -------------------------------------------------- */
@@ -62,7 +56,7 @@ static anchor_app_state_t s_app_state = ANCHOR_STATE_IDLE;
 static bool s_anchor_ranging_started = false;
 
 #if ENABLE_ANCHOR_AUTO_CALIB
-static calib_state_t s_calib = {0};
+static mw_calib_ctx_t s_calib = {0};
 #endif
 
 /* Private function prototypes ---------------------------------------- */
@@ -100,13 +94,8 @@ static float calib_get_ref_distance_3d(void)
 
 static void calib_reset(void)
 {
-  memset(&s_calib, 0, sizeof(s_calib));
-  
   sys_config_t *cfg = sys_config_get();
-  s_calib.current_delay = cfg->uwb.tx_antenna_delay;
-  s_calib.delta_step = 100;
-  s_calib.last_error = 999.0f;
-  s_calib.converged = false;
+  mw_calib_reset(&s_calib, &s_anchor_calib_cfg, cfg->uwb.tx_antenna_delay);
   
     s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Start: delay=%u target=%.3fm", 
@@ -115,121 +104,71 @@ static void calib_reset(void)
 
 static bool calib_add_sample(float distance)
 {
-  if (s_calib.count >= CALIB_SAMPLES_PER_ROUND) {
-    return true; /* Full */
-  }
+  uint16_t prev_count = s_calib.count;
+  bool full = mw_calib_add_sample(&s_calib, distance);
   
-  /* Filter outliers */
-  if (distance < 0.1f || distance > 50.0f) {
-    return false;
-  }
-  
-  s_calib.distances[s_calib.count++] = distance;
-  
-  if (s_calib.count % 5 == 0) {
+  if (s_calib.count != prev_count && (s_calib.count % 5 == 0)) {
     bsp_io_led_toggle(); /* Visual feedback during collection */
   }
   
-  return (s_calib.count >= CALIB_SAMPLES_PER_ROUND);
+  return full;
 }
 
 static void calib_calculate_and_adjust(void)
 {
-  if (s_calib.count < CALIB_SAMPLES_PER_ROUND) {
+  mw_calib_step_result_t step = mw_calib_calculate_and_adjust(&s_calib,
+                                                               calib_get_ref_distance_3d());
+
+  if (step == MW_CALIB_STEP_NOT_READY) {
     return;
   }
-  
-  /* Calculate Mean */
-  float sum = 0.0f;
-  for (uint16_t i = 0; i < s_calib.count; i++) {
-    sum += s_calib.distances[i];
-  }
-  s_calib.mean = sum / s_calib.count;
-  
-  /* Calculate StdDev */
-  float variance = 0.0f;
-  for (uint16_t i = 0; i < s_calib.count; i++) {
-    float diff = s_calib.distances[i] - s_calib.mean;
-    variance += diff * diff;
-  }
-  float std_dev = sqrtf(variance / s_calib.count);
-  
-  /* Sanity Check */
-  if (std_dev > CALIB_MAX_STD_M) {
+
+  if (step == MW_CALIB_STEP_REJECTED_STD) {
     RLOG_W(LOG_OBJECT_CODE_ANCHOR, 
            "[R%u] REJECTED std=%.3fm > %.3fm",
-           s_calib.round + 1, std_dev, CALIB_MAX_STD_M);
-    s_calib.count = 0; /* Retry this round */
+           s_calib.round + 1, s_calib.std_dev, CALIB_MAX_STD_M);
     return;
   }
-  
-  /* Calculate Error */
-  s_calib.error = s_calib.mean - calib_get_ref_distance_3d();
-  s_calib.round++;
-  
+
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[R%u] mean=%.3fm std=%.3fm err=%+.3fm delay=%u step=%u", 
-         s_calib.round, s_calib.mean, std_dev, s_calib.error, 
+         s_calib.round, s_calib.mean, s_calib.std_dev, s_calib.error, 
          s_calib.current_delay, s_calib.delta_step);
-  
-  /* Check Convergence */
-  if (fabsf(s_calib.error) < CALIB_ERROR_THRESHOLD_M) {
-    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] DONE! delay=%u err=%.3fm", 
-           s_calib.current_delay, s_calib.error);
+
+  if (step == MW_CALIB_STEP_DONE) {
+    if (s_calib.done_by_threshold) {
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] DONE! delay=%u err=%.3fm", 
+             s_calib.current_delay, s_calib.error);
+    } else {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[CALIB] STOP! delay=%u err=%.3fm", 
+             s_calib.current_delay, s_calib.error);
+    }
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "HOLD=accept CLICK=retry");
-    s_calib.converged = true;
+    s_app_state = ANCHOR_STATE_CALIB_PENDING_ACCEPT;
     bsp_io_led_on();
     return;
   }
-  
-  /* Check Limits */
-  if (s_calib.round >= CALIB_MAX_ROUNDS || s_calib.delta_step < CALIB_MIN_DELTA_STEP) {
-    RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[CALIB] STOP! delay=%u err=%.3fm", 
-           s_calib.current_delay, s_calib.error);
-    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "HOLD=accept CLICK=retry");
-    s_calib.converged = true;
-    bsp_io_led_on();
-    return;
+
+  if (step == MW_CALIB_STEP_ADJUSTED) {
+    sys_config_t *cfg = sys_config_get();
+    protobuf_uwb_cfg_t tmp = cfg->uwb;
+    tmp.tx_antenna_delay = s_calib.current_delay;
+    tmp.rx_antenna_delay = CALIB_FIXED_RX_ANT_DLY;
+    bsp_uwb_configure(&tmp);
+    s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
   }
-  
-  /* Binary Search Logic */
-  if (s_calib.error * s_calib.last_error < 0.0f) {
-    s_calib.delta_step = s_calib.delta_step / 2;
-  }
-  
-  int32_t new_delay;
-  if (s_calib.error > 0.0f) {
-    new_delay = (int32_t)s_calib.current_delay + s_calib.delta_step;
-  } else {
-    new_delay = (int32_t)s_calib.current_delay - s_calib.delta_step;
-  }
-  
-  if (new_delay < 0) new_delay = 0;
-  if (new_delay > 65535) new_delay = 65535;
-  
-  s_calib.last_error = s_calib.error;
-  s_calib.current_delay = (uint16_t)new_delay;
-  
-  sys_config_t *cfg = sys_config_get();
-  protobuf_uwb_cfg_t tmp = cfg->uwb;
-  tmp.tx_antenna_delay = s_calib.current_delay;
-  tmp.rx_antenna_delay = s_calib.current_delay;
-  bsp_uwb_configure(&tmp);
-  
-  bsp_uwb_configure(&uwb_cfg); /* Hardware re-config */
-  
-  /* Reset samples for next round */
-  s_calib.count = 0;
 }
 
 static void calib_apply_and_save(void)
 {
   if (!s_calib.converged) return;
   
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saving TX delay=%u...", s_calib.current_delay);
+    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saving TX delay=%u (RX fixed=%u)...",
+      s_calib.current_delay,
+      (unsigned)CALIB_FIXED_RX_ANT_DLY);
   
   sys_config_t *cfg = sys_config_get();
   cfg->uwb.tx_antenna_delay = s_calib.current_delay;
-  cfg->uwb.rx_antenna_delay = s_calib.current_delay;
+    cfg->uwb.rx_antenna_delay = CALIB_FIXED_RX_ANT_DLY;
   
   if (sys_config_save() == 0) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saved! Restarting...");
@@ -250,7 +189,6 @@ void app_anchor_on_button(bsp_io_button_event_t event)
   } else if (event == BSP_IO_EVENT_CLICK) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Retry...");
     calib_reset();
-    s_app_state = ANCHOR_STATE_IDLE;
   } else if (event == BSP_IO_EVENT_DOUBLE_CLICK) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Reset to factory...");
     sys_config_t *cfg = sys_config_get();
