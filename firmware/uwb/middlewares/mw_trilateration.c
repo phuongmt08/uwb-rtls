@@ -30,93 +30,62 @@ static int trilaterate_3sphere(vec3d_t *sol1, vec3d_t *sol2,
                                vec3d_t p2, double r2,
                                vec3d_t p3, double r3);
 
-static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
-                                  uint8_t num_anchors,
-                                  uint8_t selected[3]);
-
-/* Vector operations -------------------------------------------------- */
-
-static inline vec3d_t vec_diff(vec3d_t v1, vec3d_t v2) {
-    vec3d_t r = {v1.x - v2.x, v1.y - v2.y, v1.z - v2.z};
-    return r;
-}
-
-static inline vec3d_t vec_sum(vec3d_t v1, vec3d_t v2) {
-    vec3d_t r = {v1.x + v2.x, v1.y + v2.y, v1.z + v2.z};
-    return r;
-}
-
-static inline vec3d_t vec_mul(vec3d_t v, double s) {
-    vec3d_t r = {v.x * s, v.y * s, v.z * s};
-    return r;
-}
-
-static inline vec3d_t vec_div(vec3d_t v, double s) {
-    vec3d_t r = {v.x / s, v.y / s, v.z / s};
-    return r;
-}
-
-static inline double vec_norm(vec3d_t v) {
-    return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
-
-static inline vec3d_t vec_cross(vec3d_t v1, vec3d_t v2) {
-    vec3d_t r = {
-        v1.y * v2.z - v1.z * v2.y,
-        v1.z * v2.x - v1.x * v2.z,
-        v1.x * v2.y - v1.y * v2.x
-    };
-    return r;
-}
-
-static inline double vec_dot(vec3d_t v1, vec3d_t v2) {
-    return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-}
-
 /* Anchor selection --------------------------------------------------- */
 
-static void select_best_3_anchors(const mw_tril_anchor_t *anchors,
-                                  uint8_t num_anchors,
-                                  uint8_t selected[3])
+uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors, 
+                                     uint8_t total_anchors, 
+                                     mw_tril_anchor_t *best_out, 
+                                     uint8_t max_out)
 {
-    typedef struct {
-        uint8_t index;
-        double distance;
-    } anchor_dist_t;
-
-    anchor_dist_t dists[NUM_ANCHORS];
+    if (!anchors || !best_out || max_out == 0) return 0;
+    
+    // Copy valid anchors to a local array for sorting
+    mw_tril_anchor_t valid_anchors[8]; // Assumes max 8 anchors per slot
     uint8_t valid_count = 0;
-
-    for (uint8_t i = 0; i < num_anchors && i < NUM_ANCHORS; i++) {
-        if (!anchors[i].valid) continue;
-        dists[valid_count].index = i;
-        dists[valid_count].distance = anchors[i].distance;
-        valid_count++;
-    }
-
-    // Sắp xếp tăng dần theo distance
-    for (uint8_t i = 0; i < valid_count - 1; i++) {
-        for (uint8_t j = 0; j < valid_count - i - 1; j++) {
-            if (dists[j].distance > dists[j + 1].distance) {
-                anchor_dist_t temp = dists[j];
-                dists[j] = dists[j + 1];
-                dists[j + 1] = temp;
+    
+    for (uint8_t i = 0; i < total_anchors; i++) {
+        if (anchors[i].valid) {
+            if (valid_count < 8) {
+                valid_anchors[valid_count++] = anchors[i];
             }
         }
     }
-
-    // Lấy 3 anchor gần nhất
-    uint8_t count = (valid_count < 3) ? valid_count : 3;
-    for (uint8_t i = 0; i < count; i++) {
-        selected[i] = dists[i].index;
+    
+    if (valid_count == 0) return 0;
+    
+    // Sort array in ascending order of d2_score using simple selection sort
+    for (uint8_t i = 0; i < valid_count - 1; i++) {
+        uint8_t min_idx = i;
+        for (uint8_t j = i + 1; j < valid_count; j++) {
+            if (valid_anchors[j].d2_score < valid_anchors[min_idx].d2_score) {
+                min_idx = j;
+            }
+        }
+        // Swap
+        if (min_idx != i) {
+            mw_tril_anchor_t temp = valid_anchors[i];
+            valid_anchors[i] = valid_anchors[min_idx];
+            valid_anchors[min_idx] = temp;
+        }
     }
+    
+    // Copy top M to output
+    uint8_t count = (valid_count < max_out) ? valid_count : max_out;
+    for (uint8_t i = 0; i < count; i++) {
+        best_out[i] = valid_anchors[i];
+    }
+    
 #ifdef ENABLE_DEBUG_LOGGING
-    RLOG_D(LOG_OBJECT_CODE_POSITIONING,
-           "Selected anchors: #%u (%.3fm), #%u (%.3fm), #%u (%.3fm)",
-           selected[0], anchors[selected[0]].distance,
-           selected[1], anchors[selected[1]].distance,
-           selected[2], anchors[selected[2]].distance);
+    if (count >= 3) {
+        RLOG_D(LOG_OBJECT_CODE_POSITIONING,
+               "Selected best anchors by d2: #%u(d2:%.2f), #%u(d2:%.2f), #%u(d2:%.2f)",
+               best_out[0].id, best_out[0].d2_score,
+               best_out[1].id, best_out[1].d2_score,
+               best_out[2].id, best_out[2].d2_score);
+    }
 #endif
+
+    return count;
 }
 
 /* Core 3-sphere trilateration ---------------------------------------- */
@@ -170,37 +139,21 @@ static int trilaterate_3sphere(vec3d_t *sol1, vec3d_t *sol2,
 
 /* Public API --------------------------------------------------------- */
 
-mw_tril_err_t mw_trilateration_3d(const mw_tril_anchor_t *anchors,
-                                  uint8_t num_anchors,
+mw_tril_err_t mw_trilateration_3d(const mw_tril_anchor_t *anchors_exact_3,
                                   vec3d_t *position,
                                   mw_tril_result_t *result)
 {
-    if (!anchors || !position || num_anchors < 3) {
+    if (!anchors_exact_3 || !position) {
         return MW_TRIL_ERR_PARAM;
     }
 
-    /* Select best 3 anchors */
-    uint8_t selected[3] = {0, 1, 2};
-    if (num_anchors > 3) {
-        select_best_3_anchors(anchors, num_anchors, selected);
-    } else {
-        /* Use first 3 valid anchors */
-        uint8_t count = 0;
-        for (uint8_t i = 0; i < num_anchors && count < 3; i++) {
-            if (anchors[i].valid) {
-                selected[count++] = i;
-            }
-        }
-        if (count < 3) return MW_TRIL_ERR_PARAM;
-    }
-
     /* Extract selected anchors */
-    vec3d_t p1 = anchors[selected[0]].position;
-    vec3d_t p2 = anchors[selected[1]].position;
-    vec3d_t p3 = anchors[selected[2]].position;
-    double r1 = anchors[selected[0]].distance;
-    double r2 = anchors[selected[1]].distance;
-    double r3 = anchors[selected[2]].distance;
+    vec3d_t p1 = anchors_exact_3[0].position;
+    vec3d_t p2 = anchors_exact_3[1].position;
+    vec3d_t p3 = anchors_exact_3[2].position;
+    double r1 = anchors_exact_3[0].distance;
+    double r2 = anchors_exact_3[1].distance;
+    double r3 = anchors_exact_3[2].distance;
 
     /* Calculate position */
     vec3d_t sol1, sol2;
@@ -229,38 +182,24 @@ mw_tril_err_t mw_trilateration_3d(const mw_tril_anchor_t *anchors,
     return MW_TRIL_OK;
 }
 
-mw_tril_err_t mw_trilateration_2d(const mw_tril_anchor_t *anchors,
-                                  uint8_t num_anchors,
+mw_tril_err_t mw_trilateration_2d(const mw_tril_anchor_t *anchors_exact_3,
                                   vec2d_t *position,
                                   mw_tril_result_t *result)
 {
-    if (!anchors || !position || num_anchors < 3) {
+    if (!anchors_exact_3 || !position) {
         return MW_TRIL_ERR_PARAM;
     }
 
-    uint8_t selected[3] = {0, 1, 2};
-    if (num_anchors > 3) {
-        select_best_3_anchors(anchors, num_anchors, selected);
-    } else {
-        uint8_t count = 0;
-        for (uint8_t i = 0; i < num_anchors && count < 3; i++) {
-            if (anchors[i].valid) {
-                selected[count++] = i;
-            }
-        }
-        if (count < 3) return MW_TRIL_ERR_PARAM;
-    }
-
     /* Extract 2D coordinates */
-    double x1 = anchors[selected[0]].position.x;
-    double y1 = anchors[selected[0]].position.y;
-    double r1 = anchors[selected[0]].distance;
-    double x2 = anchors[selected[1]].position.x;
-    double y2 = anchors[selected[1]].position.y;
-    double r2 = anchors[selected[1]].distance;
-    double x3 = anchors[selected[2]].position.x;
-    double y3 = anchors[selected[2]].position.y;
-    double r3 = anchors[selected[2]].distance;
+    double x1 = anchors_exact_3[0].position.x;
+    double y1 = anchors_exact_3[0].position.y;
+    double r1 = anchors_exact_3[0].distance;
+    double x2 = anchors_exact_3[1].position.x;
+    double y2 = anchors_exact_3[1].position.y;
+    double r2 = anchors_exact_3[1].distance;
+    double x3 = anchors_exact_3[2].position.x;
+    double y3 = anchors_exact_3[2].position.y;
+    double r3 = anchors_exact_3[2].distance;
 
     /* 2D trilateration formula */
     double delta = 4.0 * ((x1-x2)*(y1-y3) - (x1-x3)*(y1-y2));

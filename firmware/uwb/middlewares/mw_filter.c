@@ -6,10 +6,6 @@
  * @date       2026-01-10
  * @author     Phuong Mai
  * @brief      Adaptive Kalman Filter with Innovation-based R tuning
- * @note       
- *   - Uses continuous white noise acceleration model (physically correct)
- *   - Q inflation based on innovation magnitude for responsive tracking
- *   - Automatic R adaptation via innovation variance
  * @example    None
  */
 #include "mw_filter.h"
@@ -17,343 +13,148 @@
 #include <string.h>
 #include <math.h>
 
-/* ========== DES FILTER ========== */
+/* ====================================================================
+ * UWB Mahalanobis Pre-Filter
+ * ==================================================================== */
 
-#if MW_FILTER_ENABLE_DES
-
-void mw_filter_des_init(des_filter_2d_t *des,
-                        float x0, float y0,
-                        float alpha_base,
-                        float beta)
+static float mw_filter_get_median(median_filter_1d_t *med, float new_val)
 {
-    if (!des) return;
-    memset(des, 0, sizeof(des_filter_2d_t));
-    
-    des->s_x = x0;
-    des->s_y = y0;
-    des->b_x = 0.0f;
-    des->b_y = 0.0f;
-    
-    des->alpha_base = alpha_base;
-    des->alpha = alpha_base;
-    des->beta = beta;
-    
-    des->prev_mx = x0;
-    des->prev_my = y0;
-    des->change_ema = 0.0f;
-    
-    des->initialized = true;
-}
+    med->history[med->index] = new_val;
+    med->index = (med->index + 1) % 5;
+    if (med->count < 5) med->count++;
 
-void mw_filter_des_update(des_filter_2d_t *des,
-                          float mx_raw, float my_raw,
-                          float *mx_smooth, float *my_smooth)
-{
-    if (!des || !des->initialized || !mx_smooth || !my_smooth) return;
-    
-    /* Calculate movement change */
-    float dx = mx_raw - des->prev_mx;
-    float dy = my_raw - des->prev_my;
-    float change = sqrtf(dx*dx + dy*dy);
-    
-    /* Exponential moving average of change */
-    if (des->change_ema == 0.0f) {
-        des->change_ema = change;
+    float sorted[5];
+    for (uint8_t i = 0; i < med->count; i++) sorted[i] = med->history[i];
+
+    /* Insertion sort */
+    for (uint8_t i = 1; i < med->count; i++) {
+        float key = sorted[i];
+        int j = i - 1;
+        while (j >= 0 && sorted[j] > key) {
+            sorted[j + 1] = sorted[j];
+            j--;
+        }
+        sorted[j + 1] = key;
+    }
+
+    if (med->count == 0) return new_val;
+    if (med->count % 2 == 1) {
+        return sorted[med->count / 2];
     } else {
-        des->change_ema = DES_CHANGE_ALPHA * change + 
-                         (1.0f - DES_CHANGE_ALPHA) * des->change_ema;
+        int mid = med->count / 2;
+        return 0.5f * (sorted[mid - 1] + sorted[mid]);
     }
-    
-    /* Adaptive alpha based on motion */
-    if (des->change_ema > DES_MOTION_THRESHOLD) {
-        /* High motion: increase responsiveness */
-        des->alpha = des->alpha_base * DES_MOTION_SCALE_HIGH;
-        if (des->alpha > DES_ALPHA_MAX) des->alpha = DES_ALPHA_MAX;
-    } else {
-        /* Low motion: increase smoothing */
-        des->alpha = des->alpha_base * DES_MOTION_SCALE_LOW;
-        if (des->alpha < DES_ALPHA_MIN) des->alpha = DES_ALPHA_MIN;
-    }
-    
-    /* Double Exponential Smoothing update */
-    float s_x_prev = des->s_x;
-    float b_x_prev = des->b_x;
-    des->s_x = des->alpha * mx_raw + (1.0f - des->alpha) * (s_x_prev + b_x_prev);
-    des->b_x = des->beta * (des->s_x - s_x_prev) + (1.0f - des->beta) * b_x_prev;
-    
-    float s_y_prev = des->s_y;
-    float b_y_prev = des->b_y;
-    des->s_y = des->alpha * my_raw + (1.0f - des->alpha) * (s_y_prev + b_y_prev);
-    des->b_y = des->beta * (des->s_y - s_y_prev) + (1.0f - des->beta) * b_y_prev;
-    
-    /* Output: level + trend */
-    *mx_smooth = des->s_x + des->b_x;
-    *my_smooth = des->s_y + des->b_y;
-    
-    /* Update history */
-    des->prev_mx = mx_raw;
-    des->prev_my = my_raw;
 }
 
-void mw_filter_des_reset(des_filter_2d_t *des, float x, float y)
+void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
+                                float T1, float T2, float anchor_R_base)
 {
-    if (!des) return;
-    
-    des->s_x = x;
-    des->s_y = y;
-    des->b_x = 0.0f;
-    des->b_y = 0.0f;
-    des->prev_mx = x;
-    des->prev_my = y;
-    des->change_ema = 0.0f;
+    if (!ctx) return;
+    for (uint8_t i = 0; i < 8; i++) {
+        ctx->anchor_medians[i].count = 0;
+        ctx->anchor_medians[i].index = 0;
+        for (uint8_t j = 0; j < 5; j++) ctx->anchor_medians[i].history[j] = 0.0f;
+    }
+    ctx->T1 = T1;
+    ctx->T2 = T2;
+    ctx->R_base = anchor_R_base;
+    ctx->initialized = true;
 }
 
-#endif /* MW_FILTER_ENABLE_DES */
-
-/* ========== ADAPTIVE KALMAN FILTER ========== */
-
-#if MW_FILTER_ENABLE_AKF
-
-void mw_filter_akf_init(adaptive_kalman_2d_t *akf,
-                        float x0, float y0,
-                        float dt,
-                        float Q,
-                        float R_base,
-                        float innovation_alpha,
-                        float R_scale_min,
-                        float R_scale_max)
+bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
+                                  uint8_t anchor_id, float d_raw,
+                                  float px, float py, float pz,
+                                  float vx, float vy, float vz,
+                                  float ax, float ay, float az,
+                                  float *d_out, float *d2_score, float *R_adaptive)
 {
-    if (!akf) return;
-    memset(akf, 0, sizeof(adaptive_kalman_2d_t));
+    if (!ctx || !ctx->initialized || anchor_id >= 8) return false;
+
+    /* 1. Median Filter */
+    float d_meas = mw_filter_get_median(&ctx->anchor_medians[anchor_id], d_raw);
+
+    /* 2. Predict Measurement */
+    float dx = px - ax;
+    float dy = py - ay;
+    float dz = pz - az;
+    float d_pred = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (d_pred < 0.1f) d_pred = 0.1f; /* Prevent dividing small S, over-trusting close distance */
+
+    /* 3. Compute Innovation */
+    float r = d_meas - d_pred;
+
+    /* 4. Compute Mahalanobis Distance */
+    float k_pos = 0.02f;
+    float k_vel = 0.05f; /* Tuning parameter for IMU drift */
+    float vel_mag = sqrtf(vx * vx + vy * vy + vz * vz);
+    float S = ctx->R_base + (k_pos * d_pred * d_pred) + (k_vel * vel_mag);
+    float d2 = (r * r) / S;
+
+    if (d_out) *d_out = d_meas;
+    if (d2_score) *d2_score = d2;
+
+    /* 5. Decision Logic */
+    if (d2 < ctx->T1) {
+        if (R_adaptive) *R_adaptive = ctx->R_base;
+        return true;
+    } else if (d2 < ctx->T2) {
+        float scale = (d2 / ctx->T1);
+        scale = scale * scale; /* Quadratic penalty */
+        if (R_adaptive) *R_adaptive = ctx->R_base * scale;
+        return true;
+    }
     
-    /* State: [x, vx, y, vy] */
-    akf->state[0] = x0;
-    akf->state[1] = 0.0f;
-    akf->state[2] = y0;
-    akf->state[3] = 0.0f;
-    
-    /* Initial covariance */
-    akf->P[0][0] = 1.0f;
-    akf->P[1][1] = 1.0f;
-    akf->P[2][2] = 1.0f;
-    akf->P[3][3] = 1.0f;
-    
-    /* Parameters */
-    akf->dt = dt;
-    akf->Q = Q;
-    akf->R_base = R_base;
-    
-    /* Innovation tracking */
-    akf->innovation_x = 0.0f;
-    akf->innovation_y = 0.0f;
-    akf->innovation_var = R_base;
-    akf->innovation_alpha = innovation_alpha;
-    
-    /* Adaptive R scaling */
-    akf->R_scale = 1.0f;
-    akf->R_scale_min = R_scale_min;
-    akf->R_scale_max = R_scale_max;
-    
-    akf->initialized = true;
+    /* d2 >= T2 -> Rejected */
+    return false;
 }
 
-float mw_filter_akf_update(adaptive_kalman_2d_t *akf,
-                           float mx, float my,
-                           pos_vel_2d_t *out)
+void mw_filter_distance_smoother_init(distance_smoother_t *ctx,
+                                      bool enabled,
+                                      float alpha,
+                                      float jump_limit_m)
 {
-    if (!akf || !akf->initialized) return 1.0f;
-    
-    float dt = akf->dt;
-    float Q = akf->Q;
-    
-    /* Calculate current velocity magnitude */
-    float velocity = sqrtf(akf->state[1]*akf->state[1] + 
-                          akf->state[3]*akf->state[3]);
-    
-    /* Detect stopped state */
-    bool is_stopped = (velocity < AKF_STOP_THRESHOLD);
-    
-    /* Dampen velocity when stopped */
-    if (is_stopped) {
-        akf->state[1] *= AKF_STOP_VELOCITY_DAMPING;
-        akf->state[3] *= AKF_STOP_VELOCITY_DAMPING;
-        velocity = sqrtf(akf->state[1]*akf->state[1] + 
-                        akf->state[3]*akf->state[3]);
-    }
-    
-    /* ===== PREDICT ===== */
-    float x_pred = akf->state[0] + akf->state[1] * dt;
-    float vx_pred = akf->state[1];
-    float y_pred = akf->state[2] + akf->state[3] * dt;
-    float vy_pred = akf->state[3];
-    
-    /* Innovation (measurement residual) */
-    float innov_x = mx - x_pred;
-    float innov_y = my - y_pred;
-    
-    /* Velocity-adaptive process noise */
-    float q_scale = is_stopped ? AKF_Q_SCALE_STOPPED : 
-                    (1.0f + AKF_Q_SCALE_VELOCITY_K * velocity);
-    float sigma_a2 = Q * q_scale;
-    
-    /* Process noise covariance matrix */
-    float dt2 = dt * dt;
-    float dt3 = dt2 * dt;
-    float dt4 = dt3 * dt;
-    
-    float Q_pos_pos = 0.25f * sigma_a2 * dt4;
-    float Q_pos_vel = 0.5f  * sigma_a2 * dt3;
-    float Q_vel_vel = sigma_a2 * dt2;
-    
-    /* Predict covariance (X dimension) */
-    float P00 = akf->P[0][0] + 2.0f*dt*akf->P[0][1] + dt2*akf->P[1][1] + Q_pos_pos;
-    float P01 = akf->P[0][1] + dt*akf->P[1][1] + Q_pos_vel;
-    float P11 = akf->P[1][1] + Q_vel_vel;
-    
-    /* Predict covariance (Y dimension) */
-    float P22 = akf->P[2][2] + 2.0f*dt*akf->P[2][3] + dt2*akf->P[3][3] + Q_pos_pos;
-    float P23 = akf->P[2][3] + dt*akf->P[3][3] + Q_pos_vel;
-    float P33 = akf->P[3][3] + Q_vel_vel;
-    
-    /* ===== ADAPTIVE R CALCULATION ===== */
-    float innov_magnitude_sq = innov_x*innov_x + innov_y*innov_y;
-    
-    /* Initialize or update innovation variance estimate */
-    if (akf->innovation_var == 0.0f || akf->innovation_var == akf->R_base) {
-        akf->innovation_var = innov_magnitude_sq > 1e-6f ? 
-                             innov_magnitude_sq : akf->R_base;
-    } else {
-        akf->innovation_var = akf->innovation_alpha * innov_magnitude_sq +
-                             (1.0f - akf->innovation_alpha) * akf->innovation_var;
-    }
-    
-    akf->innovation_x = innov_x;
-    akf->innovation_y = innov_y;
-    
-    /* Calculate R scale based on innovation */
-    float innovation_ratio = sqrtf(akf->innovation_var / akf->R_base);
-    akf->R_scale = 1.0f / innovation_ratio;
-    
-    /* Apply constraints on R_scale */
-    if (is_stopped) {
-        /* When stopped, trust measurements more (lower R) */
-        akf->R_scale = akf->R_scale_max;
-    } else {
-        if (akf->R_scale < akf->R_scale_min) akf->R_scale = akf->R_scale_min;
-        if (akf->R_scale > akf->R_scale_max) akf->R_scale = akf->R_scale_max;
-    }
-    
-    float R = akf->R_base * akf->R_scale;
-    
-    /* ===== UPDATE (X dimension) ===== */
-    float Sx = P00 + R;
-    float Kx0 = P00 / Sx;
-    float Kx1 = P01 / Sx;
-    
-    /* Reduce Kalman gain when stopped */
-    if (is_stopped) {
-        Kx0 *= AKF_STOP_GAIN_REDUCTION;
-        Kx1 *= AKF_STOP_GAIN_REDUCTION;
-    }
-    
-    akf->state[0] = x_pred + Kx0 * innov_x;
-    akf->state[1] = vx_pred + Kx1 * innov_x;
-    
-    akf->P[0][0] = P00 - Kx0*Sx*Kx0;
-    akf->P[0][1] = akf->P[1][0] = P01 - Kx0*Sx*Kx1;
-    akf->P[1][1] = P11 - Kx1*Sx*Kx1;
-    
-    /* ===== UPDATE (Y dimension) ===== */
-    float Sy = P22 + R;
-    float Ky2 = P22 / Sy;
-    float Ky3 = P23 / Sy;
-    
-    /* Reduce Kalman gain when stopped */
-    if (is_stopped) {
-        Ky2 *= AKF_STOP_GAIN_REDUCTION;
-        Ky3 *= AKF_STOP_GAIN_REDUCTION;
-    }
-    
-    akf->state[2] = y_pred + Ky2 * innov_y;
-    akf->state[3] = vy_pred + Ky3 * innov_y;
-    
-    akf->P[2][2] = P22 - Ky2*Sy*Ky2;
-    akf->P[2][3] = akf->P[3][2] = P23 - Ky2*Sy*Ky3;
-    akf->P[3][3] = P33 - Ky3*Sy*Ky3;
-    
-    /* Output state */
-    if (out) {
-        out->x = akf->state[0];
-        out->vx = akf->state[1];
-        out->y = akf->state[2];
-        out->vy = akf->state[3];
-    }
-    
-    return akf->R_scale;
+    if (!ctx) return;
+
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->enabled = enabled;
+    ctx->alpha = alpha;
+    ctx->jump_limit_m = jump_limit_m;
 }
 
-void mw_filter_akf_get_stats(const adaptive_kalman_2d_t *akf,
-                             float *innovation_var,
-                             float *R_scale)
+void mw_filter_distance_smoother_reset(distance_smoother_t *ctx)
 {
-    if (!akf) return;
-    
-    if (innovation_var) *innovation_var = akf->innovation_var;
-    if (R_scale) *R_scale = akf->R_scale;
+    if (!ctx) return;
+
+    for (uint8_t i = 0; i < 8; i++) {
+        ctx->anchors[i].initialized = false;
+        ctx->anchors[i].filtered_m = 0.0f;
+    }
 }
 
-#endif /* MW_FILTER_ENABLE_AKF */
-
-/* ========== COMBINED FILTER ========== */
-
-void mw_filter_init(mw_filter_cxt_t *filter,
-                    float x0, float y0,
-                    float dt,
-                    float des_alpha,
-                    float des_beta,
-                    float akf_Q,
-                    float akf_R_base,
-                    float akf_innovation_alpha,
-                    float akf_R_scale_min,
-                    float akf_R_scale_max)
+float mw_filter_distance_smoother_apply(distance_smoother_t *ctx,
+                                        uint8_t anchor_index,
+                                        float raw_distance_m)
 {
-    if (!filter) return;
-    
-#if MW_FILTER_ENABLE_DES
-    mw_filter_des_init(&filter->des, x0, y0, des_alpha, des_beta);
-#endif
-    
-#if MW_FILTER_ENABLE_AKF
-    mw_filter_akf_init(&filter->akf, x0, y0, dt,
-                       akf_Q, akf_R_base, akf_innovation_alpha,
-                       akf_R_scale_min, akf_R_scale_max);
-#endif
-}
+    if (!ctx || !ctx->enabled || anchor_index >= 8) {
+        return raw_distance_m;
+    }
 
-float mw_filter_update(mw_filter_cxt_t *filter,
-                       float mx_raw, float my_raw,
-                       pos_vel_2d_t *out)
-{
-    if (!filter || !out) return 1.0f;
-    
-    float mx_input = mx_raw;
-    float my_input = my_raw;
-    
-#if MW_FILTER_ENABLE_DES
-    /* Stage 1: DES pre-smoothing */
-    mw_filter_des_update(&filter->des, mx_raw, my_raw, &mx_input, &my_input);
-#endif
-    
-#if MW_FILTER_ENABLE_AKF
-    /* Stage 2: Adaptive Kalman Filter */
-    float R_scale = mw_filter_akf_update(&filter->akf, mx_input, my_input, out);
-    return R_scale;
-#else
-    /* No AKF: output DES result or raw input */
-    out->x = mx_input;
-    out->y = my_input;
-    out->vx = 0.0f;
-    out->vy = 0.0f;
-    return 1.0f;
-#endif
+    anchor_distance_smoother_t *flt = &ctx->anchors[anchor_index];
+    if (!flt->initialized) {
+        flt->filtered_m = raw_distance_m;
+        flt->initialized = true;
+        return raw_distance_m;
+    }
+
+    float delta = raw_distance_m - flt->filtered_m;
+    float bounded_measurement = raw_distance_m;
+
+    if (delta > ctx->jump_limit_m) {
+        bounded_measurement = flt->filtered_m + ctx->jump_limit_m;
+    } else if (delta < -ctx->jump_limit_m) {
+        bounded_measurement = flt->filtered_m - ctx->jump_limit_m;
+    }
+
+    flt->filtered_m += ctx->alpha * (bounded_measurement - flt->filtered_m);
+    return flt->filtered_m;
 }

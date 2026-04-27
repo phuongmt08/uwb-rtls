@@ -320,6 +320,18 @@ int sys_config_load(void)
 }
 
 
+int sys_config_set_power_mode(anchor_power_mode_t mode)
+{
+    if (mode > ANCHOR_POWER_MODE_DEEP_ECO) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid power mode: %d", mode);
+        return -1;
+    }
+    
+    g_storage.config.uwb.power_mode = (uint32_t)mode;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Power mode set to: %d", mode);
+    return 0;
+}
+
 void sys_config_reset_to_defaults(void)
 {
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Resetting to factory defaults");
@@ -358,6 +370,7 @@ void sys_config_reset_to_defaults(void)
        ---------- */
     g_storage.config.uwb.ranging_period_ms                  =           DEFAULT_RANGING_PERIOD_MS;
     g_storage.config.uwb.rx_timeout_ms                      =           DEFAULT_RX_TIMEOUT_MS;
+     g_storage.config.uwb.power_mode                         =           DEFAULT_ANCHOR_POWER_MODE;
     g_storage.config.uwb.anchor_list.size                   =           0;
     
     /* Calibration Configuration
@@ -431,6 +444,7 @@ void sys_config_print(void)
     CFG_LOG("-------------- TIMING -----------------");
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
+    CFG_LOG("Power Mode    : %lu", g_storage.config.uwb.power_mode);
     CFG_LOG("==========================================");
     CFG_LOG("");
 }

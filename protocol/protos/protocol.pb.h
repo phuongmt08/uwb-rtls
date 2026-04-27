@@ -26,14 +26,6 @@ typedef enum _protobuf_packet_ack_response_t {
     protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE = 7
 } protobuf_packet_ack_response_t;
 
-typedef enum _protobuf_warning_code_t {
-    protobuf_WARNING_CODE_UNSPECIFIED = 0,
-    protobuf_WARNING_CODE_QUEUE_NEAR_FULL = 1,
-    protobuf_WARNING_CODE_RETRYING = 2,
-    protobuf_WARNING_CODE_DEGRADED_MODE = 3,
-    protobuf_WARNING_CODE_PARTIAL_DATA = 4
-} protobuf_warning_code_t;
-
 typedef enum _protobuf_device_type_t {
     protobuf_DEVICE_TYPE_UNSPECIFIED = 0,
     protobuf_DEVICE_TYPE_TAG = 1,
@@ -98,6 +90,13 @@ typedef enum _protobuf_host_transport_t {
     protobuf_HOST_TRANSPORT_USB = 1,
     protobuf_HOST_TRANSPORT_UART = 2
 } protobuf_host_transport_t;
+
+typedef enum _protobuf_anchor_power_mode_t {
+    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE = 0,
+    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED = 1,
+    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO = 2,
+    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO = 3
+} protobuf_anchor_power_mode_t;
 
 typedef enum _protobuf_fota_state_index_t {
     protobuf_FOTA_STATE_UNSPECIFIED = 0,
@@ -189,6 +188,7 @@ typedef struct _protobuf_uwb_cfg_t {
     uint32_t rx_antenna_delay;
     uint32_t tx_power;
     protobuf_uwb_cfg_t_anchor_list_t anchor_list;
+    protobuf_anchor_power_mode_t power_mode;
 } protobuf_uwb_cfg_t;
 
 typedef struct _protobuf_sys_config_get_t {
@@ -638,15 +638,6 @@ extern "C" {
 #define protobuf_packet_ack_response_t_PACKET_ACK_RESPONSE_NACK_CMD_FAILED protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED
 #define protobuf_packet_ack_response_t_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE
 
-#define _protobuf_warning_code_t_MIN protobuf_WARNING_CODE_UNSPECIFIED
-#define _protobuf_warning_code_t_MAX protobuf_WARNING_CODE_PARTIAL_DATA
-#define _protobuf_warning_code_t_ARRAYSIZE ((protobuf_warning_code_t)(protobuf_WARNING_CODE_PARTIAL_DATA+1))
-#define protobuf_warning_code_t_WARNING_CODE_UNSPECIFIED protobuf_WARNING_CODE_UNSPECIFIED
-#define protobuf_warning_code_t_WARNING_CODE_QUEUE_NEAR_FULL protobuf_WARNING_CODE_QUEUE_NEAR_FULL
-#define protobuf_warning_code_t_WARNING_CODE_RETRYING protobuf_WARNING_CODE_RETRYING
-#define protobuf_warning_code_t_WARNING_CODE_DEGRADED_MODE protobuf_WARNING_CODE_DEGRADED_MODE
-#define protobuf_warning_code_t_WARNING_CODE_PARTIAL_DATA protobuf_WARNING_CODE_PARTIAL_DATA
-
 #define _protobuf_device_type_t_MIN protobuf_DEVICE_TYPE_UNSPECIFIED
 #define _protobuf_device_type_t_MAX protobuf_DEVICE_TYPE_DEBUG_TOOL
 #define _protobuf_device_type_t_ARRAYSIZE ((protobuf_device_type_t)(protobuf_DEVICE_TYPE_DEBUG_TOOL+1))
@@ -719,6 +710,10 @@ extern "C" {
 #define protobuf_host_transport_t_HOST_TRANSPORT_USB protobuf_HOST_TRANSPORT_USB
 #define protobuf_host_transport_t_HOST_TRANSPORT_UART protobuf_HOST_TRANSPORT_UART
 
+#define _protobuf_anchor_power_mode_t_MIN protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE
+#define _protobuf_anchor_power_mode_t_MAX protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO
+#define _protobuf_anchor_power_mode_t_ARRAYSIZE ((protobuf_anchor_power_mode_t)(protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO+1))
+
 #define _protobuf_fota_state_index_t_MIN protobuf_FOTA_STATE_UNSPECIFIED
 #define _protobuf_fota_state_index_t_MAX protobuf_FOTA_STATE_ERROR
 #define _protobuf_fota_state_index_t_ARRAYSIZE ((protobuf_fota_state_index_t)(protobuf_FOTA_STATE_ERROR+1))
@@ -748,6 +743,7 @@ extern "C" {
 #define protobuf_time_sync_adv_set_t_device_type_ENUMTYPE protobuf_device_type_t
 
 #define protobuf_uwb_cfg_t_role_ENUMTYPE protobuf_device_role_t
+#define protobuf_uwb_cfg_t_power_mode_ENUMTYPE protobuf_anchor_power_mode_t
 
 
 
@@ -829,7 +825,7 @@ extern "C" {
 #define protobuf_time_sync_set_t_init_default    {0, 0}
 #define protobuf_time_sync_resp_t_init_default   {0, 0}
 #define protobuf_time_sync_adv_set_t_init_default {_protobuf_device_type_t_MIN, 0, 0, 0}
-#define protobuf_uwb_cfg_t_init_default          {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}}
+#define protobuf_uwb_cfg_t_init_default          {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN}
 #define protobuf_sys_config_get_t_init_default   {0}
 #define protobuf_sys_config_set_t_init_default   {false, protobuf_uwb_cfg_t_init_default}
 #define protobuf_sys_config_resp_t_init_default  {false, protobuf_uwb_cfg_t_init_default}
@@ -899,7 +895,7 @@ extern "C" {
 #define protobuf_time_sync_set_t_init_zero       {0, 0}
 #define protobuf_time_sync_resp_t_init_zero      {0, 0}
 #define protobuf_time_sync_adv_set_t_init_zero   {_protobuf_device_type_t_MIN, 0, 0, 0}
-#define protobuf_uwb_cfg_t_init_zero             {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}}
+#define protobuf_uwb_cfg_t_init_zero             {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN}
 #define protobuf_sys_config_get_t_init_zero      {0}
 #define protobuf_sys_config_set_t_init_zero      {false, protobuf_uwb_cfg_t_init_zero}
 #define protobuf_sys_config_resp_t_init_zero     {false, protobuf_uwb_cfg_t_init_zero}
@@ -1001,6 +997,7 @@ extern "C" {
 #define protobuf_uwb_cfg_t_rx_antenna_delay_tag  10
 #define protobuf_uwb_cfg_t_tx_power_tag          11
 #define protobuf_uwb_cfg_t_anchor_list_tag       12
+#define protobuf_uwb_cfg_t_power_mode_tag        13
 #define protobuf_sys_config_get_t_dummy_tag      1
 #define protobuf_sys_config_set_t_config_tag     1
 #define protobuf_sys_config_resp_t_config_tag    1
@@ -1277,7 +1274,8 @@ X(a, STATIC,   SINGULAR, UINT32,   uwb_preamble_code,   8) \
 X(a, STATIC,   SINGULAR, UINT32,   tx_antenna_delay,   9) \
 X(a, STATIC,   SINGULAR, UINT32,   rx_antenna_delay,  10) \
 X(a, STATIC,   SINGULAR, UINT32,   tx_power,         11) \
-X(a, STATIC,   SINGULAR, BYTES,    anchor_list,      12)
+X(a, STATIC,   SINGULAR, BYTES,    anchor_list,      12) \
+X(a, STATIC,   SINGULAR, UENUM,    power_mode,       13)
 #define protobuf_uwb_cfg_t_CALLBACK NULL
 #define protobuf_uwb_cfg_t_DEFAULT NULL
 
@@ -1974,8 +1972,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ranging_status_resp_t_size      58
 #define protobuf_ranging_stop_t_size             6
 #define protobuf_sys_config_get_t_size           6
-#define protobuf_sys_config_resp_t_size          74
-#define protobuf_sys_config_set_t_size           74
+#define protobuf_sys_config_resp_t_size          76
+#define protobuf_sys_config_set_t_size           76
 #define protobuf_sys_ranging_cfg_get_t_size      6
 #define protobuf_sys_ranging_cfg_resp_t_size     14
 #define protobuf_sys_ranging_cfg_set_t_size      14
@@ -1985,7 +1983,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_time_sync_get_t_size            6
 #define protobuf_time_sync_resp_t_size           22
 #define protobuf_time_sync_set_t_size            22
-#define protobuf_uwb_cfg_t_size                  72
+#define protobuf_uwb_cfg_t_size                  74
 #define protobuf_uwb_reset_t_size                6
 #define protobuf_version_t_size                  35
 

@@ -680,6 +680,13 @@ static void network_cmd_log_clear(const protobuf_packet_t *pkt)
     if (length > 0u) {
         sys_logger_flash_consume(length);
     }
+#else
+    uint32_t length = pkt->params.log_clear.length;
+    if (length > 0u) {
+        sys_logger_consume((uint16_t)length);
+    } else {
+        sys_logger_clear();
+    }
 #endif
 }
 
@@ -742,7 +749,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
     uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
     uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
-    uint16_t read_len    = sys_logger_peek(packet.params.log_data.data.bytes, send_len);
+    uint16_t read_len    = sys_logger_peek_packet(packet.params.log_data.data.bytes, send_len);
     if (read_len == 0u) {
         return;
     }
