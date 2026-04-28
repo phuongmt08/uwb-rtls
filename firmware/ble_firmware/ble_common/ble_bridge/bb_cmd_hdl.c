@@ -100,10 +100,6 @@ typedef enum {
 } bb_cmd_hdl_state_t;
 
 static bb_cmd_hdl_state_t m_cmd_state = BB_CMD_HDL_STATE_IDLE;
-static protobuf_packet_t in_pkt;
-static protobuf_packet_t out_pkt;
-static bb_cmd_handler_t m_current_handler;
-static bb_cmd_action_t m_current_action;
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_cmd_hdl_init(void)

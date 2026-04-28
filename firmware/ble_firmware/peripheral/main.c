@@ -70,7 +70,7 @@
 
 /*
 **@brief Function for initializing power management.
- */
+*/
 static void power_management_init(void)
 {
     ret_code_t err_code;
@@ -78,26 +78,12 @@ static void power_management_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-
-/**@brief Function for handling the idle state (main loop).
- *
- * @details If there is no pending log operation, then sleep until next the next event occurs.
- */
-static void idle_state_handle(void)
-{
-    if (NRF_LOG_PROCESS() == false)
-    {
-        nrf_pwr_mgmt_run();
-    }
-}
-
-
 /**@brief Function for application main entry.
  */
 int main(void)
 {
     // Initialize.
-    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init) 
+    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init)
     logger_init();
     bsp_utils_init();
     power_management_init();
@@ -107,7 +93,7 @@ int main(void)
 
     // Start execution.
     NRF_LOG_INFO("BLE Peripheral started !");
-    
+
     // Enter main loop.
     for (;;)
     {
