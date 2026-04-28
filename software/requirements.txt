@@ -5,3 +5,4 @@ libusb-package>=1.0.26.1
 protobuf>=5.26
 pyserial>=3.5
 PyQt5>=5.15
+PyInstaller>=5.9.0
