@@ -2,16 +2,11 @@
  * @file       app_anchor.c
  * @copyright
  * @license
- * @version    1.1.0
- * @date       2025-12-24
+ * @version    2.1.0
+ * @date       2026-02-01
  * @author     Phuong Mai
- * @brief      Non-blocking Anchor with binary search auto-calibration
- * @note       
- * Calibration Algorithm:
- * 1. Collect samples → calculate mean error
- * 2. Adjust antenna delay using binary search
- * 3. Repeat until error < threshold OR delta < min_step
- * @example    None
+ * @brief      Non-blocking Anchor with binary search auto-calibration & TDMA
+ * 
  */
 /* Includes ----------------------------------------------------------- */
 #include "app_anchor.h"
@@ -25,7 +20,6 @@
 #include <stdint.h>
 #include <math.h>
 #include <string.h>
-/* Configuration ------------------------------------------------------ */
 
 /* Private types ------------------------------------------------------ */
 typedef enum {
@@ -52,20 +46,23 @@ typedef struct {
   uint16_t round;
   bool converged;
 } calib_state_t;
+
+/* Calibration Constants */
+#define CALIB_ERROR_THRESHOLD_M  0.02f  // 2cm tolerance
+#define CALIB_MIN_DELTA_STEP     3      // Stop if step < 3
+#define CALIB_MAX_ROUNDS         10     // Max iterations
+#define CALIB_SAMPLES_PER_ROUND  25     // Samples per iteration
+#define CALIB_MAX_STD_M          0.1f   // Max standard deviation
 #endif
 
 /* Private variables -------------------------------------------------- */
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
 static anchor_app_state_t s_app_state = ANCHOR_STATE_IDLE;
-static uint32_t s_last_listen_tick = 0;
+static bool s_anchor_ranging_started = false;
 
 #if ENABLE_ANCHOR_AUTO_CALIB
 static calib_state_t s_calib = {0};
-#define CALIB_ERROR_THRESHOLD_M  0.02f  // 2cm tolerance
-#define CALIB_MIN_DELTA_STEP     3      // Stop if step < 3
-#define CALIB_MAX_ROUNDS         10     // Max iterations
-#define CALIB_SAMPLES_PER_ROUND  25     // Samples per iteration
 #endif
 
 /* Private function prototypes ---------------------------------------- */
@@ -76,6 +73,20 @@ static void calib_calculate_and_adjust(void);
 static void calib_apply_and_save(void);
 static float calib_get_ref_distance_3d(void);
 #endif
+
+/* Helper to configure TDMA network */
+static void get_tdma_config(uint8_t *my_id, uint8_t *num_anchors, uint8_t *anchor_ids) {
+    sys_config_t *cfg = sys_config_get();
+  *my_id = cfg->uwb.device_id;
+    
+    /* Config network size from NUM_ANCHORS (TDMA max 8) */
+    *num_anchors = (NUM_ANCHORS > 8) ? 8 : NUM_ANCHORS;
+    
+    /* Create linear list of Anchor IDs: 1, 2, 3... */
+    for(uint8_t i=0; i<*num_anchors; i++) {
+        anchor_ids[i] = i + 1;
+    }
+}
 
 /* Private function implementations ----------------------------------- */
 
@@ -105,17 +116,18 @@ static void calib_reset(void)
 static bool calib_add_sample(float distance)
 {
   if (s_calib.count >= CALIB_SAMPLES_PER_ROUND) {
-    return false;
+    return true; /* Full */
   }
   
-  // if (distance < 0.1f || distance > 50.0f) {
-  //   return false;
-  // }
+  /* Filter outliers */
+  if (distance < 0.1f || distance > 50.0f) {
+    return false;
+  }
   
   s_calib.distances[s_calib.count++] = distance;
   
   if (s_calib.count % 5 == 0) {
-    bsp_io_led_toggle();
+    bsp_io_led_toggle(); /* Visual feedback during collection */
   }
   
   return (s_calib.count >= CALIB_SAMPLES_PER_ROUND);
@@ -127,12 +139,14 @@ static void calib_calculate_and_adjust(void)
     return;
   }
   
+  /* Calculate Mean */
   float sum = 0.0f;
   for (uint16_t i = 0; i < s_calib.count; i++) {
     sum += s_calib.distances[i];
   }
   s_calib.mean = sum / s_calib.count;
   
+  /* Calculate StdDev */
   float variance = 0.0f;
   for (uint16_t i = 0; i < s_calib.count; i++) {
     float diff = s_calib.distances[i] - s_calib.mean;
@@ -140,12 +154,12 @@ static void calib_calculate_and_adjust(void)
   }
   float std_dev = sqrtf(variance / s_calib.count);
   
+  /* Sanity Check */
   if (std_dev > CALIB_MAX_STD_M) {
     RLOG_W(LOG_OBJECT_CODE_ANCHOR, 
            "[R%u] REJECTED std=%.3fm > %.3fm",
            s_calib.round + 1, std_dev, CALIB_MAX_STD_M);
-    s_calib.count = 0;
-    memset(s_calib.distances, 0, sizeof(s_calib.distances));
+    s_calib.count = 0; /* Retry this round */
     return;
   }
   
@@ -157,6 +171,7 @@ static void calib_calculate_and_adjust(void)
          s_calib.round, s_calib.mean, std_dev, s_calib.error, 
          s_calib.current_delay, s_calib.delta_step);
   
+  /* Check Convergence */
   if (fabsf(s_calib.error) < CALIB_ERROR_THRESHOLD_M) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] DONE! delay=%u err=%.3fm", 
            s_calib.current_delay, s_calib.error);
@@ -166,6 +181,7 @@ static void calib_calculate_and_adjust(void)
     return;
   }
   
+  /* Check Limits */
   if (s_calib.round >= CALIB_MAX_ROUNDS || s_calib.delta_step < CALIB_MIN_DELTA_STEP) {
     RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[CALIB] STOP! delay=%u err=%.3fm", 
            s_calib.current_delay, s_calib.error);
@@ -175,6 +191,7 @@ static void calib_calculate_and_adjust(void)
     return;
   }
   
+  /* Binary Search Logic */
   if (s_calib.error * s_calib.last_error < 0.0f) {
     s_calib.delta_step = s_calib.delta_step / 2;
   }
@@ -195,10 +212,13 @@ static void calib_calculate_and_adjust(void)
   sys_config_t *cfg = sys_config_get();
   protobuf_uwb_cfg_t tmp = cfg->uwb;
   tmp.tx_antenna_delay = s_calib.current_delay;
+  tmp.rx_antenna_delay = s_calib.current_delay;
   bsp_uwb_configure(&tmp);
   
+  bsp_uwb_configure(&uwb_cfg); /* Hardware re-config */
+  
+  /* Reset samples for next round */
   s_calib.count = 0;
-  memset(s_calib.distances, 0, sizeof(s_calib.distances));
 }
 
 static void calib_apply_and_save(void)
@@ -209,6 +229,7 @@ static void calib_apply_and_save(void)
   
   sys_config_t *cfg = sys_config_get();
   cfg->uwb.tx_antenna_delay = s_calib.current_delay;
+  cfg->uwb.rx_antenna_delay = s_calib.current_delay;
   
   if (sys_config_save() == 0) {
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Saved! Restarting...");
@@ -242,7 +263,7 @@ void app_anchor_on_button(bsp_io_button_event_t event)
 
 #endif
 
-/* Public function definitions ---------------------------------------- */
+/* Public functions ---------------------------------------- */
 
 app_err_t app_anchor_init(void)
 {
@@ -267,10 +288,8 @@ app_err_t app_anchor_init(void)
   calib_reset();
   s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
 #else
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Mode: DS-TWR");
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Normal Mode: TDMA Responder");
 #endif
-  
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "======================");
 
 #if !ENABLE_ANCHOR_AUTO_CALIB
   s_app_state = ANCHOR_STATE_IDLE;
@@ -280,129 +299,86 @@ app_err_t app_anchor_init(void)
 
 void app_anchor_process(void *arg)
 {
+  (void)arg;
+  static uint32_t s_last_diag_log = 0;
+  uint32_t now = HAL_GetTick();
+  sys_config_t *cfg = sys_config_get();
+  uint32_t rx_timeout_ms = (cfg->uwb.rx_timeout_ms < 5U) ? 5U : cfg->uwb.rx_timeout_ms;
+  uint8_t my_id = 0;
+  uint8_t num_anchors = NUM_ANCHORS;
+  uint8_t anchor_ids[NUM_ANCHORS] = {0};
 
-  uint32_t current_tick = HAL_GetTick();
-  
-  switch (s_app_state) {
-    case ANCHOR_STATE_IDLE:
-      /* Start listening */
-      sys_ranging_err_t err = sys_ranging_anchor_start(0);
-      if (err == SYS_RANGING_OK) {
+  get_tdma_config(&my_id, &num_anchors, anchor_ids);
+
+  if (!s_anchor_ranging_started) {
+    sys_ranging_err_t start_err = sys_ranging_anchor_start_tdma(my_id, num_anchors, anchor_ids, rx_timeout_ms);
+    if (start_err == SYS_RANGING_OK) {
+      s_anchor_ranging_started = true;
+    } else if (start_err != SYS_RANGING_ERR_BUSY && (now - s_last_diag_log) >= 1000U) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR,
+             "[ANCHOR] start err=%d id=%u n=%u timeout=%lums",
+             start_err,
+             my_id,
+             num_anchors,
+             (unsigned long)rx_timeout_ms);
+      s_last_diag_log = now;
+      bsp_io_led_blink(5);
+    }
+    return;
+  }
+
+  sys_ranging_err_t err = sys_ranging_anchor_process_tdma(num_anchors, anchor_ids, rx_timeout_ms);
+
+  if (err == SYS_RANGING_OK) {
+    sys_ranging_result_t result;
+    /* Always call get_result_tdma regardless of result.valid.
+     * This is required to reset the state machine from STATE_ANCHOR_COMPLETE
+     * back to STATE_IDLE. If skipped, the next cycle's anchor_start_tdma
+     * returns SYS_RANGING_ERR_BUSY and the anchor silently drops that cycle. */
+    if (sys_ranging_anchor_get_result_tdma(&result) == SYS_RANGING_OK && result.valid) {
+      s_success_count++;
+      s_error_count = 0;
+
 #if ENABLE_ANCHOR_AUTO_CALIB
-        if (!s_calib.converged) {
-          s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
-        } else {
-          s_app_state = ANCHOR_STATE_LISTENING;
-        }
-#else
-        s_app_state = ANCHOR_STATE_LISTENING;
-#endif
-        s_last_listen_tick = current_tick;
-      } else if (err == SYS_RANGING_ERR_BUSY) {
-        /* Already running, ignore */
-      } else {
-        RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_RANGING, 
-               "[ANCHOR] Start failed: %d", err);
-        s_error_count++;
-      }
-      break;
-    
-#if ENABLE_ANCHOR_AUTO_CALIB
-    case ANCHOR_STATE_CALIB_COLLECTING: {
-      /* Process ranging and collect samples */
-      sys_ranging_err_t err = sys_ranging_anchor_process();
-      
-      if (err == SYS_RANGING_OK) {
-        /* Get result and add to calibration */
-        sys_ranging_result_t result;
-        if (sys_ranging_anchor_get_result(&result) == SYS_RANGING_OK && 
-            result.valid) {
-          bool round_complete = calib_add_sample(result.distance_m);
-          
-          if (round_complete) {
-            s_app_state = ANCHOR_STATE_CALIB_CALCULATE;
+      /* Feed to calibration if not converged */
+      if (!s_calib.converged && s_app_state == ANCHOR_STATE_CALIB_COLLECTING) {
+        if (calib_add_sample(result.distance_m)) {
+          s_app_state = ANCHOR_STATE_CALIB_CALCULATE;
+          calib_calculate_and_adjust();
+          if (s_calib.converged) {
+            s_app_state = ANCHOR_STATE_CALIB_PENDING_ACCEPT;
           } else {
-            s_app_state = ANCHOR_STATE_IDLE;
+            s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
           }
-        } else {
-          s_app_state = ANCHOR_STATE_IDLE;
         }
-      } else if (err == SYS_RANGING_ERR_BUSY) {
-        /* Still processing */
-      } else {
-        /* Error - retry */
-        s_app_state = ANCHOR_STATE_IDLE;
       }
-      break;
-    }
-    
-    case ANCHOR_STATE_CALIB_CALCULATE: {
-      /* Calculate and adjust delay */
-      calib_calculate_and_adjust();
-      
-      if (s_calib.converged) {
-        /* Done - wait for user input */
-        s_app_state = ANCHOR_STATE_CALIB_PENDING_ACCEPT;
-      } else {
-        /* Continue next round */
-        s_app_state = ANCHOR_STATE_IDLE;
-      }
-      break;
-    }
-    
-    case ANCHOR_STATE_CALIB_PENDING_ACCEPT:
-    case ANCHOR_STATE_CALIB_DONE:
-      break;
 #endif
-    
-    case ANCHOR_STATE_LISTENING: {
-      /* Normal ranging mode */
-      sys_ranging_err_t err = sys_ranging_anchor_process();
-      
-      if (err == SYS_RANGING_OK) {
-        s_app_state = ANCHOR_STATE_GET_RESULT;
-      } else if (err == SYS_RANGING_ERR_BUSY) {
-        /* Still processing */
-      } else if (err == SYS_RANGING_ERR_TIMEOUT) {
-        /* Timeout is normal - restart */
-        s_app_state = ANCHOR_STATE_IDLE;
-      } else {
-        RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_RANGING, 
-               "[ANCHOR] Error: %d", err);
-        s_error_count++;
-        s_app_state = ANCHOR_STATE_IDLE;
-        
-        if (s_error_count >= MAX_CONSECUTIVE_ERR) {
-          RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_TIMEOUT,
-                 "Too many errors (%lu)", s_error_count);
-          s_error_count = 0;
-        }
-      }
-      break;
+
     }
-    
-    case ANCHOR_STATE_GET_RESULT: {
-      sys_ranging_result_t result;
-      sys_ranging_err_t err = sys_ranging_anchor_get_result(&result);
-      
-      if (err == SYS_RANGING_OK && result.valid) {
-        s_success_count++;
-        s_error_count = 0;
-        
-        /* LED blink */
-        bsp_io_led_on();
-        bsp_delay_ms(20);
-        bsp_io_led_off();
-      }
-      
-      s_app_state = ANCHOR_STATE_IDLE;
-      break;
+    s_anchor_ranging_started = false;
+  } else if (err == SYS_RANGING_ERR_TIMEOUT || err == SYS_RANGING_ERR_NOT_STARTED) {
+    if ((now - s_last_diag_log) >= 1000U) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR,
+             "[ANCHOR] process state miss err=%d timeout=%lums",
+             err,
+             (unsigned long)rx_timeout_ms);
+      s_last_diag_log = now;
+      bsp_io_led_blink(5);
     }
-    
-    default:
-      s_app_state = ANCHOR_STATE_IDLE;
-      break;
+    /* Reset so next loop calls start_tdma again. Without this, TIMEOUT causes
+     * repeated NOT_STARTED returns, delaying re-entry and making next_poll_dw stale. */
+    s_anchor_ranging_started = false;
+  } else if (err == SYS_RANGING_ERR_BUSY) {
+    /* Still processing */
+  } else {
+    /* Real error */
+    s_error_count++;
+    s_anchor_ranging_started = false;
+    bsp_io_led_blink(5);
+    if (s_error_count >= MAX_CONSECUTIVE_ERR) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR, "Many errors (%lu)", s_error_count);
+      s_error_count = 0;
+    }
   }
 }
-
-/* End of file -------------------------------------------------------- */
+/* End of file -------------------------------------------------------- */  

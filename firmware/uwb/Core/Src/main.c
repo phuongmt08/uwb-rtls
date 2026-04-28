@@ -118,11 +118,17 @@ static void test_send_position(void)
 
   s_last_test_send_tick = current_tick;
 
+  float test_distances[NUM_ANCHORS] = {
+    s_test_x + 0.10f,
+    s_test_y + 0.20f,
+    s_test_x + s_test_y + 0.30f,
+    (s_test_x * 0.5f) + (s_test_y * 0.5f) + 0.40f
+  };
+  
   /* Send current position */
-  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, TEST_POS_ERROR);
-
-  if (ret == BSP_OK)
-  {
+  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, test_distances, TEST_POS_ERROR);
+  
+  if (ret == BSP_OK) {
     /* Update position for next send */
     s_test_x += TEST_POS_STEP;
 

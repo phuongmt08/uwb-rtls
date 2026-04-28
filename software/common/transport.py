@@ -6,7 +6,6 @@ from typing import List, Optional
 
 from . import protocol_pb2 as pb
 
-
 class VvAddress(IntEnum):
     # Keep values aligned with protocol_pb2 to avoid routing packets to wrong link.
     NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
@@ -27,6 +26,7 @@ class HostTransport(IntEnum):
 
 HDLC_SOF = 0x55
 HDLC_MAX_DATA_LEN = 256
+FRAME_TYPE_PROTOBUF = 0
 
 
 @dataclass
@@ -138,7 +138,14 @@ class VvProtocol:
     def decode_from_frames(self, data: bytes) -> List[pb.packet_t]:
         packets: List[pb.packet_t] = []
         for chunk in self.hdlc.feed(data):
-            packets.append(self.decode_packet(chunk.payload))
+            if chunk.frame_type != FRAME_TYPE_PROTOBUF:
+                continue
+
+            try:
+                packets.append(self.decode_packet(chunk.payload))
+            except DecodeError:
+                # Drop malformed protobuf payloads to keep the stream parser alive.
+                continue
         return packets
 
     def first_param(self, packets: List[pb.packet_t], name: str) -> Optional[pb.packet_t]:

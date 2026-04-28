@@ -38,14 +38,6 @@ enum packet_ack_response_t {
     PACKET_ACK_RESPONSE_NACK_INVALID_TYPE  = 7;
 }
 
-enum warning_code_t {
-    WARNING_CODE_UNSPECIFIED          = 0;
-    WARNING_CODE_QUEUE_NEAR_FULL      = 1;
-    WARNING_CODE_RETRYING             = 2;
-    WARNING_CODE_DEGRADED_MODE        = 3;
-    WARNING_CODE_PARTIAL_DATA         = 4;
-}
-
 enum device_type_t {
     DEVICE_TYPE_UNSPECIFIED = 0;
     DEVICE_TYPE_TAG         = 1;
@@ -109,6 +101,13 @@ enum host_transport_t {
     HOST_TRANSPORT_UNSPECIFIED  = 0;
     HOST_TRANSPORT_USB          = 1;
     HOST_TRANSPORT_UART         = 2;
+}
+
+enum anchor_power_mode_t {
+    ANCHOR_POWER_MODE_PERFORMANCE = 0;
+    ANCHOR_POWER_MODE_BALANCED    = 1;
+    ANCHOR_POWER_MODE_ECO         = 2;
+    ANCHOR_POWER_MODE_DEEP_ECO    = 3;
 }
 
 /* Common messages ---------------------------------------------------------- */
@@ -193,6 +192,7 @@ message uwb_cfg_t {
     uint32 rx_antenna_delay     = 10;
     uint32 tx_power             = 11;
     bytes anchor_list           = 12;
+    anchor_power_mode_t power_mode = 13;
 }
 
 message sys_config_get_t {
