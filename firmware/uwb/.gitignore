@@ -31,3 +31,6 @@ app/version_build.h
 !.gitignore
 # Keep clang-format file
 !.clang-format
+!Makefile 
+!tools/
+!tools/**

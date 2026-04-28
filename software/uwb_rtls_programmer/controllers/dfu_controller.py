@@ -9,6 +9,11 @@ from utils.workers import WorkerSignals
 from models.data_models import DfuError
 from models.consts import APP_START, APP_END
 
+
+def _is_pipe_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "pipe error" in text or "errno 32" in text
+
 class DfuController(QObject):
     def __init__(self, view: DfuTab, signals: WorkerSignals, config: ConfigService, main_ctrl):
         super().__init__()
@@ -74,11 +79,7 @@ class DfuController(QObject):
 
     def on_scan(self):
         def job():
-            try:
-                vid_filter = int(self.view.vid_edit.text().strip(), 16)
-                pid_filter = int(self.view.pid_edit.text().strip(), 16)
-            except:
-                vid_filter, pid_filter = None, None
+            vid_filter, pid_filter = self._parse_scan_filters()
 
             devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
             self.scanned_devices = devices
@@ -87,9 +88,23 @@ class DfuController(QObject):
                 self.view.combo_devices.addItem("No scanned DFU device")
             else:
                 for d in devices:
-                    self.view.combo_devices.addItem(f"{d.vid:04X}:{d.pid:04X} | IF {d.interface_number}")
+                    bus_text = "?" if d.bus is None else str(d.bus)
+                    addr_text = "?" if d.address is None else str(d.address)
+                    self.view.combo_devices.addItem(
+                        f"{d.vid:04X}:{d.pid:04X} | bus {bus_text} addr {addr_text} | IF {d.interface_number}"
+                    )
 
-            self.signals.log.emit(f"Scan complete: found {len(devices)} DFU device(s)")
+            if vid_filter is None or pid_filter is None:
+                self.signals.log.emit(f"Scan complete: found {len(devices)} DFU device(s)")
+            else:
+                self.signals.log.emit(
+                    f"Scan complete: found {len(devices)} DFU device(s) for {vid_filter:04X}:{pid_filter:04X}"
+                )
+
+            if devices:
+                first = devices[0]
+                self.view.vid_edit.setText(f"{first.vid:04X}")
+                self.view.pid_edit.setText(f"{first.pid:04X}")
         self.main_ctrl.run_task(job)
 
     def on_connect(self):
@@ -102,20 +117,63 @@ class DfuController(QObject):
     def on_auto_connect(self):
         def job():
             if not self.scanned_devices:
-                vid_filter = int(self.view.vid_edit.text().strip(), 16)
-                pid_filter = int(self.view.pid_edit.text().strip(), 16)
+                vid_filter, pid_filter = self._parse_scan_filters()
                 self.scanned_devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
             if not self.scanned_devices:
-                raise DfuError("No DFU device found. Check USB cable and Scan again.")
-            self._connect_with_device_info(self.scanned_devices[0])
+                raise DfuError("No DFU device found. Check USB cable/driver and click Scan again.")
+
+            selected_index = self.view.combo_devices.currentIndex()
+            if selected_index < 0 or selected_index >= len(self.scanned_devices):
+                selected_index = 0
+
+            selected = self.scanned_devices[selected_index]
+            self.view.vid_edit.setText(f"{selected.vid:04X}")
+            self.view.pid_edit.setText(f"{selected.pid:04X}")
+            self._connect_with_device_info(selected)
         self.main_ctrl.run_task(job)
 
     def _connect_with_device_info(self, info: DeviceInfo):
-        self.dfu.close()
-        self.dfu = DfuDevice(vid=info.vid, pid=info.pid, bus=info.bus, address=info.address)
-        opened = self.dfu.open()
+        attempts = [info]
+        if info.bus is not None or info.address is not None:
+            attempts.append(
+                DeviceInfo(
+                    vid=info.vid,
+                    pid=info.pid,
+                    bus=None,
+                    address=None,
+                    interface_number=info.interface_number,
+                )
+            )
+
+        last_error = None
+        opened = None
+        for idx, candidate in enumerate(attempts):
+            self.dfu.close()
+            self.dfu = DfuDevice(vid=candidate.vid, pid=candidate.pid, bus=candidate.bus, address=candidate.address)
+            try:
+                opened = self.dfu.open()
+                break
+            except DfuError as exc:
+                last_error = exc
+                if idx == 0 and len(attempts) > 1:
+                    self.signals.log.emit(
+                        "Auto-connect retry: scanned bus/address changed, retrying by VID/PID only..."
+                    )
+
+        if opened is None:
+            raise last_error if last_error is not None else DfuError("Failed to connect DFU device")
+
+        self.signals.log.emit(
+            f"Connected to {opened.vid:04X}:{opened.pid:04X}, interface={opened.interface_number}, "
+            f"bus={opened.bus}, addr={opened.address}"
+        )
         self.signals.connected.emit(f"Connected: {opened.vid:04X}:{opened.pid:04X} (IF {opened.interface_number})")
         self.config.set_last_vid_pid(f"{opened.vid:04X}", f"{opened.pid:04X}")
+
+        if self.dfu.ping_activity():
+            self.signals.log.emit("DFU ping sent (activity should be visible on bootloader LED)")
+        else:
+            self.signals.log.emit("Connected, but DFU ping did not complete")
 
     def on_erase_app(self):
         selected = []
@@ -147,14 +205,32 @@ class DfuController(QObject):
         if self.current_hex is None or self.current_file != path:
             self.current_hex = HexService.load_hex_image(path)
             self.current_file = path
+            self._push_recent_path(path)
+
+    def _parse_scan_filters(self) -> tuple[int | None, int | None]:
+        try:
+            vid = int(self.view.vid_edit.text().strip(), 16)
+            pid = int(self.view.pid_edit.text().strip(), 16)
+            return vid, pid
+        except Exception:
+            return None, None
+
+    def _check_in_app_range(self, start_address: int, size: int):
+        end_addr = start_address + size - 1
+        if start_address < APP_START or end_addr > APP_END:
+            raise DfuError(
+                f"Image out of app range: start=0x{start_address:08X}, end=0x{end_addr:08X}, "
+                f"allowed=0x{APP_START:08X}..0x{APP_END:08X}"
+            )
 
     def on_flash(self):
         def job():
             self._ensure_hex_loaded()
             payload = self.current_hex.data
             start = self.current_hex.start_address
+            self._check_in_app_range(start, len(payload))
             xfer = int(self.view.spin_transfer.value())
-            self.signals.log.emit(f"Flashing {len(payload)} bytes...")
+            self.signals.log.emit(f"Flashing {len(payload)} bytes to 0x{start:08X} with transfer={xfer}...")
             def prog(sent, tot): self.signals.progress.emit(int(sent * 100 / tot))
             self.dfu.write_memory(start, payload, transfer_size=xfer, progress=prog)
             self.signals.progress.emit(100)
@@ -166,11 +242,31 @@ class DfuController(QObject):
             self._ensure_hex_loaded()
             payload = self.current_hex.data
             start = self.current_hex.start_address
+            self._check_in_app_range(start, len(payload))
             xfer = int(self.view.spin_transfer.value())
-            self.signals.log.emit("Verifying...")
+            self.signals.log.emit(
+                f"Verifying {len(payload)} bytes from 0x{start:08X} with transfer={xfer}..."
+            )
             def prog(done, tot): self.signals.progress.emit(int(done * 100 / tot))
-            readback = self.dfu.read_memory(start, len(payload), transfer_size=xfer, progress=prog)
-            if readback != payload: raise DfuError("Verify failed: mismatch")
+            try:
+                readback = self.dfu.read_memory(start, len(payload), transfer_size=xfer, progress=prog)
+            except Exception as exc:
+                if _is_pipe_error(exc) and xfer != 64:
+                    self.signals.log.emit(
+                        "Pipe error during verify; retrying with transfer size 64 for compatibility..."
+                    )
+                    readback = self.dfu.read_memory(start, len(payload), transfer_size=64, progress=prog)
+                else:
+                    raise
+
+            if readback != payload:
+                for i, (a, b) in enumerate(zip(payload, readback)):
+                    if a != b:
+                        raise DfuError(f"Verify failed at offset 0x{i:X}: file=0x{a:02X}, target=0x{b:02X}")
+                if len(readback) != len(payload):
+                    raise DfuError(f"Verify failed: size mismatch file={len(payload)} read={len(readback)}")
+                raise DfuError("Verify failed: unknown mismatch")
+
             self.signals.progress.emit(100)
             self.signals.log.emit("Verify OK.")
         self.main_ctrl.run_task(job)
