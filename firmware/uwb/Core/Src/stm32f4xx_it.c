@@ -65,7 +65,8 @@ extern UART_HandleTypeDef huart2;
 extern TIM_HandleTypeDef htim9;
 
 /* USER CODE BEGIN EV */
-
+void debug_serial_uart_rx_check(void);
+void ble_bridge_uart_rx_check(void);
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -248,7 +249,11 @@ void TIM1_TRG_COM_TIM11_IRQHandler(void)
 void USART1_IRQHandler(void)
 {
   /* USER CODE BEGIN USART1_IRQn 0 */
-
+  if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE))
+  {
+    __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+    debug_serial_uart_rx_check();
+  }
   /* USER CODE END USART1_IRQn 0 */
   HAL_UART_IRQHandler(&huart1);
   /* USER CODE BEGIN USART1_IRQn 1 */
@@ -262,7 +267,11 @@ void USART1_IRQHandler(void)
 void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
-
+  if (__HAL_UART_GET_FLAG(&huart2, UART_FLAG_IDLE))
+  {
+    __HAL_UART_CLEAR_IDLEFLAG(&huart2);
+    ble_bridge_uart_rx_check();
+  }
   /* USER CODE END USART2_IRQn 0 */
   HAL_UART_IRQHandler(&huart2);
   /* USER CODE BEGIN USART2_IRQn 1 */
@@ -317,7 +326,10 @@ void OTG_FS_IRQHandler(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2) {
-    ble_bridge_uart_rx_cplt();
+    ble_bridge_uart_rx_check();
+  }
+  else if (huart->Instance == USART1) {
+    debug_serial_uart_rx_check();
   }
 }
 /* USER CODE END 1 */
