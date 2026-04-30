@@ -75,25 +75,34 @@ bool mw_calib_compute_stats(mw_calib_ctx_t *ctx,
 /* mean errors, then applies one damped gradient step per iteration.        */
 /* --------------------------------------------------------------------- */
 
-/* DW1000: 1 unit ≈ 2.345 mm → 1 m error ≈ 426 units total (2 anchors).
- * Each anchor absorbs half → 213 units/m.                                  */
-#define MW_CALIB_A2A_M_TO_DW     213.0f
-#define MW_CALIB_A2A_DAMPING     0.4f    /* 0.3-0.5: stable, 2 iters enough */
-#define MW_CALIB_A2A_ANT_MIN     14000U
-#define MW_CALIB_A2A_ANT_MAX     18000U
-#define MW_CALIB_A2A_ITERATIONS  2U
+typedef struct {
+    float    m_to_dw_units;   /* meters→DW units factor (per anchor, half TWR) */
+    float    damping;         /* step damping 0.0–1.0 (0.3–0.5 recommended)    */
+    uint16_t ant_min;         /* combined delay lower clamp                     */
+    uint16_t ant_max;         /* combined delay upper clamp                     */
+    uint8_t  iterations;      /* number of full pair-sweep iterations           */
+} mw_calib_a2a_config_t;
 
 typedef struct {
-    uint16_t combined_delay;     /* current ANT_TX + ANT_RX total            */
-    float    pair_error_sum;     /* Σ (mean_meas - d_known) for this iter    */
-    uint8_t  pair_error_count;   /* number of valid pairs accumulated        */
-    uint8_t  iter;               /* completed iterations (0-based)           */
-    float    last_avg_error;     /* avg error of last gradient step (log)    */
-    bool     done;               /* true after all iterations complete       */
+    /* config snapshot set at init — driven from positioning_config.h    */
+    float    m_to_dw_units;
+    float    damping;
+    uint16_t ant_min;
+    uint16_t ant_max;
+    uint8_t  iterations;
+
+    /* runtime state                                                      */
+    uint16_t combined_delay;     /* current ANT_TX + ANT_RX total        */
+    float    pair_error_sum;     /* Σ (mean_meas - d_known) for this iter */
+    uint8_t  pair_error_count;   /* valid pairs accumulated this iter     */
+    uint8_t  iter;               /* completed iterations (0-based)        */
+    float    last_avg_error;     /* avg error of last gradient step (log) */
+    bool     done;               /* true after all iterations complete    */
 } mw_calib_a2a_ctx_t;
 
-void mw_calib_a2a_init(mw_calib_a2a_ctx_t *ctx,
-                        uint16_t initial_combined_delay);
+void mw_calib_a2a_init(mw_calib_a2a_ctx_t       *ctx,
+                        const mw_calib_a2a_config_t *cfg,
+                        uint16_t                  initial_combined_delay);
 
 /* Accumulate one pair's measured mean and known distance into the context. */
 void mw_calib_a2a_accum_pair(mw_calib_a2a_ctx_t *ctx,

@@ -171,11 +171,20 @@ bool mw_calib_compute_stats(mw_calib_ctx_t *ctx,
 /* A2A Gradient Calibration                                             */
 /* ------------------------------------------------------------------ */
 
-void mw_calib_a2a_init(mw_calib_a2a_ctx_t *ctx,
-                        uint16_t initial_combined_delay)
+void mw_calib_a2a_init(mw_calib_a2a_ctx_t       *ctx,
+                        const mw_calib_a2a_config_t *cfg,
+                        uint16_t                  initial_combined_delay)
 {
-    if (!ctx) { return; }
+    if (!ctx || !cfg) { return; }
     memset(ctx, 0, sizeof(*ctx));
+
+    /* snapshot config into ctx so callers need no global access */
+    ctx->m_to_dw_units  = cfg->m_to_dw_units;
+    ctx->damping        = cfg->damping;
+    ctx->ant_min        = cfg->ant_min;
+    ctx->ant_max        = cfg->ant_max;
+    ctx->iterations     = cfg->iterations;
+
     ctx->combined_delay = initial_combined_delay;
 }
 
@@ -197,17 +206,17 @@ bool mw_calib_a2a_apply_gradient(mw_calib_a2a_ctx_t *ctx)
     /* delta = damping x avg_error x (DW_units/m) x 0.5
      * x0.5: this anchor carries half the TWR combined delay;
      * peer anchor delay is NOT updated here.                           */
-    int32_t delta = (int32_t)(MW_CALIB_A2A_DAMPING
+    int32_t delta = (int32_t)(ctx->damping
                                * avg_error
-                               * MW_CALIB_A2A_M_TO_DW
+                               * ctx->m_to_dw_units
                                * 0.5f);
 
     int32_t new_delay = (int32_t)ctx->combined_delay - delta;
-    if (new_delay < (int32_t)MW_CALIB_A2A_ANT_MIN) {
-        new_delay = (int32_t)MW_CALIB_A2A_ANT_MIN;
+    if (new_delay < (int32_t)ctx->ant_min) {
+        new_delay = (int32_t)ctx->ant_min;
     }
-    if (new_delay > (int32_t)MW_CALIB_A2A_ANT_MAX) {
-        new_delay = (int32_t)MW_CALIB_A2A_ANT_MAX;
+    if (new_delay > (int32_t)ctx->ant_max) {
+        new_delay = (int32_t)ctx->ant_max;
     }
 
     ctx->combined_delay   = (uint16_t)new_delay;
@@ -215,6 +224,6 @@ bool mw_calib_a2a_apply_gradient(mw_calib_a2a_ctx_t *ctx)
     ctx->pair_error_count = 0U;
     ctx->iter++;
 
-    ctx->done = (ctx->iter >= MW_CALIB_A2A_ITERATIONS);
+    ctx->done = (ctx->iter >= ctx->iterations);
     return ctx->done;
 }

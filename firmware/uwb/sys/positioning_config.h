@@ -52,17 +52,73 @@
  * ANCHOR/TAG AUTO-CALIBRATION
  * =================================================================== */
 
+/* 0 = normal ranging mode
+ * 1 = anchor-to-anchor gradient calibration mode (A2A)                      */
 #define ENABLE_ANCHOR_AUTO_CALIB    0
 #define ENABLE_TAG_AUTO_CALIB       0
 
-#define CALIB_REF_DISTANCE_XY_M   7.32f   /* Horizontal distance Tag-Anchor (m) */
-#define CALIB_TAG_HEIGHT_M        TAG_HEIGHT_M
-#define CALIB_ANCHOR_HEIGHT_M     ANCHOR_HEIGHT_M
-#define CALIB_ANCHOR_ID           1       /* Anchor used for tag calibration */
+/* ------------------------------------------------------------------
+ * A2A (Anchor-to-Anchor) Gradient Calibration
+ *
+ * Algorithm: each anchor ranges with every peer listed in
+ * CALIB_PAIRWISE_LIST, collects CALIB_ANCHOR_SAMPLES per pair,
+ * then applies a damped gradient step to its combined antenna delay.
+ * This repeats for MW_CALIB_A2A_ITERATIONS (see mw_calibration.h).
+ *
+ * Binary-search constants (ERROR_THRESHOLD, MIN_DELTA_STEP,
+ * MAX_ROUNDS) are intentionally removed — gradient needs none of them.
+ * Gradient tuning (damping, m→DW factor, iteration count, ANT clamp)
+ * lives in mw_calibration.h as MW_CALIB_A2A_* defines.
+ * ------------------------------------------------------------------ */
 
-/* Anchor-to-anchor self calibration pairwise list.
+/* Samples collected per anchor pair per iteration.
+ * 20 is a good balance: enough to average out multipath,
+ * fast enough for in-field calibration.                               */
+#define CALIB_ANCHOR_SAMPLES     20
+
+/* Reject a batch if std deviation exceeds this threshold.
+ * Batch is discarded and re-collected automatically.                  */
+#define CALIB_ANCHOR_MAX_STD_M   0.05f
+
+/* ------------------------------------------------------------------
+ * Gradient step tuning — passed into mw_calib_a2a_config_t
+ * ------------------------------------------------------------------ */
+
+/* DW1000: TWR combined delay → distance.
+ * 1 DW unit in combined (TX+RX) = c × 15.65ps / 2 ≈ 2.345 mm.
+ * Inverse: 1 m error → 1/0.002345 ≈ 426 DW units (combined).
+ * Each anchor absorbs half → 213 units/m per anchor.                 */
+#define CALIB_A2A_M_TO_DW_UNITS  213.0f
+
+/* Damping factor 0.0–1.0.
+ * 0.4: conservative, no oscillation, converges in 2 iterations.
+ * Increase toward 0.6 only if initial error is very large (>30cm).   */
+#define CALIB_A2A_DAMPING        0.4f
+
+/* Combined delay clamp range.
+ * Default DW1000 combined ≈ 32872 (2 × 16436).
+ * Allow ±~4% headroom around factory default.                        */
+#define CALIB_A2A_ANT_MIN        30000U
+#define CALIB_A2A_ANT_MAX        36000U
+
+/* Number of full pair-sweep iterations.
+ * 2 is sufficient for <5mm residual error with damping=0.4.          */
+#define CALIB_A2A_ITERATIONS     2U
+
+/* DW1000 physical constant.
+ * 1 DW unit = 1/(499.2e6 × 128) ≈ 15.65 ps one-way.
+ * TWR round-trip: 1 unit in combined (TX+RX) delay
+ * → distance error = c × 15.65ps / 2 ≈ 2.345 mm.
+ * Inverse used inside mw_calibration.c as MW_CALIB_A2A_M_TO_DW.      */
+#define DW1000_M_PER_DLY_UNIT    0.002345f   /* meters per DW unit (TWR) */
+
+/* Anchor-to-anchor pairwise calibration list.
  * Format: {source_anchor_id, target_anchor_id}
- * source_anchor_id will actively range and calibrate against target_anchor_id. */
+ * source_id actively ranges against target_id.
+ * Every source accumulates errors from all its pairs, then
+ * applies one gradient step — no dependency chain.
+ * Anchor 1 has no source entries → it holds the initial delay
+ * (natural gauge anchor, no explicit fix needed for 2 iterations).   */
 typedef struct {
   uint8_t source_id;
   uint8_t target_id;
@@ -77,18 +133,6 @@ typedef struct {
   {7, 6}, {8, 6}, \
   {8, 7} \
 }
-#define CALIB_ANCHOR_SAMPLES           20
-#define CALIB_ANCHOR_ERROR_THRESHOLD_M 0.02f
-#define CALIB_ANCHOR_MIN_DELTA_STEP    3
-#define CALIB_ANCHOR_MAX_ROUNDS        10
-#define CALIB_ANCHOR_MAX_STD_M         0.05f
-
-#define CALIB_SAMPLES             30      /* Number of samples to collect */
-#define CALIB_ERROR_THRESHOLD_M   0.02f   /* Stop if error < 2cm */
-#define CALIB_MIN_DELTA_STEP      3       /* Stop if step < 3 */
-#define CALIB_MAX_ROUNDS          10       /* Max rounds */
-#define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
-#define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
 
 /* ===================================================================
  * ANCHOR LAYOUT

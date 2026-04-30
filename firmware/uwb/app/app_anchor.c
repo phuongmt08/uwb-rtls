@@ -51,6 +51,15 @@ static const mw_calib_config_t s_anchor_calib_cfg = {
   .initial_delta_step   = 0,
   .initial_last_error   = 0.0f,
 };
+
+/* A2A gradient config — all values driven from positioning_config.h  */
+static const mw_calib_a2a_config_t s_a2a_cfg = {
+  .m_to_dw_units = CALIB_A2A_M_TO_DW_UNITS,
+  .damping       = CALIB_A2A_DAMPING,
+  .ant_min       = CALIB_A2A_ANT_MIN,
+  .ant_max       = CALIB_A2A_ANT_MAX,
+  .iterations    = CALIB_A2A_ITERATIONS,
+};
 #endif
 
 /* Private variables -------------------------------------------------- */
@@ -169,7 +178,7 @@ static void calib_reset(void)
 
   /* Init gradient context once (keeps combined_delay across pair resets) */
   if (s_a2a.iter == 0U && s_a2a.pair_error_count == 0U && !s_a2a.done) {
-    mw_calib_a2a_init(&s_a2a, combined);
+    mw_calib_a2a_init(&s_a2a, &s_a2a_cfg, combined);
   }
 
   s_calib_ranging_started = false;
