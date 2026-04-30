@@ -60,10 +60,33 @@
 #define CALIB_ANCHOR_HEIGHT_M     ANCHOR_HEIGHT_M
 #define CALIB_ANCHOR_ID           1       /* Anchor used for tag calibration */
 
+/* Anchor-to-anchor self calibration pairwise list.
+ * Format: {source_anchor_id, target_anchor_id}
+ * source_anchor_id will actively range and calibrate against target_anchor_id. */
+typedef struct {
+  uint8_t source_id;
+  uint8_t target_id;
+} calib_pair_t;
+
+#define CALIB_PAIRWISE_LIST { \
+  {2, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}, {8, 1}, \
+  {3, 2}, {4, 2}, {5, 2}, {6, 2}, {7, 2}, {8, 2}, \
+  {4, 3}, {5, 3}, {6, 3}, {7, 3}, {8, 3}, \
+  {5, 4}, {6, 4}, {7, 4}, {8, 4}, \
+  {6, 5}, {7, 5}, {8, 5}, \
+  {7, 6}, {8, 6}, \
+  {8, 7} \
+}
+#define CALIB_ANCHOR_SAMPLES           20
+#define CALIB_ANCHOR_ERROR_THRESHOLD_M 0.02f
+#define CALIB_ANCHOR_MIN_DELTA_STEP    3
+#define CALIB_ANCHOR_MAX_ROUNDS        10
+#define CALIB_ANCHOR_MAX_STD_M         0.05f
+
 #define CALIB_SAMPLES             30      /* Number of samples to collect */
 #define CALIB_ERROR_THRESHOLD_M   0.02f   /* Stop if error < 2cm */
 #define CALIB_MIN_DELTA_STEP      3       /* Stop if step < 3 */
-#define CALIB_MAX_ROUNDS          12      /* Max 10 rounds */
+#define CALIB_MAX_ROUNDS          10       /* Max rounds */
 #define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
 #define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
 

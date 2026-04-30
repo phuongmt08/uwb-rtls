@@ -226,6 +226,7 @@ static void tag_calib_reset(void)
     mw_calib_reset(&s_tag_calib, &s_tag_calib_cfg, cfg->uwb.tx_antenna_delay);
 
     s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
+    sys_ranging_set_calib_status(SYS_CALIB_STATUS_COLLECTING);
     RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Start: delay=%u target=%.3fm",
            s_tag_calib.current_delay, tag_calib_get_ref_distance_3d());
 }
@@ -272,6 +273,7 @@ static void tag_calib_calculate_and_adjust(void)
         }
         RLOG_I(LOG_OBJECT_CODE_TAG, "HOLD=accept CLICK=retry");
         s_tag_app_state = TAG_STATE_CALIB_PENDING_ACCEPT;
+        sys_ranging_set_calib_status(SYS_CALIB_STATUS_PENDING_ACCEPT);
         bsp_io_led_on();
         return;
     }
@@ -283,6 +285,7 @@ static void tag_calib_calculate_and_adjust(void)
         tmp.rx_antenna_delay = CALIB_FIXED_RX_ANT_DLY;
         bsp_uwb_configure(&tmp);
         s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
+        sys_ranging_set_calib_status(SYS_CALIB_STATUS_COLLECTING);
     }
 }
 
@@ -293,6 +296,8 @@ static void tag_calib_apply_and_save(void)
         RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saving TX delay=%u (RX fixed=%u)...",
             s_tag_calib.current_delay,
             (unsigned)CALIB_FIXED_RX_ANT_DLY);
+
+    sys_ranging_set_calib_status(SYS_CALIB_STATUS_DONE);
 
     sys_config_t *cfg = sys_config_get();
     cfg->uwb.tx_antenna_delay = s_tag_calib.current_delay;
@@ -324,6 +329,7 @@ void app_tag_on_button(bsp_io_button_event_t event)
         cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
         sys_config_save();
         s_tag_app_state = TAG_STATE_IDLE;
+        sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
     }
 }
 #endif
@@ -554,6 +560,8 @@ app_err_t app_tag_init(void)
 #if ENABLE_TAG_AUTO_CALIB
     RLOG_I(LOG_OBJECT_CODE_TAG, "Calib Mode: Target=%.3fm", tag_calib_get_ref_distance_3d());
     tag_calib_reset();
+#else
+    sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
 #endif
 
     init_filters();

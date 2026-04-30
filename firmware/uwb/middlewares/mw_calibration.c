@@ -135,3 +135,86 @@ mw_calib_step_result_t mw_calib_calculate_and_adjust(mw_calib_ctx_t *ctx,
 
     return MW_CALIB_STEP_ADJUSTED;
 }
+
+bool mw_calib_compute_stats(mw_calib_ctx_t *ctx,
+                             float *mean_out, float *std_out)
+{
+    if (!ctx || ctx->count < ctx->samples_per_round) {
+        return false;
+    }
+
+    float sum = 0.0f;
+    for (uint16_t i = 0; i < ctx->count; i++) {
+        sum += ctx->distances[i];
+    }
+    ctx->mean = sum / (float)ctx->count;
+
+    float var = 0.0f;
+    for (uint16_t i = 0; i < ctx->count; i++) {
+        float d = ctx->distances[i] - ctx->mean;
+        var += d * d;
+    }
+    ctx->std_dev = sqrtf(var / (float)ctx->count);
+
+    if (mean_out) { *mean_out = ctx->mean; }
+    if (std_out)  { *std_out  = ctx->std_dev; }
+
+    if (ctx->std_dev > ctx->max_std_m) {
+        ctx->count = 0; /* discard noisy batch, caller retries */
+        return false;
+    }
+
+    return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* A2A Gradient Calibration                                             */
+/* ------------------------------------------------------------------ */
+
+void mw_calib_a2a_init(mw_calib_a2a_ctx_t *ctx,
+                        uint16_t initial_combined_delay)
+{
+    if (!ctx) { return; }
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->combined_delay = initial_combined_delay;
+}
+
+void mw_calib_a2a_accum_pair(mw_calib_a2a_ctx_t *ctx,
+                               float meas_mean_m, float d_known_m)
+{
+    if (!ctx) { return; }
+    ctx->pair_error_sum += (meas_mean_m - d_known_m);
+    ctx->pair_error_count++;
+}
+
+bool mw_calib_a2a_apply_gradient(mw_calib_a2a_ctx_t *ctx)
+{
+    if (!ctx || ctx->pair_error_count == 0U) { return false; }
+
+    float avg_error = ctx->pair_error_sum / (float)ctx->pair_error_count;
+    ctx->last_avg_error = avg_error;
+
+    /* delta = damping x avg_error x (DW_units/m) x 0.5
+     * x0.5: this anchor carries half the TWR combined delay;
+     * peer anchor delay is NOT updated here.                           */
+    int32_t delta = (int32_t)(MW_CALIB_A2A_DAMPING
+                               * avg_error
+                               * MW_CALIB_A2A_M_TO_DW
+                               * 0.5f);
+
+    int32_t new_delay = (int32_t)ctx->combined_delay - delta;
+    if (new_delay < (int32_t)MW_CALIB_A2A_ANT_MIN) {
+        new_delay = (int32_t)MW_CALIB_A2A_ANT_MIN;
+    }
+    if (new_delay > (int32_t)MW_CALIB_A2A_ANT_MAX) {
+        new_delay = (int32_t)MW_CALIB_A2A_ANT_MAX;
+    }
+
+    ctx->combined_delay   = (uint16_t)new_delay;
+    ctx->pair_error_sum   = 0.0f;
+    ctx->pair_error_count = 0U;
+    ctx->iter++;
+
+    ctx->done = (ctx->iter >= MW_CALIB_A2A_ITERATIONS);
+    return ctx->done;
+}

@@ -40,6 +40,20 @@ typedef enum {
 } sys_ranging_mode_t;
 
 /**
+ * @brief Local calibration state advertised in UWB packets.
+ *
+ * This is intentionally 1 byte so it can fit into existing packet padding.
+ */
+typedef enum {
+  SYS_CALIB_STATUS_NORMAL = 0,
+  SYS_CALIB_STATUS_COLLECTING = 1,
+  SYS_CALIB_STATUS_CALCULATING = 2,
+  SYS_CALIB_STATUS_PENDING_ACCEPT = 3,
+  SYS_CALIB_STATUS_DONE = 4,
+  SYS_CALIB_STATUS_FACTORY_RESET = 5
+} sys_calib_status_t;
+
+/**
  * @brief Ranging result
  */
 typedef struct
@@ -49,6 +63,7 @@ typedef struct
   uint8_t  anchor_id;
   int8_t   rssi;
   uint8_t  quality;
+  uint8_t  calib_status;
   bool     valid;
 } sys_ranging_result_t;
 
@@ -141,6 +156,16 @@ sys_ranging_err_t sys_ranging_anchor_start_tdma(uint8_t anchor_id,
                                                 uint8_t num_anchors,
                                                 const uint8_t *anchor_ids,
                                                 uint32_t rx_timeout_ms);
+
+/**
+ * @brief Set the calibration state advertised by the local device in outgoing packets.
+ */
+void sys_ranging_set_calib_status(sys_calib_status_t status);
+
+/**
+ * @brief Read back the current outgoing calibration state.
+ */
+sys_calib_status_t sys_ranging_get_calib_status(void);
 
 /**
  * @brief Process Anchor TDMA ranging (call frequently in loop)

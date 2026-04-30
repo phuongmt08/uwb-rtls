@@ -81,7 +81,8 @@ typedef struct __attribute__((packed))
   uint64_t poll_rx_ts;
   uint64_t resp_tx_ts;
   uint8_t  rssi_poll;
-  uint8_t  padding[3];
+  uint8_t  calib_status;
+  uint8_t  padding[2];
 } resp_msg_t;
 
 typedef struct __attribute__((packed))
@@ -114,7 +115,7 @@ typedef struct __attribute__((packed))
   uint8_t valid;      /* 1 = valid distance, 0 = error */
   float   distance_m; /* Calculated distance */
   int8_t  rssi;
-  uint8_t padding[1]; /* reduced from [2] to keep struct size same (added slot_id byte) */
+  uint8_t padding[1];
 } result_msg_t;
 typedef struct
 {
@@ -176,6 +177,7 @@ typedef struct {
         uint64_t poll_rx_ts;
         uint64_t resp_tx_ts;
         int8_t   rssi;
+      uint8_t  calib_status;
         bool     valid;
     } anchor_resp[8];
 } sys_ranging_event_ctx_t;
@@ -188,6 +190,7 @@ static sys_ranging_event_ctx_t s_sys_ranging_ev = {0};
 #endif
 static tdma_scheduler_t s_tdma_tag    = { 0 };
 static tdma_scheduler_t s_tdma_anchor = { 0 };
+static sys_calib_status_t s_calib_status = SYS_CALIB_STATUS_NORMAL;
 static struct
 {
   uint32_t total_count;
@@ -670,6 +673,16 @@ static uint32_t tdma_compute_final_wait_timeout_us(const tdma_scheduler_t *tdma,
   return final_timeout_us;
 }
 
+void sys_ranging_set_calib_status(sys_calib_status_t status)
+{
+  s_calib_status = status;
+}
+
+sys_calib_status_t sys_ranging_get_calib_status(void)
+{
+  return s_calib_status;
+}
+
 static uint64_t tdma_compute_resp_rx_window_end(const tdma_scheduler_t *tdma,
                                                 const uint8_t          *anchor_ids,
                                                 uint8_t                 num_anchors,
@@ -915,6 +928,7 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   resp_msg.sequence_num = poll->sequence_num;
   resp_msg.anchor_id    = anchor_id;
   resp_msg.slot_id      = my_slot_id;
+  resp_msg.calib_status = (uint8_t) s_calib_status;
   {
     uint64_t poll_rx_payload = poll_rx_ts & DW_MASK_40;
     uint64_t resp_tx_payload = t3_timestamp_pred & DW_MASK_40;
@@ -1064,6 +1078,7 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   s_ctx.result_single.distance_m = raw_distance_m;
   s_ctx.result_single.anchor_id  = anchor_id;
   s_ctx.result_single.rssi       = poll_rssi_dbm;
+  s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
   s_ctx.result_single.valid      = raw_valid;
   s_ctx.result_single.t1         = ts.t1;
   s_ctx.result_single.t2         = ts.t2;
@@ -1231,6 +1246,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     uint64_t poll_rx_ts;
     uint64_t resp_tx_ts;
     int8_t   rssi;
+    uint8_t  calib_status;
     bool     valid;
   } anchor_resp[8];
   memset(anchor_resp, 0, sizeof(anchor_resp));
@@ -1351,6 +1367,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     anchor_resp[matched_index].poll_rx_ts = resp_poll_rx_ts;
     anchor_resp[matched_index].resp_tx_ts = resp_resp_tx_ts;
     anchor_resp[matched_index].rssi       = (int8_t) resp->rssi_poll;
+    anchor_resp[matched_index].calib_status = resp->calib_status;
     anchor_resp[matched_index].valid      = true;
 
     num_responses++;
@@ -1582,6 +1599,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
           tag_result->anchor_id            = result->anchor_id;
           tag_result->distance_m           = result->distance_m;
           tag_result->rssi                 = result->rssi;
+          tag_result->calib_status         = anchor_resp[i].calib_status;
           tag_result->valid                = (result->valid == 1);
 
           /* Store timestamps for reference */
@@ -1777,6 +1795,7 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                       s_sys_ranging_ev.anchor_resp[idx].poll_rx_ts &= DW_MASK_40;
                       s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts &= DW_MASK_40;
                       s_sys_ranging_ev.anchor_resp[idx].rssi = evt.rx_rssi;
+                        s_sys_ranging_ev.anchor_resp[idx].calib_status = resp->calib_status;
                       s_sys_ranging_ev.anchor_resp[idx].valid = true;
                       s_sys_ranging_ev.num_responses++;
                       RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Got RESP from anchor %u", resp->anchor_id);
@@ -1878,6 +1897,14 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                       tr->anchor_id   = res->anchor_id;
                       tr->distance_m  = res->distance_m;
                       tr->rssi        = res->rssi;
+                        tr->calib_status = SYS_CALIB_STATUS_NORMAL;
+                        for (uint8_t k = 0; k < 8; k++) {
+                          if (s_sys_ranging_ev.anchor_resp[k].valid &&
+                            s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
+                            tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
+                            break;
+                          }
+                        }
                       tr->valid       = (res->valid == 1);
                       s_ctx.result_multi.count++;
                   }
@@ -1900,6 +1927,14 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                   tr->anchor_id = res->anchor_id;
                   tr->distance_m = res->distance_m;
                   tr->rssi = res->rssi;
+                    tr->calib_status = SYS_CALIB_STATUS_NORMAL;
+                    for (uint8_t k = 0; k < 8; k++) {
+                      if (s_sys_ranging_ev.anchor_resp[k].valid &&
+                        s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
+                        tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
+                        break;
+                      }
+                    }
                   tr->valid = (res->valid == 1);
                   s_ctx.result_multi.count++;
                   result_received = true;
@@ -2035,6 +2070,7 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               s_ctx.sequence_num = poll->sequence_num;
               s_sys_ranging_ev.poll_rx_ts = evt.rx_ts;
               s_sys_ranging_ev.poll_rssi_dbm = evt.rx_rssi;
+              s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
               tdma_sync_to_poll(&s_tdma_anchor, s_sys_ranging_ev.poll_rx_ts);
               
               if (!s_anchor_track.is_tracking) {
@@ -2065,6 +2101,7 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               memcpy(&rmsg.poll_rx_ts, &p_rx, sizeof(p_rx));
               memcpy(&rmsg.resp_tx_ts, &r_tx, sizeof(r_tx));
               rmsg.rssi_poll = (uint8_t)s_sys_ranging_ev.poll_rssi_dbm;
+              rmsg.calib_status = (uint8_t) s_calib_status;
               
               s_sys_ranging_ev.planned_tx_dw = rtx_dw;
               if (bsp_uwb_tx_delayed(&rmsg, sizeof(rmsg), rtx_dw) != BSP_OK) {
@@ -2157,6 +2194,7 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
                       s_ctx.result_single.distance_m = dist;
                       s_ctx.result_single.anchor_id = s_ctx.anchor_id;
                       s_ctx.result_single.rssi = s_sys_ranging_ev.poll_rssi_dbm;
+                      s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
                       s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
                       
                       uint64_t expected_final_tx_dw = 0;
