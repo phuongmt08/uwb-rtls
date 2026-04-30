@@ -1,6 +1,7 @@
 /* ============================== mw_tdma_scheduler.c ==============================
  * @file       mw_tdma_scheduler.c
  * @brief      TDMA Time Slot Scheduler
+ * @author     Phuong Mai
  * @version    2.0.0
  * @date       2026-02-01
  * 
@@ -104,21 +105,6 @@ tdma_err_t tdma_set_timing(tdma_scheduler_t *tdma,
 {
     if (!tdma || !tdma->initialized) return TDMA_ERR_NOT_INITIALIZED;
     
-    if (guard_time_us < TDMA_MIN_GUARD_TIME_US) {
-        RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
-               "[TDMA] Guard time too small (%luµs < %luµs) - AUTO-CORRECTING",
-               (unsigned long)guard_time_us, (unsigned long)TDMA_MIN_GUARD_TIME_US);
-        guard_time_us = TDMA_MIN_GUARD_TIME_US;
-    }
-    
-    if (guard_time_us > TDMA_WARN_GUARD_TIME_US) {
-        RLOG_W(LOG_OBJECT_CODE_RANGING,
-               "[TDMA] WARNING: Guard time %luµs > %luµs! This suggests system is NOT true TDMA.",
-               (unsigned long)guard_time_us, (unsigned long)TDMA_WARN_GUARD_TIME_US);
-        RLOG_W(LOG_OBJECT_CODE_RANGING,
-               "[TDMA] Guard should be 200-500µs. If you need more, increase slot_duration instead.");
-    }
-    
     tdma_schedule_t *sched = &tdma->schedule;
     
     sched->slot_duration_us = slot_duration_us;
@@ -139,19 +125,38 @@ tdma_err_t tdma_set_timing(tdma_scheduler_t *tdma,
     return TDMA_OK;
 }
 
-tdma_err_t tdma_start_superframe(tdma_scheduler_t *tdma, uint64_t current_time_dw)
+tdma_err_t tdma_start_superframe(tdma_scheduler_t *tdma, uint64_t poll_tx_timestamp)
 {
     if (!tdma || !tdma->initialized) return TDMA_ERR_NOT_INITIALIZED;
     if (tdma->role != TDMA_ROLE_TAG) return TDMA_ERR_PARAM;
-    
-    /* Set superframe start time (DW time) */
-    tdma->superframe_start_dw = tdma_mask_40bit(current_time_dw);
-    tdma->current_slot = 0;
+
+    /* NOTE Normalize to shared superframe origin:
+     *
+     *   origin = T1 - poll_to_resp_delay
+     *
+     * This makes TAG and anchor use the same reference point.
+     * Anchor does the symmetric operation in tdma_sync_to_poll():
+     *   origin = T2 - poll_to_resp_delay
+     *
+     * Since T2 = T1 + ToF (~ns, negligible vs 1500us guard), both sides
+     * converge on the same origin. Every slot is then calculated as:
+     *   resp_tx = origin + poll_to_resp_delay + (slot_id * effective_slot)
+     *           = T1 + slot_offset  (TAG side)
+     *           ≈ T1 + slot_offset  (anchor side, ToF error < 1us)
+     *
+     * Without this normalization, anchor uses T2 as origin while TAG uses
+     * T1, creating a systematic offset that grows with slot_id. At slot 4
+     * (offset 16000us) even a small mismatch causes RESP to land outside
+     * the TAG's RX window.
+     */
+    uint64_t origin = poll_tx_timestamp
+                      - tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us);
+
+    tdma->superframe_start_dw = tdma_mask_40bit(origin);
+    tdma->current_slot        = 0;
     tdma->superframe_counter++;
-    
-    /* Mark as synchronized */
-    tdma->synchronized = true;
-    
+    tdma->synchronized        = true;
+
     return TDMA_OK;
 }
 
@@ -159,16 +164,35 @@ tdma_err_t tdma_sync_to_poll(tdma_scheduler_t *tdma, uint64_t poll_rx_timestamp)
 {
     if (!tdma || !tdma->initialized) return TDMA_ERR_NOT_INITIALIZED;
     if (tdma->role != TDMA_ROLE_ANCHOR) return TDMA_ERR_PARAM;
-    
-    /* POLL RX timestamp becomes the start of the superframe */
-    tdma->superframe_start_dw = tdma_mask_40bit(poll_rx_timestamp);
-    tdma->current_slot = 0;
-    tdma->synchronized = true;
+
+    /* NOTE Normalize to shared superframe origin:
+     *
+     *   origin = T2 - poll_to_resp_delay
+     *
+     * Symmetric with tdma_start_superframe() on the TAG side which does:
+     *   origin = T1 - poll_to_resp_delay
+     *
+     * T1 = POLL TX timestamp (TAG clock)
+     * T2 = POLL RX timestamp (anchor clock) = T1 + ToF + clock_offset
+     *
+     * ToF is ~ns for typical UWB ranges (<<1us), so both origins align to
+     * within a few ns -- well inside the 1500us guard time on every slot.
+     *
+     * Without this fix, anchor origin = T2 while TAG origin = T1.
+     * slot_offset for anchor N = N * effective_slot (e.g. 16000us for slot 4).
+     * That 16000us multiplies the T1/T2 mismatch, shifting anchor 4's RESP
+     * far enough outside TAG's RX window to cause a reliable miss.
+     */
+    uint64_t origin = poll_rx_timestamp
+                      - tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us);
+
+    tdma->superframe_start_dw = tdma_mask_40bit(origin);
+    tdma->current_slot        = 0;
+    tdma->synchronized        = true;
     tdma->superframe_counter++;
-    
-    /* Update sync tracking */
+
     tdma->schedule.last_sync_timestamp_dw = tdma->superframe_start_dw;
-    
+
     return TDMA_OK;
 }
 
@@ -246,17 +270,23 @@ tdma_err_t tdma_calculate_final_time(const tdma_scheduler_t *tdma,
     if (!tdma->synchronized) return TDMA_ERR_SYNC_LOST;
     if (!tx_timestamp_dw) return TDMA_ERR_PARAM;
     
+    (void)num_responses;
+
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
 
-    /* FIX: poll_to_resp_delay_us was missing from the formula.
-     * RESP slots are offset from superframe_start by poll_to_resp_delay, so
-     * slot-N ends at: superframe_start + poll_to_resp_delay + N*eff
-     * Without this term, FINAL was scheduled 1500us too early, coinciding
-     * with the slot-N RESP TX — causing the RESP window cap to close before
-     * slot-N RESP could arrive at TAG. */
+    /* IMPORTANT:
+     * slot_id timing in this scheduler points to slot START.
+     * For slot N, start = poll_to_resp_delay + N*effective_slot.
+     * To place FINAL after last RESP payload is fully on-air, we must add
+     * slot_duration_us (payload airtime budget) before resp_to_final_delay.
+     *
+     * Without slot_duration_us, FINAL can be too close to slot-N start,
+     * which truncates TAG receive window for the last anchor at low data rate
+     * (symptom: anchor TX OK but TAG got=0, rx_err=0). */
     uint64_t last_anchor_slot_end_dw = tdma->superframe_start_dw +
                                         tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us) +
-                                        tdma_us_to_dw(tdma->schedule.num_anchors * effective_slot_us);
+                                        tdma_us_to_dw(tdma->schedule.num_anchors * effective_slot_us) +
+                                        tdma_us_to_dw(tdma->schedule.slot_duration_us);
 
     /* final_tx = last_anchor_slot_end + resp_to_final_delay */
     *tx_timestamp_dw = last_anchor_slot_end_dw +
@@ -432,13 +462,12 @@ tdma_err_t tdma_get_slot_rx_window(const tdma_scheduler_t *tdma,
     
     if (slot_id < 0) return TDMA_ERR_INVALID_PARAM;
 
-    /* rx_late_margin: how long after expected_resp we still accept a frame.
-     * guard_time_us already covers clock drift + PHY jitter (it is sized for that).
-     * processing_margin_us covers SPI/HAL read latency after RXFCG fires.
-     * TDMA_CLOCK_GUARD_US and the old hardcoded +2500us were double-counting
-     * what guard_time already provides — removed. */
+    /* rx_late_margin: expected_resp_dw marks RESP TX start time.
+     * TAG needs to stay in RX until frame end (RXFCG comes after full frame),
+     * so include slot_duration_us as airtime budget, plus sofƯtware margin. */
     uint32_t rx_early_margin_us = tdma->schedule.guard_time_us;
-    uint32_t rx_late_margin_us  = tdma->schedule.guard_time_us +
+    uint32_t rx_late_margin_us  = tdma->schedule.slot_duration_us +
+                                  tdma->schedule.guard_time_us +
                                   tdma->schedule.processing_margin_us;
     
     uint32_t effective_slot_us = tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;

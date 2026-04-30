@@ -163,17 +163,7 @@ uint32_t sys_flash_log_read(void *out, uint32_t offset, uint32_t length)
     if (!fh || !out || length == 0u)
         return 0u;
 
-    if (offset >= BSP_FLASH_LOG_DATA_LENGTH)
-        return 0u;
-
-    uint32_t avail     = BSP_FLASH_LOG_DATA_LENGTH - offset;
-    uint32_t copy_len  = (length > avail) ? avail : length;
-    uint32_t read_addr = fh->sectors[fh->active].base
-                       + BSP_FLASH_METADATA_SIZE
-                       + BSP_FLASH_LOG_DATA_OFFSET
-                       + offset;
-    memcpy(out, (const void *)read_addr, copy_len);
-    return copy_len;
+    return bsp_flash_log_read_virtual(fh, offset, out, length);
 #else
     (void)out; (void)offset; (void)length;
     return 0u;

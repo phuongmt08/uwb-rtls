@@ -6,21 +6,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
-    network_core_t *stream;
-    bool enabled;
+bool network_cmd_init(network_core_t *stream);
+void network_cmd_process(void);
+bool network_cmd_process_packet(const protobuf_packet_t *pkt);
+void network_cmd_dispatch(const protobuf_packet_t *pkt);
 
-    protobuf_packet_t last_resp;
-    bool resp_pending;
-    uint8_t resp_retry_left;
-    uint32_t resp_deadline_ms;
-} network_cmd_t;
-
-bool network_cmd_init(network_cmd_t *cmd, network_core_t *stream);
-void network_cmd_process(network_cmd_t *cmd);
-bool network_cmd_process_packet(network_cmd_t *cmd, const protobuf_packet_t *pkt);
-void network_cmd_dispatch(network_cmd_t *cmd, const protobuf_packet_t *pkt);
-bool network_cmd_is_distance_streaming(const network_cmd_t *cmd);
-bool network_cmd_is_log_streaming(const network_cmd_t *cmd);
+/* ---- Active Command Senders ---- */
+#ifdef HAVE_BLE_PERIPHERAL
+bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool enable, uint32_t serial_number, const char *device_name);
+bool network_send_ble_status_get(network_core_t *stream, uint8_t dst);
+bool network_send_ble_adv_status(network_core_t *stream, uint8_t dst, const protobuf_ble_adv_status_t *status);
+#endif
 
 #endif /* __NETWORK_CMD_H */

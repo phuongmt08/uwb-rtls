@@ -20,6 +20,12 @@ Address range:
 #define BL_MAGIC_ADDR      (0x2001FFF0UL)
 #define BL_MAGIC_VALUE     (0xDEADB007UL)
 
+/* Shared RAM log area (noinit/NOLOAD): retained across soft reset and boot->app jump.
+ * Must match both bootloader and app linker scripts. */
+#define MEM_SHARED_LOG_RAM_START    (0x20017000UL)
+#define MEM_SHARED_LOG_RAM_SIZE      (4UL * 1024UL)
+#define MEM_SHARED_LOG_RAM_END      (MEM_SHARED_LOG_RAM_START + MEM_SHARED_LOG_RAM_SIZE)
+
 #define MEM_BOOTLOADER_START         (0x08000000UL)
 #define MEM_BOOTLOADER_END           (0x0800C000UL)
 #define MEM_BOOTLOADER_LENGTH        (MEM_BOOTLOADER_END - MEM_BOOTLOADER_START)

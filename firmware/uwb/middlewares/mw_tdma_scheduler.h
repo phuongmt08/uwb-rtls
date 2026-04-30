@@ -1,6 +1,7 @@
 /* ============================== mw_tdma_scheduler.h ==============================
  * @file       mw_tdma_scheduler.h
  * @brief      TDMA Time Slot Scheduler
+ * @author     Phuong Mai
  * @version    2.0.0
  * @date       2026-02-01
  */
@@ -19,11 +20,7 @@ extern "C" {
 #define TDMA_PROCESSING_MARGIN_US    400      /* SPI + HAL overhead (300-500µs) */
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
-#define TDMA_MIN_GUARD_TIME_US       200      /* Absolute minimum guard */
 #define TDMA_DEFAULT_GUARD_TIME_US   1500     /* Standard guard (stability profile) */
-
-/* Warning threshold - keep in sync with default guard profile. */
-#define TDMA_WARN_GUARD_TIME_US      1500
 
 /* ====================================================================
  * TIMING CONSTANTS
@@ -31,42 +28,55 @@ extern "C" {
 #define TDMA_MAX_ANCHORS             8
 
 #define TDMA_DEFAULT_SLOT_DURATION_US      2500   /* 2.5ms payload window per slot */
-#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 1500   /* 1.5ms delay */
-#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 3500  /* 3.5ms delay */
-#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 1500 /* 1.5ms delay */
+#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 3500   /* 3.5ms delay */
+#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 5000  /* 5ms — to give TAG enough headroom to build FINAL message
+                                                   * after RESP loop without hitting
+                                                   * ensure_future_tx guard (1500µs).
+                                                   * With 4 anchors, loop ends at ~+22000µs,
+                                                   * build+TX takes ~300µs, FINAL planned at
+                                                   * +25000µs → ahead=2700µs > 1500µs guard. */
+#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 4500 /* 4.5ms — increased to give Anchor
+                                                    * slot 1 enough headroom to discard other 
+                                                    * anchors RESP packets (~2ms for 4 anchors)
+                                                    * and finish SPI processing (~600us)
+                                                    * without triggering ensure_future_tx. */
+
 /* DW1000 time unit conversions */
 #define DW_TIME_UNIT_NS              15.65f   /* ~15.65 ps per tick */
 #define DW_TICKS_PER_US              63898ULL /* Approx ticks per microsecond */
 /*
- * Superframe layout:
- * +--------+ +----------------------+ +---------------------------+ +---------+ +----------------------+ +---------------------------+
- * | TAG    | |                      | | N ANCHOR                  | | TAG     | |                      | | N ANCHOR                  |
- * +--------+ +----------------------+ +---------------------------+ +---------+ +----------------------+ +---------------------------+
- * |  POLL  | | poll_to_resp_delay   | | RESP slots 1→N            | |  FINAL  | | final_to_result_delay| | RESULT slots 1→N          |
- * |  tx    | | 1500 us (default)    | | N * (2500 + 1500) us      | |  tx     | | 1500 us (default)    | | N * (2500 + 1500) us      |
- * +--------+ +----------------------+ +---------------------------+ +---------+ +----------------------+ +---------------------------+
- *                           ^ each RESP/RESULT slot = slot_duration_us + guard_time_us = 4000 us (default)
+ * NOTE Superframe layout:
+ * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
+ * | TAG  | | poll_to_resp_delay| | N ANCHOR RESP     | | TAG   | | final_to_result_d | | N ANCHOR RESULT     |
+ * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
+ * | POLL | | (3.5ms default)   | | slots 1→N         | | FINAL | | (4.5ms default)   | | slots 1→N           |
+ * | tx   | |                   | | N * 4.0ms         | | tx    | |                   | | N * 4.0ms           |
+ * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
+ *                                ^ each slot = slot_duration (2.5ms) + guard_time (1.5ms) = 4.0ms
  *
- * Full timing formula (default macros):
- *   poll_to_resp_delay_us
- * + N * (slot_duration_us + guard_time_us)
- * + resp_to_final_delay_us
- * + final_to_result_delay_us
- * + N * (slot_duration_us + guard_time_us)
+ * Full timing formula (based on current configuration):
+ *   T_superframe(N) = poll_to_resp_delay
+ *                   + N * (slot_duration + guard_time)
+ *                   + (slot_duration + resp_to_final_delay)
+ *                   + final_to_result_delay
+ *                   + N * (slot_duration + guard_time)
+ *                   + slot_duration (last result airtime)
  *
- * => T_superframe(N) = 1500 + N*4000 + 1500 + 1500 + N*4000 (us)
- *                   = 4500 + 8000*N (us)
+ *   => T_superframe(N) = 3500 + N*4000 + (2500 + 5000) + 4500 + N*4000 + 2500 (us)
+ *                      = 18000 + 8000*N (us)
  *
- * Example:
- *   N=4 anchors:  T = 36500 us = 36.5 ms
- *   N=8 anchors:  T = 68500 us = 68.5 ms
+ * Case N = 8 anchors (Maximum):
+ *   T_active = 18000 + 8000*8 = 82000 us = 82.0 ms
+ *
+ * Case N = 6 anchors:
+ *   T_active = 18000 + 8000*6 = 66000 us = 66.0 ms
+ *
+ * Case N = 4 anchors (Default):
+ *   T_active = 18000 + 8000*4 = 50000 us = 50.0 ms
  *
  * Guard time notes:
- * - guard_time_us is a safety gap inside each slot to absorb clock drift and PHY jitter.
- * - Practical sizing rule:
- *     guard_time >= drift_margin + timestamp_quantization + ISR/SPI jitter margin
- * - Drift margin is roughly proportional to elapsed time between sync points.
- *   If you increase superframe duration or anchor count, guard should be reviewed.
+ * - guard_time_us (1500us) is a safety gap inside each slot to absorb clock drift and processing jitter.
+ * - This large guard ensures stability across all 8 possible anchor slots even with software overhead.
  */
 
 

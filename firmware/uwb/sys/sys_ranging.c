@@ -1,5 +1,6 @@
 /* ============================== sys_ranging.c ==============================
  * @file       sys_ranging.c
+ * @author
  * @brief      DS-TWR + TDMA Multi-Anchor Ranging
  * @version    4.1.0
  * @date       2026-02-01
@@ -80,7 +81,8 @@ typedef struct __attribute__((packed))
   uint64_t poll_rx_ts;
   uint64_t resp_tx_ts;
   uint8_t  rssi_poll;
-  uint8_t  padding[3];
+  uint8_t  calib_status;
+  uint8_t  padding[2];
 } resp_msg_t;
 
 typedef struct __attribute__((packed))
@@ -113,7 +115,7 @@ typedef struct __attribute__((packed))
   uint8_t valid;      /* 1 = valid distance, 0 = error */
   float   distance_m; /* Calculated distance */
   int8_t  rssi;
-  uint8_t padding[1]; /* reduced from [2] to keep struct size same (added slot_id byte) */
+  uint8_t padding[1];
 } result_msg_t;
 typedef struct
 {
@@ -162,6 +164,8 @@ typedef struct {
     uint64_t                 poll_rx_ts;     // T2
     uint64_t                 resp_tx_ts;     // T3
     uint64_t                 expected_final_dw;
+    uint64_t                 planned_tx_dw;
+    uint64_t                 predicted_tx_dw;
     
     uint8_t                  num_responses;
     uint8_t                  my_slot_id;
@@ -173,6 +177,7 @@ typedef struct {
         uint64_t poll_rx_ts;
         uint64_t resp_tx_ts;
         int8_t   rssi;
+      uint8_t  calib_status;
         bool     valid;
     } anchor_resp[8];
 } sys_ranging_event_ctx_t;
@@ -185,6 +190,7 @@ static sys_ranging_event_ctx_t s_sys_ranging_ev = {0};
 #endif
 static tdma_scheduler_t s_tdma_tag    = { 0 };
 static tdma_scheduler_t s_tdma_anchor = { 0 };
+static sys_calib_status_t s_calib_status = SYS_CALIB_STATUS_NORMAL;
 static struct
 {
   uint32_t total_count;
@@ -197,20 +203,15 @@ static bool s_ranging_busy = false;
 
 /* Private functions --------------------------------------------------- */
 
-static bool dstwr_forward_interval_40(uint64_t later, uint64_t earlier, uint64_t *out_delta)
+static inline bool dstwr_forward_interval_40(uint64_t later, uint64_t earlier, uint64_t *out_delta)
 {
   const uint64_t MAX_INTERVAL_DW = tdma_us_to_dw(DSTWR_MAX_INTERVAL_US);
-
   uint64_t delta = (later - earlier) & DW_MASK_40;
-
-  /* Reject impossible/ambiguous ordering for a single DS-TWR exchange. */
   if (delta == 0ULL || delta > MAX_INTERVAL_DW)
   {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "Invalid DW interval: later=" DW_FMT " earlier=" DW_FMT " delta=%lu",
-           DW_ARG(later), DW_ARG(earlier), (unsigned long) delta);
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "Invalid DW interval: delta=%lu", (unsigned long) delta);
     return false;
   }
-
   *out_delta = delta;
   return true;
 }
@@ -286,14 +287,15 @@ static float calculate_distance(const dstwr_timestamps_t *ts)
     return -1.0f;
   }
 
-  double num    = ((double) Ra * (double) Rb) - ((double) Da * (double) Db);
-  double tof_dw = num / (double) den;
-  if (tof_dw <= 0.0)
+  float fRa = (float) Ra, fRb = (float) Rb, fDa = (float) Da, fDb = (float) Db;
+  float num    = (fRa * fRb) - (fDa * fDb);
+  float tof_dw = num / (float) den;
+  if (tof_dw <= 0.0f)
   {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Invalid distance calculation: tof_dw=%.3e", tof_dw);
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Negative tof_dw");
     return -1.0f;
   }
-  return (float) (tof_dw * DWT_TIME_UNITS * SPEED_OF_LIGHT);
+  return tof_dw * (float) DWT_TIME_UNITS * (float) SPEED_OF_LIGHT;
 }
 
 static int
@@ -337,45 +339,46 @@ hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size, uint16_t *received_le
 
 static void format_distance_m(char *buf, size_t len, float distance_m)
 {
+  if (len == 0) return;
   int32_t  mm        = (int32_t) (distance_m * 1000.0f + (distance_m >= 0.0f ? 0.5f : -0.5f));
   int32_t  abs_mm    = (mm >= 0) ? mm : -mm;
   uint32_t m_part    = (uint32_t) (abs_mm / 1000);
   uint32_t frac_part = (uint32_t) (abs_mm % 1000);
-
-  if (mm < 0)
-  {
-    snprintf(buf, len, "-%lu.%03lu", (unsigned long) m_part, (unsigned long) frac_part);
+  char     tmp[16];
+  int      pos = 0;
+  if (mm < 0) tmp[pos++] = '-';
+  /* Integer part */
+  if (m_part == 0) { tmp[pos++] = '0'; }
+  else {
+    char ibuf[8]; int ilen = 0;
+    uint32_t v = m_part;
+    while (v > 0) { ibuf[ilen++] = '0' + (v % 10); v /= 10; }
+    for (int k = ilen - 1; k >= 0; k--) tmp[pos++] = ibuf[k];
   }
-  else
-  {
-    snprintf(buf, len, "%lu.%03lu", (unsigned long) m_part, (unsigned long) frac_part);
-  }
+  tmp[pos++] = '.';
+  /* 3 fractional digits, zero-padded */
+  tmp[pos++] = '0' + (frac_part / 100);
+  tmp[pos++] = '0' + ((frac_part / 10) % 10);
+  tmp[pos++] = '0' + (frac_part % 10);
+  tmp[pos]   = '\0';
+  size_t copy = (size_t) pos < len ? (size_t) pos : len - 1;
+  for (size_t i = 0; i < copy; i++) buf[i] = tmp[i];
+  buf[copy] = '\0';
 }
 
-/* FIX #5: Improved message validation */
-static bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
+static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
 {
-  if (!data)
-    return false;
-
-  /* Check minimum length based on message type */
+  if (!data || data[0] != expected_type) return false;
   uint16_t min_len = 0;
   switch (expected_type)
   {
-  case MW_DSTWR_MSG_TYPE_POLL: min_len = sizeof(poll_msg_t); break;
-  case MW_DSTWR_MSG_TYPE_RESP: min_len = sizeof(resp_msg_t); break;
-  case MW_DSTWR_MSG_TYPE_FINAL: min_len = sizeof(final_msg_t); break;
+  case MW_DSTWR_MSG_TYPE_POLL:   min_len = sizeof(poll_msg_t);   break;
+  case MW_DSTWR_MSG_TYPE_RESP:   min_len = sizeof(resp_msg_t);   break;
+  case MW_DSTWR_MSG_TYPE_FINAL:  min_len = sizeof(final_msg_t);  break;
   case MW_DSTWR_MSG_TYPE_RESULT: min_len = sizeof(result_msg_t); break;
   default: return false;
   }
-
-  /* CRITICAL: validate ONLY - NO side effects! */
-  if (len < min_len)
-    return false;
-  if (data[0] != expected_type)
-    return false;
-
-  return true;
+  return len >= min_len;
 }
 
 static int hal_rx_wait_valid_msg(uint8_t  *buffer,
@@ -430,6 +433,58 @@ static int hal_rx_wait_valid_msg(uint8_t  *buffer,
   return -1;
 }
 
+static int hal_rx_wait_valid_msg_delayed(uint8_t  *buffer,
+                                         uint16_t  buffer_size,
+                                         uint16_t *received_length,
+                                         uint8_t   expected_type,
+                                         uint64_t  rx_timestamp_dw,
+                                         uint32_t  timeout_us)
+{
+  static uint32_t s_unexpected_type_log_tick_delayed = 0;
+  uint32_t        timeout_ms                 = (timeout_us + 999U) / 1000U;
+  uint32_t        start_tick                 = HAL_GetTick();
+
+  if (timeout_ms == 0U)
+  {
+    timeout_ms = 1U;
+  }
+
+  if (!buffer || !received_length)
+  {
+    return -1;
+  }
+  *received_length = 0;
+
+  bsp_uwb_clear_irq_event();
+  if (bsp_uwb_enable_rx_delayed(rx_timestamp_dw, 0) != BSP_OK)
+  {
+    return -1;
+  }
+
+  while ((HAL_GetTick() - start_tick) < timeout_ms)
+  {
+    bsp_err_t rx_err = bsp_uwb_rx(buffer, buffer_size, received_length);
+    if (rx_err == BSP_OK && *received_length > 0U)
+    {
+      if (validate_msg_type(buffer, *received_length, expected_type))
+      {
+        return 0;
+      }
+
+      if ((HAL_GetTick() - s_unexpected_type_log_tick_delayed) >= 1000U)
+      {
+        RLOG_W(LOG_OBJECT_CODE_RANGING, "[RXWAIT] Unexpected frame type=0x%02X len=%u expected=0x%02X",
+               (unsigned) buffer[0], (unsigned) *received_length, (unsigned) expected_type);
+        s_unexpected_type_log_tick_delayed = HAL_GetTick();
+      }
+    }
+    __NOP();
+  }
+
+  *received_length = 0;
+  return -1;
+}
+
 static void state_machine_reset(void)
 {
   s_ctx.state            = STATE_IDLE;
@@ -466,35 +521,31 @@ static uint64_t ensure_future_tx(uint64_t tx_time_dw, uint32_t guard_us)
   uint64_t now      = bsp_uwb_get_current_time_dw();
   uint64_t guard_dw = tdma_us_to_dw(guard_us);
 
-  /* FIX Bug-A: use 40-bit modular subtraction - safe against wrap-around.
-   * Old signed cast: (int64_t)(tx_time_dw - now) was WRONG near 40-bit wrap,
-   * causing valid future timestamps to be treated as past. */
+ 
   uint64_t ahead_dw = (tx_time_dw - now) & DW_MASK_40;
-  if (ahead_dw == 0ULL || ahead_dw <= guard_dw)
+  if (ahead_dw == 0ULL || ahead_dw <= guard_dw || ahead_dw >= (1ULL << 39))
   {
-    uint32_t late_us = (ahead_dw == 0ULL) ? 0U : (uint32_t) (guard_us - tdma_dw_to_us(ahead_dw));
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TX] ensure_future: slot missed by ~%luus, pushing to now+guard*2",
+    uint32_t late_us = (ahead_dw == 0ULL || ahead_dw >= (1ULL << 39)) ? 0U : (uint32_t) (guard_us - tdma_dw_to_us(ahead_dw));
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TX] Slot missed by ~%luus - ABORTING TO PREVENT COLLISION",
            (unsigned long) late_us);
-    tx_time_dw = (now + guard_dw * 2ULL) & DW_MASK_40;
+    return 0ULL;
   }
   return tx_time_dw;
-}
+} 
 
 /* Predict actual antenna-domain TX time used by DW1000 delayed TX.
  * DW1000 schedules on a quantized chip-time grid (9 LSB dropped overall), then
  * TX antenna delay is applied to produce the TX timestamp domain used by DS-TWR. */
-static uint64_t predict_delayed_tx_antenna_time(uint64_t requested_tx_time_dw)
+static inline uint64_t predict_delayed_tx_antenna_time(uint64_t requested_tx_time_dw)
 {
   uint64_t tx_ant_dly = (uint64_t) bsp_uwb_get_tx_antenna_delay();
-
-  uint64_t chip_time = (requested_tx_time_dw - tx_ant_dly) & DW_MASK_40;
-  uint32_t dx_time   = (uint32_t) (chip_time >> 8);
-  dx_time &= 0xFFFFFFFEUL; /* Match DW1000 delayed-TX quantization. */
-
+  uint64_t chip_time  = (requested_tx_time_dw - tx_ant_dly) & DW_MASK_40;
+  uint32_t dx_time    = (uint32_t) (chip_time >> 8);
+  dx_time &= 0xFFFFFFFEUL;
   return ((((uint64_t) dx_time) << 8) + tx_ant_dly) & DW_MASK_40;
 }
 
-static uint32_t tdma_effective_slot_us(const tdma_scheduler_t *tdma)
+static inline uint32_t tdma_effective_slot_us(const tdma_scheduler_t *tdma)
 {
   return tdma->schedule.slot_duration_us + tdma->schedule.guard_time_us;
 }
@@ -526,17 +577,21 @@ static void verify_tx_timing(const char *label,
                              uint8_t     slot_id,
                              uint8_t     seq,
                              uint64_t    planned_dw,
-                             uint64_t    predicted_dw)
+                             uint64_t    predicted_dw,
+                             uint64_t    actual_dw,
+                             bool        actual_valid)
 {
   const int64_t WARN_TICKS = 63898LL; /* 1ms */
   const int64_t OK_TICKS   = 1024LL;  /* ~16µs, covers 9-bit quantization */
 
-  uint64_t actual_dw = 0;
-  if (bsp_uwb_get_last_tx_timestamp(&actual_dw) != BSP_OK)
+  if (!actual_valid && actual_dw == 0)
   {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR%u] %s TX_TIME unreadable seq=%u slot=%u planned=" DW_FMT,
-           anchor_id, label, seq, slot_id, DW_ARG(planned_dw));
-    return;
+    if (bsp_uwb_get_last_tx_timestamp(&actual_dw) != BSP_OK)
+    {
+      RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR%u] %s TX_TIME unreadable seq=%u slot=%u planned=" DW_FMT,
+             anchor_id, label, seq, slot_id, DW_ARG(planned_dw));
+      return;
+    }
   }
 
   actual_dw &= DW_MASK_40;
@@ -618,6 +673,16 @@ static uint32_t tdma_compute_final_wait_timeout_us(const tdma_scheduler_t *tdma,
   return final_timeout_us;
 }
 
+void sys_ranging_set_calib_status(sys_calib_status_t status)
+{
+  s_calib_status = status;
+}
+
+sys_calib_status_t sys_ranging_get_calib_status(void)
+{
+  return s_calib_status;
+}
+
 static uint64_t tdma_compute_resp_rx_window_end(const tdma_scheduler_t *tdma,
                                                 const uint8_t          *anchor_ids,
                                                 uint8_t                 num_anchors,
@@ -668,13 +733,10 @@ static uint64_t tdma_compute_result_rx_window_end(const tdma_scheduler_t *tdma,
   return (final_tx_ts_dw + tdma_us_to_dw(result_phase_us)) & DW_MASK_40;
 }
 
-static bool dw_time_before_deadline(uint64_t now_dw, uint64_t deadline_dw)
+static inline bool dw_time_before_deadline(uint64_t now_dw, uint64_t deadline_dw)
 {
   const uint64_t HALF_RANGE_40 = (1ULL << 39);
   uint64_t       remaining     = (deadline_dw - now_dw) & DW_MASK_40;
-
-  /* "now" is before "deadline" when forward distance is non-zero and
-   * does not cross half-range ambiguity in modulo-40bit arithmetic. */
   return (remaining > 0ULL) && (remaining < HALF_RANGE_40);
 }
 
@@ -784,6 +846,41 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   (void) poll_len;
 
+  {
+    uint8_t my_mask_bit = (uint8_t) (1U << (anchor_id - 1U));
+    bool poll_targets_me = ((poll->anchor_mask & my_mask_bit) != 0U);
+    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING,
+                  "[ANCHOR%u] RX POLL seq=%u n=%u mask=0x%02X target_me=%u",
+                  anchor_id,
+                  (unsigned) poll->sequence_num,
+                  (unsigned) poll->num_anchors,
+                  (unsigned) poll->anchor_mask,
+                  poll_targets_me ? 1U : 0U);
+
+    if (!poll_targets_me)
+    {
+      RLOG_W(LOG_OBJECT_CODE_RANGING,
+             "[ANCHOR%u] POLL mask does not include this anchor (seq=%u mask=0x%02X)",
+             anchor_id,
+             (unsigned) poll->sequence_num,
+             (unsigned) poll->anchor_mask);
+    }
+
+    if (poll->num_anchors != num_anchors)
+    {
+      RLOG_W(LOG_OBJECT_CODE_RANGING,
+             "[ANCHOR%u] POLL num_anchors mismatch: poll=%u local=%u (seq=%u). Adopting POLL num_anchors.",
+             anchor_id,
+             (unsigned) poll->num_anchors,
+             (unsigned) num_anchors,
+             (unsigned) poll->sequence_num);
+
+      /* Dynamically adopt POLL config to ensure expected_final_tx_dw aligns with TAG's timeline */
+      s_tdma_anchor.schedule.num_anchors = poll->num_anchors;
+      num_anchors = poll->num_anchors;
+    }
+  }
+
   /* Read T2 (POLL RX timestamp on anchor) */
   uint64_t poll_rx_ts = 0;
   if (bsp_uwb_get_last_rx_timestamp(&poll_rx_ts) != BSP_OK)
@@ -813,8 +910,13 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   (void) resp_offset_us;
 
-  /* Ensure future TX */
+  /* Ensure future TX - if missed, abort to avoid colliding with next anchor */
   resp_tx_time_dw = ensure_future_tx(resp_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+  if (resp_tx_time_dw == 0ULL)
+  {
+    s_ranging_busy = false;
+    return -1;
+  }
 
   /* Put actual antenna-domain delayed TX timestamp in payload (T3). */
   uint64_t t3_timestamp_pred = predict_delayed_tx_antenna_time(resp_tx_time_dw);
@@ -826,6 +928,7 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   resp_msg.sequence_num = poll->sequence_num;
   resp_msg.anchor_id    = anchor_id;
   resp_msg.slot_id      = my_slot_id;
+  resp_msg.calib_status = (uint8_t) s_calib_status;
   {
     uint64_t poll_rx_payload = poll_rx_ts & DW_MASK_40;
     uint64_t resp_tx_payload = t3_timestamp_pred & DW_MASK_40;
@@ -852,7 +955,7 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     /* verify_tx_timing: always logs - DEBUG if OK, WARN if jitter, ERROR if slot missed.
      * resp_tx_time_dw here is post-ensure_future_tx (the time we actually asked for).
      * t3_timestamp_pred is the quantized antenna-domain prediction of that time. */
-    verify_tx_timing("RESP", anchor_id, my_slot_id, poll->sequence_num, resp_tx_time_dw, t3_timestamp_pred);
+    verify_tx_timing("RESP", anchor_id, my_slot_id, poll->sequence_num, resp_tx_time_dw, t3_timestamp_pred, t3_actual, (t3_actual != 0));
   }
 
   /* 3. Wait for FINAL */
@@ -863,18 +966,32 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   uint64_t expected_final_dw = 0;
   if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_dw) != TDMA_OK)
   {
-    expected_final_dw = poll_rx_ts
-                        + tdma_us_to_dw(((uint32_t) num_anchors * effective_slot_us)
+    /* Fallback mirrors tdma_calculate_final_time() using superframe_start_dw. */
+    expected_final_dw = s_tdma_anchor.superframe_start_dw
+                        + tdma_us_to_dw(s_tdma_anchor.schedule.poll_to_resp_delay_us
+                                        + ((uint32_t) num_anchors * effective_slot_us)
+                                        + s_tdma_anchor.schedule.slot_duration_us
                                         + s_tdma_anchor.schedule.resp_to_final_delay_us);
+    expected_final_dw &= DW_MASK_40;
   }
   uint64_t now_before_wait_dw = bsp_uwb_get_current_time_dw();
   int64_t  final_left_dw      = (int64_t) (expected_final_dw - now_before_wait_dw);
   uint32_t final_left_us = tdma_dw_to_us((uint64_t) ((final_left_dw >= 0) ? final_left_dw : -final_left_dw));
   uint32_t final_timeout_us = tdma_compute_final_wait_timeout_us(&s_tdma_anchor, num_anchors);
 
-  if (hal_rx_wait_valid_msg(final_buf, sizeof(final_buf), &final_len, MW_DSTWR_MSG_TYPE_FINAL,
-                            final_timeout_us)
-      != 0)
+  uint64_t rx_start_dw = (expected_final_dw - tdma_us_to_dw(1000U)) & DW_MASK_40;
+  int rx_res = -1;
+  
+  if (sys_config_get()->uwb.power_mode == ANCHOR_POWER_MODE_PERFORMANCE)
+  {
+      rx_res = hal_rx_wait_valid_msg(final_buf, sizeof(final_buf), &final_len, MW_DSTWR_MSG_TYPE_FINAL, final_timeout_us);
+  }
+  else
+  {
+      rx_res = hal_rx_wait_valid_msg_delayed(final_buf, sizeof(final_buf), &final_len, MW_DSTWR_MSG_TYPE_FINAL, rx_start_dw, final_timeout_us + 1000U);
+  }
+
+  if (rx_res != 0)
   {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] No FINAL received (seq=%u left_pre=%c%luus timeout=%luus)",
            poll->sequence_num, (final_left_dw >= 0) ? '+' : '-', (unsigned long) final_left_us,
@@ -885,9 +1002,9 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   final_msg_t *final_msg = (final_msg_t *) final_buf;
 
-  RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RX FINAL: len=%u seq=%u tag=%u responses=%u mask=0x%02X",
-                final_len, final_msg->sequence_num, final_msg->tag_id, final_msg->num_responses,
-                final_msg->anchor_resp_mask);
+  //RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RX FINAL: len=%u seq=%u tag=%u responses=%u mask=0x%02X",
+  //              final_len, final_msg->sequence_num, final_msg->tag_id, final_msg->num_responses,
+  //              final_msg->anchor_resp_mask);
 
   /* CRITICAL: Validate FINAL sequence_num matches POLL */
   if (final_msg->sequence_num != poll->sequence_num)
@@ -961,6 +1078,7 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   s_ctx.result_single.distance_m = raw_distance_m;
   s_ctx.result_single.anchor_id  = anchor_id;
   s_ctx.result_single.rssi       = poll_rssi_dbm;
+  s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
   s_ctx.result_single.valid      = raw_valid;
   s_ctx.result_single.t1         = ts.t1;
   s_ctx.result_single.t2         = ts.t2;
@@ -974,68 +1092,76 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   result_msg.msg_type     = MW_DSTWR_MSG_TYPE_RESULT;
   result_msg.sequence_num = final_msg->sequence_num;
   result_msg.anchor_id    = anchor_id;
-  result_msg.slot_id      = my_slot_id; /* FIX Bug-C: fill slot_id for TAG validation */
+  result_msg.slot_id      = my_slot_id;
   result_msg.valid        = raw_valid ? 1 : 0;
   result_msg.distance_m   = raw_distance_m;
   result_msg.rssi         = poll_rssi_dbm;
 
-  /* RESULT must be based on the actual FINAL RX timestamp at this anchor. */
-  uint64_t final_base_dw = final_rx_ts;
+  /* RESULT TX time is anchored to superframe_start_dw via tdma_calculate_final_time(),
+   * not to final_rx_ts. Each anchor receives FINAL at a slightly different time
+   * (propagation delay), so using final_rx_ts as base would shift RESULT slots
+   * differently per anchor — breaking the shared reference point guarantee.
+   *
+   * result_tx = expected_final_tx + final_to_result_delay + my_slot_id * effective_slot
+   *
+   * my_slot_id * effective_slot ensures slots are evenly separated (4000µs apart),
+   * with slot 1 at +5500µs, slot 2 at +9500µs, etc. after expected FINAL TX. */
+  uint64_t expected_final_tx_dw = 0;
+  if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_tx_dw) != TDMA_OK)
+  {
+    expected_final_tx_dw = final_rx_ts; /* Fallback only — should not happen. */
+  }
 
-  /* FIX Bug-B: use my_slot_id (NOT my_slot_id-1) to mirror the RESP formula.
-   *
-   * OLD (broken): (my_slot_id - 1) * effective_slot
-   *   → slot 1 fires at final_rx + 1500µs
-   *   → distance calculation + message build takes ~1000-1500µs
-   *   → ensure_future_tx detects slot missed, pushes to now+guard*2
-   *   → ALL anchors pushed to ~same time → collision → TAG gets only 1-2 results
-   *
-   * NEW (fixed): my_slot_id * effective_slot  (matches RESP formula)
-   *   → slot 1 fires at final_rx + 1500 + 4000 = final_rx + 5500µs  ← enough headroom
-   *   → slot 2: final_rx + 9500µs
-   *   → slot 3: final_rx + 13500µs
-   *   → slots are evenly separated with no collision
-   *
-   * TAG deadline (tdma_compute_result_rx_window_end) uses max_result_slot*effective_slot
-   * + margins (4700µs), which still covers the last slot comfortably. */
+  /* Debug: verify expected_final_tx_dw is in near future (~ms), not past or far future.
+   * If ahead_ms is large negative → superframe_start_dw is stale or wrong clock domain.
+   * If ahead_ms > 200 → MAX_REASONABLE_AHEAD will reject the TX. */
+  {
+    uint64_t now_dbg    = bsp_uwb_get_current_time_dw();
+    uint64_t ahead_dw   = (expected_final_tx_dw - now_dbg) & DW_MASK_40;
+    int32_t  ahead_ms   = (ahead_dw < (DW_MASK_40 / 2ULL))
+                          ? (int32_t)(tdma_dw_to_us(ahead_dw) / 1000U)
+                          : -(int32_t)(tdma_dw_to_us((now_dbg - expected_final_tx_dw) & DW_MASK_40) / 1000U);
+//    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING,
+//                  "[ANCHOR%u] RESULT ref: superframe=" DW_FMT " final_rx=" DW_FMT
+//                  " expected_final=" DW_FMT " ahead=%ldms",
+//                  anchor_id,
+//                  DW_ARG(s_tdma_anchor.superframe_start_dw),
+//                  DW_ARG(final_rx_ts),
+//                  DW_ARG(expected_final_tx_dw),
+//                  (long) ahead_ms);
+  }
+
   uint32_t result_offset_us =
     s_tdma_anchor.schedule.final_to_result_delay_us + (my_slot_id * effective_slot_us);
-  uint64_t result_tx_time_dw    = (final_base_dw + tdma_us_to_dw(result_offset_us)) & DW_MASK_40;
+  uint64_t result_tx_time_dw    = (expected_final_tx_dw + tdma_us_to_dw(result_offset_us)) & DW_MASK_40;
   uint64_t result_tx_planned_dw = result_tx_time_dw;
   result_tx_time_dw             = ensure_future_tx(result_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
-  if (result_tx_time_dw != result_tx_planned_dw)
+  if (result_tx_time_dw == 0ULL)
   {
-    uint32_t slip_us = tdma_dw_to_us((result_tx_time_dw - result_tx_planned_dw) & DW_MASK_40);
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT slot late -> shifted by %luus (seq=%u slot=%u)",
-           (unsigned long) slip_us, final_msg->sequence_num, my_slot_id);
-  }
-
-  {
-    uint64_t now_dw   = bsp_uwb_get_current_time_dw();
-    uint64_t ahead_dw = (result_tx_time_dw - now_dw) & DW_MASK_40;
-    uint32_t ahead_us = tdma_dw_to_us(ahead_dw);
-    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT plan: seq=%u slot=%u off=%luus ahead=%luus",
-                  final_msg->sequence_num, my_slot_id, (unsigned long) result_offset_us,
-                  (unsigned long) ahead_us);
-  }
-
-  /* Pre-compute prediction for RESULT so we can compare after TX. */
-  uint64_t result_tx_predicted_dw = predict_delayed_tx_antenna_time(result_tx_time_dw);
-
-  if (bsp_uwb_tx_delayed(&result_msg, sizeof(result_msg), result_tx_time_dw) != BSP_OK)
-  {
-    RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
-           "[ANCHOR] Failed to TX RESULT (seq=%u slot=%u off=%luus planned=" DW_FMT ")",
-           final_msg->sequence_num, my_slot_id, (unsigned long) result_offset_us, DW_ARG(result_tx_time_dw));
-    /* Don't fail - distance already calculated */
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RESULT slot missed (seq=%u slot=%u) - ABORTING TX",
+           final_msg->sequence_num, my_slot_id);
+    /* Don't return -1 here, let anchor clean up and finish cycle normally */
   }
   else
   {
-    /* Verify actual TX time from DW1000 TX_TIME register.
-     * This is the TDMA production health-check: planned vs actual.
-     * If delta > 1ms → slot was missed → investigate ensure_future_tx logs above. */
-    verify_tx_timing("RESULT", anchor_id, my_slot_id, final_msg->sequence_num, result_tx_time_dw,
-                     result_tx_predicted_dw);
+    /* Pre-compute prediction for RESULT so we can compare after TX. */
+    uint64_t result_tx_predicted_dw = predict_delayed_tx_antenna_time(result_tx_time_dw);
+
+    if (bsp_uwb_tx_delayed(&result_msg, sizeof(result_msg), result_tx_time_dw) != BSP_OK)
+    {
+      RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
+             "[ANCHOR] Failed to TX RESULT (seq=%u slot=%u off=%luus planned=" DW_FMT ")",
+             final_msg->sequence_num, my_slot_id, (unsigned long) result_offset_us, DW_ARG(result_tx_time_dw));
+      /* Don't fail - distance already calculated */
+    }
+    else
+    {
+      /* Verify actual TX time from DW1000 TX_TIME register.
+       * This is the TDMA production health-check: planned vs actual.
+       * If delta > 1ms → slot was missed → investigate ensure_future_tx logs above. */
+      verify_tx_timing("RESULT", anchor_id, my_slot_id, final_msg->sequence_num, result_tx_time_dw,
+                       result_tx_predicted_dw, 0, false);
+    }
   }
 
   /* Keep verbose debug after RESULT TX to avoid missing delayed-TX slot timing. */
@@ -1120,6 +1246,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     uint64_t poll_rx_ts;
     uint64_t resp_tx_ts;
     int8_t   rssi;
+    uint8_t  calib_status;
     bool     valid;
   } anchor_resp[8];
   memset(anchor_resp, 0, sizeof(anchor_resp));
@@ -1131,25 +1258,36 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   uint64_t resp_window_end_dw =
     tdma_compute_resp_rx_window_end(tdma, anchor_ids, num_anchors, resp_window_start_dw);
 
-  /* FIX Bug-D: Cap RESP window so it does NOT overrun the planned FINAL TX time.
-   * Without this, the last slot's rx_late_margin (4700µs) pushes the window
-   * well past FINAL TX, causing TAG to miss its FINAL deadline when not all
-   * anchors respond - which then causes all anchors to time out waiting for FINAL.
+  /* Cap RESP window so it does NOT overrun the planned FINAL TX time.
+   * Without this cap, the last slot's rx_late_margin pushes the window
+   * past FINAL TX, causing TAG to miss its FINAL deadline when not all
+   * anchors respond — which then causes all anchors to timeout on FINAL.
    *
-   * FINAL is planned at: superframe_start + N*effective_slot + resp_to_final_delay
-   * We leave processing_margin_us of headroom before FINAL to build the message. */
+   * Use tdma_calculate_final_time() as the single source of truth for when
+   * FINAL is scheduled. This is critical after the superframe origin fix:
+   * superframe_start_dw is now (T1 - poll_to_resp_delay), so any inline
+   * formula that adds poll_to_resp_delay back will be correct, but using
+   * the dedicated function avoids divergence if timing params change later. */
   {
-    uint32_t effective_slot_us = tdma_effective_slot_us(tdma);
-    /* FIX: include poll_to_resp_delay_us to mirror tdma_calculate_final_time() exactly.
-     * Without it, planned_dw was 1500us too early → cap fired too soon → slot-4 RESP missed. */
-    uint64_t final_tx_planned_dw =
-      tdma->superframe_start_dw
-      + tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us
-                      + (uint32_t) num_anchors * effective_slot_us
-                      + tdma->schedule.resp_to_final_delay_us);
+    uint64_t final_tx_planned_dw = 0;
+    if (tdma_calculate_final_time(tdma, num_anchors, &final_tx_planned_dw) != TDMA_OK)
+    {
+      /* Fallback must match tdma_calculate_final_time() exactly — including
+       * slot_duration_us which accounts for the last RESP payload airtime. */
+      uint32_t effective_slot_us = tdma_effective_slot_us(tdma);
+      final_tx_planned_dw = tdma->superframe_start_dw
+                            + tdma_us_to_dw(tdma->schedule.poll_to_resp_delay_us
+                                            + (uint32_t) num_anchors * effective_slot_us
+                                            + tdma->schedule.slot_duration_us
+                                            + tdma->schedule.resp_to_final_delay_us);
+      final_tx_planned_dw &= DW_MASK_40;
+    }
+
+    /* Leave processing_margin_us + 500us of headroom before FINAL to build
+     * the message, copy timestamps, and call bsp_uwb_tx_delayed(). */
     uint64_t final_tx_headroom_dw =
-      final_tx_planned_dw - tdma_us_to_dw(tdma->schedule.processing_margin_us + 500U);
-    final_tx_headroom_dw &= DW_MASK_40;
+      (final_tx_planned_dw - tdma_us_to_dw(tdma->schedule.processing_margin_us + 500U))
+      & DW_MASK_40;
 
     if (dw_time_before_deadline(final_tx_headroom_dw, resp_window_end_dw))
     {
@@ -1166,6 +1304,8 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     s_ranging_busy = false;
     return -1;
   }
+
+  uint64_t dbg_loop_start_dw = bsp_uwb_get_current_time_dw();
 
   while (dw_time_before_deadline(bsp_uwb_get_current_time_dw(), resp_window_end_dw)
          && (num_responses < num_anchors))
@@ -1227,6 +1367,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     anchor_resp[matched_index].poll_rx_ts = resp_poll_rx_ts;
     anchor_resp[matched_index].resp_tx_ts = resp_resp_tx_ts;
     anchor_resp[matched_index].rssi       = (int8_t) resp->rssi_poll;
+    anchor_resp[matched_index].calib_status = resp->calib_status;
     anchor_resp[matched_index].valid      = true;
 
     num_responses++;
@@ -1238,6 +1379,26 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   {
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] RESP slot mismatches in cycle: %u",
            (unsigned) slot_mismatch_count);
+  }
+
+  /* Show exactly what DW time range the loop actually covered vs what was needed. */
+  {
+    uint64_t dbg_loop_end_dw = bsp_uwb_get_current_time_dw();
+    uint32_t covered_us = tdma_dw_to_us((dbg_loop_end_dw - dbg_loop_start_dw) & DW_MASK_40);
+    uint32_t start_offset_us = tdma_dw_to_us((dbg_loop_start_dw - tdma->superframe_start_dw) & DW_MASK_40);
+    uint32_t end_offset_us   = tdma_dw_to_us((dbg_loop_end_dw   - tdma->superframe_start_dw) & DW_MASK_40);
+    uint32_t window_end_offset_us = tdma_dw_to_us((resp_window_end_dw - tdma->superframe_start_dw) & DW_MASK_40);
+    uint32_t rx_err_timeout = 0, rx_err_crc = 0, rx_err_phr = 0, rx_err_sync = 0;
+    bsp_uwb_get_rx_error_counts(&rx_err_timeout, &rx_err_crc, &rx_err_phr, &rx_err_sync);
+    bsp_uwb_reset_rx_error_counts();
+    RLOG_I(LOG_OBJECT_CODE_RANGING,
+           "[TAG] RESP window: loop=[+%luus..+%luus] covered=%luus window_end=+%luus got=%u/%u "
+           "rx_errs(to=%lu crc=%lu phr=%lu sync=%lu)",
+           (unsigned long) start_offset_us, (unsigned long) end_offset_us,
+           (unsigned long) covered_us,      (unsigned long) window_end_offset_us,
+           num_responses, num_anchors,
+           (unsigned long) rx_err_timeout, (unsigned long) rx_err_crc,
+           (unsigned long) rx_err_phr,     (unsigned long) rx_err_sync);
   }
 
   if (num_responses == 0)
@@ -1270,6 +1431,11 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   }
 
   final_tx_time_dw = ensure_future_tx(final_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+  if (final_tx_time_dw == 0ULL)
+  {
+    s_ranging_busy = false;
+    return -1;
+  }
 
   /* Put actual antenna-domain delayed TX timestamp in FINAL payload (T5). */
   uint64_t t5_payload = predict_delayed_tx_antenna_time(final_tx_time_dw);
@@ -1433,6 +1599,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
           tag_result->anchor_id            = result->anchor_id;
           tag_result->distance_m           = result->distance_m;
           tag_result->rssi                 = result->rssi;
+          tag_result->calib_status         = anchor_resp[i].calib_status;
           tag_result->valid                = (result->valid == 1);
 
           /* Store timestamps for reference */
@@ -1470,6 +1637,21 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     }
     __NOP();
   }
+
+  /* Diagnostic: report why the RESULT loop exited.
+   * TIMEOUT  → anchors TX'd but TAG window expired (timing mismatch or RF loss).
+   * EARLY_EXIT → all expected RESULTs received, window closed early (healthy). */
+  {
+    uint64_t now_dw    = bsp_uwb_get_current_time_dw();
+    bool     timed_out = !dw_time_before_deadline(now_dw, result_deadline_dw);
+    uint32_t rem_us    = timed_out ? 0U
+      : tdma_dw_to_us((result_deadline_dw - now_dw) & DW_MASK_40);
+    RLOG_W(LOG_OBJECT_CODE_RANGING,
+           "[TAG] RESULT loop: got=%u/%u mask=0x%02X %s remain=%luus",
+           results_received, num_responses, result_mask,
+           timed_out ? "TIMEOUT" : "EARLY_EXIT", (unsigned long) rem_us);
+  }
+
 
   if (result_slot_mismatch_count > 0U)
   {
@@ -1542,7 +1724,8 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
   if (s_ctx.state != STATE_TAG_RANGING_TDMA) return SYS_RANGING_ERR;
   
   uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
-  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
+  /* Use the specified timeout for the entire TDMA cycle plus some overhead */
+  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms + 500) {
     state_machine_reset();
     s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
     return SYS_RANGING_ERR_TIMEOUT;
@@ -1583,6 +1766,16 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               s_sys_ranging_ev.poll_tx_ts = evt.tx_ts; // DW1000 caches exact TX time
               tdma_start_superframe(&s_tdma_tag, s_sys_ranging_ev.poll_tx_ts);
               s_sys_ranging_ev.deadline_dw = tdma_compute_resp_rx_window_end(&s_tdma_tag, anchor_ids, num_anchors, bsp_uwb_get_current_time_dw());
+              
+              /* Cap RESP window so it does NOT overrun the planned FINAL TX time */
+              uint64_t final_tx_planned_dw = 0;
+              if (tdma_calculate_final_time(&s_tdma_tag, num_anchors, &final_tx_planned_dw) == TDMA_OK) {
+                  uint64_t final_tx_headroom_dw = (final_tx_planned_dw - tdma_us_to_dw(s_tdma_tag.schedule.processing_margin_us + 500U)) & DW_MASK_40;
+                  if (dw_time_before_deadline(final_tx_headroom_dw, s_sys_ranging_ev.deadline_dw)) {
+                      s_sys_ranging_ev.deadline_dw = final_tx_headroom_dw;
+                  }
+              }
+              
               bsp_uwb_enable_rx(0);
               s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_RESP;
           }
@@ -1602,12 +1795,14 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                       s_sys_ranging_ev.anchor_resp[idx].poll_rx_ts &= DW_MASK_40;
                       s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts &= DW_MASK_40;
                       s_sys_ranging_ev.anchor_resp[idx].rssi = evt.rx_rssi;
+                        s_sys_ranging_ev.anchor_resp[idx].calib_status = resp->calib_status;
                       s_sys_ranging_ev.anchor_resp[idx].valid = true;
                       s_sys_ranging_ev.num_responses++;
+                      RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Got RESP from anchor %u", resp->anchor_id);
                   }
               }
           }
-          if (has_evt) bsp_uwb_enable_rx(0); // keep listening
+          /* RX is automatically re-enabled in uwb_rx_cb (BSP) for continuous listening */
           
           if (!dw_time_before_deadline(bsp_uwb_get_current_time_dw(), s_sys_ranging_ev.deadline_dw) || s_sys_ranging_ev.num_responses >= num_anchors) {
               if (s_sys_ranging_ev.num_responses == 0) {
@@ -1617,6 +1812,10 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               uint64_t final_tx_time_dw = 0;
               tdma_calculate_final_time(&s_tdma_tag, num_anchors, &final_tx_time_dw);
               final_tx_time_dw = ensure_future_tx(final_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
+              if (final_tx_time_dw == 0ULL) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
               uint64_t t5_payload = predict_delayed_tx_antenna_time(final_tx_time_dw);
               
               uint8_t final_buf[256] = {0};
@@ -1649,7 +1848,33 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
           break;
       }
       case SYS_RANGING_EV_TAG_WAIT_FINAL_TX: {
+          uint64_t final_tx_ts = 0;
+          bool final_tx_done = false;
+
           if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              final_tx_ts   = evt.tx_ts;
+              final_tx_done = true;
+          } else if (has_evt) {
+              /* TX_DONE may have been overwritten in the single-slot event buffer
+               * by an incoming RX_OK (e.g. anchor RESULT arriving before main loop
+               * processed TX_DONE due to debug logging overhead).
+               * Recover: check if the cached last TX timestamp matches the planned
+               * FINAL TX window (within ±10ms). */
+              uint64_t last_tx = 0;
+              if (bsp_uwb_get_last_tx_timestamp(&last_tx) == BSP_OK) {
+                  uint64_t expected_final = 0;
+                  tdma_calculate_final_time(&s_tdma_tag, num_anchors, &expected_final);
+                  uint64_t diff = (last_tx - expected_final) & DW_MASK_40;
+                  if (diff < tdma_us_to_dw(10000U)) {
+                      final_tx_ts   = last_tx;
+                      final_tx_done = true;
+                      RLOG_W(LOG_OBJECT_CODE_RANGING,
+                             "[TAG] FINAL TX_DONE overwritten by RX - recovered via cached ts");
+                  }
+              }
+          }
+
+          if (final_tx_done) {
               s_ctx.result_multi.count = 0;
               s_ctx.result_multi.sequence_num = s_ctx.sequence_num;
               uint8_t max_slot = 1;
@@ -1659,29 +1884,83 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                       if (slot.slot_id > max_slot) max_slot = slot.slot_id;
                   }
               }
-              s_sys_ranging_ev.deadline_dw = tdma_compute_result_rx_window_end(&s_tdma_tag, evt.rx_ts, max_slot);
-              bsp_uwb_enable_rx(0);
+              s_sys_ranging_ev.deadline_dw = tdma_compute_result_rx_window_end(&s_tdma_tag, final_tx_ts, max_slot);
+
+              /* If the current event is already a RESULT (TX_DONE was overwritten),
+               * process it immediately instead of discarding it. */
+              if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK &&
+                  validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_RESULT)) {
+                  result_msg_t *res = (result_msg_t*)evt.rx_data;
+                  if (res->sequence_num == s_ctx.sequence_num) {
+                      bool duplicate = false;
+                      for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
+                          if (s_ctx.result_multi.results[i].anchor_id == res->anchor_id) { duplicate = true; break; }
+                      }
+                      if (!duplicate && s_ctx.result_multi.count < 8) {
+                          sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
+                          tr->anchor_id   = res->anchor_id;
+                          tr->distance_m  = res->distance_m;
+                          tr->rssi        = res->rssi;
+                            tr->calib_status = SYS_CALIB_STATUS_NORMAL;
+                            for (uint8_t k = 0; k < 8; k++) {
+                              if (s_sys_ranging_ev.anchor_resp[k].valid &&
+                                s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
+                                tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
+                                break;
+                              }
+                            }
+                          tr->valid       = (res->valid == 1);
+                          s_ctx.result_multi.count++;
+                      }
+                  }
+              }
+
+              /* RX is already re-enabled by BSP */
               s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_RESULT;
           }
           break;
       }
       case SYS_RANGING_EV_TAG_WAIT_RESULT: {
+          bool result_received = false;
           if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK && validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_RESULT)) {
               result_msg_t *res = (result_msg_t*)evt.rx_data;
               if (res->sequence_num == s_ctx.sequence_num) {
-                  sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
-                  tr->anchor_id = res->anchor_id;
-                  tr->distance_m = res->distance_m;
-                  tr->rssi = res->rssi;
-                  tr->valid = (res->valid == 1);
-                  s_ctx.result_multi.count++;
+                  bool duplicate = false;
+                  for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
+                      if (s_ctx.result_multi.results[i].anchor_id == res->anchor_id) { duplicate = true; break; }
+                  }
+                  if (!duplicate && s_ctx.result_multi.count < 8) {
+                      sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
+                      tr->anchor_id = res->anchor_id;
+                      tr->distance_m = res->distance_m;
+                      tr->rssi = res->rssi;
+                        tr->calib_status = SYS_CALIB_STATUS_NORMAL;
+                        for (uint8_t k = 0; k < 8; k++) {
+                          if (s_sys_ranging_ev.anchor_resp[k].valid &&
+                            s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
+                            tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
+                            break;
+                          }
+                        }
+                      tr->valid = (res->valid == 1);
+                      s_ctx.result_multi.count++;
+                      result_received = true;
+                  }
               }
           }
-          if (has_evt) bsp_uwb_enable_rx(0);
-          
+          /* Re-enable RX only when needed:
+           * - After a valid RESULT if we still expect more
+           * - On error/timeout events (not after good RX to avoid dwt_forcetrxoff()
+           *   killing the next anchor's RESULT that is already arriving) */
+          /* RX is automatically re-enabled in uwb_rx_cb (BSP) */
+
           if (!dw_time_before_deadline(bsp_uwb_get_current_time_dw(), s_sys_ranging_ev.deadline_dw) || s_ctx.result_multi.count >= s_sys_ranging_ev.num_responses) {
               s_ctx.has_result = true;
               s_ctx.state = STATE_TAG_COMPLETE;
+              for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
+                  log_ranging_result(&s_ctx.result_multi.results[i], "TAG");
+              }
+              RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Received %u RESULT messages", s_ctx.result_multi.count);
               s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
               return SYS_RANGING_OK;
           }
@@ -1692,13 +1971,27 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
   return SYS_RANGING_ERR_BUSY;
 }
 
+typedef struct {
+    bool is_tracking;
+    uint32_t track_failures;
+    uint64_t next_poll_dw;
+    uint32_t sleep_until_tick;
+    uint32_t sniffer_start_tick;
+    bool sniffer_rx_on;
+} anchor_track_state_t;
+static anchor_track_state_t s_anchor_track = {0};
+
 sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
 {
   if (s_ctx.state == STATE_IDLE) return SYS_RANGING_ERR_NOT_STARTED;
   if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA) return SYS_RANGING_ERR;
   
   uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
-  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
+  uint32_t sm_watchdog_ms = timeout_ms + 500; /* Generous overarching state machine watchdog */
+  
+  if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE || s_sys_ranging_ev.step == SYS_RANGING_EV_ANCHOR_WAIT_POLL) {
+      s_ctx.state_entry_tick = HAL_GetTick(); // keep state machine armed
+  } else if (HAL_GetTick() - s_ctx.state_entry_tick > sm_watchdog_ms) {
     state_machine_reset();
     s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
     return SYS_RANGING_ERR_TIMEOUT;
@@ -1713,7 +2006,57 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
       tdma_get_slot_for_anchor(&s_tdma_anchor, s_ctx.anchor_id, &my_slot);
       s_sys_ranging_ev.my_slot_id = my_slot.slot_id;
       s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_POLL;
-      bsp_uwb_enable_rx(0);
+      
+        uint8_t mode = (uint8_t)sys_config_get()->uwb.power_mode;
+      if (s_anchor_track.is_tracking && mode != ANCHOR_POWER_MODE_PERFORMANCE) {
+          uint64_t rx_start = (s_anchor_track.next_poll_dw - tdma_us_to_dw(5000U)) & DW_MASK_40;
+          uint64_t now_dw   = bsp_uwb_get_current_time_dw();
+          uint64_t ahead_dw = (rx_start - now_dw) & DW_MASK_40;
+          /* If rx_start is in the past, ahead_dw wraps to > half of 40-bit range.
+           * Fall back to discovery immediately instead of spamming TOO LATE. */
+          if (ahead_dw >= (DW_MASK_40 / 2ULL)) {
+              /* rx_start is in the past. Try advancing next_poll_dw by multiples
+               * of ranging_period to re-sync without dropping to discovery. */
+              uint32_t period_ms = sys_config_get()->uwb.ranging_period_ms;
+              uint64_t period_dw = tdma_us_to_dw((uint32_t)period_ms * 1000U);
+              bool recovered = false;
+              if (period_dw > 0) {
+                  for (uint8_t attempt = 0; attempt < 8; attempt++) {
+                      s_anchor_track.next_poll_dw = (s_anchor_track.next_poll_dw + period_dw) & DW_MASK_40;
+                      rx_start  = (s_anchor_track.next_poll_dw - tdma_us_to_dw(5000U)) & DW_MASK_40;
+                      ahead_dw  = (rx_start - now_dw) & DW_MASK_40;
+                      if (ahead_dw < (DW_MASK_40 / 2ULL)) {
+                          recovered = true;
+                          break;
+                      }
+                  }
+              }
+              if (recovered) {
+                  RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Tracking re-synced (+%u periods)", (unsigned)1);
+                  bsp_uwb_enable_rx_delayed(rx_start, 0);
+                  /* sleep_until_tick must cover the ACTUAL time until rx_start, not just
+                   * one period. If we advanced N periods (e.g. 4 × 150ms = 600ms), setting
+                   * sleep_until_tick = now+150ms causes track_failures to fire before
+                   * the delayed RX window even opens, abandoning tracking. */
+                  uint32_t ahead_ms = tdma_dw_to_us(ahead_dw) / 1000U;
+                  s_anchor_track.sleep_until_tick = HAL_GetTick() + ahead_ms + period_ms + 10;
+              } else {
+                  RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Tracking RX window stale, switching to DISCOVERY");
+                  s_anchor_track.is_tracking = false;
+                  s_anchor_track.sniffer_start_tick = HAL_GetTick();
+                  s_anchor_track.sniffer_rx_on = true;
+                  bsp_uwb_enable_rx(0);
+              }
+          } else {
+              bsp_uwb_enable_rx_delayed(rx_start, 0);
+              s_anchor_track.sleep_until_tick = HAL_GetTick() + sys_config_get()->uwb.ranging_period_ms + 10;
+          }
+      } else {
+          s_anchor_track.is_tracking = false;
+          s_anchor_track.sniffer_start_tick = HAL_GetTick();
+          s_anchor_track.sniffer_rx_on = true;
+          bsp_uwb_enable_rx(0);
+      }
   }
   
   bsp_uwb_event_t evt;
@@ -1726,12 +2069,26 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               s_ctx.sequence_num = poll->sequence_num;
               s_sys_ranging_ev.poll_rx_ts = evt.rx_ts;
               s_sys_ranging_ev.poll_rssi_dbm = evt.rx_rssi;
+              s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
               tdma_sync_to_poll(&s_tdma_anchor, s_sys_ranging_ev.poll_rx_ts);
+              
+              if (!s_anchor_track.is_tracking) {
+                  RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] System switch to TRACKING mode");
+              }
+              
+              s_anchor_track.is_tracking = true;
+              s_anchor_track.track_failures = 0;
+              s_anchor_track.next_poll_dw = (evt.rx_ts + tdma_us_to_dw(sys_config_get()->uwb.ranging_period_ms * 1000ULL)) & DW_MASK_40;
               
               uint64_t rtx_dw=0;
               tdma_calculate_response_time(&s_tdma_anchor, s_ctx.anchor_id, &rtx_dw);
               rtx_dw = ensure_future_tx(rtx_dw, TDMA_DEFAULT_GUARD_TIME_US);
-              s_sys_ranging_ev.resp_tx_ts = predict_delayed_tx_antenna_time(rtx_dw);
+              if (rtx_dw == 0ULL) {
+                  state_machine_reset();
+                  return SYS_RANGING_ERR;
+              }
+              s_sys_ranging_ev.predicted_tx_dw = predict_delayed_tx_antenna_time(rtx_dw);
+              s_sys_ranging_ev.resp_tx_ts = s_sys_ranging_ev.predicted_tx_dw;
               
               resp_msg_t rmsg = {0};
               rmsg.msg_type = MW_DSTWR_MSG_TYPE_RESP;
@@ -1743,18 +2100,73 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               memcpy(&rmsg.poll_rx_ts, &p_rx, sizeof(p_rx));
               memcpy(&rmsg.resp_tx_ts, &r_tx, sizeof(r_tx));
               rmsg.rssi_poll = (uint8_t)s_sys_ranging_ev.poll_rssi_dbm;
+              rmsg.calib_status = (uint8_t) s_calib_status;
               
-              bsp_uwb_tx_delayed(&rmsg, sizeof(rmsg), rtx_dw);
+              s_sys_ranging_ev.planned_tx_dw = rtx_dw;
+              if (bsp_uwb_tx_delayed(&rmsg, sizeof(rmsg), rtx_dw) != BSP_OK) {
+                  state_machine_reset();
+                  s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+                  return SYS_RANGING_ERR;
+              }
               s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_RESP_TX;
-          } else if (has_evt) {
-              bsp_uwb_enable_rx(0);
+          } else {
+              uint8_t mode = (uint8_t)sys_config_get()->uwb.power_mode;
+              if (s_anchor_track.is_tracking && mode != ANCHOR_POWER_MODE_PERFORMANCE) {
+                  if (HAL_GetTick() > s_anchor_track.sleep_until_tick) {
+                      s_anchor_track.track_failures++;
+                      if (s_anchor_track.track_failures > 3) {
+                          s_anchor_track.is_tracking = false; // Fallback to discovery
+                          RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] System switch to DISCOVERY mode (timeout)");
+                          s_anchor_track.sniffer_rx_on = false; // Trigger new cycle next tick
+                      } else {
+                          // Try next cycle
+                          s_anchor_track.next_poll_dw = (s_anchor_track.next_poll_dw + tdma_us_to_dw(sys_config_get()->uwb.ranging_period_ms * 1000ULL)) & DW_MASK_40;
+                          uint64_t rx_start = (s_anchor_track.next_poll_dw - tdma_us_to_dw(5000U)) & DW_MASK_40;
+                          bsp_uwb_enable_rx_delayed(rx_start, 0);
+                          s_anchor_track.sleep_until_tick = HAL_GetTick() + sys_config_get()->uwb.ranging_period_ms + 10;
+                      }
+                  } else if (has_evt) {
+                      // Spurious event during tracking window, keep listening immediately
+                      bsp_uwb_enable_rx(0);
+                  }
+              } else if (!s_anchor_track.is_tracking && mode != ANCHOR_POWER_MODE_PERFORMANCE) {
+                  uint32_t discovery_on_ms = 40;
+                  uint32_t discovery_interval_ms = 143;
+                  if (mode == ANCHOR_POWER_MODE_ECO) discovery_interval_ms = 307;
+                  else if (mode == ANCHOR_POWER_MODE_DEEP_ECO) discovery_interval_ms = 503;
+                  
+                  uint32_t elapsed = HAL_GetTick() - s_anchor_track.sniffer_start_tick;
+                  if (elapsed >= discovery_interval_ms) {
+                      s_anchor_track.sniffer_start_tick = HAL_GetTick();
+                      bsp_uwb_enable_rx(0);
+                      s_anchor_track.sniffer_rx_on = true;
+                  } else if (s_anchor_track.sniffer_rx_on && elapsed >= discovery_on_ms) {
+                      bsp_uwb_idle();
+                      s_anchor_track.sniffer_rx_on = false;
+                  } else if (has_evt) {
+                      if (s_anchor_track.sniffer_rx_on) bsp_uwb_enable_rx(0);
+                  }
+              } else if (has_evt) {
+                  bsp_uwb_enable_rx(0);
+              }
           }
           break;
       }
       case SYS_RANGING_EV_ANCHOR_WAIT_RESP_TX: {
           if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              s_sys_ranging_ev.resp_tx_ts = evt.tx_ts & DW_MASK_40;
+              verify_tx_timing("RESP", s_ctx.anchor_id, s_sys_ranging_ev.my_slot_id, s_ctx.sequence_num, s_sys_ranging_ev.planned_tx_dw, s_sys_ranging_ev.predicted_tx_dw, evt.tx_ts, true);
               s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_FINAL;
-              bsp_uwb_enable_rx(0);
+              
+              uint64_t expected_final_dw = 0;
+              tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_dw);
+              uint64_t rx_start_dw = (expected_final_dw - tdma_us_to_dw(1000U)) & DW_MASK_40;
+              
+                if (sys_config_get()->uwb.power_mode == ANCHOR_POWER_MODE_PERFORMANCE) {
+                  bsp_uwb_enable_rx(0);
+              } else {
+                  bsp_uwb_enable_rx_delayed(rx_start_dw, 0);
+              }
           }
           break;
       }
@@ -1781,11 +2193,21 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
                       s_ctx.result_single.distance_m = dist;
                       s_ctx.result_single.anchor_id = s_ctx.anchor_id;
                       s_ctx.result_single.rssi = s_sys_ranging_ev.poll_rssi_dbm;
+                      s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
                       s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
                       
+                      uint64_t expected_final_tx_dw = 0;
+                      if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_tx_dw) != TDMA_OK) {
+                          expected_final_tx_dw = evt.rx_ts;
+                      }
+                      
                       uint32_t rofs = s_tdma_anchor.schedule.final_to_result_delay_us + (s_sys_ranging_ev.my_slot_id * tdma_effective_slot_us(&s_tdma_anchor));
-                      uint64_t res_tx_dw = (evt.rx_ts + tdma_us_to_dw(rofs)) & DW_MASK_40;
+                      uint64_t res_tx_dw = (expected_final_tx_dw + tdma_us_to_dw(rofs)) & DW_MASK_40;
                       res_tx_dw = ensure_future_tx(res_tx_dw, TDMA_DEFAULT_GUARD_TIME_US);
+                      if (res_tx_dw == 0ULL) {
+                          state_machine_reset();
+                          return SYS_RANGING_ERR;
+                      }
                       
                       result_msg_t res = {0};
                       res.msg_type = MW_DSTWR_MSG_TYPE_RESULT;
@@ -1795,7 +2217,18 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
                       res.valid = s_ctx.result_single.valid ? 1 : 0;
                       res.distance_m = s_ctx.result_single.distance_m;
                       res.rssi = (int8_t)s_sys_ranging_ev.poll_rssi_dbm; // Pass old one
-                      bsp_uwb_tx_delayed(&res, sizeof(res), res_tx_dw);
+                      
+                      s_sys_ranging_ev.predicted_tx_dw = predict_delayed_tx_antenna_time(res_tx_dw);
+                      s_sys_ranging_ev.planned_tx_dw = res_tx_dw;
+                      if (bsp_uwb_tx_delayed(&res, sizeof(res), res_tx_dw) != BSP_OK) {
+                          state_machine_reset();
+                          s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+                          return SYS_RANGING_ERR;
+                      }
+                      log_dstwr_debug(s_ctx.sequence_num, s_ctx.anchor_id, &ts);
+                      RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[ANCHOR] DIST: seq=%u anchor=%u d=%.3fm valid=%u",
+                                    s_ctx.sequence_num, s_ctx.anchor_id, s_ctx.result_single.distance_m,
+                                    (unsigned) s_ctx.result_single.valid);
                       s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_RESULT_TX;
                   }
               }
@@ -1806,8 +2239,10 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
       }
       case SYS_RANGING_EV_ANCHOR_WAIT_RESULT_TX: {
           if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+              verify_tx_timing("RESULT", s_ctx.anchor_id, s_sys_ranging_ev.my_slot_id, s_ctx.sequence_num, s_sys_ranging_ev.planned_tx_dw, s_sys_ranging_ev.predicted_tx_dw, evt.tx_ts, true);
               s_ctx.has_result = true;
               s_ctx.state = STATE_ANCHOR_COMPLETE;
+              log_ranging_result(&s_ctx.result_single, "ANCHOR");
               s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
               return SYS_RANGING_OK;
           }
