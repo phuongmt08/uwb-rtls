@@ -26,6 +26,7 @@
 #include "ble_conn_params.h"
 #include "ble_db_discovery.h"
 #include "ble_lbs_c.h"
+#include "ble_nus_c.h"
 #include "ble_config.h"
 
 #include "nrf_ble_gatt.h"
@@ -72,6 +73,7 @@ typedef struct
 /* Private instances ------------------------------------------------------- */
 NRF_BLE_SCAN_DEF(m_scan);         /**< Scanning module instance.     */
 BLE_LBS_C_DEF(m_ble_lbs_c);       /**< LBS client module instance.   */
+BLE_NUS_C_DEF(m_ble_nus_c);       /**< NUS client module instance.   */
 NRF_BLE_GATT_DEF(m_gatt);         /**< GATT module instance.         */
 BLE_DB_DISCOVERY_DEF(m_db_disc);  /**< DB discovery module instance. */
 NRF_BLE_GQ_DEF(m_ble_gatt_queue,  /**< BLE GATT Queue instance.      */
@@ -383,6 +385,51 @@ static void lbs_c_evt_handler(ble_lbs_c_t *p_lbs_c, ble_lbs_c_evt_t *p_lbs_c_evt
     }
 }
 
+/**
+ * @brief Nordic UART Service Client event handler.
+ */
+static void nus_c_evt_handler(ble_nus_c_t *p_ble_nus_c, ble_nus_c_evt_t const *p_evt)
+{
+    ret_code_t err_code;
+
+    switch (p_evt->evt_type)
+    {
+        case BLE_NUS_C_EVT_DISCOVERY_COMPLETE:
+            NRF_LOG_INFO("NUS Service discovered on conn_handle 0x%x", p_evt->conn_handle);
+            err_code = ble_nus_c_handles_assign(p_ble_nus_c, p_evt->conn_handle, &p_evt->handles);
+            APP_ERROR_CHECK(err_code);
+
+            err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
+            APP_ERROR_CHECK(err_code);
+            break;
+
+        case BLE_NUS_C_EVT_NUS_TX_EVT:
+            // Placeholder for data reception logic - User will implement this
+            NRF_LOG_INFO("NUS Data received: %u bytes", p_evt->data_len);
+            break;
+
+        case BLE_NUS_C_EVT_DISCONNECTED:
+            NRF_LOG_INFO("NUS Service disconnected");
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void nus_c_init(void)
+{
+    ret_code_t       err_code;
+    ble_nus_c_init_t nus_c_init_obj;
+
+    nus_c_init_obj.evt_handler   = nus_c_evt_handler;
+    nus_c_init_obj.error_handler = lbs_error_handler; // Use same error handler
+    nus_c_init_obj.p_gatt_queue  = &m_ble_gatt_queue;
+
+    err_code = ble_nus_c_init(&m_ble_nus_c, &nus_c_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
+
 static void lbs_c_init(void)
 {
     ret_code_t       err_code;
@@ -662,6 +709,7 @@ static void db_disc_handler(ble_db_discovery_evt_t *p_evt)
     }
 
     ble_lbs_on_db_disc_evt(&m_ble_lbs_c, p_evt);
+    ble_nus_c_on_db_disc_evt(&m_ble_nus_c, p_evt);
 }
 
 /* -------------------------------------------------------------------------
@@ -776,6 +824,7 @@ void ble_central_init(void)
     button_init();
     db_discovery_init();
     lbs_c_init();
+    nus_c_init();
     scan_init();
     ret_code_t err_code = app_timer_create(&m_scan_publish_timer,
                                            APP_TIMER_MODE_REPEATED,
@@ -929,6 +978,58 @@ int32_t app_ble_central_rssi_dbm_get(void)
 uint32_t app_ble_central_disconnect_reason_get(void)
 {
     return m_last_disconnect_reason;
+}
+
+uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length)
+{
+    if (!m_is_connected || m_current_conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (p_data == NULL || length == 0)
+    {
+        return NRF_ERROR_NULL;
+    }
+
+    NRF_LOG_INFO("Forwarding %u bytes over BLE to peripheral...", length);
+
+    uint16_t offset = 0;
+
+    while (offset < length)
+    {
+        uint16_t current_payload_mtu = nrf_ble_gatt_eff_mtu_get(&m_gatt, m_current_conn_handle);
+        if (current_payload_mtu == 0 || current_payload_mtu > SYSTEM_CONFIG_MTU_SIZE)
+        {
+            current_payload_mtu = SYSTEM_CONFIG_MTU_SIZE;
+        }
+
+        current_payload_mtu -= 3; // ATT header
+
+        uint16_t send_len = length - offset;
+
+        if (send_len > current_payload_mtu)
+        {
+            send_len = current_payload_mtu;
+        }
+
+        ret_code_t err_code = ble_nus_c_string_send(&m_ble_nus_c, (uint8_t *)(p_data + offset), send_len);
+
+        if (err_code == NRF_ERROR_RESOURCES)
+        {
+            NRF_LOG_WARNING("BLE Central TX buffer full, dropping remaining: %u", length - offset);
+            return err_code;
+        }
+        else if (err_code != NRF_SUCCESS)
+        {
+            NRF_LOG_ERROR("BLE Central Send Failed! Code: 0x%x", (unsigned int)err_code);
+            return err_code;
+        }
+
+        offset += send_len;
+    }
+
+    return NRF_SUCCESS;
 }
 
 /* End of file ------------------------------------------------------------- */

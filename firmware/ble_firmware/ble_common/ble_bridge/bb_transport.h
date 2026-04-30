@@ -70,7 +70,7 @@ bool bb_transport_is_packet_ready(void);
  * @param[in] tx_source Destination source mode (Serial / BLE).
  * @return NRF_SUCCESS if success.
  */
-ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t length, bb_packet_source_t tx_source);
+ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t  length, bb_packet_source_t tx_source);
 
 void on_rx_byte(uint8_t byte);
 

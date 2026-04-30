@@ -73,6 +73,7 @@ bool app_ble_central_conn_params_get(uint16_t *min_ms, uint16_t *max_ms, uint16_
 uint8_t app_ble_central_status_get(void);
 int32_t app_ble_central_rssi_dbm_get(void);
 uint32_t app_ble_central_disconnect_reason_get(void);
+uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length);
 
 #ifdef __cplusplus
 }

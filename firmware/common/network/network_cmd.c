@@ -188,7 +188,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_host_transport_set,          "host_transport_set"), /* 39 */
 #else
-    CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_unimplemented,                        "host_transport_set"), /* 39 */
+    CMD_INFO(protobuf_packet_t_host_transport_set_tag,        network_cmd_unimplemented,               "host_transport_set"), /* 39 */
 #endif
 
 #ifndef BOOTLOADER

@@ -78,6 +78,7 @@ void bb_router_process(void)
             
         case BB_ROUTER_STATE_FORWARD:
             bb_router_state_forward_handle();
+            NRF_LOG_INFO("forward packet from MCU to Central")
             break;
 
         default:

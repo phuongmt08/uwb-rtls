@@ -267,19 +267,36 @@ def auto_detect_com_port():
 
 def main():
     import sys
+    import argparse
+    from vv_test_session import VvTestSession
+    import protocol_pb2 as pb
     
-    port = None
-    if len(sys.argv) > 1:
-        port = sys.argv[1]
-    else:
+    parser = argparse.ArgumentParser(description="Live BLE Central Dashboard")
+    parser.add_argument("--port", type=str, default=None, help="COM port, example COM21")
+    parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
+    args = parser.parse_args()
+    
+    port = args.port
+    baudrate = args.baud
+    
+    if not port:
         print("[!] Đang tự động dò tìm cổng COM...")
-        port = auto_detect_com_port()
+        try:
+            probe = VvTestSession.auto_probe(debug=False)
+            if probe:
+                port = probe.port
+                baudrate = probe.baud
+                print(f"[+] Tìm thấy thiết bị UWB tại {port} ({baudrate})")
+        except Exception:
+            pass
+            
+        if not port:
+            port = auto_detect_com_port()
         
     if not port:
         print("[X] KHÔNG TÌM THẤY cổng COM nào đang cắm vào máy tính!")
-        print("    Vui lòng cắm mạch vào hoặc chỉ định thủ công: python test_central.py COM<số>")
+        print("    Vui lòng cắm mạch vào hoặc chỉ định thủ công qua: python -m gateway_test.test_central --port COM<số>")
         sys.exit(1)
-    baudrate = 115200
     
     print(f"Connecting to {port} at {baudrate}...")
     try:

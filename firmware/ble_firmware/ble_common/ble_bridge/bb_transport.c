@@ -68,10 +68,12 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 
 void bb_transport_process(void)
 {
+    #if defined(BLE_PERIPHERAL)
     // Cỗ máy trạng thái giờ đây chạy tự động dựa vào event callback (on_rx_byte)
     // được ngắt từ UART (APP_UART_DATA_READY) gọi lên.
     // Nên hàm này có thể bỏ trống, hoặc có thể dùng xử lý các tác vụ delay timeout nếu cần sau này.
     bsp_uart_read_byte();
+    #endif
 }
 
 bool bb_transport_is_packet_ready(void)
@@ -89,6 +91,7 @@ ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t length, bb_pa
     else if (tx_source == BB_SOURCE_BLE) 
     {
         return bb_transport_send_ble(p_data, length);
+        NRF_LOG_INFO("Send packet via BLE to Central");
     }
     return NRF_ERROR_INVALID_PARAM;
 }
