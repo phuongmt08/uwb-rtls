@@ -61,18 +61,20 @@ static uint32_t s_rx_phr_err_count  = 0;
 static uint32_t s_rx_sync_err_count = 0;
 
 #if UWB_EVENT_DRIVEN
-static volatile bool s_isr_event_ready = false;
+#define UWB_EVENT_QUEUE_SIZE    4
+static volatile uint8_t s_ev_head           = 0; /* ISR writes here  (next write index) */
+static volatile uint8_t s_ev_tail           = 0; /* foreground reads here (next read index) */
+static bsp_uwb_event_t  s_ev_queue[UWB_EVENT_QUEUE_SIZE];
 static volatile uint8_t s_event_overflow_count = 0;
-static bsp_uwb_event_t s_isr_event;
 static void uwb_tx_cb(const dwt_callback_data_t *cb_data);
 static void uwb_rx_cb(const dwt_callback_data_t *cb_data);
 
 bool bsp_uwb_get_event(bsp_uwb_event_t *out_event)
 {
-    if (!s_isr_event_ready) return false;
+    if (s_ev_tail == s_ev_head) return false; 
     __disable_irq();
-    *out_event = s_isr_event;
-    s_isr_event_ready = false;
+    *out_event = s_ev_queue[s_ev_tail];
+    s_ev_tail  = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
     __enable_irq();
     return true;
 }
@@ -80,7 +82,7 @@ bool bsp_uwb_get_event(bsp_uwb_event_t *out_event)
 void bsp_uwb_clear_event(void)
 {
     __disable_irq();
-    s_isr_event_ready = false;
+    s_ev_head = s_ev_tail; /* drop all queued events */
     __enable_irq();
 }
 #endif
@@ -733,6 +735,8 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
   }
 
 #if UWB_EVENT_DRIVEN
+  /* Cache predicted TX timestamp for recovery if ISR is missed/overwritten */
+  s_last_tx_timestamp = (((uint64_t)dx_time << 8) + s_tx_antenna_delay) & DW_MASK_40;
   return BSP_OK;
 #else
   /* Wait for TX complete */
@@ -861,6 +865,7 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
   actual_dw = ((uint64_t)ts[0]) | ((uint64_t)ts[1] << 8) | ((uint64_t)ts[2] << 16)
          | ((uint64_t)ts[3] << 24) | ((uint64_t)ts[4] << 32);
   s_isr_event.tx_ts = actual_dw;
+  s_last_tx_timestamp = actual_dw;
   
   s_isr_event_ready = true;
 }
@@ -884,16 +889,21 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
       
       // We skip RSSI read in ISR to save time, main loop can approximate or we just use -100
       s_isr_event.rx_rssi = -100;
+      
+      /* Re-enable RX immediately without forcetrxoff to avoid killing subsequent preambles */
+      dwt_rxenable(DWT_START_RX_IMMEDIATE);
   }
   else if (cb_data->event == DWT_SIG_RX_TIMEOUT || cb_data->event == DWT_SIG_RX_PTOTIMEOUT)
   {
       s_isr_event.type = BSP_UWB_EVENT_RX_TIMEOUT;
       s_isr_event.rx_len = 0;
+      dwt_rxenable(DWT_START_RX_IMMEDIATE);
   }
   else
   {
       s_isr_event.type = BSP_UWB_EVENT_RX_ERROR;
       s_isr_event.rx_len = 0;
+      dwt_rxenable(DWT_START_RX_IMMEDIATE);
   }
   
   s_isr_event_ready = true;

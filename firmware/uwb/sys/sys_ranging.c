@@ -1802,7 +1802,7 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                   }
               }
           }
-          if (has_evt) bsp_uwb_enable_rx(0); // keep listening
+          /* RX is automatically re-enabled in uwb_rx_cb (BSP) for continuous listening */
           
           if (!dw_time_before_deadline(bsp_uwb_get_current_time_dw(), s_sys_ranging_ev.deadline_dw) || s_sys_ranging_ev.num_responses >= num_anchors) {
               if (s_sys_ranging_ev.num_responses == 0) {
@@ -1891,29 +1891,31 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK &&
                   validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_RESULT)) {
                   result_msg_t *res = (result_msg_t*)evt.rx_data;
-                  if (res->sequence_num == s_ctx.sequence_num &&
-                      s_ctx.result_multi.count < 8) {
-                      sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
-                      tr->anchor_id   = res->anchor_id;
-                      tr->distance_m  = res->distance_m;
-                      tr->rssi        = res->rssi;
-                        tr->calib_status = SYS_CALIB_STATUS_NORMAL;
-                        for (uint8_t k = 0; k < 8; k++) {
-                          if (s_sys_ranging_ev.anchor_resp[k].valid &&
-                            s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
-                            tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
-                            break;
-                          }
-                        }
-                      tr->valid       = (res->valid == 1);
-                      s_ctx.result_multi.count++;
+                  if (res->sequence_num == s_ctx.sequence_num) {
+                      bool duplicate = false;
+                      for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
+                          if (s_ctx.result_multi.results[i].anchor_id == res->anchor_id) { duplicate = true; break; }
+                      }
+                      if (!duplicate && s_ctx.result_multi.count < 8) {
+                          sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
+                          tr->anchor_id   = res->anchor_id;
+                          tr->distance_m  = res->distance_m;
+                          tr->rssi        = res->rssi;
+                            tr->calib_status = SYS_CALIB_STATUS_NORMAL;
+                            for (uint8_t k = 0; k < 8; k++) {
+                              if (s_sys_ranging_ev.anchor_resp[k].valid &&
+                                s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
+                                tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
+                                break;
+                              }
+                            }
+                          tr->valid       = (res->valid == 1);
+                          s_ctx.result_multi.count++;
+                      }
                   }
               }
 
-              /* Enable RX for remaining RESULTs */
-              if (s_ctx.result_multi.count < s_sys_ranging_ev.num_responses) {
-                  bsp_uwb_enable_rx(0);
-              }
+              /* RX is already re-enabled by BSP */
               s_sys_ranging_ev.step = SYS_RANGING_EV_TAG_WAIT_RESULT;
           }
           break;
@@ -1923,37 +1925,34 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
           if (has_evt && evt.type == BSP_UWB_EVENT_RX_OK && validate_msg_type(evt.rx_data, evt.rx_len, MW_DSTWR_MSG_TYPE_RESULT)) {
               result_msg_t *res = (result_msg_t*)evt.rx_data;
               if (res->sequence_num == s_ctx.sequence_num) {
-                  sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
-                  tr->anchor_id = res->anchor_id;
-                  tr->distance_m = res->distance_m;
-                  tr->rssi = res->rssi;
-                    tr->calib_status = SYS_CALIB_STATUS_NORMAL;
-                    for (uint8_t k = 0; k < 8; k++) {
-                      if (s_sys_ranging_ev.anchor_resp[k].valid &&
-                        s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
-                        tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
-                        break;
-                      }
-                    }
-                  tr->valid = (res->valid == 1);
-                  s_ctx.result_multi.count++;
-                  result_received = true;
+                  bool duplicate = false;
+                  for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
+                      if (s_ctx.result_multi.results[i].anchor_id == res->anchor_id) { duplicate = true; break; }
+                  }
+                  if (!duplicate && s_ctx.result_multi.count < 8) {
+                      sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
+                      tr->anchor_id = res->anchor_id;
+                      tr->distance_m = res->distance_m;
+                      tr->rssi = res->rssi;
+                        tr->calib_status = SYS_CALIB_STATUS_NORMAL;
+                        for (uint8_t k = 0; k < 8; k++) {
+                          if (s_sys_ranging_ev.anchor_resp[k].valid &&
+                            s_sys_ranging_ev.anchor_resp[k].anchor_id == res->anchor_id) {
+                            tr->calib_status = s_sys_ranging_ev.anchor_resp[k].calib_status;
+                            break;
+                          }
+                        }
+                      tr->valid = (res->valid == 1);
+                      s_ctx.result_multi.count++;
+                      result_received = true;
+                  }
               }
           }
           /* Re-enable RX only when needed:
            * - After a valid RESULT if we still expect more
            * - On error/timeout events (not after good RX to avoid dwt_forcetrxoff()
            *   killing the next anchor's RESULT that is already arriving) */
-          if (has_evt) {
-              bool need_more = (s_ctx.result_multi.count < s_sys_ranging_ev.num_responses);
-              if (result_received && need_more) {
-                  bsp_uwb_enable_rx(0);
-              } else if (!result_received) {
-                  /* Error, timeout, or non-RESULT frame — re-enable RX */
-                  bsp_uwb_enable_rx(0);
-              }
-              /* If result_received && !need_more: deadline check below will exit */
-          }
+          /* RX is automatically re-enabled in uwb_rx_cb (BSP) */
 
           if (!dw_time_before_deadline(bsp_uwb_get_current_time_dw(), s_sys_ranging_ev.deadline_dw) || s_ctx.result_multi.count >= s_sys_ranging_ev.num_responses) {
               s_ctx.has_result = true;
