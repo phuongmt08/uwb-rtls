@@ -13,6 +13,7 @@
 #include "cmsis_os.h"
 #include "adc.h"
 #include "crc.h"
+#include "dma.h"
 #include "i2c.h"
 #include "rtc.h"
 #include "spi.h"
@@ -194,6 +195,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
@@ -329,100 +331,6 @@ int main(void)
     osDelay(1000);
     /* USER CODE END WHILE */
 
-//    bsp_io_button_event_t btn_event = bsp_io_button_event();
-//
-//#if ENABLE_ANCHOR_AUTO_CALIB
-//    /* In calibration build, anchor button events handled differently */
-//    if (cfg->uwb.role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE) {
-//      app_anchor_on_button(btn_event);
-//      btn_event = BSP_IO_EVENT_NONE;  /* Prevent normal button handling */
-//    }
-//#endif
-//
-//#if ENABLE_TAG_AUTO_CALIB
-//    /* In calibration build, tag button events handled differently */
-//    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE) {
-//      app_tag_on_button(btn_event);
-//      btn_event = BSP_IO_EVENT_NONE;
-//    }
-//#endif
-//
-//    switch (btn_event)
-//    {
-//#if !ENABLE_ANCHOR_AUTO_CALIB
-//      case BSP_IO_EVENT_HOLD:
-//        /* Toggle TAG/ANCHOR role and save to flash */
-//        {
-//          sys_config_t *cfg_curr = sys_config_get();
-//          device_role_t new_role = (cfg_curr->uwb.role == DEVICE_ROLE_TAG) ?
-//                                    DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
-//
-//          sys_config_set_role(new_role);
-//          sys_config_save();
-//
-//          /* Quick LED blink to indicate save */
-//          for (uint8_t i = 0; i < 3; i++) {
-//            bsp_io_led_on();
-//            bsp_delay_ms(50);
-//            bsp_io_led_off();
-//            bsp_delay_ms(50);
-//          }
-//
-//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed to: %s",
-//                 new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
-//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
-//          bsp_delay_ms(100);
-//          HAL_NVIC_SystemReset();
-//        }
-//        break;
-//#endif
-//
-//      case BSP_IO_EVENT_DOUBLE_CLICK:
-//        /* Stop ranging */
-//        if (s_ranging_enabled) {
-//          s_ranging_enabled = false;
-//          bsp_uwb_idle();
-//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
-//        }
-//        break;
-//
-//      case BSP_IO_EVENT_CLICK:
-//        /* Start ranging */
-//        if (!s_ranging_enabled) {
-//          s_ranging_enabled = true;
-//          RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
-//        }
-//        break;
-//
-//      default:
-//        break;
-//    }
-//
-//    /* Process ranging if enabled */
-//#if TEST_SEND_POS && TEST_DISABLE_RANGING
-//    /* Ranging disabled in test mode */
-//#else
-//    if (s_ranging_enabled)
-//    {
-//      sys_config_t *cfg_curr = sys_config_get();
-//      if (cfg_curr->uwb.role == DEVICE_ROLE_TAG) {
-//        app_tag_process();
-//      } else {
-//        app_anchor_process(NULL);
-//      }
-//    }
-//#endif
-//
-//#if TEST_SEND_POS
-//    test_send_position();
-//#endif
-//
-//  (void)network_core_process(&s_network_core);
-//  network_cmd_process(&s_network_cmd);
-//
-//    sys_logger_task();
-    /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -450,9 +358,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 6;
-  RCC_OscInitStruct.PLL.PLLN = 168;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
-  RCC_OscInitStruct.PLL.PLLQ = 7;
+  RCC_OscInitStruct.PLL.PLLN = 96;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -467,7 +375,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -527,17 +435,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  /* USER CODE BEGIN Callback 0 */
-
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM9)
-  {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
-
-  /* USER CODE END Callback 1 */
-}

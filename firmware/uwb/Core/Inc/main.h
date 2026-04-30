@@ -78,6 +78,7 @@ void Error_Handler(void);
 #define SPI1_CS2_GPIO_Port GPIOB
 #define IMU_IRQ_Pin GPIO_PIN_15
 #define IMU_IRQ_GPIO_Port GPIOB
+#define IMU_IRQ_EXTI_IRQn EXTI15_10_IRQn
 #define CHARGE_EN_Pin GPIO_PIN_3
 #define CHARGE_EN_GPIO_Port GPIOB
 #define DIP1_Pin GPIO_PIN_5

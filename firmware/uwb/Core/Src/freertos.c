@@ -383,7 +383,7 @@ void flash_storage_entry(void *argument)
   /* USER CODE BEGIN flash_storage_entry */
   for (;;)
   {
-    osDelay(10000); /* every 10 seconds */
+    osDelay(2000); /* every 2 seconds */
 #ifdef HAVE_FLASH_STORAGE
     sys_logger_flash_persist();
 #endif
@@ -466,6 +466,27 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
+{
+   /* Run time stack overflow checking is performed if
+   configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
+   called if a stack overflow is detected. */
+   
+   /* Halt system and log error */
+   RLOG_E("SYS", "Stack Overflow in task: %s", pcTaskName);
+   __disable_irq();
+   while(1)
+   {
+     /* Blink LED rapidly or trigger watchdog */
+   }
+}
 
+/* For configGENERATE_RUN_TIME_STATS */
+/* Note: You need to configure a high speed timer (e.g. TIM10) in CubeMX 
+   to increment a counter every 10-100us for this to work accurately. */
+uint32_t getRunTimeCounterValue(void)
+{
+  return HAL_GetTick(); // Temporary fallback to ms, use high-speed timer for better resolution
+}
 /* USER CODE END Application */
 
