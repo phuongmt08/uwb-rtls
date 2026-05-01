@@ -39,6 +39,8 @@ static hdlc_parser_t m_hdlc_parser;
 // static void on_rx_byte(uint8_t byte);
 static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t length);
 static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length);
+static void on_rx_ble(uint8_t const * p_data, uint16_t length);
+static void on_rx_byte(uint8_t byte);
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_state_transition_cb_t cb)
@@ -58,6 +60,9 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 
 #if defined(BLE_PERIPHERAL)
     err_code = bsp_uart_init(on_rx_byte);
+    
+    // Đăng ký hàm nhận byte cho BLE
+    ble_peripheral_rx_cb_register(on_rx_ble);
 #elif defined(BLE_CENTRAL)
     NRF_LOG_INFO("Initializing USB CDC ACM for Central...");
     err_code = bsp_usbd_init(on_rx_byte); // ─ code api cho central sau
@@ -120,7 +125,7 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
         ret_code_t err_code = bsp_usbd_write(tx_buf, (size_t)frame_size);
         if (err_code == NRF_SUCCESS) 
         {
-            return NRF_SUCCESS;
+        return NRF_SUCCESS;
         }
         return err_code;
 #else
@@ -159,7 +164,6 @@ void on_rx_byte(uint8_t byte)
 
     hdlc_data_chunk_t rx_chunk;
     // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
-    // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
 
     if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
 
@@ -173,12 +177,32 @@ void on_rx_byte(uint8_t byte)
                 memcpy(p_protobuf_buffer, rx_chunk.data, rx_chunk.len);
             }
             m_is_packet_ready = true;
-            
+
             // Gọi callback chuyển đổi State cho bb_router
             if (m_rx_cb != NULL) 
             {
                 m_rx_cb(); 
             }
+        }
+    }
+}
+
+static void on_rx_ble(uint8_t const * p_data, uint16_t length)
+{
+    if (p_data == NULL || length == 0 || length > m_max_payload_len) 
+    {
+        return;
+    }
+
+    if (p_protobuf_buffer != NULL && p_protobuf_len != NULL) 
+    {
+        memcpy(p_protobuf_buffer, p_data, length);
+        *p_protobuf_len = length;
+        m_is_packet_ready = true;
+
+        if (m_rx_cb != NULL) 
+        {
+            m_rx_cb(); 
         }
     }
 }

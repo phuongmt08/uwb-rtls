@@ -50,6 +50,8 @@ static uint8_t m_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
 static uint8_t m_enc_advdata[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static uint8_t m_enc_scan_response_data[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 
+static ble_peripheral_rx_cb_t m_ble_rx_cb = NULL;
+
 static ble_gap_adv_data_t m_adv_data =
 {
     .adv_data =
@@ -63,6 +65,11 @@ static ble_gap_adv_data_t m_adv_data =
         .len    = BLE_GAP_ADV_SET_DATA_SIZE_MAX
     }
 };
+
+void ble_peripheral_rx_cb_register(ble_peripheral_rx_cb_t cb)
+{
+    m_ble_rx_cb = cb;
+}
 
 void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
@@ -160,8 +167,10 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 {
     if (p_evt->type == BLE_NUS_EVT_RX_DATA)
     {
-        // Forward data back from Central to MCU via UART if needed
-        // bb_transport_send_data(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length, BB_SOURCE_SERIAL);
+        if (m_ble_rx_cb != NULL)
+        {
+            m_ble_rx_cb(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
+        }
     }
 }
 
@@ -376,7 +385,7 @@ void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32
             }
             
             // Re-encode advertisement data to reflect new device name
-            advertising_init();
+    advertising_init();
 
             ble_peripheral_advertising_start();
         }

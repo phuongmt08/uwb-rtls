@@ -24,7 +24,7 @@
 #elif defined(BLE_CENTRAL)
 #define PACKET_ADDR protobuf_PACKET_ADDR_CENTRAL
 #else
-#define PACKET_ADDR protobuf_PACKET_ADDR_HOST
+#define PACKET_ADDR protobuf_PACKET_ADDR_UNSPECIFIED
 #endif
 
 #define MAX_PROTOBUF_PAYLOAD_SIZE 256
@@ -99,7 +99,6 @@ static void bb_router_state_check_dst_handle(void)
     } 
     else 
     {
-        m_target_source = BB_SOURCE_BLE;
         m_state = BB_ROUTER_STATE_FORWARD;
     }
 }
@@ -147,23 +146,29 @@ static bool bb_router_check_dst(uint8_t * p_data, uint16_t length)
     // Mở stream con trỏ để pb_decode đọc
     pb_istream_t stream = pb_istream_from_buffer(p_data, length);
     
-    // Lệnh decode protobuf. Ở đây gọi pb_decode toàn bộ packet (hoặc chỉ phần cần thiết)
-    // Nếu chỉ muốn parse Header để lấy addr, nanopb sẽ tự điền vào `pkt.hdr`
-    // Ở những hệ thống cực thiếu CPU có thể dùng pb_decode_tag loop để nhặt mã. Nhưng
-    // pb_decode là nhanh nhất nếu RAM rảnh rỗi struct
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt)) 
     {
         if (pkt.has_hdr && pkt.hdr.has_addr) 
         {
-            // Kiểm tra xem có gửi cho Peripheral (Chính là nRF52) hay không
-            if (pkt.hdr.addr.dst == PACKET_ADDR) 
+            uint32_t addr = pkt.hdr.addr.dst;
+            if (addr == protobuf_PACKET_ADDR_TAG || addr == protobuf_PACKET_ADDR_ANCHOR)
             {
-                return true;
+                m_target_source = BB_SOURCE_SERIAL;
+                return false;
             }
+            if (addr == PACKET_ADDR)
+            {
+                return true; // Dành cho nRF52 xử lý (is_for_me)
+            }
+            
+            // Các đích còn lại (HOST, CENTRAL, INVALID)
+            m_target_source = BB_SOURCE_BLE;
+            return false;
         }
     }
     
-    // Mặc định hoặc lỗi là Forward
+    // Mặc định hoặc lỗi là Forward ra BLE
+    m_target_source = BB_SOURCE_BLE;
     return false;
 }
 
