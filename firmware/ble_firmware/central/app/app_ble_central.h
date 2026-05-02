@@ -22,6 +22,19 @@ extern "C" {
  * ---------------------------------------------------------------------- */
 
 /**
+ * @brief Callback function type for passing received BLE NUS data
+ */
+typedef void (*ble_central_rx_cb_t)(uint8_t const * p_data, uint16_t length);
+
+/**
+ * @brief Register a callback to receive BLE NUS data.
+ *
+ * @param[in] cb Callback function.
+ */
+void ble_central_rx_cb_register(ble_central_rx_cb_t cb);
+
+
+/**
  * @brief Initialize BLE Central and start scanning.
  *
  * Sequentially initializes:

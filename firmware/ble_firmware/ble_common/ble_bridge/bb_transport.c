@@ -19,6 +19,7 @@
 #include "../../peripheral/ble_peripheral.h"
 #elif defined(BLE_CENTRAL)
 #include "../../central/bsp/bsp_usbd.h"
+#include "../../central/app/app_ble_central.h"
 #endif
 
 /* Private defines ---------------------------------------------------- */
@@ -66,6 +67,9 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 #elif defined(BLE_CENTRAL)
     NRF_LOG_INFO("Initializing USB CDC ACM for Central...");
     err_code = bsp_usbd_init(on_rx_byte); // ─ code api cho central sau
+    
+    // Register BLE receive callback for Central
+    ble_central_rx_cb_register(on_rx_ble);
 #endif
 
     return err_code;

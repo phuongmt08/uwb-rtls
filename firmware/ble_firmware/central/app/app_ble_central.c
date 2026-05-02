@@ -100,6 +100,7 @@ static ble_gap_conn_params_t m_current_conn_params;
 static protobuf_ble_state_t m_current_ble_state = protobuf_BLE_STATE_IDLE;
 static int32_t        m_last_rssi_dbm = APP_BLE_CENTRAL_RSSI_UNKNOWN_DBM;
 static uint32_t       m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
+static ble_central_rx_cb_t m_ble_rx_cb = NULL;
 APP_TIMER_DEF(m_scan_publish_timer);
 
 /* Private prototypes ------------------------------------------------------ */
@@ -404,8 +405,11 @@ static void nus_c_evt_handler(ble_nus_c_t *p_ble_nus_c, ble_nus_c_evt_t const *p
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
-            // Placeholder for data reception logic - User will implement this
             NRF_LOG_INFO("NUS Data received: %u bytes", p_evt->data_len);
+            if (m_ble_rx_cb != NULL)
+            {
+                m_ble_rx_cb(p_evt->p_data, p_evt->data_len);
+            }
             break;
 
         case BLE_NUS_C_EVT_DISCONNECTED:
@@ -873,6 +877,10 @@ void central_update_conn_params(uint16_t conn_handle,
 /* -------------------------------------------------------------------------
  * Public APIs for Protocol Bridge
  * ---------------------------------------------------------------------- */
+void ble_central_rx_cb_register(ble_central_rx_cb_t cb)
+{
+    m_ble_rx_cb = cb;
+}
 void app_ble_central_connect(const uint8_t *mac)
 {
     uint8_t target_mac[6];
