@@ -92,11 +92,18 @@ typedef enum _protobuf_host_transport_t {
 } protobuf_host_transport_t;
 
 typedef enum _protobuf_anchor_power_mode_t {
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE = 0,
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED = 1,
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO = 2,
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO = 3
+    protobuf_ANCHOR_POWER_MODE_PERFORMANCE = 0,
+    protobuf_ANCHOR_POWER_MODE_BALANCED = 1,
+    protobuf_ANCHOR_POWER_MODE_ECO = 2,
+    protobuf_ANCHOR_POWER_MODE_DEEP_ECO = 3
 } protobuf_anchor_power_mode_t;
+
+typedef enum _protobuf_session_end_reason_t {
+    protobuf_SESSION_END_REASON_UNSPECIFIED = 0,
+    protobuf_SESSION_END_REASON_LOG_DATA = 1,
+    protobuf_SESSION_END_REASON_RANGING_RESULTS = 2,
+    protobuf_SESSION_END_REASON_DEBUG_STREAMING = 3
+} protobuf_session_end_reason_t;
 
 typedef enum _protobuf_fota_state_index_t {
     protobuf_FOTA_STATE_UNSPECIFIED = 0,
@@ -251,28 +258,29 @@ typedef struct _protobuf_ranging_result_t {
     uint32_t timestamp_ms;
 } protobuf_ranging_result_t;
 
-typedef struct _protobuf_filter_cfg_t {
+/* TODO: Implement sensor fusion configuration handler in positioning task */
+typedef struct _protobuf_sensor_fusion_cfg_t {
     protobuf_filter_mode_t mode;
     float q_process_noise;
     float r_base;
     float innovation_alpha;
     float r_scale_min;
     float r_scale_max;
-} protobuf_filter_cfg_t;
+} protobuf_sensor_fusion_cfg_t;
 
-typedef struct _protobuf_filter_cfg_get_t {
+typedef struct _protobuf_sensor_fusion_cfg_get_t {
     uint32_t dummy;
-} protobuf_filter_cfg_get_t;
+} protobuf_sensor_fusion_cfg_get_t;
 
-typedef struct _protobuf_filter_cfg_set_t {
-    bool has_filter_cfg;
-    protobuf_filter_cfg_t filter_cfg;
-} protobuf_filter_cfg_set_t;
+typedef struct _protobuf_sensor_fusion_cfg_set_t {
+    bool has_config;
+    protobuf_sensor_fusion_cfg_t config;
+} protobuf_sensor_fusion_cfg_set_t;
 
-typedef struct _protobuf_filter_cfg_resp_t {
-    bool has_filter_cfg;
-    protobuf_filter_cfg_t filter_cfg;
-} protobuf_filter_cfg_resp_t;
+typedef struct _protobuf_sensor_fusion_cfg_resp_t {
+    bool has_config;
+    protobuf_sensor_fusion_cfg_t config;
+} protobuf_sensor_fusion_cfg_resp_t;
 
 typedef struct _protobuf_device_reset_t {
     uint32_t dummy;
@@ -488,12 +496,12 @@ typedef struct _protobuf_anchor_layout_get_t {
 
 typedef struct _protobuf_anchor_layout_set_t {
     pb_size_t anchors_count;
-    protobuf_anchor_layout_item_t anchors[4];
+    protobuf_anchor_layout_item_t anchors[8];
 } protobuf_anchor_layout_set_t;
 
 typedef struct _protobuf_anchor_layout_resp_t {
     pb_size_t anchors_count;
-    protobuf_anchor_layout_item_t anchors[4];
+    protobuf_anchor_layout_item_t anchors[8];
 } protobuf_anchor_layout_resp_t;
 
 typedef struct _protobuf_ranging_status_get_t {
@@ -527,6 +535,11 @@ typedef struct _protobuf_battery_info_get_t {
     uint32_t dummy;
 } protobuf_battery_info_get_t;
 
+/* Session ------------------------------------------------------------------- */
+typedef struct _protobuf_end_session_t {
+    protobuf_session_end_reason_t reason;
+} protobuf_end_session_t;
+
 typedef struct _protobuf_packet_t {
     bool has_hdr;
     protobuf_hdr_t hdr;
@@ -557,10 +570,10 @@ typedef struct _protobuf_packet_t {
         protobuf_ranging_result_t ranging_result;
         protobuf_ranging_status_get_t ranging_status_get;
         protobuf_ranging_status_resp_t ranging_status_resp;
-        /* Filter config */
-        protobuf_filter_cfg_get_t filter_cfg_get;
-        protobuf_filter_cfg_set_t filter_cfg_set;
-        protobuf_filter_cfg_resp_t filter_cfg_resp;
+        /* Sensor Fusion config */
+        protobuf_sensor_fusion_cfg_get_t sensor_fusion_cfg_get;
+        protobuf_sensor_fusion_cfg_set_t sensor_fusion_cfg_set;
+        protobuf_sensor_fusion_cfg_resp_t sensor_fusion_cfg_resp;
         /* System commands */
         protobuf_device_reset_t device_reset;
         protobuf_uwb_reset_t uwb_reset;
@@ -611,6 +624,7 @@ typedef struct _protobuf_packet_t {
         protobuf_battery_info_resp_t battery_info_resp;
         protobuf_battery_info_get_t battery_info_get;
         protobuf_enter_to_bootloader_t enter_to_bootloader;
+        protobuf_end_session_t end_session;
     } params;
 } protobuf_packet_t;
 
@@ -710,9 +724,17 @@ extern "C" {
 #define protobuf_host_transport_t_HOST_TRANSPORT_USB protobuf_HOST_TRANSPORT_USB
 #define protobuf_host_transport_t_HOST_TRANSPORT_UART protobuf_HOST_TRANSPORT_UART
 
-#define _protobuf_anchor_power_mode_t_MIN protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE
-#define _protobuf_anchor_power_mode_t_MAX protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO
-#define _protobuf_anchor_power_mode_t_ARRAYSIZE ((protobuf_anchor_power_mode_t)(protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO+1))
+#define _protobuf_anchor_power_mode_t_MIN protobuf_ANCHOR_POWER_MODE_PERFORMANCE
+#define _protobuf_anchor_power_mode_t_MAX protobuf_ANCHOR_POWER_MODE_DEEP_ECO
+#define _protobuf_anchor_power_mode_t_ARRAYSIZE ((protobuf_anchor_power_mode_t)(protobuf_ANCHOR_POWER_MODE_DEEP_ECO+1))
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE protobuf_ANCHOR_POWER_MODE_PERFORMANCE
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED protobuf_ANCHOR_POWER_MODE_BALANCED
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO protobuf_ANCHOR_POWER_MODE_ECO
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO protobuf_ANCHOR_POWER_MODE_DEEP_ECO
+
+#define _protobuf_session_end_reason_t_MIN protobuf_session_end_reason_t_SESSION_END_REASON_UNSPECIFIED
+#define _protobuf_session_end_reason_t_MAX protobuf_session_end_reason_t_SESSION_END_REASON_DEBUG_STREAMING
+#define _protobuf_session_end_reason_t_ARRAYSIZE ((protobuf_session_end_reason_t)(protobuf_session_end_reason_t_SESSION_END_REASON_DEBUG_STREAMING+1))
 
 #define _protobuf_fota_state_index_t_MIN protobuf_FOTA_STATE_UNSPECIFIED
 #define _protobuf_fota_state_index_t_MAX protobuf_FOTA_STATE_ERROR
@@ -756,7 +778,7 @@ extern "C" {
 
 
 
-#define protobuf_filter_cfg_t_mode_ENUMTYPE protobuf_filter_mode_t
+#define protobuf_sensor_fusion_cfg_t_mode_ENUMTYPE protobuf_filter_mode_t
 
 
 
@@ -811,6 +833,8 @@ extern "C" {
 
 
 
+#define protobuf_end_session_t_reason_ENUMTYPE protobuf_session_end_reason_t
+
 
 
 /* Initializer values for message structs */
@@ -837,10 +861,10 @@ extern "C" {
 #define protobuf_ranging_stop_t_init_default     {0}
 #define protobuf_anchor_ranging_t_init_default   {0, 0, 0}
 #define protobuf_ranging_result_t_init_default   {0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default}, 0}
-#define protobuf_filter_cfg_t_init_default       {_protobuf_filter_mode_t_MIN, 0, 0, 0, 0, 0}
-#define protobuf_filter_cfg_get_t_init_default   {0}
-#define protobuf_filter_cfg_set_t_init_default   {false, protobuf_filter_cfg_t_init_default}
-#define protobuf_filter_cfg_resp_t_init_default  {false, protobuf_filter_cfg_t_init_default}
+#define protobuf_sensor_fusion_cfg_t_init_default {_protobuf_filter_mode_t_MIN, 0, 0, 0, 0, 0}
+#define protobuf_sensor_fusion_cfg_get_t_init_default {0}
+#define protobuf_sensor_fusion_cfg_set_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
+#define protobuf_sensor_fusion_cfg_resp_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
 #define protobuf_device_reset_t_init_default     {0}
 #define protobuf_uwb_reset_t_init_default        {0}
 #define protobuf_factory_config_reset_t_init_default {0}
@@ -876,13 +900,14 @@ extern "C" {
 #define protobuf_pos_calib_cfg_resp_t_init_default {false, protobuf_pos_calib_cfg_t_init_default}
 #define protobuf_anchor_layout_item_t_init_default {0, 0, 0, 0}
 #define protobuf_anchor_layout_get_t_init_default {0}
-#define protobuf_anchor_layout_set_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
-#define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
+#define protobuf_anchor_layout_set_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
+#define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_default  {_protobuf_fota_state_index_t_MIN}
 #define protobuf_battery_info_resp_t_init_default {0, 0, 0, 0}
 #define protobuf_battery_info_get_t_init_default {0}
+#define protobuf_end_session_t_init_default      {_protobuf_session_end_reason_t_MIN}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
 #define protobuf_addr_t_init_zero                {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
 #define protobuf_hdr_t_init_zero                 {false, protobuf_addr_t_init_zero, 0, 0}
@@ -907,10 +932,10 @@ extern "C" {
 #define protobuf_ranging_stop_t_init_zero        {0}
 #define protobuf_anchor_ranging_t_init_zero      {0, 0, 0}
 #define protobuf_ranging_result_t_init_zero      {0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero}, 0}
-#define protobuf_filter_cfg_t_init_zero          {_protobuf_filter_mode_t_MIN, 0, 0, 0, 0, 0}
-#define protobuf_filter_cfg_get_t_init_zero      {0}
-#define protobuf_filter_cfg_set_t_init_zero      {false, protobuf_filter_cfg_t_init_zero}
-#define protobuf_filter_cfg_resp_t_init_zero     {false, protobuf_filter_cfg_t_init_zero}
+#define protobuf_sensor_fusion_cfg_t_init_zero   {_protobuf_filter_mode_t_MIN, 0, 0, 0, 0, 0}
+#define protobuf_sensor_fusion_cfg_get_t_init_zero {0}
+#define protobuf_sensor_fusion_cfg_set_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
+#define protobuf_sensor_fusion_cfg_resp_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
 #define protobuf_device_reset_t_init_zero        {0}
 #define protobuf_uwb_reset_t_init_zero           {0}
 #define protobuf_factory_config_reset_t_init_zero {0}
@@ -946,13 +971,14 @@ extern "C" {
 #define protobuf_pos_calib_cfg_resp_t_init_zero  {false, protobuf_pos_calib_cfg_t_init_zero}
 #define protobuf_anchor_layout_item_t_init_zero  {0, 0, 0, 0}
 #define protobuf_anchor_layout_get_t_init_zero   {0}
-#define protobuf_anchor_layout_set_t_init_zero   {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
-#define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
+#define protobuf_anchor_layout_set_t_init_zero   {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
+#define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_zero     {_protobuf_fota_state_index_t_MIN}
 #define protobuf_battery_info_resp_t_init_zero   {0, 0, 0, 0}
 #define protobuf_battery_info_get_t_init_zero    {0}
+#define protobuf_end_session_t_init_zero         {_protobuf_session_end_reason_t_MIN}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -1020,15 +1046,15 @@ extern "C" {
 #define protobuf_ranging_result_t_rms_error_m_tag 7
 #define protobuf_ranging_result_t_anchors_tag    8
 #define protobuf_ranging_result_t_timestamp_ms_tag 9
-#define protobuf_filter_cfg_t_mode_tag           1
-#define protobuf_filter_cfg_t_q_process_noise_tag 2
-#define protobuf_filter_cfg_t_r_base_tag         3
-#define protobuf_filter_cfg_t_innovation_alpha_tag 4
-#define protobuf_filter_cfg_t_r_scale_min_tag    5
-#define protobuf_filter_cfg_t_r_scale_max_tag    6
-#define protobuf_filter_cfg_get_t_dummy_tag      1
-#define protobuf_filter_cfg_set_t_filter_cfg_tag 1
-#define protobuf_filter_cfg_resp_t_filter_cfg_tag 1
+#define protobuf_sensor_fusion_cfg_t_mode_tag    1
+#define protobuf_sensor_fusion_cfg_t_q_process_noise_tag 2
+#define protobuf_sensor_fusion_cfg_t_r_base_tag  3
+#define protobuf_sensor_fusion_cfg_t_innovation_alpha_tag 4
+#define protobuf_sensor_fusion_cfg_t_r_scale_min_tag 5
+#define protobuf_sensor_fusion_cfg_t_r_scale_max_tag 6
+#define protobuf_sensor_fusion_cfg_get_t_dummy_tag 1
+#define protobuf_sensor_fusion_cfg_set_t_config_tag 1
+#define protobuf_sensor_fusion_cfg_resp_t_config_tag 1
 #define protobuf_device_reset_t_dummy_tag        1
 #define protobuf_uwb_reset_t_dummy_tag           1
 #define protobuf_factory_config_reset_t_magic_tag 1
@@ -1125,6 +1151,7 @@ extern "C" {
 #define protobuf_battery_info_resp_t_remaining_min_tag 3
 #define protobuf_battery_info_resp_t_is_charging_tag 4
 #define protobuf_battery_info_get_t_dummy_tag    1
+#define protobuf_end_session_t_reason_tag        1
 #define protobuf_packet_t_hdr_tag                1
 #define protobuf_packet_t_none_tag               2
 #define protobuf_packet_t_ack_tag                3
@@ -1145,9 +1172,9 @@ extern "C" {
 #define protobuf_packet_t_ranging_result_tag     18
 #define protobuf_packet_t_ranging_status_get_tag 19
 #define protobuf_packet_t_ranging_status_resp_tag 20
-#define protobuf_packet_t_filter_cfg_get_tag     21
-#define protobuf_packet_t_filter_cfg_set_tag     22
-#define protobuf_packet_t_filter_cfg_resp_tag    23
+#define protobuf_packet_t_sensor_fusion_cfg_get_tag 21
+#define protobuf_packet_t_sensor_fusion_cfg_set_tag 22
+#define protobuf_packet_t_sensor_fusion_cfg_resp_tag 23
 #define protobuf_packet_t_device_reset_tag       24
 #define protobuf_packet_t_uwb_reset_tag          25
 #define protobuf_packet_t_factory_config_reset_tag 26
@@ -1185,6 +1212,7 @@ extern "C" {
 #define protobuf_packet_t_battery_info_resp_tag  60
 #define protobuf_packet_t_battery_info_get_tag   61
 #define protobuf_packet_t_enter_to_bootloader_tag 62
+#define protobuf_packet_t_end_session_tag        63
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1350,32 +1378,32 @@ X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,      9)
 #define protobuf_ranging_result_t_DEFAULT NULL
 #define protobuf_ranging_result_t_anchors_MSGTYPE protobuf_anchor_ranging_t
 
-#define protobuf_filter_cfg_t_FIELDLIST(X, a) \
+#define protobuf_sensor_fusion_cfg_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    mode,              1) \
 X(a, STATIC,   SINGULAR, FLOAT,    q_process_noise,   2) \
 X(a, STATIC,   SINGULAR, FLOAT,    r_base,            3) \
 X(a, STATIC,   SINGULAR, FLOAT,    innovation_alpha,   4) \
 X(a, STATIC,   SINGULAR, FLOAT,    r_scale_min,       5) \
 X(a, STATIC,   SINGULAR, FLOAT,    r_scale_max,       6)
-#define protobuf_filter_cfg_t_CALLBACK NULL
-#define protobuf_filter_cfg_t_DEFAULT NULL
+#define protobuf_sensor_fusion_cfg_t_CALLBACK NULL
+#define protobuf_sensor_fusion_cfg_t_DEFAULT NULL
 
-#define protobuf_filter_cfg_get_t_FIELDLIST(X, a) \
+#define protobuf_sensor_fusion_cfg_get_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
-#define protobuf_filter_cfg_get_t_CALLBACK NULL
-#define protobuf_filter_cfg_get_t_DEFAULT NULL
+#define protobuf_sensor_fusion_cfg_get_t_CALLBACK NULL
+#define protobuf_sensor_fusion_cfg_get_t_DEFAULT NULL
 
-#define protobuf_filter_cfg_set_t_FIELDLIST(X, a) \
-X(a, STATIC,   OPTIONAL, MESSAGE,  filter_cfg,        1)
-#define protobuf_filter_cfg_set_t_CALLBACK NULL
-#define protobuf_filter_cfg_set_t_DEFAULT NULL
-#define protobuf_filter_cfg_set_t_filter_cfg_MSGTYPE protobuf_filter_cfg_t
+#define protobuf_sensor_fusion_cfg_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
+#define protobuf_sensor_fusion_cfg_set_t_CALLBACK NULL
+#define protobuf_sensor_fusion_cfg_set_t_DEFAULT NULL
+#define protobuf_sensor_fusion_cfg_set_t_config_MSGTYPE protobuf_sensor_fusion_cfg_t
 
-#define protobuf_filter_cfg_resp_t_FIELDLIST(X, a) \
-X(a, STATIC,   OPTIONAL, MESSAGE,  filter_cfg,        1)
-#define protobuf_filter_cfg_resp_t_CALLBACK NULL
-#define protobuf_filter_cfg_resp_t_DEFAULT NULL
-#define protobuf_filter_cfg_resp_t_filter_cfg_MSGTYPE protobuf_filter_cfg_t
+#define protobuf_sensor_fusion_cfg_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
+#define protobuf_sensor_fusion_cfg_resp_t_CALLBACK NULL
+#define protobuf_sensor_fusion_cfg_resp_t_DEFAULT NULL
+#define protobuf_sensor_fusion_cfg_resp_t_config_MSGTYPE protobuf_sensor_fusion_cfg_t
 
 #define protobuf_device_reset_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
@@ -1647,6 +1675,11 @@ X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_battery_info_get_t_CALLBACK NULL
 #define protobuf_battery_info_get_t_DEFAULT NULL
 
+#define protobuf_end_session_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UENUM,    reason,            1)
+#define protobuf_end_session_t_CALLBACK NULL
+#define protobuf_end_session_t_DEFAULT NULL
+
 #define protobuf_packet_t_FIELDLIST(X, a) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  hdr,               1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,none,params.none),   2) \
@@ -1668,9 +1701,9 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,ranging_stop,params.ranging_stop),  1
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,ranging_result,params.ranging_result),  18) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,ranging_status_get,params.ranging_status_get),  19) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,ranging_status_resp,params.ranging_status_resp),  20) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,filter_cfg_get,params.filter_cfg_get),  21) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,filter_cfg_set,params.filter_cfg_set),  22) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,filter_cfg_resp,params.filter_cfg_resp),  23) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,sensor_fusion_cfg_get,params.sensor_fusion_cfg_get),  21) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,sensor_fusion_cfg_set,params.sensor_fusion_cfg_set),  22) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,sensor_fusion_cfg_resp,params.sensor_fusion_cfg_resp),  23) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,device_reset,params.device_reset),  24) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,uwb_reset,params.uwb_reset),  25) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_config_reset,params.factory_config_reset),  26) \
@@ -1707,7 +1740,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,tag_position,params.tag_position),  5
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,fota_state_resp,params.fota_state_resp),  57) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_resp,params.battery_info_resp),  60) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_get,params.battery_info_get),  61) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_bootloader),  62)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_bootloader),  62) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,end_session,params.end_session),  63)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1730,9 +1764,9 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_b
 #define protobuf_packet_t_params_ranging_result_MSGTYPE protobuf_ranging_result_t
 #define protobuf_packet_t_params_ranging_status_get_MSGTYPE protobuf_ranging_status_get_t
 #define protobuf_packet_t_params_ranging_status_resp_MSGTYPE protobuf_ranging_status_resp_t
-#define protobuf_packet_t_params_filter_cfg_get_MSGTYPE protobuf_filter_cfg_get_t
-#define protobuf_packet_t_params_filter_cfg_set_MSGTYPE protobuf_filter_cfg_set_t
-#define protobuf_packet_t_params_filter_cfg_resp_MSGTYPE protobuf_filter_cfg_resp_t
+#define protobuf_packet_t_params_sensor_fusion_cfg_get_MSGTYPE protobuf_sensor_fusion_cfg_get_t
+#define protobuf_packet_t_params_sensor_fusion_cfg_set_MSGTYPE protobuf_sensor_fusion_cfg_set_t
+#define protobuf_packet_t_params_sensor_fusion_cfg_resp_MSGTYPE protobuf_sensor_fusion_cfg_resp_t
 #define protobuf_packet_t_params_device_reset_MSGTYPE protobuf_device_reset_t
 #define protobuf_packet_t_params_uwb_reset_MSGTYPE protobuf_uwb_reset_t
 #define protobuf_packet_t_params_factory_config_reset_MSGTYPE protobuf_factory_config_reset_t
@@ -1770,6 +1804,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_b
 #define protobuf_packet_t_params_battery_info_resp_MSGTYPE protobuf_battery_info_resp_t
 #define protobuf_packet_t_params_battery_info_get_MSGTYPE protobuf_battery_info_get_t
 #define protobuf_packet_t_params_enter_to_bootloader_MSGTYPE protobuf_enter_to_bootloader_t
+#define protobuf_packet_t_params_end_session_MSGTYPE protobuf_end_session_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1794,10 +1829,10 @@ extern const pb_msgdesc_t protobuf_ranging_start_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_stop_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_ranging_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_result_t_msg;
-extern const pb_msgdesc_t protobuf_filter_cfg_t_msg;
-extern const pb_msgdesc_t protobuf_filter_cfg_get_t_msg;
-extern const pb_msgdesc_t protobuf_filter_cfg_set_t_msg;
-extern const pb_msgdesc_t protobuf_filter_cfg_resp_t_msg;
+extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_t_msg;
+extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_get_t_msg;
+extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_set_t_msg;
+extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_resp_t_msg;
 extern const pb_msgdesc_t protobuf_device_reset_t_msg;
 extern const pb_msgdesc_t protobuf_uwb_reset_t_msg;
 extern const pb_msgdesc_t protobuf_factory_config_reset_t_msg;
@@ -1840,6 +1875,7 @@ extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_fota_state_resp_t_msg;
 extern const pb_msgdesc_t protobuf_battery_info_resp_t_msg;
 extern const pb_msgdesc_t protobuf_battery_info_get_t_msg;
+extern const pb_msgdesc_t protobuf_end_session_t_msg;
 extern const pb_msgdesc_t protobuf_packet_t_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -1866,10 +1902,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ranging_stop_t_fields &protobuf_ranging_stop_t_msg
 #define protobuf_anchor_ranging_t_fields &protobuf_anchor_ranging_t_msg
 #define protobuf_ranging_result_t_fields &protobuf_ranging_result_t_msg
-#define protobuf_filter_cfg_t_fields &protobuf_filter_cfg_t_msg
-#define protobuf_filter_cfg_get_t_fields &protobuf_filter_cfg_get_t_msg
-#define protobuf_filter_cfg_set_t_fields &protobuf_filter_cfg_set_t_msg
-#define protobuf_filter_cfg_resp_t_fields &protobuf_filter_cfg_resp_t_msg
+#define protobuf_sensor_fusion_cfg_t_fields &protobuf_sensor_fusion_cfg_t_msg
+#define protobuf_sensor_fusion_cfg_get_t_fields &protobuf_sensor_fusion_cfg_get_t_msg
+#define protobuf_sensor_fusion_cfg_set_t_fields &protobuf_sensor_fusion_cfg_set_t_msg
+#define protobuf_sensor_fusion_cfg_resp_t_fields &protobuf_sensor_fusion_cfg_resp_t_msg
 #define protobuf_device_reset_t_fields &protobuf_device_reset_t_msg
 #define protobuf_uwb_reset_t_fields &protobuf_uwb_reset_t_msg
 #define protobuf_factory_config_reset_t_fields &protobuf_factory_config_reset_t_msg
@@ -1912,6 +1948,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_fota_state_resp_t_fields &protobuf_fota_state_resp_t_msg
 #define protobuf_battery_info_resp_t_fields &protobuf_battery_info_resp_t_msg
 #define protobuf_battery_info_get_t_fields &protobuf_battery_info_get_t_msg
+#define protobuf_end_session_t_fields &protobuf_end_session_t_msg
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -1921,8 +1958,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_distance_t_size          23
 #define protobuf_anchor_layout_get_t_size        6
 #define protobuf_anchor_layout_item_t_size       21
-#define protobuf_anchor_layout_resp_t_size       92
-#define protobuf_anchor_layout_set_t_size        92
+#define protobuf_anchor_layout_resp_t_size       184
+#define protobuf_anchor_layout_set_t_size        184
 #define protobuf_anchor_ranging_t_size           23
 #define protobuf_battery_info_get_t_size         6
 #define protobuf_battery_info_resp_t_size        25
@@ -1944,12 +1981,9 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_device_reset_t_size             6
 #define protobuf_device_type_get_t_size          6
 #define protobuf_device_type_set_t_size          2
+#define protobuf_end_session_t_size              2
 #define protobuf_enter_to_bootloader_t_size      6
 #define protobuf_factory_config_reset_t_size     6
-#define protobuf_filter_cfg_get_t_size           6
-#define protobuf_filter_cfg_resp_t_size          29
-#define protobuf_filter_cfg_set_t_size           29
-#define protobuf_filter_cfg_t_size               27
 #define protobuf_flash_data_t_size               203
 #define protobuf_flash_erase_t_size              8
 #define protobuf_flash_read_t_size               12
@@ -1971,6 +2005,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ranging_status_get_t_size       6
 #define protobuf_ranging_status_resp_t_size      58
 #define protobuf_ranging_stop_t_size             6
+#define protobuf_sensor_fusion_cfg_get_t_size    6
+#define protobuf_sensor_fusion_cfg_resp_t_size   29
+#define protobuf_sensor_fusion_cfg_set_t_size    29
+#define protobuf_sensor_fusion_cfg_t_size        27
 #define protobuf_sys_config_get_t_size           6
 #define protobuf_sys_config_resp_t_size          76
 #define protobuf_sys_config_set_t_size           76

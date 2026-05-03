@@ -83,6 +83,8 @@ static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt);
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
+static void network_cmd_end_session(const protobuf_packet_t *pkt);
+
 
 /* ---- Internal State ---- */
 
@@ -146,13 +148,14 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,      network_cmd_unimplemented,               "rng_cfg_resp"),       /* 15 */
     CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_unimplemented,               "rng_start"),          /* 16 */
     CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_unimplemented,               "rng_stop"),           /* 17 */
+    /* TODO: Need to implement */
     CMD_INFO(protobuf_packet_t_ranging_result_tag,            network_cmd_unimplemented,               "rng_result"),         /* 18 */
     CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 19 */
     CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,       network_cmd_unimplemented,               "rng_status_resp"),    /* 20 */
 
-    CMD_INFO(protobuf_packet_t_filter_cfg_get_tag,            network_cmd_unimplemented,               "flt_cfg_get"),        /* 21 */
-    CMD_INFO(protobuf_packet_t_filter_cfg_set_tag,            network_cmd_unimplemented,               "flt_cfg_set"),        /* 22 */
-    CMD_INFO(protobuf_packet_t_filter_cfg_resp_tag,           network_cmd_unimplemented,               "flt_cfg_resp"),       /* 23 */
+    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_get_tag,     network_cmd_unimplemented,               "fusion_cfg_get"),     /* 21 */
+    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_set_tag,     network_cmd_unimplemented,               "fusion_cfg_set"),     /* 22 */
+    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_resp_tag,    network_cmd_unimplemented,               "fusion_cfg_resp"),    /* 23 */
 #endif /* !BOOTLOADER */
 
     CMD_INFO(protobuf_packet_t_device_reset_tag,              network_cmd_device_reset,                "dev_reset"),          /* 24 */
@@ -215,6 +218,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,               "battery_info_resp"),  /* 60 */
     CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 61 */
 #endif /* !BOOTLOADER */
+    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 63 */
     //      +=================================================+=======================================+========================+
 };
 
@@ -311,6 +315,12 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
 
+    if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+        s_network_cmd.stream->serial_connection_active = true;
+    } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+        s_network_cmd.stream->ble_connection_active = true;
+    }
+
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_device_information_resp_tag);
 
     resp.params.device_information_resp.serial_number = bsp_util_get_serial_number();
@@ -339,6 +349,12 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
+
+    if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+        s_network_cmd.stream->serial_connection_active = true;
+    } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+        s_network_cmd.stream->ble_connection_active = true;
+    }
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_device_information_resp_tag);
 
@@ -773,6 +789,43 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 #endif
 }
 
+static void network_cmd_end_session(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+    
+    protobuf_session_end_reason_t reason = pkt->params.end_session.reason;
+
+    RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d", 
+           (unsigned)pkt->hdr.addr.src, (int)reason);
+
+    switch (reason) {
+        case protobuf_SESSION_END_REASON_LOG_DATA:
+            s_log_stream_enabled = false;
+            RLOG_I(OBJECT_CODE, "Log streaming stopped");
+            break;
+
+        case protobuf_SESSION_END_REASON_RANGING_RESULTS:
+            /* TODO: Implement stopping ranging results streaming if applicable */
+            RLOG_I(OBJECT_CODE, "Ranging results streaming stopped");
+            break;
+
+        case protobuf_SESSION_END_REASON_DEBUG_STREAMING:
+            s_log_stream_enabled = false;
+            RLOG_I(OBJECT_CODE, "Debug streaming stopped");
+            break;
+
+        default:
+            /* For unspecified or other reasons, we might want to reset the connection flags as before */
+            if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+                s_network_cmd.stream->serial_connection_active = false;
+            } else if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+                s_network_cmd.stream->ble_connection_active = false;
+            }
+            s_log_stream_enabled = false;
+            break;
+    }
+}
+
 static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet)
 {
     (void)packet;
@@ -810,6 +863,10 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
 static bool network_cmd_host_active(void)
 {
     CHECK(s_network_cmd.stream, false);
+
+    if (s_network_cmd.stream->ble_connection_active || s_network_cmd.stream->serial_connection_active) {
+        return true;
+    }
 
     uint32_t last_tick = s_network_cmd.stream->latest_packet_tick;
     if (last_tick == 0u) {

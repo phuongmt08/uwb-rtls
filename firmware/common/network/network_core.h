@@ -51,6 +51,9 @@ typedef struct {
 
     uint32_t latest_packet_tick;
     network_core_packet_handler_t packet_handler;
+
+    bool ble_connection_active;
+    bool serial_connection_active;
 } network_core_t;
 
 #define NETWORK_CORE_PKT_HDR_SIZE sizeof(protobuf_hdr_t)
