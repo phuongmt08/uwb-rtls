@@ -11,23 +11,32 @@ from config import Config
 
 @dataclass
 class UwbPosition:
-    """UWB Position data structure"""
+    """UWB Position data structure with distances"""
     x: float  # meters
     y: float  # meters
-    z: float  # meters
+    vx: float # m/s
+    vy: float # m/s
+    yaw: float # rad
     error: float  # meters
+    error_frame_cnt: int
+    distances: list[float] # meters from each anchor
     timestamp: float  # unix timestamp
     
     def __str__(self):
-        return f"Position(x={self.x:.3f}, y={self.y:.3f}, z={self.z:.3f}, err={self.error:.3f})"
+        dist_str = ", ".join([f"{d:.2f}" for d in self.distances])
+        return f"Position(x={self.x:.3f}, y={self.y:.3f}, vx={self.vx:.3f}, vy={self.vy:.3f}, yaw={self.yaw:.3f}, err={self.error:.3f}, err_cnt={self.error_frame_cnt}, dists=[{dist_str}])"
     
     def to_dict(self):
         """Convert to dictionary for JSON serialization"""
         return {
             'x': self.x,
             'y': self.y,
-            'z': self.z,
+            'vx': self.vx,
+            'vy': self.vy,
+            'yaw': self.yaw,
             'error': self.error,
+            'error_frame_cnt': self.error_frame_cnt,
+            'distances': self.distances,
             'timestamp': self.timestamp
         }
 
@@ -114,12 +123,12 @@ class UwbGateway:
             self.udp_socket.close()
             self.logger.info("UDP socket closed")
     
-    def validate_frame(self, x: float, y: float, z: float, error: float) -> bool:
+    def validate_frame(self, x: float, y: float, error: float) -> bool:
         """
         Validate UWB frame data
         
         Args:
-            x, y, z: Position coordinates
+            x, y: Position coordinates
             error: Error estimate
             
         Returns:
@@ -129,8 +138,6 @@ class UwbGateway:
             return False
         if not (Config.POSITION_MIN <= y <= Config.POSITION_MAX):
             return False
-        if not (Config.POSITION_MIN <= z <= Config.POSITION_MAX):
-            return False
         if not (Config.ERROR_MIN <= error <= Config.ERROR_MAX):
             return False
         return True
@@ -139,51 +146,71 @@ class UwbGateway:
         """
         Parse UWB frame
         
-        Frame format (18 bytes):
-            SOF(1) + X(4) + Y(4) + Z(4) + Error(4) + Length(1)
+        Frame format (variable):
+            SOF(1) + LEN(1) + X(4) + Y(4) + VX(4) + VY(4) + Yaw(4) + Error(4) + ErrorCnt(4) + Dists(4*N)
         
         Args:
-            frame_bytes: Raw frame data (18 bytes)
+            frame_bytes: Raw frame data
             
         Returns:
             UwbPosition object if valid, None otherwise
         """
         try:
-            # Unpack: '<' = little-endian, 'B' = uint8, 'f' = float
-            sof, x, y, z, error, length = struct.unpack('<Bffffb', frame_bytes)
+            if len(frame_bytes) < 30: # SOF(1) + LEN(1) + PX(4) + PY(4) + VX(4) + VY(4) + YAW(4) + Error(4) + ErrorCnt(4)
+                return None
+                
+            sof = frame_bytes[0]
+            length = frame_bytes[1]
             
-            # Validate SOF and length
+            # Validate SOF
             if sof != Config.UWB_SOF:
                 self.logger.debug(f"Invalid SOF: 0x{sof:02X}")
                 return None
             
-            if length != Config.UWB_PAYLOAD_LEN:
-                self.logger.debug(f"Invalid length: {length}")
+            # Length validation - minimum is 28 bytes without distances 
+            # 28 bytes = PX(4) + PY(4) + VX(4) + VY(4) + YAW(4) + Error(4) + ErrorCnt(4)
+            if length % 4 != 0 or length < 28:
+                self.logger.debug(f"Invalid length byte: {length}")
                 return None
             
+            # Calculate number of distances
+            num_anchors = (length - 28) // 4
+            
+            # Unpack: '<' = little-endian, 'B' = uint8, 'I' = uint32, 'f' = float
+            fmt = f'<BBffffffI{num_anchors}f'
+            unpacked = struct.unpack(fmt, frame_bytes)
+            
+            # unpacked indices
+            sof, length, x, y, vx, vy, yaw, error, error_frame_cnt = unpacked[0:9]
+            distances = list(unpacked[9:9+num_anchors])
+            
             # Validate position data
-            if not self.validate_frame(x, y, z, error):
-                self.logger.debug(f"Invalid data: x={x}, y={y}, z={z}, err={error}")
+            if not self.validate_frame(x, y, error):
+                self.logger.debug(f"Invalid data: x={x}, y={y}, err={error}")
                 return None
             
             # Create position object
             position = UwbPosition(
                 x=x,
                 y=y,
-                z=z,
+                vx=vx,
+                vy=vy,
+                yaw=yaw,
                 error=error,
+                error_frame_cnt=error_frame_cnt,
+                distances=distances,
                 timestamp=time.time()
             )
             
             return position
             
-        except struct.error as e:
+        except (struct.error, IndexError) as e:
             self.logger.error(f"Frame parse error: {e}")
             return None
     
     def send_udp(self, position: UwbPosition) -> bool:
         """
-        Send position data via UDP
+        Send position and distance data via UDP
         
         Args:
             position: UwbPosition object
@@ -192,11 +219,20 @@ class UwbGateway:
             True if sent successfully, False otherwise
         """
         try:
-            # Format: Binary format with only x, y, z (12 bytes)
-            data = struct.pack('<fff',
+            # Format: Binary format with fields matching UwbPosition
+            # X(4) + Y(4) + VX(4) + VY(4) + Yaw(4) + Error(4) + ErrorCnt(4) + Dists(4*N)
+            num_dists = len(position.distances)
+            fmt = f'<ffffffI{num_dists}f'
+            
+            data = struct.pack(fmt,
                 position.x,
                 position.y,
-                position.z
+                position.vx,
+                position.vy,
+                position.yaw,
+                position.error,
+                position.error_frame_cnt,
+                *position.distances,
             )
             
             self.udp_socket.sendto(data, (self.udp_host, self.udp_port))
@@ -210,7 +246,7 @@ class UwbGateway:
     
     def process_uart_data(self):
         """
-        Read and process UART data
+        Read and process UART data with dynamic length detection
         Returns number of bytes processed
         """
         if not self.serial or not self.serial.is_open:
@@ -227,19 +263,26 @@ class UwbGateway:
         for byte in data:
             bytes_processed += 1
             
-            # State machine: Looking for Start-Of-Frame
+            # State 0: Looking for Start-Of-Frame
             if self.parse_index == 0:
                 if byte == Config.UWB_SOF:
                     self.parse_buffer = bytearray([byte])
                     self.parse_index = 1
                 continue
             
-            # Collecting frame bytes
+            # State 1: Reading Length byte
+            if self.parse_index == 1:
+                self.parse_buffer.append(byte)
+                self.parse_index = 2
+                self.expected_len = byte + 2 # Total frame is SOF + LEN + Payload
+                continue
+
+            # Collecting payload bytes
             self.parse_buffer.append(byte)
             self.parse_index += 1
             
             # Complete frame received?
-            if self.parse_index == Config.UWB_FRAME_SIZE:
+            if self.parse_index == self.expected_len:
                 position = self.parse_frame(bytes(self.parse_buffer))
                 
                 if position:
@@ -257,8 +300,8 @@ class UwbGateway:
                 self.parse_buffer = bytearray()
                 self.parse_index = 0
             
-            # Overflow protection
-            if self.parse_index >= Config.UWB_FRAME_SIZE:
+            # Overflow protection (max size say 256 bytes)
+            if self.parse_index > 256:
                 self.logger.warning("Parse buffer overflow, resetting")
                 self.parse_buffer = bytearray()
                 self.parse_index = 0
