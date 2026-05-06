@@ -40,6 +40,7 @@
 #include "sys_task.h"
 
 #include <string.h>
+#include "bsp_imu.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -304,8 +305,12 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
 #else
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing IMU...");
+  if (bsp_imu_init() != BSP_IMU_OK)
+  {
+    err = 1;
+  }
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
-
   if (bsp_uwb_init() != 0)
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
