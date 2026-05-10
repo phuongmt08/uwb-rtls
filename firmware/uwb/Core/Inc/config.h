@@ -17,4 +17,6 @@
 /* Experimental features */
 #define UWB_EVENT_DRIVEN 0
 
+#undef USE_DIP_SWITCH   /* NOTE: Define this if you are running anchor mode in tag hardware */
+
 #endif /* __CONFIG_H */
