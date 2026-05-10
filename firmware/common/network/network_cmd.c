@@ -864,7 +864,7 @@ static bool network_cmd_host_active(void)
 {
     CHECK(s_network_cmd.stream, false);
 
-    if (s_network_cmd.stream->ble_connection_active || s_network_cmd.stream->serial_connection_active) {
+    if (s_network_cmd.stream->serial_connection_active) {
         return true;
     }
 
