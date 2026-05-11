@@ -32,25 +32,18 @@ typedef enum
 } sys_ranging_err_t;
 
 /**
- * @brief Ranging mode
- */
-typedef enum {
-  SYS_RANGING_MODE_SINGLE = 0,    /* Single anchor (legacy) */
-  SYS_RANGING_MODE_TDMA = 1       /* Multi-anchor TDMA */
-} sys_ranging_mode_t;
-
-/**
  * @brief Local calibration state advertised in UWB packets.
  *
  * This is intentionally 1 byte so it can fit into existing packet padding.
+ * Only two states matter:
+ *   NORMAL = calibration not finished (or not running)
+ *   DONE   = calibration converged, antenna delay saved
+ * The Anchor Master uses DONE from peers to decide when the
+ * whole network is calibrated and ready to reset into normal mode.
  */
 typedef enum {
   SYS_CALIB_STATUS_NORMAL = 0,
-  SYS_CALIB_STATUS_COLLECTING = 1,
-  SYS_CALIB_STATUS_CALCULATING = 2,
-  SYS_CALIB_STATUS_PENDING_ACCEPT = 3,
-  SYS_CALIB_STATUS_DONE = 4,
-  SYS_CALIB_STATUS_FACTORY_RESET = 5
+  SYS_CALIB_STATUS_DONE   = 1
 } sys_calib_status_t;
 
 /**
@@ -73,7 +66,7 @@ typedef struct
 
 typedef struct
 {
-  sys_ranging_result_t results[NUM_ANCHORS];
+  sys_ranging_result_t results[MAX_ANCHORS_SUPPORTED];
   uint8_t count;          /* Number of valid results */
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
@@ -83,9 +76,6 @@ typedef struct
  */
 typedef struct
 {
-  /* Mode selection */
-  sys_ranging_mode_t mode;          /* SINGLE or TDMA */
-  
   /* Common parameters */
   uint8_t  sequence_num;
   uint32_t rx_timeout_ms;
@@ -168,6 +158,16 @@ void sys_ranging_set_calib_status(sys_calib_status_t status);
 sys_calib_status_t sys_ranging_get_calib_status(void);
 
 /**
+ * @brief Get the current TDMA slot ID (0=Idle/Poll, 1-N=Anchor slots)
+ */
+uint8_t sys_ranging_get_current_slot(void);
+
+/**
+ * @brief Get the current superframe counter (synced across network)
+ */
+uint32_t sys_ranging_get_superframe_count(void);
+
+/**
  * @brief Process Anchor TDMA ranging (call frequently in loop)
  * @param num_anchors Total number of anchors in network
  * @param anchor_ids Array of all anchor IDs in network
@@ -244,5 +244,10 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
  * @brief Reset ranging statistics
  */
 void sys_ranging_reset_stats(void);
+
+/**
+ * @brief Abort any ongoing ranging and reset state machine to IDLE
+ */
+void sys_ranging_abort(void);
 
 #endif /* __SYS_RANGING_H */

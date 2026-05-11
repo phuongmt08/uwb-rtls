@@ -60,7 +60,8 @@ static uint32_t s_rx_crc_err_count  = 0;
 static uint32_t s_rx_phr_err_count  = 0;
 static uint32_t s_rx_sync_err_count = 0;
 
-#if UWB_EVENT_DRIVEN
+#ifdef UWB_EVENT_DRIVEN
+/* Queue size: drain loops consume events immediately each call, so 4 is sufficient. */
 #define UWB_EVENT_QUEUE_SIZE    4
 static volatile uint8_t s_ev_head           = 0; /* ISR writes here  (next write index) */
 static volatile uint8_t s_ev_tail           = 0; /* foreground reads here (next read index) */
@@ -219,7 +220,7 @@ bsp_err_t bsp_uwb_init(void)
   port_set_dw1000_fastrate();
   dwt_setleds(1);
 
-#if UWB_EVENT_DRIVEN
+#ifdef UWB_EVENT_DRIVEN
   /* Register UWB callbacks for foreground event processing */
   dwt_setcallbacks(uwb_tx_cb, uwb_rx_cb);
   /* Enable interrupts for TX done, RX good, RX timeout, RX preamble timeout, RX overflow, RX frame check error, SFD detection, RX preamble header error */
@@ -271,28 +272,32 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
   s_tx_antenna_delay = cfg->tx_antenna_delay;
   s_rx_antenna_delay = cfg->rx_antenna_delay;
 
-    /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
-    dwt_setinterrupt((uint32)(DWT_INT_RFCG |
-                              DWT_INT_RFTO |
-                              DWT_INT_RXPTO |
-                              DWT_INT_RFCE |
-                              DWT_INT_RPHE |
-                              DWT_INT_RFSL), 1);
+    /* Configure interrupt mask.
+     * In UWB_EVENT_DRIVEN mode we also need DWT_INT_TFRS (TX frame sent) so that
+     * uwb_tx_cb fires and TX_DONE events reach the queue.
+     * bsp_uwb_configure() is called AFTER bsp_uwb_init() which already set the
+     * event-driven mask, but dwt_configure() resets the chip config so we must
+     * re-apply it here. */
+#ifdef UWB_EVENT_DRIVEN
+    dwt_setinterrupt((uint32)(DWT_INT_TFRS |   /* TX frame sent      */
+                              DWT_INT_RFCG |   /* RX good frame      */
+                              DWT_INT_RFTO |   /* RX timeout         */
+                              DWT_INT_RXPTO |  /* Preamble timeout   */
+                              DWT_INT_RXOVRR | /* RX buffer overrun  */
+                              DWT_INT_RFCE |   /* RX CRC error       */
+                              DWT_INT_RPHE |   /* RX PHR error       */
+                              DWT_INT_RFSL), 1); /* RX sync loss    */
+#else
+    dwt_setinterrupt((uint32)(DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO |
+                              DWT_INT_RFCE | DWT_INT_RPHE | DWT_INT_RFSL), 1);
+#endif
 
     dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
     dwt_forcetrxoff();
     s_irq_event_pending = 0;
-    
-    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)", 
+
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)",
            cfg->tx_antenna_delay, cfg->rx_antenna_delay);
-
-  /* Enable DW1000 IRQ sources used by RX path (required for IRQ pin assertion). */
-  dwt_setinterrupt(
-    (uint32) (DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO | DWT_INT_RFCE | DWT_INT_RPHE | DWT_INT_RFSL), 1);
-
-  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
-  dwt_forcetrxoff();
-  s_irq_event_pending = 0;
 
   return BSP_OK;
 }
@@ -314,7 +319,7 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
     return BSP_ERR;
   }
 
-#if UWB_EVENT_DRIVEN
+#ifdef UWB_EVENT_DRIVEN
   return BSP_OK;
 #else
   /* Wait TX complete (Blocking) */
@@ -734,15 +739,21 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
     return BSP_ERR;
   }
 
-#if UWB_EVENT_DRIVEN
-  /* Cache predicted TX timestamp for recovery if ISR is missed/overwritten */
-  s_last_tx_timestamp = (((uint64_t)dx_time << 8) + s_tx_antenna_delay) & DW_MASK_40;
+  uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+  if (status & SYS_STATUS_HPDWARN) {
+      RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAY] HPDWARN (Late TX) - Aborting");
+      dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
+      dwt_forcetrxoff();
+      return BSP_ERR;
+  }
+
+#ifdef UWB_EVENT_DRIVEN
   return BSP_OK;
 #else
   /* Wait for TX complete */
   uint32_t timeout_ms = 100;
   uint32_t start      = HAL_GetTick();
-  uint32_t status     = 0;
+  status              = 0;
 
   while ((HAL_GetTick() - start) < timeout_ms)
   {
@@ -844,70 +855,84 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void)
 }
 void bsp_uwb_on_irq(void)
 {
-#if UWB_EVENT_DRIVEN
+#ifdef UWB_EVENT_DRIVEN
   dwt_isr();
 #else
   s_irq_event_pending = 1;
 #endif
 }
 
-#if UWB_EVENT_DRIVEN
+#ifdef UWB_EVENT_DRIVEN
 static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
 {
   (void)cb_data;
-  if (s_isr_event_ready) s_event_overflow_count++;
-  s_isr_event.type = BSP_UWB_EVENT_TX_DONE;
-  s_isr_event.rx_len = 0;
-  
-  uint64_t actual_dw = 0;
+
+  uint8_t next_head = (uint8_t)((s_ev_head + 1u) % UWB_EVENT_QUEUE_SIZE);
+  if (next_head == s_ev_tail) {
+      /* Queue full — drop oldest by advancing tail, count overflow */
+      s_event_overflow_count++;
+      s_ev_tail = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
+  }
+
+  bsp_uwb_event_t *ev = &s_ev_queue[s_ev_head];
+  ev->type   = BSP_UWB_EVENT_TX_DONE;
+  ev->rx_len = 0;
+  ev->rx_ts  = 0;
+  ev->rx_rssi = 0;
+
   uint8_t ts[5];
   dwt_readtxtimestamp(ts);
-  actual_dw = ((uint64_t)ts[0]) | ((uint64_t)ts[1] << 8) | ((uint64_t)ts[2] << 16)
-         | ((uint64_t)ts[3] << 24) | ((uint64_t)ts[4] << 32);
-  s_isr_event.tx_ts = actual_dw;
-  s_last_tx_timestamp = actual_dw;
-  
-  s_isr_event_ready = true;
+  ev->tx_ts = ((uint64_t)ts[0])        | ((uint64_t)ts[1] << 8)
+            | ((uint64_t)ts[2] << 16)  | ((uint64_t)ts[3] << 24)
+            | ((uint64_t)ts[4] << 32);
+  s_last_tx_timestamp = ev->tx_ts;
+
+  s_ev_head = next_head;
+
+  /* Re-arm receiver immediately after TX so the next incoming frame
+   * (e.g. anchor RESULT arriving ~final_to_result_delay_us after FINAL TX)
+   * is not missed while the foreground loop is still processing TX_DONE.
+   * Without this, DW1000 stays IDLE after TX and RESULT frames are lost. */
+  dwt_rxenable(DWT_START_RX_IMMEDIATE);
 }
 
 static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
 {
-  if (cb_data->event == DWT_SIG_RX_OKAY)
-  {
-      if (s_isr_event_ready) s_event_overflow_count++;
-      s_isr_event.type = BSP_UWB_EVENT_RX_OK;
-      s_isr_event.rx_len = cb_data->datalength;
-      if (s_isr_event.rx_len > sizeof(s_isr_event.rx_data)) {
-          s_isr_event.rx_len = sizeof(s_isr_event.rx_data);
+  if (cb_data->event == DWT_SIG_RX_OKAY) {
+      uint8_t next_head = (uint8_t)((s_ev_head + 1u) % UWB_EVENT_QUEUE_SIZE);
+      if (next_head == s_ev_tail) {
+          /* Queue full — drop oldest, count overflow */
+          s_event_overflow_count++;
+          s_ev_tail = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
       }
-      dwt_readrxdata(s_isr_event.rx_data, s_isr_event.rx_len, 0);
-      
+
+      bsp_uwb_event_t *ev = &s_ev_queue[s_ev_head];
+      ev->tx_ts = 0;
+      ev->type    = BSP_UWB_EVENT_RX_OK;
+      ev->rx_len  = cb_data->datalength;
+      if (ev->rx_len > sizeof(ev->rx_data)) {
+          ev->rx_len = sizeof(ev->rx_data);
+      }
+      dwt_readrxdata(ev->rx_data, ev->rx_len, 0);
+
       uint8_t ts[5];
       dwt_readrxtimestamp(ts);
-      s_isr_event.rx_ts = ((uint64_t)ts[0]) | ((uint64_t)ts[1] << 8) | ((uint64_t)ts[2] << 16)
-             | ((uint64_t)ts[3] << 24) | ((uint64_t)ts[4] << 32);
-      
-      // We skip RSSI read in ISR to save time, main loop can approximate or we just use -100
-      s_isr_event.rx_rssi = -100;
-      
-      /* Re-enable RX immediately without forcetrxoff to avoid killing subsequent preambles */
+      ev->rx_ts = ((uint64_t)ts[0])        | ((uint64_t)ts[1] << 8)
+                | ((uint64_t)ts[2] << 16)  | ((uint64_t)ts[3] << 24)
+                | ((uint64_t)ts[4] << 32);
+      ev->rx_rssi = -100; /* deferred — compute in foreground if needed */
+
+      /* Re-enable RX immediately to capture back-to-back frames */
+      dwt_rxenable(DWT_START_RX_IMMEDIATE);
+      s_ev_head = next_head;
+  } else {
+      /* Do not queue timeouts or errors. They happen naturally during continuous
+       * listening between slots and will rapidly overflow the queue, dropping
+       * valid RX_OK/TX_DONE events. The TDMA state machine handles its own timeouts. */
       dwt_rxenable(DWT_START_RX_IMMEDIATE);
   }
-  else if (cb_data->event == DWT_SIG_RX_TIMEOUT || cb_data->event == DWT_SIG_RX_PTOTIMEOUT)
-  {
-      s_isr_event.type = BSP_UWB_EVENT_RX_TIMEOUT;
-      s_isr_event.rx_len = 0;
-      dwt_rxenable(DWT_START_RX_IMMEDIATE);
-  }
-  else
-  {
-      s_isr_event.type = BSP_UWB_EVENT_RX_ERROR;
-      s_isr_event.rx_len = 0;
-      dwt_rxenable(DWT_START_RX_IMMEDIATE);
-  }
-  
-  s_isr_event_ready = true;
 }
+
 #endif
 
 void bsp_uwb_clear_irq_event(void)
