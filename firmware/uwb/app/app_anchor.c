@@ -115,6 +115,8 @@ static void calib_calculate_and_adjust(void) {
   sys_config_t *cfg = sys_config_get();
   cfg->uwb.tx_antenna_delay = (uint16_t)(s_a2a.combined_delay / 2);
   cfg->uwb.rx_antenna_delay = (uint16_t)(s_a2a.combined_delay / 2);
+  cfg->calib.last_avg_error_m = s_a2a.last_avg_error;
+  cfg->calib.iterations_taken = s_a2a.iter;
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Iter %u complete. Error=%+.3fm NewDelay=%u",
          s_a2a.iter, s_a2a.last_avg_error, s_a2a.combined_delay);

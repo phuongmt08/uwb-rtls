@@ -302,6 +302,8 @@ static void tag_calib_apply_and_save(void)
     sys_config_t *cfg = sys_config_get();
     cfg->uwb.tx_antenna_delay = s_tag_calib.current_delay;
         cfg->uwb.rx_antenna_delay = CALIB_FIXED_RX_ANT_DLY;
+    cfg->calib.last_avg_error_m = s_tag_calib.error;
+    cfg->calib.iterations_taken = s_tag_calib.round;
 
     if (sys_config_save() == 0) {
         RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saved! Restarting...");

@@ -486,6 +486,10 @@ message pos_calib_cfg_t {
     float max_std_m               = 11;
     float damping                 = 12; /* Added for gradient descent tuning */
     uint32 iterations             = 13; /* Total iterations to run */
+    
+    // Diagnostic
+    float last_avg_error_m        = 14;
+    uint32 iterations_taken       = 15;
 }
 
 message pos_calib_cfg_get_t {

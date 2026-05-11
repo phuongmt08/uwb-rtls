@@ -432,6 +432,8 @@ void sys_config_print(void)
     CFG_LOG("TX Ant Delay  : %lu", g_storage.config.uwb.tx_antenna_delay);
     CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
     CFG_LOG("TX Power      : 0x%08lX", g_storage.config.uwb.tx_power);
+    CFG_LOG("Calib Error   : %+.3fm", g_storage.config.calib.last_avg_error_m);
+    CFG_LOG("Calib Iter    : %u", (unsigned)g_storage.config.calib.iterations_taken);
     CFG_LOG("-------------- TIMING -----------------");
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);

@@ -92,11 +92,20 @@ typedef enum _protobuf_host_transport_t {
 } protobuf_host_transport_t;
 
 typedef enum _protobuf_anchor_power_mode_t {
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE = 0,
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED = 1,
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO = 2,
-    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO = 3
+    protobuf_ANCHOR_POWER_MODE_PERFORMANCE = 0,
+    protobuf_ANCHOR_POWER_MODE_BALANCED = 1,
+    protobuf_ANCHOR_POWER_MODE_ECO = 2,
+    protobuf_ANCHOR_POWER_MODE_DEEP_ECO = 3
 } protobuf_anchor_power_mode_t;
+
+typedef enum _protobuf_calib_state_t {
+    protobuf_calib_state_t_CALIB_STATE_UNSPECIFIED = 0,
+    protobuf_calib_state_t_CALIB_STATE_IDLE = 1,
+    protobuf_calib_state_t_CALIB_STATE_COLLECTING = 2,
+    protobuf_calib_state_t_CALIB_STATE_CALCULATING = 3,
+    protobuf_calib_state_t_CALIB_STATE_DONE = 4,
+    protobuf_calib_state_t_CALIB_STATE_ERROR = 5
+} protobuf_calib_state_t;
 
 typedef enum _protobuf_fota_state_index_t {
     protobuf_FOTA_STATE_UNSPECIFIED = 0,
@@ -459,6 +468,11 @@ typedef struct _protobuf_pos_calib_cfg_t {
     uint32_t min_delta_step;
     uint32_t max_rounds;
     float max_std_m;
+    float damping; /* Added for gradient descent tuning */
+    uint32_t iterations; /* Total iterations to run */
+    /* Diagnostic */
+    float last_avg_error_m;
+    uint32_t iterations_taken;
 } protobuf_pos_calib_cfg_t;
 
 typedef struct _protobuf_pos_calib_cfg_get_t {
@@ -495,6 +509,20 @@ typedef struct _protobuf_anchor_layout_resp_t {
     pb_size_t anchors_count;
     protobuf_anchor_layout_item_t anchors[4];
 } protobuf_anchor_layout_resp_t;
+
+typedef struct _protobuf_calib_status_get_t {
+    uint32_t dummy;
+} protobuf_calib_status_get_t;
+
+typedef struct _protobuf_calib_status_resp_t {
+    protobuf_calib_state_t state;
+    uint32_t progress_percent;
+    uint32_t current_iteration;
+    uint32_t total_iterations;
+    float last_avg_error_m;
+    uint32_t current_antenna_delay;
+    uint32_t peer_ready_mask;
+} protobuf_calib_status_resp_t;
 
 typedef struct _protobuf_ranging_status_get_t {
     uint32_t dummy;
@@ -611,6 +639,8 @@ typedef struct _protobuf_packet_t {
         protobuf_battery_info_resp_t battery_info_resp;
         protobuf_battery_info_get_t battery_info_get;
         protobuf_enter_to_bootloader_t enter_to_bootloader;
+        protobuf_calib_status_get_t calib_status_get;
+        protobuf_calib_status_resp_t calib_status_resp;
     } params;
 } protobuf_packet_t;
 
@@ -710,9 +740,17 @@ extern "C" {
 #define protobuf_host_transport_t_HOST_TRANSPORT_USB protobuf_HOST_TRANSPORT_USB
 #define protobuf_host_transport_t_HOST_TRANSPORT_UART protobuf_HOST_TRANSPORT_UART
 
-#define _protobuf_anchor_power_mode_t_MIN protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE
-#define _protobuf_anchor_power_mode_t_MAX protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO
-#define _protobuf_anchor_power_mode_t_ARRAYSIZE ((protobuf_anchor_power_mode_t)(protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO+1))
+#define _protobuf_anchor_power_mode_t_MIN protobuf_ANCHOR_POWER_MODE_PERFORMANCE
+#define _protobuf_anchor_power_mode_t_MAX protobuf_ANCHOR_POWER_MODE_DEEP_ECO
+#define _protobuf_anchor_power_mode_t_ARRAYSIZE ((protobuf_anchor_power_mode_t)(protobuf_ANCHOR_POWER_MODE_DEEP_ECO+1))
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE protobuf_ANCHOR_POWER_MODE_PERFORMANCE
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED protobuf_ANCHOR_POWER_MODE_BALANCED
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO protobuf_ANCHOR_POWER_MODE_ECO
+#define protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO protobuf_ANCHOR_POWER_MODE_DEEP_ECO
+
+#define _protobuf_calib_state_t_MIN protobuf_calib_state_t_CALIB_STATE_UNSPECIFIED
+#define _protobuf_calib_state_t_MAX protobuf_calib_state_t_CALIB_STATE_ERROR
+#define _protobuf_calib_state_t_ARRAYSIZE ((protobuf_calib_state_t)(protobuf_calib_state_t_CALIB_STATE_ERROR+1))
 
 #define _protobuf_fota_state_index_t_MIN protobuf_FOTA_STATE_UNSPECIFIED
 #define _protobuf_fota_state_index_t_MAX protobuf_FOTA_STATE_ERROR
@@ -806,6 +844,9 @@ extern "C" {
 
 
 
+#define protobuf_calib_status_resp_t_state_ENUMTYPE protobuf_calib_state_t
+
+
 
 #define protobuf_fota_state_resp_t_state_ENUMTYPE protobuf_fota_state_index_t
 
@@ -870,7 +911,7 @@ extern "C" {
 #define protobuf_log_data_t_init_default         {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_default        {_protobuf_log_type_t_MIN, 0, 0}
 #define protobuf_host_transport_set_t_init_default {_protobuf_host_transport_t_MIN}
-#define protobuf_pos_calib_cfg_t_init_default    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_pos_calib_cfg_t_init_default    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_pos_calib_cfg_get_t_init_default {0}
 #define protobuf_pos_calib_cfg_set_t_init_default {false, protobuf_pos_calib_cfg_t_init_default}
 #define protobuf_pos_calib_cfg_resp_t_init_default {false, protobuf_pos_calib_cfg_t_init_default}
@@ -878,6 +919,8 @@ extern "C" {
 #define protobuf_anchor_layout_get_t_init_default {0}
 #define protobuf_anchor_layout_set_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
+#define protobuf_calib_status_get_t_init_default {0}
+#define protobuf_calib_status_resp_t_init_default {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0}
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_default  {_protobuf_fota_state_index_t_MIN}
@@ -940,7 +983,7 @@ extern "C" {
 #define protobuf_log_data_t_init_zero            {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_zero           {_protobuf_log_type_t_MIN, 0, 0}
 #define protobuf_host_transport_set_t_init_zero  {_protobuf_host_transport_t_MIN}
-#define protobuf_pos_calib_cfg_t_init_zero       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_pos_calib_cfg_t_init_zero       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_pos_calib_cfg_get_t_init_zero   {0}
 #define protobuf_pos_calib_cfg_set_t_init_zero   {false, protobuf_pos_calib_cfg_t_init_zero}
 #define protobuf_pos_calib_cfg_resp_t_init_zero  {false, protobuf_pos_calib_cfg_t_init_zero}
@@ -948,6 +991,8 @@ extern "C" {
 #define protobuf_anchor_layout_get_t_init_zero   {0}
 #define protobuf_anchor_layout_set_t_init_zero   {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
+#define protobuf_calib_status_get_t_init_zero    {0}
+#define protobuf_calib_status_resp_t_init_zero   {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0}
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_zero     {_protobuf_fota_state_index_t_MIN}
@@ -1099,6 +1144,10 @@ extern "C" {
 #define protobuf_pos_calib_cfg_t_min_delta_step_tag 9
 #define protobuf_pos_calib_cfg_t_max_rounds_tag  10
 #define protobuf_pos_calib_cfg_t_max_std_m_tag   11
+#define protobuf_pos_calib_cfg_t_damping_tag     12
+#define protobuf_pos_calib_cfg_t_iterations_tag  13
+#define protobuf_pos_calib_cfg_t_last_avg_error_m_tag 14
+#define protobuf_pos_calib_cfg_t_iterations_taken_tag 15
 #define protobuf_pos_calib_cfg_get_t_dummy_tag   1
 #define protobuf_pos_calib_cfg_set_t_config_tag  1
 #define protobuf_pos_calib_cfg_resp_t_config_tag 1
@@ -1109,6 +1158,14 @@ extern "C" {
 #define protobuf_anchor_layout_get_t_dummy_tag   1
 #define protobuf_anchor_layout_set_t_anchors_tag 1
 #define protobuf_anchor_layout_resp_t_anchors_tag 1
+#define protobuf_calib_status_get_t_dummy_tag    1
+#define protobuf_calib_status_resp_t_state_tag   1
+#define protobuf_calib_status_resp_t_progress_percent_tag 2
+#define protobuf_calib_status_resp_t_current_iteration_tag 3
+#define protobuf_calib_status_resp_t_total_iterations_tag 4
+#define protobuf_calib_status_resp_t_last_avg_error_m_tag 5
+#define protobuf_calib_status_resp_t_current_antenna_delay_tag 6
+#define protobuf_calib_status_resp_t_peer_ready_mask_tag 7
 #define protobuf_ranging_status_get_t_dummy_tag  1
 #define protobuf_ranging_status_resp_t_ranging_period_ms_tag 1
 #define protobuf_ranging_status_resp_t_ranging_total_count_tag 2
@@ -1185,6 +1242,8 @@ extern "C" {
 #define protobuf_packet_t_battery_info_resp_tag  60
 #define protobuf_packet_t_battery_info_get_tag   61
 #define protobuf_packet_t_enter_to_bootloader_tag 62
+#define protobuf_packet_t_calib_status_get_tag   63
+#define protobuf_packet_t_calib_status_resp_tag  64
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1565,7 +1624,11 @@ X(a, STATIC,   SINGULAR, UINT32,   samples,           7) \
 X(a, STATIC,   SINGULAR, FLOAT,    error_threshold_m,   8) \
 X(a, STATIC,   SINGULAR, UINT32,   min_delta_step,    9) \
 X(a, STATIC,   SINGULAR, UINT32,   max_rounds,       10) \
-X(a, STATIC,   SINGULAR, FLOAT,    max_std_m,        11)
+X(a, STATIC,   SINGULAR, FLOAT,    max_std_m,        11) \
+X(a, STATIC,   SINGULAR, FLOAT,    damping,          12) \
+X(a, STATIC,   SINGULAR, UINT32,   iterations,       13) \
+X(a, STATIC,   SINGULAR, FLOAT,    last_avg_error_m,  14) \
+X(a, STATIC,   SINGULAR, UINT32,   iterations_taken,  15)
 #define protobuf_pos_calib_cfg_t_CALLBACK NULL
 #define protobuf_pos_calib_cfg_t_DEFAULT NULL
 
@@ -1610,6 +1673,22 @@ X(a, STATIC,   REPEATED, MESSAGE,  anchors,           1)
 #define protobuf_anchor_layout_resp_t_CALLBACK NULL
 #define protobuf_anchor_layout_resp_t_DEFAULT NULL
 #define protobuf_anchor_layout_resp_t_anchors_MSGTYPE protobuf_anchor_layout_item_t
+
+#define protobuf_calib_status_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_calib_status_get_t_CALLBACK NULL
+#define protobuf_calib_status_get_t_DEFAULT NULL
+
+#define protobuf_calib_status_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UENUM,    state,             1) \
+X(a, STATIC,   SINGULAR, UINT32,   progress_percent,   2) \
+X(a, STATIC,   SINGULAR, UINT32,   current_iteration,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   total_iterations,   4) \
+X(a, STATIC,   SINGULAR, FLOAT,    last_avg_error_m,   5) \
+X(a, STATIC,   SINGULAR, UINT32,   current_antenna_delay,   6) \
+X(a, STATIC,   SINGULAR, UINT32,   peer_ready_mask,   7)
+#define protobuf_calib_status_resp_t_CALLBACK NULL
+#define protobuf_calib_status_resp_t_DEFAULT NULL
 
 #define protobuf_ranging_status_get_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
@@ -1707,7 +1786,9 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,tag_position,params.tag_position),  5
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,fota_state_resp,params.fota_state_resp),  57) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_resp,params.battery_info_resp),  60) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_get,params.battery_info_get),  61) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_bootloader),  62)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_bootloader),  62) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_get,params.calib_status_get),  63) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_resp,params.calib_status_resp),  64)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1770,6 +1851,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_b
 #define protobuf_packet_t_params_battery_info_resp_MSGTYPE protobuf_battery_info_resp_t
 #define protobuf_packet_t_params_battery_info_get_MSGTYPE protobuf_battery_info_get_t
 #define protobuf_packet_t_params_enter_to_bootloader_MSGTYPE protobuf_enter_to_bootloader_t
+#define protobuf_packet_t_params_calib_status_get_MSGTYPE protobuf_calib_status_get_t
+#define protobuf_packet_t_params_calib_status_resp_MSGTYPE protobuf_calib_status_resp_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1835,6 +1918,8 @@ extern const pb_msgdesc_t protobuf_anchor_layout_item_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_layout_get_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_layout_set_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_layout_resp_t_msg;
+extern const pb_msgdesc_t protobuf_calib_status_get_t_msg;
+extern const pb_msgdesc_t protobuf_calib_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_fota_state_resp_t_msg;
@@ -1907,6 +1992,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_get_t_fields &protobuf_anchor_layout_get_t_msg
 #define protobuf_anchor_layout_set_t_fields &protobuf_anchor_layout_set_t_msg
 #define protobuf_anchor_layout_resp_t_fields &protobuf_anchor_layout_resp_t_msg
+#define protobuf_calib_status_get_t_fields &protobuf_calib_status_get_t_msg
+#define protobuf_calib_status_resp_t_fields &protobuf_calib_status_resp_t_msg
 #define protobuf_ranging_status_get_t_fields &protobuf_ranging_status_get_t_msg
 #define protobuf_ranging_status_resp_t_fields &protobuf_ranging_status_resp_t_msg
 #define protobuf_fota_state_resp_t_fields &protobuf_fota_state_resp_t_msg
@@ -1939,6 +2026,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ble_scan_stop_t_size            6
 #define protobuf_ble_status_get_t_size           6
 #define protobuf_ble_status_resp_t_size          13
+#define protobuf_calib_status_get_t_size         6
+#define protobuf_calib_status_resp_t_size        37
 #define protobuf_device_information_get_t_size   6
 #define protobuf_device_information_resp_t_size  67
 #define protobuf_device_reset_t_size             6
@@ -1963,9 +2052,9 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_none_t_size                     6
 #define protobuf_packet_t_size                   233
 #define protobuf_pos_calib_cfg_get_t_size        6
-#define protobuf_pos_calib_cfg_resp_t_size       55
-#define protobuf_pos_calib_cfg_set_t_size        55
-#define protobuf_pos_calib_cfg_t_size            53
+#define protobuf_pos_calib_cfg_resp_t_size       77
+#define protobuf_pos_calib_cfg_set_t_size        77
+#define protobuf_pos_calib_cfg_t_size            75
 #define protobuf_ranging_result_t_size           141
 #define protobuf_ranging_start_t_size            2
 #define protobuf_ranging_status_get_t_size       6
