@@ -377,15 +377,6 @@ void sys_config_reset_to_defaults(void)
        ---------- */
     g_storage.config.calib.enable_anchor_auto_calib         =           ENABLE_ANCHOR_AUTO_CALIB;
     g_storage.config.calib.enable_tag_auto_calib            =           ENABLE_TAG_AUTO_CALIB;
-    // g_storage.config.calib.ref_distance_xy_m                =           CALIB_REF_DISTANCE_XY_M;
-    // g_storage.config.calib.tag_height_m                     =           CALIB_TAG_HEIGHT_M;
-    // g_storage.config.calib.anchor_height_m                  =           CALIB_ANCHOR_HEIGHT_M;
-    // g_storage.config.calib.calib_anchor_id                  =           CALIB_ANCHOR_ID;
-    // g_storage.config.calib.samples                          =           CALIB_SAMPLES;
-    // g_storage.config.calib.error_threshold_m                =           CALIB_ERROR_THRESHOLD_M;
-    // g_storage.config.calib.min_delta_step                   =           CALIB_MIN_DELTA_STEP;
-    // g_storage.config.calib.max_rounds                       =           CALIB_MAX_ROUNDS;
-    // g_storage.config.calib.max_std_m                        =           CALIB_MAX_STD_M;
 
     /* Anchor Layout Positions (X, Y, Z in meters)
        ================================================================================================

@@ -108,8 +108,8 @@ static void init_filters(void)
     /* Smoothing is enabled by default only when Mahalanobis pre-filter is disabled. */
     mw_filter_distance_smoother_init(&s_filters.smoother,
                                      (ENABLE_MAHALANOBIS_PREFILTER == 0),
-                                     0.25f,
-                                     0.30f);
+                                     SMOOTHER_ALPHA,
+                                     SMOOTHER_JUMP_LIMIT_M);
 }
 
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
@@ -475,7 +475,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_success_count++;
     s_error_count = 0;
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm | Error: \261%.3fm", 
+           (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M, (float)tril_result.error_estimate);
     RLOG_I(LOG_OBJECT_CODE_TAG, "D2 Scores: #%u(%.1f) #%u(%.1f) #%u(%.1f)",
            best_3_anchors[0].id, best_3_anchors[0].d2_score,
            best_3_anchors[1].id, best_3_anchors[1].d2_score,

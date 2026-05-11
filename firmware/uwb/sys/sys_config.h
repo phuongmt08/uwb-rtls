@@ -42,7 +42,7 @@ typedef protobuf_anchor_layout_item_t sys_anchor_layout_t;
 #define HOST_TRANSPORT_USB           protobuf_HOST_TRANSPORT_USB
 #define HOST_TRANSPORT_UART          protobuf_HOST_TRANSPORT_UART
 
-#define SYS_CONFIG_MAX_ANCHORS       NUM_ANCHORS
+#define SYS_CONFIG_MAX_ANCHORS       MAX_ANCHORS_SUPPORTED
 #define SYS_CONFIG_CALIB_MAX_SAMPLES 64
 
 typedef protobuf_anchor_power_mode_t anchor_power_mode_t;
@@ -70,7 +70,7 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            14 /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            18 /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_ROLE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR

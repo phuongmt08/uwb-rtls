@@ -36,12 +36,12 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.24f)
+#define TAG_HEIGHT_M            (0.435f)
 
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (0.415f)
+#define ANCHOR_HEIGHT_M         (0.405f)
 
 /**
  * @brief Height offset between Anchor and Tag (meters)
@@ -78,7 +78,7 @@
 
 /* Reject a batch if std deviation exceeds this threshold.
  * Batch is discarded and re-collected automatically.                  */
-#define CALIB_ANCHOR_MAX_STD_M   0.05f
+#define CALIB_ANCHOR_MAX_STD_M   0.10f
 
 /* ------------------------------------------------------------------
  * Gradient step tuning — passed into mw_calib_a2a_config_t
@@ -91,9 +91,9 @@
 #define CALIB_A2A_M_TO_DW_UNITS  213.0f
 
 /* Damping factor 0.0–1.0.
- * 0.4: conservative, no oscillation, converges in 2 iterations.
- * Increase toward 0.6 only if initial error is very large (>30cm).   */
-#define CALIB_A2A_DAMPING        0.4f
+ * 0.2: conservative, smooth convergence, no oscillation.
+ * Increase toward 0.4 only if initial error is very large (>30cm).   */
+#define CALIB_A2A_DAMPING        0.2f
 
 /* Combined delay clamp range.
  * Default DW1000 combined ≈ 32872 (2 × 16436).
@@ -103,7 +103,7 @@
 
 /* Number of full pair-sweep iterations.
  * 2 is sufficient for <5mm residual error with damping=0.4.          */
-#define CALIB_A2A_ITERATIONS     2U
+#define CALIB_A2A_ITERATIONS     3U
 
 /* DW1000 physical constant.
  * 1 DW unit = 1/(499.2e6 × 128) ≈ 15.65 ps one-way.
@@ -119,26 +119,12 @@
  * applies one gradient step — no dependency chain.
  * Anchor 1 has no source entries → it holds the initial delay
  * (natural gauge anchor, no explicit fix needed for 2 iterations).   */
-typedef struct {
-  uint8_t source_id;
-  uint8_t target_id;
-} calib_pair_t;
-
-#define CALIB_PAIRWISE_LIST { \
-  {2, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}, {8, 1}, \
-  {3, 2}, {4, 2}, {5, 2}, {6, 2}, {7, 2}, {8, 2}, \
-  {4, 3}, {5, 3}, {6, 3}, {7, 3}, {8, 3}, \
-  {5, 4}, {6, 4}, {7, 4}, {8, 4}, \
-  {6, 5}, {7, 5}, {8, 5}, \
-  {7, 6}, {8, 6}, \
-  {8, 7} \
-}
-
 /* ===================================================================
  * ANCHOR LAYOUT
  * =================================================================== */
 
-#define NUM_ANCHORS  4
+#define MAX_ANCHORS_SUPPORTED  8
+#define NUM_ANCHORS            4
 
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
@@ -147,10 +133,10 @@ typedef struct {
 #define ANCHOR_2_Y   0.0f
 
 #define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   14.64f
+#define ANCHOR_3_Y   9.76f
 
 #define ANCHOR_4_X   9.76f
-#define ANCHOR_4_Y   14.64f
+#define ANCHOR_4_Y   9.76f
 
 #ifndef ANCHOR_1_Z
 #define ANCHOR_1_Z ANCHOR_HEIGHT_M
@@ -191,13 +177,21 @@ typedef struct {
  *        1 = Reject results with error > MAX_ACCEPTABLE_ERROR_M
  */
 #ifndef ENABLE_QUALITY_GATING
-#define ENABLE_QUALITY_GATING       1
+#define ENABLE_QUALITY_GATING       0
 #endif
 
 /* Quality gating parameter */
 #ifndef MAX_ACCEPTABLE_ERROR_M
 #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
 #endif
+
+/**
+ * @brief Distance Smoother (EMA Filter) parameters
+ *        ALPHA: 0.0 to 1.0 (lower = smoother/more lag, higher = jumpier/less lag)
+ *        JUMP_LIMIT: Max allowed delta between consecutive samples (meters)
+ */
+#define SMOOTHER_ALPHA              0.25f
+#define SMOOTHER_JUMP_LIMIT_M       0.30f
 
 /* ===================================================================
  * ERROR HANDLING
