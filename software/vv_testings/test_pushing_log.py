@@ -176,6 +176,14 @@ class LogRealtimeTester:
         pkt.log_clear.length = 0xFFFFFFFF
         return pkt
 
+    def send_end_session(self, reason: int) -> None:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.proto.next_seq()
+        pkt.end_session.reason = reason
+        self._send_packet(pkt)
+
     def bootstrap(self) -> None:
         self._send_packet(self._build_none())
         time.sleep(0.05)
@@ -283,7 +291,10 @@ def main() -> int:
             tester.loop()
 
     except KeyboardInterrupt:
-        print("\nStopped")
+        print("\nStopping... Sending end_session to device.")
+        if 'tester' in locals():
+            tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
+            time.sleep(0.1) # Wait briefly so the serial has time to send
         return 0
     except SerialException as exc:
         print(f"Serial error: {exc}")
