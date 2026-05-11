@@ -110,16 +110,39 @@ class FlashLogStreamParser:
 
 
 class LogRealtimeTester:
-    def __init__(self, ser: serial.Serial, proto: VvProtocol, src: int, dst: int, verbose: bool = False, clear_first: bool = False):
+    def __init__(self, ser: serial.Serial, proto: VvProtocol, src: int, dst: int, verbose: bool = False, clear_first: bool = False, calibration: bool = False, args=None):
         self.ser = ser
         self.proto = proto
         self.src = src
         self.dst = dst
         self.verbose = verbose
         self.clear_first = clear_first
+        self.calibration = calibration
         self.log_parser = FlashLogStreamParser()
         self.last_ping = 0.0
         self.last_poll = 0.0
+        
+        self.record = args.record
+        self.log_file = None
+        self.uwb_file = None
+
+        if self.calibration:
+            filename = f"calibration_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            self.log_file = open(filename, "w", encoding="utf-8")
+            print(f"Saving calibration logs to {filename}")
+
+        if self.record == "uwb":
+            filename = f"uwb_record_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            self.uwb_file = open(filename, "w", encoding="utf-8")
+            self.uwb_file.write("timestamp,type,anchor_id,distance,rssi,x,y,z,error_m,frame_error\n")
+            self.frame_error_count = 0
+            print(f"Recording UWB data to {filename}")
+
+    def __del__(self):
+        if hasattr(self, 'log_file') and self.log_file is not None:
+            self.log_file.close()
+        if hasattr(self, 'uwb_file') and self.uwb_file is not None:
+            self.uwb_file.close()
 
     def _send_packet(self, pkt: pb.packet_t) -> None:
         frame = self.proto.wrap_packet(pkt)
@@ -203,6 +226,41 @@ class LogRealtimeTester:
             lines = self.log_parser.feed(payload)
             for line in lines:
                 print(line)
+                
+                # Strip ANSI escape codes for processing
+                import re
+                clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+
+                if self.calibration and self.log_file is not None:
+                    self.log_file.write(clean_line + '\n')
+                    self.log_file.flush()
+
+                if self.record == "uwb" and self.uwb_file is not None:
+                    # Increment frame error count if log level is ERROR
+                    if "[ERROR]" in clean_line:
+                        self.frame_error_count += 1
+
+                    # Match primary distance: "[TAG] Distance: 6.652 m [A:4 RSSI:0dBm] [C:1]"
+                    dist_match = re.search(r"Distance:\s+([\d.]+)\s+m\s+\[A:(\d+)\s+RSSI:(-?\d+)dBm\]", clean_line)
+                    if dist_match:
+                        dist, aid, rssi = dist_match.group(1), dist_match.group(2), dist_match.group(3)
+                        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                        self.uwb_file.write(f"{ts},distance,{aid},{dist},{rssi},,,, ,{self.frame_error_count}\n")
+                        self.uwb_file.flush()
+                        continue
+
+                    # Match position: "Tril Px=1.234m Py=5.678m Z=0.44m | Error: ±0.100m"
+                    pos_match = re.search(r"Tril Px=([\d.-]+)m Py=([\d.-]+)m Z=([\d.-]+)m\s+\|\s+Error:\s+.([\d.]+)", clean_line)
+                    if pos_match:
+                        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                        x, y, z, err = pos_match.group(1), pos_match.group(2), pos_match.group(3), pos_match.group(4)
+                        self.uwb_file.write(f"{ts},position,,, ,{x},{y},{z},{err},{self.frame_error_count}\n")
+                        self.uwb_file.flush()
+                    elif "[ERROR]" in clean_line:
+                        # Log error record even if no distance/pos matched
+                        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                        self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
+                        self.uwb_file.flush()
 
             ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
             self._send_packet(ack_pkt)
@@ -287,6 +345,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Clear existing flash log backlog once before realtime streaming",
     )
+    parser.add_argument(
+        "--calibration",
+        action="store_true",
+        help="Save log to a file for calibration testing",
+    )
+    parser.add_argument(
+        "--record",
+        choices=["uwb"],
+        help="Record specific data (uwb) to a CSV file",
+    )
     return parser.parse_args()
 
 
@@ -318,6 +386,8 @@ def main() -> int:
                 dst=args.dst,
                 verbose=args.verbose,
                 clear_first=args.clear_first,
+                calibration=args.calibration,
+                args=args,
             )
             tester.bootstrap()
             tester.loop()
