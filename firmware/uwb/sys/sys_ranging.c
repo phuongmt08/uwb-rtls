@@ -1273,6 +1273,7 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   uint16_t response_len;
   uint8_t  num_responses = 0;
   uint8_t  resp_mask     = 0;
+  uint32_t slot_mismatch_count = 0;
 
   struct
   {
