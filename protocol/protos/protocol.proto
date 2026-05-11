@@ -110,6 +110,15 @@ enum anchor_power_mode_t {
     ANCHOR_POWER_MODE_DEEP_ECO    = 3;
 }
 
+enum calib_state_t {
+    CALIB_STATE_UNSPECIFIED = 0;
+    CALIB_STATE_IDLE        = 1;
+    CALIB_STATE_COLLECTING  = 2;
+    CALIB_STATE_CALCULATING = 3;
+    CALIB_STATE_DONE        = 4;
+    CALIB_STATE_ERROR       = 5;
+}
+
 /* Common messages ---------------------------------------------------------- */
 
 message addr_t {
@@ -475,6 +484,8 @@ message pos_calib_cfg_t {
     uint32 min_delta_step         = 9;
     uint32 max_rounds             = 10;
     float max_std_m               = 11;
+    float damping                 = 12; /* Added for gradient descent tuning */
+    uint32 iterations             = 13; /* Total iterations to run */
 }
 
 message pos_calib_cfg_get_t {
@@ -506,6 +517,20 @@ message anchor_layout_set_t {
 
 message anchor_layout_resp_t {
     repeated anchor_layout_item_t anchors = 1;
+}
+
+message calib_status_get_t {
+    uint32 dummy = 1;
+}
+
+message calib_status_resp_t {
+    calib_state_t state         = 1;
+    uint32 progress_percent     = 2;
+    uint32 current_iteration    = 3;
+    uint32 total_iterations     = 4;
+    float last_avg_error_m      = 5;
+    uint32 current_antenna_delay = 6;
+    uint32 peer_ready_mask      = 7;
 }
 
 
@@ -659,6 +684,9 @@ message packet_t {
         battery_info_get_t        battery_info_get        = 61;
 
         enter_to_bootloader_t     enter_to_bootloader     = 62;
+
+        calib_status_get_t        calib_status_get        = 63;
+        calib_status_resp_t       calib_status_resp       = 64;
     }
 }
 

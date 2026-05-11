@@ -28,6 +28,8 @@ typedef struct {
 void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
                                 float T1, float T2, float anchor_R_base);
 
+float mw_filter_median_update(median_filter_1d_t *med, float new_val);
+
 bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   uint8_t anchor_id, float d_raw,
                                   float px, float py, float pz,

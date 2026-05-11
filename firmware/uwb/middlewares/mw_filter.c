@@ -17,7 +17,7 @@
  * UWB Mahalanobis Pre-Filter
  * ==================================================================== */
 
-static float mw_filter_get_median(median_filter_1d_t *med, float new_val)
+float mw_filter_median_update(median_filter_1d_t *med, float new_val)
 {
     med->history[med->index] = new_val;
     med->index = (med->index + 1) % 5;
@@ -71,7 +71,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     if (!ctx || !ctx->initialized || anchor_id >= 8) return false;
 
     /* 1. Median Filter */
-    float d_meas = mw_filter_get_median(&ctx->anchor_medians[anchor_id], d_raw);
+    float d_meas = mw_filter_median_update(&ctx->anchor_medians[anchor_id], d_raw);
 
     /* 2. Predict Measurement */
     float dx = px - ax;

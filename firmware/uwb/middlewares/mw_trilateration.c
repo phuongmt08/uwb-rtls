@@ -32,17 +32,17 @@ static int trilaterate_3sphere(vec3d_t *sol1, vec3d_t *sol2,
 
 /* Anchor selection --------------------------------------------------- */
 
-uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors, 
-                                     uint8_t total_anchors, 
-                                     mw_tril_anchor_t *best_out, 
+uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
+                                     uint8_t total_anchors,
+                                     mw_tril_anchor_t *best_out,
                                      uint8_t max_out)
 {
     if (!anchors || !best_out || max_out == 0) return 0;
-    
-    // Copy valid anchors to a local array for sorting
-    mw_tril_anchor_t valid_anchors[8]; // Assumes max 8 anchors per slot
+
+    /* Collect valid anchors */
+    mw_tril_anchor_t valid_anchors[8];
     uint8_t valid_count = 0;
-    
+
     for (uint8_t i = 0; i < total_anchors; i++) {
         if (anchors[i].valid) {
             if (valid_count < 8) {
@@ -50,42 +50,85 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
             }
         }
     }
-    
+
     if (valid_count == 0) return 0;
-    
-    // Sort array in ascending order of d2_score using simple selection sort
+
+    /* If we have exactly max_out or fewer, return all of them directly */
+    if (valid_count <= max_out) {
+        for (uint8_t i = 0; i < valid_count; i++) {
+            best_out[i] = valid_anchors[i];
+        }
+        return valid_count;
+    }
+
+#if ENABLE_MAHALANOBIS_PREFILTER
+    /* 
+     * OPTION A: Mahalanobis Selection
+     * Sort valid anchors by d2_score ascending (lower score = more trustworthy).
+     * Simple bubble sort for small N (max 8).
+     */
     for (uint8_t i = 0; i < valid_count - 1; i++) {
-        uint8_t min_idx = i;
         for (uint8_t j = i + 1; j < valid_count; j++) {
-            if (valid_anchors[j].d2_score < valid_anchors[min_idx].d2_score) {
-                min_idx = j;
+            if (valid_anchors[i].d2_score > valid_anchors[j].d2_score) {
+                mw_tril_anchor_t temp = valid_anchors[i];
+                valid_anchors[i] = valid_anchors[j];
+                valid_anchors[j] = temp;
             }
         }
-        // Swap
-        if (min_idx != i) {
-            mw_tril_anchor_t temp = valid_anchors[i];
-            valid_anchors[i] = valid_anchors[min_idx];
-            valid_anchors[min_idx] = temp;
-        }
     }
-    
-    // Copy top M to output
-    uint8_t count = (valid_count < max_out) ? valid_count : max_out;
-    for (uint8_t i = 0; i < count; i++) {
+
+    uint8_t out_count = (valid_count < max_out) ? valid_count : max_out;
+    for (uint8_t i = 0; i < out_count; i++) {
         best_out[i] = valid_anchors[i];
     }
-    
-#ifdef ENABLE_DEBUG_LOGGING
-    if (count >= 3) {
-        RLOG_D(LOG_OBJECT_CODE_POSITIONING,
-               "Selected best anchors by d2: #%u(d2:%.2f), #%u(d2:%.2f), #%u(d2:%.2f)",
-               best_out[0].id, best_out[0].d2_score,
-               best_out[1].id, best_out[1].d2_score,
-               best_out[2].id, best_out[2].d2_score);
+    return out_count;
+
+#else
+    /* 
+     * OPTION B: Geometry Selection (GDOP Optimization)
+     * Select the best 3-anchor subset by maximising triangle area.
+     *
+     * Larger triangle area = better geometric spread = lower GDOP = less
+     * position noise.
+     *
+     * Algorithm: exhaustive O(N^3) search over all C(N,3) triplets.
+     */
+    uint8_t best_i = 0, best_j = 1, best_k = 2;
+    double  best_area2 = -1.0;
+
+    for (uint8_t i = 0; i < valid_count - 2; i++) {
+        double xi = valid_anchors[i].position.x;
+        double yi = valid_anchors[i].position.y;
+        for (uint8_t j = i + 1; j < valid_count - 1; j++) {
+            double xj = valid_anchors[j].position.x;
+            double yj = valid_anchors[j].position.y;
+            for (uint8_t k = j + 1; k < valid_count; k++) {
+                double xk = valid_anchors[k].position.x;
+                double yk = valid_anchors[k].position.y;
+                double area2 = (xj - xi) * (yk - yi) - (xk - xi) * (yj - yi);
+                if (area2 < 0.0) area2 = -area2;
+                if (area2 > best_area2) {
+                    best_area2 = area2;
+                    best_i = i;
+                    best_j = j;
+                    best_k = k;
+                }
+            }
+        }
     }
+
+    best_out[0] = valid_anchors[best_i];
+    best_out[1] = valid_anchors[best_j];
+    best_out[2] = valid_anchors[best_k];
+
+#ifdef ENABLE_DEBUG_LOGGING
+    RLOG_D(LOG_OBJECT_CODE_POSITIONING,
+            "Best geometry anchors: #%u #%u #%u (area2=%.2f)",
+            best_out[0].id, best_out[1].id, best_out[2].id, best_area2);
 #endif
 
-    return count;
+    return 3;
+#endif
 }
 
 /* Core 3-sphere trilateration ---------------------------------------- */
@@ -172,11 +215,36 @@ mw_tril_err_t mw_trilateration_3d(const mw_tril_anchor_t *anchors_exact_3,
         result->num_anchors = 3;
         result->valid = true;
 
-        /* Calculate RMS error */
-        double e1 = fabs(vec_norm(vec_diff(*position, p1)) - r1);
-        double e2 = fabs(vec_norm(vec_diff(*position, p2)) - r2);
-        double e3 = fabs(vec_norm(vec_diff(*position, p3)) - r3);
-        result->error_estimate = sqrt((e1*e1 + e2*e2 + e3*e3) / 3.0);
+        /* 1. Calculate Residual RMS (Measurement inconsistency) */
+        double d1 = vec_norm(vec_diff(*position, p1));
+        double d2 = vec_norm(vec_diff(*position, p2));
+        double d3 = vec_norm(vec_diff(*position, p3));
+        double e1 = fabs(d1 - r1);
+        double e2 = fabs(d2 - r2);
+        double e3 = fabs(d3 - r3);
+        double rms = sqrt((e1*e1 + e2*e2 + e3*e3) / 3.0);
+
+        /* 2. Calculate GDOP (Geometric factor) 
+         * For 3D, we approximate based on the volume of the tetrahedron 
+         * or simplified matrix approach. For simplicity and robustness 
+         * in this 3-anchor setup, we use the area of the base triangle. */
+        double area2 = (p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y);
+        if (area2 < 0) area2 = -area2;
+        
+        /* Characteristic length (avg distance between anchors) */
+        double s12 = vec_norm(vec_diff(p1, p2));
+        double s13 = vec_norm(vec_diff(p1, p3));
+        double s23 = vec_norm(vec_diff(p2, p3));
+        double s_avg = (s12 + s13 + s23) / 3.0;
+        
+        /* GDOP is inversely proportional to the area. 
+         * Minimum GDOP for equilateral triangle is ~1.2. */
+        double gdop = (s_avg * s_avg) / (area2 + 0.001); 
+        if (gdop < 1.2) gdop = 1.2;
+        if (gdop > 20.0) gdop = 20.0;
+
+        /* 3. Final Estimated Position Error (EPE) */
+        result->error_estimate = rms * gdop;
     }
 
     return MW_TRIL_OK;
@@ -221,17 +289,34 @@ mw_tril_err_t mw_trilateration_2d(const mw_tril_anchor_t *anchors_exact_3,
         result->num_anchors = 3;
         result->valid = true;
 
-        /* Calculate RMS error */
-        double d1 = sqrt((position->x-x1)*(position->x-x1) + 
-                        (position->y-y1)*(position->y-y1));
-        double d2 = sqrt((position->x-x2)*(position->x-x2) + 
-                        (position->y-y2)*(position->y-y2));
-        double d3 = sqrt((position->x-x3)*(position->x-x3) + 
-                        (position->y-y3)*(position->y-y3));
+        /* 1. Calculate Residual RMS (Measurement inconsistency) */
+        double d1 = sqrt((position->x-x1)*(position->x-x1) + (position->y-y1)*(position->y-y1));
+        double d2 = sqrt((position->x-x2)*(position->x-x2) + (position->y-y2)*(position->y-y2));
+        double d3 = sqrt((position->x-x3)*(position->x-x3) + (position->y-y3)*(position->y-y3));
         double e1 = fabs(d1 - r1);
         double e2 = fabs(d2 - r2);
         double e3 = fabs(d3 - r3);
-        result->error_estimate = sqrt((e1*e1 + e2*e2 + e3*e3) / 3.0);
+        double rms = sqrt((e1*e1 + e2*e2 + e3*e3) / 3.0);
+
+        /* 2. Calculate GDOP (Geometric factor)
+         * GDOP in 2D is inversely proportional to triangle area. 
+         * delta calculated above is 8 * Area. */
+        double area = fabs(delta) / 8.0;
+        
+        /* Characteristic length (avg distance between anchors) */
+        double s12 = sqrt((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2));
+        double s13 = sqrt((x1-x3)*(x1-x3) + (y1-y3)*(y1-y3));
+        double s23 = sqrt((x2-x3)*(x2-x3) + (y2-y3)*(y2-y3));
+        double s_avg = (s12 + s13 + s23) / 3.0;
+
+        /* Geometric factor: Ratio of perimeter-square to area.
+         * Minimum for equilateral triangle is ~1.2. */
+        double gdop = (s_avg * s_avg) / (area + 0.001);
+        if (gdop < 1.2) gdop = 1.2;
+        if (gdop > 20.0) gdop = 20.0;
+
+        /* 3. Final Estimated Position Error (EPE) in meters */
+        result->error_estimate = rms * gdop;
     }
 
     return MW_TRIL_OK;
