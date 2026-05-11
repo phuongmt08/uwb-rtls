@@ -70,6 +70,7 @@ static uint32_t s_next_due_tick = 0;
 static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
+static uint8_t s_last_selected_anchors_mask = 0;
 
 #if ENABLE_TAG_AUTO_CALIB
 static tag_calib_state_t s_tag_calib = {0};
@@ -482,6 +483,11 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         return;
     }
 
+    s_last_selected_anchors_mask = 0;
+    for (uint8_t i = 0; i < 3; i++) {
+        s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
+    }
+
     /* ==== STEP 3: Trilateration ==== */
     vec2d_t tril_position;
     mw_tril_result_t tril_result;
@@ -515,10 +521,11 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_error_count = 0;
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm", (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "D2 Scores: #%u(%.1f) #%u(%.1f) #%u(%.1f)",
+    RLOG_I(LOG_OBJECT_CODE_TAG, "D2 Scores: #%u(%.1f) #%u(%.1f) #%u(%.1f) Mask=0x%02X",
            best_3_anchors[0].id, best_3_anchors[0].d2_score,
            best_3_anchors[1].id, best_3_anchors[1].d2_score,
-           best_3_anchors[2].id, best_3_anchors[2].d2_score);
+           best_3_anchors[2].id, best_3_anchors[2].d2_score,
+           (unsigned int)s_last_selected_anchors_mask);
 
     if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
                                   TAG_HEIGHT_M,
