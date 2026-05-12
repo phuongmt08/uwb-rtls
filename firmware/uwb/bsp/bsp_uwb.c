@@ -240,14 +240,14 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
     dwt_config_t dw_cfg = {
         .chan           = cfg->uwb_channel,
         .prf            = (cfg->uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_1024,
-        .rxPAC          = DWT_PAC32,
-        .txCode         = 9,
-        .rxCode         = 9,
-        .nsSFD          = 0,
+        .txPreambLength = DWT_PLEN_256,
+        .rxPAC          = DWT_PAC16,
+        .txCode         = 17,
+        .rxCode         = 17,
+        .nsSFD          = 1,
         .dataRate       = cfg->uwb_data_rate,
         .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = (1024 + 64)   
+        .sfdTO          = (256 + 1 + 16 - 8)   
     };
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
@@ -264,6 +264,8 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
   tx_cfg.power = cfg->tx_power;
   tx_cfg.PGdly = 0xC2;
   dwt_configuretxrf(&tx_cfg);
+  // Add smart power configuration 
+  dwt_setsmarttxpower(1);
 
   dwt_setrxantennadelay(cfg->rx_antenna_delay);
   dwt_settxantennadelay(cfg->tx_antenna_delay);
