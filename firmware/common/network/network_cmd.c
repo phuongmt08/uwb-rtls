@@ -683,7 +683,7 @@ static void network_cmd_log_clear(const protobuf_packet_t *pkt)
 #else
     uint32_t length = pkt->params.log_clear.length;
     if (length > 0u) {
-        sys_logger_consume((uint16_t)length);
+        sys_logger_ram_consume((uint16_t)length);
     } else {
         sys_logger_clear();
     }
@@ -710,7 +710,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
     uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
     uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
-    uint32_t read_len    = sys_logger_flash_read_packet(packet.params.log_data.data.bytes, send_len);
+    uint32_t read_len    = sys_logger_flash_peek_packet(packet.params.log_data.data.bytes, send_len);
     if (read_len == 0u) {
         return;
     }
@@ -749,7 +749,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
     uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
     uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
-    uint16_t read_len    = sys_logger_peek_packet(packet.params.log_data.data.bytes, send_len);
+    uint16_t read_len    = sys_logger_ram_peek_packet(packet.params.log_data.data.bytes, send_len);
     if (read_len == 0u) {
         return;
     }
@@ -798,7 +798,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
     CHECK_VOID(tracker != NULL);
 
     if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
-        sys_logger_consume((uint16_t)tracker->log_len);
+        sys_logger_ram_consume((uint16_t)tracker->log_len);
     }
 
     tracker->waiting_ack = false;

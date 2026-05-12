@@ -370,7 +370,7 @@ void sys_config_reset_to_defaults(void)
        ---------- */
     g_storage.config.uwb.ranging_period_ms                  =           DEFAULT_RANGING_PERIOD_MS;
     g_storage.config.uwb.rx_timeout_ms                      =           DEFAULT_RX_TIMEOUT_MS;
-     g_storage.config.uwb.power_mode                         =           DEFAULT_ANCHOR_POWER_MODE;
+     g_storage.config.uwb.power_mode                        =           DEFAULT_ANCHOR_POWER_MODE;
     g_storage.config.uwb.anchor_list.size                   =           0;
     
     /* Calibration Configuration
