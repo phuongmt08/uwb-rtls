@@ -42,16 +42,14 @@ void mw_calib_reset(mw_calib_ctx_t *ctx,
 
     ctx->min_valid_distance_m = cfg->min_valid_distance_m;
     ctx->max_valid_distance_m = cfg->max_valid_distance_m;
-    ctx->error_threshold_m = cfg->error_threshold_m;
-    ctx->min_delta_step = cfg->min_delta_step;
-    ctx->max_rounds = cfg->max_rounds;
     ctx->max_std_m = cfg->max_std_m;
 
+    ctx->m_to_dw_units = cfg->m_to_dw_units;
+    ctx->damping = cfg->damping;
+    ctx->max_iterations = cfg->max_iterations;
+
     ctx->current_delay = initial_delay;
-    ctx->delta_step = cfg->initial_delta_step;
-    ctx->last_error = cfg->initial_last_error;
     ctx->converged = false;
-    ctx->done_by_threshold = false;
 }
 
 bool mw_calib_add_sample(mw_calib_ctx_t *ctx, float distance_m)
@@ -105,31 +103,18 @@ mw_calib_step_result_t mw_calib_calculate_and_adjust(mw_calib_ctx_t *ctx,
     ctx->error = ctx->mean - ref_distance_m;
     ctx->round++;
 
-    if (fabsf(ctx->error) < ctx->error_threshold_m) {
+    if (ctx->round >= ctx->max_iterations) {
         ctx->converged = true;
-        ctx->done_by_threshold = true;
         return MW_CALIB_STEP_DONE;
     }
 
-    if (ctx->round >= ctx->max_rounds ||
-        ctx->delta_step < ctx->min_delta_step) {
-        ctx->converged = true;
-        ctx->done_by_threshold = false;
-        return MW_CALIB_STEP_DONE;
-    }
+    /* Gradient descent step 
+     * delta = damping * error * (DW_units/m)
+     * We don't multiply by 0.5 here because Tag calibration usually adjusts ONLY its TX delay
+     * to compensate for the ENTIRE round trip error mapping to this Tag. */
+    int32_t delta = (int32_t)(ctx->damping * ctx->error * ctx->m_to_dw_units);
+    int32_t new_delay = (int32_t)ctx->current_delay - delta;
 
-    if ((ctx->error * ctx->last_error) < 0.0f) {
-        ctx->delta_step = (uint16_t)(ctx->delta_step / 2U);
-    }
-
-    int32_t new_delay;
-    if (ctx->error > 0.0f) {
-        new_delay = (int32_t)ctx->current_delay + (int32_t)ctx->delta_step;
-    } else {
-        new_delay = (int32_t)ctx->current_delay - (int32_t)ctx->delta_step;
-    }
-
-    ctx->last_error = ctx->error;
     ctx->current_delay = mw_calib_clamp_u16_from_i32(new_delay);
     ctx->count = 0;
 

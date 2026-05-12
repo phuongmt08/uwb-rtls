@@ -212,12 +212,10 @@ static const mw_calib_config_t s_tag_calib_cfg = {
     .samples_per_round = CALIB_SAMPLES,
     .min_valid_distance_m = 0.1f,
     .max_valid_distance_m = 50.0f,
-    .error_threshold_m = CALIB_ERROR_THRESHOLD_M,
-    .min_delta_step = CALIB_MIN_DELTA_STEP,
-    .max_rounds = CALIB_MAX_ROUNDS,
     .max_std_m = CALIB_MAX_STD_M,
-    .initial_delta_step = 100,
-    .initial_last_error = 999.0f
+    .m_to_dw_units = CALIB_A2A_M_TO_DW_UNITS,
+    .damping = CALIB_A2A_DAMPING,
+    .max_iterations = CALIB_MAX_ROUNDS
 };
 
 static void tag_calib_reset(void)

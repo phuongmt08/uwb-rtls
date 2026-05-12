@@ -1372,12 +1372,6 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
       RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] RESP missing: got %u/%u mask=0x%02X", num_responses, num_anchors, resp_mask);
   }
 
-  if (slot_mismatch_count > 0U)
-  {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] RESP slot mismatches in cycle: %u",
-           (unsigned) slot_mismatch_count);
-  }
-
   /* Show exactly what DW time range the loop actually covered vs what was needed. */
   {
     uint64_t dbg_loop_end_dw = bsp_uwb_get_current_time_dw();
@@ -1609,11 +1603,6 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
           tag_result->t2 = anchor_resp[i].poll_rx_ts;
           tag_result->t3 = anchor_resp[i].resp_tx_ts;
           tag_result->t4 = anchor_resp[i].resp_rx_ts;
-          /* FIX Bug-T5: t5 = predicted FINAL TX antenna time (sent in FINAL payload),
-           * NOT t6_actual. t5 and t6 are different timestamps:
-           *   t5 = FINAL TX timestamp as seen by anchor (predicted, embedded in payload)
-           *   t6 = actual FINAL TX timestamp read from DW1000 TX_TIME register after TX.
-           * Using t6_actual for both caused DS-TWR self-validation to always show delta=0. */
           tag_result->t5 = t5_payload;
           tag_result->t6 = t6_actual;
 
