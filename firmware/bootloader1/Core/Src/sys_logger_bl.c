@@ -230,7 +230,7 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len)
     return buf_read(out, max_len);
 }
 
-uint16_t sys_logger_peek_packet(uint8_t *out, uint16_t max_len)
+uint16_t sys_logger_ram_peek_packet(uint8_t *out, uint16_t max_len)
 {
     if (!s_inited || !out || max_len < (BL_LOG_LEN_FIELD + LOG_HEADER_LEN)) {
         return 0u;
@@ -268,7 +268,7 @@ uint16_t sys_logger_peek_packet(uint8_t *out, uint16_t max_len)
     return copied;
 }
 
-void sys_logger_consume(uint16_t len)
+void sys_logger_ram_consume(uint16_t len)
 {
     buf_pop(len);
 }
