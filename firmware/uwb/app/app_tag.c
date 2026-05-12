@@ -102,8 +102,9 @@ static void init_filters(void)
     s_last_position.x = init_x;
     s_last_position.y = init_y;
 
-    /* Initialize Mahalanobis Prefilter (T1=6.0, T2=16.0, BaseR=0.1) */
-    mw_filter_mahalanobis_init(&s_filters.prefilter, 6.0f, 16.0f, 0.1f);
+    /* Clean-history Mahalanobis prefilter:
+     * T1 = recover threshold, T2 = reject threshold, R = variance floor. */
+    mw_filter_mahalanobis_init(&s_filters.prefilter, 4.0f, 9.0f, 0.05f);
 
     /* Smoothing is enabled by default only when Mahalanobis pre-filter is disabled. */
     mw_filter_distance_smoother_init(&s_filters.smoother,
@@ -385,11 +386,18 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         /* Store valid anchor data */
         anchors_by_id[aid].position = anchor_pos;
         anchors_by_id[aid].distance = (double)r2d;
-        anchors_by_id[aid].rssi = (int8_t)r->rssi;
         anchors_by_id[aid].id = aid;
         anchors_by_id[aid].valid = true;
         anchors_by_id[aid].d2_score = (double)d2_score;
         anchors_by_id[aid].r_adaptive = (double)r_adapt;
+        anchors_by_id[aid].fp_amp_norm = (double)r->fp_amp_norm_q8 / 256.0;
+        anchors_by_id[aid].fp_snr = (double)r->fp_snr_q8 / 256.0;
+        anchors_by_id[aid].quality_valid = (r->quality != 0U);
+        anchors_by_id[aid].selection_score = 0.0;
+        anchors_by_id[aid].residual_rms = 0.0;
+        anchors_by_id[aid].gdop_penalty = 0.0;
+        anchors_by_id[aid].fp_penalty = 0.0;
+        anchors_by_id[aid].fp_snr_penalty = 0.0;
         valid_count++;
 
         RLOG_D(LOG_OBJECT_CODE_TAG, "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)", aid, d_used, (float)r2d, (float)dz);
@@ -397,8 +405,10 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
-            RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm RSSI=%ddBm",
-                   id, anchors_by_id[id].distance, anchors_by_id[id].rssi);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm FP=%.2f SNR=%.2f",
+                   id, anchors_by_id[id].distance,
+                   anchors_by_id[id].fp_amp_norm,
+                   anchors_by_id[id].fp_snr);
         }
     }
 
@@ -481,6 +491,13 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
            best_3_anchors[0].id, best_3_anchors[0].d2_score,
            best_3_anchors[1].id, best_3_anchors[1].d2_score,
            best_3_anchors[2].id, best_3_anchors[2].d2_score);
+    RLOG_I(LOG_OBJECT_CODE_TAG,
+           "Triplet Score: %.3f residual=%.3fm gdop=%.3f fp=%.3f fp_snr=%.3f",
+           best_3_anchors[0].selection_score,
+           best_3_anchors[0].residual_rms,
+           best_3_anchors[0].gdop_penalty,
+           best_3_anchors[0].fp_penalty,
+           best_3_anchors[0].fp_snr_penalty);
 
     if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
                                   TAG_HEIGHT_M,

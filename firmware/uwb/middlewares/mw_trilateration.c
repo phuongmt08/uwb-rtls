@@ -16,6 +16,26 @@
 /* Private defines ---------------------------------------------------- */
 #define MAXZERO  (0.001)
 
+#ifndef MW_TRIL_D2_RECOVER
+#define MW_TRIL_D2_RECOVER 4.0
+#endif
+
+#ifndef MW_TRIL_D2_REJECT
+#define MW_TRIL_D2_REJECT 9.0
+#endif
+
+#ifndef MW_TRIL_RESIDUAL_SCALE_M
+#define MW_TRIL_RESIDUAL_SCALE_M 1.0
+#endif
+
+#ifndef MW_TRIL_FP_NORM_GOOD
+#define MW_TRIL_FP_NORM_GOOD 8.0
+#endif
+
+#ifndef MW_TRIL_FP_SNR_GOOD
+#define MW_TRIL_FP_SNR_GOOD 12.0
+#endif
+
 /* Private function prototypes ---------------------------------------- */
 static inline vec3d_t vec_diff(vec3d_t v1, vec3d_t v2);
 static inline vec3d_t vec_sum(vec3d_t v1, vec3d_t v2);
@@ -29,6 +49,67 @@ static int trilaterate_3sphere(vec3d_t *sol1, vec3d_t *sol2,
                                vec3d_t p1, double r1,
                                vec3d_t p2, double r2,
                                vec3d_t p3, double r3);
+
+static double clamp01(double value)
+{
+    if (value < 0.0) return 0.0;
+    if (value > 1.0) return 1.0;
+    return value;
+}
+
+static double anchor_d2_penalty(double d2_score)
+{
+    double span = MW_TRIL_D2_REJECT - MW_TRIL_D2_RECOVER;
+    if (span <= 0.001) span = 1.0;
+    return clamp01((d2_score - MW_TRIL_D2_RECOVER) / span);
+}
+
+static double fp_quality_penalty(double value, double good_value)
+{
+    if (value <= 0.0) return 1.0;
+    return clamp01(1.0 - (value / good_value));
+}
+
+static double triangle_area2(const mw_tril_anchor_t *a,
+                             const mw_tril_anchor_t *b,
+                             const mw_tril_anchor_t *c)
+{
+    double area2 = (b->position.x - a->position.x) * (c->position.y - a->position.y)
+                 - (c->position.x - a->position.x) * (b->position.y - a->position.y);
+    return (area2 < 0.0) ? -area2 : area2;
+}
+
+static bool trilaterate_2d_probe(const mw_tril_anchor_t *a,
+                                 const mw_tril_anchor_t *b,
+                                 const mw_tril_anchor_t *c,
+                                 vec2d_t *position,
+                                 double *residual_rms)
+{
+    double x1 = a->position.x, y1 = a->position.y, r1 = a->distance;
+    double x2 = b->position.x, y2 = b->position.y, r2 = b->distance;
+    double x3 = c->position.x, y3 = c->position.y, r3 = c->distance;
+
+    double delta = 4.0 * ((x1 - x2) * (y1 - y3) - (x1 - x3) * (y1 - y2));
+    if (fabs(delta) < MAXZERO) {
+        return false;
+    }
+
+    double A = r2 * r2 - r1 * r1 - x2 * x2 + x1 * x1 - y2 * y2 + y1 * y1;
+    double B = r3 * r3 - r1 * r1 - x3 * x3 + x1 * x1 - y3 * y3 + y1 * y1;
+
+    position->x = (1.0 / delta) * (2.0 * A * (y1 - y3) - 2.0 * B * (y1 - y2));
+    position->y = (1.0 / delta) * (2.0 * B * (x1 - x2) - 2.0 * A * (x1 - x3));
+
+    double d1 = sqrt((position->x - x1) * (position->x - x1) + (position->y - y1) * (position->y - y1));
+    double d2 = sqrt((position->x - x2) * (position->x - x2) + (position->y - y2) * (position->y - y2));
+    double d3 = sqrt((position->x - x3) * (position->x - x3) + (position->y - y3) * (position->y - y3));
+    double e1 = d1 - r1;
+    double e2 = d2 - r2;
+    double e3 = d3 - r3;
+
+    *residual_rms = sqrt((e1 * e1 + e2 * e2 + e3 * e3) / 3.0);
+    return true;
+}
 
 /* Anchor selection --------------------------------------------------- */
 
@@ -61,74 +142,113 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
         return valid_count;
     }
 
-#if ENABLE_MAHALANOBIS_PREFILTER
-    /* 
-     * OPTION A: Mahalanobis Selection
-     * Sort valid anchors by d2_score ascending (lower score = more trustworthy).
-     * Simple bubble sort for small N (max 8).
-     */
-    for (uint8_t i = 0; i < valid_count - 1; i++) {
-        for (uint8_t j = i + 1; j < valid_count; j++) {
-            if (valid_anchors[i].d2_score > valid_anchors[j].d2_score) {
-                mw_tril_anchor_t temp = valid_anchors[i];
-                valid_anchors[i] = valid_anchors[j];
-                valid_anchors[j] = temp;
-            }
-        }
-    }
-
-    uint8_t out_count = (valid_count < max_out) ? valid_count : max_out;
-    for (uint8_t i = 0; i < out_count; i++) {
-        best_out[i] = valid_anchors[i];
-    }
-    return out_count;
-
-#else
-    /* 
-     * OPTION B: Geometry Selection (GDOP Optimization)
-     * Select the best 3-anchor subset by maximising triangle area.
-     *
-     * Larger triangle area = better geometric spread = lower GDOP = less
-     * position noise.
-     *
-     * Algorithm: exhaustive O(N^3) search over all C(N,3) triplets.
-     */
-    uint8_t best_i = 0, best_j = 1, best_k = 2;
-    double  best_area2 = -1.0;
-
-    for (uint8_t i = 0; i < valid_count - 2; i++) {
-        double xi = valid_anchors[i].position.x;
-        double yi = valid_anchors[i].position.y;
-        for (uint8_t j = i + 1; j < valid_count - 1; j++) {
-            double xj = valid_anchors[j].position.x;
-            double yj = valid_anchors[j].position.y;
-            for (uint8_t k = j + 1; k < valid_count; k++) {
-                double xk = valid_anchors[k].position.x;
-                double yk = valid_anchors[k].position.y;
-                double area2 = (xj - xi) * (yk - yi) - (xk - xi) * (yj - yi);
-                if (area2 < 0.0) area2 = -area2;
-                if (area2 > best_area2) {
-                    best_area2 = area2;
-                    best_i = i;
-                    best_j = j;
-                    best_k = k;
+    if (max_out != 3U) {
+        for (uint8_t i = 0; i < valid_count - 1; i++) {
+            for (uint8_t j = i + 1; j < valid_count; j++) {
+                if (valid_anchors[i].d2_score > valid_anchors[j].d2_score) {
+                    mw_tril_anchor_t temp = valid_anchors[i];
+                    valid_anchors[i] = valid_anchors[j];
+                    valid_anchors[j] = temp;
                 }
             }
         }
+
+        uint8_t out_count = (valid_count < max_out) ? valid_count : max_out;
+        for (uint8_t i = 0; i < out_count; i++) {
+            best_out[i] = valid_anchors[i];
+        }
+        return out_count;
+    }
+
+    double max_area2 = 0.0;
+    for (uint8_t i = 0; i < valid_count - 2; i++) {
+        for (uint8_t j = i + 1; j < valid_count - 1; j++) {
+            for (uint8_t k = j + 1; k < valid_count; k++) {
+                double area2 = triangle_area2(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k]);
+                if (area2 > max_area2) {
+                    max_area2 = area2;
+                }
+            }
+        }
+    }
+    if (max_area2 < MAXZERO) {
+        return 0;
+    }
+
+    uint8_t best_i = 0, best_j = 1, best_k = 2;
+    double  best_score = 1.0e9;
+    double  best_residual = 0.0;
+    double  best_gdop_penalty = 0.0;
+    double  best_fp_penalty = 0.0;
+    double  best_fp_snr_penalty = 0.0;
+
+    for (uint8_t i = 0; i < valid_count - 2; i++) {
+        for (uint8_t j = i + 1; j < valid_count - 1; j++) {
+            for (uint8_t k = j + 1; k < valid_count; k++) {
+                vec2d_t probe_pos;
+                double residual = 0.0;
+                if (!trilaterate_2d_probe(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
+                                          &probe_pos, &residual)) {
+                    continue;
+                }
+
+                double area2 = triangle_area2(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k]);
+                double gdop_penalty = clamp01(1.0 - (area2 / max_area2));
+                double residual_penalty = clamp01(residual / MW_TRIL_RESIDUAL_SCALE_M);
+                double avg_d2_penalty = (anchor_d2_penalty(valid_anchors[i].d2_score)
+                                       + anchor_d2_penalty(valid_anchors[j].d2_score)
+                                       + anchor_d2_penalty(valid_anchors[k].d2_score)) / 3.0;
+                double avg_fp_penalty =
+                    ((valid_anchors[i].quality_valid ? fp_quality_penalty(valid_anchors[i].fp_amp_norm, MW_TRIL_FP_NORM_GOOD) : 1.0)
+                   + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_amp_norm, MW_TRIL_FP_NORM_GOOD) : 1.0)
+                   + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_amp_norm, MW_TRIL_FP_NORM_GOOD) : 1.0)) / 3.0;
+                double avg_fp_snr_penalty =
+                    ((valid_anchors[i].quality_valid ? fp_quality_penalty(valid_anchors[i].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)
+                   + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)
+                   + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)) / 3.0;
+
+                double score = (0.30 * avg_d2_penalty) + (0.25 * avg_fp_penalty)
+                             + (0.15 * avg_fp_snr_penalty) + (0.20 * gdop_penalty)
+                             + (0.10 * residual_penalty);
+
+                if (score < best_score) {
+                    best_score = score;
+                    best_i = i;
+                    best_j = j;
+                    best_k = k;
+                    best_residual = residual;
+                    best_gdop_penalty = gdop_penalty;
+                    best_fp_penalty = avg_fp_penalty;
+                    best_fp_snr_penalty = avg_fp_snr_penalty;
+                }
+            }
+        }
+    }
+
+    if (best_score >= 1.0e9) {
+        return 0;
     }
 
     best_out[0] = valid_anchors[best_i];
     best_out[1] = valid_anchors[best_j];
     best_out[2] = valid_anchors[best_k];
 
+    for (uint8_t i = 0; i < 3U; i++) {
+        best_out[i].selection_score = best_score;
+        best_out[i].residual_rms = best_residual;
+        best_out[i].gdop_penalty = best_gdop_penalty;
+        best_out[i].fp_penalty = best_fp_penalty;
+        best_out[i].fp_snr_penalty = best_fp_snr_penalty;
+    }
+
 #ifdef ENABLE_DEBUG_LOGGING
-    RLOG_D(LOG_OBJECT_CODE_POSITIONING,
-            "Best geometry anchors: #%u #%u #%u (area2=%.2f)",
-            best_out[0].id, best_out[1].id, best_out[2].id, best_area2);
+    RLOG_D(LOG_OBJECT_CODE_TAG,
+            "Best composite anchors: #%u #%u #%u (score=%.3f residual=%.3f gdop=%.3f)",
+            best_out[0].id, best_out[1].id, best_out[2].id,
+            best_score, best_residual, best_gdop_penalty);
 #endif
 
     return 3;
-#endif
 }
 
 /* Core 3-sphere trilateration ---------------------------------------- */

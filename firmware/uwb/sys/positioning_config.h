@@ -168,7 +168,7 @@
  *        1 = apply Mahalanobis gate
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
-#define ENABLE_MAHALANOBIS_PREFILTER  0
+#define ENABLE_MAHALANOBIS_PREFILTER  1
 #endif
 
 /**

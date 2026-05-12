@@ -54,7 +54,8 @@ typedef struct
   float    distance_m;
   uint64_t t1, t2, t3, t4, t5, t6;
   uint8_t  anchor_id;
-  int8_t   rssi;
+  uint16_t fp_amp_norm_q8;
+  uint16_t fp_snr_q8;
   uint8_t  quality;
   uint8_t  calib_status;
   bool     valid;

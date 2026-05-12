@@ -39,10 +39,17 @@ typedef struct {
     vec3d_t position;  /* Anchor position (x, y, z) in meters */
     double distance;   /* Measured distance to tag in meters */
     uint8_t id;        /* Anchor ID */
-    int8_t rssi;       /* RSSI in dBm (e.g., -70) */
     bool valid;        /* true if measurement is valid */
     double d2_score;   /* Mahalanobis distance squared */
     double r_adaptive; /* Adaptive covariance */
+    double fp_amp_norm;
+    double fp_snr;
+    bool quality_valid;
+    double selection_score;
+    double residual_rms;
+    double gdop_penalty;
+    double fp_penalty;
+    double fp_snr_penalty;
 } mw_tril_anchor_t;
 
 /**

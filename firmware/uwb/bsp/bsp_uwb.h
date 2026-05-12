@@ -18,6 +18,18 @@
 #include "protos/protocol.pb.h"
 #include "config.h"
 
+typedef struct {
+    uint16_t fp_amp1;
+    uint16_t fp_amp2;
+    uint16_t fp_amp3;
+    uint16_t std_noise;
+    uint16_t max_noise;
+    uint16_t rx_pream_count;
+    uint16_t fp_amp_norm_q8;
+    uint16_t fp_snr_q8;
+    bool     valid;
+} bsp_uwb_rx_quality_t;
+
 #ifdef UWB_EVENT_DRIVEN
 typedef enum {
     BSP_UWB_EVENT_NONE = 0,
@@ -33,7 +45,7 @@ typedef struct {
     uint8_t              rx_data[128];
     uint64_t             rx_ts;
     uint64_t             tx_ts;
-    int8_t               rx_rssi;
+    bsp_uwb_rx_quality_t rx_quality;
 } bsp_uwb_event_t;
 #endif
 
@@ -123,17 +135,11 @@ bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_m
 void bsp_uwb_idle(void);
 
 /**
- * @brief Read RSSI of last received frame
- * @return RSSI value in dBm (negative value, e.g., -70 dBm)
- *         Returns 0 if no valid RX or error
+ * @brief Get cached first-path quality diagnostics of the last RX frame.
+ * @param[out] quality Output quality metrics.
+ * @return BSP_OK when valid diagnostics are available.
  */
-int8_t bsp_uwb_get_rssi(void);
-
-/**
- * @brief Get cached RSSI of the last successfully received frame.
- * @return RSSI in dBm, or -100 when unavailable.
- */
-int8_t bsp_uwb_get_last_rx_rssi(void);
+bsp_err_t bsp_uwb_get_last_rx_quality(bsp_uwb_rx_quality_t *quality);
 
 /**
  * @brief Get cached RX timestamp of the last successfully received frame.
@@ -168,6 +174,12 @@ bool bsp_uwb_is_rx_ready(void);
 uint64_t bsp_uwb_get_current_time_dw(void);
 bsp_err_t bsp_uwb_validate_delayed_tx(uint64_t tx_timestamp_dw, uint64_t min_guard_dw);
 uint16_t bsp_uwb_get_rx_antenna_delay(void);
+
+void bsp_uwb_get_rx_error_counts(uint32_t *timeout,
+                                 uint32_t *crc_err,
+                                 uint32_t *phr_err,
+                                 uint32_t *sync_err);
+void bsp_uwb_reset_rx_error_counts(void);
 
 /**
  * @brief Notify BSP about UWB IRQ edge (call from EXTI callback)

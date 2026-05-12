@@ -17,10 +17,20 @@ typedef struct {
     uint8_t index;
 } median_filter_1d_t;
 
+#define MW_FILTER_MAHAL_HISTORY_WINDOW 15U
+#define MW_FILTER_MAHAL_COLD_START     3U
+
 typedef struct {
-    median_filter_1d_t anchor_medians[8];
-    float T1;
-    float T2;
+    float history[MW_FILTER_MAHAL_HISTORY_WINDOW];
+    uint8_t count;
+    uint8_t index;
+    bool rejected;
+} mahalanobis_anchor_state_t;
+
+typedef struct {
+    mahalanobis_anchor_state_t anchors[8];
+    float T1;     /* Recover threshold */
+    float T2;     /* Reject threshold */
     float R_base;
     bool initialized;
 } mahalanobis_prefilter_t;

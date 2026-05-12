@@ -77,8 +77,7 @@ typedef struct __attribute__((packed))
   uint8_t tag_id;
   uint8_t num_anchors;
   uint8_t anchor_mask;
-  uint8_t rssi_last;
-  uint8_t padding[7];
+  uint8_t padding[8];
 } poll_msg_t;
 
 typedef struct __attribute__((packed))
@@ -89,9 +88,8 @@ typedef struct __attribute__((packed))
   uint8_t  slot_id;
   uint64_t poll_rx_ts;
   uint64_t resp_tx_ts;
-  uint8_t  rssi_poll;
   uint8_t  calib_status;
-  uint8_t  padding[2];
+  uint8_t  padding[3];
 } resp_msg_t;
 
 typedef struct __attribute__((packed))
@@ -123,8 +121,8 @@ typedef struct __attribute__((packed))
   uint8_t slot_id;    /* TDMA slot ID - TAG uses this to detect slot mismatches */
   uint8_t valid;      /* 1 = valid distance, 0 = error */
   float   distance_m; /* Calculated distance */
-  int8_t  rssi;
-  uint8_t padding[1];
+  uint16_t fp_amp_norm_q8;
+  uint16_t fp_snr_q8;
 } result_msg_t;
 typedef struct
 {
@@ -178,15 +176,14 @@ typedef struct {
     
     uint8_t                  num_responses;
     uint8_t                  my_slot_id;
-    int8_t                   poll_rssi_dbm;
+    bsp_uwb_rx_quality_t     poll_quality;
     
     struct {
         uint8_t  anchor_id;
         uint64_t resp_rx_ts;
         uint64_t poll_rx_ts;
         uint64_t resp_tx_ts;
-        int8_t   rssi;
-      uint8_t  calib_status;
+        uint8_t  calib_status;
         bool     valid;
     } anchor_resp[8];
 } sys_ranging_event_ctx_t;
@@ -521,8 +518,18 @@ static void log_ranging_result(const sys_ranging_result_t *result, const char *r
   s_stats.success_count++;
   char dist_str[16];
   format_distance_m(dist_str, sizeof(dist_str), result->distance_m);
-  RLOG_I(LOG_OBJECT_CODE_RANGING, "[%s] Distance: %s m [A:%u RSSI:%ddBm] [C:%u]", role, dist_str, result->anchor_id,
-         result->rssi, result->calib_status);
+  RLOG_I(LOG_OBJECT_CODE_RANGING, "[%s] Distance: %s m [A:%u FP=%.2f SNR=%.2f] [C:%u]",
+         role, dist_str, result->anchor_id,
+         (float)result->fp_amp_norm_q8 / 256.0f,
+         (float)result->fp_snr_q8 / 256.0f,
+         result->calib_status);
+}
+
+static uint16_t min_nonzero_u16(uint16_t a, uint16_t b)
+{
+  if (a == 0U) return b;
+  if (b == 0U) return a;
+  return (a < b) ? a : b;
 }
 
 static uint64_t ensure_future_tx(uint64_t tx_time_dw, uint32_t guard_us)
@@ -917,8 +924,8 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     return -1;
   }
 
-  /* Use RSSI captured at RX moment of POLL frame (no delayed diagnostic read). */
-  int8_t poll_rssi_dbm = bsp_uwb_get_last_rx_rssi();
+  bsp_uwb_rx_quality_t poll_quality = {0};
+  (void)bsp_uwb_get_last_rx_quality(&poll_quality);
 
   if (tdma_sync_to_poll(&s_tdma_anchor, poll_rx_ts) != TDMA_OK)
   {
@@ -962,8 +969,6 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     memcpy(&resp_msg.poll_rx_ts, &poll_rx_payload, sizeof(poll_rx_payload));
     memcpy(&resp_msg.resp_tx_ts, &resp_tx_payload, sizeof(resp_tx_payload));
   }
-  resp_msg.rssi_poll = (uint8_t) poll_rssi_dbm;
-
   if (bsp_uwb_tx_delayed(&resp_msg, sizeof(resp_msg), resp_tx_time_dw) != BSP_OK)
   {
     RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING, "[ANCHOR] TX_DELAYED failed for RESP (time=" DW_FMT ")",
@@ -1050,6 +1055,8 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     s_ranging_busy = false;
     return -1;
   }
+  bsp_uwb_rx_quality_t final_quality = {0};
+  (void)bsp_uwb_get_last_rx_quality(&final_quality);
 
   /* Extract our data safely from packed payload (avoid unaligned u64 access). */
   bool     anchor_found    = false;
@@ -1104,7 +1111,11 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   s_ctx.result_single.distance_m = raw_distance_m;
   s_ctx.result_single.anchor_id  = anchor_id;
-  s_ctx.result_single.rssi       = poll_rssi_dbm;
+  s_ctx.result_single.fp_amp_norm_q8 = min_nonzero_u16(poll_quality.fp_amp_norm_q8,
+                                                       final_quality.fp_amp_norm_q8);
+  s_ctx.result_single.fp_snr_q8      = min_nonzero_u16(poll_quality.fp_snr_q8,
+                                                       final_quality.fp_snr_q8);
+  s_ctx.result_single.quality        = (poll_quality.valid && final_quality.valid) ? 1U : 0U;
   s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
   s_ctx.result_single.valid      = raw_valid;
   s_ctx.result_single.t1         = ts.t1;
@@ -1122,7 +1133,8 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   result_msg.slot_id      = my_slot_id;
   result_msg.valid        = raw_valid ? 1 : 0;
   result_msg.distance_m   = raw_distance_m;
-  result_msg.rssi         = poll_rssi_dbm;
+  result_msg.fp_amp_norm_q8 = s_ctx.result_single.fp_amp_norm_q8;
+  result_msg.fp_snr_q8      = s_ctx.result_single.fp_snr_q8;
 
   /* RESULT TX time is anchored to superframe_start_dw via tdma_calculate_final_time(),
    * not to final_rx_ts. Each anchor receives FINAL at a slightly different time
@@ -1281,7 +1293,6 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     uint64_t resp_rx_ts;
     uint64_t poll_rx_ts;
     uint64_t resp_tx_ts;
-    int8_t   rssi;
     uint8_t  calib_status;
     bool     valid;
   } anchor_resp[8];
@@ -1355,7 +1366,6 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     anchor_resp[matched_index].resp_rx_ts = resp_rx_ts;
     anchor_resp[matched_index].poll_rx_ts = resp_poll_rx_ts;
     anchor_resp[matched_index].resp_tx_ts = resp_resp_tx_ts;
-    anchor_resp[matched_index].rssi       = (int8_t) resp->rssi_poll;
     anchor_resp[matched_index].calib_status = resp->calib_status;
     anchor_resp[matched_index].valid      = true;
 
@@ -1594,7 +1604,9 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
           sys_ranging_result_t *tag_result = &s_ctx.result_multi.results[s_ctx.result_multi.count];
           tag_result->anchor_id            = result->anchor_id;
           tag_result->distance_m           = result->distance_m;
-          tag_result->rssi                 = result->rssi;
+          tag_result->fp_amp_norm_q8       = result->fp_amp_norm_q8;
+          tag_result->fp_snr_q8            = result->fp_snr_q8;
+          tag_result->quality              = (result->fp_amp_norm_q8 > 0U && result->fp_snr_q8 > 0U) ? 1U : 0U;
           tag_result->calib_status         = anchor_resp[i].calib_status;
           tag_result->valid                = (result->valid == 1);
 
@@ -1801,7 +1813,6 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                           memcpy(&s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts, &resp->resp_tx_ts, sizeof(uint64_t));
                           s_sys_ranging_ev.anchor_resp[idx].poll_rx_ts &= DW_MASK_40;
                           s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts &= DW_MASK_40;
-                          s_sys_ranging_ev.anchor_resp[idx].rssi = evt.rx_rssi;
                           s_sys_ranging_ev.anchor_resp[idx].calib_status = resp->calib_status;
                           s_sys_ranging_ev.anchor_resp[idx].valid = true;
                           s_sys_ranging_ev.num_responses++;
@@ -1909,7 +1920,9 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                           sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
                           tr->anchor_id   = res->anchor_id;
                           tr->distance_m  = res->distance_m;
-                          tr->rssi        = res->rssi;
+                          tr->fp_amp_norm_q8 = res->fp_amp_norm_q8;
+                          tr->fp_snr_q8      = res->fp_snr_q8;
+                          tr->quality        = (res->fp_amp_norm_q8 > 0U && res->fp_snr_q8 > 0U) ? 1U : 0U;
                             tr->calib_status = SYS_CALIB_STATUS_NORMAL;
                             for (uint8_t k = 0; k < 8; k++) {
                               if (s_sys_ranging_ev.anchor_resp[k].valid &&
@@ -1943,7 +1956,9 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                           sys_ranging_result_t *tr = &s_ctx.result_multi.results[s_ctx.result_multi.count];
                           tr->anchor_id  = res->anchor_id;
                           tr->distance_m = res->distance_m;
-                          tr->rssi       = res->rssi;
+                          tr->fp_amp_norm_q8 = res->fp_amp_norm_q8;
+                          tr->fp_snr_q8      = res->fp_snr_q8;
+                          tr->quality        = (res->fp_amp_norm_q8 > 0U && res->fp_snr_q8 > 0U) ? 1U : 0U;
                           tr->calib_status = SYS_CALIB_STATUS_NORMAL;
                           for (uint8_t k = 0; k < 8; k++) {
                               if (s_sys_ranging_ev.anchor_resp[k].valid &&
@@ -2083,7 +2098,7 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               poll_msg_t *poll = (poll_msg_t*)evt.rx_data;
               s_ctx.sequence_num = poll->sequence_num;
               s_sys_ranging_ev.poll_rx_ts = evt.rx_ts;
-              s_sys_ranging_ev.poll_rssi_dbm = evt.rx_rssi;
+              s_sys_ranging_ev.poll_quality = evt.rx_quality;
               s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
               tdma_sync_to_poll(&s_tdma_anchor, s_sys_ranging_ev.poll_rx_ts);
               
@@ -2114,7 +2129,6 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
               uint64_t r_tx = s_sys_ranging_ev.resp_tx_ts & DW_MASK_40;
               memcpy(&rmsg.poll_rx_ts, &p_rx, sizeof(p_rx));
               memcpy(&rmsg.resp_tx_ts, &r_tx, sizeof(r_tx));
-              rmsg.rssi_poll = (uint8_t)s_sys_ranging_ev.poll_rssi_dbm;
               rmsg.calib_status = (uint8_t) s_calib_status;
               
               s_sys_ranging_ev.planned_tx_dw = rtx_dw;
@@ -2231,7 +2245,14 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
                       float dist = calculate_distance(&ts);
                       s_ctx.result_single.distance_m = dist;
                       s_ctx.result_single.anchor_id = s_ctx.anchor_id;
-                      s_ctx.result_single.rssi = s_sys_ranging_ev.poll_rssi_dbm;
+                      s_ctx.result_single.fp_amp_norm_q8 =
+                          min_nonzero_u16(s_sys_ranging_ev.poll_quality.fp_amp_norm_q8,
+                                          evt.rx_quality.fp_amp_norm_q8);
+                      s_ctx.result_single.fp_snr_q8 =
+                          min_nonzero_u16(s_sys_ranging_ev.poll_quality.fp_snr_q8,
+                                          evt.rx_quality.fp_snr_q8);
+                      s_ctx.result_single.quality =
+                          (s_sys_ranging_ev.poll_quality.valid && evt.rx_quality.valid) ? 1U : 0U;
                       s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
                       s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
                       
@@ -2255,7 +2276,8 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors, const uin
                       res.slot_id = s_sys_ranging_ev.my_slot_id;
                       res.valid = s_ctx.result_single.valid ? 1 : 0;
                       res.distance_m = s_ctx.result_single.distance_m;
-                      res.rssi = (int8_t)s_sys_ranging_ev.poll_rssi_dbm; // Pass old one
+                      res.fp_amp_norm_q8 = s_ctx.result_single.fp_amp_norm_q8;
+                      res.fp_snr_q8      = s_ctx.result_single.fp_snr_q8;
                       
                       s_sys_ranging_ev.predicted_tx_dw = predict_delayed_tx_antenna_time(res_tx_dw);
                       s_sys_ranging_ev.planned_tx_dw = res_tx_dw;

@@ -18,7 +18,6 @@
 #include "sys_logger.h"
 #include "config.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -47,9 +46,7 @@ static inline uint64_t dw_read_timestamp(const uint8_t *buf)
 static bool     s_initialized       = false;
 static uint64_t s_last_rx_timestamp = 0;    /* Cached RX timestamp */
 static uint64_t s_last_tx_timestamp = 0;    /* Cached TX timestamp */
-static int8_t   s_last_rx_rssi      = -100; /* Cached RSSI for last good RX frame */
-static uint16_t s_last_diag_f1      = 0;    /* Raw diagnostics for deferred RSSI calc */
-static uint16_t s_last_diag_n       = 0;
+static bsp_uwb_rx_quality_t s_last_rx_quality = {0};
 static uint16_t s_tx_antenna_delay  = 0;    /* Cached TX antenna delay */
 static uint16_t s_rx_antenna_delay  = 0;    /* Cached RX antenna delay */
 
@@ -96,6 +93,7 @@ static void     reset_DW1000(void);
 static void     port_set_dw1000_slowrate(void);
 static void     port_set_dw1000_fastrate(void);
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms);
+static void     capture_rx_quality(bsp_uwb_rx_quality_t *out_quality);
 
 /* Private functions ------------------------------------------------------ */
 /* Note: Keep writetospi and readfromspi compatible with deca_driver */
@@ -191,6 +189,35 @@ static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
     units = 0xFFFFu;
   }
   return (uint16_t) units;
+}
+
+static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
+{
+  dwt_rxdiag_t diag;
+  memset(&diag, 0, sizeof(diag));
+  memset(out_quality, 0, sizeof(*out_quality));
+
+  dwt_readdignostics(&diag);
+
+  out_quality->fp_amp1        = diag.firstPathAmp1;
+  out_quality->fp_amp2        = diag.firstPathAmp2;
+  out_quality->fp_amp3        = diag.firstPathAmp3;
+  out_quality->std_noise      = diag.stdNoise;
+  out_quality->max_noise      = diag.maxNoise;
+  out_quality->rx_pream_count = diag.rxPreamCount;
+
+  if (diag.rxPreamCount > 0U &&
+      (diag.firstPathAmp1 != 0U || diag.firstPathAmp2 != 0U || diag.firstPathAmp3 != 0U))
+  {
+    uint32_t fp_sum = (uint32_t)diag.firstPathAmp1 + (uint32_t)diag.firstPathAmp2
+                      + (uint32_t)diag.firstPathAmp3;
+    uint32_t fp_norm_q8 = (fp_sum << 8) / (uint32_t)diag.rxPreamCount;
+    uint32_t fp_snr_q8  = (fp_sum << 8) / ((uint32_t)diag.stdNoise + 1U);
+
+    out_quality->fp_amp_norm_q8 = (fp_norm_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_norm_q8;
+    out_quality->fp_snr_q8      = (fp_snr_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_snr_q8;
+    out_quality->valid          = true;
+  }
 }
 
 /* Public functions --------------------------------------------------- */
@@ -394,21 +421,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
     dwt_readrxtimestamp(ts_buf);
     s_last_rx_timestamp = dw_read_timestamp(ts_buf) & DW_MASK_40;
 
-    /* Capture RSSI immediately while diagnostics still match this frame. */
-    {
-      dwt_rxdiag_t diag;
-      dwt_readdignostics(&diag);
-      if (diag.firstPathAmp1 == 0 || diag.rxPreamCount == 0)
-      {
-        s_last_rx_rssi = -100;
-      }
-      else
-      {
-        float ratio    = (float) diag.firstPathAmp1 / (float) diag.rxPreamCount;
-        float log_val  = 20.0f * log10f(ratio);
-        s_last_rx_rssi = (int8_t) (log_val - 62.0f);
-      }
-    }
+    capture_rx_quality(&s_last_rx_quality);
 
     /* 3. Read Frame Info to get length */
     uint32_t rxfi            = dwt_read32bitreg(RX_FINFO_ID);
@@ -457,7 +470,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     s_last_rx_timestamp = 0;
-    s_last_rx_rssi      = -100;
+    memset(&s_last_rx_quality, 0, sizeof(s_last_rx_quality));
     *out_len            = 0;
     s_rx_timeout_count++;
     return BSP_ERR_TIMEOUT;
@@ -482,7 +495,7 @@ bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     s_last_rx_timestamp = 0;
-    s_last_rx_rssi      = -100;
+    memset(&s_last_rx_quality, 0, sizeof(s_last_rx_quality));
     *out_len            = 0;
     return BSP_ERR; /* Return error to indicate bad frame */
   }
@@ -632,28 +645,16 @@ void bsp_uwb_idle(void)
   dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
 }
 
-int8_t bsp_uwb_get_rssi(void)
+
+bsp_err_t bsp_uwb_get_last_rx_quality(bsp_uwb_rx_quality_t *quality)
 {
-  if (s_last_diag_f1 == 0 || s_last_diag_n == 0)
+  CHECK_PARAM(quality != NULL, BSP_ERR_PARAM);
+  if (!s_last_rx_quality.valid)
   {
-    return -100;
+    return BSP_ERR;
   }
-
-  /* RSSI Formula for PRF64 (from DW1000 User Manual):
-   * RSL ≈ 20*log10(F1/N) - 62.42
-   * Move heavy log10f calculation here, out of the interrupt/poll RX path. */
-  float  ratio   = (float) s_last_diag_f1 / (float) s_last_diag_n;
-  float  log_val = 20.0f * log10f(ratio);
-  int8_t rssi    = (int8_t) (log_val - 62.0f);
-
-  /* Cache the result for bsp_uwb_get_last_rx_rssi() */
-  s_last_rx_rssi = rssi;
-  return rssi;
-}
-
-int8_t bsp_uwb_get_last_rx_rssi(void)
-{
-  return s_last_rx_rssi;
+  *quality = s_last_rx_quality;
+  return BSP_OK;
 }
 
 bsp_err_t bsp_uwb_get_last_rx_timestamp(uint64_t *timestamp)
@@ -880,7 +881,7 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
   ev->type   = BSP_UWB_EVENT_TX_DONE;
   ev->rx_len = 0;
   ev->rx_ts  = 0;
-  ev->rx_rssi = 0;
+  memset(&ev->rx_quality, 0, sizeof(ev->rx_quality));
 
   uint8_t ts[5];
   dwt_readtxtimestamp(ts);
@@ -922,7 +923,8 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
       ev->rx_ts = ((uint64_t)ts[0])        | ((uint64_t)ts[1] << 8)
                 | ((uint64_t)ts[2] << 16)  | ((uint64_t)ts[3] << 24)
                 | ((uint64_t)ts[4] << 32);
-      ev->rx_rssi = -100; /* deferred — compute in foreground if needed */
+      capture_rx_quality(&ev->rx_quality);
+      s_last_rx_quality = ev->rx_quality;
 
       /* Re-enable RX immediately to capture back-to-back frames */
       dwt_rxenable(DWT_START_RX_IMMEDIATE);
