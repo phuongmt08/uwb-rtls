@@ -976,5 +976,33 @@ void bsp_uwb_reset_rx_error_counts(void)
   s_rx_phr_err_count  = 0;
   s_rx_sync_err_count = 0;
 }
+// bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat)
+// {
+//     CHECK_PARAM(temp && vbat, BSP_ERR_PARAM);
+//     if (!s_initialized) return BSP_ERR;
 
+//     uint16_t raw_val = dwt_readtempvbat(1);
+
+//     uint8_t raw_vbat = (uint8_t)(raw_val & 0xFF);
+//     uint8_t raw_temp = (uint8_t)((raw_val >> 8) & 0xFF);
+
+//     *vbat = (raw_vbat / 173.0f) + 3.3f;
+//     *temp = (raw_temp * 1.13f) - 113.0f;
+
+//     return BSP_OK;
+// }
+
+// float bsp_uwb_compensate_distance_error(float raw_dist_m, float temp_c, float vbat_v)
+// {
+//     const float REF_TEMP = 20.0f; 
+//     const float REF_VBAT = 3.3f;
+
+//     float temp_err_m = (temp_c - REF_TEMP) * 0.00215f;
+    
+//     float vbat_err_m = (REF_VBAT - vbat_v) * 0.0535f;
+
+//     float compensated_dist = raw_dist_m - temp_err_m - vbat_err_m;
+    
+//     return compensated_dist;
+// }
 /* End of file -------------------------------------------------------- */
