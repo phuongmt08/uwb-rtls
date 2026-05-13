@@ -3,14 +3,13 @@ from __future__ import annotations
 import argparse
 import time
 from datetime import datetime
-from dataclasses import dataclass
 from typing import Iterable
 
 import serial
 from serial import SerialException
-from serial.tools import list_ports
 
 import protocol_pb2 as pb
+from vv_test_session import VvTestSession
 from parser_protocol import HostTransport, VvAddress, VvProtocol
 
 BAUD_DEFAULT = 115200
@@ -23,12 +22,6 @@ EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
 
 def packet_name(pkt: pb.packet_t) -> str:
     return pkt.WhichOneof("params") or "<none>"
-
-
-@dataclass
-class ProbeResult:
-    port: str
-    baud: int
 
 
 class FlashLogStreamParser:
@@ -206,6 +199,14 @@ class LogRealtimeTester:
         pkt.log_clear.length = 0xFFFFFFFF
         return pkt
 
+    def send_end_session(self, reason: int) -> None:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.proto.next_seq()
+        pkt.end_session.reason = reason
+        self._send_packet(pkt)
+
     def bootstrap(self) -> None:
         self._send_packet(self._build_none())
         time.sleep(0.05)
@@ -290,39 +291,6 @@ class LogRealtimeTester:
                 self._process_packet(pkt)
 
 
-def _score_port(p: list_ports.ListPortInfo) -> int:
-    score = 0
-    desc = (p.description or "").lower()
-    manu = (p.manufacturer or "").lower()
-    hwid = (p.hwid or "").lower()
-
-    if "stm" in desc or "stm" in manu:
-        score += 4
-    if "usb serial" in desc or "virtual com" in desc:
-        score += 2
-    if "vid:pid=0483" in hwid:
-        score += 6
-    if "bluetooth" in desc:
-        score -= 4
-    return score
-
-
-def prioritized_ports() -> Iterable[list_ports.ListPortInfo]:
-    ports = list(list_ports.comports())
-    ports.sort(key=_score_port, reverse=True)
-    return ports
-
-
-def auto_detect_port() -> ProbeResult | None:
-    for p in prioritized_ports():
-        try:
-            with serial.Serial(p.device, BAUD_DEFAULT, timeout=READ_TIMEOUT_S):
-                return ProbeResult(port=p.device, baud=BAUD_DEFAULT)
-        except Exception:
-            continue
-    return None
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Realtime device-log test (only log output)")
     parser.add_argument("--port", default=None, help="COM port, example COM7")
@@ -363,9 +331,9 @@ def main() -> int:
 
     port = args.port
     if not port:
-        probe = auto_detect_port()
+        probe = VvTestSession.auto_probe(src=args.src, debug=args.verbose)
         if probe is None:
-            print("No serial port found. Use --port COMx")
+            print("No serial port found or device not responding. Use --port COMx")
             return 2
         port = probe.port
 
@@ -393,7 +361,10 @@ def main() -> int:
             tester.loop()
 
     except KeyboardInterrupt:
-        print("\nStopped")
+        print("\nStopping... Sending end_session to device.")
+        if 'tester' in locals():
+            tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
+            time.sleep(0.1) # Wait briefly so the serial has time to send
         return 0
     except SerialException as exc:
         print(f"Serial error: {exc}")

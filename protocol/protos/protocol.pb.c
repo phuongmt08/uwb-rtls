@@ -75,16 +75,16 @@ PB_BIND(protobuf_anchor_ranging_t, protobuf_anchor_ranging_t, AUTO)
 PB_BIND(protobuf_ranging_result_t, protobuf_ranging_result_t, AUTO)
 
 
-PB_BIND(protobuf_filter_cfg_t, protobuf_filter_cfg_t, AUTO)
+PB_BIND(protobuf_sensor_fusion_cfg_t, protobuf_sensor_fusion_cfg_t, AUTO)
 
 
-PB_BIND(protobuf_filter_cfg_get_t, protobuf_filter_cfg_get_t, AUTO)
+PB_BIND(protobuf_sensor_fusion_cfg_get_t, protobuf_sensor_fusion_cfg_get_t, AUTO)
 
 
-PB_BIND(protobuf_filter_cfg_set_t, protobuf_filter_cfg_set_t, AUTO)
+PB_BIND(protobuf_sensor_fusion_cfg_set_t, protobuf_sensor_fusion_cfg_set_t, AUTO)
 
 
-PB_BIND(protobuf_filter_cfg_resp_t, protobuf_filter_cfg_resp_t, AUTO)
+PB_BIND(protobuf_sensor_fusion_cfg_resp_t, protobuf_sensor_fusion_cfg_resp_t, AUTO)
 
 
 PB_BIND(protobuf_device_reset_t, protobuf_device_reset_t, AUTO)
@@ -220,6 +220,8 @@ PB_BIND(protobuf_battery_info_get_t, protobuf_battery_info_get_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, 2)
+
+
 
 
 

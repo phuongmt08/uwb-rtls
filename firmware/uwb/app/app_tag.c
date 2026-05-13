@@ -58,6 +58,7 @@ static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
+static uint8_t s_last_selected_anchors_mask = 0;
 
 #if ENABLE_TAG_AUTO_CALIB
 static mw_calib_ctx_t s_tag_calib = {0};
@@ -440,6 +441,11 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     if (best_count < 3) {
         s_error_count++;
         return;
+    }
+
+    s_last_selected_anchors_mask = 0;
+    for (uint8_t i = 0; i < 3; i++) {
+        s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
     }
 
     /* ==== STEP 3: Trilateration ==== */

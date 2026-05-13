@@ -47,10 +47,10 @@ typedef protobuf_anchor_layout_item_t sys_anchor_layout_t;
 
 typedef protobuf_anchor_power_mode_t anchor_power_mode_t;
 
-#define ANCHOR_POWER_MODE_PERFORMANCE protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_PERFORMANCE
-#define ANCHOR_POWER_MODE_BALANCED    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_BALANCED
-#define ANCHOR_POWER_MODE_ECO         protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_ECO
-#define ANCHOR_POWER_MODE_DEEP_ECO    protobuf_anchor_power_mode_t_ANCHOR_POWER_MODE_DEEP_ECO
+#define ANCHOR_POWER_MODE_PERFORMANCE protobuf_ANCHOR_POWER_MODE_PERFORMANCE
+#define ANCHOR_POWER_MODE_BALANCED    protobuf_ANCHOR_POWER_MODE_BALANCED
+#define ANCHOR_POWER_MODE_ECO         protobuf_ANCHOR_POWER_MODE_ECO
+#define ANCHOR_POWER_MODE_DEEP_ECO    protobuf_ANCHOR_POWER_MODE_DEEP_ECO
 
 /**
  * @brief System configuration stored in flash and RAM.

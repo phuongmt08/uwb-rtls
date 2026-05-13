@@ -14,6 +14,7 @@
 #include "stm32f4xx_hal.h"
 
 #include <string.h>
+#include "positioning_config.h"
 
 /* Private defines ---------------------------------------------------- */
 #define UART_SOF           (0xAA)

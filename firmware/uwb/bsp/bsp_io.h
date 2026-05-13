@@ -137,6 +137,7 @@ bool bsp_io_dip_changed(void);
  * @param z Z coordinate in meters
  * @param distance Per-anchor distances in meters (array size NUM_ANCHORS), can be NULL
  * @param error Error estimate in meters (from trilateration)
+ * @param distance Pointer to anchor distance array (NUM_ANCHORS elements), pass NULL if unavailable
  * @return BSP_OK on success, BSP_ERR on failure
  * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + DISTANCES(4*NUM_ANCHORS) + ERROR(4)
  *       LEN is payload bytes after LEN field.

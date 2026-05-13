@@ -146,11 +146,11 @@ static void network_core_forward_packet(network_core_t *core, stream_type_t in_s
     
     stream_type_t fwd = network_core_dst_to_tx_stream(dst);
     if (dst == protobuf_PACKET_ADDR_BCAST) {
-        /* BCAST: route to everything EXCEPT where it came from */
-        if (in_stream != STREAM_SERIAL_RX) {
+        /* BCAST: route to everything EXCEPT where it came from, and only to active soft connections */
+        if (in_stream != STREAM_SERIAL_RX && core->serial_connection_active) {
             network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
         }
-        if (in_stream != STREAM_BLE_RX) {
+        if (in_stream != STREAM_BLE_RX && core->ble_connection_active) {
             network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
         }
         return;
@@ -299,10 +299,25 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     packet->hdr.addr.dst = dst;
     packet->hdr.seq = (core->tx_seq)++;
 
+    if (dst == protobuf_PACKET_ADDR_BCAST) {
+        /* BCAST is sent to all active soft connections */
+        if (core->serial_connection_active) {
+            network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
+        }
+        if (core->ble_connection_active) {
+            network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
+        }
+        return true;
+    }
+
     if (dst == protobuf_PACKET_ADDR_DEBUG) {
-        /* DEBUG is a broadcast to all available interfaces */
-        network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
-        network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
+        /* DEBUG is a broadcast to all available interfaces, but only if they are active */
+        if (core->serial_connection_active) {
+            network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
+        }
+        if (core->ble_connection_active) {
+            network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
+        }
         return true;
     }
 
