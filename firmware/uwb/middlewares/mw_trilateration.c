@@ -25,7 +25,7 @@
 #endif
 
 #ifndef MW_TRIL_RESIDUAL_SCALE_M
-#define MW_TRIL_RESIDUAL_SCALE_M 1.0
+#define MW_TRIL_RESIDUAL_SCALE_M 0.30
 #endif
 
 #ifndef MW_TRIL_FP_NORM_GOOD
@@ -59,9 +59,9 @@ static double clamp01(double value)
 
 static double anchor_d2_penalty(double d2_score)
 {
-    double span = MW_TRIL_D2_REJECT - MW_TRIL_D2_RECOVER;
-    if (span <= 0.001) span = 1.0;
-    return clamp01((d2_score - MW_TRIL_D2_RECOVER) / span);
+    double reject = MW_TRIL_D2_REJECT;
+    if (reject <= 0.001) reject = 1.0;
+    return clamp01(d2_score / reject);
 }
 
 static double fp_quality_penalty(double value, double good_value)
@@ -70,13 +70,37 @@ static double fp_quality_penalty(double value, double good_value)
     return clamp01(1.0 - (value / good_value));
 }
 
-static double triangle_area2(const mw_tril_anchor_t *a,
-                             const mw_tril_anchor_t *b,
-                             const mw_tril_anchor_t *c)
+static double triplet_gdop(const mw_tril_anchor_t *a,
+                           const mw_tril_anchor_t *b,
+                           const mw_tril_anchor_t *c,
+                           const vec2d_t *position)
 {
-    double area2 = (b->position.x - a->position.x) * (c->position.y - a->position.y)
-                 - (c->position.x - a->position.x) * (b->position.y - a->position.y);
-    return (area2 < 0.0) ? -area2 : area2;
+    const mw_tril_anchor_t *triplet[3] = {a, b, c};
+    double hxx = 0.0;
+    double hxy = 0.0;
+    double hyy = 0.0;
+
+    for (uint8_t i = 0; i < 3U; i++) {
+        double dx = position->x - triplet[i]->position.x;
+        double dy = position->y - triplet[i]->position.y;
+        double range = sqrt((dx * dx) + (dy * dy));
+        if (range < MAXZERO) {
+            return 1.0e9;
+        }
+
+        double hx = dx / range;
+        double hy = dy / range;
+        hxx += hx * hx;
+        hxy += hx * hy;
+        hyy += hy * hy;
+    }
+
+    double det = (hxx * hyy) - (hxy * hxy);
+    if (det <= 1.0e-6) {
+        return 1.0e9;
+    }
+
+    return sqrt((hxx + hyy) / det);
 }
 
 static bool trilaterate_2d_probe(const mw_tril_anchor_t *a,
@@ -160,18 +184,28 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
         return out_count;
     }
 
-    double max_area2 = 0.0;
+    double min_gdop = 1.0e9;
+    double max_gdop = 0.0;
     for (uint8_t i = 0; i < valid_count - 2; i++) {
         for (uint8_t j = i + 1; j < valid_count - 1; j++) {
             for (uint8_t k = j + 1; k < valid_count; k++) {
-                double area2 = triangle_area2(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k]);
-                if (area2 > max_area2) {
-                    max_area2 = area2;
+                vec2d_t probe_pos;
+                double residual = 0.0;
+                if (!trilaterate_2d_probe(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
+                                          &probe_pos, &residual)) {
+                    continue;
+                }
+
+                double gdop = triplet_gdop(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
+                                           &probe_pos);
+                if (gdop < 1.0e8) {
+                    if (gdop < min_gdop) min_gdop = gdop;
+                    if (gdop > max_gdop) max_gdop = gdop;
                 }
             }
         }
     }
-    if (max_area2 < MAXZERO) {
+    if (min_gdop >= 1.0e8) {
         return 0;
     }
 
@@ -192,8 +226,16 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                     continue;
                 }
 
-                double area2 = triangle_area2(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k]);
-                double gdop_penalty = clamp01(1.0 - (area2 / max_area2));
+                double gdop = triplet_gdop(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
+                                           &probe_pos);
+                if (gdop >= 1.0e8) {
+                    continue;
+                }
+                double gdop_span = max_gdop - min_gdop;
+                if (gdop_span <= 0.001) {
+                    gdop_span = 1.0;
+                }
+                double gdop_penalty = clamp01((gdop - min_gdop) / gdop_span);
                 double residual_penalty = clamp01(residual / MW_TRIL_RESIDUAL_SCALE_M);
                 double avg_d2_penalty = (anchor_d2_penalty(valid_anchors[i].d2_score)
                                        + anchor_d2_penalty(valid_anchors[j].d2_score)
@@ -207,9 +249,9 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                    + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)
                    + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)) / 3.0;
 
-                double score = (0.30 * avg_d2_penalty) + (0.25 * avg_fp_penalty)
-                             + (0.15 * avg_fp_snr_penalty) + (0.20 * gdop_penalty)
-                             + (0.10 * residual_penalty);
+                double score = (0.35 * avg_d2_penalty) + (0.15 * avg_fp_penalty)
+                             + (0.10 * avg_fp_snr_penalty) + (0.20 * gdop_penalty)
+                             + (0.20 * residual_penalty);
 
                 if (score < best_score) {
                     best_score = score;

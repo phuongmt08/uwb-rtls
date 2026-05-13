@@ -24,6 +24,7 @@
 #define CALIB_TURN_TIMEOUT_MS   4000U /* Max time for one anchor to hold the floor */
 #define CALIB_DONE_GRACE_MS     60000U /* After DONE, keep ranging so master sees status */
 #define ANCHOR_MASTER           4     /* Anchor ID that starts the calibration sequence */
+#define CALIB_TARGET_MODE       (CALIB_A2A_TARGET_MODE != 0U)
 
 /* Private types ------------------------------------------------------ */
 typedef enum {
@@ -110,9 +111,24 @@ static void calib_reset(void) {
 
 static void calib_calculate_and_adjust(void) {
   if (s_app_state == ANCHOR_STATE_CALIB_DONE) return;
-  bool converged = mw_calib_a2a_apply_gradient(&s_a2a);
-  
+
   sys_config_t *cfg = sys_config_get();
+  if (CALIB_TARGET_MODE && cfg->uwb.device_id != CALIB_TARGET_ANCHOR_ID) {
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR,
+             "[CALIB] Reference anchor #%u unchanged. Target is #%u.",
+             cfg->uwb.device_id, CALIB_TARGET_ANCHOR_ID);
+      cfg->calib.enable_anchor_auto_calib = false;
+      sys_config_save();
+      sys_ranging_set_calib_status(SYS_CALIB_STATUS_DONE);
+      s_app_state = ANCHOR_STATE_CALIB_DONE;
+      s_done_start_ms = HAL_GetTick();
+      s_ranging_active = false;
+      s_anchor_resp_active = false;
+      return;
+  }
+
+  bool converged = mw_calib_a2a_apply_gradient(&s_a2a);
+
   cfg->uwb.tx_antenna_delay = (uint16_t)(s_a2a.combined_delay / 2);
   cfg->uwb.rx_antenna_delay = (uint16_t)(s_a2a.combined_delay / 2);
   cfg->calib.last_avg_error_m = s_a2a.last_avg_error;
@@ -138,8 +154,24 @@ static void calib_calculate_and_adjust(void) {
 }
 
 static void calib_next_turn(void) {
+  uint8_t finished_turn = s_current_turn;
+  uint8_t my_id = sys_config_get()->uwb.device_id;
+
   /* Abort current ranging to clear hardware and state machine for next turn */
   sys_ranging_abort();
+
+  if (CALIB_TARGET_MODE &&
+      (my_id == CALIB_TARGET_ANCHOR_ID) &&
+      (finished_turn == CALIB_TARGET_ANCHOR_ID)) {
+      calib_calculate_and_adjust();
+      s_current_turn = CALIB_TARGET_ANCHOR_ID;
+      s_turn_start_ms = HAL_GetTick();
+      s_last_act_ms = HAL_GetTick();
+      s_heard_poll = false;
+      s_ranging_active = false;
+      s_anchor_resp_active = false;
+      return;
+  }
 
   s_current_turn = (s_current_turn % NUM_ANCHORS) + 1;
   
@@ -157,6 +189,10 @@ static void calib_next_turn(void) {
 static void calib_process_round(uint32_t rx_timeout_ms) {
   uint8_t my_id = sys_config_get()->uwb.device_id;
   bool is_my_turn = (my_id == s_current_turn);
+  if (CALIB_TARGET_MODE) {
+      is_my_turn = ((my_id == CALIB_TARGET_ANCHOR_ID) &&
+                    (my_id == s_current_turn));
+  }
   
   /* 1. TURN WATCHDOG */
   uint32_t now = HAL_GetTick();
@@ -255,7 +291,9 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
 #endif
                   ) {
                     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Peer %u READY. mean=%.3fm std=%.3fm", res->anchor_id, m, s);
-                    mw_calib_a2a_accum_pair(&s_a2a, m, known);
+                    if (!CALIB_TARGET_MODE || my_id == CALIB_TARGET_ANCHOR_ID) {
+                      mw_calib_a2a_accum_pair(&s_a2a, m, known);
+                    }
                     s_peer_ready_mask |= (1 << idx);
                   } else {
                     RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Peer %u REJECTED (std=%.3fm). Restarting.", res->anchor_id, s);
@@ -316,13 +354,24 @@ app_err_t app_anchor_init(void) {
     mw_calib_a2a_config_t a2a_cfg = {
       .m_to_dw_units = CALIB_A2A_M_TO_DW_UNITS,
       .damping       = CALIB_A2A_DAMPING,
-      .ant_min       = 10000,
-      .ant_max       = 40000,
+      .ant_min       = CALIB_A2A_ANT_MIN,
+      .ant_max       = CALIB_A2A_ANT_MAX,
       .iterations    = CALIB_A2A_ITERATIONS
     };
     mw_calib_a2a_init(&s_a2a, &a2a_cfg, (uint16_t)(cfg->uwb.tx_antenna_delay + cfg->uwb.rx_antenna_delay));
     
     calib_reset();
+    if (CALIB_TARGET_MODE && cfg->uwb.device_id != CALIB_TARGET_ANCHOR_ID) {
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR,
+             "[CALIB] Reference anchor #%u ready. Target is #%u.",
+             cfg->uwb.device_id, CALIB_TARGET_ANCHOR_ID);
+      cfg->calib.enable_anchor_auto_calib = false;
+      sys_config_save();
+      sys_ranging_set_calib_status(SYS_CALIB_STATUS_DONE);
+      s_app_state = ANCHOR_STATE_CALIB_DONE;
+      s_done_start_ms = HAL_GetTick();
+      return APP_OK;
+    }
     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Mode ACTIVE. Iter=1 Mask=0x%02X", s_peer_expected_mask);
   } else {
     s_app_state = ANCHOR_STATE_NORMAL;

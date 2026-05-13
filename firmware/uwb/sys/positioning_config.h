@@ -57,6 +57,13 @@
 #define ENABLE_ANCHOR_AUTO_CALIB    0
 #define ENABLE_TAG_AUTO_CALIB       0
 
+/* A2A calibration mode:
+ * 0 = mutual calibration: all anchors calibrate against each other
+ * 1 = target calibration: only CALIB_TARGET_ANCHOR_ID is adjusted;
+ *     other anchors keep their delay and act as references. */
+#define CALIB_A2A_TARGET_MODE       1U
+#define CALIB_TARGET_ANCHOR_ID      4U
+
 /* ------------------------------------------------------------------
  * A2A (Anchor-to-Anchor) Gradient Calibration
  *

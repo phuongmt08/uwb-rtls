@@ -343,35 +343,6 @@ hal_rx_with_timeout(uint8_t *buffer, uint16_t buffer_size, uint16_t *received_le
   return -1;
 }
 
-static void format_distance_m(char *buf, size_t len, float distance_m)
-{
-  if (len == 0) return;
-  int32_t  mm        = (int32_t) (distance_m * 1000.0f + (distance_m >= 0.0f ? 0.5f : -0.5f));
-  int32_t  abs_mm    = (mm >= 0) ? mm : -mm;
-  uint32_t m_part    = (uint32_t) (abs_mm / 1000);
-  uint32_t frac_part = (uint32_t) (abs_mm % 1000);
-  char     tmp[16];
-  int      pos = 0;
-  if (mm < 0) tmp[pos++] = '-';
-  /* Integer part */
-  if (m_part == 0) { tmp[pos++] = '0'; }
-  else {
-    char ibuf[8]; int ilen = 0;
-    uint32_t v = m_part;
-    while (v > 0) { ibuf[ilen++] = '0' + (v % 10); v /= 10; }
-    for (int k = ilen - 1; k >= 0; k--) tmp[pos++] = ibuf[k];
-  }
-  tmp[pos++] = '.';
-  /* 3 fractional digits, zero-padded */
-  tmp[pos++] = '0' + (frac_part / 100);
-  tmp[pos++] = '0' + ((frac_part / 10) % 10);
-  tmp[pos++] = '0' + (frac_part % 10);
-  tmp[pos]   = '\0';
-  size_t copy = (size_t) pos < len ? (size_t) pos : len - 1;
-  for (size_t i = 0; i < copy; i++) buf[i] = tmp[i];
-  buf[copy] = '\0';
-}
-
 static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
 {
   if (!data || data[0] != expected_type) return false;
@@ -516,13 +487,6 @@ static void log_ranging_result(const sys_ranging_result_t *result, const char *r
   }
 
   s_stats.success_count++;
-  char dist_str[16];
-  format_distance_m(dist_str, sizeof(dist_str), result->distance_m);
-  RLOG_I(LOG_OBJECT_CODE_RANGING, "[%s] Distance: %s m [A:%u FP=%.2f SNR=%.2f] [C:%u]",
-         role, dist_str, result->anchor_id,
-         (float)result->fp_amp_norm_q8 / 256.0f,
-         (float)result->fp_snr_q8 / 256.0f,
-         result->calib_status);
 }
 
 static uint16_t min_nonzero_u16(uint16_t a, uint16_t b)
@@ -1305,8 +1269,6 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   uint64_t resp_window_end_dw =
     tdma_compute_resp_rx_window_end(tdma, anchor_ids, num_anchors, resp_window_start_dw);
 
-  uint64_t dbg_loop_start_dw = bsp_uwb_get_current_time_dw();
-
   while (dw_time_before_deadline(bsp_uwb_get_current_time_dw(), resp_window_end_dw)
          && (num_responses < num_anchors))
   {
@@ -1380,26 +1342,6 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
 
   if (num_responses < num_anchors) {
       RLOG_W(LOG_OBJECT_CODE_RANGING, "[TAG] RESP missing: got %u/%u mask=0x%02X", num_responses, num_anchors, resp_mask);
-  }
-
-  /* Show exactly what DW time range the loop actually covered vs what was needed. */
-  {
-    uint64_t dbg_loop_end_dw = bsp_uwb_get_current_time_dw();
-    uint32_t covered_us = tdma_dw_to_us((dbg_loop_end_dw - dbg_loop_start_dw) & DW_MASK_40);
-    uint32_t start_offset_us = tdma_dw_to_us((dbg_loop_start_dw - tdma->superframe_start_dw) & DW_MASK_40);
-    uint32_t end_offset_us   = tdma_dw_to_us((dbg_loop_end_dw   - tdma->superframe_start_dw) & DW_MASK_40);
-    uint32_t window_end_offset_us = tdma_dw_to_us((resp_window_end_dw - tdma->superframe_start_dw) & DW_MASK_40);
-    uint32_t rx_err_timeout = 0, rx_err_crc = 0, rx_err_phr = 0, rx_err_sync = 0;
-    bsp_uwb_get_rx_error_counts(&rx_err_timeout, &rx_err_crc, &rx_err_phr, &rx_err_sync);
-    bsp_uwb_reset_rx_error_counts();
-    RANGING_LOG_D(LOG_OBJECT_CODE_RANGING,
-           "[TAG] RESP window: loop=[+%luus..+%luus] covered=%luus window_end=+%luus got=%u/%u "
-           "rx_errs(to=%lu crc=%lu phr=%lu sync=%lu)",
-           (unsigned long) start_offset_us, (unsigned long) end_offset_us,
-           (unsigned long) covered_us,      (unsigned long) window_end_offset_us,
-           num_responses, num_anchors,
-           (unsigned long) rx_err_timeout, (unsigned long) rx_err_crc,
-           (unsigned long) rx_err_phr,     (unsigned long) rx_err_sync);
   }
 
   if (num_responses == 0)
@@ -1535,10 +1477,12 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
   }
 
   uint64_t result_deadline_dw = tdma_compute_result_rx_window_end(tdma, t6_actual, max_result_slot);
+#if SYS_RANGING_DEBUG
   uint32_t result_timeout_us  = tdma_dw_to_us((result_deadline_dw - t6_actual) & DW_MASK_40);
 
   RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Waiting RESULT: expected=%u max_slot=%u timeout=%luus",
                 num_responses, max_result_slot, (unsigned long) result_timeout_us);
+#endif
 
   s_ctx.result_multi.count        = 0;
   s_ctx.result_multi.sequence_num = sequence_num;
@@ -1649,10 +1593,12 @@ ds_twr_tag_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint8_t sequence
     bool     timed_out = !dw_time_before_deadline(now_dw, result_deadline_dw);
     uint32_t rem_us    = timed_out ? 0U
       : tdma_dw_to_us((result_deadline_dw - now_dw) & DW_MASK_40);
-    RLOG_W(LOG_OBJECT_CODE_RANGING,
-           "[TAG] RESULT loop: got=%u/%u expected_mask=0x%02X actual_mask=0x%02X %s remain=%luus",
-           results_received, num_responses, final_mask, result_mask,
-           timed_out ? "TIMEOUT" : "EARLY_EXIT", (unsigned long) rem_us);
+    if (timed_out || results_received < num_responses || result_mask != final_mask) {
+      RLOG_W(LOG_OBJECT_CODE_RANGING,
+             "[TAG] RESULT loop: got=%u/%u expected_mask=0x%02X actual_mask=0x%02X %s remain=%luus",
+             results_received, num_responses, final_mask, result_mask,
+             timed_out ? "TIMEOUT" : "EARLY_EXIT", (unsigned long) rem_us);
+    }
   }
 
 

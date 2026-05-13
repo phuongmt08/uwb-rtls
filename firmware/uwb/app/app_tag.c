@@ -42,8 +42,6 @@ typedef struct {
 
 } filter_state_t;
 
-/* Private variables --------------------------------------------------- */
-
 /* Private variables -------------------------------------------------- */
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
@@ -57,6 +55,7 @@ static uint8_t s_pending_anchor_ids[NUM_ANCHORS] = {0};
 static bool s_pending_calib_mode = false;
 static uint32_t s_next_due_tick = 0;
 static uint32_t s_cycle_start_tick = 0;
+static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
 
@@ -400,22 +399,12 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         anchors_by_id[aid].fp_snr_penalty = 0.0;
         valid_count++;
 
-        RLOG_D(LOG_OBJECT_CODE_TAG, "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)", aid, d_used, (float)r2d, (float)dz);
     }
 
+    float anchor_distances[NUM_ANCHORS] = {0.0f};
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
-            RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm FP=%.2f SNR=%.2f",
-                   id, anchors_by_id[id].distance,
-                   anchors_by_id[id].fp_amp_norm,
-                   anchors_by_id[id].fp_snr);
-        }
-    }
-
-    float uart_distances[NUM_ANCHORS] = {0.0f};
-    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
-        if (anchors_by_id[id].valid) {
-            uart_distances[id - 1] = anchors_by_id[id].distance;
+            anchor_distances[id - 1] = anchors_by_id[id].distance;
         }
     }
 
@@ -479,29 +468,25 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 #endif
 
     /* ==== STEP 5: Final Handling (No Ext Filters) ==== */
-    s_last_position.x = tril_position.x;
-    s_last_position.y = tril_position.y;
+    vec2d_t final_position = tril_position;
+
+    s_last_position.x = final_position.x;
+    s_last_position.y = final_position.y;
     
     s_success_count++;
     s_error_count = 0;
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm | Error: \261%.3fm", 
-           (float)tril_position.x, (float)tril_position.y, TAG_HEIGHT_M, (float)tril_result.error_estimate);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "D2 Scores: #%u(%.1f) #%u(%.1f) #%u(%.1f)",
-           best_3_anchors[0].id, best_3_anchors[0].d2_score,
-           best_3_anchors[1].id, best_3_anchors[1].d2_score,
-           best_3_anchors[2].id, best_3_anchors[2].d2_score);
     RLOG_I(LOG_OBJECT_CODE_TAG,
-           "Triplet Score: %.3f residual=%.3fm gdop=%.3f fp=%.3f fp_snr=%.3f",
-           best_3_anchors[0].selection_score,
-           best_3_anchors[0].residual_rms,
-           best_3_anchors[0].gdop_penalty,
-           best_3_anchors[0].fp_penalty,
-           best_3_anchors[0].fp_snr_penalty);
+           "Dist A1=%.3fm A2=%.3fm A3=%.3fm A4=%.3fm",
+           anchor_distances[0], anchor_distances[1], anchor_distances[2], anchor_distances[3]);
+    RLOG_I(LOG_OBJECT_CODE_TAG,
+           "Pos x=%.3fm y=%.3fm z=%.2fm err=%.3fm",
+           (float)final_position.x, (float)final_position.y,
+           TAG_HEIGHT_M, (float)tril_result.error_estimate);
 
-    if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
+    if (bsp_io_uart_send_position(final_position.x, final_position.y,
                                   TAG_HEIGHT_M,
-                                  uart_distances,
+                                  anchor_distances,
                                   (float)tril_result.error_estimate) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
@@ -572,6 +557,7 @@ app_err_t app_tag_init(void)
     s_last_ranging_tick = HAL_GetTick();
     s_next_due_tick = s_last_ranging_tick + cfg->uwb.ranging_period_ms;
     s_cycle_start_tick = 0;
+    s_last_cycle_done_tick = 0;
     s_period_miss_count = 0;
     s_period_overrun_count = 0;
 
@@ -705,17 +691,23 @@ void app_tag_process(void)
             bsp_io_led_blink(5);
         }
 
-        s_last_ranging_tick = HAL_GetTick();
+        uint32_t cycle_done_tick = HAL_GetTick();
         if (s_cycle_start_tick != 0U) {
-            uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
+            uint32_t cycle_ms = cycle_done_tick - s_cycle_start_tick;
+            uint32_t interval_ms = (s_last_cycle_done_tick == 0U)
+                                   ? cfg->uwb.ranging_period_ms
+                                   : (cycle_done_tick - s_last_cycle_done_tick);
+            float current_hz = (interval_ms > 0U) ? (1000.0f / (float)interval_ms) : 0.0f;
+
             RLOG_I(LOG_OBJECT_CODE_TAG,
-                   "[TAG] Cycle complete: duration=%lums target_period=%ums anchors=%u valid=%u",
+                   "Cycle duration=%lums period=%ums rate=%.2fHz anchors=%u valid=%u",
                    (unsigned long)cycle_ms,
-                     (unsigned)cfg->uwb.ranging_period_ms,
+                   (unsigned)cfg->uwb.ranging_period_ms,
+                   current_hz,
                    (unsigned)s_pending_num_anchors,
                    (unsigned)multi_results.count);
-            
-                 if (cycle_ms > cfg->uwb.ranging_period_ms) {
+
+            if (cycle_ms > cfg->uwb.ranging_period_ms) {
                 s_period_overrun_count++;
                 if ((s_period_overrun_count % 5U) == 1U) {
                     RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -726,6 +718,8 @@ void app_tag_process(void)
                 }
             }
         }
+        s_last_cycle_done_tick = cycle_done_tick;
+        s_last_ranging_tick = cycle_done_tick;
         update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
         if ((s_period_miss_count % 10U) == 1U && s_period_miss_count > 0U) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
