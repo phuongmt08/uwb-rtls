@@ -1,4 +1,8 @@
 from __future__ import annotations
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 
 import argparse
 import time
@@ -8,9 +12,9 @@ from typing import Iterable
 import serial
 from serial import SerialException
 
-import protocol_pb2 as pb
+from common import protocol_pb2 as pb
+from common.parser_protocol import HostTransport, VvAddress, VvProtocol
 from vv_test_session import VvTestSession
-from parser_protocol import HostTransport, VvAddress, VvProtocol
 
 BAUD_DEFAULT = 115200
 READ_TIMEOUT_S = 0.05
