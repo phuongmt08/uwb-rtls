@@ -69,6 +69,46 @@ static anchor_app_state_t s_app_state = ANCHOR_STATE_IDLE;
 
 /* Private functions -------------------------------------------------- */
 #if ENABLE_ANCHOR_AUTO_CALIB
+static bool calib_is_external_target_mode(void) {
+  return CALIB_TARGET_MODE && (CALIB_TARGET_ANCHOR_ID == 0U);
+}
+
+static uint8_t calib_effective_target_id(uint8_t my_id) {
+  (void)my_id;
+  return CALIB_TARGET_ANCHOR_ID;
+}
+
+static bool calib_is_target(uint8_t my_id) {
+  return (!CALIB_TARGET_MODE) || calib_is_external_target_mode() || (my_id == calib_effective_target_id(my_id));
+}
+
+static float calib_get_target_to_anchor_distance_3d(uint8_t anchor_id) {
+    sys_config_t *cfg = sys_config_get();
+    float ax = 0.0f;
+    float ay = 0.0f;
+    float az = 0.0f;
+    bool found = false;
+
+    for (uint32_t i = 0; i < cfg->anchor_count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == anchor_id) {
+            ax = cfg->anchor_layout[i].x_m;
+            ay = cfg->anchor_layout[i].y_m;
+            az = cfg->anchor_layout[i].z_m;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        return -1.0f;
+    }
+
+    float dx = ax - CALIB_TARGET_POS_X_M;
+    float dy = ay - CALIB_TARGET_POS_Y_M;
+    float dz = az - CALIB_TARGET_POS_Z_M;
+    return sqrtf(dx*dx + dy*dy + dz*dz);
+}
+
 static float calib_get_ref_distance_3d(uint8_t my_id, uint8_t peer_id) {
     sys_config_t *cfg = sys_config_get();
     float x1 = 0, y1 = 0, z1 = 0;
@@ -95,7 +135,7 @@ static float calib_get_ref_distance_3d(uint8_t my_id, uint8_t peer_id) {
         float dz = z2 - z1;
         return sqrtf(dx*dx + dy*dy + dz*dz);
     }
-    return 1.0f; /* fallback */
+    return -1.0f;
 }
 
 static void calib_reset(void) {
@@ -107,16 +147,39 @@ static void calib_reset(void) {
   s_system_started = false;
   s_turn_start_ms = HAL_GetTick();
   s_last_act_ms = HAL_GetTick();
+  if (calib_is_external_target_mode()) {
+    s_current_turn = 0U;
+  } else if (CALIB_TARGET_MODE) {
+    uint8_t my_id = sys_config_get()->uwb.device_id;
+    s_current_turn = calib_effective_target_id(my_id);
+  }
+}
+
+static bool calib_apply_runtime_delays(sys_config_t *cfg) {
+  if (!cfg) {
+    return false;
+  }
+
+  if (bsp_uwb_configure(&cfg->uwb) != BSP_OK) {
+    RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_UWB_INIT,
+           "[CALIB] Failed to apply antenna delays at runtime (TX=%u RX=%u)",
+           cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
+    return false;
+  }
+
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Applied antenna delays: TX=%u RX=%u",
+         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
+  return true;
 }
 
 static void calib_calculate_and_adjust(void) {
   if (s_app_state == ANCHOR_STATE_CALIB_DONE) return;
 
   sys_config_t *cfg = sys_config_get();
-  if (CALIB_TARGET_MODE && cfg->uwb.device_id != CALIB_TARGET_ANCHOR_ID) {
+  if (CALIB_TARGET_MODE && !calib_is_target(cfg->uwb.device_id)) {
       RLOG_I(LOG_OBJECT_CODE_ANCHOR,
              "[CALIB] Reference anchor #%u unchanged. Target is #%u.",
-             cfg->uwb.device_id, CALIB_TARGET_ANCHOR_ID);
+             cfg->uwb.device_id, calib_effective_target_id(cfg->uwb.device_id));
       cfg->calib.enable_anchor_auto_calib = false;
       sys_config_save();
       sys_ranging_set_calib_status(SYS_CALIB_STATUS_DONE);
@@ -133,6 +196,13 @@ static void calib_calculate_and_adjust(void) {
   cfg->uwb.rx_antenna_delay = (uint16_t)(s_a2a.combined_delay / 2);
   cfg->calib.last_avg_error_m = s_a2a.last_avg_error;
   cfg->calib.iterations_taken = s_a2a.iter;
+
+  if (!calib_apply_runtime_delays(cfg)) {
+      s_app_state = ANCHOR_STATE_NORMAL;
+      s_ranging_active = false;
+      s_anchor_resp_active = false;
+      return;
+  }
   
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Iter %u complete. Error=%+.3fm NewDelay=%u",
          s_a2a.iter, s_a2a.last_avg_error, s_a2a.combined_delay);
@@ -156,15 +226,27 @@ static void calib_calculate_and_adjust(void) {
 static void calib_next_turn(void) {
   uint8_t finished_turn = s_current_turn;
   uint8_t my_id = sys_config_get()->uwb.device_id;
+  uint8_t target_id = calib_effective_target_id(my_id);
 
   /* Abort current ranging to clear hardware and state machine for next turn */
   sys_ranging_abort();
 
-  if (CALIB_TARGET_MODE &&
-      (my_id == CALIB_TARGET_ANCHOR_ID) &&
-      (finished_turn == CALIB_TARGET_ANCHOR_ID)) {
+  if (calib_is_external_target_mode() && finished_turn == 0U) {
       calib_calculate_and_adjust();
-      s_current_turn = CALIB_TARGET_ANCHOR_ID;
+      s_current_turn = 0U;
+      s_turn_start_ms = HAL_GetTick();
+      s_last_act_ms = HAL_GetTick();
+      s_heard_poll = false;
+      s_ranging_active = false;
+      s_anchor_resp_active = false;
+      return;
+  }
+
+  if (CALIB_TARGET_MODE &&
+      calib_is_target(my_id) &&
+      (finished_turn == target_id)) {
+      calib_calculate_and_adjust();
+      s_current_turn = target_id;
       s_turn_start_ms = HAL_GetTick();
       s_last_act_ms = HAL_GetTick();
       s_heard_poll = false;
@@ -188,9 +270,9 @@ static void calib_next_turn(void) {
 
 static void calib_process_round(uint32_t rx_timeout_ms) {
   uint8_t my_id = sys_config_get()->uwb.device_id;
-  bool is_my_turn = (my_id == s_current_turn);
-  if (CALIB_TARGET_MODE) {
-      is_my_turn = ((my_id == CALIB_TARGET_ANCHOR_ID) &&
+  bool is_my_turn = calib_is_external_target_mode() ? true : (my_id == s_current_turn);
+  if (CALIB_TARGET_MODE && !calib_is_external_target_mode()) {
+      is_my_turn = (calib_is_target(my_id) &&
                     (my_id == s_current_turn));
   }
   
@@ -271,7 +353,13 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
               }
 
               if (!(s_peer_ready_mask & (1 << idx))) {
-                float known = calib_get_ref_distance_3d(my_id, res->anchor_id);
+                float known = calib_is_external_target_mode()
+                                ? calib_get_target_to_anchor_distance_3d(res->anchor_id)
+                                : calib_get_ref_distance_3d(my_id, res->anchor_id);
+                if (known <= 0.0f) {
+                  RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Peer %u skipped: missing reference distance", res->anchor_id);
+                  continue;
+                }
                 float dist = res->distance_m;
 #if CALIB_STUB_MODE
                 if (!res->valid || dist < 0.01f) dist = 1.0f;
@@ -291,7 +379,7 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
 #endif
                   ) {
                     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Peer %u READY. mean=%.3fm std=%.3fm", res->anchor_id, m, s);
-                    if (!CALIB_TARGET_MODE || my_id == CALIB_TARGET_ANCHOR_ID) {
+                    if (calib_is_target(my_id)) {
                       mw_calib_a2a_accum_pair(&s_a2a, m, known);
                     }
                     s_peer_ready_mask |= (1 << idx);
@@ -347,7 +435,9 @@ app_err_t app_anchor_init(void) {
     s_app_state = ANCHOR_STATE_CALIB_COLLECTING;
     s_peer_expected_mask = 0;
     for (uint8_t i = 1; i <= NUM_ANCHORS; i++) {
-      if (i != cfg->uwb.device_id) s_peer_expected_mask |= (1 << (i - 1));
+      if (calib_is_external_target_mode() || i != cfg->uwb.device_id) {
+        s_peer_expected_mask |= (1 << (i - 1));
+      }
     }
     
     /* Fixed a2a init with config struct */
@@ -361,10 +451,10 @@ app_err_t app_anchor_init(void) {
     mw_calib_a2a_init(&s_a2a, &a2a_cfg, (uint16_t)(cfg->uwb.tx_antenna_delay + cfg->uwb.rx_antenna_delay));
     
     calib_reset();
-    if (CALIB_TARGET_MODE && cfg->uwb.device_id != CALIB_TARGET_ANCHOR_ID) {
+    if (CALIB_TARGET_MODE && !calib_is_target(cfg->uwb.device_id)) {
       RLOG_I(LOG_OBJECT_CODE_ANCHOR,
              "[CALIB] Reference anchor #%u ready. Target is #%u.",
-             cfg->uwb.device_id, CALIB_TARGET_ANCHOR_ID);
+             cfg->uwb.device_id, calib_effective_target_id(cfg->uwb.device_id));
       cfg->calib.enable_anchor_auto_calib = false;
       sys_config_save();
       sys_ranging_set_calib_status(SYS_CALIB_STATUS_DONE);
@@ -372,7 +462,13 @@ app_err_t app_anchor_init(void) {
       s_done_start_ms = HAL_GetTick();
       return APP_OK;
     }
-    RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Mode ACTIVE. Iter=1 Mask=0x%02X", s_peer_expected_mask);
+    if (calib_is_external_target_mode()) {
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR,
+             "[CALIB] External target ACTIVE at (%.3f, %.3f, %.3f). Iter=1 Mask=0x%02X",
+             CALIB_TARGET_POS_X_M, CALIB_TARGET_POS_Y_M, CALIB_TARGET_POS_Z_M, s_peer_expected_mask);
+    } else {
+      RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Mode ACTIVE. Iter=1 Mask=0x%02X", s_peer_expected_mask);
+    }
   } else {
     s_app_state = ANCHOR_STATE_NORMAL;
   }
@@ -394,6 +490,10 @@ void app_anchor_process(void *arg) {
       uint32_t now = HAL_GetTick();
       uint32_t elapsed = now - s_done_start_ms;
       bool all_peers_done = ((s_peer_done_mask & s_peer_expected_mask) == s_peer_expected_mask);
+
+      if (calib_is_external_target_mode()) {
+        return;
+      }
 
       /* Reset if:
        * 1. All peers are DONE (Master checks this to sync the whole network)

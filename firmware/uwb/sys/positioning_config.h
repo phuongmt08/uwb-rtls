@@ -59,10 +59,21 @@
 
 /* A2A calibration mode:
  * 0 = mutual calibration: all anchors calibrate against each other
- * 1 = target calibration: only CALIB_TARGET_ANCHOR_ID is adjusted;
- *     other anchors keep their delay and act as references. */
+ * 1 = target calibration: only the target anchor is adjusted;
+ *     other anchors keep their delay and act as references.
+ *
+ * CALIB_TARGET_ANCHOR_ID:
+ * 0 = external target/initiator, not part of anchor layout or TDMA anchor slots
+ * 1..NUM_ANCHORS = fixed target anchor ID. */
 #define CALIB_A2A_TARGET_MODE       1U
-#define CALIB_TARGET_ANCHOR_ID      4U
+#define CALIB_TARGET_ANCHOR_ID      0U
+
+/* Physical position of the external calibration target when
+ * CALIB_TARGET_ANCHOR_ID == 0. This target ranges as the TAG/initiator side
+ * and does not consume any anchor ID or TDMA anchor slot. */
+#define CALIB_TARGET_POS_X_M        0.0f
+#define CALIB_TARGET_POS_Y_M        0.0f
+#define CALIB_TARGET_POS_Z_M        TAG_HEIGHT_M
 
 /* ------------------------------------------------------------------
  * A2A (Anchor-to-Anchor) Gradient Calibration
