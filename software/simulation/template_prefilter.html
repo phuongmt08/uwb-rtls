@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UWB Debug v4.9 (Fixed Gate): __FILENAME__</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .controls { display: flex; gap: 20px; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex-wrap: wrap; }
+        .control-item { display: flex; flex-direction: column; gap: 5px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        label { font-size: 0.75rem; font-weight: bold; color: #64748b; text-transform: uppercase; }
+        input[type="range"] { width: 180px; }
+        .val { color: #2563eb; font-weight: bold; }
+        .plot-lg { height: 500px; }
+        .plot-md { height: 400px; }
+        .plot-title { font-size: 1rem; color: #1e293b; margin: 0 0 10px 0; border-left: 4px solid #2563eb; padding-left: 10px; }
+        .badge { font-size: 0.7rem; background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 99px; font-weight: bold; margin-left: 8px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; }
+        .stat-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: #334155; }
+        .stat-box strong { display: block; color: #1e293b; margin-bottom: 6px; font-size: 0.85rem; }
+        .stat-row { display: flex; justify-content: space-between; gap: 10px; line-height: 1.55; }
+        .stat-row span:last-child { font-weight: 700; color: #2563eb; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h2 style="margin:0;">__FILENAME__ <span class="badge">v4.9 Fixed Gate</span></h2>
+            <p style="margin:5px 0 0; font-size:0.8rem; color:#64748b;">Init Bias - X: __BIAS_X__, Y: __BIAS_Y__</p>
+        </div>
+        <div class="controls">
+            <div class="control-item">
+                <label>T2 Reject (High): <span id="t2_high_val" class="val">9.0</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="t2_high_range" min="1" max="40" step="0.5" value="9.0">
+                    <input type="number" id="t2_high_input" step="0.5" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="9.0">
+                </div>
+            </div>
+            <div class="control-item">
+                <label>T2 Recover (Low): <span id="t2_low_val" class="val">4.0</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="t2_low_range" min="1" max="40" step="0.5" value="4.0">
+                    <input type="number" id="t2_low_input" step="0.5" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="4.0">
+                </div>
+            </div>
+            <div class="control-item">
+                <label>R_base (Noise Floor): <span id="r_val" class="val">0.05</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="r_range" min="0.01" max="0.5" step="0.01" value="0.05">
+                    <input type="number" id="r_input" step="0.01" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="0.05">
+                </div>
+            </div>
+            <div class="control-item">
+                <label>History Window: <span id="win_val" class="val">15</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="win_range" min="3" max="30" step="1" value="15">
+                    <input type="number" id="win_input" step="1" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="15">
+                </div>
+            </div>
+            <div class="control-item">
+                <label>ZUPT Accel: <span id="zupt_acc_val" class="val">0.15</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="zupt_acc_range" min="0.01" max="1.0" step="0.01" value="0.15">
+                    <input type="number" id="zupt_acc_input" step="0.01" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="0.15">
+                </div>
+            </div>
+            <div class="control-item">
+                <label>ZUPT Gyro: <span id="zupt_gyr_val" class="val">0.05</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="zupt_gyr_range" min="0.01" max="0.5" step="0.01" value="0.05">
+                    <input type="number" id="zupt_gyr_input" step="0.01" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="0.05">
+                </div>
+            </div>
+            <div class="control-item">
+                <label>Max Samples: <span id="max_samples_val" class="val">All</span></label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="range" id="max_samples_range" min="10" max="100000" step="10" value="10000">
+                    <input type="number" id="max_samples_input" step="10" style="width:80px; padding:4px; border:1px solid #cbd5e1; border-radius:8px;" value="10000">
+                </div>
+            </div>
+            <div class="control-item" style="grid-column: span 2; width: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <label style="margin: 0;">Anchor Selection Rules:</label>
+                    <button onclick="addRule()" style="padding: 4px 10px; font-size: 0.75rem; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 4px; font-weight: bold;">+ Add Rule</button>
+                </div>
+                <div id="rules_container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            </div>
+            <div class="control-item" style="grid-column: span 2; width: 100%;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
+                    <input type="checkbox" id="enable_smoother" style="width:16px; height:16px;" onchange="update()"> 
+                    <span style="color:#1e293b; text-transform:none;">Enable Distance Smoothing (Alpha: 0.25, Jump Limit: 0.3m)</span>
+                </label>
+            </div>
+            <div class="control-item" style="grid-column: span 2; width: 100%;">
+                <label>Export Trajectory</label>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <select id="export_path_select" onchange="updatePositionRateDisplay()" style="min-width:220px; padding:8px; border:1px solid #cbd5e1; border-radius:8px;">
+                        <option value="firmware">Firmware Path</option>
+                        <option value="all">Simulated Path (All)</option>
+                        <option value="rules">Simulated Path (Rules)</option>
+                        <option value="wls" selected>Simulated Path (Multilateration)</option>
+                        <option value="triplet">Simulated Path (Best Triplet)</option>
+                    </select>
+                    <button onclick="exportTrajectoryCsv()" style="padding: 10px 20px; background: #2563eb; border-radius: 8px; color: white; border: none; font-weight: bold; font-size: 0.8rem; cursor: pointer;">Export CSV</button>
+                    <span id="position_rate_info" style="font-size:0.85rem; color:#334155; font-weight:600;">Position Hz: --</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; grid-column: span 2; justify-content: flex-end;">
+                <button onclick="saveDefaults()" style="padding: 10px 20px; background: #10b981; border-radius: 8px; color: white; border: none; font-weight: bold; font-size: 0.8rem; cursor: pointer;">Save Defaults</button>
+                <button onclick="clearDefaults()" style="padding: 10px 20px; background: #ef4444; border-radius: 8px; color: white; border: none; font-weight: bold; font-size: 0.8rem; cursor: pointer;">Clear Defaults</button>
+                <a href="../simulation_dashboard.html" style="padding: 10px 20px; background: #e2e8f0; border-radius: 8px; text-decoration: none; color: #475569; font-weight: bold; font-size: 0.8rem; height: fit-content;">&larr; Dashboard</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card"><h3 class="plot-title">Trajectory Comparison</h3><div id="trajectory" class="plot-lg"></div></div>
+        <div class="card"><h3 class="plot-title">Distance Tracking</h3><div id="distances" class="plot-lg"></div></div>
+    </div>
+    <div class="card">
+        <h3 class="plot-title">Mahalanobis D2 Scores (gate on raw d vs clean-history median)</h3>
+        <div id="scores" class="plot-md"></div>
+        <div id="d2_distance_stats" class="stats-grid"></div>
+    </div>
+    <div class="card"><h3 class="plot-title">IMU Acceleration</h3><div id="accel" class="plot-md"></div></div>
+    <div class="card"><h3 class="plot-title">Integrated Velocity</h3><div id="velocity" class="plot-md"></div></div>
+    <div class="card"><h3 class="plot-title">IMU Rotation (Gyro & Yaw)</h3><div id="yaw_plot" class="plot-md"></div></div>
+    <div class="card"><h3 class="plot-title">Positioning Error (vs Ground Truth)</h3><div id="pos_error" class="plot-md"></div></div>
+    <div class="card"><h3 class="plot-title">Log Error Frames (CSV)</h3><div id="error_frame" class="plot-md"></div></div>
+
+    <script>
+        const rawData = __DATA_JSON__, anchors = __ANCHORS_JSON__, gt_square = __GT_SQUARE_JSON__, tagHeight = __TAG_HEIGHT__;
+        const sourceFilename = "__FILENAME__";
+        const samples = rawData.all_entries.filter(e => e.type === 'Update');
+        let latestTrajectoryPaths = {
+            firmware: { x: rawData.fw_path.x, y: rawData.fw_path.y }
+        };
+        let latestTotalTime = 0;
+        
+        document.getElementById('max_samples_range').max = rawData.all_entries.length;
+        document.getElementById('max_samples_range').value = rawData.all_entries.length;
+        document.getElementById('max_samples_input').value = rawData.all_entries.length;
+
+        function decodeMask(mask) {
+            let a = [];
+            if (mask & 1) a.push(1);
+            if (mask & 2) a.push(2);
+            if (mask & 4) a.push(3);
+            if (mask & 8) a.push(4);
+            return a.length > 0 ? a.join(',') : 'None';
+        }
+
+        function trilaterate(vAnchors) {
+            if (vAnchors.length < 3) return null;
+            const [a1, a2, a3] = vAnchors;
+            const d = 4*((a1.x-a2.x)*(a1.y-a3.y)-(a1.x-a3.x)*(a1.y-a2.y));
+            if (Math.abs(d) < 0.001) return null;
+            const A = a2.r**2-a1.r**2-a2.x**2+a1.x**2-a2.y**2+a1.y**2;
+            const B = a3.r**2-a1.r**2-a3.x**2+a1.x**2-a3.y**2+a1.y**2;
+            return {
+                x: (1/d)*(2*A*(a1.y-a3.y)-2*B*(a1.y-a2.y)),
+                y: (1/d)*(2*B*(a1.x-a2.x)-2*A*(a1.x-a3.x))
+            };
+        }
+
+        // ── WLS Multilateration ──────────────────────────────────────────────
+        // Nhận N >= 3 anchor, giải bằng Weighted Least Squares trên hệ linear hoá.
+        // Weight w_i = 1 / (1 + d2_i): anchor sạch (d2 thấp) được tin hơn.
+        // Không cần sort/chọn trước — tự động khai thác toàn bộ anchor hợp lệ.
+        function multilaterate(vAnchors) {
+            if (vAnchors.length < 3) return null;
+
+            const ref = vAnchors[0];
+            const others = vAnchors.slice(1);
+
+            // Tích luỹ AᵀWA và AᵀWb
+            let hxx = 0, hxy = 0, hyy = 0, bx = 0, by = 0;
+            for (const a of others) {
+                // Linearize: trừ eq(ref) khỏi eq(a) → 2(ref.x-a.x)X + 2(ref.y-a.y)Y = C
+                const Ai = 2 * (ref.x - a.x);
+                const Bi = 2 * (ref.y - a.y);
+                const Ci = a.r*a.r - ref.r*ref.r
+                         - a.x*a.x + ref.x*ref.x
+                         - a.y*a.y + ref.y*ref.y;
+                const w = 1 / (1 + (a.d2 || 0));   // WLS weight
+                hxx += w * Ai * Ai;
+                hxy += w * Ai * Bi;
+                hyy += w * Bi * Bi;
+                bx  += w * Ai * Ci;
+                by  += w * Bi * Ci;
+            }
+
+            const det = hxx * hyy - hxy * hxy;
+            if (Math.abs(det) < 0.0001) return null;
+            return {
+                x: (hyy * bx - hxy * by) / det,
+                y: (hxx * by - hxy * bx) / det
+            };
+        }
+
+        function clamp01(v) {
+            return Math.max(0, Math.min(1, v));
+        }
+
+        function residualRms(pos, anchorSet) {
+            if (!pos) return Infinity;
+            const errs = anchorSet.map(a => {
+                const pred = Math.sqrt((pos.x-a.x)**2 + (pos.y-a.y)**2);
+                return pred - a.r;
+            });
+            return Math.sqrt(errs.reduce((s, e) => s + e*e, 0) / errs.length);
+        }
+
+        function d2Penalty(d2, d2Reject) {
+            return clamp01((d2 || 0) / Math.max(0.001, d2Reject));
+        }
+
+        function tripletGdop(pos, triplet) {
+            if (!pos) return Infinity;
+            let hxx = 0, hxy = 0, hyy = 0;
+            for (const a of triplet) {
+                const dx = pos.x - a.x;
+                const dy = pos.y - a.y;
+                const r = Math.sqrt(dx*dx + dy*dy);
+                if (r < 0.001) return Infinity;
+                const hx = dx / r;
+                const hy = dy / r;
+                hxx += hx * hx;
+                hxy += hx * hy;
+                hyy += hy * hy;
+            }
+            const det = hxx * hyy - hxy * hxy;
+            if (det <= 0.000001) return Infinity;
+            return Math.sqrt((hxx + hyy) / det);
+        }
+
+        function selectBestTriplet(vAnchors, d2Reject) {
+            if (vAnchors.length < 3) return null;
+            const candidates = [];
+            let minGdop = Infinity;
+            let maxGdop = 0;
+
+            for (let i = 0; i < vAnchors.length - 2; i++) {
+                for (let j = i + 1; j < vAnchors.length - 1; j++) {
+                    for (let k = j + 1; k < vAnchors.length; k++) {
+                        const triplet = [vAnchors[i], vAnchors[j], vAnchors[k]];
+                        const pos = trilaterate(triplet);
+                        if (!pos) continue;
+                        const gdop = tripletGdop(pos, triplet);
+                        if (!Number.isFinite(gdop)) continue;
+                        const residual = residualRms(pos, triplet);
+                        const avgD2Raw = triplet.reduce((s, a) => s + (a.d2 || 0), 0) / 3;
+                        candidates.push({ triplet, pos, gdop, residual, avgD2Raw });
+                        minGdop = Math.min(minGdop, gdop);
+                        maxGdop = Math.max(maxGdop, gdop);
+                    }
+                }
+            }
+            if (!candidates.length) return null;
+
+            let best = null;
+            const gdopSpan = Math.max(0.001, maxGdop - minGdop);
+            for (const c of candidates) {
+                const avgD2Penalty = c.triplet.reduce((s, a) => s + d2Penalty(a.d2, d2Reject), 0) / 3;
+                const gdopPenalty = clamp01((c.gdop - minGdop) / gdopSpan);
+                const residualPenalty = clamp01(c.residual / 0.30);
+                const score = 0.45*avgD2Penalty + 0.25*gdopPenalty + 0.30*residualPenalty;
+
+                if (!best || score < best.score) {
+                    best = {
+                        triplet: c.triplet,
+                        pos: c.pos,
+                        score,
+                        avgD2Raw: c.avgD2Raw,
+                        avgD2Penalty,
+                        gdopRaw: c.gdop,
+                        gdopPenalty,
+                        residual: c.residual,
+                        residualPenalty
+                    };
+                }
+            }
+            return best;
+        }
+
+        let ruleCounter = 0;
+        function addRule(start, end, activeAnchors) {
+            start = start !== undefined ? start : 0;
+            end = end !== undefined ? end : 100000;
+            activeAnchors = activeAnchors || [0, 1, 2, 3];
+
+            const id = ruleCounter++;
+            const div = document.createElement('div');
+            div.id = 'rule_' + id;
+            div.style.display = 'flex';
+            div.style.gap = '10px';
+            div.style.alignItems = 'center';
+            div.style.background = '#f8fafc';
+            div.style.padding = '8px 12px';
+            div.style.borderRadius = '6px';
+            div.style.border = '1px solid #e2e8f0';
+            div.style.fontSize = '0.85rem';
+
+            let checksHTML = '';
+            for (let i = 0; i < 4; i++) {
+                const checked = activeAnchors.includes(i) ? 'checked' : '';
+                checksHTML += `<label style="display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" class="rule-anchor" value="${i}" ${checked} onchange="update()"> A${i+1}</label>`;
+            }
+
+            div.innerHTML = `
+                <div style="display:flex; align-items:center; gap:5px;">
+                    <span style="font-weight:bold; color:#64748b;">Range:</span>
+                    <input type="number" class="rule-start" value="${start}" style="width: 70px; padding: 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
+                    <span>-</span>
+                    <input type="number" class="rule-end" value="${end}" style="width: 70px; padding: 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
+                </div>
+                <div style="display:flex; gap: 12px; margin-left: 15px; flex-grow: 1;">
+                    ${checksHTML}
+                </div>
+                <button onclick="removeRule(${id})" style="cursor:pointer; color: #ef4444; border:none; background:none; font-weight:bold; font-size:1.2rem; padding:0 5px;" title="Remove Rule">&times;</button>
+            `;
+
+            document.getElementById('rules_container').appendChild(div);
+            update();
+        }
+
+        function removeRule(id) {
+            const el = document.getElementById('rule_' + id);
+            if (el) el.remove();
+            update();
+        }
+
+        function formatLogNumber(value) {
+            if (!Number.isFinite(value)) return "  0.000000";
+            const fixed = Number(value).toFixed(6);
+            return value >= 0 ? "  " + fixed : " " + fixed;
+        }
+
+        function replacePxPyInLine(line, px, py) {
+            let out = line;
+            out = out.replace(/px:\s*[-+]?\d+(?:\.\d+)?/, "px:" + formatLogNumber(px));
+            out = out.replace(/py:\s*[-+]?\d+(?:\.\d+)?/, "py:" + formatLogNumber(py));
+            return out;
+        }
+
+        function formatFallbackLogLine(entry, px, py, index) {
+            const idx = String(index).padStart(4, ' ');
+            const type = String(entry.type || '').padEnd(7, ' ');
+            const d = entry.distances || [0, 0, 0, 0];
+            const mask = Number.isFinite(entry.mask) ? entry.mask : 15;
+            const err = Number.isFinite(entry.err) ? entry.err : 0;
+            return `(${idx}/${idx}) ${type} ` +
+                `ax:${formatLogNumber(entry.ax)} ay:${formatLogNumber(entry.ay)} gz:${formatLogNumber(entry.gz)} ` +
+                `px:${formatLogNumber(px)} py:${formatLogNumber(py)} dt:${formatLogNumber(entry.dt)} ` +
+                `mask: ${mask} d1:${formatLogNumber(d[0])} d2:${formatLogNumber(d[1])} ` +
+                `d3:${formatLogNumber(d[2])} d4:${formatLogNumber(d[3])} err: ${err}`;
+        }
+
+        function exportTrajectoryCsv() {
+            const select = document.getElementById('export_path_select');
+            const selected = select ? select.value : 'rules';
+            const path = latestTrajectoryPaths[selected] || latestTrajectoryPaths.firmware;
+            let updateIdx = 0;
+
+            const lines = rawData.all_entries.map((entry, index) => {
+                let px = entry.px_fw;
+                let py = entry.py_fw;
+
+                if (entry.type === 'Update') {
+                    const nextPx = path.x ? path.x[updateIdx] : null;
+                    const nextPy = path.y ? path.y[updateIdx] : null;
+                    if (Number.isFinite(nextPx) && Number.isFinite(nextPy)) {
+                        px = nextPx;
+                        py = nextPy;
+                    }
+                    updateIdx++;
+                }
+
+                const sourceLine = entry.raw_line || formatFallbackLogLine(entry, entry.px_fw, entry.py_fw, index + 1);
+                return replacePxPyInLine(sourceLine, px, py);
+            });
+
+            const blob = new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+            const link = document.createElement('a');
+            const label = selected.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+            const base = sourceFilename.replace(/\.csv$/i, '');
+            const url = URL.createObjectURL(blob);
+            link.href = url;
+            link.download = `${base}_${label}_trajectory.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function countValidPositions(path) {
+            if (!path || !path.x || !path.y) return 0;
+            let count = 0;
+            for (let i = 0; i < path.x.length; i++) {
+                if (Number.isFinite(path.x[i]) && Number.isFinite(path.y[i])) count++;
+            }
+            return count;
+        }
+
+        function updatePositionRateDisplay(totalTimeOverride) {
+            if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
+            const select = document.getElementById('export_path_select');
+            const selected = select ? select.value : 'rules';
+            const path = latestTrajectoryPaths[selected] || latestTrajectoryPaths.firmware;
+            const validCount = countValidPositions(path);
+            const totalCount = path && path.x ? path.x.length : 0;
+            const hz = latestTotalTime > 0 ? validCount / latestTotalTime : 0;
+            const label = select ? select.options[select.selectedIndex].text : 'Trajectory';
+            const elem = document.getElementById('position_rate_info');
+            if (elem) {
+                elem.textContent = `${label}: ${hz.toFixed(2)} Hz (${validCount}/${totalCount} points, ${latestTotalTime.toFixed(2)}s)`;
+            }
+        }
+
+        function meanFinite(values) {
+            let sum = 0;
+            let count = 0;
+            values.forEach(v => {
+                if (Number.isFinite(v)) {
+                    sum += v;
+                    count++;
+                }
+            });
+            return count > 0 ? { mean: sum / count, count } : { mean: null, count: 0 };
+        }
+
+        function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength) {
+            const elem = document.getElementById('d2_distance_stats');
+            if (!elem) return;
+
+            const rawCounts = [0, 0, 0, 0];
+            samples.slice(0, xAxisLength).forEach(s => {
+                for (let i = 0; i < 4; i++) {
+                    if (s.distances[i] > 0.1) rawCounts[i]++;
+                }
+            });
+
+            elem.innerHTML = [0, 1, 2, 3].map(i => {
+                const d2 = meanFinite(d2Scores[i]);
+                const gatedCount = gatedDist[i].filter(v => Number.isFinite(v)).length;
+                const rejectCount = rejectIdx[i].length;
+                const meanText = d2.mean === null ? '--' : d2.mean.toFixed(3);
+                return `
+                    <div class="stat-box">
+                        <strong>A${i + 1}</strong>
+                        <div class="stat-row"><span>Mean D2</span><span>${meanText}</span></div>
+                        <div class="stat-row"><span>D2 Count</span><span>${d2.count}</span></div>
+                        <div class="stat-row"><span>Raw Dist</span><span>${rawCounts[i]}</span></div>
+                        <div class="stat-row"><span>Gated Dist</span><span>${gatedCount}</span></div>
+                        <div class="stat-row"><span>Rejected</span><span>${rejectCount}</span></div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function update() {
+            const T2_high    = parseFloat(document.getElementById('t2_high_range').value);
+            const T2_low     = parseFloat(document.getElementById('t2_low_range').value);
+            const R_base     = parseFloat(document.getElementById('r_range').value);
+            const WIN        = parseInt(document.getElementById('win_range').value);
+            const zupt_acc   = parseFloat(document.getElementById('zupt_acc_range').value);
+            const zupt_gyr   = parseFloat(document.getElementById('zupt_gyr_range').value);
+            let max_samples  = parseInt(document.getElementById('max_samples_range').value);
+
+            if (isNaN(max_samples)) max_samples = rawData.all_entries.length;
+
+            document.getElementById('t2_high_val').innerText = T2_high;
+            document.getElementById('t2_low_val').innerText  = T2_low;
+            document.getElementById('r_val').innerText       = R_base;
+            document.getElementById('win_val').innerText     = WIN;
+            document.getElementById('zupt_acc_val').innerText = zupt_acc;
+            document.getElementById('zupt_gyr_val').innerText = zupt_gyr;
+            const maxRangeElem = document.getElementById('max_samples_range');
+            document.getElementById('max_samples_val').innerText = (max_samples >= parseInt(maxRangeElem.max)) ? "All" : max_samples;
+
+            const rules = [];
+            const ruleDivs = document.getElementById('rules_container').children;
+            for (let i = 0; i < ruleDivs.length; i++) {
+                const div = ruleDivs[i];
+                const start = parseInt(div.querySelector('.rule-start').value) || 0;
+                const end = parseInt(div.querySelector('.rule-end').value) || 100000;
+                const anchors = Array.from(div.querySelectorAll('.rule-anchor:checked')).map(cb => parseInt(cb.value));
+                rules.push({ start, end, anchors });
+            }
+
+            const bias = rawData.biases;
+
+            // histories[i] = CLEAN accepted-only sliding window per anchor
+            const histories = [[], [], [], []];
+            const gatedDist = [[], [], [], []];
+            const d2Scores  = [[], [], [], []];
+            const rejectIdx = [[], [], [], []];
+            const is_rejected = [false, false, false, false];
+
+            let v_clean = { x: 0, y: 0 }, yaw = 0, zupt_cnt = 0;
+            const simPath  = { x: [], y: [] };
+            const simPathRuled = { x: [], y: [] };
+            const simPathWLS     = { x: [], y: [] };
+            const simPathTriplet = { x: [], y: [] };
+            const wlsInfo         = [];
+            const bestTripletInfo = [];
+
+            const enable_smoother = document.getElementById('enable_smoother').checked;
+            const SMOOTHER_ALPHA = 0.25;
+            const SMOOTHER_JUMP_LIMIT = 0.30;
+            const smoother_state = [
+                { init: false, filtered: 0 },
+                { init: false, filtered: 0 },
+                { init: false, filtered: 0 },
+                { init: false, filtered: 0 }
+            ];
+
+            const applySmoothing = (i, raw_d) => {
+                if (!enable_smoother) return raw_d;
+                if (!smoother_state[i].init) {
+                    smoother_state[i].filtered = raw_d;
+                    smoother_state[i].init = true;
+                    return raw_d;
+                }
+                let delta = raw_d - smoother_state[i].filtered;
+                let bounded = raw_d;
+                if (delta > SMOOTHER_JUMP_LIMIT) {
+                    bounded = smoother_state[i].filtered + SMOOTHER_JUMP_LIMIT;
+                } else if (delta < -SMOOTHER_JUMP_LIMIT) {
+                    bounded = smoother_state[i].filtered - SMOOTHER_JUMP_LIMIT;
+                }
+                smoother_state[i].filtered += SMOOTHER_ALPHA * (bounded - smoother_state[i].filtered);
+                return smoother_state[i].filtered;
+            };
+
+            // k_vel: velocity uncertainty (m/s → variance contribution)
+            // k_pos REMOVED — was the root bug (depended on firmware position)
+            const k_vel = 0.5;
+
+            const plotData = { vx: [], vy: [], zupt: [], ax: [], ay: [], gz: [], yaw: [], times: [] };
+            let sampleIdx = 0, total_time = 0;
+            let last_ax = 0, last_ay = 0, last_gz = 0;
+
+            const entriesToProcess = rawData.all_entries.slice(0, max_samples);
+            entriesToProcess.forEach((entry) => {
+                if (entry.type === 'Init') {
+                    last_ax = entry.ax; last_ay = entry.ay; last_gz = entry.gz;
+                }
+                if (entry.dt > 0) total_time += entry.dt;
+
+                // ── IMU predict step ─────────────────────────────────────
+                if (entry.type === 'Predict' && entry.dt > 0) {
+                    last_ax = entry.ax; last_ay = entry.ay; last_gz = entry.gz;
+                    v_clean.x += (entry.ax - bias.ax) * entry.dt;
+                    v_clean.y += (entry.ay - bias.ay) * entry.dt;
+                    v_clean.x *= 0.98; v_clean.y *= 0.98;
+                    yaw += (entry.gz - bias.gz) * entry.dt;
+
+                    const acc_mag = Math.sqrt((entry.ax - bias.ax)**2 + (entry.ay - bias.ay)**2);
+                    const gyr_mag = Math.abs(entry.gz - bias.gz);
+                    if (acc_mag < zupt_acc && gyr_mag < zupt_gyr) zupt_cnt++; else zupt_cnt = 0;
+                    if (zupt_cnt > 10) { v_clean.x = 0; v_clean.y = 0; }
+                }
+
+                // ── UWB update step ──────────────────────────────────────
+                if (entry.type === 'Update') {
+                    let v_anchors = [];
+                    let v_anchors_ruled = [];
+                    let v_anchors_best = [];
+
+                    let allowedAnchors = [0, 1, 2, 3];
+                    let hasMatchingRule = false;
+                    for (const r of rules) {
+                        if (sampleIdx >= r.start && sampleIdx <= r.end) {
+                            allowedAnchors = r.anchors;
+                            hasMatchingRule = true;
+                            break;
+                        }
+                    }
+                    if (rules.length > 0 && !hasMatchingRule) {
+                        allowedAnchors = []; // If rules exist but no rule matches, use no anchors for ruled path
+                    }
+
+                    entry.distances.forEach((d, i) => {
+                        const anc = anchors[i];
+
+                        // Skip clearly invalid readings
+                        if (d <= 0.1) {
+                            gatedDist[i].push(null);
+                            d2Scores[i].push(null);
+                            return;
+                        }
+
+                        const hist = histories[i];
+
+                        // ── Cold-start: warm up history without gating ────
+                        if (hist.length < 3) {
+                            hist.push(d);
+                            let smoothed_d = applySmoothing(i, d);
+                            gatedDist[i].push(smoothed_d);
+                            d2Scores[i].push(0);
+                            const r2d = Math.sqrt(Math.max(0, smoothed_d**2 - (anc.z - tagHeight)**2));
+                            v_anchors.push({ x: anc.x, y: anc.y, r: r2d });
+                            v_anchors_best.push({ x: anc.x, y: anc.y, r: r2d, d2: 0, id: i+1 });
+                            if (allowedAnchors.includes(i)) {
+                                v_anchors_ruled.push({ x: anc.x, y: anc.y, r: r2d });
+                            }
+                            return;
+                        }
+
+                        const sorted  = [...hist].sort((a, b) => a - b);
+                        const d_pred  = sorted[Math.floor(sorted.length / 2)];
+                        const mean    = hist.reduce((s, v) => s + v, 0) / hist.length;
+                        const variance= hist.reduce((s, v) => s + (v - mean)**2, 0) / hist.length;
+                        const vel_mag = Math.sqrt(v_clean.x**2 + v_clean.y**2);
+                        const S       = Math.max(variance, R_base) + (k_vel * vel_mag);
+
+                        const d2 = ((d - d_pred)**2) / S;
+                        d2Scores[i].push(d2);
+
+                        let pass = false;
+                        if (is_rejected[i]) {
+                            if (d2 < T2_low) {
+                                is_rejected[i] = false;
+                                pass = true;
+                            }
+                        } else {
+                            if (d2 > T2_high) {
+                                is_rejected[i] = true;
+                            } else {
+                                pass = true;
+                            }
+                        }
+
+                        if (pass) {
+                            hist.push(d);
+                            if (hist.length > WIN) hist.shift();
+                            let smoothed_d = applySmoothing(i, d);
+                            gatedDist[i].push(smoothed_d);
+                            const r2d = Math.sqrt(Math.max(0, smoothed_d**2 - (anc.z - tagHeight)**2));
+                            v_anchors.push({ x: anc.x, y: anc.y, r: r2d });
+                            v_anchors_best.push({ x: anc.x, y: anc.y, r: r2d, d2: d2, id: i+1 });
+                            if (allowedAnchors.includes(i)) {
+                                v_anchors_ruled.push({ x: anc.x, y: anc.y, r: r2d });
+                            }
+                        } else {
+                            gatedDist[i].push(null);
+                            rejectIdx[i].push(sampleIdx);
+                        }
+                    });
+
+                    const pos = multilaterate(v_anchors);
+                    simPath.x.push(pos ? pos.x : null);
+                    simPath.y.push(pos ? pos.y : null);
+
+                    const pos_ruled = multilaterate(v_anchors_ruled);
+                    simPathRuled.x.push(pos_ruled ? pos_ruled.x : null);
+                    simPathRuled.y.push(pos_ruled ? pos_ruled.y : null);
+
+                    // ── WLS Multilateration path (NEW) ────────────────────
+                    // Dùng toàn bộ anchor hợp lệ, weight = 1/(1+d2), không cần sort/chọn
+                    const pos_wls = multilaterate(v_anchors_best);
+                    simPathWLS.x.push(pos_wls ? pos_wls.x : null);
+                    simPathWLS.y.push(pos_wls ? pos_wls.y : null);
+                    if (pos_wls) {
+                        const anchorList = v_anchors_best.map(a => `A${a.id}(w=${(1/(1+(a.d2||0))).toFixed(2)})`).join(', ');
+                        wlsInfo.push(`N=${v_anchors_best.length}<br>${anchorList}`);
+                    } else {
+                        wlsInfo.push('None');
+                    }
+
+                    const bestTriplet = selectBestTriplet(v_anchors_best, T2_high);
+                    simPathTriplet.x.push(bestTriplet ? bestTriplet.pos.x : null);
+                    simPathTriplet.y.push(bestTriplet ? bestTriplet.pos.y : null);
+                    if (bestTriplet) {
+                        const ids = bestTriplet.triplet.map(a => 'A'+a.id).join(',');
+                        bestTripletInfo.push(
+                            `${ids}<br>d2Raw=${bestTriplet.avgD2Raw.toFixed(3)}` +
+                            ` d2Pen=${bestTriplet.avgD2Penalty.toFixed(3)}` +
+                            `<br>gdopRaw=${bestTriplet.gdopRaw.toFixed(3)}` +
+                            ` gdopPen=${bestTriplet.gdopPenalty.toFixed(3)}` +
+                            `<br>res=${bestTriplet.residual.toFixed(3)}m` +
+                            ` resPen=${bestTriplet.residualPenalty.toFixed(3)}` +
+                            `<br>score=${bestTriplet.score.toFixed(3)}`
+                        );
+                    } else {
+                        bestTripletInfo.push('None');
+                    }
+
+                    plotData.vx.push(v_clean.x);
+                    plotData.vy.push(v_clean.y);
+                    plotData.zupt.push(zupt_cnt > 10 ? 0.1 : 0);
+                    plotData.ax.push(last_ax - bias.ax);
+                    plotData.ay.push(last_ay - bias.ay);
+                    plotData.gz.push(last_gz - bias.gz);
+                    plotData.yaw.push(yaw * 180 / Math.PI);
+                    plotData.times.push(total_time);
+                    sampleIdx++;
+                }
+            });
+
+            const x_axis    = simPath.x.map((_, i) => i);
+            latestTrajectoryPaths = {
+                firmware: {
+                    x: rawData.fw_path.x.slice(0, x_axis.length),
+                    y: rawData.fw_path.y.slice(0, x_axis.length)
+                },
+                all: simPath,
+                rules: simPathRuled,
+                wls: simPathWLS,
+                triplet: simPathTriplet
+            };
+            updatePositionRateDisplay(total_time);
+            const rej_indices = (i) => rejectIdx[i];
+            const times     = plotData.times;
+            const pos_errors = [];
+            const pos_errors_wls = [];
+            const pos_errors_triplet = [];
+            updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, x_axis.length);
+
+            Plotly.restyle('trajectory', { 
+                x: [rawData.fw_path.x.slice(0, x_axis.length), simPath.x, simPathRuled.x, simPathWLS.x, simPathTriplet.x], 
+                y: [rawData.fw_path.y.slice(0, x_axis.length), simPath.y, simPathRuled.y, simPathWLS.y, simPathTriplet.y],
+                text: [
+                    samples.slice(0, x_axis.length).map((_, i) => 'Idx: ' + i + '<br>Mask: ' + rawData.fw_path.mask[i] + ' (A' + decodeMask(rawData.fw_path.mask[i]) + ')'), 
+                    simPath.x.map((_, i) => 'Idx: ' + i),
+                    simPathRuled.x.map((_, i) => 'Idx: ' + i),
+                    simPathWLS.x.map((_, i) => 'Idx: ' + i + '<br>Multilateration: ' + wlsInfo[i]),
+                    simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i])
+                ]
+            }, [2, 3, 4, 5, 6]);
+
+            for (let i = 0; i < 4; i++) {
+                Plotly.restyle('distances', {
+                    x: [x_axis, x_axis, rej_indices(i)],
+                    y: [samples.slice(0, x_axis.length).map(s => s.distances[i] <= 0.1 ? null : s.distances[i]), gatedDist[i], rejectIdx[i].map(idx => samples[idx].distances[i])],
+                    customdata: [times, times, rejectIdx[i].map(idx => times[idx])],
+                    hovertemplate: 'Time: %{customdata:.4f}s | %{y:.6f}m<extra></extra>'
+                }, [i*3, i*3+1, i*3+2]);
+
+                Plotly.restyle('scores', {
+                    x: [x_axis], y: [d2Scores[i]],
+                    customdata: [times],
+                    hovertemplate: 'Time: %{customdata:.4f}s | D2: %{y:.6f}<extra></extra>'
+                }, [i]);
+            }
+            Plotly.restyle('scores', { 
+                x: [[0, x_axis.length], [0, x_axis.length]], 
+                y: [[T2_high, T2_high], [T2_low, T2_low]] 
+            }, [4, 5]);
+
+            Plotly.restyle('accel', {
+                x: [x_axis, x_axis], y: [plotData.ax, plotData.ay],
+                customdata: [times, times],
+                hovertemplate: 'Time: %{customdata:.4f}s | %{y:.6f}<extra></extra>'
+            }, [0, 1]);
+
+            Plotly.restyle('velocity', {
+                x: [x_axis, x_axis, x_axis, x_axis, x_axis],
+                y: [[], [], plotData.vx, plotData.vy, plotData.zupt],
+                customdata: [[], [], times, times, times],
+                hovertemplate: 'Time: %{customdata:.4f}s | %{y:.6f}<extra></extra>'
+            }, [0, 1, 2, 3, 4]);
+
+            Plotly.restyle('yaw_plot', {
+                x: [x_axis, x_axis], y: [plotData.gz, plotData.yaw],
+                customdata: [times, times],
+                hovertemplate: 'Time: %{customdata:.4f}s | %{y:.6f}<extra></extra>'
+            }, [0, 1]);
+
+            simPathRuled.x.forEach((px, i) => {
+                if (px === null) { pos_errors.push(null); return; }
+                const py = simPathRuled.y[i];
+                let min_d = 999;
+                for (let j = 0; j < gt_square.x.length - 1; j++) {
+                    const x1 = gt_square.x[j], y1 = gt_square.y[j],
+                          x2 = gt_square.x[j+1], y2 = gt_square.y[j+1];
+                    const l2 = (x2-x1)**2 + (y2-y1)**2;
+                    let t = ((px-x1)*(x2-x1) + (py-y1)*(y2-y1)) / l2;
+                    t = Math.max(0, Math.min(1, t));
+                    const dx = px - (x1 + t*(x2-x1)), dy = py - (y1 + t*(y2-y1));
+                    min_d = Math.min(min_d, Math.sqrt(dx*dx + dy*dy));
+                }
+                pos_errors.push(min_d);
+            });
+
+            simPathWLS.x.forEach((px, i) => {
+                if (px === null) { pos_errors_wls.push(null); return; }
+                const py = simPathWLS.y[i];
+                let min_d = 999;
+                for (let j = 0; j < gt_square.x.length - 1; j++) {
+                    const x1 = gt_square.x[j], y1 = gt_square.y[j],
+                          x2 = gt_square.x[j+1], y2 = gt_square.y[j+1];
+                    const l2 = (x2-x1)**2 + (y2-y1)**2;
+                    let t = ((px-x1)*(x2-x1) + (py-y1)*(y2-y1)) / l2;
+                    t = Math.max(0, Math.min(1, t));
+                    const dx = px - (x1 + t*(x2-x1)), dy = py - (y1 + t*(y2-y1));
+                    min_d = Math.min(min_d, Math.sqrt(dx*dx + dy*dy));
+                }
+                pos_errors_wls.push(min_d);
+            });
+
+            simPathTriplet.x.forEach((px, i) => {
+                if (px === null) { pos_errors_triplet.push(null); return; }
+                const py = simPathTriplet.y[i];
+                let min_d = 999;
+                for (let j = 0; j < gt_square.x.length - 1; j++) {
+                    const x1 = gt_square.x[j], y1 = gt_square.y[j],
+                          x2 = gt_square.x[j+1], y2 = gt_square.y[j+1];
+                    const l2 = (x2-x1)**2 + (y2-y1)**2;
+                    let t = ((px-x1)*(x2-x1) + (py-y1)*(y2-y1)) / l2;
+                    t = Math.max(0, Math.min(1, t));
+                    const dx = px - (x1 + t*(x2-x1)), dy = py - (y1 + t*(y2-y1));
+                    min_d = Math.min(min_d, Math.sqrt(dx*dx + dy*dy));
+                }
+                pos_errors_triplet.push(min_d);
+            });
+
+            const meanErr = (arr) => {
+                const valid = arr.filter(v => v !== null);
+                return valid.length ? (valid.reduce((s, v) => s + v, 0) / valid.length).toFixed(3) : "N/A";
+            };
+
+            Plotly.restyle('pos_error', {
+                x: [x_axis, x_axis, x_axis], y: [pos_errors, pos_errors_wls, pos_errors_triplet],
+                name: [
+                    `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
+                    `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
+                    `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`
+                ],
+                customdata: [times, times, times],
+                hovertemplate: 'Time: %{customdata:.4f}s | Err: %{y:.6f}m<extra></extra>'
+            }, [0, 1, 2]);
+
+            const csv_errors = samples.slice(0, x_axis.length).map(s => s.err);
+            Plotly.restyle('error_frame', {
+                x: [x_axis], y: [csv_errors],
+                customdata: [times],
+                hovertemplate: 'Time: %{customdata:.4f}s | Frames: %{y:.0f}<extra></extra>'
+            }, [0]);
+
+            const syncLayout = {
+                'xaxis.range':  [0, x_axis.length],
+                'xaxis2.range': [0, total_time],
+                'xaxis2.showticklabels': true,
+                'xaxis2.autorange': false
+            };
+            ['distances', 'scores', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame']
+                .forEach(id => Plotly.relayout(id, syncLayout));
+        }
+
+        const colors = ['#2563eb', '#16a34a', '#d97706', '#7c3aed'];
+
+        Plotly.newPlot('trajectory', [
+            { x: anchors.map(a => a.x), y: anchors.map(a => a.y), mode: 'markers+text',
+               name: 'Anchors', text: anchors.map(a => 'A'+a.id),
+               marker: { symbol: 'triangle-up', size: 12, color: '#1e293b' } },
+            { x: gt_square.x, y: gt_square.y, mode: 'lines', name: 'Ground Truth',
+               line: { dash: 'dot', color: '#ef4444', width: 2 }, opacity: 0.4 },
+            { x: rawData.fw_path.x, y: rawData.fw_path.y, mode: 'lines+markers',
+               name: 'Firmware Path', line: { color: '#94a3b8', width: 1 }, marker: { size: 3, color: '#94a3b8' },
+               text: samples.map((_, i) => 'Idx: ' + i + '<br>Mask: ' + rawData.fw_path.mask[i] + ' (A' + decodeMask(rawData.fw_path.mask[i]) + ')'),
+               hovertemplate: '%{text}<br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>' },
+            { x: [], y: [], mode: 'lines', name: 'Simulated Path (All)',
+               line: { color: '#94a3b8', width: 1, dash: 'dot' },
+               hovertemplate: '%{text}<br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>' },
+            { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Rules)',
+               marker: { size: 4, color: '#2563eb' }, line: { width: 2, color: '#2563eb' },
+               hovertemplate: '%{text}<br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>' },
+            { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Multilateration)',
+               marker: { size: 4, color: '#d97706' }, line: { width: 2, color: '#d97706', dash: 'dash' },
+               hovertemplate: '%{text}<br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>' },
+            { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Best Triplet)',
+               marker: { size: 4, color: '#059669' }, line: { width: 2, color: '#059669' },
+               hovertemplate: '%{text}<br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>' }
+        ], {
+            xaxis: { title: 'X (m)' },
+            yaxis: { title: 'Y (m)' },
+            hovermode: 'closest', margin: { t: 20 },
+            legend: { orientation: 'h', yanchor: 'top', y: -0.15, xanchor: 'center', x: 0.5 }
+        });
+
+        const dTraces = [];
+        for (let i = 0; i < 4; i++) {
+            dTraces.push({ x: samples.map((_, idx) => idx),
+                            y: samples.map(s => s.distances[i] <= 0.1 ? null : s.distances[i]),
+                            name: 'A'+(i+1)+' Raw', mode: 'lines',
+                            line: { width: 1, color: colors[i], opacity: 0.15 } });
+            dTraces.push({ x: [], y: [], name: 'A'+(i+1)+' Gated', mode: 'lines',
+                            line: { width: 2, color: colors[i] } });
+            dTraces.push({ x: [], y: [], name: 'REJECTED', legendgroup: 'rej',
+                            showlegend: (i === 0), mode: 'markers',
+                            marker: { symbol: 'x', color: '#ef4444', size: 6 } });
+        }
+        dTraces.push({ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' });
+
+        const nodeDistSet = new Set();
+        const corners = [];
+        for (let i = 0; i < gt_square.x.length - 1; i++) corners.push({ x: gt_square.x[i], y: gt_square.y[i] });
+        anchors.forEach(a => {
+            corners.forEach(c => {
+                const d = Math.sqrt((a.x - c.x)**2 + (a.y - c.y)**2 + (a.z - tagHeight)**2);
+                nodeDistSet.add(Math.round(d * 10) / 10); // Round to 0.1m to group tiers
+            });
+        });
+        const uniqueNodeDist = Array.from(nodeDistSet).sort((a,b) => a - b);
+        uniqueNodeDist.forEach((dist, idx) => {
+            dTraces.push({
+                x: [0, samples.length], y: [dist, dist],
+                name: 'Ground Truth', mode: 'lines',
+                line: { color: '#94a3b8', width: 1, dash: 'dash' }, opacity: 0.8,
+                legendgroup: 'gt_node', showlegend: (idx === 0)
+            });
+        });
+        Plotly.newPlot('distances', dTraces, {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index', side: 'bottom' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { title: 'Distance (m)' },
+            hovermode: 'x unified'
+        });
+
+        const sTraces = [];
+        for (let i = 0; i < 4; i++) {
+            sTraces.push({ x: [], y: [], name: 'A'+(i+1), mode: 'lines',
+                            line: { color: colors[i] } });
+        }
+        sTraces.push({ x: [], y: [], mode: 'lines', name: 'T2 Reject',
+                        line: { color: '#ef4444', dash: 'dash' } });
+        sTraces.push({ x: [], y: [], mode: 'lines', name: 'T2 Recover',
+                        line: { color: '#f59e0b', dash: 'dash' } });
+        sTraces.push({ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' });
+        Plotly.newPlot('scores', sTraces, {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { range: [0, 20], title: 'D2 Score' },
+            hovermode: 'x unified'
+        });
+
+        Plotly.newPlot('accel', [
+            { x: [], y: [], name: 'Ax', mode: 'lines', line: { color: '#2563eb' } },
+            { x: [], y: [], name: 'Ay', mode: 'lines', line: { color: '#16a34a' } },
+            { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+        ], {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { title: 'm/s²' },
+            hovermode: 'x unified'
+        });
+
+        Plotly.newPlot('velocity', [
+            { x: [], y: [], name: 'Vx Raw', mode: 'lines',
+               line: { color: '#ef4444', dash: 'dot', width: 1 }, visible: 'legendonly' },
+            { x: [], y: [], name: 'Vy Raw', mode: 'lines',
+               line: { color: '#f87171', dash: 'dot', width: 1 }, visible: 'legendonly' },
+            { x: [], y: [], name: 'Vx Clean', mode: 'lines', line: { color: '#2563eb', width: 2 } },
+            { x: [], y: [], name: 'Vy Clean', mode: 'lines', line: { color: '#16a34a', width: 2 } },
+            { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', mode: 'lines',
+               line: { color: '#cbd5e1', width: 0 }, opacity: 0.3 },
+            { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+        ], {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { title: 'm/s' },
+            hovermode: 'x unified'
+        });
+
+        Plotly.newPlot('yaw_plot', [
+            { x: [], y: [], name: 'Gyro Z', mode: 'lines',
+               line: { color: '#94a3b8', width: 1 }, yaxis: 'y2' },
+            { x: [], y: [], name: 'Yaw Angle', mode: 'lines', line: { color: '#7c3aed', width: 2 } },
+            { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+        ], {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { title: 'Yaw (deg)', side: 'left' },
+            yaxis2: { title: 'Gyro (rad/s)', overlaying: 'y', side: 'right', showgrid: false },
+            hovermode: 'x unified'
+        });
+
+        Plotly.newPlot('pos_error', [
+            { x: [], y: [], name: 'Pos Error (Rules)', mode: 'lines',
+               line: { color: '#ef4444', width: 2 } },
+            { x: [], y: [], name: 'Pos Error (Multilateration)', mode: 'lines',
+               line: { color: '#d97706', width: 2 } },
+            { x: [], y: [], name: 'Pos Error (Best Triplet)', mode: 'lines',
+               line: { color: '#059669', width: 2 } },
+            { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+        ], {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { title: 'Error (m)', range: [0, 1.5] },
+            hovermode: 'x unified'
+        });
+
+        Plotly.newPlot('error_frame', [
+            { x: [], y: [], name: 'Log Error Frames', mode: 'lines',
+               line: { color: '#475569', width: 1 }, fill: 'tozeroy' },
+            { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+        ], {
+            margin: { t: 40, b: 40 },
+            xaxis:  { title: 'Sample Index' },
+            xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top',
+                       showticklabels: true, showline: true },
+            yaxis:  { title: 'Frame Count' },
+            hovermode: 'x unified'
+        });
+
+        function syncInput(rangeId, inputId) {
+            document.getElementById(rangeId).addEventListener('input', (e) => {
+                document.getElementById(inputId).value = e.target.value;
+                update();
+            });
+            document.getElementById(inputId).addEventListener('input', (e) => {
+                document.getElementById(rangeId).value = e.target.value;
+                update();
+            });
+        }
+
+        syncInput('t2_high_range', 't2_high_input');
+        syncInput('t2_low_range', 't2_low_input');
+        syncInput('r_range', 'r_input');
+        syncInput('win_range', 'win_input');
+        syncInput('zupt_acc_range', 'zupt_acc_input');
+        syncInput('zupt_gyr_range', 'zupt_gyr_input');
+        syncInput('max_samples_range', 'max_samples_input');
+        
+        function saveDefaults() {
+            const config = {
+                t2_high: document.getElementById('t2_high_input').value,
+                t2_low: document.getElementById('t2_low_input').value,
+                r_base: document.getElementById('r_input').value,
+                zupt_acc: document.getElementById('zupt_acc_input').value,
+                zupt_gyr: document.getElementById('zupt_gyr_input').value,
+                max_samples: document.getElementById('max_samples_input').value,
+                enable_smoother: document.getElementById('enable_smoother').checked,
+                rules: []
+            };
+            const ruleDivs = document.getElementById('rules_container').children;
+            for (let i = 0; i < ruleDivs.length; i++) {
+                const div = ruleDivs[i];
+                config.rules.push({
+                    start: div.querySelector('.rule-start').value,
+                    end: div.querySelector('.rule-end').value,
+                    anchors: Array.from(div.querySelectorAll('.rule-anchor:checked')).map(cb => parseInt(cb.value))
+                });
+            }
+            localStorage.setItem('uwb_sim_defaults', JSON.stringify(config));
+            alert('Defaults saved!');
+        }
+
+        function clearDefaults() {
+            localStorage.removeItem('uwb_sim_defaults');
+            alert('Defaults cleared! Reload the page to see original settings.');
+        }
+
+        function loadDefaults() {
+            const saved = localStorage.getItem('uwb_sim_defaults');
+            if (saved) {
+                try {
+                    const config = JSON.parse(saved);
+                    if (config.t2_high) {
+                        document.getElementById('t2_high_input').value = config.t2_high;
+                        document.getElementById('t2_high_range').value = config.t2_high;
+                        document.getElementById('t2_high_val').innerText = config.t2_high;
+                    }
+                    if (config.t2_low) {
+                        document.getElementById('t2_low_input').value = config.t2_low;
+                        document.getElementById('t2_low_range').value = config.t2_low;
+                        document.getElementById('t2_low_val').innerText = config.t2_low;
+                    }
+                    if (config.r_base) {
+                        document.getElementById('r_input').value = config.r_base;
+                        document.getElementById('r_range').value = config.r_base;
+                        document.getElementById('r_val').innerText = config.r_base;
+                    }
+                    if (config.zupt_acc) {
+                        document.getElementById('zupt_acc_input').value = config.zupt_acc;
+                        document.getElementById('zupt_acc_range').value = config.zupt_acc;
+                        document.getElementById('zupt_acc_val').innerText = config.zupt_acc;
+                    }
+                    if (config.zupt_gyr) {
+                        document.getElementById('zupt_gyr_input').value = config.zupt_gyr;
+                        document.getElementById('zupt_gyr_range').value = config.zupt_gyr;
+                        document.getElementById('zupt_gyr_val').innerText = config.zupt_gyr;
+                    }
+                    if (config.max_samples) {
+                        document.getElementById('max_samples_input').value = config.max_samples;
+                        document.getElementById('max_samples_range').value = config.max_samples;
+                        document.getElementById('max_samples_val').innerText = config.max_samples;
+                    }
+                    if (config.enable_smoother !== undefined) {
+                        document.getElementById('enable_smoother').checked = config.enable_smoother;
+                    }
+                    
+                    if (config.rules && config.rules.length > 0) {
+                        document.getElementById('rules_container').innerHTML = ''; // clear existing
+                        config.rules.forEach(r => {
+                            addRule();
+                            const div = document.getElementById('rules_container').lastElementChild;
+                            div.querySelector('.rule-start').value = r.start;
+                            div.querySelector('.rule-end').value = r.end;
+                            div.querySelectorAll('.rule-anchor').forEach(cb => {
+                                cb.checked = r.anchors.includes(parseInt(cb.value));
+                            });
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to load defaults', e);
+                }
+            }
+        }
+
+        loadDefaults();
+        update();
+    </script>
+</body>
+</html>
