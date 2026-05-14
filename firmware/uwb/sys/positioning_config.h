@@ -55,7 +55,6 @@
 /* 0 = normal ranging mode
  * 1 = anchor-to-anchor gradient calibration mode (A2A)                      */
 #define ENABLE_ANCHOR_AUTO_CALIB    0
-#define ENABLE_TAG_AUTO_CALIB       0
 
 /* A2A calibration mode:
  * 0 = mutual calibration: all anchors calibrate against each other

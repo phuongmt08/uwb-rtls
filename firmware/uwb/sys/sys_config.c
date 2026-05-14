@@ -376,7 +376,7 @@ void sys_config_reset_to_defaults(void)
     /* Calibration Configuration
        ---------- */
     g_storage.config.calib.enable_anchor_auto_calib         =           ENABLE_ANCHOR_AUTO_CALIB;
-    g_storage.config.calib.enable_tag_auto_calib            =           ENABLE_TAG_AUTO_CALIB;
+    g_storage.config.calib.enable_tag_auto_calib            =           0U;
 
     /* Anchor Layout Positions (X, Y, Z in meters)
        ================================================================================================

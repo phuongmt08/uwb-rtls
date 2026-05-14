@@ -425,15 +425,6 @@ int main(void)
     }
 #endif
 
-#if ENABLE_TAG_AUTO_CALIB
-    /* In calibration build, tag button events handled differently */
-    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE)
-    {
-      app_tag_on_button(btn_event);
-      btn_event = BSP_IO_EVENT_NONE;
-    }
-#endif
-
     switch (btn_event)
     {
 #if !ENABLE_ANCHOR_AUTO_CALIB
