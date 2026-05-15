@@ -11,6 +11,10 @@ import threading
 
 # --- CONFIGURATION ---
 BASE_DIR = r"c:\Users\USER\Desktop\final_project\uwb-rtls\software\simulation"
+GT_SQUARE = {
+    'x': [2.44, 7.32, 7.32, 2.44, 2.44],
+    'y': [2.44, 2.44, 7.32, 7.32, 2.44]
+}
 
 def parse_log(filepath):
     data = []
@@ -80,28 +84,45 @@ def run_gen(log_file):
                 fp_logs['snr'][i].append(val_snr)
 
     # --- GENERATE MINI THUMBNAIL (SVG) ---
-    svg_path = ""
+    svg_content = ""
     if fw_path['x']:
-        # Scale to 60x40 box
-        xs, ys = fw_path['x'], fw_path['y']
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
+        # Combine path and GT to find global bounds
+        all_x = fw_path['x'] + GT_SQUARE['x']
+        all_y = fw_path['y'] + GT_SQUARE['y']
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
         dx, dy = max_x - min_x, max_y - min_y
-        scale = min(50 / (dx or 1), 30 / (dy or 1))
-        pts = []
-        for i in range(len(xs)):
-            # Flip Y for SVG (0,0 is top-left)
-            px = 5 + (xs[i] - min_x) * scale
-            py = 35 - (ys[i] - min_y) * scale
-            pts.append(f"{px:.1f},{py:.1f}")
-        svg_path = f'<svg viewBox="0 0 60 40"><polyline points="{" ".join(pts)}" fill="none" stroke="#2563eb" stroke-width="1.5" /></svg>'
+        
+        # Scale to fit 50x50 box (1:1 Aspect Ratio)
+        max_dim = max(dx, dy, 0.1)
+        scale = 50 / max_dim
+        
+        # Centering offsets
+        off_x = (50 - dx * scale) / 2
+        off_y = (50 - dy * scale) / 2
 
+        def to_svg(x_list, y_list):
+            pts = []
+            for i in range(len(x_list)):
+                px = 5 + off_x + (x_list[i] - min_x) * scale
+                py = 55 - off_y - (y_list[i] - min_y) * scale
+                pts.append(f"{px:.1f},{py:.1f}")
+            return " ".join(pts)
+
+        gt_pts = to_svg(GT_SQUARE['x'], GT_SQUARE['y'])
+        fw_pts = to_svg(fw_path['x'], fw_path['y'])
+        
+        svg_content = f"""
+            <polyline points="{gt_pts}" fill="none" stroke="#fecaca" stroke-width="1.5" stroke-dasharray="2,2" />
+            <polyline points="{fw_pts}" fill="none" stroke="#2563eb" stroke-width="1.2" />
+        """
+    
     payload = {
         'fw_path': fw_path,
         'fp_logs': fp_logs,
         'all_entries': log_data,
         'biases': bias,
-        'thumb_svg': svg_path
+        'thumb_svg': f'<svg viewBox="0 0 60 60">{svg_content}</svg>'
     }
     return payload
 
@@ -240,10 +261,11 @@ def main():
         .log-item:hover {{ background: #f8fafc; }}
         .log-item:last-child {{ border-bottom: none; }}
         .thumb {{ 
-            width: 60px; 
-            height: 40px; 
-            background: #f1f5f9; 
-            border-radius: 4px; 
+            width: 50px; 
+            height: 50px; 
+            background: #f8fafc; 
+            border: 1px solid #f1f5f9;
+            border-radius: 6px; 
             display: flex; 
             align-items: center; 
             justify-content: center;
