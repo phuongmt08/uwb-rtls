@@ -143,19 +143,35 @@ def main():
     logs.sort(reverse=True)
     if not logs: return
 
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_prefilter.html')
+    template_mtime = os.path.getmtime(template_path) if os.path.exists(template_path) else 0
+    template_content = load_template()
+
+    files_generated = 0
     sim_results = []
     for lp in logs:
         try:
-            p = run_gen(lp)
-            if not p: continue
             fn  = os.path.basename(lp)
             rn  = fn.replace('.csv', '_sim.html')
             rp  = os.path.join(os.path.dirname(lp), rn)
-            with open(rp, 'w', encoding='utf-8') as f:
-                template = load_template()
-                html = template.replace('__FILENAME__', fn)
-                html = html.replace('__DATA_JSON__', json.dumps(p))
-                f.write(html)
+            
+            # Check if we need to regenerate
+            log_mtime = os.path.getmtime(lp)
+            html_exists = os.path.exists(rp)
+            html_mtime = os.path.getmtime(rp) if html_exists else 0
+            
+            needs_gen = not html_exists or log_mtime > html_mtime or template_mtime > html_mtime
+            
+            p = run_gen(lp)
+            if not p: continue
+            
+            if needs_gen:
+                with open(rp, 'w', encoding='utf-8') as f:
+                    html = template_content.replace('__FILENAME__', fn)
+                    html = html.replace('__DATA_JSON__', json.dumps(p))
+                    f.write(html)
+                files_generated += 1
+                
             num_updates = len([e for e in p['all_entries'] if e['type'] == 'Update'])
             sim_results.append({
                 'name': fn,
@@ -166,6 +182,7 @@ def main():
         except Exception as e:
             import traceback
             traceback.print_exc()
+
 
     # Group results by folder (date)
     grouped_results = {}
@@ -210,7 +227,7 @@ def main():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UWB Pro-Tuning Dashboard</title>
+    <title>UWB Pro-Tuning Simulation</title>
     <style>
         body {{ 
             font-family: 'Inter', -apple-system, sans-serif; 
@@ -276,7 +293,7 @@ def main():
 </head>
 <body>
     <div class="container">
-        <h1>UWB Pro-Tuning Dashboard</h1>
+        <h1>UWB Pro-Tuning Simulation</h1>
         <p>Select a simulation log file to start real-time tuning and analysis.</p>
         {list_html}
     </div>
@@ -286,7 +303,10 @@ def main():
     with open(os.path.join(BASE_DIR, "simulation_dashboard.html"), 'w', encoding='utf-8') as f:
         f.write(dashboard_html)
     
-    print(f"\n[SUCCESS] Generated {len(sim_results)} simulation files.")
+    if files_generated > 0:
+        print(f"\n[SUCCESS] Generated {files_generated} new simulation files.")
+    else:
+        print(f"\n[INFO] All {len(sim_results)} simulation files are up to date.")
     print(f"[INFO] Dashboard: {os.path.join(BASE_DIR, 'simulation_dashboard.html')}")
 
     # --- AUTO SERVER & BROWSER ---
