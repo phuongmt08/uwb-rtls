@@ -360,14 +360,6 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
 
-#ifdef PRESET_WORST_CASE
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: WORST_CASE");
-#elif defined(PRESET_BEST_CASE)
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: BEST_CASE");
-#else
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: MANUAL");
-#endif
-
 #if ENABLE_MAHALANOBIS_PREFILTER
     RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON, smoothing OFF");
 #else
