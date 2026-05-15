@@ -795,7 +795,7 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
     
     protobuf_session_end_reason_t reason = pkt->params.end_session.reason;
 
-    RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d", 
+    RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d",
            (unsigned)pkt->hdr.addr.src, (int)reason);
 
     switch (reason) {

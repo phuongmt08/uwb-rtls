@@ -188,15 +188,18 @@ bool mw_calib_a2a_apply_gradient(mw_calib_a2a_ctx_t *ctx)
     float avg_error = ctx->pair_error_sum / (float)ctx->pair_error_count;
     ctx->last_avg_error = avg_error;
 
-    /* delta = damping x avg_error x (DW_units/m) x 0.5
-     * x0.5: this anchor carries half the TWR combined delay;
-     * peer anchor delay is NOT updated here.                           */
+    /* delta = damping x avg_error x per-anchor DW_units/m.
+     * ctx->m_to_dw_units is already the per-anchor correction factor;
+     * do not halve it again here.
+     *
+     * Empirically for this DS-TWR path, increasing ANT delay makes the
+     * measured distance shorter. So negative error (measured < known)
+     * must reduce combined_delay, and positive error must increase it.  */
     int32_t delta = (int32_t)(ctx->damping
                                * avg_error
-                               * ctx->m_to_dw_units
-                               * 0.5f);
+                               * ctx->m_to_dw_units);
 
-    int32_t new_delay = (int32_t)ctx->combined_delay - delta;
+    int32_t new_delay = (int32_t)ctx->combined_delay + delta;
     if (new_delay < (int32_t)ctx->ant_min) {
         new_delay = (int32_t)ctx->ant_min;
     }

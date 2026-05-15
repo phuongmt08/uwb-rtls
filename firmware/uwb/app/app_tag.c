@@ -237,6 +237,13 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         anchors_by_id[aid].r_adaptive = (double)r_adapt;
         anchors_by_id[aid].fp_amp_norm = (double)r->fp_amp_norm_q8 / 256.0;
         anchors_by_id[aid].fp_snr = (double)r->fp_snr_q8 / 256.0;
+        RLOG_I(LOG_OBJECT_CODE_TAG,
+               "[FP] Anchor #%u amp_norm=%.3f snr=%.3f raw_amp_q8=%u raw_snr_q8=%u",
+               aid,
+               anchors_by_id[aid].fp_amp_norm,
+               anchors_by_id[aid].fp_snr,
+               (unsigned)r->fp_amp_norm_q8,
+               (unsigned)r->fp_snr_q8);
         anchors_by_id[aid].quality_valid = (r->quality != 0U);
         anchors_by_id[aid].selection_score = 0.0;
         anchors_by_id[aid].residual_rms = 0.0;

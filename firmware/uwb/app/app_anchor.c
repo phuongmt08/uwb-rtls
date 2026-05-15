@@ -60,6 +60,8 @@ static uint32_t           s_done_start_ms  = 0;  /* For grace period */
 static bool               s_system_started = false; /* Has heard at least one poll since reset */
 static uint8_t            s_peer_done_mask = 0;
 static median_filter_1d_t s_calib_medians[MAX_ANCHORS_SUPPORTED] = {0};
+static float              s_iter_std_sum   = 0.0f;
+static uint8_t            s_iter_std_count = 0U;
 #endif
 
 static bool s_ranging_active     = false;
@@ -80,6 +82,15 @@ static uint8_t calib_effective_target_id(uint8_t my_id) {
 
 static bool calib_is_target(uint8_t my_id) {
   return (!CALIB_TARGET_MODE) || calib_is_external_target_mode() || (my_id == calib_effective_target_id(my_id));
+}
+
+static uint8_t calib_count_mask_bits(uint8_t mask) {
+  uint8_t count = 0U;
+  while (mask != 0U) {
+    count += (uint8_t)(mask & 1U);
+    mask >>= 1U;
+  }
+  return count;
 }
 
 static float calib_get_target_to_anchor_distance_3d(uint8_t anchor_id) {
@@ -144,6 +155,10 @@ static void calib_reset(void) {
     memset(&s_calib_medians[i], 0, sizeof(median_filter_1d_t));
   }
   s_peer_ready_mask = 0;
+  s_a2a.pair_error_sum = 0.0f;
+  s_a2a.pair_error_count = 0U;
+  s_iter_std_sum = 0.0f;
+  s_iter_std_count = 0U;
   s_system_started = false;
   s_turn_start_ms = HAL_GetTick();
   s_last_act_ms = HAL_GetTick();
@@ -190,6 +205,22 @@ static void calib_calculate_and_adjust(void) {
       return;
   }
 
+  uint8_t pair_count = s_a2a.pair_error_count;
+  uint8_t expected_pair_count = calib_count_mask_bits(s_peer_expected_mask);
+  if (pair_count == 0U) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR,
+             "[CALIB] No valid peer batches ready; continuing collection.");
+      return;
+  }
+  if (CALIB_TARGET_MODE && !calib_is_external_target_mode()
+      && pair_count < expected_pair_count) {
+      RLOG_W(LOG_OBJECT_CODE_ANCHOR,
+             "[CALIB] Incomplete target batch: pairs=%u/%u ready_mask=0x%02X expected=0x%02X. Continuing collection.",
+             (unsigned)pair_count, (unsigned)expected_pair_count,
+             (unsigned)s_peer_ready_mask, (unsigned)s_peer_expected_mask);
+      return;
+  }
+  float avg_std = (s_iter_std_count > 0U) ? (s_iter_std_sum / (float)s_iter_std_count) : 0.0f;
   bool converged = mw_calib_a2a_apply_gradient(&s_a2a);
 
   cfg->uwb.tx_antenna_delay = (uint16_t)(s_a2a.combined_delay / 2);
@@ -204,8 +235,9 @@ static void calib_calculate_and_adjust(void) {
       return;
   }
   
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Iter %u complete. Error=%+.3fm NewDelay=%u",
-         s_a2a.iter, s_a2a.last_avg_error, s_a2a.combined_delay);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Iter %u complete. Error=%+.3fm AvgStd=%.3fm Pairs=%u/%u NewDelay=%u",
+         s_a2a.iter, s_a2a.last_avg_error, avg_std,
+         (unsigned)pair_count, (unsigned)expected_pair_count, s_a2a.combined_delay);
          
   if (converged || s_a2a.iter >= CALIB_A2A_ITERATIONS) {
       RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] SUCCESS! Converged. Setting DONE status.");
@@ -218,6 +250,12 @@ static void calib_calculate_and_adjust(void) {
       /* Reset ranging state so we can immediately start as normal responder */
       s_ranging_active = false;
       s_anchor_resp_active = false;
+      if (CALIB_TARGET_MODE && !calib_is_external_target_mode()
+          && calib_is_target(cfg->uwb.device_id)) {
+        RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Target calibrated. Rebooting to apply/signal DONE.");
+        HAL_Delay(100);
+        HAL_NVIC_SystemReset();
+      }
   } else {
       calib_reset();
   }
@@ -274,6 +312,9 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
   if (CALIB_TARGET_MODE && !calib_is_external_target_mode()) {
       is_my_turn = (calib_is_target(my_id) &&
                     (my_id == s_current_turn));
+  }
+  if (s_app_state == ANCHOR_STATE_CALIB_DONE) {
+      is_my_turn = false;
   }
   
   /* 1. TURN WATCHDOG */
@@ -381,6 +422,8 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
                     RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Peer %u READY. mean=%.3fm std=%.3fm", res->anchor_id, m, s);
                     if (calib_is_target(my_id)) {
                       mw_calib_a2a_accum_pair(&s_a2a, m, known);
+                      s_iter_std_sum += s;
+                      s_iter_std_count++;
                     }
                     s_peer_ready_mask |= (1 << idx);
                   } else {
@@ -532,8 +575,6 @@ void app_anchor_process(void *arg) {
     }
     if (!s_ranging_active) {
       if (sys_ranging_anchor_start_tdma(my_id, n_all, all_ids, rx_timeout_ms) == SYS_RANGING_OK) {
-        uint8_t slot = sys_ranging_get_current_slot();
-        RLOG_I(LOG_OBJECT_CODE_ANCHOR, "Ranging started (Slot %u)", slot);
         s_ranging_active = true;
       }
       return;
@@ -543,6 +584,9 @@ void app_anchor_process(void *arg) {
       if (err == SYS_RANGING_OK) {
         sys_ranging_result_t res;
         sys_ranging_anchor_get_result_tdma(&res); /* Reset state machine */
+        if (res.valid) {
+          RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[DIST] Anchor #%u: tag_distance=%.3fm", my_id, res.distance_m);
+        }
       }
       s_ranging_active = false;
     }

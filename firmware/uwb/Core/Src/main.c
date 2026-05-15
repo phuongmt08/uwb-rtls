@@ -316,13 +316,28 @@ int main(void)
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
 
+#if ENABLE_FORCE_DEFAULT_ANT_DLY
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
     cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
     cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u",
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to config default: TX=%u RX=%u",
            TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
   }
+  else if (cfg->uwb.role == DEVICE_ROLE_ANCHOR)
+  {
+    cfg->uwb.tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
+    cfg->uwb.rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force ANCHOR antenna delay to config default: TX=%u RX=%u",
+           ANCHOR_DEFAULT_TX_ANT_DLY, ANCHOR_DEFAULT_RX_ANT_DLY);
+           
+    /* Force save new configuration to flash for Anchor */
+    sys_config_save();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Saved FORCE_DEFAULT_ANT_DLY to flash");
+  }
+#else
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Use previous/calibrated antenna delay from flash");
+#endif
 
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
          cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
