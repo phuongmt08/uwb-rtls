@@ -23,3 +23,8 @@ _build/
 *.swp
 *.swo
 *~
+
+# Data logs
+software/simulation/**/*_log_data.csv
+software/simulation/**/*_sim.html
+software/simulation/simulation_dashboard.html
