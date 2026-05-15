@@ -704,7 +704,7 @@ message packet_t {
         calib_status_get_t        calib_status_get        = 63;
         calib_status_resp_t       calib_status_resp       = 64;
         
-        end_session_t             end_session             = 65
+        end_session_t             end_session             = 65;
     }
 }
 

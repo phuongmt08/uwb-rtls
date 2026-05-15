@@ -219,6 +219,9 @@ PB_BIND(protobuf_battery_info_resp_t, protobuf_battery_info_resp_t, AUTO)
 PB_BIND(protobuf_battery_info_get_t, protobuf_battery_info_get_t, AUTO)
 
 
+PB_BIND(protobuf_end_session_t, protobuf_end_session_t, AUTO)
+
+
 PB_BIND(protobuf_packet_t, protobuf_packet_t, 2)
 
 
