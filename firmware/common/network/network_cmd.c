@@ -218,7 +218,9 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,               "battery_info_resp"),  /* 60 */
     CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 61 */
 #endif /* !BOOTLOADER */
-    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 63 */
+    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 63 */
+    CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 64 */
+    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
     //      +=================================================+=======================================+========================+
 };
 
@@ -802,11 +804,15 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
         case protobuf_SESSION_END_REASON_LOG_DATA:
             s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Log streaming stopped");
+            /* Also reset connection flag for LOG_DATA as it is usually the primary session */
+            if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+                s_network_cmd.stream->serial_connection_active = false;
+            }
             break;
 
         case protobuf_SESSION_END_REASON_RANGING_RESULTS:
-            /* TODO: Implement stopping ranging results streaming if applicable */
-            RLOG_I(OBJECT_CODE, "Ranging results streaming stopped");
+            /* Just stop streaming but keep connection if needed, though usually we end all */
+            RLOG_I(OBJECT_CODE, "	Ranging streaming stopped");
             break;
 
         case protobuf_SESSION_END_REASON_DEBUG_STREAMING:
@@ -815,10 +821,9 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             break;
 
         default:
-            /* For unspecified or other reasons, we might want to reset the connection flags as before */
-            if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+            if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
                 s_network_cmd.stream->serial_connection_active = false;
-            } else if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+            } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
                 s_network_cmd.stream->ble_connection_active = false;
             }
             s_log_stream_enabled = false;

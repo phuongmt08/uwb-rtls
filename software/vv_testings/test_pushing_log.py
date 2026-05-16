@@ -330,16 +330,16 @@ def main() -> int:
     args = parse_args()
 
     port = args.port
-    if not port:
-        probe = VvTestSession.auto_probe(src=args.src, debug=args.verbose)
-        if probe is None:
-            print("No serial port found or device not responding. Use --port COMx")
-            return 2
-        port = probe.port
-
-    proto = VvProtocol()
-
     try:
+        if not port:
+            probe = VvTestSession.auto_probe(src=args.src, debug=args.verbose)
+            if probe is None:
+                print("No serial port found or device not responding. Use --port COMx")
+                return 2
+            port = probe.port
+
+        proto = VvProtocol()
+
         with serial.Serial(port, args.baud, timeout=READ_TIMEOUT_S) as ser:
             ser.reset_input_buffer()
             ser.reset_output_buffer()
@@ -358,13 +358,16 @@ def main() -> int:
                 args=args,
             )
             tester.bootstrap()
-            tester.loop()
+            try:
+                tester.loop()
+            except KeyboardInterrupt:
+                print("\nStopping... Sending end_session to device.")
+                tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
+                time.sleep(0.1)
+                return 0
 
     except KeyboardInterrupt:
-        print("\nStopping... Sending end_session to device.")
-        if 'tester' in locals():
-            tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
-            time.sleep(0.1) # Wait briefly so the serial has time to send
+        print("\nStopping...")
         return 0
     except SerialException as exc:
         print(f"Serial error: {exc}")

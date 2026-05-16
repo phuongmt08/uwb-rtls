@@ -386,7 +386,7 @@ class CommandCatalog:
             CommandSpec(62, "enter_to_bootloader", self.factory.enter_to_bootloader),
             CommandSpec(46, "flash_verify", self.factory.flash_verify),
             CommandSpec(57, "fota_state_resp", self.factory.fota_state_resp),
-            CommandSpec(63, "end_session", self.factory.end_session),
+            CommandSpec(65, "end_session", self.factory.end_session),
         ]
 
     def all(self) -> Iterable[CommandSpec]:
