@@ -314,7 +314,7 @@ int main(void)
   if (bsp_uwb_init() != 0)
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
-  }
+  } 
 
 #if ENABLE_FORCE_DEFAULT_ANT_DLY
   if (cfg->uwb.role == DEVICE_ROLE_TAG)

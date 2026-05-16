@@ -188,15 +188,21 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     
     for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
-    sys_config_t *cfg = sys_config_get();
+    float anchor_distances[NUM_ANCHORS] = {0.0f};
     
     /* 1. Extract, Filter and Project Ranging Results */
     for (int i = 0; i < num_success; i++) {
         sys_ranging_result_t *r = &results[i];
-        if (!r->valid) continue;
-
         uint8_t aid = r->anchor_id;
         if (aid < 1 || aid > NUM_ANCHORS) continue;
+        anchor_distances[aid - 1] = r->distance_m;
+
+        if (!r->valid) {
+            RLOG_W(LOG_OBJECT_CODE_TAG,
+                   "Anchor #%u invalid distance marker %.3fm - skipped for position",
+                   aid, r->distance_m);
+            continue;
+        }
 
         vec3d_t anchor_pos;
         if (!get_anchor_position(aid, &anchor_pos)) {
@@ -254,7 +260,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     }
 
-    float anchor_distances[NUM_ANCHORS] = {0.0f};
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
             anchor_distances[id - 1] = anchors_by_id[id].distance;
@@ -263,6 +268,9 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     /* Need at least 3 anchors for trilateration */
     if (valid_count < 3) {
+        RLOG_I(LOG_OBJECT_CODE_TAG,
+               "Dist A1=%.3fm A2=%.3fm A3=%.3fm A4=%.3fm",
+               anchor_distances[0], anchor_distances[1], anchor_distances[2], anchor_distances[3]);
         RLOG_W(LOG_OBJECT_CODE_TAG, 
                "Not enough valid anchors: %u/3 minimum", valid_count);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
@@ -419,7 +427,6 @@ app_err_t app_tag_init(void)
 
 void app_tag_process(void)
 {
-    static uint32_t last_log = 0;
     static uint32_t last_warn_log = 0;
     sys_config_t *cfg = sys_config_get();
     uint32_t now = HAL_GetTick();

@@ -70,13 +70,13 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            13   /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            15   /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_ROLE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_HOST_TRANSPORT    HOST_TRANSPORT_USB
 #define DEFAULT_DEVICE_ID         0x01
-#define DEFAULT_RANGING_PERIOD_MS 100
+#define DEFAULT_RANGING_PERIOD_MS 80
 #define DEFAULT_RX_TIMEOUT_MS     75
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64

@@ -58,23 +58,42 @@ static uint32_t s_rx_phr_err_count  = 0;
 static uint32_t s_rx_sync_err_count = 0;
 
 #ifdef UWB_EVENT_DRIVEN
-/* Queue size: drain loops consume events immediately each call, so 4 is sufficient. */
-#define UWB_EVENT_QUEUE_SIZE    4
+/* Keep enough room for TX_DONE plus all RESP/RESULT frames in one TDMA phase.
+ * Ring-buffer capacity is size-1, so 32 stores up to 31 events. */
+#define UWB_EVENT_QUEUE_SIZE    32
 static volatile uint8_t s_ev_head           = 0; /* ISR writes here  (next write index) */
 static volatile uint8_t s_ev_tail           = 0; /* foreground reads here (next read index) */
 static bsp_uwb_event_t  s_ev_queue[UWB_EVENT_QUEUE_SIZE];
-static volatile uint8_t s_event_overflow_count = 0;
+static volatile bsp_uwb_event_stats_t s_event_stats = {0};
 static void uwb_tx_cb(const dwt_callback_data_t *cb_data);
 static void uwb_rx_cb(const dwt_callback_data_t *cb_data);
 
 bool bsp_uwb_get_event(bsp_uwb_event_t *out_event)
 {
-    if (s_ev_tail == s_ev_head) return false; 
     __disable_irq();
+    if (s_ev_tail == s_ev_head) {
+        __enable_irq();
+        return false;
+    }
     *out_event = s_ev_queue[s_ev_tail];
     s_ev_tail  = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
     __enable_irq();
     return true;
+}
+
+void bsp_uwb_get_event_stats(bsp_uwb_event_stats_t *stats)
+{
+    if (!stats) return;
+    __disable_irq();
+    *stats = (bsp_uwb_event_stats_t) {
+        .tx_done        = s_event_stats.tx_done,
+        .rx_ok          = s_event_stats.rx_ok,
+        .queue_overflow = s_event_stats.queue_overflow,
+        .irq_extra_pass = s_event_stats.irq_extra_pass,
+        .rx_rearm_fail  = s_event_stats.rx_rearm_fail,
+    };
+    memset((void *)&s_event_stats, 0, sizeof(s_event_stats));
+    __enable_irq();
 }
 
 void bsp_uwb_clear_event(void)
@@ -250,9 +269,12 @@ bsp_err_t bsp_uwb_init(void)
 #ifdef UWB_EVENT_DRIVEN
   /* Register UWB callbacks for foreground event processing */
   dwt_setcallbacks(uwb_tx_cb, uwb_rx_cb);
-  /* Enable interrupts for TX done, RX good, RX timeout, RX preamble timeout, RX overflow, RX frame check error, SFD detection, RX preamble header error */
-  dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO |
-                   DWT_INT_RXOVRR | DWT_INT_RFCE | DWT_INT_SFDT | DWT_INT_RPHE, 1);
+  /* Event-driven state machine only queues TX_DONE and RX_OK events.
+   * RX error IRQs are still enabled so the driver can clear/reset/re-arm RX
+   * inside a multi-anchor window; they are not queued or logged as events. */
+  dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_RXPTO |
+                   DWT_INT_RXOVRR | DWT_INT_RFCE | DWT_INT_SFDT |
+                   DWT_INT_RPHE | DWT_INT_RFSL, 1);
 #endif
 
   s_initialized = true;
@@ -267,19 +289,19 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
     dwt_config_t dw_cfg = {
         .chan           = cfg->uwb_channel,
         .prf            = (cfg->uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_256,
+        .txPreambLength = DWT_PLEN_512,
         .rxPAC          = DWT_PAC16,
         .txCode         = 17,
         .rxCode         = 17,
         .nsSFD          = 1,
         .dataRate       = cfg->uwb_data_rate,
         .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = (256 + 1 + 16 - 8)   
+        .sfdTO          = (512 + 1 + 16 - 8)   
     };
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
            dw_cfg.chan, cfg->uwb_prf, dw_cfg.dataRate, dw_cfg.txCode);
-    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=256 PAC=16 SFD=%u nsSFD=%u PHR=%u",
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=512 PAC=16 SFD=%u nsSFD=%u PHR=%u",
            dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
 
   if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS)
@@ -310,12 +332,12 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 #ifdef UWB_EVENT_DRIVEN
     dwt_setinterrupt((uint32)(DWT_INT_TFRS |   /* TX frame sent      */
                               DWT_INT_RFCG |   /* RX good frame      */
-                              DWT_INT_RFTO |   /* RX timeout         */
                               DWT_INT_RXPTO |  /* Preamble timeout   */
                               DWT_INT_RXOVRR | /* RX buffer overrun  */
                               DWT_INT_RFCE |   /* RX CRC error       */
                               DWT_INT_RPHE |   /* RX PHR error       */
-                              DWT_INT_RFSL), 1); /* RX sync loss    */
+                              DWT_INT_RFSL |   /* RX sync loss       */
+                              DWT_INT_SFDT), 1); /* RX SFD timeout   */
 #else
     dwt_setinterrupt((uint32)(DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO |
                               DWT_INT_RFCE | DWT_INT_RPHE | DWT_INT_RFSL), 1);
@@ -859,7 +881,29 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void)
 void bsp_uwb_on_irq(void)
 {
 #ifdef UWB_EVENT_DRIVEN
-  dwt_isr();
+  const uint32_t useful_irq_mask = SYS_STATUS_TXFRS | SYS_STATUS_RXFCG;
+  const uint32_t recovery_irq_mask = SYS_STATUS_RXPTO | SYS_STATUS_RXOVRR |
+                                     SYS_STATUS_RXFCE | SYS_STATUS_RXPHE |
+                                     SYS_STATUS_RXRFSL | SYS_STATUS_RXSFDTO;
+  const uint32_t irq_mask = useful_irq_mask | recovery_irq_mask;
+  for (uint8_t pass = 0; pass < 8U; pass++)
+  {
+    uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
+    if ((status & irq_mask) == 0U)
+    {
+      break;
+    }
+    if (pass > 0U)
+    {
+      s_event_stats.irq_extra_pass++;
+    }
+    dwt_isr();
+    status = dwt_read32bitreg(SYS_STATUS_ID);
+    if ((status & useful_irq_mask) == 0U)
+    {
+      break;
+    }
+  }
 #else
   s_irq_event_pending = 1;
 #endif
@@ -873,7 +917,7 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
   uint8_t next_head = (uint8_t)((s_ev_head + 1u) % UWB_EVENT_QUEUE_SIZE);
   if (next_head == s_ev_tail) {
       /* Queue full — drop oldest by advancing tail, count overflow */
-      s_event_overflow_count++;
+      s_event_stats.queue_overflow++;
       s_ev_tail = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
   }
 
@@ -891,12 +935,14 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
   s_last_tx_timestamp = ev->tx_ts;
 
   s_ev_head = next_head;
+  s_event_stats.tx_done++;
 
   /* Re-arm receiver immediately after TX so the next incoming frame
-   * (e.g. anchor RESULT arriving ~final_to_result_delay_us after FINAL TX)
-   * is not missed while the foreground loop is still processing TX_DONE.
-   * Without this, DW1000 stays IDLE after TX and RESULT frames are lost. */
-  dwt_rxenable(DWT_START_RX_IMMEDIATE);
+   * (e.g. RESP after POLL, or anchor RESULT after FINAL TX) is not missed while
+   * the foreground loop is still processing TX_DONE. */
+  if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
+      s_event_stats.rx_rearm_fail++;
+  }
 }
 
 static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
@@ -905,7 +951,7 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
       uint8_t next_head = (uint8_t)((s_ev_head + 1u) % UWB_EVENT_QUEUE_SIZE);
       if (next_head == s_ev_tail) {
           /* Queue full — drop oldest, count overflow */
-          s_event_overflow_count++;
+          s_event_stats.queue_overflow++;
           s_ev_tail = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
       }
 
@@ -925,15 +971,20 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
                 | ((uint64_t)ts[4] << 32);
       capture_rx_quality(&ev->rx_quality);
       s_last_rx_quality = ev->rx_quality;
+      s_ev_head = next_head;
+      s_event_stats.rx_ok++;
 
       /* Re-enable RX immediately to capture back-to-back frames */
-      dwt_rxenable(DWT_START_RX_IMMEDIATE);
-      s_ev_head = next_head;
+      if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
+          s_event_stats.rx_rearm_fail++;
+      }
   } else {
       /* Do not queue timeouts or errors. They happen naturally during continuous
        * listening between slots and will rapidly overflow the queue, dropping
        * valid RX_OK/TX_DONE events. The TDMA state machine handles its own timeouts. */
-      dwt_rxenable(DWT_START_RX_IMMEDIATE);
+      if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
+          s_event_stats.rx_rearm_fail++;
+      }
   }
 }
 

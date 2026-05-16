@@ -22,8 +22,8 @@
 #define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16611
-#define ANCHOR_DEFAULT_RX_ANT_DLY   16436
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16342
+#define ANCHOR_DEFAULT_RX_ANT_DLY   16342
 
 /* During auto-calibration, only TX delay is adjusted.
  * RX delay is kept fixed at this value for both Tag and Anchor. */
@@ -65,14 +65,14 @@
  * 0 = external target/initiator, not part of anchor layout or TDMA anchor slots
  * 1..NUM_ANCHORS = fixed target anchor ID. */
 #define CALIB_A2A_TARGET_MODE       1U
-#define CALIB_TARGET_ANCHOR_ID      0U
+#define CALIB_TARGET_ANCHOR_ID      4U
 
 /* Physical position of the external calibration target when
  * CALIB_TARGET_ANCHOR_ID == 0. This target ranges as the TAG/initiator side
  * and does not consume any anchor ID or TDMA anchor slot. */
 #define CALIB_TARGET_POS_X_M        0.0f
 #define CALIB_TARGET_POS_Y_M        0.0f
-#define CALIB_TARGET_POS_Z_M        TAG_HEIGHT_M
+#define CALIB_TARGET_POS_Z_M        0.0f
 
 /* ------------------------------------------------------------------
  * A2A (Anchor-to-Anchor) Gradient Calibration
@@ -95,7 +95,7 @@
 
 /* Reject a batch if std deviation exceeds this threshold.
  * Batch is discarded and re-collected automatically.                  */
-#define CALIB_ANCHOR_MAX_STD_M   0.10f
+#define CALIB_ANCHOR_MAX_STD_M   0.08f
 
 /* ------------------------------------------------------------------
  * Gradient step tuning — passed into mw_calib_a2a_config_t
@@ -108,9 +108,9 @@
 #define CALIB_A2A_M_TO_DW_UNITS  213.0f
 
 /* Damping factor 0.0–1.0.
- * 0.2: conservative, smooth convergence, no oscillation.
- * Increase toward 0.4 only if initial error is very large (>30cm).   */
-#define CALIB_A2A_DAMPING        0.2f
+ * 0.4 converges faster for target-mode calibration with ~1m initial error.
+ * Reduce toward 0.2 if the error starts oscillating across zero.      */
+#define CALIB_A2A_DAMPING        0.4f
 
 /* Combined delay clamp range.
  * Default DW1000 combined ≈ 32872 (2 × 16436).
@@ -120,7 +120,7 @@
 
 /* Number of full pair-sweep iterations.
  * 2 is sufficient for <5mm residual error with damping=0.4.          */
-#define CALIB_A2A_ITERATIONS     3U
+#define CALIB_A2A_ITERATIONS     12U
 
 /* DW1000 physical constant.
  * 1 DW unit = 1/(499.2e6 × 128) ≈ 15.65 ps one-way.
