@@ -105,21 +105,6 @@ tdma_err_t tdma_set_timing(tdma_scheduler_t *tdma,
 {
     if (!tdma || !tdma->initialized) return TDMA_ERR_NOT_INITIALIZED;
     
-    if (guard_time_us < TDMA_MIN_GUARD_TIME_US) {
-        RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
-               "[TDMA] Guard time too small (%luµs < %luµs) - AUTO-CORRECTING",
-               (unsigned long)guard_time_us, (unsigned long)TDMA_MIN_GUARD_TIME_US);
-        guard_time_us = TDMA_MIN_GUARD_TIME_US;
-    }
-    
-    if (guard_time_us > TDMA_WARN_GUARD_TIME_US) {
-        RLOG_W(LOG_OBJECT_CODE_RANGING,
-               "[TDMA] WARNING: Guard time %luµs > %luµs! This suggests system is NOT true TDMA.",
-               (unsigned long)guard_time_us, (unsigned long)TDMA_WARN_GUARD_TIME_US);
-        RLOG_W(LOG_OBJECT_CODE_RANGING,
-               "[TDMA] Guard should be 200-500µs. If you need more, increase slot_duration instead.");
-    }
-    
     tdma_schedule_t *sched = &tdma->schedule;
     
     sched->slot_duration_us = slot_duration_us;
@@ -145,7 +130,7 @@ tdma_err_t tdma_start_superframe(tdma_scheduler_t *tdma, uint64_t poll_tx_timest
     if (!tdma || !tdma->initialized) return TDMA_ERR_NOT_INITIALIZED;
     if (tdma->role != TDMA_ROLE_TAG) return TDMA_ERR_PARAM;
 
-    /* Normalize to shared superframe origin:
+    /* NOTE Normalize to shared superframe origin:
      *
      *   origin = T1 - poll_to_resp_delay
      *

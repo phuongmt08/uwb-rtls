@@ -292,7 +292,7 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
       (Add == 0x08000000UL) ||
       (Add == MEM_APP_START))
   {
-    status = DFU_Erase_AppSectors();
+    status = DFU_Erase_UserSectors();
   }
   /* Selected erase: erase the addressed app sector only. */
   else if ((Add >= MEM_APP_START) && (Add < MEM_DATA_STORAGE_END))
@@ -329,10 +329,10 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
   /* USER CODE BEGIN 3 */
   g_dfu_last_activity = HAL_GetTick();
 
-  /* Verify destination is in application space (sector 3-5 only) */
+  /* Verify destination is in user space (sectors 3-7) */
   uint32_t addr = (uint32_t)dest;
-  if (addr < MEM_APP_START || addr >= MEM_APP_END) {
-    /* Reject writes to bootloader area (< MEM_APP_START) or data storage (>= MEM_APP_END) */
+  if (addr < MEM_APP_START || addr >= MEM_DATA_STORAGE_END) {
+    /* Reject writes to bootloader area (< MEM_APP_START) */
     return USBD_FAIL;
   }
 
@@ -340,7 +340,7 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
   
   /* Auto-erase on first write as a safety fallback if host skipped erase command */
   if (!g_erase_done) {
-    if (DFU_Erase_AppSectors() != USBD_OK) {
+    if (DFU_Erase_UserSectors() != USBD_OK) {
       HAL_FLASH_Lock();
       return USBD_FAIL;
     }

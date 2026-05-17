@@ -198,6 +198,12 @@ PB_BIND(protobuf_anchor_layout_set_t, protobuf_anchor_layout_set_t, AUTO)
 PB_BIND(protobuf_anchor_layout_resp_t, protobuf_anchor_layout_resp_t, AUTO)
 
 
+PB_BIND(protobuf_calib_status_get_t, protobuf_calib_status_get_t, AUTO)
+
+
+PB_BIND(protobuf_calib_status_resp_t, protobuf_calib_status_resp_t, AUTO)
+
+
 PB_BIND(protobuf_ranging_status_get_t, protobuf_ranging_status_get_t, AUTO)
 
 
@@ -216,7 +222,9 @@ PB_BIND(protobuf_battery_info_get_t, protobuf_battery_info_get_t, AUTO)
 PB_BIND(protobuf_end_session_t, protobuf_end_session_t, AUTO)
 
 
-PB_BIND(protobuf_packet_t, protobuf_packet_t, AUTO)
+PB_BIND(protobuf_packet_t, protobuf_packet_t, 2)
+
+
 
 
 

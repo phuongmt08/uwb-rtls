@@ -218,7 +218,9 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,               "battery_info_resp"),  /* 60 */
     CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 61 */
 #endif /* !BOOTLOADER */
-    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 63 */
+    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 63 */
+    CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 64 */
+    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
     //      +=================================================+=======================================+========================+
 };
 
@@ -699,7 +701,7 @@ static void network_cmd_log_clear(const protobuf_packet_t *pkt)
 #else
     uint32_t length = pkt->params.log_clear.length;
     if (length > 0u) {
-        sys_logger_consume((uint16_t)length);
+        sys_logger_ram_consume((uint16_t)length);
     } else {
         sys_logger_clear();
     }
@@ -726,7 +728,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
     uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
     uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
-    uint32_t read_len    = sys_logger_flash_read_packet(packet.params.log_data.data.bytes, send_len);
+    uint32_t read_len    = sys_logger_flash_peek_packet(packet.params.log_data.data.bytes, send_len);
     if (read_len == 0u) {
         return;
     }
@@ -765,7 +767,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
     uint16_t max_payload = (uint16_t)sizeof(packet.params.log_data.data.bytes);
     uint16_t send_len    = (data_length > max_payload) ? max_payload : (uint16_t)data_length;
-    uint16_t read_len    = sys_logger_peek_packet(packet.params.log_data.data.bytes, send_len);
+    uint16_t read_len    = sys_logger_ram_peek_packet(packet.params.log_data.data.bytes, send_len);
     if (read_len == 0u) {
         return;
     }
@@ -795,18 +797,22 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
     
     protobuf_session_end_reason_t reason = pkt->params.end_session.reason;
 
-    RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d", 
+    RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d",
            (unsigned)pkt->hdr.addr.src, (int)reason);
 
     switch (reason) {
         case protobuf_SESSION_END_REASON_LOG_DATA:
             s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Log streaming stopped");
+            /* Also reset connection flag for LOG_DATA as it is usually the primary session */
+            if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+                s_network_cmd.stream->serial_connection_active = false;
+            }
             break;
 
         case protobuf_SESSION_END_REASON_RANGING_RESULTS:
-            /* TODO: Implement stopping ranging results streaming if applicable */
-            RLOG_I(OBJECT_CODE, "Ranging results streaming stopped");
+            /* Just stop streaming but keep connection if needed, though usually we end all */
+            RLOG_I(OBJECT_CODE, "	Ranging streaming stopped");
             break;
 
         case protobuf_SESSION_END_REASON_DEBUG_STREAMING:
@@ -815,10 +821,9 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             break;
 
         default:
-            /* For unspecified or other reasons, we might want to reset the connection flags as before */
-            if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+            if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
                 s_network_cmd.stream->serial_connection_active = false;
-            } else if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+            } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
                 s_network_cmd.stream->ble_connection_active = false;
             }
             s_log_stream_enabled = false;
@@ -851,7 +856,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
     CHECK_VOID(tracker != NULL);
 
     if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
-        sys_logger_consume((uint16_t)tracker->log_len);
+        sys_logger_ram_consume((uint16_t)tracker->log_len);
     }
 
     tracker->waiting_ack = false;
