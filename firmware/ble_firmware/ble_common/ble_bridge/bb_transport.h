@@ -61,6 +61,11 @@ void bb_transport_process(void);
 bool bb_transport_is_packet_ready(void);
 
 /**
+ * @brief Giải phóng cờ báo hiệu gói tin sẵn sàng để cho phép nhận gói tin tiếp theo.
+ */
+void bb_transport_clear_packet_ready(void);
+
+/**
  * @brief Truyền data theo cấu hình Source.
  *        Nếu type = SERIAL, tiến hành bọc HDLC vào gửi UART.
  *        Nếu type = BLE, gửi raw Protobuf qua môi trường radio.

@@ -84,6 +84,7 @@ void bb_router_process(void)
 
         default:
             m_state = BB_ROUTER_STATE_IDLE;
+            bb_transport_clear_packet_ready();
             break;
     }
 }
@@ -128,6 +129,7 @@ static void bb_router_state_process_cmd_handle(void)
     {
         // Action = NONE (không cần gửi gì) hoặc ERROR (Báo lỗi payload) -> clear cờ chờ gói mới.
         m_state = BB_ROUTER_STATE_IDLE;
+        bb_transport_clear_packet_ready();
     }
 }
 
@@ -138,6 +140,7 @@ static void bb_router_state_forward_handle(void)
     bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
 
     m_state = BB_ROUTER_STATE_IDLE;
+    bb_transport_clear_packet_ready();
 }
 
 static void bb_router_log_forward_packet(void)
@@ -190,7 +193,7 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             }
 
 #if defined(BLE_CENTRAL)
-            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG)
+            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG || addr == protobuf_PACKET_ADDR_BCAST)
             {
                 m_target_source = BB_SOURCE_SERIAL;
                 return false;
@@ -199,7 +202,7 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             m_target_source = BB_SOURCE_BLE;
             return false;
 #elif defined(BLE_PERIPHERAL)
-            if (addr == protobuf_PACKET_ADDR_MCU)
+            if (addr == protobuf_PACKET_ADDR_MCU || addr == protobuf_PACKET_ADDR_BCAST)
             {
                 m_target_source = BB_SOURCE_SERIAL;
                 return false;

@@ -91,6 +91,11 @@ bool bb_transport_is_packet_ready(void)
     return m_is_packet_ready;
 }
 
+void bb_transport_clear_packet_ready(void)
+{
+    m_is_packet_ready = false;
+}
+
 ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t length, bb_packet_source_t tx_source)
 {
     if (tx_source == BB_SOURCE_SERIAL) 
@@ -160,9 +165,9 @@ void on_rx_byte(uint8_t byte)
 {
     // Nếu buffer hiện tại chưa được Router xử lý xong thì drop byte mới
     // để đảm bảo không bị ghi đè dữ liệu (nguyên tắc Zero-Copy)
-    // if (m_is_packet_ready || p_protobuf_buffer == NULL || p_protobuf_len == NULL) {
-    //     return;
-    // }
+    if (m_is_packet_ready || p_protobuf_buffer == NULL || p_protobuf_len == NULL) {
+        return;
+    }
 
     hdlc_data_chunk_t rx_chunk;
     // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
@@ -192,6 +197,11 @@ void on_rx_byte(uint8_t byte)
 static void on_rx_ble(uint8_t const * p_data, uint16_t length)
 {
     if (p_data == NULL || length == 0 || length > m_max_payload_len) 
+    {
+        return;
+    }
+
+    if (m_is_packet_ready)
     {
         return;
     }
