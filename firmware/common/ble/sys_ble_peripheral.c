@@ -81,7 +81,7 @@ static void ble_set_state(protobuf_ble_state_t new_state, int32_t rssi_dbm)
    }
 }
 
-static void test_send_log_data_to_host(void)
+static void __attribute__((unused)) test_send_log_data_to_host(void)
 {
     if (!s_ble_peri.stream) return;
 
@@ -119,9 +119,10 @@ static void ble_poll_status(void)
 {
    if (!s_ble_peri.stream) return;
    
-//    if (!network_send_ble_status_get(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL)) {
-//        RLOG_W(OBJECT_CODE, "ble_status_get send failed");
-//    }
+   if (!network_send_ble_status_get(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL)) {
+       RLOG_W(OBJECT_CODE, "ble_status_get send failed");
+   }
+   // Send the message stub to check the transmission from MCU to HOST via BLE
    RLOG_I(OBJECT_CODE, "send testing BLE transmittion log to HOST");
    test_send_log_data_to_host();
 }
