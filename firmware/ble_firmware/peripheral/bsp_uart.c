@@ -121,25 +121,16 @@ static void uart_event_handler(app_uart_evt_t * p_event)
     }
 }
 
-void bsp_uart_read_byte()
+void bsp_uart_read_byte(void)
 {
     uint8_t byte;
-    // Phải dùng vòng lặp while để lấy HẾT các byte đang đợi trong FIFO của UART
-    // while (app_uart_get(&byte) == NRF_SUCCESS)
-    // {
-        
-    //     // if (s_rx_cb != NULL)
-    //     // {
-    //     //     s_rx_cb(byte);
-    //     // }
-    // }
-    while (app_uart_get(&byte) != NRF_SUCCESS);
-    if (s_rx_cb != NULL)
+    while (app_uart_get(&byte) == NRF_SUCCESS)
     {
-        s_rx_cb(byte);
+        if (s_rx_cb != NULL)
+        {
+            s_rx_cb(byte);
+        }
     }
-    while (app_uart_put(byte) != NRF_SUCCESS);
-
 }
 
 /* End of file -------------------------------------------------------- */

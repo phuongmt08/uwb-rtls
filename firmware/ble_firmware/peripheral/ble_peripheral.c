@@ -256,6 +256,7 @@ void ble_peripheral_advertising_start(void)
 
     if (!m_is_initialized) return;
     if (m_is_advertising) return;
+    if (m_conn_handle != BLE_CONN_HANDLE_INVALID) return;
 
     err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
     APP_ERROR_CHECK(err_code);
@@ -273,6 +274,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         case BLE_GAP_EVT_CONNECTED:
             NRF_LOG_INFO("Connected");
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
+            m_is_advertising = false; // SoftDevice stops advertising automatically on connection
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
             bsp_utils_led_blink_start();
@@ -289,6 +291,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             bsp_utils_led_blink_stop();
             m_pending_tx_chunks = 0;
+            m_is_advertising = false; // Reset flag so that advertising_start does not return early
             ble_peripheral_advertising_start();
             break;
 

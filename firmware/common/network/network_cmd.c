@@ -315,6 +315,8 @@ static void network_cmd_ack(const protobuf_packet_t *pkt)
 
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 {
+    RLOG_I(OBJECT_CODE, "Received device information request from 0x%02X", (unsigned)pkt->hdr.addr.src);
+
     CHECK_VOID(pkt && s_network_cmd.stream);
 
     if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
