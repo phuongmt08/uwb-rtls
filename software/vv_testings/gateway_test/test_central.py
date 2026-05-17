@@ -4,6 +4,7 @@ import sys
 import time
 import threading
 from pathlib import Path
+from datetime import datetime
 
 # Add the parent directory to sys.path so we can import modules from vv_testings
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -18,6 +19,77 @@ devices = {}  # Format: "AA:BB:CC:DD:EE:FF" -> {"bytes": b'...', "name": "...", 
 factory = CommandFactory()
 LOST_DEVICE_TIMEOUT_S = 5.0
 packet_debug_enabled = False
+
+# Constants for Log Parsing
+MAX_RECORD_LEN = 512
+EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
+
+class FlashLogStreamParser:
+    """Parse flash-log stream entries:
+    [len_lo][len_hi][raw_record(len)][pad to 4-byte].
+    raw_record = [log_type][obj_code][timestamp(6)][msg_len][msg].
+    """
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
+    def feed(self, chunk: bytes) -> list[str]:
+        self._buf.extend(chunk)
+        lines: list[str] = []
+        while True:
+            if len(self._buf) < 2:
+                break
+            rec_len = int(self._buf[0]) | (int(self._buf[1]) << 8)
+            if rec_len == 0 or rec_len > MAX_RECORD_LEN:
+                del self._buf[0:1]
+                continue
+            entry_len = (2 + rec_len + 3) & ~3
+            if len(self._buf) < entry_len:
+                break
+            rec = bytes(self._buf[2 : 2 + rec_len])
+            del self._buf[:entry_len]
+            line = self._decode_record(rec)
+            if line is not None:
+                lines.append(line)
+        return lines
+
+    @staticmethod
+    def _format_timestamp(timestamp: int) -> str:
+        if timestamp >= EPOCH_MS_MIN_FOR_DATETIME:
+            try:
+                dt = datetime.fromtimestamp(timestamp / 1000.0)
+                return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            except (OverflowError, OSError, ValueError):
+                pass
+        return str(timestamp)
+
+    @staticmethod
+    def _decode_record(rec: bytes) -> str | None:
+        if len(rec) < 9:
+            return None
+        log_type = rec[0]
+        obj_code = rec[1]
+        timestamp = int.from_bytes(rec[2:8], byteorder="little", signed=False)
+        msg_len = rec[8]
+        if 9 + msg_len > len(rec):
+            return None
+        msg = rec[9 : 9 + msg_len].decode("utf-8", errors="replace")
+        if log_type == 0xFE:
+            level = "INFO"
+            color = "\033[37m"  # white
+        elif log_type == 0xFF:
+            level = "DEBUG"
+            color = "\033[36m"  # cyan
+        elif log_type == 0xFD:
+            level = "WARN"
+            color = "\033[33m"  # yellow
+        else:
+            level = "ERROR"
+            color = "\033[31m"  # red
+        ts_text = FlashLogStreamParser._format_timestamp(timestamp)
+        reset = "\033[0m"
+        return f"{color}[{ts_text}] [{level:<5}] [0x{obj_code:02X}] {msg}{reset}"
+
+log_parser = FlashLogStreamParser()
 
 BLE_STATE_NAMES = {
     pb.BLE_STATE_UNSPECIFIED: "UNSPECIFIED",
@@ -56,6 +128,8 @@ def _packet_debug_line(pkt: pb.packet_t) -> str:
     elif ptype == "ble_conn_params_resp":
         p = pkt.ble_conn_params_resp.params
         detail = f" min={p.min_interval_ms} max={p.max_interval_ms} lat={p.slave_latency} to={p.sup_timeout_ms}"
+    elif ptype == "log_data":
+        detail = f" type={pkt.log_data.type} len={len(pkt.log_data.data)}"
 
     return f"[RX][seq={seq}][src={src}->dst={dst}] {ptype}{detail}"
 
@@ -101,6 +175,14 @@ def rx_thread_func(session: VvTestSession):
                         print(f"\n[!] BLE Status -> {state_name}")
                     print("cmd> ", end="", flush=True)
 
+                elif ptype == "log_data":
+                    p = pkt.log_data
+                    lines = log_parser.feed(p.data)
+                    for line in lines:
+                        print(f"\n{line}")
+                    if lines:
+                        print("cmd> ", end="", flush=True)
+
             # Firmware gửi scan_result mỗi 2s, nếu quá timeout không thấy cập nhật thì coi là mất.
             now = time.time()
             for mac, info in list(devices.items()):
@@ -122,6 +204,7 @@ def print_help():
     print("  disconnect      : Ngắt kết nối thiết bị hiện tại")
     print("  get             : Đọc Connection Params hiện tại (get_params)")
     print("  set             : Ghi Connection Params mới (min=30, max=60)")
+    print("  stub [tag|anchor]: Gửi 'device_information_get' để test đường truyền")
     print("  debug on/off    : Bật/tắt log packet RX từ central")
     print("  help            : Hiển thị bảng lệnh này")
     print("  exit            : Thoát")
@@ -229,6 +312,22 @@ def run_interactive(session: VvTestSession, src: int, dst: int):
                 # Bắt buộc đặt các thông số này không C nó sẽ hiểu là 0
                 pkt.ble_conn_params_set.params.slave_latency = 0
                 pkt.ble_conn_params_set.params.sup_timeout_ms = 4000
+                session.send_packet(pkt)
+
+            elif cmd == "stub":
+                target_name = cmd_line[1].lower() if len(cmd_line) > 1 else "tag"
+                if target_name == "anchor":
+                    target_dst = pb.PACKET_ADDR_ANCHOR
+                    target_label = "ANCHOR"
+                elif target_name == "tag":
+                    target_dst = pb.PACKET_ADDR_TAG
+                    target_label = "TAG"
+                else:
+                    print("[!] Sử dụng: stub [tag|anchor]")
+                    continue
+
+                print(f"[+] Gửi stub (device_information_get) tới {target_label} (0x{target_dst:02X}) ...")
+                pkt = factory.device_information_get(pb.PACKET_ADDR_HOST, target_dst, session.proto.next_seq())
                 session.send_packet(pkt)
 
             elif cmd == "debug":
