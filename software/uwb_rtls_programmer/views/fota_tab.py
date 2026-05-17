@@ -15,8 +15,15 @@ class FotaTab(QWidget):
 
 
         # 1. Device Box
-        device_box = QGroupBox("BLE Device Scanner")
+        device_box = QGroupBox("Central Dongle & BLE Scanner")
         d_layout = QVBoxLayout(device_box)
+        
+        dongle_layout = QHBoxLayout()
+        dongle_layout.addWidget(QLabel("Dongle Status:"))
+        self.lbl_dongle_status = QLabel("Searching for Central Dongle...")
+        self.lbl_dongle_status.setStyleSheet("color: #F59E0B; font-weight: bold;")
+        dongle_layout.addWidget(self.lbl_dongle_status)
+        dongle_layout.addStretch()
         
         btn_layout = QHBoxLayout()
         self.btn_scan = QPushButton("Scan Nearby Devices")
@@ -27,6 +34,8 @@ class FotaTab(QWidget):
         btn_layout.addWidget(self.btn_connect)
         btn_layout.addWidget(self.lbl_device_status)
         btn_layout.addStretch()
+
+        d_layout.addLayout(dongle_layout)
 
         self.table_ble = QTableWidget(0, 4)
         self.table_ble.setHorizontalHeaderLabels(["Device Name", "MAC Address / ID", "Serial Number", "RSSI"])
@@ -82,7 +91,7 @@ class FotaTab(QWidget):
         self.btn_erase_app = QPushButton("Erase App Sectors")
         
         self.btn_auto_fota.setMinimumHeight(45)
-        self.btn_auto_fota.setStyleSheet("font-weight: bold; color: #1e88e5;")
+
         self.btn_verify.setMinimumHeight(35)
         self.btn_erase_app.setMinimumHeight(35)
         
