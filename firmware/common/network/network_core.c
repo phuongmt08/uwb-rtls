@@ -101,8 +101,7 @@ static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_
 static stream_type_t network_core_dst_to_tx_stream(protobuf_device_addr_t dst)
 {
     switch (dst) {
-        case protobuf_PACKET_ADDR_TAG:
-        case protobuf_PACKET_ADDR_ANCHOR:
+        case protobuf_PACKET_ADDR_MCU:
             /* Device-specific addresses – send over the primary network link */
             return STREAM_SERIAL_TX;
         case protobuf_PACKET_ADDR_CENTRAL:
@@ -126,14 +125,6 @@ static bool network_core_is_for_us(network_core_t *core, const protobuf_packet_t
 
     protobuf_device_addr_t dst = (protobuf_device_addr_t)packet->hdr.addr.dst;
     if (dst == protobuf_PACKET_ADDR_BCAST) return true;
-
-#ifdef BOOTLOADER
-    /* Bootloader should accept both TAG/ANCHOR unicast commands so FOTA tools
-     * do not need role-specific dst handling before app config is known. */
-    if (dst == protobuf_PACKET_ADDR_TAG || dst == protobuf_PACKET_ADDR_ANCHOR) {
-        return true;
-    }
-#endif
 
     return (dst == core->local_addr);
 }

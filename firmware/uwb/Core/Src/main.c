@@ -285,8 +285,7 @@ int main(void)
   sys_config_t *cfg = sys_config_get();
 
   serial_init();
-  protobuf_device_addr_t local_addr = (cfg->uwb.role == DEVICE_ROLE_TAG) ? 
-                                      protobuf_PACKET_ADDR_TAG : protobuf_PACKET_ADDR_ANCHOR;
+  protobuf_device_addr_t local_addr = protobuf_PACKET_ADDR_MCU;
 
   if (!network_core_init(&s_network_core, local_addr, s_network_rx_buf, sizeof(s_network_rx_buf)))
   {

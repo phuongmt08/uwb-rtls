@@ -42,8 +42,7 @@ typedef enum _protobuf_device_role_t {
 
 typedef enum _protobuf_device_addr_t {
     protobuf_PACKET_ADDR_UNSPECIFIED = 0,
-    protobuf_PACKET_ADDR_TAG = 1,
-    protobuf_PACKET_ADDR_ANCHOR = 2,
+    protobuf_PACKET_ADDR_MCU = 1,
     protobuf_PACKET_ADDR_CENTRAL = 3,
     protobuf_PACKET_ADDR_PERIPHERAL = 4,
     protobuf_PACKET_ADDR_HOST = 5,
@@ -51,6 +50,7 @@ typedef enum _protobuf_device_addr_t {
     protobuf_PACKET_ADDR_BCAST = 15
 } protobuf_device_addr_t;
 
+/* NOTE deprecated */
 typedef enum _protobuf_filter_mode_t {
     protobuf_FILTER_MODE_UNSPECIFIED = 0,
     protobuf_FILTER_MODE_KALMAN = 1
@@ -241,7 +241,7 @@ typedef struct _protobuf_sys_ranging_cfg_resp_t {
 } protobuf_sys_ranging_cfg_resp_t;
 
 typedef struct _protobuf_ranging_start_t {
-    bool reset_filter_state;
+    uint32_t dummy;
 } protobuf_ranging_start_t;
 
 typedef struct _protobuf_ranging_stop_t {
@@ -251,16 +251,13 @@ typedef struct _protobuf_ranging_stop_t {
 typedef struct _protobuf_anchor_ranging_t {
     uint32_t anchor_id;
     uint32_t distance_mm;
-    int32_t rssi_dbm;
+    uint32_t fp_amp;
 } protobuf_anchor_ranging_t;
 
 typedef struct _protobuf_ranging_result_t {
     float pos_x_m;
     float pos_y_m;
     float pos_z_m;
-    float covariance_xx;
-    float covariance_xy;
-    float covariance_yy;
     float rms_error_m;
     pb_size_t anchors_count;
     protobuf_anchor_ranging_t anchors[4];
@@ -702,8 +699,7 @@ extern "C" {
 #define _protobuf_device_addr_t_MAX protobuf_PACKET_ADDR_BCAST
 #define _protobuf_device_addr_t_ARRAYSIZE ((protobuf_device_addr_t)(protobuf_PACKET_ADDR_BCAST+1))
 #define protobuf_device_addr_t_PACKET_ADDR_UNSPECIFIED protobuf_PACKET_ADDR_UNSPECIFIED
-#define protobuf_device_addr_t_PACKET_ADDR_TAG protobuf_PACKET_ADDR_TAG
-#define protobuf_device_addr_t_PACKET_ADDR_ANCHOR protobuf_PACKET_ADDR_ANCHOR
+#define protobuf_device_addr_t_PACKET_ADDR_MCU protobuf_PACKET_ADDR_MCU
 #define protobuf_device_addr_t_PACKET_ADDR_CENTRAL protobuf_PACKET_ADDR_CENTRAL
 #define protobuf_device_addr_t_PACKET_ADDR_PERIPHERAL protobuf_PACKET_ADDR_PERIPHERAL
 #define protobuf_device_addr_t_PACKET_ADDR_HOST protobuf_PACKET_ADDR_HOST
@@ -901,7 +897,7 @@ extern "C" {
 #define protobuf_ranging_start_t_init_default    {0}
 #define protobuf_ranging_stop_t_init_default     {0}
 #define protobuf_anchor_ranging_t_init_default   {0, 0, 0}
-#define protobuf_ranging_result_t_init_default   {0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default}, 0}
+#define protobuf_ranging_result_t_init_default   {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default}, 0}
 #define protobuf_sensor_fusion_cfg_t_init_default {_protobuf_filter_mode_t_MIN, 0, 0, 0, 0, 0}
 #define protobuf_sensor_fusion_cfg_get_t_init_default {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
@@ -974,7 +970,7 @@ extern "C" {
 #define protobuf_ranging_start_t_init_zero       {0}
 #define protobuf_ranging_stop_t_init_zero        {0}
 #define protobuf_anchor_ranging_t_init_zero      {0, 0, 0}
-#define protobuf_ranging_result_t_init_zero      {0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero}, 0}
+#define protobuf_ranging_result_t_init_zero      {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero}, 0}
 #define protobuf_sensor_fusion_cfg_t_init_zero   {_protobuf_filter_mode_t_MIN, 0, 0, 0, 0, 0}
 #define protobuf_sensor_fusion_cfg_get_t_init_zero {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
@@ -1077,20 +1073,17 @@ extern "C" {
 #define protobuf_sys_ranging_cfg_get_t_dummy_tag 1
 #define protobuf_sys_ranging_cfg_set_t_config_tag 1
 #define protobuf_sys_ranging_cfg_resp_t_config_tag 1
-#define protobuf_ranging_start_t_reset_filter_state_tag 1
+#define protobuf_ranging_start_t_dummy_tag       1
 #define protobuf_ranging_stop_t_dummy_tag        1
 #define protobuf_anchor_ranging_t_anchor_id_tag  1
 #define protobuf_anchor_ranging_t_distance_mm_tag 2
-#define protobuf_anchor_ranging_t_rssi_dbm_tag   3
+#define protobuf_anchor_ranging_t_fp_amp_tag     3
 #define protobuf_ranging_result_t_pos_x_m_tag    1
 #define protobuf_ranging_result_t_pos_y_m_tag    2
 #define protobuf_ranging_result_t_pos_z_m_tag    3
-#define protobuf_ranging_result_t_covariance_xx_tag 4
-#define protobuf_ranging_result_t_covariance_xy_tag 5
-#define protobuf_ranging_result_t_covariance_yy_tag 6
-#define protobuf_ranging_result_t_rms_error_m_tag 7
-#define protobuf_ranging_result_t_anchors_tag    8
-#define protobuf_ranging_result_t_timestamp_ms_tag 9
+#define protobuf_ranging_result_t_rms_error_m_tag 4
+#define protobuf_ranging_result_t_anchors_tag    5
+#define protobuf_ranging_result_t_timestamp_ms_tag 6
 #define protobuf_sensor_fusion_cfg_t_mode_tag    1
 #define protobuf_sensor_fusion_cfg_t_q_process_noise_tag 2
 #define protobuf_sensor_fusion_cfg_t_r_base_tag  3
@@ -1407,7 +1400,7 @@ X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
 #define protobuf_sys_ranging_cfg_resp_t_config_MSGTYPE protobuf_sys_ranging_cfg_t
 
 #define protobuf_ranging_start_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, BOOL,     reset_filter_state,   1)
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_ranging_start_t_CALLBACK NULL
 #define protobuf_ranging_start_t_DEFAULT NULL
 
@@ -1419,7 +1412,7 @@ X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_anchor_ranging_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   anchor_id,         1) \
 X(a, STATIC,   SINGULAR, UINT32,   distance_mm,       2) \
-X(a, STATIC,   SINGULAR, INT32,    rssi_dbm,          3)
+X(a, STATIC,   SINGULAR, UINT32,   fp_amp,            3)
 #define protobuf_anchor_ranging_t_CALLBACK NULL
 #define protobuf_anchor_ranging_t_DEFAULT NULL
 
@@ -1427,12 +1420,9 @@ X(a, STATIC,   SINGULAR, INT32,    rssi_dbm,          3)
 X(a, STATIC,   SINGULAR, FLOAT,    pos_x_m,           1) \
 X(a, STATIC,   SINGULAR, FLOAT,    pos_y_m,           2) \
 X(a, STATIC,   SINGULAR, FLOAT,    pos_z_m,           3) \
-X(a, STATIC,   SINGULAR, FLOAT,    covariance_xx,     4) \
-X(a, STATIC,   SINGULAR, FLOAT,    covariance_xy,     5) \
-X(a, STATIC,   SINGULAR, FLOAT,    covariance_yy,     6) \
-X(a, STATIC,   SINGULAR, FLOAT,    rms_error_m,       7) \
-X(a, STATIC,   REPEATED, MESSAGE,  anchors,           8) \
-X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,      9)
+X(a, STATIC,   SINGULAR, FLOAT,    rms_error_m,       4) \
+X(a, STATIC,   REPEATED, MESSAGE,  anchors,           5) \
+X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,      6)
 #define protobuf_ranging_result_t_CALLBACK NULL
 #define protobuf_ranging_result_t_DEFAULT NULL
 #define protobuf_ranging_result_t_anchors_MSGTYPE protobuf_anchor_ranging_t
@@ -2047,7 +2037,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_item_t_size       21
 #define protobuf_anchor_layout_resp_t_size       184
 #define protobuf_anchor_layout_set_t_size        184
-#define protobuf_anchor_ranging_t_size           23
+#define protobuf_anchor_ranging_t_size           18
 #define protobuf_battery_info_get_t_size         6
 #define protobuf_battery_info_resp_t_size        25
 #define protobuf_ble_adv_config_t_size           41
@@ -2089,8 +2079,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_pos_calib_cfg_resp_t_size       77
 #define protobuf_pos_calib_cfg_set_t_size        77
 #define protobuf_pos_calib_cfg_t_size            75
-#define protobuf_ranging_result_t_size           141
-#define protobuf_ranging_start_t_size            2
+#define protobuf_ranging_result_t_size           106
+#define protobuf_ranging_start_t_size            6
 #define protobuf_ranging_status_get_t_size       6
 #define protobuf_ranging_status_resp_t_size      58
 #define protobuf_ranging_stop_t_size             6

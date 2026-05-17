@@ -54,15 +54,14 @@ enum device_role_t {
 
 enum device_addr_t {
     PACKET_ADDR_UNSPECIFIED = 0x0;
-    PACKET_ADDR_TAG         = 0x1;
-    PACKET_ADDR_ANCHOR      = 0x2;
+    PACKET_ADDR_MCU         = 0x1;
     PACKET_ADDR_CENTRAL     = 0x3;
     PACKET_ADDR_PERIPHERAL  = 0x4;
     PACKET_ADDR_HOST        = 0x5;
     PACKET_ADDR_DEBUG       = 0x7;
     PACKET_ADDR_BCAST       = 0xF;
 }
-
+// NOTE deprecated
 enum filter_mode_t {
     FILTER_MODE_UNSPECIFIED = 0;
     FILTER_MODE_KALMAN      = 1;
@@ -243,7 +242,7 @@ message sys_ranging_cfg_resp_t {
 }
 
 message ranging_start_t {
-    bool reset_filter_state = 1;
+    uint32 dummy = 1;
 }
 
 message ranging_stop_t {
@@ -253,22 +252,19 @@ message ranging_stop_t {
 message anchor_ranging_t {
     uint32 anchor_id      = 1;
     uint32 distance_mm    = 2;
-    int32 rssi_dbm        = 3;
+    uint32 fp_amp         = 3;
 }
 
 message ranging_result_t {
     float pos_x_m          = 1;
     float pos_y_m          = 2;
     float pos_z_m          = 3;
-    float covariance_xx    = 4;
-    float covariance_xy    = 5;
-    float covariance_yy    = 6;
-    float rms_error_m      = 7;
-    repeated anchor_ranging_t anchors = 8;
-    uint32 timestamp_ms    = 9;
+    float rms_error_m      = 4;
+    repeated anchor_ranging_t anchors = 5;
+    uint32 timestamp_ms    = 6;
 }
 
-/* Sensor Fusion configuration ---------------------------------------------- */
+/* Sensor Fusion  ---------------------------------------------- */
 
 /* TODO: Implement sensor fusion configuration handler in positioning task */
 message sensor_fusion_cfg_t {
@@ -291,6 +287,11 @@ message sensor_fusion_cfg_set_t {
 message sensor_fusion_cfg_resp_t {
     sensor_fusion_cfg_t config = 1;
 }
+/* TODO: Implement the sensor fusion result including IMU heading data and diagnostics
+message sensor_fusion_result_t {
+    uint32 dummy = 1;
+}
+*/
 
 /* Commands ----------------------------------------------------------------- */
 

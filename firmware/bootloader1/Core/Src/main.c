@@ -131,7 +131,7 @@ int main(void)
   RLOG_D(OBJECT_CODE, "=================================================");
   /* Initialize protocol stack */
   serial_init();  // TEMP: Test
-  network_core_init(&s_net_core, protobuf_device_addr_t_PACKET_ADDR_TAG, s_net_rx_buf, sizeof(s_net_rx_buf));
+  network_core_init(&s_net_core, protobuf_device_addr_t_PACKET_ADDR_MCU, s_net_rx_buf, sizeof(s_net_rx_buf));
   network_cmd_init(&s_net_core);  // TEMP: Test
   bl_fota_init(&s_net_core);  // TEMP: Disabled to isolate hardfault source
 

@@ -62,8 +62,8 @@ ENTER_TIMEOUT_S   = 0.5
 POST_ENTER_WAIT_S = 2   # wait after enter_to_bootloader ACK for reset+bootloader init
 
 DEFAULT_SRC  = int(VvAddress.DEBUG)
-DEFAULT_APP_DST = int(VvAddress.ANCHOR)
-DEFAULT_BL_DST  = int(VvAddress.TAG)
+DEFAULT_APP_DST = int(VvAddress.MCU)
+DEFAULT_BL_DST  = int(VvAddress.MCU)
 DEFAULT_BAUD = 115200
 
 assert CHUNK_SIZE % 4 == 0, "CHUNK_SIZE must be 4-byte aligned"

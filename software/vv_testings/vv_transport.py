@@ -11,8 +11,7 @@ from google.protobuf.message import DecodeError
 class VvAddress(IntEnum):
     # Keep values aligned with protocol_pb2 to avoid routing packets to wrong link.
     NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
-    TAG = int(pb.PACKET_ADDR_TAG)
-    ANCHOR = int(pb.PACKET_ADDR_ANCHOR)
+    MCU = int(pb.PACKET_ADDR_MCU)
     CENTRAL = int(pb.PACKET_ADDR_CENTRAL)
     PERIPHERAL = int(pb.PACKET_ADDR_PERIPHERAL)
     HOST = int(pb.PACKET_ADDR_HOST)
