@@ -43,7 +43,6 @@ SRC_FILES += \
   $(SDK_ROOT)/components/libraries/sortlist/nrf_sortlist.c \
   $(SDK_ROOT)/components/libraries/strerror/nrf_strerror.c \
   $(SDK_ROOT)/modules/nrfx/mdk/system_nrf52.c \
-  $(SDK_ROOT)/components/boards/boards.c \
   $(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_clock.c \
   $(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_uart.c \
   $(SDK_ROOT)/modules/nrfx/soc/nrfx_atomic.c \
@@ -63,6 +62,8 @@ SRC_FILES += \
   $(SDK_ROOT)/components/ble/nrf_ble_qwr/nrf_ble_qwr.c \
   $(SDK_ROOT)/external/utf_converter/utf.c \
   $(SDK_ROOT)/components/ble/ble_services/ble_lbs/ble_lbs.c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_nus/ble_nus.c \
+  $(SDK_ROOT)/components/ble/ble_link_ctx_manager/ble_link_ctx_manager.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh_ble.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c
@@ -70,15 +71,20 @@ SRC_FILES += \
 # Custom Application & Bridge files
 SRC_FILES += \
   $(PROJ_DIR)/main.c \
-  $(PROJ_DIR)/sys_log.c \
   $(PROJ_DIR)/bsp_utils.c \
   $(PROJ_DIR)/bsp_uart.c \
   $(PROJ_DIR)/ble_peripheral.c \
   $(PROJ_DIR)/ble_peripheral.c \
+  $(PROJ_DIR)/../ble_common/boards.c \
+  $(COMMON_DIR)/logger.c \
   $(COMMON_DIR)/hdlc.c \
   $(COMMON_DIR)/ble_bridge/bb_cmd_hdl.c \
   $(COMMON_DIR)/ble_bridge/bb_router.c \
-  $(COMMON_DIR)/ble_bridge/bb_transport.c
+  $(COMMON_DIR)/ble_bridge/bb_transport.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_common.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_decode.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_encode.c \
+  $(PROJ_DIR)/../../../protocol/protos/protocol.pb.c
 
 # Include folders common to all targets
 INC_FOLDERS += \
@@ -106,7 +112,6 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/gpiote \
   $(SDK_ROOT)/components/libraries/bootloader/ble_dfu \
   $(SDK_ROOT)/components/nfc/ndef/connection_handover/common \
-  $(SDK_ROOT)/components/boards \
   $(SDK_ROOT)/components/nfc/ndef/generic/record \
   $(SDK_ROOT)/components/nfc/t4t_parser/cc_file \
   $(SDK_ROOT)/components/ble/ble_advertising \
@@ -135,6 +140,7 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/csense_drv \
   $(SDK_ROOT)/components/libraries/memobj \
   $(SDK_ROOT)/components/ble/ble_services/ble_nus_c \
+  $(SDK_ROOT)/components/ble/ble_link_ctx_manager \
   $(SDK_ROOT)/components/softdevice/common \
   $(SDK_ROOT)/components/ble/ble_services/ble_ias \
   $(SDK_ROOT)/components/libraries/usbd/class/hid/mouse \
@@ -148,7 +154,7 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/scheduler \
   $(SDK_ROOT)/components/libraries/cli \
   $(SDK_ROOT)/components/ble/ble_services/ble_lbs \
-  $(SDK_ROOT)/components/ble/ble_services/ble_hts \
+  ../../../../protocol/nanopb \
   $(SDK_ROOT)/components/libraries/crc16 \
   $(SDK_ROOT)/components/nfc/t4t_parser/apdu \
   $(SDK_ROOT)/components/libraries/util \
@@ -229,7 +235,7 @@ OPT = -O3 -g3
 CFLAGS += $(OPT)
 CFLAGS += -DAPP_TIMER_V2
 CFLAGS += -DAPP_TIMER_V2_RTC1_ENABLED
-CFLAGS += -DBOARD_PCA10040
+CFLAGS += -DBOARD_CUSTOM
 CFLAGS += -DBLE_PERIPHERAL
 CFLAGS += -DBLE_BRIDGE
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
@@ -259,7 +265,7 @@ ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 ASMFLAGS += -DAPP_TIMER_V2
 ASMFLAGS += -DAPP_TIMER_V2_RTC1_ENABLED
-ASMFLAGS += -DBOARD_PCA10040
+ASMFLAGS += -DBOARD_CUSTOM
 ASMFLAGS += -DBLE_PERIPHERAL
 ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET
 ASMFLAGS += -DFLOAT_ABI_HARD

@@ -1,6 +1,7 @@
 #include "ble_peripheral.h"
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 #include "nordic_common.h"
 #include "nrf.h"
 #include "app_error.h"
@@ -18,8 +19,9 @@
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
 #include "bsp_utils.h"
-#include "sys_log.h"
+#include "logger.h"
 #include "nrf_log.h"
+#include "ble_nus.h"
 #include "../ble_common/ble_config.h"
 
 #define DEVICE_NAME                     SYSTEM_CONFIG_DEVICE_PREFIX "01"
@@ -38,11 +40,18 @@
 BLE_LBS_DEF(m_lbs);
 NRF_BLE_GATT_DEF(m_gatt);
 NRF_BLE_QWR_DEF(m_qwr);
+BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);
+
+static bool m_is_initialized = false;
+static bool m_is_advertising = false;
 
 static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;
 static uint8_t m_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
 static uint8_t m_enc_advdata[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static uint8_t m_enc_scan_response_data[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
+static uint32_t m_pending_tx_chunks = 0;
+
+static ble_peripheral_rx_cb_t m_ble_rx_cb = NULL;
 
 static ble_gap_adv_data_t m_adv_data =
 {
@@ -57,6 +66,11 @@ static ble_gap_adv_data_t m_adv_data =
         .len    = BLE_GAP_ADV_SET_DATA_SIZE_MAX
     }
 };
+
+void ble_peripheral_rx_cb_register(ble_peripheral_rx_cb_t cb)
+{
+    m_ble_rx_cb = cb;
+}
 
 void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
@@ -106,11 +120,12 @@ static void advertising_init(void)
 
     memset(&advdata, 0, sizeof(advdata));
 
-    advdata.name_type          = BLE_ADVDATA_FULL_NAME;
+    advdata.name_type          = BLE_ADVDATA_NO_NAME;
     advdata.include_appearance = true;
     advdata.flags              = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
 
     memset(&srdata, 0, sizeof(srdata));
+    srdata.name_type               = BLE_ADVDATA_FULL_NAME;
     srdata.uuids_complete.uuid_cnt = sizeof(adv_uuids) / sizeof(adv_uuids[0]);
     srdata.uuids_complete.p_uuids  = adv_uuids;
 
@@ -149,11 +164,25 @@ static void led_write_handler(uint16_t conn_handle, ble_lbs_t * p_lbs, uint8_t l
     UNUSED_PARAMETER(led_state);
 }
 
+static void nus_data_handler(ble_nus_evt_t * p_evt)
+{
+    if (p_evt->type == BLE_NUS_EVT_RX_DATA)
+    {
+        NRF_LOG_INFO("BLE Peripheral NUS RX: %u bytes", p_evt->params.rx_data.length);
+        bsp_utils_led_activity_pulse();
+        if (m_ble_rx_cb != NULL)
+        {
+            m_ble_rx_cb(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
+        }
+    }
+}
+
 static void services_init(void)
 {
     ret_code_t         err_code;
     ble_lbs_init_t     init     = {0};
     nrf_ble_qwr_init_t qwr_init = {0};
+    ble_nus_init_t     nus_init = {0};
 
     qwr_init.error_handler = nrf_qwr_error_handler;
 
@@ -163,6 +192,11 @@ static void services_init(void)
     init.led_write_handler = led_write_handler;
 
     err_code = ble_lbs_init(&m_lbs, &init);
+    APP_ERROR_CHECK(err_code);
+
+    // Initialize Nordic UART Service
+    nus_init.data_handler = nus_data_handler;
+    err_code = ble_nus_init(&m_nus, &nus_init);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -199,13 +233,34 @@ static void conn_params_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+// Forward declaration
+static void ble_stack_init(void);
+
+void ble_peripheral_init(void)
+{
+    if (m_is_initialized) return;
+    
+    ble_stack_init();
+    gap_params_init();
+    gatt_init();
+    services_init();
+    advertising_init();
+    conn_params_init();
+    
+    m_is_initialized = true;
+}
+
 void ble_peripheral_advertising_start(void)
 {
     ret_code_t           err_code;
 
+    if (!m_is_initialized) return;
+    if (m_is_advertising) return;
+
     err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
     APP_ERROR_CHECK(err_code);
 
+    m_is_advertising = true;
     bsp_utils_led_on();
 }
 
@@ -221,6 +276,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
             bsp_utils_led_blink_start();
+            m_pending_tx_chunks = 0;
             if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
             {
                 APP_ERROR_CHECK(err_code);
@@ -232,6 +288,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                             p_ble_evt->evt.gap_evt.params.disconnected.reason);
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             bsp_utils_led_blink_stop();
+            m_pending_tx_chunks = 0;
             ble_peripheral_advertising_start();
             break;
 
@@ -274,6 +331,23 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             APP_ERROR_CHECK(err_code);
             break;
 
+        case BLE_GATTS_EVT_HVN_TX_COMPLETE:
+        {
+            uint16_t completed_count = p_ble_evt->evt.gatts_evt.params.hvn_tx_complete.count;
+            if (m_pending_tx_chunks > 0)
+            {
+                if (completed_count >= m_pending_tx_chunks)
+                {
+                    m_pending_tx_chunks = 0;
+                }
+                else
+                {
+                    m_pending_tx_chunks -= completed_count;
+                }
+                bsp_utils_led_activity_pulse();
+            }
+        } break;
+
         default:
             break;
     }
@@ -296,12 +370,125 @@ static void ble_stack_init(void)
     NRF_SDH_BLE_OBSERVER(m_ble_observer, APP_BLE_OBSERVER_PRIO, ble_evt_handler, NULL);
 }
 
-void ble_peripheral_init(void)
+void ble_peripheral_advertising_stop(void)
 {
-    ble_stack_init();
-    gap_params_init();
-    gatt_init();
-    services_init();
+    if (m_is_advertising)
+    {
+        sd_ble_gap_adv_stop(m_adv_handle);
+        m_is_advertising = false;
+    }
+}
+
+void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32_t serial_number)
+{
+    if (!m_is_initialized && enable)
+    {
+        ble_peripheral_init();
+    }
+    
+    NRF_LOG_INFO("MCU Requested BLE ADV Config Set: enable=%d, device_name=%s, serial_number=%u", enable, device_name, serial_number);
+
+    if (enable)
+    {
+        if (!m_is_advertising)
+        {
+            ble_gap_conn_sec_mode_t sec_mode;
+            BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
+            
+            if (device_name != NULL && strlen(device_name) > 0)
+            {
+                sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)device_name, strlen(device_name));
+            }
+            else
+            {
+                char auto_name[30];
+                snprintf(auto_name, sizeof(auto_name), "%s%02X", SYSTEM_CONFIG_DEVICE_PREFIX, (unsigned int)serial_number);
+                sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)auto_name, strlen(auto_name));            
+            }
+            
+            // Re-encode advertisement data to reflect new device name
     advertising_init();
-    conn_params_init();
+
+            ble_peripheral_advertising_start();
+        }
+    }
+    else
+    {
+        ble_peripheral_advertising_stop();
+    }
+}
+
+uint8_t ble_peripheral_status_get(void)
+{
+    if (!m_is_initialized) return 1; // IDLE
+    if (m_conn_handle != BLE_CONN_HANDLE_INVALID) return 5; // CONNECTED
+    if (m_is_advertising) return 3; // ADVERTISING
+    return 1; // IDLE
+}
+
+void ble_peripheral_adv_status_update(const void * p_adv_status)
+{
+    // Cập nhật lại array quảng bá m_enc_advdata với struct protobuf_ble_adv_status_t 
+    // Rồi update lại set adv_data 
+    // const protobuf_ble_adv_status_t * status = (const protobuf_ble_adv_status_t *)p_adv_status;
+    NRF_LOG_INFO("MCU Requested BLE Central ADV Status Update");
+    // Implement payload mapping later if required
+}
+
+uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
+{
+    if (!m_is_initialized || m_conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (p_data == NULL || length == 0)
+    {
+        return NRF_ERROR_NULL;
+    }
+
+    NRF_LOG_INFO("Forwarding %u bytes over BLE...", length);
+    
+    uint16_t offset = 0;
+    
+    while (offset < length)
+    {
+        // Sử dụng SYSTEM_CONFIG_MTU_SIZE từ ble_config.h, 
+        // trừ đi 3 byte header của chuẩn ATT (Mỗi gói payload BLE chỉ chứa được MTU - 3).
+        uint16_t current_payload_mtu = nrf_ble_gatt_eff_mtu_get(&m_gatt, m_conn_handle);
+        if (current_payload_mtu == 0 || current_payload_mtu > SYSTEM_CONFIG_MTU_SIZE) 
+        {
+            current_payload_mtu = SYSTEM_CONFIG_MTU_SIZE; // Đảm bảo lấy chuẩn từ file config
+        }
+        
+        current_payload_mtu -= 3; // Trừ header
+        
+        uint16_t send_len = length - offset;
+        
+        if (send_len > current_payload_mtu) 
+        {
+            send_len = current_payload_mtu;
+        }
+
+        ret_code_t err_code = ble_nus_data_send(&m_nus, (uint8_t *)(p_data + offset), &send_len, m_conn_handle);
+        
+        if (err_code == NRF_ERROR_RESOURCES)
+        {
+            // Tràn bộ đệm TX Notification của SoftDevice, thoát ra chờ nhịp sau hoặc loop chờ.
+            // Phải chú ý vì đây có thể gọi từ UART IRQ, nên không delay.
+            NRF_LOG_WARNING("BLE TX buffer full, dropping remaining byte: %u", length - offset);
+            return err_code;
+        }
+        else if (err_code != NRF_SUCCESS)
+        {
+            NRF_LOG_ERROR("BLE Send Failed! Code: 0x%x", err_code);
+            return err_code;
+        }
+
+        m_pending_tx_chunks++;
+        
+        offset += send_len;
+    }
+
+    return NRF_SUCCESS;
 }

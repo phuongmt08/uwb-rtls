@@ -13,11 +13,13 @@
 #include <stddef.h>
 #include "bb_transport.h"
 #include "hdlc.h"
+#include "logger.h"
 #if defined(BLE_PERIPHERAL)
 #include "../../peripheral/bsp_uart.h"
-#include "../../peripheral/sys_log.h"
+#include "../../peripheral/ble_peripheral.h"
 #elif defined(BLE_CENTRAL)
-
+#include "../../central/bsp/bsp_usbd.h"
+#include "../../central/app/app_ble_central.h"
 #endif
 
 /* Private defines ---------------------------------------------------- */
@@ -38,6 +40,8 @@ static hdlc_parser_t m_hdlc_parser;
 // static void on_rx_byte(uint8_t byte);
 static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t length);
 static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length);
+static void on_rx_ble(uint8_t const * p_data, uint16_t length);
+static void on_rx_byte(uint8_t byte);
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_state_transition_cb_t cb)
@@ -56,10 +60,16 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     ret_code_t err_code = NRF_SUCCESS;
 
 #if defined(BLE_PERIPHERAL)
-    NRF_LOG_INFO("Initializing UART for Peripheral...");
     err_code = bsp_uart_init(on_rx_byte);
+    
+    // Đăng ký hàm nhận byte cho BLE
+    ble_peripheral_rx_cb_register(on_rx_ble);
 #elif defined(BLE_CENTRAL)
-    // err_code = bsp_usb_init(on_rx_byte); // Đợi code api cho central sau
+    NRF_LOG_INFO("Initializing USB CDC ACM for Central...");
+    err_code = bsp_usbd_init(on_rx_byte); // ─ code api cho central sau
+    
+    // Register BLE receive callback for Central
+    ble_central_rx_cb_register(on_rx_ble);
 #endif
 
     return err_code;
@@ -67,9 +77,12 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 
 void bb_transport_process(void)
 {
+    #if defined(BLE_PERIPHERAL)
     // Cỗ máy trạng thái giờ đây chạy tự động dựa vào event callback (on_rx_byte)
     // được ngắt từ UART (APP_UART_DATA_READY) gọi lên.
     // Nên hàm này có thể bỏ trống, hoặc có thể dùng xử lý các tác vụ delay timeout nếu cần sau này.
+    bsp_uart_read_byte();
+    #endif
 }
 
 bool bb_transport_is_packet_ready(void)
@@ -87,6 +100,7 @@ ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t length, bb_pa
     else if (tx_source == BB_SOURCE_BLE) 
     {
         return bb_transport_send_ble(p_data, length);
+        NRF_LOG_INFO("Send packet via BLE to Central");
     }
     return NRF_ERROR_INVALID_PARAM;
 }
@@ -104,6 +118,7 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
         // 3. Đẩy mảng byte đã đóng gói xuống UART nếu là Peripheral
 #if defined(BLE_PERIPHERAL)
         ret_code_t err_code = bsp_uart_transmit(tx_buf, (uint16_t)frame_size);
+        NRF_LOG_INFO("bb_transport: Transmitted %d bytes over UART", frame_size);
         if (err_code == NRF_SUCCESS) 
         {
             return NRF_SUCCESS;
@@ -111,7 +126,12 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
         return err_code;
 #elif defined(BLE_CENTRAL)
         // bsp_serial_central_transmit(tx_buf, frame_size); // Đợi code api cho central sau
+        ret_code_t err_code = bsp_usbd_write(tx_buf, (size_t)frame_size);
+        if (err_code == NRF_SUCCESS) 
+        {
         return NRF_SUCCESS;
+        }
+        return err_code;
 #else
         return NRF_ERROR_NOT_SUPPORTED;
 #endif
@@ -122,9 +142,14 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
 
 static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
 {
-    // Gửi byte thuần qua BLE
-    // ble_nus_data_send(...)
-    return NRF_SUCCESS;
+#if defined(BLE_PERIPHERAL)
+    // Gọi hàm truyền data qua BLE peripheral (NUS/GATT custom Service)
+    return ble_peripheral_send_data(p_data, length);
+#elif defined(BLE_CENTRAL)
+    return app_ble_central_send_data(p_data, length);
+#else
+    return NRF_ERROR_NOT_SUPPORTED;
+#endif
 }
 
 /**
@@ -140,12 +165,11 @@ void on_rx_byte(uint8_t byte)
     // }
 
     hdlc_data_chunk_t rx_chunk;
-    NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
+    // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
 
     if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
 
     {   
-        // NRF_LOG_INFO("Received HDLC payload: len=%u", rx_chunk.len);
         // Copy data payload sang buffer do Router truyền xuống
         if (rx_chunk.len <= m_max_payload_len) 
         {
@@ -155,14 +179,32 @@ void on_rx_byte(uint8_t byte)
                 memcpy(p_protobuf_buffer, rx_chunk.data, rx_chunk.len);
             }
             m_is_packet_ready = true;
-            
-            NRF_LOG_INFO("Received HDLC payload: len=%u", rx_chunk.len);
 
             // Gọi callback chuyển đổi State cho bb_router
             if (m_rx_cb != NULL) 
             {
                 m_rx_cb(); 
             }
+        }
+    }
+}
+
+static void on_rx_ble(uint8_t const * p_data, uint16_t length)
+{
+    if (p_data == NULL || length == 0 || length > m_max_payload_len) 
+    {
+        return;
+    }
+
+    if (p_protobuf_buffer != NULL && p_protobuf_len != NULL) 
+    {
+        memcpy(p_protobuf_buffer, p_data, length);
+        *p_protobuf_len = length;
+        m_is_packet_ready = true;
+
+        if (m_rx_cb != NULL) 
+        {
+            m_rx_cb(); 
         }
     }
 }

@@ -354,6 +354,8 @@ typedef struct _protobuf_ble_status_get_t {
 typedef struct _protobuf_ble_status_resp_t {
     protobuf_ble_state_t state;
     int32_t rssi_dbm; /* valid only when connected */
+    bool has_disconnect_reason;
+    uint32_t disconnect_reason;
 } protobuf_ble_status_resp_t;
 
 typedef PB_BYTES_ARRAY_T(6) protobuf_ble_scan_result_t_mac_address_t;
@@ -915,7 +917,7 @@ extern "C" {
 #define protobuf_flash_verify_t_init_default     {0}
 #define protobuf_ble_adv_config_t_init_default   {0, 0, ""}
 #define protobuf_ble_status_get_t_init_default   {0}
-#define protobuf_ble_status_resp_t_init_default  {_protobuf_ble_state_t_MIN, 0}
+#define protobuf_ble_status_resp_t_init_default  {_protobuf_ble_state_t_MIN, 0, false, 0}
 #define protobuf_ble_scan_result_t_init_default  {{0, {0}}, 0, "", 0}
 #define protobuf_ble_conn_params_t_init_default  {0, 0, 0, 0}
 #define protobuf_ble_conn_params_get_t_init_default {0}
@@ -988,7 +990,7 @@ extern "C" {
 #define protobuf_flash_verify_t_init_zero        {0}
 #define protobuf_ble_adv_config_t_init_zero      {0, 0, ""}
 #define protobuf_ble_status_get_t_init_zero      {0}
-#define protobuf_ble_status_resp_t_init_zero     {_protobuf_ble_state_t_MIN, 0}
+#define protobuf_ble_status_resp_t_init_zero     {_protobuf_ble_state_t_MIN, 0, false, 0}
 #define protobuf_ble_scan_result_t_init_zero     {{0, {0}}, 0, "", 0}
 #define protobuf_ble_conn_params_t_init_zero     {0, 0, 0, 0}
 #define protobuf_ble_conn_params_get_t_init_zero {0}
@@ -1113,6 +1115,7 @@ extern "C" {
 #define protobuf_ble_status_get_t_dummy_tag      1
 #define protobuf_ble_status_resp_t_state_tag     1
 #define protobuf_ble_status_resp_t_rssi_dbm_tag  2
+#define protobuf_ble_status_resp_t_disconnect_reason_tag 3
 #define protobuf_ble_scan_result_t_mac_address_tag 1
 #define protobuf_ble_scan_result_t_rssi_dbm_tag  2
 #define protobuf_ble_scan_result_t_name_tag      3
@@ -1526,7 +1529,8 @@ X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 
 #define protobuf_ble_status_resp_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    state,             1) \
-X(a, STATIC,   SINGULAR, INT32,    rssi_dbm,          2)
+X(a, STATIC,   SINGULAR, INT32,    rssi_dbm,          2) \
+X(a, STATIC,   OPTIONAL, UINT32,   disconnect_reason,   3)
 #define protobuf_ble_status_resp_t_CALLBACK NULL
 #define protobuf_ble_status_resp_t_DEFAULT NULL
 
@@ -2052,7 +2056,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ble_scan_start_t_size           20
 #define protobuf_ble_scan_stop_t_size            6
 #define protobuf_ble_status_get_t_size           6
-#define protobuf_ble_status_resp_t_size          13
+#define protobuf_ble_status_resp_t_size          19
 #define protobuf_calib_status_get_t_size         6
 #define protobuf_calib_status_resp_t_size        37
 #define protobuf_device_information_get_t_size   6

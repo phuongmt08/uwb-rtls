@@ -7,7 +7,7 @@
  *    Supports command-response and event streaming patterns
  *
  * @version        : 1.1.0
- * @author         :
+ * @author         : Phuong Mai
  * @date           : 2026
  *
  * @attention
@@ -370,8 +370,9 @@ message ble_status_get_t {
 }
 
 message ble_status_resp_t {
-    ble_state_t state   = 1;
-    int32 rssi_dbm      = 2;  /* valid only when connected */
+    ble_state_t state        = 1;
+    int32 rssi_dbm           = 2;  /* valid only when connected */
+    optional uint32 disconnect_reason = 3;  
 }
 
 message ble_scan_result_t {
