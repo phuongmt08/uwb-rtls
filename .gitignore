@@ -5,3 +5,26 @@
 # Python bytecode
 *.pyc
 __pycache__/
+
+# Build artifacts
+_build/
+**/_build/
+*.o
+*.a
+*.elf
+*.hex
+*.out
+*.bin
+*.map
+*.lst
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# Data logs
+software/simulation/**/*_log_data.csv
+software/simulation/**/*_sim.html
+software/simulation/simulation_dashboard.html

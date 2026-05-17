@@ -1,0 +1,11 @@
+device nRF52832_xxAA
+si SWD
+speed 4000
+r
+erase
+r
+loadfile ../../soft_device/s132_nrf52_7.2.0_softdevice.hex
+loadfile _build/nrf52832_xxaa.hex
+r
+g
+q
