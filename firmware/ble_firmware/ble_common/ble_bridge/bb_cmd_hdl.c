@@ -25,6 +25,13 @@
 
 /* Private defines ---------------------------------------------------- */
 #define PKT_INIT protobuf_packet_t_init_zero
+#ifdef BLE_PERIPHERAL
+#define PACKET_ADDR protobuf_PACKET_ADDR_PERIPHERAL
+#elif defined(BLE_CENTRAL)
+#define PACKET_ADDR protobuf_PACKET_ADDR_CENTRAL
+#else
+#define PACKET_ADDR protobuf_PACKET_ADDR_UNSPECIFIED
+#endif
 typedef void (*bb_cmd_handler_t)(const protobuf_packet_t * p_in_pkt, protobuf_packet_t * p_out_pkt, bb_cmd_action_t * p_action);
 
 /* Private enumerate/structure ----------------------------------------- */
@@ -154,9 +161,13 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
         out_pkt.has_hdr = true;
         out_pkt.hdr.timestamp = in_pkt.hdr.timestamp; 
         
-        // Khi nRF trả lời lại STM32, Destination sẽ là Host (STM32)
-        out_pkt.hdr.has_addr = true;
-        out_pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST; 
+        // Reply to the original sender (STM32 TAG/ANCHOR or PC HOST).
+        if (in_pkt.hdr.has_addr)
+        {
+            out_pkt.hdr.has_addr = true;
+            out_pkt.hdr.addr.src = PACKET_ADDR;
+            out_pkt.hdr.addr.dst = in_pkt.hdr.addr.src;
+        }
     }
 
     // 4. Gọi Handler thực thi Logic ứng dụng

@@ -101,6 +101,7 @@ static protobuf_ble_state_t m_current_ble_state = protobuf_BLE_STATE_IDLE;
 static int32_t        m_last_rssi_dbm = APP_BLE_CENTRAL_RSSI_UNKNOWN_DBM;
 static uint32_t       m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
 static ble_central_rx_cb_t m_ble_rx_cb = NULL;
+static uint32_t       m_pending_tx_chunks = 0;
 APP_TIMER_DEF(m_scan_publish_timer);
 
 /* Private prototypes ------------------------------------------------------ */
@@ -406,6 +407,7 @@ static void nus_c_evt_handler(ble_nus_c_t *p_ble_nus_c, ble_nus_c_evt_t const *p
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
             NRF_LOG_INFO("NUS Data received: %u bytes", p_evt->data_len);
+            bsp_led_rx_pulse();
             if (m_ble_rx_cb != NULL)
             {
                 m_ble_rx_cb(p_evt->p_data, p_evt->data_len);
@@ -490,6 +492,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_is_connecting = false;
             m_current_conn_handle = p_gap_evt->conn_handle;
             m_current_conn_params = p_gap_evt->params.connected.conn_params;
+            m_pending_tx_chunks = 0;
 
             m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
             ble_state_update(protobuf_BLE_STATE_CONNECTED);
@@ -527,6 +530,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_is_connected = false;
             m_is_connecting = false;
             m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
+            m_pending_tx_chunks = 0;
 
             m_last_disconnect_reason = reason;
             ble_state_update(protobuf_BLE_STATE_IDLE);
@@ -641,6 +645,31 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
             APP_ERROR_CHECK(err_code);
         } break;
+
+        case BLE_GATTC_EVT_WRITE_CMD_TX_COMPLETE:
+        {
+            uint16_t completed_count = p_ble_evt->evt.gattc_evt.params.write_cmd_tx_complete.count;
+            if (m_pending_tx_chunks > 0)
+            {
+                if (completed_count >= m_pending_tx_chunks)
+                {
+                    m_pending_tx_chunks = 0;
+                }
+                else
+                {
+                    m_pending_tx_chunks -= completed_count;
+                }
+                bsp_led_tx_pulse();
+            }
+        } break;
+
+        case BLE_GATTC_EVT_WRITE_RSP:
+            if (m_pending_tx_chunks > 0)
+            {
+                m_pending_tx_chunks--;
+                bsp_led_tx_pulse();
+            }
+            break;
 
         /* ---- GATT Server timeout ------------------------------------ */
         case BLE_GATTS_EVT_TIMEOUT:
@@ -1033,6 +1062,9 @@ uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length)
             NRF_LOG_ERROR("BLE Central Send Failed! Code: 0x%x", (unsigned int)err_code);
             return err_code;
         }
+
+        NRF_LOG_INFO("BLE Central NUS TX queued: %u bytes", send_len);
+        m_pending_tx_chunks++;
 
         offset += send_len;
     }

@@ -49,6 +49,7 @@ static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;
 static uint8_t m_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
 static uint8_t m_enc_advdata[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static uint8_t m_enc_scan_response_data[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
+static uint32_t m_pending_tx_chunks = 0;
 
 static ble_peripheral_rx_cb_t m_ble_rx_cb = NULL;
 
@@ -167,6 +168,8 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 {
     if (p_evt->type == BLE_NUS_EVT_RX_DATA)
     {
+        NRF_LOG_INFO("BLE Peripheral NUS RX: %u bytes", p_evt->params.rx_data.length);
+        bsp_utils_led_activity_pulse();
         if (m_ble_rx_cb != NULL)
         {
             m_ble_rx_cb(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
@@ -273,6 +276,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
             bsp_utils_led_blink_start();
+            m_pending_tx_chunks = 0;
             if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
             {
                 APP_ERROR_CHECK(err_code);
@@ -284,6 +288,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                             p_ble_evt->evt.gap_evt.params.disconnected.reason);
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             bsp_utils_led_blink_stop();
+            m_pending_tx_chunks = 0;
             ble_peripheral_advertising_start();
             break;
 
@@ -325,6 +330,23 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
             APP_ERROR_CHECK(err_code);
             break;
+
+        case BLE_GATTS_EVT_HVN_TX_COMPLETE:
+        {
+            uint16_t completed_count = p_ble_evt->evt.gatts_evt.params.hvn_tx_complete.count;
+            if (m_pending_tx_chunks > 0)
+            {
+                if (completed_count >= m_pending_tx_chunks)
+                {
+                    m_pending_tx_chunks = 0;
+                }
+                else
+                {
+                    m_pending_tx_chunks -= completed_count;
+                }
+                bsp_utils_led_activity_pulse();
+            }
+        } break;
 
         default:
             break;
@@ -462,6 +484,8 @@ uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
             NRF_LOG_ERROR("BLE Send Failed! Code: 0x%x", err_code);
             return err_code;
         }
+
+        m_pending_tx_chunks++;
         
         offset += send_len;
     }

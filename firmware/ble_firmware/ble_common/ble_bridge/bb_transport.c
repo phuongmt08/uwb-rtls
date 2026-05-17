@@ -146,9 +146,7 @@ static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
     // Gọi hàm truyền data qua BLE peripheral (NUS/GATT custom Service)
     return ble_peripheral_send_data(p_data, length);
 #elif defined(BLE_CENTRAL)
-    // Tương tự cho BLE Central nếu có
-    // return ble_central_send_data(p_data, length);
-    return NRF_SUCCESS;
+    return app_ble_central_send_data(p_data, length);
 #else
     return NRF_ERROR_NOT_SUPPORTED;
 #endif
