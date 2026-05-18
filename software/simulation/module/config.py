@@ -1,0 +1,218 @@
+import numpy as np
+from dataclasses import dataclass
+from typing import Tuple
+
+# TXT
+OUTPUT_TXT_ENABLED = False
+
+# OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
+SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\data\20260513_16g34p_ukf_log_data_rules_trajectory.csv"
+# SOURCE_DATA_FILE = None
+
+# ---------------------------------------------------------------------------
+# Simulation configuration
+# ---------------------------------------------------------------------------
+ROOM_SIZE_M = 10.0
+SIMULATION_TIME_S = 20.0  # Total simulation time in seconds
+
+# ==========================================
+# User defined reference rectangle
+# ==========================================
+DRAW_RECTANGLE = True
+RECT_WIDTH = -4.88
+RECT_HEIGHT = 4.88
+# ==========================================
+
+IMU_EMA_ALPHA = 0.25
+
+# ==========================================
+# Zero Velocity Update (ZUPT) configuration
+# ==========================================
+IMU_ZUPT_THRESHOLD = 5.0
+IMU_ZUPT_FRAMES = 15
+# ==========================================
+
+
+TEST_UKF_Q_R_Params = False
+
+ANCHOR_1_X = 0.0
+ANCHOR_1_Y = 0.0
+
+ANCHOR_2_X = 9.76
+ANCHOR_2_Y = 0.0
+
+ANCHOR_3_X = 0.0
+ANCHOR_3_Y = 9.76
+
+ANCHOR_4_X = 9.76
+ANCHOR_4_Y = 9.76
+
+# Anchor positions in the room (three corners)
+ANCHOR_POSITIONS = np.array([
+    [ANCHOR_1_X, ANCHOR_1_Y],     
+    [ANCHOR_2_X, ANCHOR_2_Y],     
+    [ANCHOR_3_X, ANCHOR_3_Y],    
+    [ANCHOR_4_X, ANCHOR_4_Y]     
+])
+
+# UKF configuration
+UKF_STATE_SIZE = 8
+UKF_PROCESS_NOISE_SIZE = 3
+UKF_MEASUREMENT_SIZE = 3
+UKF_ALPHA = 0.1
+UKF_KAPPA = 0.0
+UKF_BETA = 2.0
+
+# Initial filter uncertainty variables
+P_PX = 1e-06
+P_PY = 1e-06
+P_VX = 1e-06
+P_VY = 1e-06
+P_THETA = 1e-20
+P_BAX = 1e-05
+P_BAY = 1e-05
+P_BGZ = 1e-05
+
+INITIAL_P = np.diag([
+    P_PX, P_PY, P_VX, P_VY, P_THETA, P_BAX, P_BAY, P_BGZ
+])
+
+# Q/R Test Params toggle
+TEST_UKF_Q_R_Params = False
+
+# Hardcoded TEST values (Always constant)
+Q_A_TEST = 0.2**2
+Q_G_TEST = np.deg2rad(2)**2
+R_UWB_TEST = 0.1**2
+
+# MANUAL values (Editable from GUI else block)
+Q_A_MANUAL = 0.04
+Q_G_MANUAL = 4.78e-07
+R_UWB_MANUAL = 0.01
+
+# Logic to select final values
+if TEST_UKF_Q_R_Params:
+    Q_A = Q_A_TEST
+    Q_G = Q_G_TEST
+    R_UWB = R_UWB_TEST
+else:
+    Q_A = Q_A_MANUAL
+    Q_G = Q_G_MANUAL
+    R_UWB = R_UWB_MANUAL
+
+PROCESS_NOISE_COV = np.diag([Q_A, Q_A, Q_G])
+MEASUREMENT_NOISE_COV = np.diag([R_UWB, R_UWB, R_UWB])
+
+# Derived UKF parameters
+UKF_AUGMENTED_SIZE = UKF_STATE_SIZE + UKF_PROCESS_NOISE_SIZE
+UKF_NUM_SIGMA = 2 * UKF_AUGMENTED_SIZE + 1
+UKF_LAMBDA = UKF_ALPHA**2 * (UKF_AUGMENTED_SIZE + UKF_KAPPA) - UKF_AUGMENTED_SIZE
+UKF_GAMMA = np.sqrt(UKF_AUGMENTED_SIZE + UKF_LAMBDA)
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SensorEvent:
+    type: str
+    ax: float
+    ay: float
+    gz: float
+    px: float
+    py: float
+    distances: np.ndarray
+    dt: float
+    mask: int = 0
+    raw_line: str = ""
+    ax_ema: float = 0.0
+    ay_ema: float = 0.0
+    gz_ema: float = 0.0
+
+@dataclass
+class IMUSample:
+    ax: float
+    ay: float
+    gz: float
+
+@dataclass
+class UKFContext:
+    x: np.ndarray
+    P: np.ndarray
+    Wm: np.ndarray
+    Wc: np.ndarray
+    is_first_frame: bool
+    X_sigma_pred: np.ndarray
+    use_advanced_propagate: bool = False
+    prev_imu_sample: IMUSample = None
+    logger: 'UKFLogger' = None
+
+# ==================== SERIAL CONFIGURATION ====================
+# UART Configuration
+UART_BAUDRATE = 115200
+UART_TIMEOUT = 1.0
+TARGET_PORT = "COM8"
+
+# Protocol Definitions
+UART_SOF = 0xAA
+
+# ==================== LIVE PLOT CONFIGURATION ====================
+# Frame Structure Format (little-endian)
+# - B: unsigned char (1 byte) for sof
+# - B: unsigned char (1 byte) for length  
+# - B: unsigned char (1 byte) for anchor_mask
+# - I: unsigned int (4 bytes) for tx_frame_cnt
+# - f: float (4 bytes) for ax
+# - f: float (4 bytes) for ay
+# - f: float (4 bytes) for gz
+# - f: float (4 bytes) for px
+# - f: float (4 bytes) for py
+# - 4f: 4 floats (16 bytes) for distance array
+# - I: unsigned int (4 bytes) for error_frame_cnt
+# - f: float (4 bytes) for dt
+LIVE_FRAME_FORMAT = '<BBBI5f4fIf'
+import struct
+LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
+
+# ==================== IMU Q Process CONFIGURATION ====================
+# Frame Structure Format (little-endian)
+# - B: unsigned char (1 byte) for sof
+# - B: unsigned char (1 byte) for length  
+# - I: unsigned int (4 bytes) for tx_frame_cnt
+# - f: float (4 bytes) for ax
+# - f: float (4 bytes) for ay
+# - f: float (4 bytes) for gz
+IMU_FRAME_FORMAT = '<BBI3f'
+import struct
+IMU_FRAME_SIZE = struct.calcsize(IMU_FRAME_FORMAT)
+
+# ==================== CSV CONFIGURATION ====================
+# File naming
+CSV_UKF_FILENAME_PREFIX = "ukf_log_data"
+CSV_UKF_FILENAME_SUFFIX = ".csv"
+
+# File naming
+CSV_IMU_FILENAME_PREFIX = "imu_log_data"
+CSV_IMU_FILENAME_SUFFIX = ".csv"
+
+# File naming
+CSV_UWB_FILENAME_PREFIX = "uwb_log_data"
+CSV_UWB_FILENAME_SUFFIX = ".csv"
+
+# ==================== UWB CONFIGURATION ====================
+# Frame Structure Format (little-endian)
+# - B: unsigned char (1 byte) for sof
+# - B: unsigned char (1 byte) for length  
+# - I: unsigned int (4 bytes) for tx_frame_cnt
+# - 4f: 4 floats (16 bytes) for distance array
+UWB_FRAME_FORMAT = '<BBI4f'
+UWB_FRAME_SIZE = struct.calcsize(UWB_FRAME_FORMAT)
+
+# Logging Control
+PRINT_DATA = True  # Set to False to disable console printing
+
+# Predict/Update detection
+PREDICT_THRESHOLD = 0.001
+
+# Graph configuration
+MAX_SAMPLES = 5000  # Define number of samples to keep in graph

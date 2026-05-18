@@ -1,0 +1,671 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1251</width>
+    <height>898</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,5,1">
+    <item>
+     <widget class="QGroupBox" name="DataSource">
+      <property name="font">
+       <font>
+        <pointsize>10</pointsize>
+        <weight>75</weight>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="title">
+       <string>Data Source</string>
+      </property>
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <item>
+        <widget class="QCheckBox" name="checkBox_csvPath">
+         <property name="font">
+          <font>
+           <weight>50</weight>
+           <italic>true</italic>
+           <bold>false</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string>Use CSV:</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLineEdit" name="lineEdit_csvPath"/>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QFrame" name="frame">
+      <property name="frameShape">
+       <enum>QFrame::StyledPanel</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Raised</enum>
+      </property>
+      <layout class="QHBoxLayout" name="horizontalLayout_2">
+       <item>
+        <widget class="QGroupBox" name="groupBox">
+         <property name="title">
+          <string>UKF Params</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_13">
+          <item row="0" column="0" rowspan="2">
+           <widget class="QFrame" name="frame_2">
+            <property name="frameShape">
+             <enum>QFrame::StyledPanel</enum>
+            </property>
+            <property name="frameShadow">
+             <enum>QFrame::Raised</enum>
+            </property>
+            <layout class="QGridLayout" name="gridLayout_8">
+             <item row="0" column="0">
+              <widget class="QGroupBox" name="groupBox_3">
+               <property name="title">
+                <string>Constants</string>
+               </property>
+               <layout class="QGridLayout" name="gridLayout_3">
+                <item row="0" column="0">
+                 <widget class="QLabel" name="label">
+                  <property name="text">
+                   <string>alpha</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QLineEdit" name="lineEdit_ukfAlpha"/>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="label_2">
+                  <property name="text">
+                   <string>kappa</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QLineEdit" name="lineEdit_ukfKappa"/>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="label_3">
+                  <property name="text">
+                   <string>beta</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QLineEdit" name="lineEdit_ukfBeta"/>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QGroupBox" name="groupBox_7">
+               <property name="title">
+                <string>Anchor</string>
+               </property>
+               <layout class="QGridLayout" name="gridLayout_6">
+                <item row="6" column="1" colspan="2">
+                 <widget class="QLineEdit" name="lineEdit_A4_X"/>
+                </item>
+                <item row="6" column="0">
+                 <widget class="QLabel" name="label_15">
+                  <property name="text">
+                   <string>A4_X</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="4" column="2">
+                 <widget class="QLineEdit" name="lineEdit_A3_X"/>
+                </item>
+                <item row="7" column="0">
+                 <widget class="QLabel" name="label_19">
+                  <property name="text">
+                   <string>A4_Y</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="2">
+                 <widget class="QLineEdit" name="lineEdit_A1_Y"/>
+                </item>
+                <item row="2" column="2">
+                 <widget class="QLineEdit" name="lineEdit_A2_X"/>
+                </item>
+                <item row="3" column="2">
+                 <widget class="QLineEdit" name="lineEdit_A2_Y"/>
+                </item>
+                <item row="2" column="0" colspan="2">
+                 <widget class="QLabel" name="label_22">
+                  <property name="text">
+                   <string>A2_X</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="2">
+                 <widget class="QLineEdit" name="lineEdit_A1_X"/>
+                </item>
+                <item row="4" column="0" colspan="2">
+                 <widget class="QLabel" name="label_23">
+                  <property name="text">
+                   <string>A3_X</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="0" colspan="2">
+                 <widget class="QLabel" name="label_25">
+                  <property name="text">
+                   <string>A1_X</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="0" colspan="2">
+                 <widget class="QLabel" name="label_24">
+                  <property name="text">
+                   <string>A2_Y</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="5" column="0" colspan="2">
+                 <widget class="QLabel" name="label_18">
+                  <property name="text">
+                   <string>A3_Y</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="5" column="2">
+                 <widget class="QLineEdit" name="lineEdit_A3_Y"/>
+                </item>
+                <item row="1" column="0" colspan="2">
+                 <widget class="QLabel" name="label_21">
+                  <property name="text">
+                   <string>A1_Y</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="7" column="1" colspan="2">
+                 <widget class="QLineEdit" name="lineEdit_A4_Y"/>
+                </item>
+               </layout>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QGroupBox" name="groupBox_8">
+            <property name="title">
+             <string>Rec</string>
+            </property>
+            <layout class="QGridLayout" name="gridLayout_9">
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_16">
+               <property name="text">
+                <string>Width</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QLineEdit" name="lineEdit_recWidth"/>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_17">
+               <property name="text">
+                <string>Height</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QLineEdit" name="lineEdit_recHeight"/>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="1" column="1" rowspan="2">
+           <widget class="QGroupBox" name="groupBox_4">
+            <property name="title">
+             <string>Matrix</string>
+            </property>
+            <layout class="QGridLayout" name="gridLayout_5">
+             <item row="8" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_bax"/>
+             </item>
+             <item row="10" column="0">
+              <widget class="QLabel" name="label_14">
+               <property name="text">
+                <string>P_bgz</string>
+               </property>
+              </widget>
+             </item>
+             <item row="10" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_bgz"/>
+             </item>
+             <item row="9" column="0">
+              <widget class="QLabel" name="label_13">
+               <property name="text">
+                <string>P_bay</string>
+               </property>
+              </widget>
+             </item>
+             <item row="9" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_bay"/>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_6">
+               <property name="text">
+                <string>Qg</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="label_4">
+               <property name="text">
+                <string>Ruwb</string>
+               </property>
+              </widget>
+             </item>
+             <item row="4" column="0">
+              <widget class="QLabel" name="label_8">
+               <property name="text">
+                <string>P_py</string>
+               </property>
+              </widget>
+             </item>
+             <item row="5" column="0">
+              <widget class="QLabel" name="label_9">
+               <property name="text">
+                <string>P_vx</string>
+               </property>
+              </widget>
+             </item>
+             <item row="4" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_py"/>
+             </item>
+             <item row="5" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_vx"/>
+             </item>
+             <item row="6" column="0">
+              <widget class="QLabel" name="label_12">
+               <property name="text">
+                <string>P_vy</string>
+               </property>
+              </widget>
+             </item>
+             <item row="6" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_vy"/>
+             </item>
+             <item row="1" column="1">
+              <widget class="QLineEdit" name="lineEdit_ukfQg"/>
+             </item>
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_5">
+               <property name="text">
+                <string>Qa</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QLineEdit" name="lineEdit_ukfQa"/>
+             </item>
+             <item row="3" column="0">
+              <widget class="QLabel" name="label_7">
+               <property name="text">
+                <string>P_px</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QLineEdit" name="lineEdit_ukfRuwb"/>
+             </item>
+             <item row="3" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_px"/>
+             </item>
+             <item row="7" column="0">
+              <widget class="QLabel" name="label_11">
+               <property name="text">
+                <string>P_theta</string>
+               </property>
+              </widget>
+             </item>
+             <item row="7" column="1">
+              <widget class="QLineEdit" name="lineEdit_P_theta"/>
+             </item>
+             <item row="8" column="0">
+              <widget class="QLabel" name="label_10">
+               <property name="text">
+                <string>P_bax</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QGroupBox" name="groupBox_9">
+            <property name="title">
+             <string>Noise STD</string>
+            </property>
+            <layout class="QGridLayout" name="gridLayout_10">
+             <item row="3" column="0">
+              <widget class="QLabel" name="label_28">
+               <property name="text">
+                <string>IMU_STD_GZ</string>
+               </property>
+              </widget>
+             </item>
+             <item row="4" column="0">
+              <widget class="QLabel" name="label_26">
+               <property name="text">
+                <string>STD_UWB</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_20">
+               <property name="text">
+                <string>IMU_STD_AX</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QLineEdit" name="lineEdit_imuSTDAy"/>
+             </item>
+             <item row="1" column="1">
+              <widget class="QLineEdit" name="lineEdit_imuSTDAx"/>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="label_27">
+               <property name="text">
+                <string>IMU_STD_AY</string>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="1">
+              <widget class="QLineEdit" name="lineEdit_imuSTDGz"/>
+             </item>
+             <item row="4" column="1">
+              <widget class="QLineEdit" name="lineEdit_STDRuwb"/>
+             </item>
+             <item row="0" column="1">
+              <widget class="QCheckBox" name="checkBox_useQRTestParams">
+               <property name="font">
+                <font>
+                 <weight>50</weight>
+                 <italic>true</italic>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Use test params</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QCheckBox" name="checkBox_ukfTrapezoidal">
+            <property name="font">
+             <font>
+              <weight>50</weight>
+              <italic>true</italic>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="text">
+             <string>Use Trapezoidal</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_2">
+         <property name="title">
+          <string>IMU</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_12">
+          <item row="0" column="0">
+           <widget class="QFrame" name="frame_3">
+            <property name="frameShape">
+             <enum>QFrame::StyledPanel</enum>
+            </property>
+            <property name="frameShadow">
+             <enum>QFrame::Raised</enum>
+            </property>
+            <layout class="QHBoxLayout" name="horizontalLayout_3" stretch="1,3">
+             <item>
+              <widget class="QGroupBox" name="groupBox_5">
+               <property name="title">
+                <string>EMA &amp; ZUPT</string>
+               </property>
+               <layout class="QGridLayout" name="gridLayout_11">
+                <item row="0" column="0">
+                 <widget class="QLabel" name="label_31">
+                  <property name="text">
+                   <string>EMA alpha</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QLineEdit" name="lineEdit_emaAlpha"/>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="label_30">
+                  <property name="text">
+                   <string>ZUPT Threshold</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QLineEdit" name="lineEdit_zuptThreshold"/>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="label_29">
+                  <property name="text">
+                   <string>ZUPT Frames</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QLineEdit" name="lineEdit_zuptFrames"/>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="groupBox_10">
+               <property name="title">
+                <string>Data</string>
+               </property>
+               <layout class="QGridLayout" name="gridLayout_14">
+                <item row="0" column="0">
+                 <widget class="QCheckBox" name="checkBox_rawIMU">
+                  <property name="font">
+                   <font>
+                    <weight>50</weight>
+                    <italic>true</italic>
+                    <bold>false</bold>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Raw IMU</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QCheckBox" name="checkBox_rawIMU_ZUPT">
+                  <property name="font">
+                   <font>
+                    <weight>50</weight>
+                    <italic>true</italic>
+                    <bold>false</bold>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Raw IMU + ZUPT</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QCheckBox" name="checkBox_emaIMU">
+                  <property name="font">
+                   <font>
+                    <weight>50</weight>
+                    <italic>true</italic>
+                    <bold>false</bold>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>EMA IMU</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QCheckBox" name="checkBox_emaIMU_ZUPT">
+                  <property name="font">
+                   <font>
+                    <weight>50</weight>
+                    <italic>true</italic>
+                    <bold>false</bold>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>EMA IMU + ZUPT</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QGroupBox" name="groupBox_6">
+            <property name="title">
+             <string>TXT</string>
+            </property>
+            <layout class="QGridLayout" name="gridLayout_15">
+             <item row="0" column="0">
+              <widget class="QCheckBox" name="checkBox_txtEnable">
+               <property name="font">
+                <font>
+                 <weight>50</weight>
+                 <italic>true</italic>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Enable export</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QCheckBox" name="checkBox_txtRaw">
+               <property name="font">
+                <font>
+                 <weight>50</weight>
+                 <italic>true</italic>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Export raw</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QCheckBox" name="checkBox_txtEMA">
+               <property name="font">
+                <font>
+                 <weight>50</weight>
+                 <italic>true</italic>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Export ema</string>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="0">
+              <widget class="QCheckBox" name="checkBox_txtRaw_ZUPT">
+               <property name="font">
+                <font>
+                 <weight>50</weight>
+                 <italic>true</italic>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Export raw + ZUPT</string>
+               </property>
+              </widget>
+             </item>
+             <item row="4" column="0">
+              <widget class="QCheckBox" name="checkBox_txtEMA_ZUPT">
+               <property name="font">
+                <font>
+                 <weight>50</weight>
+                 <italic>true</italic>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Export ema + ZUPT</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="pushButton_run">
+      <property name="font">
+       <font>
+        <pointsize>15</pointsize>
+        <weight>75</weight>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Run</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1251</width>
+     <height>21</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
