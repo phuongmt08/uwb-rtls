@@ -302,8 +302,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dst",
         type=int,
-        default=int(VvAddress.BCAST),
-        help="Device destination address (default: BCAST=15, works for TAG/ANCHOR)",
+        default=int(VvAddress.MCU),
+        help="Device destination address (default: MCU=1)",
     )
     parser.add_argument(
         "--src",
