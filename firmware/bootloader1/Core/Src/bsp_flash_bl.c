@@ -36,6 +36,8 @@ static bsp_fl_status_t erase_sector(uint32_t hal_sector)
     uint32_t sector_error = 0;
 
     HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | 
+                           FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
     HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &sector_error);
     HAL_FLASH_Lock();
 
@@ -48,6 +50,8 @@ static bsp_fl_status_t write_words(uint32_t addr, const uint8_t *data, uint32_t 
     uint32_t        count = length / 4u;
 
     HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | 
+                           FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
 
     for (uint32_t i = 0; i < count; i++) {
         if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD,

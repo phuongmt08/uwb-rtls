@@ -53,9 +53,9 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
         .flow_control = APP_UART_FLOW_CONTROL_DISABLED,
         .use_parity   = false,
 #if defined (UART_PRESENT)
-        .baud_rate    = NRF_UART_BAUDRATE_115200
+        .baud_rate    = NRF_UART_BAUDRATE_460800
 #else
-        .baud_rate    = NRF_UARTE_BAUDRATE_115200
+        .baud_rate    = NRF_UARTE_BAUDRATE_460800
 #endif
     };
 
