@@ -243,3 +243,131 @@ float mw_filter_distance_smoother_apply(distance_smoother_t *ctx,
     flt->filtered_m += ctx->alpha * (bounded_measurement - flt->filtered_m);
     return flt->filtered_m;
 }
+
+/* ====================================================================
+ * UKF Initialization Filter (Median over N samples)
+ * ==================================================================== */
+
+void mw_filter_ukf_init_reset(ukf_init_filter_t *ctx)
+{
+    if (!ctx) return;
+    ctx->count = 0;
+    for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+        ctx->x_history[i] = 0.0f;
+        ctx->y_history[i] = 0.0f;
+    }
+}
+
+static void insertion_sort(float arr[], uint8_t n)
+{
+    for (uint8_t i = 1; i < n; i++) {
+        float key = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = key;
+    }
+}
+
+bool mw_filter_ukf_init_add(ukf_init_filter_t *ctx, float x, float y, float *out_x, float *out_y)
+{
+    if (!ctx) return false;
+
+    if (ctx->count < UKF_INIT_SAMPLES) {
+        ctx->x_history[ctx->count] = x;
+        ctx->y_history[ctx->count] = y;
+        ctx->count++;
+    }
+
+    if (ctx->count < UKF_INIT_SAMPLES) {
+        return false;
+    }
+
+    /* Compute Median */
+    float sorted_x[UKF_INIT_SAMPLES];
+    float sorted_y[UKF_INIT_SAMPLES];
+    
+    for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+        sorted_x[i] = ctx->x_history[i];
+        sorted_y[i] = ctx->y_history[i];
+    }
+
+    insertion_sort(sorted_x, UKF_INIT_SAMPLES);
+    insertion_sort(sorted_y, UKF_INIT_SAMPLES);
+
+    if (out_x) {
+        if (UKF_INIT_SAMPLES % 2 == 1) {
+            *out_x = sorted_x[UKF_INIT_SAMPLES / 2];
+        } else {
+            *out_x = 0.5f * (sorted_x[UKF_INIT_SAMPLES / 2 - 1] + sorted_x[UKF_INIT_SAMPLES / 2]);
+        }
+    }
+    
+    if (out_y) {
+        if (UKF_INIT_SAMPLES % 2 == 1) {
+            *out_y = sorted_y[UKF_INIT_SAMPLES / 2];
+        } else {
+            *out_y = 0.5f * (sorted_y[UKF_INIT_SAMPLES / 2 - 1] + sorted_y[UKF_INIT_SAMPLES / 2]);
+        }
+    }
+
+    return true; /* Filter completed */
+}
+
+void mw_filter_ukf_init_distance_reset(ukf_init_distance_filter_t *ctx)
+{
+    if (!ctx) return;
+    ctx->count = 0;
+    for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+        ctx->d_history[0][i] = 0.0f;
+        ctx->d_history[1][i] = 0.0f;
+        ctx->d_history[2][i] = 0.0f;
+    }
+}
+
+bool mw_filter_ukf_init_distance_add(ukf_init_distance_filter_t *ctx, float d0, float d1, float d2, float *out_d0, float *out_d1, float *out_d2)
+{
+    if (!ctx) return false;
+
+    if (ctx->count < UKF_INIT_SAMPLES) {
+        ctx->d_history[0][ctx->count] = d0;
+        ctx->d_history[1][ctx->count] = d1;
+        ctx->d_history[2][ctx->count] = d2;
+        ctx->count++;
+    }
+
+    if (ctx->count < UKF_INIT_SAMPLES) {
+        return false;
+    }
+
+    /* Compute Median */
+    if (out_d0 && out_d1 && out_d2) {
+        float sorted_d0[UKF_INIT_SAMPLES];
+        float sorted_d1[UKF_INIT_SAMPLES];
+        float sorted_d2[UKF_INIT_SAMPLES];
+
+        for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+            sorted_d0[i] = ctx->d_history[0][i];
+            sorted_d1[i] = ctx->d_history[1][i];
+            sorted_d2[i] = ctx->d_history[2][i];
+        }
+
+        insertion_sort(sorted_d0, UKF_INIT_SAMPLES);
+        insertion_sort(sorted_d1, UKF_INIT_SAMPLES);
+        insertion_sort(sorted_d2, UKF_INIT_SAMPLES);
+
+        if (UKF_INIT_SAMPLES % 2 == 1) {
+            *out_d0 = sorted_d0[UKF_INIT_SAMPLES / 2];
+            *out_d1 = sorted_d1[UKF_INIT_SAMPLES / 2];
+            *out_d2 = sorted_d2[UKF_INIT_SAMPLES / 2];
+        } else {
+            *out_d0 = 0.5f * (sorted_d0[UKF_INIT_SAMPLES / 2 - 1] + sorted_d0[UKF_INIT_SAMPLES / 2]);
+            *out_d1 = 0.5f * (sorted_d1[UKF_INIT_SAMPLES / 2 - 1] + sorted_d1[UKF_INIT_SAMPLES / 2]);
+            *out_d2 = 0.5f * (sorted_d2[UKF_INIT_SAMPLES / 2 - 1] + sorted_d2[UKF_INIT_SAMPLES / 2]);
+        }
+    }
+
+    return true; /* Filter completed */
+}

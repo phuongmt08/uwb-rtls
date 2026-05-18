@@ -144,5 +144,11 @@ bool bsp_io_dip_changed(void);
  */
 bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error);
 
+bsp_err_t bsp_io_uart_send_fusion_log_data(
+  uint8_t mask, uint32_t err_frame_count, 
+  float ax, float ay, float gz, float px, float py, const float *distance, 
+  const double *fp_amp_norm, const double *fp_snr, 
+  float dt);
+
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

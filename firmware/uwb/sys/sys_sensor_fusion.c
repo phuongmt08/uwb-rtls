@@ -14,6 +14,9 @@
 #include "err.h"
 #include <stddef.h>
 #include <math.h>
+#include <string.h>
+#include <stdio.h>
+#include "positioning_config.h"
 
 /* Private defines ---------------------------------------------------- */
 #define NUM_STATE     			8
@@ -65,6 +68,9 @@ typedef struct
     arm_matrix_instance_f32 mat_P;
     arm_matrix_instance_f32 mat_Q;
     arm_matrix_instance_f32 mat_R;
+
+    // Flag
+	bool enable_predict;
 
 } ukf_core_t;
 
@@ -311,9 +317,9 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         for(int i=0; i<NUM_STATE; i++) X_sigma[i][m] = x_s[i];
 
         float px = x_s[0], py = x_s[1];
-        D_sigma[0][m] = sqrtf((px - ANCHOR_0_X)*(px - ANCHOR_0_X) + (py - ANCHOR_0_Y)*(py - ANCHOR_0_Y)) + x_s[8];
-        D_sigma[1][m] = sqrtf((px - ANCHOR_1_X)*(px - ANCHOR_1_X) + (py - ANCHOR_1_Y)*(py - ANCHOR_1_Y)) + x_s[9];
-        D_sigma[2][m] = sqrtf((px - ANCHOR_2_X)*(px - ANCHOR_2_X) + (py - ANCHOR_2_Y)*(py - ANCHOR_2_Y)) + x_s[10];
+        D_sigma[0][m] = sqrtf((px - ANCHOR_1_X)*(px - ANCHOR_1_X) + (py - ANCHOR_1_Y)*(py - ANCHOR_1_Y)) + x_s[8];
+        D_sigma[1][m] = sqrtf((px - ANCHOR_2_X)*(px - ANCHOR_2_X) + (py - ANCHOR_2_Y)*(py - ANCHOR_2_Y)) + x_s[9];
+        D_sigma[2][m] = sqrtf((px - ANCHOR_3_X)*(px - ANCHOR_3_X) + (py - ANCHOR_3_Y)*(py - ANCHOR_3_Y)) + x_s[10];
     }
 
     float32_t d_mean[NUM_UPDATE_NOISE] = {0};
@@ -390,6 +396,23 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     ukf.is_first_frame = true;
 
     return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_set_predict_flag()
+{
+	ukf.enable_predict = true;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_clear_predict_flag()
+{
+	ukf.enable_predict = false;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+bool sys_sensor_fusion_check_predict_flag()
+{
+	return ukf.enable_predict;
 }
 
 /* Private definitions ------------------------------------------------ */
