@@ -94,7 +94,7 @@ static float    s_test_y              = TEST_POS_START_Y;
 static uint32_t s_last_test_send_tick = 0;
 #endif
 
-#if ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION_LOG || ENABLE_SYS_FUSION
 float dt;
 uint32_t last_time = 0;
 uint32_t imu_get_data_err = 0;
@@ -223,6 +223,46 @@ void app_reset_config(void)
   __ISB();
   __enable_irq();
 }
+
+#if ENABLE_SYS_FUSION
+static float get_dt(void)
+{
+    uint32_t current_time = HAL_GetTick(); // milliseconds
+    uint32_t dt_ms = current_time - last_time;
+    last_time = current_time;
+
+    // Giới hạn dt để tránh giá trị bất thường
+    if(dt_ms > 100) dt_ms = 100;
+    if(dt_ms < 1) dt_ms = 1;
+
+    return (float)dt_ms / 1000.0f; // chuyển sang giây
+}
+static void fusion_task(void *arg)
+{
+	if(sys_sensor_fusion_check_predict_flag() == false) return;
+	static uint8_t first_call = 1;
+
+	if(first_call)
+	{
+		last_time = HAL_GetTick();
+		dt = 0.01f; // giá trị mặc định cho lần đầu
+		first_call = 0;
+	}
+	else
+	{
+		dt = get_dt();
+	}
+
+    sys_sensor_fusion_predict(&ukf_data, dt);
+    bsp_io_uart_send_fusion_data(0, 0, ukf_data.px, ukf_data.py, ukf_data.theta);
+//  float uwb_dists[NUM_ANCHORS];
+//	float uwb_err;
+//	uint32_t err_cnt;
+//	app_tag_get_latest_uwb_data(uwb_dists, &uwb_err, &err_cnt);
+//  bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_data.vx, ukf_data.vy, (ukf_data.theta*RAD2DEG),
+//                                      uwb_dists, uwb_err, err_cnt);
+}
+#endif
 
 #if ENABLE_SYS_FUSION_LOG
 static float get_dt(void)

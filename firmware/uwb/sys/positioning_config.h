@@ -203,11 +203,11 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  0
+#define ENABLE_SYS_FUSION  1
 #endif
 
 #ifndef ENABLE_SYS_FUSION_LOG
-#define ENABLE_SYS_FUSION_LOG  1
+#define ENABLE_SYS_FUSION_LOG  0
 #endif
 
 /**

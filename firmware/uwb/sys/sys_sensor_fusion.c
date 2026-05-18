@@ -71,6 +71,7 @@ typedef struct
 
     // Flag
 	bool enable_predict;
+	bool enable_update;
 
 } ukf_core_t;
 
@@ -267,7 +268,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	return SYS_SENSOR_FUSION_OK;
 }
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2)
+sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2, uint8_t mask)
 {
     float32_t P_aug[M * M] = {0};
     float32_t L_aug[M * M] = {0};
@@ -298,6 +299,13 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         0, 0, 0
     };
 
+    float ANCHOR_POS_TABLE[NUM_ANCHORS][2] = {
+        {ANCHOR_1_X, ANCHOR_1_Y},
+        {ANCHOR_2_X, ANCHOR_2_Y},
+        {ANCHOR_3_X, ANCHOR_3_Y},
+        {ANCHOR_4_X, ANCHOR_4_Y}
+    };
+
     for(int m = 0; m < NUM_UPDATE_SIGMA; m++)
     {
         float32_t x_s[M];
@@ -317,9 +325,18 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         for(int i=0; i<NUM_STATE; i++) X_sigma[i][m] = x_s[i];
 
         float px = x_s[0], py = x_s[1];
-        D_sigma[0][m] = sqrtf((px - ANCHOR_1_X)*(px - ANCHOR_1_X) + (py - ANCHOR_1_Y)*(py - ANCHOR_1_Y)) + x_s[8];
-        D_sigma[1][m] = sqrtf((px - ANCHOR_2_X)*(px - ANCHOR_2_X) + (py - ANCHOR_2_Y)*(py - ANCHOR_2_Y)) + x_s[9];
-        D_sigma[2][m] = sqrtf((px - ANCHOR_3_X)*(px - ANCHOR_3_X) + (py - ANCHOR_3_Y)*(py - ANCHOR_3_Y)) + x_s[10];
+        int d_index = 0;
+        for(int anc = 0; anc < NUM_ANCHORS; anc++)
+        {
+            if(mask & (1 << anc))
+            {
+                D_sigma[d_index][m] = sqrtf((px - ANCHOR_POS_TABLE[anc][0]) * 
+                                            (px - ANCHOR_POS_TABLE[anc][0]) + 
+                                            (py - ANCHOR_POS_TABLE[anc][1]) * 
+                                            (py - ANCHOR_POS_TABLE[anc][1])) + x_s[8 + d_index];
+                d_index++;
+            }
+        }    
     }
 
     float32_t d_mean[NUM_UPDATE_NOISE] = {0};
@@ -398,6 +415,26 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     return SYS_SENSOR_FUSION_OK;
 }
 
+sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0)
+{
+	ukf.state.px = x0;
+	ukf.state.py = y0;
+	if (p_ukf != NULL) *p_ukf = ukf.state;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_set_update_flag()
+{
+	ukf.enable_update = true;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_clear_update_flag()
+{
+	ukf.enable_update = false;
+	return SYS_SENSOR_FUSION_OK;
+}
+
 sys_sensor_fusion_err_t sys_sensor_fusion_set_predict_flag()
 {
 	ukf.enable_predict = true;
@@ -408,6 +445,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_clear_predict_flag()
 {
 	ukf.enable_predict = false;
 	return SYS_SENSOR_FUSION_OK;
+}
+
+bool sys_sensor_fusion_check_update_flag()
+{
+	return ukf.enable_update;
 }
 
 bool sys_sensor_fusion_check_predict_flag()

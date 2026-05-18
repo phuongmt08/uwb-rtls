@@ -425,6 +425,100 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 
     s_success_count++;
+#elif ENABLE_SYS_FUSION
+ /* ==== STEP 3: UKF Initialization or Update ==== */
+    if (!s_ukf_initialized)
+    {
+        vec2d_t tril_position;
+        mw_tril_result_t tril_result;
+
+        mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+        if (err != MW_TRIL_OK) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
+            s_error_count++;
+            return;
+        }
+
+        float init_x, init_y;
+        float init_d0, init_d1, init_d2;
+        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter, (float)tril_position.x, (float)tril_position.y, &init_x, &init_y);
+        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter, (float)best_3_anchors[0].distance, (float)best_3_anchors[1].distance, (float)best_3_anchors[2].distance, &init_d0, &init_d1, &init_d2);
+
+        if (pos_done && dist_done)
+        {
+            /* Set initial position for UKF */
+            s_ukf_initialized = true;
+
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
+
+            for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
+            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
+            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
+
+            double fp_amp_norm[NUM_ANCHORS];
+            double fp_snr[NUM_ANCHORS];
+
+            for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+                fp_amp_norm[i] = 0.0f;
+                fp_snr[i] = 0.0f;
+            }
+
+
+            sys_sensor_fusion_set_predict_flag();
+            sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
+            // bsp_io_uart_send_fusion_data((uint8_t)0, s_error_count, ukf_data.px, ukf_data.py, ukf_data.thetao);
+            // s_latest_error = (float)tril_result.error_estimate;
+        }
+        else
+        {
+            /* Still collecting data to initialize UKF */
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d", s_ukf_init_filter.count, UKF_INIT_SAMPLES);
+        }
+    }
+    else
+    {
+
+        for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+        for(int i=0; i<NUM_ANCHORS; i++)
+        {
+            s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
+        }
+
+    	/* ==== STEP 3: Trilateration ==== */
+		vec2d_t tril_position;
+		mw_tril_result_t tril_result;
+
+		mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+		if (err != MW_TRIL_OK) {
+			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
+			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
+			s_error_count++;
+		}
+
+		s_last_selected_anchors_mask = 0;
+		for (uint8_t i = 0; i < 3; i++) {
+			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
+		}
+		test = s_last_selected_anchors_mask;
+
+        double fp_amp_norm[NUM_ANCHORS];
+        double fp_snr[NUM_ANCHORS];
+
+        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+            fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
+            fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+        }
+
+        sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, test);
+
+//        bsp_io_uart_send_fusion_data(test, s_error_count, ukf_data.px, ukf_data.py, ukf_data.theta);
+    }
+
+    s_success_count++;
 #else
     /* ==== STEP 3: Trilateration ==== */
     vec2d_t tril_position;
