@@ -62,6 +62,7 @@ static void handle_ble_conn_params_resp(const protobuf_packet_t * p_in, protobuf
 static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #endif
+static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 
 /* Private variables -------------------------------------------------- */
 // Chỉ config mảng những lệnh nào nRF52832 tự xử lý. 
@@ -76,7 +77,6 @@ static const bb_cmd_entry_t m_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_unimplemented,  "ble_adv_status"),
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_unimplemented,  "ble_adv_config_set"),
 #endif /* !BLE_PERIPHERAL */
-
 #if defined(BLE_CENTRAL)
     CMD_INFO(protobuf_packet_t_ble_disconnect_tag,                handle_ble_disconnect,            "ble_disconnect"),
     CMD_INFO(protobuf_packet_t_ble_connect_tag,                   handle_ble_connect,               "ble_connect"),
@@ -96,7 +96,7 @@ static const bb_cmd_entry_t m_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_scan_start_tag,                handle_ble_unimplemented,         "ble_scan_start"),
     CMD_INFO(protobuf_packet_t_ble_scan_stop_tag,                 handle_ble_unimplemented,         "ble_scan_stop"),
 #endif /* !BLE_CENTRAL */
-
+    CMD_INFO(protobuf_packet_t_device_information_get_tag, handle_device_information_get, "device_information_get"),
 };
 
 uint32_t max_id_table = sizeof(m_cmd_table) / sizeof(m_cmd_table[0]);
@@ -256,6 +256,15 @@ static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packe
     *p_action = BB_CMD_ACTION_NONE;
 }
 #endif /* BLE_PERIPHERAL */
+
+static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
+{
+    NRF_LOG_INFO("MCU Requested Device Information");
+    p_out->which_params = protobuf_packet_t_ack_tag;
+    p_out->params.ack.ack_seq = p_in->hdr.seq;
+    p_out->params.ack.response = protobuf_PACKET_ACK_RESPONSE_ACK;
+    *p_action = BB_CMD_ACTION_SEND_SERIAL;
+}
 
 static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {

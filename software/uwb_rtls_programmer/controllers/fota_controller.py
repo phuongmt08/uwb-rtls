@@ -17,9 +17,14 @@ class DongleMonitorThread(QThread):
         self.fota_service = fota_service
         self.running = True
         self.current_port = None
+        self.suspended = False
 
     def run(self):
         while self.running:
+            if self.suspended:
+                self.msleep(100)
+                continue
+
             if not self.current_port:
                 probe = self.fota_service.auto_probe_dongle()
                 if probe:
@@ -49,6 +54,8 @@ class FotaController(QObject):
         self.fota_service = FotaService()
         self.current_dongle_port = None
         self.is_connected = False
+        self.connected_mac_str = None
+        self.connected_mac_bytes = None
         
         self._setup_connections()
         self._load_preferences()
@@ -57,6 +64,11 @@ class FotaController(QObject):
         self.monitor_thread.dongle_connected.connect(self._on_dongle_connected)
         self.monitor_thread.dongle_disconnected.connect(self._on_dongle_disconnected)
         self.monitor_thread.start()
+
+    def shutdown(self):
+        if hasattr(self, 'monitor_thread') and self.monitor_thread.isRunning():
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
 
     def _on_dongle_connected(self, port, serial_number):
         self.current_dongle_port = port
@@ -70,6 +82,12 @@ class FotaController(QObject):
         self.view.lbl_dongle_status.setStyleSheet("color: #F59E0B; font-weight: bold;") # Yellow/Orange
         self.signals.log.emit("[FOTA] Dongle Disconnected. Waiting for device...")
 
+    def _on_task_done(self, ok: bool, msg: str):
+        self.monitor_thread.suspended = False
+        self.view.btn_scan.setEnabled(not self.is_connected)
+        self.view.btn_connect.setEnabled(True)
+        self.view.btn_auto_fota.setEnabled(True)
+
     def _setup_connections(self):
         self.view.btn_browse.clicked.connect(self.on_browse)
         self.view.btn_scan.clicked.connect(self.on_scan)
@@ -80,6 +98,7 @@ class FotaController(QObject):
         
         self.scan_result_signal.connect(self._on_scan_result)
         self.connection_status_signal.connect(self._on_connection_status)
+        self.signals.done.connect(self._on_task_done)
 
     def _on_connection_status(self, status: str):
         self.view.lbl_device_status.setText(status)
@@ -99,10 +118,35 @@ class FotaController(QObject):
             self.view.btn_scan.setEnabled(True)
 
     def _load_preferences(self):
+        try:
+            from services.build_service import BuildService
+            uwb_dir = BuildService.get_uwb_project_dir()
+            version_dir = os.path.join(uwb_dir, "build_version")
+            versioned_files = []
+            if os.path.exists(version_dir):
+                for f in os.listdir(version_dir):
+                    if f.endswith(".hex"):
+                        full_path = os.path.normpath(os.path.join(version_dir, f))
+                        mtime = os.path.getmtime(full_path)
+                        versioned_files.append((mtime, full_path))
+                # Sort by mtime descending (newest first)
+                versioned_files.sort(reverse=True, key=lambda x: x[0])
+        except Exception:
+            versioned_files = []
+
+        final_paths = []
+        for _, path in versioned_files:
+            if path not in final_paths:
+                final_paths.append(path)
+
         recent = self.config.get_recent_hex_paths()
         for p in recent:
-            if os.path.exists(p):
-                self.view.combo_file.addItem(p)
+            p_norm = os.path.normpath(p)
+            if os.path.exists(p_norm) and p_norm not in final_paths:
+                final_paths.append(p_norm)
+
+        for p in final_paths:
+            self.view.combo_file.addItem(p)
         if self.view.combo_file.count() > 0:
             self.view.combo_file.setCurrentIndex(0)
 
@@ -150,8 +194,12 @@ class FotaController(QObject):
             self.signals.log.emit("[FOTA] ERROR: Dongle not detected. Please plug in the Dongle.")
             return
             
+        self.monitor_thread.suspended = True
         self.view.table_ble.setRowCount(0)
         self.signals.log.emit(f"[FOTA] Scanning for BLE peripherals using {port}...")
+        self.view.btn_scan.setEnabled(False)
+        self.view.btn_connect.setEnabled(False)
+        self.view.btn_auto_fota.setEnabled(False)
         def task():
             self.fota_service.scan_nearby_devices(
                 port=port,
@@ -167,8 +215,13 @@ class FotaController(QObject):
             return
             
         if self.is_connected:
+            self.monitor_thread.suspended = True
             self.signals.log.emit("[FOTA] Disconnecting from device...")
             self.view.btn_connect.setEnabled(False)
+            self.view.btn_scan.setEnabled(False)
+            self.view.btn_auto_fota.setEnabled(False)
+            self.connected_mac_str = None
+            self.connected_mac_bytes = None
             def task_disconnect():
                 self.fota_service.disconnect_device(
                     port=port,
@@ -184,8 +237,15 @@ class FotaController(QObject):
             return
         mac_str = self.view.table_ble.item(row, 1).text()
         mac_bytes = bytes.fromhex(mac_str.replace(":", ""))
+        self.monitor_thread.suspended = True
+        
+        self.connected_mac_str = mac_str
+        self.connected_mac_bytes = mac_bytes
+        
         self.signals.log.emit(f"[FOTA] Connecting to {mac_str} via {port}...")
         self.view.btn_connect.setEnabled(False)
+        self.view.btn_scan.setEnabled(False)
+        self.view.btn_auto_fota.setEnabled(False)
         
         def task_connect():
             self.fota_service.connect_to_device(
@@ -214,16 +274,34 @@ class FotaController(QObject):
             self.signals.log.emit("[FOTA] ERROR: Invalid HEX file selected.")
             return
             
+        mac_str = self.connected_mac_str
+        mac_bytes = self.connected_mac_bytes
+        if not mac_str:
+            row = self.view.table_ble.currentRow()
+            if row >= 0:
+                mac_str = self.view.table_ble.item(row, 1).text()
+                mac_bytes = bytes.fromhex(mac_str.replace(":", ""))
+                
+        if not mac_str:
+            self.signals.log.emit("[FOTA] ERROR: No target device selected or connected.")
+            return
+
         chunk_size = self.view.spin_chunk.value()
         
+        self.monitor_thread.suspended = True
         self.signals.log.emit(f"[FOTA] Starting Auto OTA Flash with chunk size {chunk_size} bytes via {port}")
         self.signals.progress.emit(0)
+        self.view.btn_scan.setEnabled(False)
+        self.view.btn_connect.setEnabled(False)
+        self.view.btn_auto_fota.setEnabled(False)
         
         def task():
             self.fota_service.execute_ota_flash(
                 port=port,
                 hex_path=hex_path,
                 chunk_size=chunk_size,
+                mac_bytes=mac_bytes,
+                mac_str=mac_str,
                 log_cb=self.signals.log.emit,
                 progress_cb=self.signals.progress.emit,
                 status_cb=self.connection_status_signal.emit

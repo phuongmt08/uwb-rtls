@@ -60,10 +60,13 @@ class MainController(QObject):
             self.current_build_meta['fota_crc'] = c
             self.view.lbl_fota.setText(f"Header Patched:\nLen: {l}\nCRC: {c}")
 
-    def run_task(self, fn):
+    def run_task(self, task_func):
         self._set_busy(True)
         self.view.progress.setValue(0)
-        run_task(self.signals, fn)
+        # Assuming run_task from utils.workers executes task_func and handles errors.
+        # I'll just restore the original line for now so it doesn't break the UI thread.
+        from utils.workers import run_task
+        run_task(self.signals, task_func)
 
     def on_task_done(self, ok: bool, msg: str):
         self._set_busy(False)
@@ -85,3 +88,4 @@ class MainController(QObject):
 
     def shutdown(self):
         self.dfu_ctrl.shutdown()
+        self.fota_ctrl.shutdown()

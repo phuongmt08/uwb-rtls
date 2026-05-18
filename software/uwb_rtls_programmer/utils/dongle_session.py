@@ -117,21 +117,41 @@ class DongleSession:
         dst = int(VvAddress.CENTRAL)
         for port_info in cls.prioritized_ports():
             for baud in BAUD_CANDIDATES:
+                print(f"[PROBE] Trying port {port_info.device} at baud {baud}...")
                 try:
                     with cls(port_info.device, baud=baud, debug=debug) as sess:
-                        seq = sess.proto.next_seq()
-                        pkt = sess.proto.pb.packet_t()
-                        pkt.hdr.addr.src = src
-                        pkt.hdr.addr.dst = dst
-                        pkt.hdr.seq = seq
-                        pkt.device_information_get.dummy = 0
-                        match, _ = sess.send_expect_param(pkt, "device_information_resp", timeout_s=0.5)
-                        if match is not None:
-                            return ProbeResult(
-                                port=port_info.device,
-                                baud=baud,
-                                serial_number=int(match.device_information_resp.serial_number),
-                            )
-                except SerialException:
+                        time.sleep(0.15)
+                        sess.ser.reset_input_buffer()
+                        
+                        for attempt in range(3):
+                            if attempt > 0:
+                                print(f"[PROBE] Retry {attempt} on {port_info.device}...")
+                            
+                            seq = sess.proto.next_seq()
+                            pkt = sess.proto.pb.packet_t()
+                            pkt.hdr.addr.src = src
+                            pkt.hdr.addr.dst = dst
+                            pkt.hdr.seq = seq
+                            pkt.device_information_get.dummy = 0
+                            
+                            match, packets = sess.send_expect_param(pkt, "ack", timeout_s=0.4)
+                            
+                            if packets:
+                                print(f"[PROBE] Received {len(packets)} packets on {port_info.device}:")
+                                for p in packets:
+                                    print(f"  - Type: {sess.packet_name(p)} | Hdr: {sess.packet_hdr(p)}")
+                            else:
+                                print(f"[PROBE] No packets received on {port_info.device}")
+                                
+                            if match is not None:
+                                print(f"[PROBE] Success! Matched ACK on {port_info.device}.")
+                                return ProbeResult(
+                                    port=port_info.device,
+                                    baud=baud,
+                                    serial_number=0,  # Dongle returns ACK only, no SN
+                                )
+                            time.sleep(0.1)
+                except SerialException as e:
+                    print(f"[PROBE] SerialException on {port_info.device}: {e}")
                     continue
         return None
