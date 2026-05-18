@@ -1,7 +1,7 @@
-#include "sys_log.h"
+#include "logger.h"
 
 
-void sys_log_init(void)
+void logger_init(void)
 {
     ret_code_t err_code = NRF_LOG_INIT(NULL);
     APP_ERROR_CHECK(err_code);

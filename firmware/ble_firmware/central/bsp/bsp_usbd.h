@@ -24,6 +24,8 @@ extern "C" {
 /* -------------------------------------------------------------------------
  * Public API
  * ---------------------------------------------------------------------- */
+typedef void (*bsp_usbd_rx_line_cb_t)(const char *line);
+typedef void (*bsp_usbd_rx_cb_t)(uint8_t byte);
 
 /**
  * @brief Initialize USB CDC ACM peripheral.
@@ -33,9 +35,8 @@ extern "C" {
  *
  * @return NRF_SUCCESS or a propagated SDK error code.
  */
-ret_code_t bsp_usbd_init(void);
+ret_code_t bsp_usbd_init(bsp_usbd_rx_cb_t rx_cb);
 
-typedef void (*bsp_usbd_rx_line_cb_t)(const char *line);
 
 /**
  * @brief Set the callback for complete line reception (ending with \r or \n).

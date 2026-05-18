@@ -63,16 +63,14 @@
 #include "bsp_uart.h"
 #include "bsp_utils.h"
 
-#include "sys_log.h"
-#include "ble_peripheral.h"
-
+#include "logger.h"
 
 #include "bb_transport.h"
 #include "app_uart.h"
 
 /*
 **@brief Function for initializing power management.
- */
+*/
 static void power_management_init(void)
 {
     ret_code_t err_code;
@@ -80,59 +78,25 @@ static void power_management_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-
-/**@brief Function for handling the idle state (main loop).
- *
- * @details If there is no pending log operation, then sleep until next the next event occurs.
- */
-static void idle_state_handle(void)
-{
-    if (NRF_LOG_PROCESS() == false)
-    {
-        nrf_pwr_mgmt_run();
-    }
-}
-
-
 /**@brief Function for application main entry.
  */
 int main(void)
 {
     // Initialize.
-    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init) 
-    sys_log_init();
+    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init)
+    logger_init();
     bsp_utils_init();
     power_management_init();
 
     bb_router_init();
-    ble_peripheral_init();
+    // BLE is disabled by default, initialized later via STM32 command
 
     // Start execution.
-    NRF_LOG_INFO("Blinky example started.");
-    
-    ble_peripheral_advertising_start();
+    NRF_LOG_INFO("BLE Peripheral started !");
 
     // Enter main loop.
     for (;;)
     {
         bb_router_process();
-        bsp_uart_read_byte(); // Đọc byte từ UART để kích hoạt callback on_rx_byte trong bb_transport (được setup trong bb_router_init)
-        idle_state_handle();
     }
 }
-    // uint8_t cr;
-
-/**
- * @}
- */
-
-//         // 
-//         while (app_u// art_get(&cr) != NRF_SUCCESS);
-//   //       
-//         // Gửi trở lại ngay kí tự
-//  đó (echo/// // NRF_LOG_INFO("Received: %c bytes\n", cr);
-//         // on_rx_byte(cr); // Gọi callback xử lý byte nhận được từ UART (được setup trong bb_transport_init)
-// log)
-//     //     while (app_uart_put(cr) != NRF_SUCCESS);// ////  
-        
-//                 bytebsp_uart_read_byte();

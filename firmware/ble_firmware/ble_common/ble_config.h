@@ -27,7 +27,7 @@ extern "C" {
 
 
 // =============================================================================
-// 2. CONNECTION PARAMETERS
+// 2. BLE PARAMETERS
 // =============================================================================
 // Sharing these parameters ensures seamless handshakes between Central & Peripheral
 
@@ -41,12 +41,12 @@ extern "C" {
 /** 
  * @brief Minimum acceptable connection interval.
  */
-#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(100, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(7.5, UNIT_1_25_MS)
 
 /** 
  * @brief Maximum acceptable connection interval.
  */
-#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(200, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(15, UNIT_1_25_MS)
 
 /** 
  * @brief Slave latency.
@@ -61,6 +61,22 @@ extern "C" {
  * the connection. Value provided in milliseconds.
  */
 #define SYSTEM_CONFIG_CONN_SUP_TIMEOUT    MSEC_TO_UNITS(4000, UNIT_10_MS)
+
+/**
+ * @brief Central scan interval in milliseconds.
+ */
+#define SYSTEM_CONFIG_SCAN_INTERVAL_MS     100
+
+/**
+ * @brief Central scan window in milliseconds.
+ */
+#define SYSTEM_CONFIG_SCAN_WINDOW_MS       50
+
+/**
+ * @brief Central scan duration in milliseconds.
+ * Set to 0 to scan indefinitely.
+ */
+#define SYSTEM_CONFIG_SCAN_DURATION_MS     0
 
 
 // =============================================================================

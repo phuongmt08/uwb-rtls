@@ -32,12 +32,19 @@ typedef enum
 } sys_ranging_err_t;
 
 /**
- * @brief Ranging mode
+ * @brief Local calibration state advertised in UWB packets.
+ *
+ * This is intentionally 1 byte so it can fit into existing packet padding.
+ * Only two states matter:
+ *   NORMAL = calibration not finished (or not running)
+ *   DONE   = calibration converged, antenna delay saved
+ * The Anchor Master uses DONE from peers to decide when the
+ * whole network is calibrated and ready to reset into normal mode.
  */
 typedef enum {
-  SYS_RANGING_MODE_SINGLE = 0,    /* Single anchor (legacy) */
-  SYS_RANGING_MODE_TDMA = 1       /* Multi-anchor TDMA */
-} sys_ranging_mode_t;
+  SYS_CALIB_STATUS_NORMAL = 0,
+  SYS_CALIB_STATUS_DONE   = 1
+} sys_calib_status_t;
 
 /**
  * @brief Ranging result
@@ -47,8 +54,10 @@ typedef struct
   float    distance_m;
   uint64_t t1, t2, t3, t4, t5, t6;
   uint8_t  anchor_id;
-  int8_t   rssi;
+  uint16_t fp_amp_norm_q8;
+  uint16_t fp_snr_q8;
   uint8_t  quality;
+  uint8_t  calib_status;
   bool     valid;
 } sys_ranging_result_t;
 
@@ -58,7 +67,7 @@ typedef struct
 
 typedef struct
 {
-  sys_ranging_result_t results[NUM_ANCHORS];
+  sys_ranging_result_t results[MAX_ANCHORS_SUPPORTED];
   uint8_t count;          /* Number of valid results */
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
@@ -68,9 +77,6 @@ typedef struct
  */
 typedef struct
 {
-  /* Mode selection */
-  sys_ranging_mode_t mode;          /* SINGLE or TDMA */
-  
   /* Common parameters */
   uint8_t  sequence_num;
   uint32_t rx_timeout_ms;
@@ -141,6 +147,26 @@ sys_ranging_err_t sys_ranging_anchor_start_tdma(uint8_t anchor_id,
                                                 uint8_t num_anchors,
                                                 const uint8_t *anchor_ids,
                                                 uint32_t rx_timeout_ms);
+
+/**
+ * @brief Set the calibration state advertised by the local device in outgoing packets.
+ */
+void sys_ranging_set_calib_status(sys_calib_status_t status);
+
+/**
+ * @brief Read back the current outgoing calibration state.
+ */
+sys_calib_status_t sys_ranging_get_calib_status(void);
+
+/**
+ * @brief Get the current TDMA slot ID (0=Idle/Poll, 1-N=Anchor slots)
+ */
+uint8_t sys_ranging_get_current_slot(void);
+
+/**
+ * @brief Get the current superframe counter (synced across network)
+ */
+uint32_t sys_ranging_get_superframe_count(void);
 
 /**
  * @brief Process Anchor TDMA ranging (call frequently in loop)
@@ -219,5 +245,10 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
  * @brief Reset ranging statistics
  */
 void sys_ranging_reset_stats(void);
+
+/**
+ * @brief Abort any ongoing ranging and reset state machine to IDLE
+ */
+void sys_ranging_abort(void);
 
 #endif /* __SYS_RANGING_H */

@@ -50,4 +50,8 @@ void bsp_utils_led_off(void);
  */
 void bsp_utils_led_toggle(void);
 
+/**@brief Pulse the status LED once, then restore the previous blink state.
+ */
+void bsp_utils_led_activity_pulse(void);
+
 #endif // BSP_UTILS_H

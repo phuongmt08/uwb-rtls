@@ -105,7 +105,8 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* USER CODE END SysInitbsp_rtc_get_timestamp_ms */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
@@ -125,7 +126,7 @@ int main(void)
   RLOG_D(OBJECT_CODE, "=================================================");
   /* Initialize protocol stack */
   serial_init();
-  network_core_init(&s_net_core, protobuf_device_addr_t_PACKET_ADDR_TAG, s_net_rx_buf, sizeof(s_net_rx_buf));
+  network_core_init(&s_net_core, protobuf_PACKET_ADDR_MCU, s_net_rx_buf, sizeof(s_net_rx_buf));
   network_cmd_init(&s_net_core);
   bl_fota_init(&s_net_core);
 

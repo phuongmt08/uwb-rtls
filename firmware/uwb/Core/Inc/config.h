@@ -15,6 +15,8 @@
 #define HAVE_BLE_PERIPHERAL
 
 /* Experimental features */
-#define UWB_EVENT_DRIVEN 0
+#define UWB_EVENT_DRIVEN
+
+#define USE_DIP_SWITCH   /* Define this if your hardware has a physical DIP switch for ID selection */
 
 #endif /* __CONFIG_H */

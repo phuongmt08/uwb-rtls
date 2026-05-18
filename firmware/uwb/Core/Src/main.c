@@ -40,6 +40,7 @@
 #include "sys_task.h"
 
 #include <string.h>
+#include "bsp_imu.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -284,8 +285,7 @@ int main(void)
   sys_config_t *cfg = sys_config_get();
 
   serial_init();
-  protobuf_device_addr_t local_addr = (cfg->uwb.role == DEVICE_ROLE_TAG) ? 
-                                      protobuf_PACKET_ADDR_TAG : protobuf_PACKET_ADDR_ANCHOR;
+  protobuf_device_addr_t local_addr = protobuf_PACKET_ADDR_MCU;
 
   if (!network_core_init(&s_network_core, local_addr, s_network_rx_buf, sizeof(s_network_rx_buf)))
   {
@@ -304,20 +304,39 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
 #else
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing IMU...");
+  if (bsp_imu_init() != BSP_IMU_OK)
+  {
 
+  }
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
   if (bsp_uwb_init() != 0)
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
-  }
+  } 
 
+#if ENABLE_FORCE_DEFAULT_ANT_DLY
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
     cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
     cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u",
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to config default: TX=%u RX=%u",
            TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
   }
+  else if (cfg->uwb.role == DEVICE_ROLE_ANCHOR)
+  {
+    cfg->uwb.tx_antenna_delay = ANCHOR_DEFAULT_TX_ANT_DLY;
+    cfg->uwb.rx_antenna_delay = ANCHOR_DEFAULT_RX_ANT_DLY;
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force ANCHOR antenna delay to config default: TX=%u RX=%u",
+           ANCHOR_DEFAULT_TX_ANT_DLY, ANCHOR_DEFAULT_RX_ANT_DLY);
+           
+    /* Force save new configuration to flash for Anchor */
+    sys_config_save();
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Saved FORCE_DEFAULT_ANT_DLY to flash");
+  }
+#else
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Use previous/calibrated antenna delay from flash");
+#endif
 
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
          cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
@@ -375,17 +394,19 @@ int main(void)
 #endif
   
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
+#ifdef USE_DIP_SWITCH
   /* Read DIP switch - ALWAYS OVERRIDES saved config */
   uint8_t dip_value = bsp_io_dip_read();
-  if (dip_value == 0)
+  if (dip_value == 0 || dip_value > NUM_ANCHORS)
   {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Using saved Device ID: %u", dip_value, cfg->uwb.device_id);
   }
   else
   {
     sys_config_set_device_id(dip_value);
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
   }
+#endif
 
   cfg = sys_config_get();
 
@@ -415,15 +436,6 @@ int main(void)
     {
       app_anchor_on_button(btn_event);
       btn_event = BSP_IO_EVENT_NONE; /* Prevent normal button handling */
-    }
-#endif
-
-#if ENABLE_TAG_AUTO_CALIB
-    /* In calibration build, tag button events handled differently */
-    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE)
-    {
-      app_tag_on_button(btn_event);
-      btn_event = BSP_IO_EVENT_NONE;
     }
 #endif
 

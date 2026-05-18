@@ -22,6 +22,19 @@ extern "C" {
  * ---------------------------------------------------------------------- */
 
 /**
+ * @brief Callback function type for passing received BLE NUS data
+ */
+typedef void (*ble_central_rx_cb_t)(uint8_t const * p_data, uint16_t length);
+
+/**
+ * @brief Register a callback to receive BLE NUS data.
+ *
+ * @param[in] cb Callback function.
+ */
+void ble_central_rx_cb_register(ble_central_rx_cb_t cb);
+
+
+/**
  * @brief Initialize BLE Central and start scanning.
  *
  * Sequentially initializes:
@@ -59,6 +72,21 @@ void central_update_conn_params(uint16_t conn_handle,
                                 uint16_t max_interval_ms, 
                                 uint16_t slave_latency, 
                                 uint16_t conn_sup_timeout_ms);
+
+/* -------------------------------------------------------------------------
+ * Bridge API
+ * ---------------------------------------------------------------------- */
+#include <stdbool.h>
+void app_ble_central_scan_start(uint16_t interval_ms, uint16_t window_ms, uint16_t duration_ms, bool active);
+void app_ble_central_scan_stop(void);
+void app_ble_central_connect(const uint8_t *mac);
+void app_ble_central_disconnect(void);
+void app_ble_central_conn_params_set(uint16_t min_interval_ms, uint16_t max_interval_ms, uint16_t slave_latency, uint16_t conn_sup_timeout_ms);
+bool app_ble_central_conn_params_get(uint16_t *min_ms, uint16_t *max_ms, uint16_t *lat, uint16_t *to_ms);
+uint8_t app_ble_central_status_get(void);
+int32_t app_ble_central_rssi_dbm_get(void);
+uint32_t app_ble_central_disconnect_reason_get(void);
+uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length);
 
 #ifdef __cplusplus
 }

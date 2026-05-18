@@ -152,14 +152,14 @@ class CommandFactory:
         pkt.ranging_status_resp.ranging_period_ms = 300
         return pkt
 
-    def filter_cfg_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def sensor_fusion_cfg_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.filter_cfg_get.dummy = 0
+        pkt.sensor_fusion_cfg_get.dummy = 0
         return pkt
 
-    def filter_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def sensor_fusion_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        cfg = pkt.filter_cfg_set.filter_cfg
+        cfg = pkt.sensor_fusion_cfg_set.config
         cfg.mode = pb.FILTER_MODE_KALMAN
         cfg.q_process_noise = 0.1
         cfg.r_base = 0.1
@@ -168,10 +168,15 @@ class CommandFactory:
         cfg.r_scale_max = 1.2
         return pkt
 
-    def filter_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def sensor_fusion_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        cfg = pkt.filter_cfg_resp.filter_cfg
+        cfg = pkt.sensor_fusion_cfg_resp.config
         cfg.mode = pb.FILTER_MODE_KALMAN
+        return pkt
+
+    def end_session(self, src: int, dst: int, seq: int, reason: int = 0) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.end_session.reason = reason
         return pkt
 
     def device_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -327,6 +332,59 @@ class CommandFactory:
         pkt.fota_state_resp.state = pb.FOTA_STATE_IDLE
         return pkt
 
+    # ── BLE central commands ──────────────────────────────────────────────────────────
+
+    def ble_scan_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_scan_start.duration_ms = 5000  # Default 5 secs
+        pkt.ble_scan_start.interval_ms = 160
+        pkt.ble_scan_start.window_ms = 80
+        pkt.ble_scan_start.active_scanning = True
+        return pkt
+
+    def ble_scan_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_scan_stop.dummy = 0
+        return pkt
+        
+    def ble_connect(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_connect.mac_address = b"\x00\x11\x22\x33\x44\x55"
+        return pkt
+
+    def ble_disconnect(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_disconnect.reason = 0
+        return pkt
+
+    def ble_conn_params_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_conn_params_get.dummy = 0
+        return pkt
+
+    def ble_conn_params_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_conn_params_set.params.min_interval_ms = 15
+        pkt.ble_conn_params_set.params.max_interval_ms = 30
+        pkt.ble_conn_params_set.params.slave_latency = 0
+        pkt.ble_conn_params_set.params.sup_timeout_ms = 4000
+        return pkt
+
+    def ble_conn_params_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_conn_params_resp.params.min_interval_ms = 15
+        pkt.ble_conn_params_resp.params.max_interval_ms = 30
+        pkt.ble_conn_params_resp.params.slave_latency = 0
+        pkt.ble_conn_params_resp.params.sup_timeout_ms = 4000
+        return pkt
+        
+    def ble_scan_result(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.ble_scan_result.mac_address = b"\x00\x11\x22\x33\x44\x55"
+        pkt.ble_scan_result.rssi_dbm = -50
+        pkt.ble_scan_result.serial_number = 12345
+        return pkt
+
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -350,9 +408,9 @@ class CommandCatalog:
             CommandSpec(17, "ranging_result", self.factory.ranging_result),
             CommandSpec(18, "ranging_status_get", self.factory.ranging_status_get),
             CommandSpec(19, "ranging_status_resp", self.factory.ranging_status_resp),
-            CommandSpec(20, "filter_cfg_get", self.factory.filter_cfg_get),
-            CommandSpec(21, "filter_cfg_set", self.factory.filter_cfg_set),
-            CommandSpec(22, "filter_cfg_resp", self.factory.filter_cfg_resp),
+            CommandSpec(20, "sensor_fusion_cfg_get", self.factory.sensor_fusion_cfg_get),
+            CommandSpec(21, "sensor_fusion_cfg_set", self.factory.sensor_fusion_cfg_set),
+            CommandSpec(22, "sensor_fusion_cfg_resp", self.factory.sensor_fusion_cfg_resp),
             CommandSpec(23, "device_reset", self.factory.device_reset),
             CommandSpec(24, "uwb_reset", self.factory.uwb_reset),
             CommandSpec(25, "factory_config_reset", self.factory.factory_config_reset),
@@ -375,10 +433,19 @@ class CommandCatalog:
             CommandSpec(42, "anchor_layout_get", self.factory.anchor_layout_get),
             CommandSpec(43, "anchor_layout_set", self.factory.anchor_layout_set),
             CommandSpec(44, "anchor_layout_resp", self.factory.anchor_layout_resp),
+            CommandSpec(47, "ble_conn_params_get", self.factory.ble_conn_params_get),
+            CommandSpec(48, "ble_conn_params_set", self.factory.ble_conn_params_set),
+            CommandSpec(49, "ble_conn_params_resp", self.factory.ble_conn_params_resp),
+            CommandSpec(50, "ble_disconnect", self.factory.ble_disconnect),
+            CommandSpec(51, "ble_scan_start", self.factory.ble_scan_start),
+            CommandSpec(52, "ble_scan_stop", self.factory.ble_scan_stop),
+            CommandSpec(53, "ble_connect", self.factory.ble_connect),
+            CommandSpec(54, "ble_scan_result", self.factory.ble_scan_result),            
             # FOTA
             CommandSpec(62, "enter_to_bootloader", self.factory.enter_to_bootloader),
             CommandSpec(46, "flash_verify", self.factory.flash_verify),
             CommandSpec(57, "fota_state_resp", self.factory.fota_state_resp),
+            CommandSpec(65, "end_session", self.factory.end_session),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

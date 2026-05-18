@@ -221,9 +221,6 @@ static void bl_on_flash_verify(const protobuf_packet_t *pkt)
         return;
     }
 
-    s_fota.state = protobuf_FOTA_STATE_VERIFYING;
-    bl_send_fota_state(pkt, s_fota.state);
-
     uint32_t image_len = 0u;
     uint32_t expected_crc = 0u;
     uint32_t computed_crc = 0u;
