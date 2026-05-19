@@ -11,6 +11,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
+#include "adc.h"
 #include "crc.h"
 #include "dma.h"
 #include "gpio.h"
@@ -156,12 +157,26 @@ static void test_send_pos_task(void *arg)
   test_send_position();
 }
 #endif
-
 static void ranging_process_task(void *arg)
 {
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
   /* Ranging disabled in test mode */
 #else
+  static bool s_ranging_halted = false;
+  if (!sys_pm_is_safe())
+  {
+    /* Halt ranging to protect the hardware under brownout conditions */
+    if (!s_ranging_halted) {
+        bsp_uwb_idle();
+        s_ranging_halted = true;
+    }
+    return;
+  }
+  else if (s_ranging_halted)
+  {
+      s_ranging_halted = false;
+  }
+
   if (s_ranging_enabled)
   {
     sys_config_t *cfg_curr = sys_config_get();
@@ -252,6 +267,8 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
+  MX_TIM2_Init();
+  MX_ADC1_Init();
   MX_TIM10_Init();
   MX_USB_DEVICE_Init();
   MX_TIM11_Init();
@@ -356,7 +373,7 @@ int main(void)
   bsp_battery_init(); // Initialize MAX17048 battery fuel gauge
   sys_pm_init();      // Initialize PM Service (including internal ADC)
 
-  int pm_task_id = sys_task_add((sys_task_cb_t)sys_pm_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
+  int pm_task_id = sys_task_add((sys_task_cb_t)sys_pm_task, NULL, SYS_TASK_TYPE_PERIODIC, 100, 0);
   if (pm_task_id >= 0)
   {
     sys_task_start(pm_task_id);

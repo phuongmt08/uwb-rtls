@@ -65,6 +65,8 @@ extern DMA_HandleTypeDef hdma_usart2_rx;
 /* USER CODE BEGIN EV */
 void debug_serial_uart_rx_check(void);
 void ble_bridge_uart_rx_check(void);
+extern DMA_HandleTypeDef hdma_adc1;
+extern ADC_HandleTypeDef hadc1;
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -371,5 +373,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 }
 
 /* USER CODE BEGIN 1 */
+/**
+  * @brief This function handles DMA2 stream0 global interrupt.
+  */
+void DMA2_Stream0_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&hdma_adc1);
+}
 
+/**
+  * @brief This function handles ADC1 global interrupt.
+  */
+void ADC_IRQHandler(void)
+{
+  HAL_ADC_IRQHandler(&hadc1);
+}
 /* USER CODE END 1 */

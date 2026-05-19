@@ -385,6 +385,25 @@ class CommandFactory:
         pkt.ble_scan_result.serial_number = 12345
         return pkt
 
+    def battery_info_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.battery_info_get.dummy = 0
+        return pkt
+
+    def battery_info_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.battery_info_resp.bat_voltage_mv = 3300
+        pkt.battery_info_resp.bat_soc_percent = 100
+        pkt.battery_info_resp.remaining_min = 120
+        pkt.battery_info_resp.is_charging = False
+        pkt.battery_info_resp.mcu_temp_c = 25.0
+        pkt.battery_info_resp.vdda_mv = 3300
+        pkt.battery_info_resp.uwb_temp_c = 25.0
+        pkt.battery_info_resp.uwb_vbat_mv = 3300
+        pkt.battery_info_resp.imu_temp_c = 25.0
+        pkt.battery_info_resp.error_mask = 0
+        return pkt
+
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -446,6 +465,9 @@ class CommandCatalog:
             CommandSpec(46, "flash_verify", self.factory.flash_verify),
             CommandSpec(57, "fota_state_resp", self.factory.fota_state_resp),
             CommandSpec(65, "end_session", self.factory.end_session),
+            # Power Management
+            CommandSpec(60, "battery_info_resp", self.factory.battery_info_resp),
+            CommandSpec(61, "battery_info_get", self.factory.battery_info_get),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

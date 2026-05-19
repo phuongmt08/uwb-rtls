@@ -9,44 +9,90 @@
 #ifndef SYS_PM_H
 #define SYS_PM_H
 
-#include "bsp_adc.h"
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef struct {
-    uint32_t voltage_mv;
-    uint8_t  soc_pct;
-    int32_t  remaining_min;
-    bool     is_charging;
-    bool     fuel_gauge_present;
-    
-    bsp_adc_data_t adc;
-    
-    /* DW1000 monitoring telemetry */
-    float    uwb_temp_c;
-    uint32_t uwb_vbat_mv;
-    bool     uwb_sensor_valid;
+/* Power Channels to monitor */
+typedef enum {
+    PM_CH_SOC = 0,
+    PM_CH_VDDA,
+    PM_CH_TEMP,
+    PM_CH_VBAT,
+    PM_CH_CRATE,
+    PM_CH_UWB_TEMP,
+    PM_CH_UWB_VBAT,
+    PM_CH_IMU_TEMP,
+    PM_CH_MAX
+} pm_channel_t;
 
-    /* IMU monitoring telemetry */
-    float    imu_temp_c;
-    bool     imu_sensor_valid;
+typedef struct {
+    pm_channel_t channel;
+    float        min;
+    float        max;
+    const char  *name;
+} pm_threshold_t;
+
+typedef struct {
+    union {
+        float values[PM_CH_MAX];
+        struct {
+            float soc;            /* PM_CH_SOC */
+            float vdda_mv;        /* PM_CH_VDDA */
+            float temp_degc;      /* PM_CH_TEMP */
+            float bat_voltage_mv; /* PM_CH_VBAT */
+            float crate;          /* PM_CH_CRATE */
+            float uwb_temp_c;     /* PM_CH_UWB_TEMP */
+            float uwb_vbat_mv;    /* PM_CH_UWB_VBAT */
+            float imu_temp_c;     /* PM_CH_IMU_TEMP */
+        };
+    };
+    int32_t  remaining_min;
+    bool     is_safe;         /* True if no critical power fault is active */
+    bool     is_charging;     /* True when the fuel gauge reports charge current */
+    bool     charge_enabled;  /* Current state of the CHARGE_EN control pin */
+    uint32_t error_mask;      /* Bitmask of all breached thresholds */
+    uint32_t critical_mask;   /* Bitmask of faults that are allowed to halt ranging */
 } sys_pm_status_t;
 
+/* Error bits for error_mask */
+#define PM_ERR_SOC_BIT        (1 << PM_CH_SOC)
+#define PM_ERR_VDDA_BIT       (1 << PM_CH_VDDA)
+#define PM_ERR_TEMP_BIT       (1 << PM_CH_TEMP)
+#define PM_ERR_VBAT_BIT       (1 << PM_CH_VBAT)
+#define PM_ERR_CRATE_BIT      (1 << PM_CH_CRATE)
+#define PM_ERR_UWB_TEMP_BIT   (1 << PM_CH_UWB_TEMP)
+#define PM_ERR_UWB_VBAT_BIT   (1 << PM_CH_UWB_VBAT)
+#define PM_ERR_IMU_TEMP_BIT   (1 << PM_CH_IMU_TEMP)
+
+#define PM_ERR_HW_WATCHDOG     (1 << 8)
+#define PM_ERR_BAT_RESET_BIT   (1 << 9)
+#define PM_ERR_BAT_HW_LOW_BIT  (1 << 10)
+#define PM_ERR_BAT_HW_HIGH_BIT (1 << 11)
+
 /**
- * @brief Initialize Power Management and ADC hardware.
+ * @brief  Initialize Power Management and GPIOs.
  */
 void sys_pm_init(void);
 
 /**
- * @brief 1Hz periodic task to collect battery, internal ADC, DW1000, and IMU status.
- * @param[in] arg Optional task argument.
+ * @brief  Process all checks, alerts, and charge control logic (runs at 10Hz).
  */
-void sys_pm_task(void *arg);
+void sys_pm_process(void);
 
 /**
- * @brief Get the latest aggregated power management and hardware monitoring snapshot.
- * @param[out] status Pointer to destination structure.
+ * @brief  Check if system is in a safe operating state (for UWB, etc).
+ */
+bool sys_pm_is_safe(void);
+
+/**
+ * @brief  Get latest PM status.
  */
 void sys_pm_get_status(sys_pm_status_t *status);
+
+/**
+ * @brief  Periodic task to run PM process and battery task.
+ * @param  arg  Task argument (unused)
+ */
+void sys_pm_task(void *arg);
 
 #endif /* SYS_PM_H */

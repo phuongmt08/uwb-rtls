@@ -24,8 +24,38 @@
 
 /* USER CODE END 0 */
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim10;
 TIM_HandleTypeDef htim11;
+
+/* TIM2 init function */
+void MX_TIM2_Init(void)
+{
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 9599;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 99;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
 
 /* TIM10 init function */
 void MX_TIM10_Init(void)
@@ -83,7 +113,12 @@ void MX_TIM11_Init(void)
 void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
 {
 
-  if(tim_baseHandle->Instance==TIM10)
+  if(tim_baseHandle->Instance==TIM2)
+  {
+    /* TIM2 clock enable */
+    __HAL_RCC_TIM2_CLK_ENABLE();
+  }
+  else if(tim_baseHandle->Instance==TIM10)
   {
   /* USER CODE BEGIN TIM10_MspInit 0 */
 
@@ -114,7 +149,12 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
 void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
 {
 
-  if(tim_baseHandle->Instance==TIM10)
+  if(tim_baseHandle->Instance==TIM2)
+  {
+    /* Peripheral clock disable */
+    __HAL_RCC_TIM2_CLK_DISABLE();
+  }
+  else if(tim_baseHandle->Instance==TIM10)
   {
   /* USER CODE BEGIN TIM10_MspDeInit 0 */
 
