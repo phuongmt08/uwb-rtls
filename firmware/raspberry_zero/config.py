@@ -8,8 +8,8 @@ class Config:
     
     # UWB Protocol
     UWB_SOF = 0xAA
-    UWB_PAYLOAD_LEN = 16
-    UWB_FRAME_SIZE = 18  # SOF(1) + X(4) + Y(4) + Z(4) + Error(4) + Length(1)
+    # Frame is now dynamic: [SOF(1)] [LEN(1)] [DATA(LEN)]
+    # LEN = (3 + NUM_ANCHORS + 1) * 4
     
     # UDP Configuration
     UDP_HOST = '192.168.1.100'  # Server IP address

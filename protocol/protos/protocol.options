@@ -1,9 +1,15 @@
 protobuf.device_information_resp_t.uid              max_size:12
 protobuf.uwb_cfg_t.anchor_list                      max_size:8
 protobuf.ranging_result_t.anchors                   max_count:4
-protobuf.log_data_t.data                            max_size:128
-protobuf.anchor_layout_set_t.anchors                max_count:4
-protobuf.anchor_layout_resp_t.anchors               max_count:4
+protobuf.log_data_t.data                            max_size:192
+protobuf.flash_write_t.data                         max_size:200
+protobuf.flash_data_t.data                          max_size:200
+protobuf.anchor_layout_set_t.anchors                max_count:8
+protobuf.anchor_layout_resp_t.anchors               max_count:8
+protobuf.ble_scan_result_t.mac_address              max_size:6
+protobuf.ble_scan_result_t.name                     max_size:32
+protobuf.ble_connect_t.mac_address                  max_size:6
+protobuf.ble_adv_config_t.device_name               max_size:32
 
 protobuf.common_constant_t                          long_names:false
 protobuf.packet_ack_response_t                      long_names:false
@@ -14,5 +20,9 @@ protobuf.device_addr_t                              long_names:false
 protobuf.filter_mode_t                              long_names:false
 protobuf.log_level_t                                long_names:false
 protobuf.host_transport_t                           long_names:false
+protobuf.anchor_power_mode_t                        long_names:false
 protobuf.ble_state_t                                long_names:false
 protobuf.flash_addr_region_t                        long_names:false
+protobuf.fota_state_index_t                         long_names:false
+protobuf.session_end_reason_t                       long_names:false
+    

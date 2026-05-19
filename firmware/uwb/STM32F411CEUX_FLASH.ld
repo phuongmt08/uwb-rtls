@@ -48,7 +48,8 @@ MEMORY
   /* Remaining 207 KB: application code + rodata + .data load image */
   FLASH        (rx)  : ORIGIN = 0x0800C400, LENGTH = 207K
   DATA_STORAGE (rx)  : ORIGIN = 0x08040000, LENGTH = 256K      /* Sectors 6-7: Dual-sector data storage */
-  RAM          (xrw) : ORIGIN = 0x20000000, LENGTH = 96K
+  RAM          (xrw) : ORIGIN = 0x20000000, LENGTH = 92K
+  LOG_RAM      (xrw) : ORIGIN = 0x20017000, LENGTH = 4K
 }
 
 /* Sections */
@@ -98,14 +99,14 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
-  .ARM.extab (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  .ARM.extab :
   {
     . = ALIGN(4);
     *(.ARM.extab* .gnu.linkonce.armextab.*)
     . = ALIGN(4);
   } >FLASH
 
-  .ARM (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  .ARM :
   {
     . = ALIGN(4);
     __exidx_start = .;
@@ -114,7 +115,7 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
-  .preinit_array (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  .preinit_array :
   {
     . = ALIGN(4);
     PROVIDE_HIDDEN (__preinit_array_start = .);
@@ -123,7 +124,7 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
-  .init_array (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  .init_array :
   {
     . = ALIGN(4);
     PROVIDE_HIDDEN (__init_array_start = .);
@@ -133,7 +134,7 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
-  .fini_array (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  .fini_array :
   {
     . = ALIGN(4);
     PROVIDE_HIDDEN (__fini_array_start = .);
@@ -177,6 +178,18 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM
 
+  /* Shared boot/app RAM log area. NOLOAD keeps content over software reset.
+   * Place variables with __attribute__((section(".shared_log"))). */
+  .shared_log (NOLOAD) :
+  {
+    . = ALIGN(4);
+    __shared_log_start__ = .;
+    KEEP(*(.shared_log))
+    KEEP(*(.shared_log*))
+    . = ALIGN(4);
+    __shared_log_end__ = .;
+  } >LOG_RAM
+
   /* User_heap_stack section, used to check that there is enough "RAM" Ram  type memory left */
   ._user_heap_stack :
   {
@@ -198,3 +211,6 @@ SECTIONS
 
   .ARM.attributes 0 : { *(.ARM.attributes) }
 }
+
+PROVIDE(SHARED_LOG_START = ORIGIN(LOG_RAM));
+PROVIDE(SHARED_LOG_SIZE  = LENGTH(LOG_RAM));

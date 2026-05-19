@@ -1,8 +1,9 @@
 /* ============================== sys_ranging.h ==============================
  * @file       sys_ranging.h
- * @brief      Non-blocking ranging API with state machine
- * @version    4.0.0
- * @date       2025-11-26
+ * @brief      Non-blocking ranging API with TDMA support
+ * @version    5.0.0
+ * @date       2026-01-31
+ * 
  */
 
 #ifndef __SYS_RANGING_H
@@ -15,6 +16,7 @@
 #include "positioning_config.h"
 
 /* Public enumerate/structure ---------------------------------------- */
+
 typedef enum
 {
   SYS_RANGING_OK = 0,
@@ -24,17 +26,25 @@ typedef enum
   SYS_RANGING_ERR_PROTO = -4,
   SYS_RANGING_ERR_BUSY = -5,           /* State machine busy */
   SYS_RANGING_ERR_NOT_STARTED = -6,    /* Not started yet */
-  SYS_RANGING_ERR_NO_RESULT = -7       /* No result available */
+  SYS_RANGING_ERR_NO_RESULT = -7,      /* No result available */
+  SYS_RANGING_ERR_PARTIAL = -8,        /* Partial success (some anchors) */
+  SYS_RANGING_ERR_SYNC_LOST = -9       /* TDMA sync lost */
 } sys_ranging_err_t;
 
 /**
- * @brief Ranging configuration (for legacy blocking API)
+ * @brief Local calibration state advertised in UWB packets.
+ *
+ * This is intentionally 1 byte so it can fit into existing packet padding.
+ * Only two states matter:
+ *   NORMAL = calibration not finished (or not running)
+ *   DONE   = calibration converged, antenna delay saved
+ * The Anchor Master uses DONE from peers to decide when the
+ * whole network is calibrated and ready to reset into normal mode.
  */
-typedef struct
-{
-  uint8_t  sequence_num;
-  uint32_t rx_timeout_us;
-} sys_ranging_config_t;
+typedef enum {
+  SYS_CALIB_STATUS_NORMAL = 0,
+  SYS_CALIB_STATUS_DONE   = 1
+} sys_calib_status_t;
 
 /**
  * @brief Ranging result
@@ -43,26 +53,148 @@ typedef struct
 {
   float    distance_m;
   uint64_t t1, t2, t3, t4, t5, t6;
-  uint8_t  anchor_id;  /* Which anchor (for multiple anchor mode) */
-  int8_t  rssi;       /* RSSI for diagnostics */
+  uint8_t  anchor_id;
+  uint16_t fp_amp_norm_q8;
+  uint16_t fp_snr_q8;
+  uint8_t  quality;
+  uint8_t  calib_status;
   bool     valid;
 } sys_ranging_result_t;
 
-#ifdef MULTIPLE_ANCHOR
 /**
- * @brief Multiple anchor results
+ * @brief Multi-anchor ranging results
+ */
+
+typedef struct
+{
+  sys_ranging_result_t results[MAX_ANCHORS_SUPPORTED];
+  uint8_t count;          /* Number of valid results */
+  uint8_t sequence_num;   /* Sequence number */
+} sys_ranging_multi_result_t;
+
+/**
+ * @brief Ranging configuration
  */
 typedef struct
 {
-  sys_ranging_result_t results[NUM_ANCHORS];
-  uint8_t count;  /* Number of valid results */
-} sys_ranging_multi_result_t;
-#endif
+  /* Common parameters */
+  uint8_t  sequence_num;
+  uint32_t rx_timeout_ms;
+  
+  /* Single-anchor mode */
+  uint8_t  target_anchor_id;        /* Target anchor (0xFF = any) */
+  
+  /* TDMA multi-anchor mode */
+  uint8_t  num_anchors;             /* Number of anchors (1-8) */
+  uint8_t  anchor_ids[NUM_ANCHORS]; /* List of anchor IDs */
+  uint32_t slot_duration_ms;        /* TDMA slot duration (0 = default) */
+} sys_ranging_config_t;
 
-/* Non-blocking API --------------------------------------------------- */
+/* ====================================================================
+ * NON-BLOCKING API - TDMA MULTI-ANCHOR MODE
+ * ==================================================================== */
 
 /**
- * @brief Start Tag ranging (non-blocking)
+ * @brief Start Tag ranging in TDMA mode (range with multiple anchors)
+ * @param num_anchors Number of anchors to range with (1-8)
+ * @param anchor_ids Array of anchor IDs
+ * @param sequence_num Sequence number
+ * @param rx_timeout_ms RX timeout in milliseconds (0 = use default)
+ * @return SYS_RANGING_OK if started successfully
+ */
+sys_ranging_err_t sys_ranging_tag_start_tdma(uint8_t num_anchors,
+                                             const uint8_t *anchor_ids,
+                                             uint8_t sequence_num,
+                                             uint32_t rx_timeout_ms);
+
+/**
+ * @brief Process Tag TDMA ranging (call frequently in loop)
+ * @param num_anchors Number of anchors
+ * @param anchor_ids Array of anchor IDs
+ * @param rx_timeout_ms RX timeout in milliseconds
+ * @return 
+ *   - SYS_RANGING_OK: Ranging complete
+ *   - SYS_RANGING_ERR: Error occurred
+ *   - SYS_RANGING_ERR_TIMEOUT: Timeout
+ */
+sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors,
+                                               const uint8_t *anchor_ids,
+                                               uint32_t rx_timeout_ms);
+
+/**
+ * @brief Get Tag TDMA ranging results (only after SYS_RANGING_OK or ERR_PARTIAL)
+ * @param results Output multi-anchor results structure
+ * @return SYS_RANGING_OK if results available
+ */
+sys_ranging_err_t sys_ranging_tag_get_results_tdma(sys_ranging_multi_result_t *results);
+
+/**
+ * @brief Get last anchor ranging result
+ * @param result Pointer to result structure
+ * @return SYS_RANGING_OK if valid result available
+ */
+sys_ranging_err_t sys_ranging_anchor_get_last_result(sys_ranging_result_t *result);
+
+/**
+ * @brief Start Anchor ranging in TDMA mode
+ * @param anchor_id This anchor's ID (1-8)
+ * @param num_anchors Total number of anchors in network
+ * @param anchor_ids Array of all anchor IDs in network
+ * @param rx_timeout_ms RX timeout in milliseconds
+ * @return SYS_RANGING_OK if started successfully
+ */
+sys_ranging_err_t sys_ranging_anchor_start_tdma(uint8_t anchor_id,
+                                                uint8_t num_anchors,
+                                                const uint8_t *anchor_ids,
+                                                uint32_t rx_timeout_ms);
+
+/**
+ * @brief Set the calibration state advertised by the local device in outgoing packets.
+ */
+void sys_ranging_set_calib_status(sys_calib_status_t status);
+
+/**
+ * @brief Read back the current outgoing calibration state.
+ */
+sys_calib_status_t sys_ranging_get_calib_status(void);
+
+/**
+ * @brief Get the current TDMA slot ID (0=Idle/Poll, 1-N=Anchor slots)
+ */
+uint8_t sys_ranging_get_current_slot(void);
+
+/**
+ * @brief Get the current superframe counter (synced across network)
+ */
+uint32_t sys_ranging_get_superframe_count(void);
+
+/**
+ * @brief Process Anchor TDMA ranging (call frequently in loop)
+ * @param num_anchors Total number of anchors in network
+ * @param anchor_ids Array of all anchor IDs in network
+ * @param rx_timeout_ms RX timeout in milliseconds
+ * @return
+ *   - SYS_RANGING_OK: Ranging complete
+ *   - SYS_RANGING_ERR: Error occurred
+ *   - SYS_RANGING_ERR_TIMEOUT: Timeout (normal, no TAG poll)
+ */
+sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
+                                                  const uint8_t *anchor_ids,
+                                                  uint32_t rx_timeout_ms);
+
+/**
+ * @brief Get Anchor TDMA ranging result (only after SYS_RANGING_OK)
+ * @param result Output result structure
+ * @return SYS_RANGING_OK if result available
+ */
+sys_ranging_err_t sys_ranging_anchor_get_result_tdma(sys_ranging_result_t *result);
+
+/* ====================================================================
+ * NON-BLOCKING API - LEGACY SINGLE-ANCHOR MODE (backward compatible)
+ * ==================================================================== */
+
+/**
+ * @brief Start Tag ranging (non-blocking, single anchor)
  * @param sequence_num Sequence number
  * @param rx_timeout_ms RX timeout in milliseconds
  * @return SYS_RANGING_OK if started successfully
@@ -109,40 +241,14 @@ sys_ranging_err_t sys_ranging_anchor_process(void);
  */
 sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
 
-/* Multiple Anchor API (TAG only) ------------------------------------ */
-#ifdef MULTIPLE_ANCHOR
 /**
- * @brief Start Tag ranging with specific anchor
- * @param anchor_id Target anchor ID (or 0xFF for any/broadcast)
- * @param sequence_num Sequence number
- * @param rx_timeout_ms RX timeout in milliseconds
- * @return SYS_RANGING_OK if started successfully
+ * @brief Reset ranging statistics
  */
-sys_ranging_err_t sys_ranging_tag_start_with_anchor(uint8_t anchor_id, 
-                                                     uint8_t sequence_num, 
-                                                     uint32_t rx_timeout_ms);
+void sys_ranging_reset_stats(void);
 
 /**
- * @brief Range with multiple anchors sequentially
- * @param anchor_ids Array of anchor IDs to range with
- * @param num_anchors Number of anchors in array (max 8)
- * @param results Output array for results (must be size num_anchors)
- * @param sequence_num Starting sequence number
- * @param rx_timeout_ms RX timeout per anchor
- * @return Number of successful ranging operations (0 to num_anchors)
+ * @brief Abort any ongoing ranging and reset state machine to IDLE
  */
-int sys_ranging_tag_multi_anchor(const uint8_t *anchor_ids,
-                                 uint8_t num_anchors,
-                                 sys_ranging_result_t *results,
-                                 uint8_t sequence_num,
-                                 uint32_t rx_timeout_ms);
-#endif
-
-/* Legacy blocking API (compatibility) -------------------------------- */
-sys_ranging_err_t sys_ranging_tag_once(const sys_ranging_config_t *config,
-                                       sys_ranging_result_t *result);
-
-sys_ranging_err_t sys_ranging_anchor_once(const sys_ranging_config_t *config,
-                                          sys_ranging_result_t *result);
+void sys_ranging_abort(void);
 
 #endif /* __SYS_RANGING_H */

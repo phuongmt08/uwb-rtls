@@ -1,6 +1,10 @@
 from __future__ import annotations
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from vv_commands import CommandFactory
+
+from common.commands import CommandFactory
 from vv_test_session import VvTestSession
 
 from test_common import first_param, send_and_print
@@ -53,8 +57,8 @@ def run(session: VvTestSession, src: int, dst: int) -> bool:
     print(f"  SET config={set_ranging_pkt.sys_ranging_cfg_set.config}")
     print(f"  GET config={ranging_resp.sys_ranging_cfg_resp.config if ranging_resp else '<not received>'}")
 
-    send_and_print(session, "filter_cfg_set", factory.filter_cfg_set(src, dst, session.proto.next_seq()))
-    send_and_print(session, "filter_cfg_get", factory.filter_cfg_get(src, dst, session.proto.next_seq()))
-    print("Manual check filter_cfg: firmware may return NACK_UNIMPLEMENTED depending build flags.")
+    send_and_print(session, "sensor_fusion_cfg_set", factory.sensor_fusion_cfg_set(src, dst, session.proto.next_seq()))
+    send_and_print(session, "sensor_fusion_cfg_get", factory.sensor_fusion_cfg_get(src, dst, session.proto.next_seq()))
+    print("Manual check sensor_fusion_cfg: firmware may return NACK_UNIMPLEMENTED depending build flags.")
 
     return ok

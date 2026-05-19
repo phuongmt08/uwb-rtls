@@ -1,13 +1,17 @@
 from __future__ import annotations
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import time
+
 from dataclasses import dataclass
 
 import serial
 from serial import SerialException
 from serial.tools import list_ports
 
-from vv_transport import VvAddress, VvProtocol
+from common.transport import VvAddress, VvProtocol
 
 
 READ_TIMEOUT_S = 0.05
@@ -49,15 +53,22 @@ class VvTestSession:
         return pkt.WhichOneof("params") or "<none>"
 
     def packet_hdr(self, pkt) -> str:
-        return f"src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}"
+        base = f"src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}"
+        if pkt.WhichOneof("params") == "ack":
+            base += f" ack_seq={pkt.ack.ack_seq}"
+        return base
 
-    def recv_packets(self, timeout_s: float) -> list:
+    def recv_packets(self, timeout_s: float, break_on_recv: bool = False) -> list:
         if self.ser is None:
             raise RuntimeError("Session is not opened")
         deadline = time.time() + timeout_s
         packets = []
         while time.time() < deadline:
-            data = self.ser.read(self.ser.in_waiting or 1)
+            in_wait = self.ser.in_waiting
+            if in_wait == 0:
+                time.sleep(0.001)
+                continue
+            data = self.ser.read(in_wait)
             if not data:
                 continue
             try:
@@ -65,7 +76,10 @@ class VvTestSession:
             except Exception as exc:
                 self.dbg(f"decode exception: {exc}")
                 decoded = []
-            packets.extend(decoded)
+            if decoded:
+                packets.extend(decoded)
+                if break_on_recv:
+                    break
         return packets
 
     def send_packet(self, pkt) -> None:
@@ -110,9 +124,8 @@ class VvTestSession:
         return ports
 
     @classmethod
-    def auto_probe(cls, debug: bool = True) -> ProbeResult | None:
-        src = int(VvAddress.HOST)
-        dst = int(VvAddress.ANCHOR)
+    def auto_probe(cls, src: int = int(VvAddress.DEBUG), debug: bool = True) -> ProbeResult | None:
+        dst = int(VvAddress.BCAST)
 
         for port_info in cls.prioritized_ports():
             for baud in BAUD_CANDIDATES:

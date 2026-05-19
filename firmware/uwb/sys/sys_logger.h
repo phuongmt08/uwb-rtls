@@ -29,12 +29,18 @@
 #include "log_config.h"
 #include "err.h"
 #include "config.h"
+#include "memorylayout.h"
 
 /* Public defines ----------------------------------------------------------- */
 /**
- * @brief Total RAM buffer size for logger (16KB)
+ * @brief Shared logger metadata bytes stored in MEM_SHARED_LOG_RAM.
  */
-#define SYS_LOGGER_BUF_SIZE        (16384U)
+#define SYS_LOGGER_SHARED_META_SIZE (16U)
+
+/**
+ * @brief Total RAM buffer size for logger in shared noinit RAM.
+ */
+#define SYS_LOGGER_BUF_SIZE        (MEM_SHARED_LOG_RAM_SIZE - SYS_LOGGER_SHARED_META_SIZE)
 
 /**
  * @brief Maximum message length per log record (180 bytes)
@@ -50,8 +56,9 @@
 
 
 /* Public macros ------------------------------------------------------------ */
+
 /**
- * @brief Log an informational message
+ * @brief Log an info message
  * @param _OBJ_CODE Object code identifying the component
  * @param _FORMAT printf-style format string
  * @param ... Variable arguments
@@ -150,28 +157,7 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len);
  * @note  Typically called after the bytes peeked by sys_logger_peek() have
  *        been successfully persisted or transmitted.
  */
-void sys_logger_consume(uint16_t len);
-
-/* ── Flash persistence API (HAVE_FLASH_STORAGE only) ───────────────────────
- *
- *  Flash log sub-partition layout (64 KB, append-only):
- *    Records stored sequentially:
- *    [LEN_LO(1)][LEN_HI(1)][LOG_TYPE(1)][OBJ_CODE(1)][TIMESTAMP(6)][DATA_LEN(1)][MSG...][PAD to 4B]
- *
- *  Two-index model:
- *    g_flash_log_write_pos  — next byte to write (owner: sys_logger_flash_persist)
- *    g_flash_log_read_pos   — next byte host has NOT yet confirmed receiving
- *                             (owner: sys_logger_flash_consume)
- *
- *  Read flow (non-destructive):
- *    1. sys_logger_flash_persist()        — flush RAM → flash
- *    2. sys_logger_flash_read_chunk()     — send pending bytes from read_pos
- *    3. sys_logger_flash_consume(length)  — host confirms receipt; advance read_pos
- *
- *  On boot, write_pos is recovered by scanning flash.  read_pos always resets
- *  to 0 — unconfirmed data is re-sent to the host on next request.
- * ───────────────────────────────────────────────────────────────────────── */
-#ifdef HAVE_FLASH_STORAGE
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
 
 /**
  * @brief  Flush pending RAM log records to the flash log sub-partition.
@@ -223,7 +209,7 @@ uint32_t sys_logger_flash_read_chunk(uint8_t *out, uint16_t max_len);
  * @param[in]  max_len  Maximum bytes to copy
  * @return Number of bytes copied (0 if nothing suitable).
  */
-uint32_t sys_logger_flash_read_packet(uint8_t *out, uint16_t max_len);
+uint32_t sys_logger_flash_peek_packet(uint8_t *out, uint16_t max_len);
 
 /**
  * @brief  Advance the read cursor by @p length bytes.
@@ -236,7 +222,20 @@ uint32_t sys_logger_flash_read_packet(uint8_t *out, uint16_t max_len);
  */
 void sys_logger_flash_consume(uint32_t length);
 
-#endif /* HAVE_FLASH_STORAGE */
+#else
+
+/**
+ * @brief Remove @p len bytes from the tail of the circular buffer.
+ *
+ * @param[in] len Number of bytes to discard
+ * @note  Typically called after the bytes peeked by sys_logger_ram_peek_packet() have
+ *        been successfully persisted or transmitted.
+ */
+void sys_logger_ram_consume(uint16_t len);
+
+uint16_t sys_logger_ram_peek_packet(uint8_t *out, uint16_t max_len);
+
+#endif /* defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG) */
 
 /* -------------------------------------------------------------------------- */
 

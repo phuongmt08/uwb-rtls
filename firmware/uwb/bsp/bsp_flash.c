@@ -74,6 +74,12 @@ static bsp_flash_status_t swap_sector(bsp_flash_dual_t *dr,
                                        uint32_t          sub_offset,
                                        uint32_t          sub_length);
 
+/** @brief Copy the latest config snapshot from one sector into another. */
+static bsp_flash_status_t copy_latest_cfg_snapshot(const bsp_flash_region_t *src,
+                                                   bsp_flash_region_t       *dst,
+                                                   bsp_flash_crc32_fn        crc_cb,
+                                                   uint32_t                 *out_next_meta_offset);
+
 /* bsp_app_image_header_t is declared in bsp_flash.h */
 
 static const bsp_app_image_header_t g_bsp_app_image_header
@@ -530,6 +536,16 @@ swap_sector(bsp_flash_dual_t *dr, const void *data, uint32_t size, uint32_t sub_
     return BSP_FLASH_ERR_ERASE;
   }
 
+  /* Preserve the latest config snapshot in the new sector before writing
+   * the record that triggered the swap. This keeps config alive when the
+   * active sector flips because of log growth.
+   */
+  uint32_t next_meta_offset = 0u;
+  if (copy_latest_cfg_snapshot(old, nr, dr->crc32_cb, &next_meta_offset) != BSP_FLASH_OK)
+  {
+    return BSP_FLASH_ERR_PROGRAM;
+  }
+
   /* Determine new generation */
   uint32_t                    old_offset = 0u;
   bsp_flash_metadata_entry_t *old_entry  = find_latest_metadata(old, &old_offset);
@@ -561,8 +577,8 @@ swap_sector(bsp_flash_dual_t *dr, const void *data, uint32_t size, uint32_t sub_
   uint32_t data_crc  = dr->crc32_cb ? dr->crc32_cb(data, size) : 0u;
   uint32_t timestamp = dr->timestamp_cb ? dr->timestamp_cb() : 0u;
 
-  /* Write first metadata entry in new sector */
-  if (append_metadata_entry(nr->base, 0u, new_gen, sub_offset, size, timestamp, data_crc, 0xFFFFFFFFu,
+  /* Write metadata after the optional copied config snapshot. */
+  if (append_metadata_entry(nr->base, next_meta_offset, new_gen, sub_offset, size, timestamp, data_crc, 0xFFFFFFFFu,
                             dr->crc32_cb)
       != BSP_FLASH_OK)
   {
@@ -573,6 +589,63 @@ swap_sector(bsp_flash_dual_t *dr, const void *data, uint32_t size, uint32_t sub_
   /* Switch active sector */
   dr->active = new_idx;
   RLOG_I(LOG_OBJECT_CODE_FLASH, " Swap done. Now active=%u", dr->active);
+  return BSP_FLASH_OK;
+}
+
+static bsp_flash_status_t copy_latest_cfg_snapshot(const bsp_flash_region_t *src,
+                                                   bsp_flash_region_t       *dst,
+                                                   bsp_flash_crc32_fn        crc_cb,
+                                                   uint32_t                 *out_next_meta_offset)
+{
+  const uint32_t sub_offset = BSP_FLASH_CFG_DATA_OFFSET;
+  const uint32_t sub_length = BSP_FLASH_CFG_DATA_LENGTH;
+  const bsp_flash_metadata_entry_t *best_entry = NULL;
+
+  if (!src || !dst || !out_next_meta_offset)
+    return BSP_FLASH_ERR_NULL_PTR;
+
+  *out_next_meta_offset = 0u;
+
+  for (uint32_t scan = 0u; scan < BSP_FLASH_METADATA_SIZE; scan += BSP_FLASH_ENTRY_SIZE)
+  {
+    const bsp_flash_metadata_entry_t *e = (const bsp_flash_metadata_entry_t *) (src->base + scan);
+
+    if (e->marker == FLASH_ERASED_VALUE)
+      break;
+
+    if (e->marker == BSP_FLASH_ENTRY_MARKER && is_entry_valid(e, crc_cb) && e->data_length > 0u
+        && e->data_offset >= sub_offset && e->data_offset < (sub_offset + sub_length))
+    {
+      if (!best_entry || ((int32_t) (e->gen - best_entry->gen) > 0))
+      {
+        best_entry = e;
+      }
+    }
+  }
+
+  if (!best_entry)
+    return BSP_FLASH_OK;
+
+  uint32_t read_addr  = src->base + BSP_FLASH_METADATA_SIZE + best_entry->data_offset;
+  uint32_t write_addr = dst->base + BSP_FLASH_METADATA_SIZE + best_entry->data_offset;
+
+  HAL_FLASH_Unlock();
+  if (flash_write_block(write_addr, (const void *) read_addr, best_entry->data_length) != BSP_FLASH_OK)
+  {
+    HAL_FLASH_Lock();
+    return BSP_FLASH_ERR_PROGRAM;
+  }
+
+  if (append_metadata_entry(dst->base, 0u, best_entry->gen, best_entry->data_offset, best_entry->data_length,
+                            best_entry->timestamp, best_entry->crc32, best_entry->log_read_pos, crc_cb)
+      != BSP_FLASH_OK)
+  {
+    HAL_FLASH_Lock();
+    return BSP_FLASH_ERR_PROGRAM;
+  }
+
+  HAL_FLASH_Lock();
+  *out_next_meta_offset = BSP_FLASH_ENTRY_SIZE;
   return BSP_FLASH_OK;
 }
 
@@ -588,32 +661,107 @@ bsp_flash_log_get_positions(const bsp_flash_dual_t *dr, uint32_t *out_write_pos,
   uint32_t                  write_pos = 0u;
   uint32_t                  read_pos  = 0u;
   uint32_t                  scan      = 0u;
+  uint32_t                  last_gen  = 0u;
 
   while (scan < BSP_FLASH_METADATA_SIZE)
   {
     const bsp_flash_metadata_entry_t *e = (const bsp_flash_metadata_entry_t *) (active->base + scan);
     if (e->marker == FLASH_ERASED_VALUE)
       break;
-    if (e->marker == BSP_FLASH_ENTRY_MARKER && is_entry_valid(e, dr->crc32_cb) && e->data_offset >= sub_offset
-        && e->data_offset < (sub_offset + sub_length))
+    if (e->marker == BSP_FLASH_ENTRY_MARKER && is_entry_valid(e, dr->crc32_cb))
     {
-      if (e->data_length > 0u)
+      last_gen = e->gen;
+
+      if (e->data_offset >= sub_offset && e->data_offset < (sub_offset + sub_length))
       {
-        uint32_t end = (e->data_offset - sub_offset) + e->data_length;
-        if (end > write_pos)
-          write_pos = end;
+        if (e->data_length > 0u)
+        {
+          uint32_t end = (e->data_offset - sub_offset) + e->data_length;
+          if (end > write_pos)
+            write_pos = end;
+        }
+        if (e->log_read_pos != 0xFFFFFFFFu)
+          read_pos = e->log_read_pos;
       }
-      if (e->log_read_pos != 0xFFFFFFFFu)
-        read_pos = e->log_read_pos;
     }
     scan += BSP_FLASH_ENTRY_SIZE;
   }
 
   if (out_write_pos)
-    *out_write_pos = write_pos;
-  if (out_read_pos)
-    *out_read_pos = read_pos;
+    *out_write_pos = (last_gen << 20) | write_pos;
+  if (out_read_pos) {
+    if (read_pos == 0u || read_pos == 0xFFFFFFFFu) {
+        *out_read_pos = (last_gen << 20) | 0;
+    } else {
+        uint32_t rgen = read_pos >> 20;
+        if (last_gen > 0u && rgen < (last_gen - 1u)) {
+            /* Pointer is dead (sector overwritten)! Force it to oldest alive generation */
+            uint8_t inactive_idx = 1u - dr->active;
+            bsp_flash_metadata_entry_t *oe = (bsp_flash_metadata_entry_t *)dr->sectors[inactive_idx].base;
+            if (oe->marker == BSP_FLASH_ENTRY_MARKER && oe->gen == (last_gen - 1u)) {
+                *out_read_pos = ((last_gen - 1u) << 20) | 0;
+            } else {
+                *out_read_pos = (last_gen << 20) | 0;
+            }
+        } else {
+            *out_read_pos = read_pos;
+        }
+    }
+  }
   return BSP_FLASH_OK;
+}
+
+uint32_t bsp_flash_log_read_virtual(const bsp_flash_dual_t *dr, uint32_t virtual_offset, void *out, uint32_t length)
+{
+    if (!dr || !out || length == 0u)
+        return 0u;
+
+    uint32_t req_gen = virtual_offset >> 20;
+    uint32_t local_offset = virtual_offset & 0xFFFFF;
+
+    if (local_offset >= BSP_FLASH_LOG_DATA_LENGTH)
+        return 0u;
+
+    /* Find which sector contains this log generation.
+     * Scan full metadata instead of checking the first entry only, because
+     * slot 0 may hold a copied config snapshot with an older generation.
+     */
+    uint8_t target_idx = 0xFFu;
+    for (uint8_t i = 0u; i < 2u; i++) {
+      uint32_t scan = 0u;
+      while (scan < BSP_FLASH_METADATA_SIZE) {
+        const bsp_flash_metadata_entry_t *e =
+          (const bsp_flash_metadata_entry_t *)(dr->sectors[i].base + scan);
+
+        if (e->marker == FLASH_ERASED_VALUE) {
+          break;
+        }
+
+        if (e->marker == BSP_FLASH_ENTRY_MARKER && is_entry_valid(e, dr->crc32_cb)
+          && e->gen == req_gen && e->data_length > 0u
+          && e->data_offset >= BSP_FLASH_LOG_DATA_OFFSET
+          && e->data_offset < (BSP_FLASH_LOG_DATA_OFFSET + BSP_FLASH_LOG_DATA_LENGTH)) {
+          target_idx = i;
+          break;
+        }
+
+        scan += BSP_FLASH_ENTRY_SIZE;
+      }
+
+      if (target_idx != 0xFFu) {
+        break;
+      }
+    }
+
+    if (target_idx > 1u)
+        return 0u;
+
+    uint32_t avail = BSP_FLASH_LOG_DATA_LENGTH - local_offset;
+    uint32_t copy_len = (length > avail) ? avail : length;
+    uint32_t read_addr = dr->sectors[target_idx].base + BSP_FLASH_METADATA_SIZE + BSP_FLASH_LOG_DATA_OFFSET + local_offset;
+
+    memcpy(out, (const void *)read_addr, copy_len);
+    return copy_len;
 }
 
 bsp_flash_status_t bsp_flash_log_update_read_pos(bsp_flash_dual_t *dr, uint32_t read_pos)
@@ -651,7 +799,7 @@ bsp_flash_status_t bsp_flash_log_update_read_pos(bsp_flash_dual_t *dr, uint32_t 
   if ((scan + BSP_FLASH_ENTRY_SIZE) > BSP_FLASH_METADATA_SIZE)
     return BSP_FLASH_ERR_NO_SPACE; /* metadata region full */
 
-  uint32_t gen       = has_gen ? (last_gen + 1u) : 0u;
+  uint32_t gen       = has_gen ? last_gen : 0u;
   uint32_t timestamp = dr->timestamp_cb ? dr->timestamp_cb() : 0u;
 
   return append_metadata_entry(active->base, scan, gen, sub_offset + log_pos, /* bookmark */
@@ -709,7 +857,7 @@ bsp_flash_status_t bsp_flash_log_append(bsp_flash_dual_t *dr,
   }
 
   uint32_t next_meta_offset = scan;
-  uint32_t gen              = has_valid_gen ? (last_gen + 1u) : 0u;
+  uint32_t gen              = has_valid_gen ? last_gen : 0u;
 
   /* Decide whether the active sector has room for this write */
   bool reason_meta_full = ((next_meta_offset + BSP_FLASH_ENTRY_SIZE) > BSP_FLASH_METADATA_SIZE);
@@ -742,11 +890,19 @@ bsp_flash_status_t bsp_flash_log_append(bsp_flash_dual_t *dr,
      * intact — its data remains readable until the caller (sys_logger)
      * resets g_flash_log_read_pos after confirming the host received it.
      * ──────────────────────────────────────────────────────────────────── */
-    uint8_t             new_idx = 1u - dr->active;
-    bsp_flash_region_t *nr      = &dr->sectors[new_idx];
+    uint8_t                   new_idx = 1u - dr->active;
+    const bsp_flash_region_t *old     = &dr->sectors[dr->active];
+    bsp_flash_region_t       *nr      = &dr->sectors[new_idx];
 
     if (flash_erase_sector(nr->base) != BSP_FLASH_OK)
       return BSP_FLASH_ERR_ERASE;
+
+    /* Preserve the latest config snapshot before writing the new log entry.
+     * Without this, repeated log swaps can erase the only valid config copy.
+     */
+    uint32_t next_meta_offset = 0u;
+    if (copy_latest_cfg_snapshot(old, nr, dr->crc32_cb, &next_meta_offset) != BSP_FLASH_OK)
+      return BSP_FLASH_ERR_PROGRAM;
 
     /* Write data at the start of the log sub-partition in the new sector */
     uint32_t write_addr = nr->base + BSP_FLASH_METADATA_SIZE + sub_offset;
@@ -761,7 +917,7 @@ bsp_flash_status_t bsp_flash_log_append(bsp_flash_dual_t *dr,
     uint32_t data_crc  = dr->crc32_cb ? dr->crc32_cb(data, size) : 0u;
     uint32_t timestamp = dr->timestamp_cb ? dr->timestamp_cb() : 0u;
 
-    if (append_metadata_entry(nr->base, 0u, gen + 1u, sub_offset, size, timestamp, data_crc, log_read_pos,
+    if (append_metadata_entry(nr->base, next_meta_offset, gen + 1u, sub_offset, size, timestamp, data_crc, log_read_pos,
                               dr->crc32_cb)
         != BSP_FLASH_OK)
       return BSP_FLASH_ERR_PROGRAM;

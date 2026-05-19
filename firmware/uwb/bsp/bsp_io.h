@@ -40,7 +40,8 @@
 /**
  * @brief Button event types
  */
-typedef enum {
+typedef enum
+{
   BSP_IO_EVENT_NONE = 0,
   BSP_IO_EVENT_CLICK,
   BSP_IO_EVENT_DOUBLE_CLICK,
@@ -51,7 +52,8 @@ typedef enum {
 /**
  * @brief Button state machine states
  */
-typedef enum {
+typedef enum
+{
   BSP_IO_BUTTON_IDLE = 0,
   BSP_IO_BUTTON_DEBOUNCE,
   BSP_IO_BUTTON_PRESSED,
@@ -83,6 +85,19 @@ void bsp_io_led_off(void);
  * @brief Toggle LED state
  */
 void bsp_io_led_toggle(void);
+
+/**
+ * @brief Blink LED in non-blocking mode.
+ * @param duration_ms LED ON duration in milliseconds.
+ * @note Call bsp_io_task() periodically from main loop to complete blink timing.
+ */
+void bsp_io_led_blink(uint32_t duration_ms);
+
+/**
+ * @brief Periodic BSP IO task (non-blocking).
+ * @note Handles LED blink timeout and future time-based IO tasks.
+ */
+void bsp_io_task(void);
 
 /* Button control ----------------------------------------------------- */
 /**
@@ -120,12 +135,14 @@ bool bsp_io_dip_changed(void);
  * @param x X coordinate in meters
  * @param y Y coordinate in meters
  * @param z Z coordinate in meters
+ * @param distance Per-anchor distances in meters (array size NUM_ANCHORS), can be NULL
  * @param error Error estimate in meters (from trilateration)
+ * @param distance Pointer to anchor distance array (NUM_ANCHORS elements), pass NULL if unavailable
  * @return BSP_OK on success, BSP_ERR on failure
- * @note Frame format: SOF(1) + X(4) + Y(4) + Z(4) + ERROR(4) + LENGTH(1) = 18 bytes
- *       SOF = 0xAA, LENGTH = 16 (payload size)
+ * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + DISTANCES(4*NUM_ANCHORS) + ERROR(4)
+ *       LEN is payload bytes after LEN field.
  */
-bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error);
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error);
 
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

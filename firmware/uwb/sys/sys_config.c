@@ -112,6 +112,7 @@ int sys_config_set_role(device_role_t role)
         return -1;
     }
     g_storage.config.uwb.role = role;
+    g_storage.config.device_type = sys_config_default_device_type_from_role(role);
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Role set to: %s",
            role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
     return 0;
@@ -198,11 +199,15 @@ int sys_config_load(void)
         return -1;
     }
 
-    sys_config_storage_t temp_storage;
+    static sys_config_storage_t temp_storage;
+    bool                 normalize_and_save = false;
     uint32_t bytes_read = sys_flash_cfg_read(&temp_storage, sizeof(sys_config_storage_t));
 
     if (bytes_read != sizeof(sys_config_storage_t)) {
-        RLOG_D(LOG_OBJECT_CODE_SYS_CFG, "No valid config in flash");
+        RLOG_D(LOG_OBJECT_CODE_SYS_CFG,
+               "No valid config in flash (bytes_read=%lu expected=%lu)",
+               (unsigned long)bytes_read,
+               (unsigned long)sizeof(sys_config_storage_t));
         return -1;
     }
 
@@ -239,6 +244,14 @@ int sys_config_load(void)
     if (!sys_config_device_type_valid(temp_storage.config.device_type)) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid device_type in flash, deriving from role");
         temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
+        normalize_and_save = true;
+    }
+    else if (temp_storage.config.device_type != sys_config_default_device_type_from_role(temp_storage.config.uwb.role)) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
+               "device_type/role mismatch in flash, normalizing to %s",
+               temp_storage.config.uwb.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
+        temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
+        normalize_and_save = true;
     }
 
     if (!sys_config_host_transport_valid(temp_storage.config.host_transport)) {
@@ -269,6 +282,15 @@ int sys_config_load(void)
 
     memcpy(&g_storage, &temp_storage, sizeof(sys_config_storage_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
+
+    if (normalize_and_save) {
+        if (sys_config_save() == 0) {
+            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Normalized config persisted back to flash");
+        } else {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Normalized config could not be persisted back to flash");
+        }
+    }
+
     return 0;
 #else
     if (g_config_magic == CONFIG_RAM_MAGIC) {
@@ -297,6 +319,18 @@ int sys_config_load(void)
 #endif
 }
 
+
+int sys_config_set_power_mode(anchor_power_mode_t mode)
+{
+    if (mode > ANCHOR_POWER_MODE_DEEP_ECO) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid power mode: %d", mode);
+        return -1;
+    }
+    
+    g_storage.config.uwb.power_mode = (uint32_t)mode;
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Power mode set to: %d", mode);
+    return 0;
+}
 
 void sys_config_reset_to_defaults(void)
 {
@@ -336,21 +370,13 @@ void sys_config_reset_to_defaults(void)
        ---------- */
     g_storage.config.uwb.ranging_period_ms                  =           DEFAULT_RANGING_PERIOD_MS;
     g_storage.config.uwb.rx_timeout_ms                      =           DEFAULT_RX_TIMEOUT_MS;
+     g_storage.config.uwb.power_mode                        =           DEFAULT_ANCHOR_POWER_MODE;
     g_storage.config.uwb.anchor_list.size                   =           0;
     
     /* Calibration Configuration
        ---------- */
     g_storage.config.calib.enable_anchor_auto_calib         =           ENABLE_ANCHOR_AUTO_CALIB;
-    g_storage.config.calib.enable_tag_auto_calib            =           ENABLE_TAG_AUTO_CALIB;
-    g_storage.config.calib.ref_distance_xy_m                =           CALIB_REF_DISTANCE_XY_M;
-    g_storage.config.calib.tag_height_m                     =           CALIB_TAG_HEIGHT_M;
-    g_storage.config.calib.anchor_height_m                  =           CALIB_ANCHOR_HEIGHT_M;
-    g_storage.config.calib.calib_anchor_id                  =           CALIB_ANCHOR_ID;
-    g_storage.config.calib.samples                          =           CALIB_SAMPLES;
-    g_storage.config.calib.error_threshold_m                =           CALIB_ERROR_THRESHOLD_M;
-    g_storage.config.calib.min_delta_step                   =           CALIB_MIN_DELTA_STEP;
-    g_storage.config.calib.max_rounds                       =           CALIB_MAX_ROUNDS;
-    g_storage.config.calib.max_std_m                        =           CALIB_MAX_STD_M;
+    g_storage.config.calib.enable_tag_auto_calib            =           0U;
 
     /* Anchor Layout Positions (X, Y, Z in meters)
        ================================================================================================
@@ -406,9 +432,12 @@ void sys_config_print(void)
     CFG_LOG("TX Ant Delay  : %lu", g_storage.config.uwb.tx_antenna_delay);
     CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
     CFG_LOG("TX Power      : 0x%08lX", g_storage.config.uwb.tx_power);
+    CFG_LOG("Calib Error   : %+.3fm", g_storage.config.calib.last_avg_error_m);
+    CFG_LOG("Calib Iter    : %u", (unsigned)g_storage.config.calib.iterations_taken);
     CFG_LOG("-------------- TIMING -----------------");
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
+    CFG_LOG("Power Mode    : %lu", g_storage.config.uwb.power_mode);
     CFG_LOG("==========================================");
     CFG_LOG("");
 }
