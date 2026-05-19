@@ -432,7 +432,16 @@ void sys_config_print(void)
     CFG_LOG("TX Ant Delay  : %lu", g_storage.config.uwb.tx_antenna_delay);
     CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
     CFG_LOG("TX Power      : 0x%08lX", g_storage.config.uwb.tx_power);
-    CFG_LOG("Calib Error   : %+.3fm", g_storage.config.calib.last_avg_error_m);
+    CFG_LOG("Calib MeanErr : %+.3fm", g_storage.config.calib.last_pair_error_mean_m);
+    CFG_LOG("Calib Spread  : %.3fm", g_storage.config.calib.last_pair_error_spread_m);
+    CFG_LOG("Calib RMS     : %.3fm", g_storage.config.calib.last_pair_error_rms_m);
+    CFG_LOG("Calib AbsErr  : mean=%.3fm max=%.3fm",
+            g_storage.config.calib.last_pair_error_mean_abs_m,
+            g_storage.config.calib.last_pair_error_max_abs_m);
+    CFG_LOG("Calib PairCnt : %lu usable / %lu rejected",
+            (unsigned long)g_storage.config.calib.last_usable_pair_count,
+            (unsigned long)g_storage.config.calib.last_rejected_pair_count);
+    CFG_LOG("Calib Rejects : %lu", (unsigned long)g_storage.config.calib.rejected_batch_count);
     CFG_LOG("Calib Iter    : %u", (unsigned)g_storage.config.calib.iterations_taken);
     CFG_LOG("-------------- TIMING -----------------");
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);

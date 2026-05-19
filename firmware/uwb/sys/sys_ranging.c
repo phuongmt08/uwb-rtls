@@ -30,6 +30,9 @@
 #define MW_DSTWR_MSG_TYPE_RESP   0xE2
 #define MW_DSTWR_MSG_TYPE_FINAL  0xE3
 #define MW_DSTWR_MSG_TYPE_RESULT 0xE4 /* Anchor sends distance to TAG */
+#define MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY 0xE5
+
+#define CALIB_PAIR_SUMMARY_SLOT_MS 20U
 /* Macro definitions -------------------------------------------------- */
 // SYS_RANGING_DEBUG: Enable  detailed debug logs for ranging state machine and calculations
 #define SYS_RANGING_DEBUG     0
@@ -124,6 +127,11 @@ typedef struct __attribute__((packed))
   uint16_t fp_amp_norm_q8;
   uint16_t fp_snr_q8;
 } result_msg_t;
+
+typedef char calib_pair_summary_fits_bsp_rx_event_t[
+  (sizeof(sys_calib_pair_summary_msg_t) <= 128U) ? 1 : -1
+];
+
 typedef struct
 {
   ranging_state_t state;
@@ -399,6 +407,9 @@ static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t 
   case MW_DSTWR_MSG_TYPE_RESP:   min_len = sizeof(resp_msg_t);   break;
   case MW_DSTWR_MSG_TYPE_FINAL:  min_len = sizeof(final_msg_t);  break;
   case MW_DSTWR_MSG_TYPE_RESULT: min_len = sizeof(result_msg_t); break;
+  case MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY:
+    min_len = sizeof(sys_calib_pair_summary_msg_t);
+    break;
   default: return false;
   }
   return len >= min_len;
@@ -1181,6 +1192,50 @@ void sys_ranging_set_calib_status(sys_calib_status_t status)
 sys_calib_status_t sys_ranging_get_calib_status(void)
 {
   return s_calib_status;
+}
+
+sys_ranging_err_t sys_ranging_send_calib_pair_summary(const sys_calib_pair_summary_msg_t *summary,
+                                                      uint8_t slot_id)
+{
+  if (!summary || slot_id == 0U || slot_id > SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS) {
+    return SYS_RANGING_ERR_PARAM;
+  }
+  if (summary->pair_count > SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS) {
+    return SYS_RANGING_ERR_PARAM;
+  }
+
+  sys_calib_pair_summary_msg_t msg = *summary;
+  msg.msg_type = MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY;
+
+  HAL_Delay((uint32_t)slot_id * CALIB_PAIR_SUMMARY_SLOT_MS);
+  if (bsp_uwb_tx(&msg, sizeof(msg)) != BSP_OK) {
+    return SYS_RANGING_ERR;
+  }
+  return SYS_RANGING_OK;
+}
+
+sys_ranging_err_t sys_ranging_poll_calib_pair_summary(sys_calib_pair_summary_msg_t *summary,
+                                                      uint32_t timeout_ms)
+{
+  uint8_t rx_buf[sizeof(sys_calib_pair_summary_msg_t)] = {0};
+  uint16_t rx_len = 0U;
+
+  if (!summary) {
+    return SYS_RANGING_ERR_PARAM;
+  }
+
+  if (hal_rx_wait_valid_msg(rx_buf, sizeof(rx_buf), &rx_len,
+                            MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY,
+                            timeout_ms * 1000U) != 0) {
+    return SYS_RANGING_ERR_TIMEOUT;
+  }
+
+  memcpy(summary, rx_buf, sizeof(*summary));
+  if (summary->pair_count > SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS) {
+    return SYS_RANGING_ERR_PROTO;
+  }
+
+  return SYS_RANGING_OK;
 }
 
 uint8_t sys_ranging_get_current_slot(void)

@@ -72,6 +72,30 @@ typedef struct
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
 
+#define SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS 3U
+
+typedef struct __attribute__((packed))
+{
+  uint8_t  peer_id;
+  float    known_m;
+  float    mean_m;
+  float    std_m;
+  float    timeout_rate;
+  uint16_t valid_count;
+} sys_calib_pair_summary_item_t;
+
+typedef struct __attribute__((packed))
+{
+  uint8_t msg_type;
+  uint8_t epoch_id;
+  uint8_t sender_id;
+  uint8_t pair_count;
+  uint16_t current_tx_delay;
+  uint16_t current_rx_delay;
+  uint16_t current_combined_delay;
+  sys_calib_pair_summary_item_t pair[SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS];
+} sys_calib_pair_summary_msg_t;
+
 /**
  * @brief Ranging configuration
  */
@@ -188,6 +212,18 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
  * @return SYS_RANGING_OK if result available
  */
 sys_ranging_err_t sys_ranging_anchor_get_result_tdma(sys_ranging_result_t *result);
+
+/**
+ * @brief Send one calibration pair summary packet in a deterministic summary slot.
+ */
+sys_ranging_err_t sys_ranging_send_calib_pair_summary(const sys_calib_pair_summary_msg_t *summary,
+                                                      uint8_t slot_id);
+
+/**
+ * @brief Poll for one calibration pair summary packet.
+ */
+sys_ranging_err_t sys_ranging_poll_calib_pair_summary(sys_calib_pair_summary_msg_t *summary,
+                                                      uint32_t timeout_ms);
 
 /* ====================================================================
  * NON-BLOCKING API - LEGACY SINGLE-ANCHOR MODE (backward compatible)

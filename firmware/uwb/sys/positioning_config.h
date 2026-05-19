@@ -22,11 +22,11 @@
 #define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16342
-#define ANCHOR_DEFAULT_RX_ANT_DLY   16342
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16225
+#define ANCHOR_DEFAULT_RX_ANT_DLY   16225
 
-/* During auto-calibration, only TX delay is adjusted.
- * RX delay is kept fixed at this value for both Tag and Anchor. */
+/* Legacy fixed RX delay used by older calibration paths. V1 A2A summary
+ * solver only logs candidate delays and does not apply this value. */
 #define CALIB_FIXED_RX_ANT_DLY      16436
 
 /* ===================================================================
@@ -53,42 +53,18 @@
  * =================================================================== */
 
 /* 0 = normal ranging mode
- * 1 = anchor-to-anchor gradient calibration mode (A2A)                      */
+ * 1 = mutual anchor-to-anchor calibration summary mode (A2A V1)             */
 #define ENABLE_ANCHOR_AUTO_CALIB    0
 
-/* A2A calibration mode:
- * 0 = mutual calibration: all anchors calibrate against each other
- * 1 = target calibration: only the target anchor is adjusted;
- *     other anchors keep their delay and act as references.
- *
- * CALIB_TARGET_ANCHOR_ID:
- * 0 = external target/initiator, not part of anchor layout or TDMA anchor slots
- * 1..NUM_ANCHORS = fixed target anchor ID. */
-#define CALIB_A2A_TARGET_MODE       1U
-#define CALIB_TARGET_ANCHOR_ID      4U
-
-/* Physical position of the external calibration target when
- * CALIB_TARGET_ANCHOR_ID == 0. This target ranges as the TAG/initiator side
- * and does not consume any anchor ID or TDMA anchor slot. */
-#define CALIB_TARGET_POS_X_M        0.0f
-#define CALIB_TARGET_POS_Y_M        0.0f
-#define CALIB_TARGET_POS_Z_M        0.0f
-
 /* ------------------------------------------------------------------
- * A2A (Anchor-to-Anchor) Gradient Calibration
+ * A2A (Anchor-to-Anchor) Mutual Calibration V1
  *
- * Algorithm: each anchor ranges with every peer listed in
- * CALIB_PAIRWISE_LIST, collects CALIB_ANCHOR_SAMPLES per pair,
- * then applies a damped gradient step to its combined antenna delay.
- * This repeats for MW_CALIB_A2A_ITERATIONS (see mw_calibration.h).
- *
- * Binary-search constants (ERROR_THRESHOLD, MIN_DELTA_STEP,
- * MAX_ROUNDS) are intentionally removed — gradient needs none of them.
- * Gradient tuning (damping, m→DW factor, iteration count, ANT clamp)
- * lives in mw_calibration.h as MW_CALIB_A2A_* defines.
+ * Mutual-only V1: each anchor ranges with every other anchor, collects
+ * CALIB_ANCHOR_SAMPLES per pair, and sends CALIB_PAIR_SUMMARY to A4.
+ * A4 runs the full-matrix solver and logs candidate delays only.
  * ------------------------------------------------------------------ */
 
-/* Samples collected per anchor pair per iteration.
+/* Samples collected per anchor pair per calibration epoch.
  * 20 is a good balance: enough to average out multipath,
  * fast enough for in-field calibration.                               */
 #define CALIB_ANCHOR_SAMPLES     20
@@ -97,20 +73,25 @@
  * Batch is discarded and re-collected automatically.                  */
 #define CALIB_ANCHOR_MAX_STD_M   0.08f
 
-/* ------------------------------------------------------------------
- * Gradient step tuning — passed into mw_calib_a2a_config_t
- * ------------------------------------------------------------------ */
-
-/* DW1000: TWR combined delay → distance.
+/* DW1000: TWR combined delay -> distance.
  * 1 DW unit in combined (TX+RX) = c × 15.65ps / 2 ≈ 2.345 mm.
- * Inverse: 1 m error → 1/0.002345 ≈ 426 DW units (combined).
- * Each anchor absorbs half → 213 units/m per anchor.                 */
+ * V1 uses this only to log candidate delay deltas.                    */
 #define CALIB_A2A_M_TO_DW_UNITS  213.0f
 
-/* Damping factor 0.0–1.0.
- * 0.4 converges faster for target-mode calibration with ~1m initial error.
- * Reduce toward 0.2 if the error starts oscillating across zero.      */
+/* Legacy gradient damping kept for compatibility with mw_calibration. */
 #define CALIB_A2A_DAMPING        0.4f
+
+/* Reject a calibration batch when per-pair residuals disagree by more
+ * than this. A single antenna-delay scalar cannot fix link/angle bias. */
+#define CALIB_A2A_MAX_PAIR_ERROR_SPREAD_M  0.20f
+
+/* Reject a pair when too many TDMA rounds missed that peer while collecting.
+ * timeout_rate = timeout_count / (valid_count + timeout_count). */
+#define CALIB_A2A_MAX_TIMEOUT_RATE         0.25f
+
+/* Final success gate. A calibration run is successful only when every
+ * usable pair's absolute residual is below this value. */
+#define CALIB_A2A_CONVERGENCE_MAX_ABS_M    0.05f
 
 /* Combined delay clamp range.
  * Default DW1000 combined ≈ 32872 (2 × 16436).
@@ -118,24 +99,18 @@
 #define CALIB_A2A_ANT_MIN        30000U
 #define CALIB_A2A_ANT_MAX        36000U
 
-/* Number of full pair-sweep iterations.
- * 2 is sufficient for <5mm residual error with damping=0.4.          */
-#define CALIB_A2A_ITERATIONS     12U
+/* Legacy gradient iteration count kept for compatibility. V1 summary
+ * calibration completes after one mutual collection epoch.            */
+#define CALIB_A2A_ITERATIONS     3U
 
 /* DW1000 physical constant.
  * 1 DW unit = 1/(499.2e6 × 128) ≈ 15.65 ps one-way.
  * TWR round-trip: 1 unit in combined (TX+RX) delay
  * → distance error = c × 15.65ps / 2 ≈ 2.345 mm.
- * Inverse used inside mw_calibration.c as MW_CALIB_A2A_M_TO_DW.      */
+ * Inverse is used when converting solved bias to logged candidate
+ * delay deltas.                                                       */
 #define DW1000_M_PER_DLY_UNIT    0.002345f   /* meters per DW unit (TWR) */
 
-/* Anchor-to-anchor pairwise calibration list.
- * Format: {source_anchor_id, target_anchor_id}
- * source_id actively ranges against target_id.
- * Every source accumulates errors from all its pairs, then
- * applies one gradient step — no dependency chain.
- * Anchor 1 has no source entries → it holds the initial delay
- * (natural gauge anchor, no explicit fix needed for 2 iterations).   */
 /* ===================================================================
  * ANCHOR LAYOUT
  * =================================================================== */
