@@ -40,8 +40,9 @@ FW_IMAGE_CRC ?= 0
 GENERATED_DIR := .
 FW_IMAGE_META_HEADER := fw_image_meta.h
 FOTA_PATCH_SCRIPT := tools/patch_fota_header.py
+FW_IMAGE_META_SCRIPT := tools/generate_fw_image_meta.py
 
-# Version is updated by uwb_rtls_programmer before build
+# Version is updated by firmware/uwb/tools/update_version.py before build
 
 .PHONY: all clean rebuild patch_fota_header
 
@@ -97,24 +98,14 @@ VERSION_MAJOR := $(shell grep '#define FW_VERSION_MAJOR' app/version.h | tail -1
 VERSION_MINOR := $(shell grep '#define FW_VERSION_MINOR' app/version.h | tail -1 | grep -o '[0-9]\+$$')
 VERSION_PATCH := $(shell grep '#define FW_VERSION_PATCH' app/version.h | tail -1 | grep -o '[0-9]\+$$')
 
-# Regenerate fw_image_meta.h on every build.
-$(FW_IMAGE_META_HEADER): FORCE
+$(FW_IMAGE_META_HEADER): $(FW_IMAGE_META_SCRIPT)
 	@mkdir -p $(GENERATED_DIR)
-	@printf "%s\n" "/*" > $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" " * AUTO-GENERATED FILE - Do not edit manually" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" " */" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#ifndef FW_IMAGE_META_H" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#define FW_IMAGE_META_H" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#define FW_VERSION_GITSHA_HEX 0x$(FW_GIT_SHA)ULL" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#define FW_VERSION_GITSHA_NOQUOTE $(FW_GIT_SHA)" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#define FW_IMAGE_TIMESTAMP $(FW_IMAGE_TIMESTAMP)U" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#define FW_IMAGE_LENGTH $(FW_IMAGE_LENGTH)U" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#define FW_IMAGE_CRC $(FW_IMAGE_CRC)U" >> $(FW_IMAGE_META_HEADER)
-	@printf "%s\n" "#endif" >> $(FW_IMAGE_META_HEADER)
-	@echo "  [meta] fw_image_meta.h (sha=$(FW_GIT_SHA) ts=$(FW_IMAGE_TIMESTAMP))"
-
-FORCE:
+	@$(PYTHON) $(FW_IMAGE_META_SCRIPT) \
+		--output $(FW_IMAGE_META_HEADER) \
+		--git-sha $(FW_GIT_SHA) \
+		--timestamp $(FW_IMAGE_TIMESTAMP) \
+		--image-length $(FW_IMAGE_LENGTH) \
+		--image-crc $(FW_IMAGE_CRC)
 
 $(TARGET).elf: $(OBJECTS)
 	@mkdir -p $(dir $@)

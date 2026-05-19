@@ -81,9 +81,15 @@ class DfuDevice:
 
     def open(self) -> DeviceInfo:
         backend = DfuDevice.get_usb_backend()
-        candidates = list(
-            usb.core.find(find_all=True, idVendor=self.vid, idProduct=self.pid, backend=backend) or []
-        )
+        # On Windows, querying by VID/PID can hit a stale libusb cache if the device 
+        # just re-enumerated. Querying ALL devices forces a cache flush!
+        all_devices = usb.core.find(find_all=True, backend=backend) or []
+        candidates = []
+        if all_devices:
+            for dev in all_devices:
+                if int(dev.idVendor) == self.vid and int(dev.idProduct) == self.pid:
+                    candidates.append(dev)
+
         if not candidates:
             raise DfuError(f"Cannot find DFU device VID:PID = {self.vid:04X}:{self.pid:04X}")
 
@@ -103,8 +109,11 @@ class DfuDevice:
             raise DfuError("Matching USB device found but no DFU interface available")
 
         self.dev = dev
-        dev.set_configuration()
-        cfg = dev.get_active_configuration()
+        try:
+            cfg = dev.get_active_configuration()
+        except usb.core.USBError:
+            dev.set_configuration()
+            cfg = dev.get_active_configuration()
 
         dfu_intf = None
         for intf in cfg:
@@ -120,6 +129,10 @@ class DfuDevice:
             if dev.is_kernel_driver_active(self.interface_number):
                 dev.detach_kernel_driver(self.interface_number)
         usb.util.claim_interface(dev, self.interface_number)
+        try:
+            dev.set_interface_altsetting(self.interface_number, 0)
+        except Exception:
+            pass
 
         return DeviceInfo(
             vid=self.vid,
@@ -176,25 +189,37 @@ class DfuDevice:
 
     def _wait_ready(self, max_tries: int = 300):
         for _ in range(max_tries):
-            status, poll, state, _ = self.get_status()
-            if status != 0:
-                raise DfuError(f"DFU status error: {status}")
-            if state in (STATE_DFU_IDLE, STATE_DFU_DNLOAD_IDLE, STATE_DFU_UPLOAD_IDLE):
-                return state
-            sleep_time = max(poll / 1000.0, 0.01)
-            time.sleep(sleep_time)
+            try:
+                status, poll, state, _ = self.get_status()
+                if status != 0:
+                    raise DfuError(f"DFU status error: {status}")
+                if state in (STATE_DFU_IDLE, STATE_DFU_DNLOAD_IDLE, STATE_DFU_UPLOAD_IDLE):
+                    return state
+                sleep_time = max(poll / 1000.0, 0.01)
+                time.sleep(sleep_time)
+            except Exception as e:
+                # If the STM32 is erasing flash, the CPU halts and USB will timeout/STALL 
+                # causing a Pipe error. We should gracefully sleep and retry.
+                if _ == max_tries - 1:
+                    raise e
+                time.sleep(0.05)
+                
         raise DfuError("Timeout waiting DFU ready state")
 
     def _safe_recover_idle(self):
-        try:
-            state = self.get_state()
-            if state == STATE_DFU_ERROR:
-                self.clear_status()
+        for attempt in range(4):
+            try:
+                state = self.get_state()
+                if state == STATE_DFU_ERROR:
+                    self.clear_status()
+                    time.sleep(0.02)
+                self.abort()
                 time.sleep(0.02)
-            self.abort()
-            time.sleep(0.02)
-        except Exception:
-            pass
+                return  # Success
+            except Exception:
+                # If Windows suspended the port or the pipe is stale, 
+                # this will fail once but usually wakes it up for the next try
+                time.sleep(0.1)
 
     def _dnload_cmd_and_wait(self, block_num: int, payload: bytes):
         self._ctrl_out(REQ_DNLOAD, block_num, payload)
@@ -205,11 +230,25 @@ class DfuDevice:
         self._dnload_cmd_and_wait(0, cmd)
 
     def erase_address(self, address: int):
-        cmd = b"\x41" + int(address).to_bytes(4, "little")
-        self._dnload_cmd_and_wait(0, cmd)
+        old_timeout = self.timeout_ms
+        self.timeout_ms = 30000
+        try:
+            self._safe_recover_idle()
+            self._wait_ready()
+            cmd = b"\x41" + int(address).to_bytes(4, "little")
+            self._dnload_cmd_and_wait(0, cmd)
+        finally:
+            self.timeout_ms = old_timeout
 
     def mass_erase(self):
-        self._dnload_cmd_and_wait(0, b"\x41")
+        old_timeout = self.timeout_ms
+        self.timeout_ms = 30000
+        try:
+            self._safe_recover_idle()
+            self._wait_ready()
+            self._dnload_cmd_and_wait(0, b"\x41")
+        finally:
+            self.timeout_ms = old_timeout
 
     def write_memory(
         self,
@@ -221,9 +260,13 @@ class DfuDevice:
         if not data:
             return
 
+        print("[TRACE] Calling _safe_recover_idle...")
         self._safe_recover_idle()
+        print("[TRACE] Calling _wait_ready...")
         self._wait_ready()
+        print(f"[TRACE] Calling set_address_pointer({start_address:08X})...")
         self.set_address_pointer(start_address)
+        print("[TRACE] Address pointer set successfully!")
 
         total = len(data)
         sent = 0

@@ -4,6 +4,7 @@ import shutil
 import time
 import subprocess
 import sys
+import importlib.util
 from models.consts import MAX_VERSIONED_BUILDS
 from models.data_models import DfuError
 
@@ -56,63 +57,19 @@ class BuildService:
     @staticmethod
     def update_version(auto_inc: bool, log_callback) -> bool:
         try:
-            uwb_dir = BuildService.get_uwb_project_dir()
-            version_file = os.path.join(uwb_dir, "app", "version.h")
-            version_build_file = os.path.join(uwb_dir, "app", "version_build.h")
-            
-            if not os.path.exists(version_file):
-                log_callback(f"[VERSION] ERROR: Missing {version_file}")
+            tool_path = os.path.join(BuildService.get_uwb_project_dir(), "tools", "update_version.py")
+            if not os.path.exists(tool_path):
+                log_callback(f"[VERSION] ERROR: Missing {tool_path}")
                 return False, ""
-            
-            with open(version_file, 'r') as f:
-                version_content = f.read()
-            
-            major = int(re.search(r'#define\s+FW_VERSION_MAJOR\s+(\d+)', version_content).group(1))
-            minor = int(re.search(r'#define\s+FW_VERSION_MINOR\s+(\d+)', version_content).group(1))
-            patch = int(re.search(r'#define\s+FW_VERSION_PATCH\s+(\d+)', version_content).group(1))
-            
-            log_callback(f"[VERSION] Current: {major}.{minor}.{patch}")
-            
-            old_major = old_minor = old_patch = old_build = 0
-            if os.path.exists(version_build_file):
-                try:
-                    with open(version_build_file, 'r') as f:
-                        build_content = f.read()
-                    
-                    m = re.search(r'#define\s+FW_VERSION_MAJOR_OLD\s+(\d+)', build_content)
-                    if m: old_major = int(m.group(1))
-                    m = re.search(r'#define\s+FW_VERSION_MINOR_OLD\s+(\d+)', build_content)
-                    if m: old_minor = int(m.group(1))
-                    m = re.search(r'#define\s+FW_VERSION_PATCH_OLD\s+(\d+)', build_content)
-                    if m: old_patch = int(m.group(1))
-                    m = re.search(r'#define\s+FW_VERSION_BUILD\s+(\d+)', build_content)
-                    if m: old_build = int(m.group(1))
-                except Exception as e:
-                    log_callback(f"[VERSION] Build file read error: {e}")
-            
-            if f"{major}.{minor}.{patch}" == f"{old_major}.{old_minor}.{old_patch}":
-                new_build = (old_build + 1) if auto_inc else old_build
-                log_callback(f"[VERSION] Version unchanged -> INCREMENT to {new_build}")
-            else:
-                new_build = 0
-                log_callback(f"[VERSION] Version changed -> RESET to 0")
-            
-            new_content = f"/*\n * version_build.h - AUTO-GENERATED\n * Do not commit this file to git\n * Updated by Python programmer before each build\n */\n\n#ifndef APPLICATION_VERSION_BUILD_H_\n#define APPLICATION_VERSION_BUILD_H_\n\n#define FW_VERSION_MAJOR_OLD {major}\n#define FW_VERSION_MINOR_OLD {minor}\n#define FW_VERSION_PATCH_OLD {patch}\n#define FW_VERSION_BUILD {new_build}\n\n#endif /* APPLICATION_VERSION_BUILD_H_ */\n"
-            write_file = True
-            if os.path.exists(version_build_file):
-                with open(version_build_file, 'r') as f:
-                    if f.read() == new_content:
-                        write_file = False
-            
-            if write_file:
-                with open(version_build_file, 'w') as f:
-                    f.write(new_content)
-                log_callback("[VERSION] version_build.h updated.")
-            else:
-                log_callback("[VERSION] version_build.h unchanged. Ready for fast incremental build!")
-                
-            log_callback(f"[VERSION] {major}.{minor}.{patch}.{new_build}")
-            return True, f"{major}.{minor}.{patch}.{new_build}"
+
+            spec = importlib.util.spec_from_file_location("uwb_update_version_tool", tool_path)
+            if spec is None or spec.loader is None:
+                log_callback(f"[VERSION] ERROR: Cannot load {tool_path}")
+                return False, ""
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.update_version_file(BuildService.get_uwb_project_dir(), auto_inc, log_callback)
         except Exception as e:
             log_callback(f"[VERSION] ERROR: {e}")
             return False, ""

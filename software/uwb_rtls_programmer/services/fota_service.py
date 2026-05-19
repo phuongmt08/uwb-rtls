@@ -11,6 +11,7 @@ from common.transport import VvAddress
 from common.commands import CommandFactory
 from common import protocol_pb2 as pb
 from utils.dongle_session import DongleSession
+from serial.tools import list_ports
 
 MEM_APP_START = 0x0800_C000
 MEM_APP_END   = 0x0804_0000
@@ -72,21 +73,11 @@ class FotaService:
         self.factory = CommandFactory()
 
     def auto_probe_dongle(self):
-        return DongleSession.auto_probe(src=int(VvAddress.DEBUG), debug=False)
+        return DongleSession.auto_probe(src=int(VvAddress.HOST), debug=False)
 
     def ping_dongle(self, port):
-        try:
-            with DongleSession(port, baud=115200, debug=False) as session:
-                seq = session.proto.next_seq()
-                pkt = session.proto.pb.packet_t()
-                pkt.hdr.addr.src = int(VvAddress.DEBUG)
-                pkt.hdr.addr.dst = int(VvAddress.CENTRAL)
-                pkt.hdr.seq = seq
-                pkt.device_information_get.dummy = 0
-                match, _ = session.send_expect_param(pkt, "device_information_resp", timeout_s=0.5)
-                return match is not None
-        except Exception:
-            return False
+        # Elegant, conflict-free hotplug check: just verify if the virtual COM port still exists in the OS
+        return any(p.device == port for p in list_ports.comports())
 
     def scan_nearby_devices(self, port, log_cb, result_cb):
         if not port:
@@ -95,7 +86,7 @@ class FotaService:
 
         with DongleSession(port, baud=115200, debug=False) as session:
             seq = session.proto.next_seq()
-            pkt = self.factory._base(int(VvAddress.DEBUG), int(VvAddress.CENTRAL), seq)
+            pkt = self.factory.ble_scan_start(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             pkt.ble_scan_start.duration_ms = 4000
             pkt.ble_scan_start.interval_ms = 100
             pkt.ble_scan_start.window_ms = 50
@@ -127,13 +118,12 @@ class FotaService:
         with DongleSession(port, baud=115200, debug=False) as session:
             # Send stop scan first for safety
             seq_stop = session.proto.next_seq()
-            pkt_stop = self.factory._base(int(VvAddress.DEBUG), int(VvAddress.CENTRAL), seq_stop)
-            pkt_stop.ble_scan_stop.dummy = 0
+            pkt_stop = self.factory.ble_scan_stop(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq_stop)
             session.send_packet(pkt_stop)
             time.sleep(0.5)
 
             seq = session.proto.next_seq()
-            pkt = self.factory._base(int(VvAddress.DEBUG), int(VvAddress.CENTRAL), seq)
+            pkt = self.factory.ble_connect(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             pkt.ble_connect.mac_address = mac_bytes
             session.send_packet(pkt)
             
@@ -160,14 +150,13 @@ class FotaService:
             return
         with DongleSession(port, baud=115200, debug=False) as session:
             seq = session.proto.next_seq()
-            pkt = self.factory._base(int(VvAddress.DEBUG), int(VvAddress.CENTRAL), seq)
-            pkt.ble_disconnect.reason = 0
+            pkt = self.factory.ble_disconnect(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             session.send_packet(pkt)
             log_cb("[FOTA] Disconnect command sent to Central Dongle.")
             time.sleep(0.5)
             disconnected_cb("Disconnected")
 
-    def execute_ota_flash(self, port, hex_path, chunk_size, log_cb, progress_cb, status_cb):
+    def execute_ota_flash(self, port, hex_path, chunk_size, mac_bytes, mac_str, log_cb, progress_cb, status_cb):
         if chunk_size % 4 != 0:
             log_cb(f"[FOTA] ERROR: Chunk size ({chunk_size}) must be a multiple of 4.")
             return
@@ -185,8 +174,8 @@ class FotaService:
             log_cb("[FOTA] ERROR: Dongle not detected.")
             return
             
-        src = int(VvAddress.DEBUG)
-        dst = int(VvAddress.PERIPHERAL)
+        src = int(VvAddress.HOST)
+        dst = int(VvAddress.MCU)
         
         with DongleSession(port, baud=115200, debug=False) as session:
             # 1. enter_to_bootloader
@@ -203,10 +192,27 @@ class FotaService:
                         ack_ok = True
             if ack_ok:
                 log_cb("[FOTA] enter_to_bootloader ACK received, waiting for reboot...")
+                
+                # Perform scan & reconnect sequence
+                log_cb("[FOTA] BLE connection dropped due to device reboot.")
+                log_cb("[FOTA] Sending disconnect to clean up Central connection state...")
+                try:
+                    seq_disc = session.proto.next_seq()
+                    pkt_disc = self.factory.ble_disconnect(src, int(VvAddress.CENTRAL), seq_disc)
+                    session.send_packet(pkt_disc)
+                    time.sleep(1.5)
+                except Exception as e:
+                    log_cb(f"[FOTA] [WARN] Failed to send clean disconnect command: {e}")
+                
+                # Reconnect
+                reconnect_ok = self._scan_and_reconnect(session, src, mac_bytes, mac_str, log_cb)
+                if not reconnect_ok:
+                    log_cb("[FOTA] [FAIL] Could not reconnect to device in Bootloader. Aborting OTA.")
+                    return
             else:
                 log_cb("[FOTA] No ACK for enter_to_bootloader, assuming already in bootloader.")
+                time.sleep(1.0)
             
-            time.sleep(2.0)
             _ = session.recv_packets(0.2)
             
             # 2. flash_erase
@@ -303,3 +309,58 @@ class FotaService:
                 
             # Device reboots and severs connection, so we are now disconnected
             status_cb("Disconnected")
+
+    def _scan_and_reconnect(self, session, src, mac_bytes, mac_str, log_cb):
+        import time
+        from common.transport import VvAddress
+        log_cb(f"[FOTA] Re-scanning for {mac_str} in Bootloader mode...")
+        deadline = time.time() + 15.0
+        found = False
+        
+        # Send scan start
+        seq = session.proto.next_seq()
+        pkt_scan = self.factory.ble_scan_start(src, int(VvAddress.CENTRAL), seq)
+        session.send_packet(pkt_scan)
+        
+        while time.time() < deadline:
+            for p in session.recv_packets(0.1):
+                if p.WhichOneof("params") == "ble_scan_result":
+                    if p.ble_scan_result.mac_address == mac_bytes:
+                        found = True
+                        break
+            if found:
+                break
+                
+        # Send scan stop
+        seq = session.proto.next_seq()
+        pkt_stop = self.factory.ble_scan_stop(src, int(VvAddress.CENTRAL), seq)
+        session.send_packet(pkt_stop)
+        time.sleep(0.2)
+        
+        if not found:
+            log_cb("[FOTA] [FAIL] Could not find device advertising in Bootloader.")
+            return False
+            
+        log_cb("[FOTA] Device found! Sending Connect command...")
+        seq = session.proto.next_seq()
+        pkt_conn = self.factory.ble_connect(src, int(VvAddress.CENTRAL), seq)
+        pkt_conn.ble_connect.mac = mac_bytes
+        session.send_packet(pkt_conn)
+        
+        deadline = time.time() + 5.0
+        connected = False
+        while time.time() < deadline:
+            for p in session.recv_packets(0.1):
+                if p.WhichOneof("params") == "ble_status_resp":
+                    if p.ble_status_resp.state == 2:  # CONNECTED
+                        connected = True
+                        break
+            if connected:
+                break
+                
+        if connected:
+            log_cb("[FOTA] Successfully reconnected to device in Bootloader mode!")
+            time.sleep(1.0) # Wait for MTU / param exchange
+            return True
+        else:
+            return False

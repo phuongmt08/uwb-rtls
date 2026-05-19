@@ -45,10 +45,35 @@ class DfuController(QObject):
         self.view.vid_edit.setText(vid)
         self.view.pid_edit.setText(pid)
 
+        try:
+            from services.build_service import BuildService
+            uwb_dir = BuildService.get_uwb_project_dir()
+            version_dir = os.path.join(uwb_dir, "build_version")
+            versioned_files = []
+            if os.path.exists(version_dir):
+                for f in os.listdir(version_dir):
+                    if f.endswith(".hex"):
+                        full_path = os.path.normpath(os.path.join(version_dir, f))
+                        mtime = os.path.getmtime(full_path)
+                        versioned_files.append((mtime, full_path))
+                # Sort by mtime descending (newest first)
+                versioned_files.sort(reverse=True, key=lambda x: x[0])
+        except Exception:
+            versioned_files = []
+
+        final_paths = []
+        for _, path in versioned_files:
+            if path not in final_paths:
+                final_paths.append(path)
+
         recent = self.config.get_recent_hex_paths()
         for p in recent:
-            if os.path.exists(p):
-                self.view.combo_file.addItem(p)
+            p_norm = os.path.normpath(p)
+            if os.path.exists(p_norm) and p_norm not in final_paths:
+                final_paths.append(p_norm)
+
+        for p in final_paths:
+            self.view.combo_file.addItem(p)
         if self.view.combo_file.count() > 0:
             self.view.combo_file.setCurrentIndex(0)
 
@@ -77,8 +102,38 @@ class DfuController(QObject):
         self.config.set_last_hex_dir(os.path.dirname(path))
         self.signals.log.emit(f"Selected HEX: {path}")
 
+    def _force_app_to_dfu_mode(self):
+        from utils.dongle_session import DongleSession
+        from serial.tools import list_ports
+        from common.transport import VvAddress
+        from common.commands import CommandFactory
+        import time
+
+        ports = list(list_ports.comports())
+        tried_reboot = False
+        for p in ports:
+            if p.vid == 0x0483 and p.pid == 0x5740:
+                self.signals.log.emit(f"Found STM VCP {p.device} (0483:5740), sending enter_to_bootloader...")
+                try:
+                    with DongleSession(p.device, baud=115200, debug=False) as session:
+                        factory = CommandFactory()
+                        seq = session.proto.next_seq()
+                        pkt = factory.enter_to_bootloader(int(VvAddress.HOST), int(VvAddress.MCU), seq)
+                        session.send_packet(pkt)
+                        tried_reboot = True
+                        # Wait briefly for device to process and start rebooting
+                        time.sleep(0.5)
+                except Exception as e:
+                    self.signals.log.emit(f"Could not send to {p.device}: {e}")
+        
+        # If we tried to reboot any ports, wait a bit for USB to re-enumerate as DFU
+        if tried_reboot:
+            self.signals.log.emit("Waiting for USB to re-enumerate as DFU device...")
+            time.sleep(1.0)
+
     def on_scan(self):
         def job():
+            self._force_app_to_dfu_mode()
             vid_filter, pid_filter = self._parse_scan_filters()
 
             devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
@@ -116,11 +171,22 @@ class DfuController(QObject):
 
     def on_auto_connect(self):
         def job():
+            self._force_app_to_dfu_mode()
+            self.scanned_devices = [] # Force fresh scan after potential reboot
+            vid_filter, pid_filter = self._parse_scan_filters()
+            self.scanned_devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
+            
+            self.view.combo_devices.clear()
             if not self.scanned_devices:
-                vid_filter, pid_filter = self._parse_scan_filters()
-                self.scanned_devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
-            if not self.scanned_devices:
+                self.view.combo_devices.addItem("No scanned DFU device")
                 raise DfuError("No DFU device found. Check USB cable/driver and click Scan again.")
+            else:
+                for d in self.scanned_devices:
+                    bus_text = "?" if d.bus is None else str(d.bus)
+                    addr_text = "?" if d.address is None else str(d.address)
+                    self.view.combo_devices.addItem(
+                        f"{d.vid:04X}:{d.pid:04X} | bus {bus_text} addr {addr_text} | IF {d.interface_number}"
+                    )
 
             selected_index = self.view.combo_devices.currentIndex()
             if selected_index < 0 or selected_index >= len(self.scanned_devices):
@@ -129,7 +195,17 @@ class DfuController(QObject):
             selected = self.scanned_devices[selected_index]
             self.view.vid_edit.setText(f"{selected.vid:04X}")
             self.view.pid_edit.setText(f"{selected.pid:04X}")
-            self._connect_with_device_info(selected)
+            
+            # Connect using VID/PID only, exactly like manual Connect
+            # This prevents Pipe Error from stale USB handles during re-enumeration
+            connect_info = DeviceInfo(
+                vid=selected.vid,
+                pid=selected.pid,
+                bus=None,
+                address=None,
+                interface_number=selected.interface_number
+            )
+            self._connect_with_device_info(connect_info)
         self.main_ctrl.run_task(job)
 
     def _connect_with_device_info(self, info: DeviceInfo):
@@ -229,6 +305,7 @@ class DfuController(QObject):
             payload = self.current_hex.data
             start = self.current_hex.start_address
             self._check_in_app_range(start, len(payload))
+            
             xfer = int(self.view.spin_transfer.value())
             self.signals.log.emit(f"Flashing {len(payload)} bytes to 0x{start:08X} with transfer={xfer}...")
             def prog(sent, tot): self.signals.progress.emit(int(sent * 100 / tot))
