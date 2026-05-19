@@ -14,6 +14,7 @@
     #include "sys_config.h"
     #include "bsp_battery.h"
     #include "sys_logger.h"
+    #include "sys_pm.h"
 #else
     #include "sys_logger_bl.h"
 
@@ -609,18 +610,23 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
 
-    bsp_battery_info_t battery_info;
-    if (bsp_battery_get_info(&battery_info) != BSP_BATTERY_OK) {
-        RLOG_W(OBJECT_CODE, "Failed to get battery info");
-        return;
-    }
+    sys_pm_status_t pm_status;
+    sys_pm_get_status(&pm_status);
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_battery_info_resp_tag);
-    resp.hdr                             = pkt->hdr;
-    resp.params.battery_info_resp.bat_voltage_mv   = battery_info.voltage_mv;
-    resp.params.battery_info_resp.bat_soc_percent  = battery_info.soc_pct;
-    resp.params.battery_info_resp.remaining_min    = battery_info.remaining_min;
-    resp.params.battery_info_resp.is_charging      = battery_info.is_charging;
+    resp.hdr                                       = pkt->hdr;
+    resp.params.battery_info_resp.bat_voltage_mv   = pm_status.voltage_mv;
+    resp.params.battery_info_resp.bat_soc_percent  = pm_status.soc_pct;
+    resp.params.battery_info_resp.remaining_min    = pm_status.remaining_min;
+    resp.params.battery_info_resp.is_charging      = pm_status.is_charging;
+    
+    // Hardware telemetry fields
+    resp.params.battery_info_resp.mcu_temp_c       = pm_status.adc.temp_c;
+    resp.params.battery_info_resp.vdda_mv          = pm_status.adc.vdda_mv;
+    resp.params.battery_info_resp.uwb_temp_c       = pm_status.uwb_temp_c;
+    resp.params.battery_info_resp.uwb_vbat_mv      = pm_status.uwb_vbat_mv;
+    resp.params.battery_info_resp.imu_temp_c       = pm_status.imu_temp_c;
+
     network_cmd_send_packet(&resp);
 }
 

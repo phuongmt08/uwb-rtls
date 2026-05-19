@@ -42,6 +42,7 @@
 
 #include <string.h>
 #include "bsp_imu.h"
+#include "sys_pm.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -352,20 +353,13 @@ int main(void)
   bsp_io_led_off();
 
   sys_task_init();
-  bsp_battery_err_t bat_init_ret = bsp_battery_init();
-  if (bat_init_ret == BSP_BATTERY_OK)
+  bsp_battery_init(); // Initialize MAX17048 battery fuel gauge
+  sys_pm_init();      // Initialize PM Service (including internal ADC)
+
+  int pm_task_id = sys_task_add((sys_task_cb_t)sys_pm_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
+  if (pm_task_id >= 0)
   {
-    int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
-    if (bat_task_id >= 0)
-    {
-      sys_task_start(bat_task_id);
-    }
-  }
-  else
-  {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION,
-           "Battery init failed (%d), battery task disabled",
-           (int)bat_init_ret);
+    sys_task_start(pm_task_id);
   }
 
   int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);

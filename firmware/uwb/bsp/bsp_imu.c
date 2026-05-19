@@ -168,4 +168,16 @@ static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 	return true;
 }
 
+bsp_imu_err_t bsp_imu_get_temp(float *temp)
+{
+	CHECK_ERR(!temp, BSP_IMU_ERR);
+	icm42688_sensor_data_t raw_data;
+
+	// Burst read raw sensor data (including temperature) from ICM-42688
+	CHECK_ERR(icm42688_get_raw_data(&bsp_imu, &raw_data) == ICM42688_OK, BSP_IMU_ERR);
+
+	*temp = raw_data.temp;
+	return BSP_IMU_OK;
+}
+
 /* End of file -------------------------------------------------------- */

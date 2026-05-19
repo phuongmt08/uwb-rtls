@@ -537,6 +537,12 @@ typedef struct _protobuf_battery_info_resp_t {
     uint32_t bat_soc_percent;
     int32_t remaining_min;
     bool is_charging;
+    /* Hardware telemetry fields */
+    float mcu_temp_c; /* MCU internal temperature in degrees Celsius */
+    uint32_t vdda_mv; /* Actual VDDA voltage in mV after calibration */
+    float uwb_temp_c; /* DW1000 chip internal temperature in degrees Celsius */
+    uint32_t uwb_vbat_mv; /* DW1000 VBAT supply voltage in mV */
+    float imu_temp_c; /* IMU sensor internal temperature in degrees Celsius */
 } protobuf_battery_info_resp_t;
 
 typedef struct _protobuf_battery_info_get_t {
@@ -920,7 +926,7 @@ extern "C" {
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_default  {_protobuf_fota_state_index_t_MIN}
-#define protobuf_battery_info_resp_t_init_default {0, 0, 0, 0}
+#define protobuf_battery_info_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_battery_info_get_t_init_default {0}
 #define protobuf_end_session_t_init_default      {_protobuf_session_end_reason_t_MIN}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
@@ -991,7 +997,7 @@ extern "C" {
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_zero     {_protobuf_fota_state_index_t_MIN}
-#define protobuf_battery_info_resp_t_init_zero   {0, 0, 0, 0}
+#define protobuf_battery_info_resp_t_init_zero   {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_battery_info_get_t_init_zero    {0}
 #define protobuf_end_session_t_init_zero         {_protobuf_session_end_reason_t_MIN}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
@@ -1167,6 +1173,11 @@ extern "C" {
 #define protobuf_battery_info_resp_t_bat_soc_percent_tag 2
 #define protobuf_battery_info_resp_t_remaining_min_tag 3
 #define protobuf_battery_info_resp_t_is_charging_tag 4
+#define protobuf_battery_info_resp_t_mcu_temp_c_tag 5
+#define protobuf_battery_info_resp_t_vdda_mv_tag 6
+#define protobuf_battery_info_resp_t_uwb_temp_c_tag 7
+#define protobuf_battery_info_resp_t_uwb_vbat_mv_tag 8
+#define protobuf_battery_info_resp_t_imu_temp_c_tag 9
 #define protobuf_battery_info_get_t_dummy_tag    1
 #define protobuf_end_session_t_reason_tag        1
 #define protobuf_packet_t_hdr_tag                1
@@ -1685,7 +1696,12 @@ X(a, STATIC,   SINGULAR, UENUM,    state,             1)
 X(a, STATIC,   SINGULAR, UINT32,   bat_voltage_mv,    1) \
 X(a, STATIC,   SINGULAR, UINT32,   bat_soc_percent,   2) \
 X(a, STATIC,   SINGULAR, INT32,    remaining_min,     3) \
-X(a, STATIC,   SINGULAR, BOOL,     is_charging,       4)
+X(a, STATIC,   SINGULAR, BOOL,     is_charging,       4) \
+X(a, STATIC,   SINGULAR, FLOAT,    mcu_temp_c,        5) \
+X(a, STATIC,   SINGULAR, UINT32,   vdda_mv,           6) \
+X(a, STATIC,   SINGULAR, FLOAT,    uwb_temp_c,        7) \
+X(a, STATIC,   SINGULAR, UINT32,   uwb_vbat_mv,       8) \
+X(a, STATIC,   SINGULAR, FLOAT,    imu_temp_c,        9)
 #define protobuf_battery_info_resp_t_CALLBACK NULL
 #define protobuf_battery_info_resp_t_DEFAULT NULL
 
@@ -1980,7 +1996,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_set_t_size        184
 #define protobuf_anchor_ranging_t_size           18
 #define protobuf_battery_info_get_t_size         6
-#define protobuf_battery_info_resp_t_size        25
+#define protobuf_battery_info_resp_t_size        52
 #define protobuf_ble_adv_config_t_size           41
 #define protobuf_ble_adv_status_t_size           38
 #define protobuf_ble_conn_params_get_t_size      6

@@ -1029,21 +1029,23 @@ void bsp_uwb_reset_rx_error_counts(void)
   s_rx_phr_err_count  = 0;
   s_rx_sync_err_count = 0;
 }
-// bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat)
-// {
-//     CHECK_PARAM(temp && vbat, BSP_ERR_PARAM);
-//     if (!s_initialized) return BSP_ERR;
+bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat)
+{
+    CHECK_PARAM(temp && vbat, BSP_ERR_PARAM);
+    if (!s_initialized) return BSP_ERR;
 
-//     uint16_t raw_val = dwt_readtempvbat(1);
+    // Read raw values from the SAR ADC register of the DW1000 with fastSPI = 1
+    uint16_t raw_val = dwt_readtempvbat(1);
 
-//     uint8_t raw_vbat = (uint8_t)(raw_val & 0xFF);
-//     uint8_t raw_temp = (uint8_t)((raw_val >> 8) & 0xFF);
+    uint8_t raw_vbat = (uint8_t)(raw_val & 0xFF);
+    uint8_t raw_temp = (uint8_t)((raw_val >> 8) & 0xFF);
 
-//     *vbat = (raw_vbat / 173.0f) + 3.3f;
-//     *temp = (raw_temp * 1.13f) - 113.0f;
+    // Calculate real temperature and VBAT based on Decawave Datasheet formulas
+    *vbat = (raw_vbat * 0.0057f) + 2.3f;
+    *temp = (raw_temp * 1.13f) - 113.0f;
 
-//     return BSP_OK;
-// }
+    return BSP_OK;
+}
 
 // float bsp_uwb_compensate_distance_error(float raw_dist_m, float temp_c, float vbat_v)
 // {

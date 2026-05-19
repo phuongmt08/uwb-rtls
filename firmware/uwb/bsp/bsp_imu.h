@@ -158,6 +158,13 @@ bsp_imu_err_t bsp_imu_irq_handler();
 
 bool bsp_imu_is_data_ready();
 
+/**
+ * @brief Read internal temperature of ICM-42688 IMU chip.
+ * @param[out] temp  Pointer to float to store temperature in C.
+ * @return BSP_IMU_OK on success, BSP_IMU_ERR on failure.
+ */
+bsp_imu_err_t bsp_imu_get_temp(float *temp);
+
 #endif /* __BSP_IMU_H */
 
 /* End of file -------------------------------------------------------- */
