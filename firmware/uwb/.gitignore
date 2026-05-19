@@ -34,3 +34,4 @@ app/version_build.h
 !Makefile 
 !tools/
 !tools/**
+tools/__pycache__/
