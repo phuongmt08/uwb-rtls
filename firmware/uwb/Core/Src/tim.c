@@ -65,7 +65,7 @@ void MX_TIM11_Init(void)
 
   /* USER CODE END TIM11_Init 1 */
   htim11.Instance = TIM11;
-  htim11.Init.Prescaler = 83;
+  htim11.Init.Prescaler = 95;
   htim11.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim11.Init.Period = 999;
   htim11.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -103,7 +103,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
     __HAL_RCC_TIM11_CLK_ENABLE();
 
     /* TIM11 interrupt Init */
-    HAL_NVIC_SetPriority(TIM1_TRG_COM_TIM11_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(TIM1_TRG_COM_TIM11_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(TIM1_TRG_COM_TIM11_IRQn);
   /* USER CODE BEGIN TIM11_MspInit 1 */
 
