@@ -5,7 +5,7 @@ let debounceTimer = null;
 
 function initSimulation() {
     if (window.Worker) {
-        simWorker = new Worker('../src/workers/sim_worker.js');
+        simWorker = new Worker('/src/workers/sim_worker.js');
         simWorker.onmessage = function(e) {
             const res = e.data;
             latestTrajectoryPaths = {

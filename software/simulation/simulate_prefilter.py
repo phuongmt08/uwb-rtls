@@ -10,7 +10,7 @@ import webbrowser
 import threading
 
 # --- CONFIGURATION ---
-BASE_DIR = r"c:\Users\USER\Desktop\final_project\uwb-rtls\software\simulation"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GT_SQUARE = {
     'x': [2.44, 7.32, 7.32, 2.44, 2.44],
     'y': [2.44, 2.44, 7.32, 7.32, 2.44]
