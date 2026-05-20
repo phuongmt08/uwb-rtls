@@ -28,3 +28,7 @@ _build/
 software/simulation/**/*_log_data.csv
 software/simulation/**/*_sim.html
 software/simulation/simulation_dashboard.html
+
+# Programmer builds
+software/uwb_rtls_programmer/execution/*.exe
+software/uwb_rtls_programmer/execution/*.spec

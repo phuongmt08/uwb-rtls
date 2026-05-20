@@ -307,7 +307,7 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
             network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
         }
         if (core->ble_connection_active) {
-            network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
+            // network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
         }
         return true;
     }

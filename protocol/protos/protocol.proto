@@ -7,7 +7,7 @@
  *    Supports command-response and event streaming patterns
  *
  * @version        : 1.1.0
- * @author         :
+ * @author         : Phuong Mai
  * @date           : 2026
  *
  * @attention
@@ -370,8 +370,9 @@ message ble_status_get_t {
 }
 
 message ble_status_resp_t {
-    ble_state_t state   = 1;
-    int32 rssi_dbm      = 2;  /* valid only when connected */
+    ble_state_t state        = 1;
+    int32 rssi_dbm           = 2;  /* valid only when connected */
+    optional uint32 disconnect_reason = 3;  
 }
 
 message ble_scan_result_t {
@@ -430,27 +431,30 @@ message ble_adv_status_t {
 }
 
 /*
+ * NOTE: deprecated
  * Anchor distance sample
  * - Produced by an anchor while connected to gateway.
+ * message anchor_distance_t {
+ *    uint32 anchor_id          = 1;
+ *    uint32 distance_mm        = 2;
+ *    int32 rssi_dbm            = 3;
+ * }
  */
-message anchor_distance_t {
-    uint32 anchor_id          = 1;
-    uint32 distance_mm        = 2;
-    int32 rssi_dbm            = 3;
-}
 
 /*
+ * NOTE: deprecated
  * Tag position sample
  * - Produced by a tag while connected to gateway.
  * - Position is absolute in meter unit according to current coordinate frame.
+ * message tag_position_t {
+ *     float pos_x_m             = 1;
+ *     float pos_y_m             = 2;
+ *     float pos_z_m             = 3;
+ *     float rms_error_m         = 4;
+ *     uint32 timestamp_ms       = 5;
+ * }
  */
-message tag_position_t {
-    float pos_x_m             = 1;
-    float pos_y_m             = 2;
-    float pos_z_m             = 3;
-    float rms_error_m         = 4;
-    uint32 timestamp_ms       = 5;
-}
+
 /*
  * Log Data
  * This is a packet used to update the data of the requested passive log
@@ -703,8 +707,8 @@ message packet_t {
         ble_scan_result_t         ble_scan_result         = 54;
 
         /* Data samples */
-        anchor_distance_t         anchor_distance         = 55;
-        tag_position_t            tag_position            = 56;
+//        anchor_distance_t         anchor_distance         = 55; //deprecated
+//        tag_position_t            tag_position            = 56; //deprecated
 
         /* FOTA State */
         fota_state_resp_t         fota_state_resp         = 57;

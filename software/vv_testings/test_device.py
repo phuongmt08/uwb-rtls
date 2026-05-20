@@ -1,6 +1,10 @@
 from __future__ import annotations
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from vv_commands import CommandFactory
+
+from common.commands import CommandFactory
 from vv_test_session import VvTestSession
 
 from test_common import first_param, send_and_print

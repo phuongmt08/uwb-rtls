@@ -68,6 +68,7 @@
 #include "../bsp/bsp_io.h"
 #include "../bsp/bsp_usbd.h"
 #include "app_ble_central.h"
+#include "bb_router.h"
 
 /* -------------------------------------------------------------------------
  * Compile-time feature flags
@@ -119,20 +120,21 @@ int main(void)
 
     /* ----- USB CDC ACM --------------------------------------------------- */
 #if APP_ENABLE_USB_CDC_ACM
+    bb_router_init();
     app_usbd_serial_num_generate();
 
     NRF_LOG_INFO("Boot: bsp_usbd_init");
     NRF_LOG_FLUSH();
-    err_code = bsp_usbd_init();
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_WARNING("USB init failed (0x%08x) - continuing BLE-only.", err_code);
-    }
-    else
-    {
-        NRF_LOG_INFO("Boot: USB CDC ACM ready");
-    }
-    NRF_LOG_FLUSH(); /* Flush before BLE init so USB events don't drop BLE logs */
+    // err_code = bsp_usbd_init();
+    // if (err_code != NRF_SUCCESS)
+    // {
+    //     NRF_LOG_WARNING("USB init failed (0x%08x) - continuing BLE-only.", err_code);
+    // }
+    // else
+    // {
+    //     NRF_LOG_INFO("Boot: USB CDC ACM ready");
+    // }
+    // NRF_LOG_FLUSH(); /* Flush before BLE init so USB events don't drop BLE logs */
 #else
     NRF_LOG_INFO("Boot: USB CDC ACM disabled");
 #endif /* APP_ENABLE_USB_CDC_ACM */
@@ -145,6 +147,7 @@ int main(void)
     /* ----- Main loop ----------------------------------------------------- */
     for (;;)
     {
+        bb_router_process(); /* Check for incoming data from UART and handle state transitions */
 #if APP_ENABLE_USB_CDC_ACM
         /* Drain the USB event queue before sleeping. */
         while (bsp_usbd_process())

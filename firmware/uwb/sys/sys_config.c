@@ -199,7 +199,7 @@ int sys_config_load(void)
         return -1;
     }
 
-    sys_config_storage_t temp_storage;
+    static sys_config_storage_t temp_storage;
     bool                 normalize_and_save = false;
     uint32_t bytes_read = sys_flash_cfg_read(&temp_storage, sizeof(sys_config_storage_t));
 
