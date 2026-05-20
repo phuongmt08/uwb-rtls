@@ -12,7 +12,8 @@ import pyqtgraph as pg
 
 from ..config import (
     TARGET_PORT, UART_BAUDRATE, UART_TIMEOUT, LIVE_FRAME_SIZE, UART_SOF, 
-    PRINT_DATA, MAX_SAMPLES, ROOM_SIZE_M, ANCHOR_POSITIONS, IMUSample, CSV_UKF_FILENAME_SUFFIX, CSV_UKF_FILENAME_PREFIX
+    PRINT_DATA, MAX_SAMPLES, ROOM_SIZE_M, ANCHOR_POSITIONS, IMUSample, CSV_UKF_FILENAME_SUFFIX, CSV_UKF_FILENAME_PREFIX,
+    GROUND_TRUTH_D1, GROUND_TRUTH_D2, GROUND_TRUTH_D3, GROUND_TRUTH_D4
 )
 from ..module_parse_frame import parse_live_frame
 from ..module_csv import generate_timestamp_filename, create_csv_file, write_frame_to_csv, print_frame_data
@@ -319,6 +320,16 @@ class MainWindow(QMainWindow):
         self.plot_d2 = self.graph_d.plot(pen=pg.mkPen('g', width=1.5), name="d2")
         self.plot_d3 = self.graph_d.plot(pen=pg.mkPen('b', width=1.5), name="d3")
         self.plot_d4 = self.graph_d.plot(pen=pg.mkPen('m', width=1.5), name="d4")
+        
+        # Ground truth horizontal lines
+        self.gt_line_d1 = pg.InfiniteLine(pos=GROUND_TRUTH_D1, angle=0, pen=pg.mkPen('r', width=3, style=pg.QtCore.Qt.DashLine))
+        self.gt_line_d2 = pg.InfiniteLine(pos=GROUND_TRUTH_D2, angle=0, pen=pg.mkPen('g', width=3, style=pg.QtCore.Qt.DashLine))
+        self.gt_line_d3 = pg.InfiniteLine(pos=GROUND_TRUTH_D3, angle=0, pen=pg.mkPen('b', width=3, style=pg.QtCore.Qt.DashLine))
+        self.gt_line_d4 = pg.InfiniteLine(pos=GROUND_TRUTH_D4, angle=0, pen=pg.mkPen('m', width=3, style=pg.QtCore.Qt.DashLine))
+        self.graph_d.addItem(self.gt_line_d1)
+        self.graph_d.addItem(self.gt_line_d2)
+        self.graph_d.addItem(self.gt_line_d3)
+        self.graph_d.addItem(self.gt_line_d4)
         
         # Draw Anchors on plot
         for idx, anchor in enumerate(ANCHOR_POSITIONS):

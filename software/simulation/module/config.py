@@ -157,6 +157,11 @@ TARGET_PORT = "COM8"
 UART_SOF = 0xAA
 
 # ==================== LIVE PLOT CONFIGURATION ====================
+GROUND_TRUTH_D1 = 1.0
+GROUND_TRUTH_D2 = 2.0
+GROUND_TRUTH_D3 = 3.0
+GROUND_TRUTH_D4 = 4.0
+
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
 # - B: unsigned char (1 byte) for length  
