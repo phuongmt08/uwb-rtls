@@ -500,9 +500,17 @@ message pos_calib_cfg_t {
     float damping                 = 12; /* Added for gradient descent tuning */
     uint32 iterations             = 13; /* Total iterations to run */
     
-    // Diagnostic
-    float last_avg_error_m        = 14;
+    // Diagnostics from the last evaluated calibration batch.
+    float last_pair_error_mean_m  = 14;
     uint32 iterations_taken       = 15;
+    float last_pair_error_spread_m = 16;
+    float last_pair_std_mean_m    = 17;
+    uint32 last_usable_pair_count = 18;
+    uint32 last_rejected_pair_count = 19;
+    uint32 rejected_batch_count   = 20;
+    float last_pair_error_rms_m   = 21;
+    float last_pair_error_max_abs_m = 22;
+    float last_pair_error_mean_abs_m = 23;
 }
 
 message pos_calib_cfg_get_t {
@@ -545,9 +553,14 @@ message calib_status_resp_t {
     uint32 progress_percent     = 2;
     uint32 current_iteration    = 3;
     uint32 total_iterations     = 4;
-    float last_avg_error_m      = 5;
+    float last_pair_error_mean_m = 5;
     uint32 current_antenna_delay = 6;
     uint32 peer_ready_mask      = 7;
+    float last_pair_error_spread_m = 8;
+    uint32 rejected_batch_count = 9;
+    float last_pair_error_rms_m = 10;
+    float last_pair_error_max_abs_m = 11;
+    float last_pair_error_mean_abs_m = 12;
 }
 
 

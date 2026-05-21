@@ -45,7 +45,23 @@ function initPlots(anchors, gt_square, rawData, samples) {
             marker: { color: 'red', symbol: 'x', size: 5 }, visible: 'legendonly'
         });
     });
-    // Trace index 12: Dummy for axis
+
+    const gtDistanceLevels = computeGroundTruthDistanceLevels(anchors, gt_square);
+    const gtX = [0, Math.max(samples.length - 1, 1)];
+    gtDistanceLevels.forEach((level, idx) => {
+        distTraces.push({
+            x: gtX,
+            y: [level.value, level.value],
+            name: `GT Distance ${idx + 1}: ${level.value.toFixed(3)}m`,
+            mode: 'lines',
+            type: 'scatter',
+            line: { color: '#0f172a', width: 1.5, dash: ['dash', 'dot', 'longdash'][idx % 3] },
+            opacity: 0.65,
+            hovertemplate: `${level.label}: %{y:.6f}m<extra></extra>`
+        });
+    });
+
+    // Dummy for axis
     distTraces.push({ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' });
 
     Plotly.newPlot('distances', distTraces, {
@@ -138,6 +154,30 @@ function initPlots(anchors, gt_square, rawData, samples) {
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Frame Count' }, hovermode: 'x unified'
     });
+}
+
+function computeGroundTruthDistanceLevels(anchors, gt_square) {
+    const levels = [];
+    const pointCount = Math.min(gt_square.x.length, gt_square.y.length);
+
+    for (let p = 0; p < pointCount; p++) {
+        const gx = gt_square.x[p];
+        const gy = gt_square.y[p];
+        for (const anchor of anchors) {
+            const d = Math.hypot(gx - anchor.x, gy - anchor.y);
+            const key = d.toFixed(3);
+            if (!levels.some(level => level.key === key)) {
+                levels.push({ key, value: d });
+            }
+        }
+    }
+
+    return levels
+        .sort((a, b) => a.value - b.value)
+        .map(level => ({
+            ...level,
+            label: `Ground Truth ${level.value.toFixed(3)}m`
+        }));
 }
 
 // Helper for mean calculation
