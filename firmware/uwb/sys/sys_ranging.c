@@ -64,6 +64,10 @@
 /* Set to 0 to force immediate RX instead of delayed RX for debugging */
 #define SYS_RANGING_USE_RX_DELAYED 0
 
+/* Set to 1 when diagnosing delayed-TX slot jitter. Keep 0 in production to
+ * avoid extra SPI reads and 64-bit math in the TDMA critical path. */
+#define SYS_RANGING_VERIFY_TX_TIMING 0
+
 #if SYS_RANGING_USE_RX_DELAYED
 #define RANGING_ENABLE_RX_DELAYED(ts, timeout) bsp_uwb_enable_rx_delayed(ts, timeout)
 #else
@@ -1044,6 +1048,7 @@ static inline uint32_t tdma_effective_slot_us(const tdma_scheduler_t *tdma)
  *   |delta| ≤ 63898 ticks (~1ms)   → WARN, jitter or minor slip
  *   |delta| >  63898 ticks          → ERROR, slot was missed
  * ---------------------------------------------------------------- */
+#if SYS_RANGING_VERIFY_TX_TIMING
 static void verify_tx_timing(const char *label,
                              uint8_t     anchor_id,
                              uint8_t     slot_id,
@@ -1132,6 +1137,7 @@ static void verify_tx_timing(const char *label,
                   (unsigned long) abs_ticks);
   }
 }
+#endif
 
 static uint32_t tdma_compute_final_wait_timeout_us(const tdma_scheduler_t *tdma, uint8_t num_anchors)
 {
@@ -1462,11 +1468,6 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     s_ranging_busy = false;
     return -1;
   }
-  // NOTE: Deprecated
-  uint32_t resp_offset_us = tdma_dw_to_us((resp_tx_time_dw - poll_rx_ts) & DW_MASK_40);
-
-  (void) resp_offset_us;
-
   /* Ensure future TX - if missed, abort to avoid colliding with next anchor */
   resp_tx_time_dw = ensure_future_tx(resp_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
   if (resp_tx_time_dw == 0ULL)
@@ -1507,10 +1508,9 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     {
       t3_timestamp_used = t3_actual & DW_MASK_40;
     }
-    /* verify_tx_timing: always logs - DEBUG if OK, WARN if jitter, ERROR if slot missed.
-     * resp_tx_time_dw here is post-ensure_future_tx (the time we actually asked for).
-     * t3_timestamp_pred is the quantized antenna-domain prediction of that time. */
+#if SYS_RANGING_VERIFY_TX_TIMING
     verify_tx_timing("RESP", anchor_id, my_slot_id, poll->sequence_num, resp_tx_time_dw, t3_timestamp_pred, t3_actual, (t3_actual != 0));
+#endif
   }
 
   /* 3. Wait for FINAL */
@@ -1529,9 +1529,6 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
                                         + s_tdma_anchor.schedule.resp_to_final_delay_us);
     expected_final_dw &= DW_MASK_40;
   }
-  uint64_t now_before_wait_dw = bsp_uwb_get_current_time_dw();
-  int64_t  final_left_dw      = (int64_t) (expected_final_dw - now_before_wait_dw);
-  uint32_t final_left_us = tdma_dw_to_us((uint64_t) ((final_left_dw >= 0) ? final_left_dw : -final_left_dw));
   uint32_t final_timeout_us = tdma_compute_final_wait_timeout_us(&s_tdma_anchor, num_anchors);
 
   uint64_t rx_start_dw = (expected_final_dw - tdma_us_to_dw(1000U)) & DW_MASK_40;
@@ -1555,6 +1552,9 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
 
   if (rx_res != 0)
   {
+    uint64_t now_before_wait_dw = bsp_uwb_get_current_time_dw();
+    int64_t  final_left_dw      = (int64_t) (expected_final_dw - now_before_wait_dw);
+    uint32_t final_left_us = tdma_dw_to_us((uint64_t) ((final_left_dw >= 0) ? final_left_dw : -final_left_dw));
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] No FINAL received (seq=%u left_pre=%c%luus timeout=%luus)",
            poll->sequence_num, (final_left_dw >= 0) ? '+' : '-', (unsigned long) final_left_us,
            (unsigned long) final_timeout_us);
@@ -1601,14 +1601,14 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   {
     uint8_t *entry             = final_buf + sizeof(final_msg_t) + (i * sizeof(final_anchor_data_t));
     uint8_t  entry_anchor_id   = entry[0];
-    uint64_t entry_resp_rx_ts  = 0;
-    uint64_t entry_final_tx_ts = 0;
-
-    memcpy(&entry_resp_rx_ts, entry + 1, sizeof(entry_resp_rx_ts));
-    memcpy(&entry_final_tx_ts, entry + 1 + sizeof(uint64_t), sizeof(entry_final_tx_ts));
 
     if (entry_anchor_id == anchor_id)
     {
+      uint64_t entry_resp_rx_ts  = 0;
+      uint64_t entry_final_tx_ts = 0;
+
+      memcpy(&entry_resp_rx_ts, entry + 1, sizeof(entry_resp_rx_ts));
+      memcpy(&entry_final_tx_ts, entry + 1 + sizeof(uint64_t), sizeof(entry_final_tx_ts));
       resp_rx_ts_tag  = entry_resp_rx_ts & DW_MASK_40;
       final_tx_ts_tag = entry_final_tx_ts & DW_MASK_40;
       anchor_found    = true;
@@ -1666,24 +1666,9 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   result_msg.fp_amp_norm_q8 = s_ctx.result_single.fp_amp_norm_q8;
   result_msg.fp_snr_q8      = s_ctx.result_single.fp_snr_q8;
 
-  /* RESULT TX time is anchored to superframe_start_dw via tdma_calculate_final_time(),
-   * not to final_rx_ts. Each anchor receives FINAL at a slightly different time
-   * (propagation delay), so using final_rx_ts as base would shift RESULT slots
-   * differently per anchor — breaking the shared reference point guarantee.
-   *
-   * result_tx = expected_final_tx + final_to_result_delay + my_slot_id * effective_slot
-   *
-   * my_slot_id * effective_slot ensures slots are evenly separated (4000µs apart),
-   * with slot 1 at +5500µs, slot 2 at +9500µs, etc. after expected FINAL TX. */
-  uint64_t expected_final_tx_dw = 0;
-  if (tdma_calculate_final_time(&s_tdma_anchor, num_anchors, &expected_final_tx_dw) != TDMA_OK)
-  {
-    expected_final_tx_dw = final_rx_ts; /* Fallback only - should not happen. */
-  }
-
   uint32_t result_offset_us =
     s_tdma_anchor.schedule.final_to_result_delay_us + (my_slot_id * effective_slot_us);
-  uint64_t result_tx_time_dw    = (expected_final_tx_dw + tdma_us_to_dw(result_offset_us)) & DW_MASK_40;
+  uint64_t result_tx_time_dw    = (expected_final_dw + tdma_us_to_dw(result_offset_us)) & DW_MASK_40;
   result_tx_time_dw             = ensure_future_tx(result_tx_time_dw, TDMA_DEFAULT_GUARD_TIME_US);
   if (result_tx_time_dw == 0ULL)
   {
@@ -1693,9 +1678,6 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   }
   else
   {
-    /* Pre-compute prediction for RESULT so we can compare after TX. */
-    uint64_t result_tx_predicted_dw = predict_delayed_tx_antenna_time(result_tx_time_dw);
-
     if (bsp_uwb_tx_delayed(&result_msg, sizeof(result_msg), result_tx_time_dw) != BSP_OK)
     {
       RLOG_E(LOG_OBJECT_CODE_RANGING, ERR_UWB_RANGING,
@@ -1705,11 +1687,11 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
     }
     else
     {
-      /* Verify actual TX time from DW1000 TX_TIME register.
-       * This is the TDMA production health-check: planned vs actual.
-       * If delta > 1ms → slot was missed → investigate ensure_future_tx logs above. */
+#if SYS_RANGING_VERIFY_TX_TIMING
+      uint64_t result_tx_predicted_dw = predict_delayed_tx_antenna_time(result_tx_time_dw);
       verify_tx_timing("RESULT", anchor_id, my_slot_id, final_msg->sequence_num, result_tx_time_dw,
                        result_tx_predicted_dw, 0, false);
+#endif
     }
   }
 
@@ -2719,7 +2701,9 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
           do {
               if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
                   s_sys_ranging_ev.resp_tx_ts = evt.tx_ts & DW_MASK_40;
+#if SYS_RANGING_VERIFY_TX_TIMING
                   verify_tx_timing("RESP", s_ctx.anchor_id, s_sys_ranging_ev.my_slot_id, s_ctx.sequence_num, s_sys_ranging_ev.planned_tx_dw, s_sys_ranging_ev.predicted_tx_dw, evt.tx_ts, true);
+#endif
                   tx_done = true;
                   break;
               }
@@ -2845,8 +2829,10 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                       res.fp_amp_norm_q8 = s_ctx.result_single.fp_amp_norm_q8;
                       res.fp_snr_q8      = s_ctx.result_single.fp_snr_q8;
                       
-                      s_sys_ranging_ev.predicted_tx_dw = predict_delayed_tx_antenna_time(res_tx_dw);
                       s_sys_ranging_ev.planned_tx_dw = res_tx_dw;
+#if SYS_RANGING_VERIFY_TX_TIMING
+                      s_sys_ranging_ev.predicted_tx_dw = predict_delayed_tx_antenna_time(res_tx_dw);
+#endif
                       if (bsp_uwb_tx_delayed(&res, sizeof(res), res_tx_dw) != BSP_OK) {
                           s_anchor_diag.result_tx_fail++;
                           state_machine_reset();
@@ -2875,7 +2861,9 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
           bool tx_done = false;
           do {
               if (has_evt && evt.type == BSP_UWB_EVENT_TX_DONE) {
+#if SYS_RANGING_VERIFY_TX_TIMING
                   verify_tx_timing("RESULT", s_ctx.anchor_id, s_sys_ranging_ev.my_slot_id, s_ctx.sequence_num, s_sys_ranging_ev.planned_tx_dw, s_sys_ranging_ev.predicted_tx_dw, evt.tx_ts, true);
+#endif
                   tx_done = true;
                   break;
               }
