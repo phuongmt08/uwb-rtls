@@ -82,8 +82,10 @@ static median_filter_1d_t s_calib_medians[MAX_ANCHORS_SUPPORTED] = {0};
 static calib_pair_result_t s_pair_results[MAX_ANCHORS_SUPPORTED] = {0};
 #endif
 
+#if ENABLE_ANCHOR_AUTO_CALIB
 static bool s_ranging_active     = false;
 static bool s_anchor_resp_active = false;
+#endif
 
 static anchor_app_state_t s_app_state = ANCHOR_STATE_IDLE;
 
@@ -791,28 +793,19 @@ void app_anchor_process(void *arg) {
 #endif
 
   if (s_app_state == ANCHOR_STATE_NORMAL) {
-    uint8_t my_id = sys_config_get()->uwb.device_id;
     uint8_t all_ids[MAX_ANCHORS_SUPPORTED];
     uint8_t n_all = 0;
     for (uint8_t i = 1; i <= NUM_ANCHORS; i++) {
         all_ids[n_all++] = i;
     }
-    if (!s_ranging_active) {
-      if (sys_ranging_anchor_start_tdma(my_id, n_all, all_ids, rx_timeout_ms) == SYS_RANGING_OK) {
-        s_ranging_active = true;
-      }
-      return;
-    }
     sys_ranging_err_t err = sys_ranging_anchor_process_tdma(n_all, all_ids, rx_timeout_ms);
-    if (err != SYS_RANGING_ERR_BUSY) {
-      if (err == SYS_RANGING_OK) {
-        sys_ranging_result_t res;
-        sys_ranging_anchor_get_result_tdma(&res); /* Reset state machine */
-        if (res.valid) {
-          RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[DIST] Anchor #%u: tag_distance=%.3fm", my_id, res.distance_m);
-        }
+    if (err == SYS_RANGING_OK) {
+      sys_ranging_result_t res;
+      if (sys_ranging_anchor_get_result_tdma(&res) == SYS_RANGING_OK && res.valid) {
+        RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[DIST] Anchor #%u: tag_distance=%.3fm",
+               sys_config_get()->uwb.device_id,
+               res.distance_m);
       }
-      s_ranging_active = false;
     }
   }
 }
