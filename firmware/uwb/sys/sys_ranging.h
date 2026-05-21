@@ -193,14 +193,20 @@ uint8_t sys_ranging_get_current_slot(void);
 uint32_t sys_ranging_get_superframe_count(void);
 
 /**
- * @brief Process Anchor TDMA ranging (call frequently in loop)
+ * @brief Process Anchor TDMA ranging (call frequently in loop).
+ *
+ * If sys_ranging_anchor_start_tdma() was called first, this processes that
+ * explicit transaction. If the anchor is idle, this function owns the normal
+ * anchor receive policy: performance listens continuously, while lower-power
+ * modes use discovery/tracking receive windows around expected POLL timing.
  * @param num_anchors Total number of anchors in network
  * @param anchor_ids Array of all anchor IDs in network
  * @param rx_timeout_ms RX timeout in milliseconds
  * @return
  *   - SYS_RANGING_OK: Ranging complete
+ *   - SYS_RANGING_ERR_BUSY: No complete ranging result yet
  *   - SYS_RANGING_ERR: Error occurred
- *   - SYS_RANGING_ERR_TIMEOUT: Timeout (normal, no TAG poll)
+ *   - SYS_RANGING_ERR_TIMEOUT: Transaction timeout
  */
 sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
                                                   const uint8_t *anchor_ids,
