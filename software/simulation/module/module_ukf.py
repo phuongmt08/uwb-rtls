@@ -176,9 +176,9 @@ def propagate_sigma_point_advanced(
     )
     return x_pred
 
-TEST_PREDICT = True
+TEST_PREDICT = False
+CIRCULAR_AVERAGE = False
 if not TEST_PREDICT:
-    CIRCULAR_AVERAGE = True
 
     def ukf_predict(
         context: UKFContext,
@@ -191,7 +191,7 @@ if not TEST_PREDICT:
         if context.is_first_frame:
             sigma_points_aug, P_aug, L_aug, x_aug = generate_augmented_sigma_points(context, return_internals=True)
             sigma_points_aug_log = sigma_points_aug
-            context.is_first_frame = False # note
+            context.is_first_frame = True # note
         else:
             sigma_points_aug = np.vstack(
                 [context.X_sigma_pred, np.zeros((config.UKF_PROCESS_NOISE_SIZE, config.UKF_NUM_SIGMA))]
@@ -297,23 +297,29 @@ else:
         # =====================================================
         context.x = np.zeros(config.UKF_STATE_SIZE)
         
-        # --- Circular mean for theta (state index 4) ---
-        sum_sin = 0.0
-        sum_cos = 0.0
-        for m in range(config.UKF_NUM_SIGMA):
-            theta = context.X_sigma_pred[4, m]
-            sum_sin += context.Wm[m] * np.sin(theta)
-            sum_cos += context.Wm[m] * np.cos(theta)
-        
-        context.x[4] = np.arctan2(sum_sin, sum_cos)
-        
-        # --- Linear mean for other states ---
-        # States: [px, py, vx, vy, theta, bax, bay, bgz]
-        #         [ 0,  1,  2,  3,     4,   5,   6,   7]
-        for i in [0, 1, 2, 3, 5, 6, 7]:
-            context.x[i] = np.sum(
-                context.Wm * context.X_sigma_pred[i, :]
-            )
+        if CIRCULAR_AVERAGE:
+            # --- Circular mean for theta (state index 4) ---
+            sum_sin = 0.0
+            sum_cos = 0.0
+            for m in range(config.UKF_NUM_SIGMA):
+                theta = context.X_sigma_pred[4, m]
+                sum_sin += context.Wm[m] * np.sin(theta)
+                sum_cos += context.Wm[m] * np.cos(theta)
+            
+            context.x[4] = np.arctan2(sum_sin, sum_cos)
+            
+            # --- Linear mean for other states ---
+            # States: [px, py, vx, vy, theta, bax, bay, bgz]
+            #         [ 0,  1,  2,  3,     4,   5,   6,   7]
+            for i in [0, 1, 2, 3, 5, 6, 7]:
+                context.x[i] = np.sum(
+                    context.Wm * context.X_sigma_pred[i, :]
+                )
+        else:
+            for m in range(config.UKF_NUM_SIGMA):
+                context.x += context.Wm[m] * context.X_sigma_pred[:, m]
+
+            context.x[4] = normalize_angle(context.x[4])
         
         # =====================================================
         # STEP 4: Compute predicted covariance
@@ -379,43 +385,169 @@ def ukf_update(
     anchors: np.ndarray,
     event_line: str = ""
 ) -> None:
+
     if np.any(np.isnan(d_meas)):
         return
 
-    z_sigma = np.zeros((config.UKF_MEASUREMENT_SIZE, config.UKF_NUM_SIGMA))
+    # =====================================================
+    # STEP 1: Build augmented state for UPDATE
+    # =====================================================
+
+    x_aug = np.zeros(
+        config.UKF_STATE_SIZE + config.UKF_MEASUREMENT_SIZE
+    )
+
+    x_aug[:config.UKF_STATE_SIZE] = context.x
+
+    P_aug = np.zeros((
+        config.UKF_STATE_SIZE + config.UKF_MEASUREMENT_SIZE,
+        config.UKF_STATE_SIZE + config.UKF_MEASUREMENT_SIZE
+    ))
+
+    # Top-left = predicted covariance
+    P_aug[
+        :config.UKF_STATE_SIZE,
+        :config.UKF_STATE_SIZE
+    ] = context.P
+
+    # Bottom-right = measurement noise covariance
+    P_aug[
+        config.UKF_STATE_SIZE:,
+        config.UKF_STATE_SIZE:
+    ] = config.MEASUREMENT_NOISE_COV
+
+    # =====================================================
+    # STEP 2: Generate augmented sigma points
+    # =====================================================
+
+    L_aug = np.linalg.cholesky(P_aug)
+
+    sigma_points_aug = np.zeros((
+        config.UKF_STATE_SIZE + config.UKF_MEASUREMENT_SIZE,
+        config.UKF_NUM_SIGMA
+    ))
+
+    sigma_points_aug[:, 0] = x_aug
+
+    gamma = np.sqrt(
+        config.UKF_STATE_SIZE
+        + config.UKF_MEASUREMENT_SIZE
+        + config.UKF_LAMBDA
+    )
+
+    for i in range(config.UKF_STATE_SIZE + config.UKF_MEASUREMENT_SIZE):
+        sigma_points_aug[:, i + 1] = x_aug + gamma * L_aug[:, i]
+        sigma_points_aug[:, i + 1 + config.UKF_STATE_SIZE + config.UKF_MEASUREMENT_SIZE] = (
+            x_aug - gamma * L_aug[:, i]
+        )
+
+    # =====================================================
+    # STEP 3: Pass sigma through measurement model
+    #         d = range + noise
+    # =====================================================
+
+    z_sigma = np.zeros((
+        config.UKF_MEASUREMENT_SIZE,
+        config.UKF_NUM_SIGMA
+    ))
+
     for m in range(config.UKF_NUM_SIGMA):
-        px, py = context.X_sigma_pred[0, m], context.X_sigma_pred[1, m]
+
+        px = sigma_points_aug[0, m]
+        py = sigma_points_aug[1, m]
+
         for anchor_idx, anchor in enumerate(anchors):
-            z_sigma[anchor_idx, m] = np.hypot(px - anchor[0], py - anchor[1])
+
+            noise_term = sigma_points_aug[
+                config.UKF_STATE_SIZE + anchor_idx,
+                m
+            ]
+
+            z_sigma[anchor_idx, m] = (
+                np.hypot(px - anchor[0], py - anchor[1])
+                + noise_term
+            )
+
+    # =====================================================
+    # STEP 4: Predicted measurement mean
+    # =====================================================
 
     z_mean = np.zeros(config.UKF_MEASUREMENT_SIZE)
+
     for m in range(config.UKF_NUM_SIGMA):
         z_mean += context.Wm[m] * z_sigma[:, m]
 
-    S = np.zeros((config.UKF_MEASUREMENT_SIZE, config.UKF_MEASUREMENT_SIZE))
-    Tc = np.zeros((config.UKF_STATE_SIZE, config.UKF_MEASUREMENT_SIZE))
+    # =====================================================
+    # STEP 5: Innovation covariance + cross covariance
+    # =====================================================
+
+    S = np.zeros((
+        config.UKF_MEASUREMENT_SIZE,
+        config.UKF_MEASUREMENT_SIZE
+    ))
+
+    Tc = np.zeros((
+        config.UKF_STATE_SIZE,
+        config.UKF_MEASUREMENT_SIZE
+    ))
+
     for m in range(config.UKF_NUM_SIGMA):
+
         z_diff = z_sigma[:, m] - z_mean
-        x_diff = context.X_sigma_pred[:, m] - context.x
+
+        x_diff = (
+            sigma_points_aug[:config.UKF_STATE_SIZE, m]
+            - context.x
+        )
+
         x_diff[4] = normalize_angle(x_diff[4])
+
         S += context.Wc[m] * np.outer(z_diff, z_diff)
+
         Tc += context.Wc[m] * np.outer(x_diff, z_diff)
 
-    S += config.MEASUREMENT_NOISE_COV
+    # =====================================================
+    # IMPORTANT:
+    # DO NOT add R here
+    # R already embedded in augmented sigma points
+    # =====================================================
 
     try:
         K = Tc @ np.linalg.inv(S)
+
     except np.linalg.LinAlgError:
         return
 
+    # =====================================================
+    # STEP 6: State update
+    # =====================================================
+
     y = d_meas - z_mean
+
     update_val = K @ y
+
     context.x += update_val
+
     context.x[4] = normalize_angle(context.x[4])
+
     context.P -= K @ S @ K.T
+
     context.P = 0.5 * (context.P + context.P.T)
+
     context.is_first_frame = True
 
     trace_P = np.trace(context.P)
+
     if context.logger:
-        context.logger.log_update(z_sigma, z_mean, S, Tc, K, y, d_meas, update_val, trace_P, event_line=event_line)
+        context.logger.log_update(
+            z_sigma,
+            z_mean,
+            S,
+            Tc,
+            K,
+            y,
+            d_meas,
+            update_val,
+            trace_P,
+            event_line=event_line
+        )
