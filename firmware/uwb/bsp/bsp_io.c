@@ -62,9 +62,12 @@ typedef struct
   uint8_t length;                /* Payload length bytes */
   uint8_t anchor_mask;           /* Bitmask of which anchors are selected */
   uint32_t tx_frame_cnt;         /* Tx frame count */
-  float   px;                    /* X position in meters */
-  float   py;                    /* Y position in meters */
-  float   yaw;                   /* Yaw angle in radians */
+  float   ukf_x;                 /* X position in meters */
+  float   ukf_y;                 /* Y position in meters */
+  float   ukf_yaw;               /* Yaw angle in degrees */
+  float   tril_x;                /* X position in meters */
+  float   tril_y;                /* Y position in meters */
+  float   yaw;                   /* Yaw angle in degrees */
   uint32_t   error_frame_cnt;    /* Error frame count */
 } __attribute__((packed)) uart_fusion_frame_t;
 #endif
@@ -413,18 +416,20 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 #endif
 
 #if ENABLE_SYS_FUSION
-bsp_err_t bsp_io_uart_send_fusion_data(uint8_t mask, uint32_t err_frame_count, float px, float py, float yaw)
+bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count)
 {
   if (s_tx_busy)
     return BSP_ERR;  // hoặc queue lại
 
   s_fusion_frame.sof             = UART_SOF;
   s_fusion_frame.length          = UART_FUSION_PAYLOAD_LEN_BYTES;
-  s_fusion_frame.anchor_mask     = mask;
   s_fusion_frame.tx_frame_cnt++;
-  s_fusion_frame.px              = px;
-  s_fusion_frame.py              = py;
-  s_fusion_frame.yaw             = yaw;
+  s_fusion_frame.ukf_x              = ukf_x;
+  s_fusion_frame.ukf_y              = ukf_y;
+  s_fusion_frame.ukf_yaw            = ukf_yaw;
+  s_fusion_frame.tril_x             = tril_x;
+  s_fusion_frame.tril_y             = tril_y;
+  s_fusion_frame.yaw            = yaw;
   s_fusion_frame.error_frame_cnt = err_frame_count;
 
   if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note

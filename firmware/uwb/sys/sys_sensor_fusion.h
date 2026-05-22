@@ -51,6 +51,10 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2, uint8_t mask);
 
+float sys_sensor_fusion_get_ukf_yaw_deg();
+
+float sys_sensor_fusion_get_yaw_deg();
+
 sys_sensor_fusion_err_t sys_sensor_fusion_set_update_flag();
 
 sys_sensor_fusion_err_t sys_sensor_fusion_clear_update_flag();

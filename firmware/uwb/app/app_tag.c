@@ -61,6 +61,8 @@ static bool s_ukf_initialized = false;
 static ukf_init_filter_t s_ukf_init_filter;
 static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static float s_latest_error = 0.0f;
+static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
+static bool s_latest_fusion_position_valid = false;
 bsp_imu_bias_t t_imu_bias;
 uint8_t test = 0;
 static float s_latest_distances[NUM_ANCHORS] = {0};
@@ -405,6 +407,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
 			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
 			s_error_count++;
+            return;
 		}
 
 		s_last_selected_anchors_mask = 0;
@@ -469,7 +472,9 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
             sys_sensor_fusion_set_predict_flag();
             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
-            bsp_io_uart_send_fusion_data((uint8_t)0, s_error_count, ukf_data.px, ukf_data.py, ukf_data.theta);
+            s_latest_fusion_position.x = init_x;
+            s_latest_fusion_position.y = init_y;
+            s_latest_fusion_position_valid = true;
             // s_latest_error = (float)tril_result.error_estimate;
         }
         else
@@ -497,6 +502,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
 			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
 			s_error_count++;
+            return;
 		}
 
 		s_last_selected_anchors_mask = 0;
@@ -514,8 +520,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
 
         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, test);
-
-//        bsp_io_uart_send_fusion_data(test, s_error_count, ukf_data.px, ukf_data.py, ukf_data.theta);
+        s_latest_fusion_position = tril_position;
+        s_latest_fusion_position_valid = true;
     }
 
     s_success_count++;
@@ -571,6 +577,39 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 #endif
 }
 /* Public functions --------------------------------------------------- */
+bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count)
+{
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+    if (x != NULL) {
+        *x = (float)s_latest_fusion_position.x;
+    }
+
+    if (y != NULL) {
+        *y = (float)s_latest_fusion_position.y;
+    }
+
+    if (err_count != NULL) {
+        *err_count = s_error_count;
+    }
+
+    return s_latest_fusion_position_valid;
+#else
+    if (x != NULL) {
+        *x = (float)s_last_position.x;
+    }
+
+    if (y != NULL) {
+        *y = (float)s_last_position.y;
+    }
+
+    if (err_count != NULL) {
+        *err_count = s_error_count;
+    }
+
+    return true;
+#endif
+}
+
 app_err_t app_tag_init(void)
 {
     sys_config_t *cfg = sys_config_get();

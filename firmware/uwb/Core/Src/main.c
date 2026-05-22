@@ -254,7 +254,13 @@ static void fusion_task(void *arg)
 	}
 
     sys_sensor_fusion_predict(&ukf_data, dt);
-    bsp_io_uart_send_fusion_data(0, 0, ukf_data.px, ukf_data.py, ukf_data.theta);
+    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+    float yaw = sys_sensor_fusion_get_yaw_deg();
+    float tril_x = 0.0f;
+    float tril_y = 0.0f;
+    uint32_t err_count = 0;
+    app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
+    bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
 //  float uwb_dists[NUM_ANCHORS];
 //	float uwb_err;
 //	uint32_t err_cnt;

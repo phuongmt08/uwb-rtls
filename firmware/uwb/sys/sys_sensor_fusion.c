@@ -43,6 +43,7 @@
 
 #define SYS_SENSOR_FUSION_PI    3.14159265358979323846f
 #define SYS_SENSOR_FUSION_2PI   (2.0f * SYS_SENSOR_FUSION_PI)
+#define RAD2DEG							180.0f / 3.14159265358979323846f
 
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
@@ -90,6 +91,8 @@ unsigned long sys_update_cholesky_err_count = 0;
 unsigned long sys_update_inverse_err_count = 0;
 
 /* Private variables -------------------------------------------------- */
+float yaw = 0.0f;
+
 /* Private function prototypes ---------------------------------------- */
 static float normalize_angle(float angle);
 
@@ -249,6 +252,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 		float w_avg = 0.5f * (ukf.imu_old.gz + ukf.imu_current.gz) - bgz + n_gz;
 		float theta_new = theta + w_avg * dt;
+		yaw = theta_new;
 
 		float ax_old = (ukf.imu_old.ax - bax + n_ax)*cosf(theta) - (ukf.imu_old.ay - bay + n_ay)*sinf(theta);
 		float ay_old = (ukf.imu_old.ax - bax + n_ax)*sinf(theta) + (ukf.imu_old.ay - bay + n_ay)*cosf(theta);
@@ -524,6 +528,16 @@ bool sys_sensor_fusion_check_update_flag()
 bool sys_sensor_fusion_check_predict_flag()
 {
 	return ukf.enable_predict;
+}
+
+float sys_sensor_fusion_get_ukf_yaw_deg()
+{
+	return ukf.state.theta * RAD2DEG;
+}
+
+float sys_sensor_fusion_get_yaw_deg()
+{
+	return yaw;
 }
 
 /* Private definitions ------------------------------------------------ */
