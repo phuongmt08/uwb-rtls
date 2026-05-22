@@ -22,8 +22,8 @@
 #define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16225
-#define ANCHOR_DEFAULT_RX_ANT_DLY   16225
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16234
+#define ANCHOR_DEFAULT_RX_ANT_DLY   16234
 
 /* Legacy fixed RX delay used by older calibration paths. V1 A2A summary
  * solver only logs candidate delays and does not apply this value. */
@@ -178,11 +178,11 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  1
+#define ENABLE_SYS_FUSION  0
 #endif
 
 #ifndef ENABLE_SYS_FUSION_LOG
-#define ENABLE_SYS_FUSION_LOG  0
+#define ENABLE_SYS_FUSION_LOG  1
 #endif
 
 /**
