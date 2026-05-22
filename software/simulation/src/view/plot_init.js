@@ -5,7 +5,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: anchors.map(a => a.x), y: anchors.map(a => a.y), mode: 'markers+text',
           name: 'Anchors', text: anchors.map(a => 'A'+a.id), textposition: 'top center',
           marker: { color: '#1e293b', size: 10, symbol: 'triangle-up' } },
-        { x: gt_square.x, y: gt_square.y, mode: 'lines', name: 'Ground Truth',
+        { x: gt_square.x, y: gt_square.y, mode: 'lines', name: `Ground Truth (${gt_square.name || 'Original Square'})`,
           line: { color: '#f87171', dash: 'dot', width: 1 } },
         { x: samples.map(e => e.px_fw), y: samples.map(e => e.py_fw), mode: 'lines+markers',
           name: 'Firmware Path', type: 'scattergl', marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
@@ -43,21 +43,6 @@ function initPlots(anchors, gt_square, rawData, samples) {
         distTraces.push({
             x: [], y: [], name: `A${a.id} Rejected`, mode: 'markers', type: 'scattergl',
             marker: { color: 'red', symbol: 'x', size: 5 }, visible: 'legendonly'
-        });
-    });
-
-    const gtDistanceLevels = computeGroundTruthDistanceLevels(anchors, gt_square);
-    const gtX = [0, Math.max(samples.length - 1, 1)];
-    gtDistanceLevels.forEach((level, idx) => {
-        distTraces.push({
-            x: gtX,
-            y: [level.value, level.value],
-            name: `GT Distance ${idx + 1}: ${level.value.toFixed(3)}m`,
-            mode: 'lines',
-            type: 'scatter',
-            line: { color: '#0f172a', width: 1.5, dash: ['dash', 'dot', 'longdash'][idx % 3] },
-            opacity: 0.65,
-            hovertemplate: `${level.label}: %{y:.6f}m<extra></extra>`
         });
     });
 
@@ -134,6 +119,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 8. Pos Error
     const errTraces = [
+        { x: [], y: [], name: 'Pos Error (Firmware)', mode: 'lines', type: 'scatter', line: { color: '#64748b', width: 1.5 } },
         { x: [], y: [], name: 'Pos Error (Rules)', mode: 'lines', type: 'scatter', line: { color: '#ef4444', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Multilateration)', mode: 'lines', type: 'scatter', line: { color: '#d97706', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Best Triplet)', mode: 'lines', type: 'scatter', line: { color: '#059669', width: 2 } },
@@ -154,30 +140,6 @@ function initPlots(anchors, gt_square, rawData, samples) {
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Frame Count' }, hovermode: 'x unified'
     });
-}
-
-function computeGroundTruthDistanceLevels(anchors, gt_square) {
-    const levels = [];
-    const pointCount = Math.min(gt_square.x.length, gt_square.y.length);
-
-    for (let p = 0; p < pointCount; p++) {
-        const gx = gt_square.x[p];
-        const gy = gt_square.y[p];
-        for (const anchor of anchors) {
-            const d = Math.hypot(gx - anchor.x, gy - anchor.y);
-            const key = d.toFixed(3);
-            if (!levels.some(level => level.key === key)) {
-                levels.push({ key, value: d });
-            }
-        }
-    }
-
-    return levels
-        .sort((a, b) => a.value - b.value)
-        .map(level => ({
-            ...level,
-            label: `Ground Truth ${level.value.toFixed(3)}m`
-        }));
 }
 
 // Helper for mean calculation
