@@ -249,7 +249,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             continue;
         }
 #else
-        d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
+        // d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
 #endif
 
         double r2d = 0.0;
@@ -469,7 +469,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
             sys_sensor_fusion_set_predict_flag();
             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
-            // bsp_io_uart_send_fusion_data((uint8_t)0, s_error_count, ukf_data.px, ukf_data.py, ukf_data.thetao);
+            bsp_io_uart_send_fusion_data((uint8_t)0, s_error_count, ukf_data.px, ukf_data.py, ukf_data.theta);
             // s_latest_error = (float)tril_result.error_estimate;
         }
         else
