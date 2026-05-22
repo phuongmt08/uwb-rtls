@@ -26,6 +26,7 @@ class DataThread(QThread):
     connected_signal = pyqtSignal(str)
     disconnected_signal = pyqtSignal()
     data_signal = pyqtSignal(dict)
+    csv_created_signal = pyqtSignal()
     
     def __init__(self):
         super().__init__()
@@ -55,6 +56,7 @@ class DataThread(QThread):
         self.prev_distances = None
         self.last_active_mask = 0
         self.new_csv_requested = False
+        self.create_csv_enabled = True
 
     def stop(self):
         self.running = False
@@ -157,7 +159,7 @@ class DataThread(QThread):
         # 3. UKF Predict & Update
         if status == "Predict":
             imu_sample = IMUSample(ax=frame_data['ax'], ay=frame_data['ay'], gz=frame_data['gz'])
-            # ukf_predict(self.ukf_ctx, imu_sample, dt)
+            ukf_predict(self.ukf_ctx, imu_sample, dt)
         
         if status == "Update":
             d_meas_all = np.array(frame_data['distances'])
@@ -165,7 +167,7 @@ class DataThread(QThread):
             if len(active_indices) >= 3:
                 active_d_meas = d_meas_all[active_indices][:3]
                 active_anchors = ANCHOR_POSITIONS[active_indices][:3]
-                # ukf_update(self.ukf_ctx, active_d_meas, active_anchors)
+                ukf_update(self.ukf_ctx, active_d_meas, active_anchors)
                 
         res = {
             'imu_x': self.imu_x,
@@ -209,12 +211,14 @@ class DataThread(QThread):
         
         while self.running:
             if getattr(self, 'new_csv_requested', False):
-                if self.csv_file:
-                    self.csv_file.close()
-                filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
-                self.csv_file, self.csv_writer = create_csv_file(filename)
-                print("[INFO] Started new data collection csv...")
-                frame_count = 0
+                if self.create_csv_enabled:
+                    if self.csv_file:
+                        self.csv_file.close()
+                    filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
+                    self.csv_file, self.csv_writer = create_csv_file(filename)
+                    print("[INFO] Started new data collection csv...")
+                    frame_count = 0
+                    self.csv_created_signal.emit()
                 self.new_csv_requested = False
 
             if self.serial_port is None or not self.serial_port.is_open:
@@ -228,10 +232,11 @@ class DataThread(QThread):
                     self.connected_signal.emit(TARGET_PORT)
                     print(f"[INFO] Successfully connected to {TARGET_PORT} at {UART_BAUDRATE} baud")
                     
-                    if self.csv_file is None:
+                    if self.create_csv_enabled and self.csv_file is None:
                         filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
                         self.csv_file, self.csv_writer = create_csv_file(filename)
                         print("[INFO] Starting data collection...")
+                        self.csv_created_signal.emit()
                         
                 except serial.SerialException as e:
                     print(f"[WARNING] Failed to connect to {TARGET_PORT}: {e}")
@@ -255,12 +260,33 @@ class DataThread(QThread):
                             frame_data = parse_live_frame(frame_bytes)
                             if frame_data:
                                 frame_count += 1
-                                status, self.prev_distances = write_frame_to_csv(
-                                    self.csv_writer, frame_data, frame_count, self.prev_distances
-                                )
-                                
+                                if self.csv_writer is not None:
+                                    status, self.prev_distances = write_frame_to_csv(
+                                        self.csv_writer, frame_data, frame_count, self.prev_distances
+                                    )
+                                else:
+                                    # Fallback when csv_writer is None
+                                    from ..module_csv import PREDICT_THRESHOLD
+
+                                    status = "Predict"
+                                    if frame_data['tx_frame_cnt'] == 1:
+                                        status = "Init"
+                                        self.prev_distances = frame_data['distances'].copy()
+                                    else:
+                                        all_distances_zero = all(abs(d) < 1e-6 for d in frame_data['distances'])
+                                        if not all_distances_zero:
+                                            if self.prev_distances is not None:
+                                                distances_changed = False
+                                                for i in range(len(frame_data['distances'])):
+                                                    if abs(frame_data['distances'][i] - self.prev_distances[i]) > PREDICT_THRESHOLD:
+                                                        distances_changed = True
+                                                        break
+                                                if distances_changed:
+                                                    status = "Update"
+                                        self.prev_distances = frame_data['distances'].copy()
+
                                 # Flush periodically
-                                if frame_count % 10 == 0:
+                                if self.csv_file is not None and frame_count % 10 == 0:
                                     self.csv_file.flush()
                                 
                                 # Process and emit data for GUI
@@ -349,6 +375,7 @@ class MainWindow(QMainWindow):
         
         # Setup UI connections
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
+        self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
         
         # Setup Timer for GUI updates (~30fps)
         self.timer = QTimer()
@@ -357,10 +384,19 @@ class MainWindow(QMainWindow):
         
         # Start Data Thread
         self.thread = DataThread()
+        self.thread.create_csv_enabled = self.checkBox_createCsv.isChecked()
         self.thread.connected_signal.connect(self.on_connected)
         self.thread.disconnected_signal.connect(self.on_disconnected)
         self.thread.data_signal.connect(self.on_data)
+        self.thread.csv_created_signal.connect(self.on_csv_created)
         self.thread.start()
+
+    def on_checkbox_csv_changed(self, state):
+        if hasattr(self, 'thread') and self.thread is not None:
+            self.thread.create_csv_enabled = (state == pg.QtCore.Qt.Checked)
+
+    def on_csv_created(self):
+        self.checkBox_createCsv.setChecked(False)
 
     def clear_graph(self):
         self.imu_xs.clear()
@@ -389,7 +425,8 @@ class MainWindow(QMainWindow):
         self.plot_d4.setData([])
         
         if hasattr(self, 'thread') and self.thread is not None:
-            self.thread.request_new_csv()
+            if self.checkBox_createCsv.isChecked():
+                self.thread.request_new_csv()
 
     @pyqtSlot(str)
     def on_connected(self, port):

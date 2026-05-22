@@ -38,8 +38,10 @@ def parse_live_frame(data_bytes):
             'px': unpacked[7],
             'py': unpacked[8],
             'distances': list(unpacked[9:13]),
-            'err_cnt': unpacked[13],
-            'dt': unpacked[14]
+            'fp_amp_norm': list(unpacked[13:17]),
+            'fp_snr': list(unpacked[17:21]),
+            'err_cnt': unpacked[21],
+            'dt': unpacked[22]
         }
     except struct.error:
         return None

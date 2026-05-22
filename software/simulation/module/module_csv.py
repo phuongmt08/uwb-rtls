@@ -71,6 +71,43 @@ def find_latest_csv_file(directory: str = None, file_type: str = "ukf_log_data")
 
 def parse_csv_data(filepath: str) -> list[SensorEvent]:
     events = []
+    
+    with open(filepath, "r", encoding="utf-8") as f:
+        first_line = f.readline()
+        f.seek(0)
+        
+        # Check if it's the new standard CSV format
+        if "frame_counter" in first_line:
+            import csv
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    dt_val = float(row['dt'])
+                    # Sanitize dt to prevent simulation breaking with corrupted data
+                    if dt_val < 0 or dt_val > 5.0:
+                        dt_val = 0.01  # Default to 10ms
+                    # If Predict row has 0 dt, assume 100Hz (0.01s)
+                    if dt_val == 0.0 and row['status'].strip() == 'Predict':
+                        dt_val = 0.01
+                    
+                    events.append(SensorEvent(
+                        type=row['status'].strip(),
+                        ax=float(row['ax']),
+                        ay=float(row['ay']),
+                        gz=float(row['gz']),
+                        px=float(row['px']) if row.get('px') else 0.0,
+                        py=float(row['py']) if row.get('py') else 0.0,
+                        distances=np.array([float(row['d1']), float(row['d2']), float(row['d3']), float(row['d4'])]),
+                        dt=dt_val,
+                        mask=int(row['mask']) if row.get('mask') else 0,
+                        raw_line=",".join(str(v) for v in row.values())
+                    ))
+                except (ValueError, KeyError, TypeError):
+                    # Skip corrupted rows missing necessary data
+                    continue
+            return events
+
+    # Fallback to older text-based regex parser
     init_pattern = re.compile(
         r"Init\s+"
         r"(?:bias_ax|ax):\s*(?P<ax>[-\d.]+)\s+"
@@ -137,7 +174,9 @@ def generate_timestamp_filename(prefix, suffix):
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%Hg%Mp")
     date_folder = now.strftime("%d_%m_%y")
-    directory = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv"
+    # Base directory relative to this file's location
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    directory = os.path.join(base_dir, "csv")
     date_directory = os.path.join(directory, date_folder)
     if not os.path.exists(date_directory):
         os.makedirs(date_directory)
