@@ -6,3 +6,5 @@ protobuf>=5.26
 pyserial>=3.5
 pyqtgraph>=0.12.4
 numpy>=2.0.0
+PyQt5>=5.15
+PyInstaller>=5.9.0

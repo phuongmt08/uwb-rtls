@@ -159,12 +159,6 @@ PB_BIND(protobuf_ble_connect_t, protobuf_ble_connect_t, AUTO)
 PB_BIND(protobuf_ble_adv_status_t, protobuf_ble_adv_status_t, AUTO)
 
 
-PB_BIND(protobuf_anchor_distance_t, protobuf_anchor_distance_t, AUTO)
-
-
-PB_BIND(protobuf_tag_position_t, protobuf_tag_position_t, AUTO)
-
-
 PB_BIND(protobuf_log_data_t, protobuf_log_data_t, AUTO)
 
 

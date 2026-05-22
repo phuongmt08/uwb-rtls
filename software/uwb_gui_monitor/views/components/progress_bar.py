@@ -1,0 +1,1 @@
+# Custom QProgressBar for FOTA

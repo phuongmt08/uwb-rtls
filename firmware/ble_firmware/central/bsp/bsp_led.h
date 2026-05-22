@@ -46,6 +46,16 @@ void bsp_led_connected(void);
  */
 void bsp_led_all_off(void);
 
+/**
+ * @brief Pulse the TX activity LED once.
+ */
+void bsp_led_tx_pulse(void);
+
+/**
+ * @brief Pulse the RX activity LED once.
+ */
+void bsp_led_rx_pulse(void);
+
 #ifdef __cplusplus
 }
 #endif

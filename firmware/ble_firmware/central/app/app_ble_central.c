@@ -6,17 +6,12 @@
  * @brief   BLE Central Application
  *
  * Handles BLE stack initialization, scanning, connection management,
- * LBS client, and terminal UI over USB CDC ACM.
- *
- * Dependencies (BSP layer):
- *  - bsp_led   : LED state control
- *  - bsp_usbd  : USB CDC ACM write
+ * and LBS client logic.
  */
 
 /* Includes ---------------------------------------------------------------- */
 #include "app_ble_central.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "central_io.h"
@@ -31,6 +26,7 @@
 #include "ble_conn_params.h"
 #include "ble_db_discovery.h"
 #include "ble_lbs_c.h"
+#include "ble_nus_c.h"
 #include "ble_config.h"
 
 #include "nrf_ble_gatt.h"
@@ -44,44 +40,21 @@
 #include "app_button.h"
 #include "app_util.h"
 
-#include "../bsp/bsp_led.h"
-#include "../bsp/bsp_usbd.h"
+#include "bsp_led.h"
+#include "bb_cmd_hdl.h"
+#include "protocol.pb.h"
 
 /* Private defines --------------------------------------------------------- */
-#define SCAN_INTERVAL            0x00A0  /**< Scan interval  (units of 0.625 ms). */
-#define SCAN_WINDOW              0x0050  /**< Scan window    (units of 0.625 ms). */
-#define SCAN_DURATION            0x0000  /**< 0 = scan indefinitely.              */
-
 #define APP_BLE_CONN_CFG_TAG     1  /**< SoftDevice BLE configuration tag. */
 #define APP_BLE_OBSERVER_PRIO    3  /**< BLE observer priority.            */
 
 #define MAX_KNOWN_DEVICES        15 /**< Maximum devices tracked in scan list. */
+#define APP_BLE_CENTRAL_RSSI_UNKNOWN_DBM                (-127)
+#define APP_BLE_CENTRAL_DISCONNECT_REASON_NONE          0U
 
 /* -------------------------------------------------------------------------
  * Debug helpers
  * ---------------------------------------------------------------------- */
-
-/**
- * @brief Map a BLE HCI disconnect reason code to a human-readable string.
- *
- * Covers the most common reasons seen in practice.  Unknown codes are
- * printed as a raw hex number by the caller.
- */
-static const char * ble_hci_reason_str(uint8_t reason)
-{
-    switch (reason)
-    {
-        case BLE_HCI_STATUS_CODE_SUCCESS:                               return "Success";
-        case BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION:                 return "Remote user terminated";
-        case BLE_HCI_REMOTE_DEV_TERMINATION_DUE_TO_LOW_RESOURCES:       return "Remote: low resources";
-        case BLE_HCI_REMOTE_DEV_TERMINATION_DUE_TO_POWER_OFF:           return "Remote: power off";
-        case BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION:                  return "Local host terminated";
-        case BLE_HCI_CONN_INTERVAL_UNACCEPTABLE:                        return "Conn interval unacceptable";
-        case BLE_HCI_CONNECTION_TIMEOUT:                                return "Connection timeout";
-        case BLE_HCI_CONN_FAILED_TO_BE_ESTABLISHED:                     return "Failed to establish";
-        default:                                                        return "Unknown";
-    }
-}
 
 /* Private types ----------------------------------------------------------- */
 
@@ -100,6 +73,7 @@ typedef struct
 /* Private instances ------------------------------------------------------- */
 NRF_BLE_SCAN_DEF(m_scan);         /**< Scanning module instance.     */
 BLE_LBS_C_DEF(m_ble_lbs_c);       /**< LBS client module instance.   */
+BLE_NUS_C_DEF(m_ble_nus_c);       /**< NUS client module instance.   */
 NRF_BLE_GATT_DEF(m_gatt);         /**< GATT module instance.         */
 BLE_DB_DISCOVERY_DEF(m_db_disc);  /**< DB discovery module instance. */
 NRF_BLE_GQ_DEF(m_ble_gatt_queue,  /**< BLE GATT Queue instance.      */
@@ -115,7 +89,6 @@ static ble_uuid_t const m_target_periph_uuid =
 
 /* Private variables ------------------------------------------------------- */
 static known_device_t m_known_devices[MAX_KNOWN_DEVICES]; /**< Live scan list.           */
-static known_device_t m_connected_device_info;            /**< Currently connected peer. */
 static bool           m_is_connected = false;             /**< Connection flag.          */
 static bool           m_is_connecting = false;            /**< Connecting flag.          */
 
@@ -123,6 +96,13 @@ static bool           m_has_pending_connect = false;
 static ble_gap_addr_t m_pending_target_addr;
 
 static uint16_t       m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
+static ble_gap_conn_params_t m_current_conn_params;
+static protobuf_ble_state_t m_current_ble_state = protobuf_BLE_STATE_IDLE;
+static int32_t        m_last_rssi_dbm = APP_BLE_CENTRAL_RSSI_UNKNOWN_DBM;
+static uint32_t       m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
+static ble_central_rx_cb_t m_ble_rx_cb = NULL;
+static uint32_t       m_pending_tx_chunks = 0;
+APP_TIMER_DEF(m_scan_publish_timer);
 
 /* Private prototypes ------------------------------------------------------ */
 static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context);
@@ -131,31 +111,32 @@ static void db_disc_handler(ble_db_discovery_evt_t *p_evt);
 static void scan_start(void);
 static void lbs_c_init(void);
 static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool matched);
+static void ble_state_update(protobuf_ble_state_t new_state);
+static void scan_publish_timeout_handler(void *p_context);
 
-/* -------------------------------------------------------------------------
- * UI — Terminal output over USB CDC ACM
- * ---------------------------------------------------------------------- */
-
-/**
- * @brief Redraw the device list and connection status on the terminal.
- *
- * Uses ANSI escape codes to clear the screen before printing so that the
- * output appears as an always-current, in-place list rather than scrolling.
- */
-static void app_ble_ui_redraw(void)
+static void ble_state_update(protobuf_ble_state_t new_state)
 {
-    if (!bsp_usbd_is_connected())
+    if (m_current_ble_state == new_state)
     {
         return;
     }
 
-    static char tx_buf[1024];
-    int len = 0;
+    m_current_ble_state = new_state;
 
-    /* Clear screen and home cursor, then print header. */
-    len += snprintf(tx_buf + len, sizeof(tx_buf) - len, "\033[2J\033[H=== BLE DEVICES LIST ===\r\n");
+    bb_cmd_notify_ble_status((uint8_t)new_state,
+                             app_ble_central_rssi_dbm_get(),
+                             m_last_disconnect_reason);
+}
 
-    /* Print all currently active (recently seen) devices. */
+static void scan_publish_timeout_handler(void *p_context)
+{
+    UNUSED_PARAMETER(p_context);
+
+    if (m_current_ble_state != protobuf_BLE_STATE_SCANNING)
+    {
+        return;
+    }
+
     for (int i = 0; i < MAX_KNOWN_DEVICES; i++)
     {
         if (!m_known_devices[i].active)
@@ -163,45 +144,37 @@ static void app_ble_ui_redraw(void)
             continue;
         }
 
-        int written = snprintf(tx_buf + len, sizeof(tx_buf) - len,
-                               "<%s><%04X><%02x:%02x:%02x:%02x:%02x:%02x><%d dBm>\r\n",
-                               m_known_devices[i].name,
-                               m_known_devices[i].uuid,
-                               m_known_devices[i].addr[5], m_known_devices[i].addr[4],
-                               m_known_devices[i].addr[3], m_known_devices[i].addr[2],
-                               m_known_devices[i].addr[1], m_known_devices[i].addr[0],
-                               m_known_devices[i].rssi);
-
-        if (written > 0 && len + written < (int)sizeof(tx_buf))
-        {
-            len += written;
-        }
-        else
-        {
-            break; /* Buffer full — skip remaining entries. */
-        }
+        bb_cmd_notify_scan_result(m_known_devices[i].addr,
+                                  m_known_devices[i].rssi,
+                                  m_known_devices[i].name,
+                                  0);
     }
+}
 
-    /* Print the connected device section if a connection is active. */
-    if (m_is_connected)
-    {
-        int w = snprintf(tx_buf + len, sizeof(tx_buf) - len,
-                         "\r\n==== BLE CONNECT ====\r\n"
-                         "<%s><%04X><%02x:%02x:%02x:%02x:%02x:%02x><%d dBm>\r\n",
-                         m_connected_device_info.name,
-                         m_connected_device_info.uuid,
-                         m_connected_device_info.addr[5], m_connected_device_info.addr[4],
-                         m_connected_device_info.addr[3], m_connected_device_info.addr[2],
-                         m_connected_device_info.addr[1], m_connected_device_info.addr[0],
-                         m_connected_device_info.rssi);
-
-        if (w > 0 && len + w < (int)sizeof(tx_buf))
-        {
-            len += w;
-        }
+void app_ble_central_scan_start(uint16_t interval_ms, uint16_t window_ms, uint16_t duration_ms, bool active)
+{
+    if (interval_ms > 0 && window_ms > 0) {
+        m_scan.scan_params.interval = MSEC_TO_UNITS(interval_ms, UNIT_0_625_MS);
+        m_scan.scan_params.window   = MSEC_TO_UNITS(window_ms, UNIT_0_625_MS);
+        m_scan.scan_params.timeout  = duration_ms / 10;
+        m_scan.scan_params.active   = active ? 1 : 0;
     }
+    ret_code_t err_code = nrf_ble_scan_start(&m_scan);
+    if (err_code == NRF_SUCCESS) {
+        bsp_led_scanning();
+        m_is_connecting = false;
+        m_has_pending_connect = false;
+        ble_state_update(protobuf_BLE_STATE_SCANNING);
+    }
+}
 
-    bsp_usbd_write((const uint8_t *)tx_buf, len);
+void app_ble_central_scan_stop(void)
+{
+    nrf_ble_scan_stop();
+    if (!m_is_connected && !m_is_connecting) {
+        ble_state_update(protobuf_BLE_STATE_IDLE);
+    }
+    // TODO: Add bsp led off if there's an API, usually bsp_led library covers state changes automatically
 }
 
 /* -------------------------------------------------------------------------
@@ -212,8 +185,7 @@ static void app_ble_ui_redraw(void)
  * @brief Process one advertising report and refresh the known-device list.
  *
  * Extracts the device name and 16-bit service UUID from the advertisement
- * payload, updates the tracking table, and triggers a terminal redraw only
- * when something meaningful changed.
+ * payload and updates the tracking table.
  *
  * @param[in] p_adv_report  Pointer to the raw advertising report.
  * @param[in] matched       true if the report matched the scan filter.
@@ -269,24 +241,7 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
                  ((uint16_t)p_adv_report->data.p_data[uuid_offset + 1] << 8);
     }
 
-    /* ----- Expire stale entries (> 5 s since last adv) ------------------ */
     uint32_t current_ticks = app_timer_cnt_get();
-    bool     should_redraw = false;
-
-    for (int i = 0; i < MAX_KNOWN_DEVICES; i++)
-    {
-        if (!m_known_devices[i].active)
-        {
-            continue;
-        }
-
-        uint32_t diff = (current_ticks - m_known_devices[i].last_seen) & 0x00FFFFFF;
-        if (diff > APP_TIMER_TICKS(5000))
-        {
-            m_known_devices[i].active = false;
-            should_redraw = true; /* Device timed out — refresh list. */
-        }
-    }
 
     /* ----- Find existing entry for this peer ---------------------------- */
     int known_idx = -1;
@@ -307,10 +262,6 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
         /* Ignore devices that do not match our target UUID */
         if (uuid16 != SYSTEM_CONFIG_SERVICE_UUID && !matched)
         {
-            if (should_redraw) 
-            {
-                app_ble_ui_redraw();
-            }
             return;
         }
 
@@ -339,7 +290,7 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
             }
         }
 
-        /* Populate the slot. */
+        /* Initialize the known device fields */
         m_known_devices[known_idx].active = true;
         memcpy(m_known_devices[known_idx].addr,
                p_adv_report->peer_addr.addr,
@@ -349,7 +300,8 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
         m_known_devices[known_idx].uuid      = uuid16;                                      /* First 16-bit service UUID, or 0 if not present. */
         m_known_devices[known_idx].rssi      = p_adv_report->rssi;                          /* Signal strength in dBm. */
         m_known_devices[known_idx].last_seen = current_ticks;                               /* Timestamp for aging out old entries. */
-        should_redraw = true;                                                               /* New device appeared. */
+        m_last_rssi_dbm = p_adv_report->rssi;
+
     }
     else
     {
@@ -358,24 +310,24 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
             strcmp(dev_name, "<no_name>") != 0)
         {
             strncpy(m_known_devices[known_idx].name, dev_name, NRF_BLE_SCAN_NAME_MAX_LEN + 1);
-            should_redraw = true; /* Name resolved — refresh list. */
         }
-
+        
         if (m_known_devices[known_idx].uuid == 0 && uuid16 != 0)
         {
             m_known_devices[known_idx].uuid = uuid16;
-            should_redraw = true; /* UUID resolved — refresh list. */
         }
 
         /* Always refresh RSSI and heartbeat timestamp. */
         m_known_devices[known_idx].rssi      = p_adv_report->rssi;
         m_known_devices[known_idx].last_seen = current_ticks;
+        m_last_rssi_dbm = p_adv_report->rssi;
     }
 
-    if (should_redraw)
-    {
-        app_ble_ui_redraw();
-    }
+    bb_cmd_notify_scan_result(m_known_devices[known_idx].addr,
+                              m_known_devices[known_idx].rssi,
+                              m_known_devices[known_idx].name,
+                              0);
+
 }
 
 /* -------------------------------------------------------------------------
@@ -388,6 +340,7 @@ static void scan_start(void)
     APP_ERROR_CHECK(err_code);
 
     bsp_led_scanning();
+    ble_state_update(protobuf_BLE_STATE_SCANNING);
 }
 
 static void lbs_error_handler(uint32_t nrf_error)
@@ -434,6 +387,55 @@ static void lbs_c_evt_handler(ble_lbs_c_t *p_lbs_c, ble_lbs_c_evt_t *p_lbs_c_evt
     }
 }
 
+/**
+ * @brief Nordic UART Service Client event handler.
+ */
+static void nus_c_evt_handler(ble_nus_c_t *p_ble_nus_c, ble_nus_c_evt_t const *p_evt)
+{
+    ret_code_t err_code;
+
+    switch (p_evt->evt_type)
+    {
+        case BLE_NUS_C_EVT_DISCOVERY_COMPLETE:
+            NRF_LOG_INFO("NUS Service discovered on conn_handle 0x%x", p_evt->conn_handle);
+            err_code = ble_nus_c_handles_assign(p_ble_nus_c, p_evt->conn_handle, &p_evt->handles);
+            APP_ERROR_CHECK(err_code);
+
+            err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
+            APP_ERROR_CHECK(err_code);
+            break;
+
+        case BLE_NUS_C_EVT_NUS_TX_EVT:
+            NRF_LOG_INFO("NUS Data received: %u bytes", p_evt->data_len);
+            bsp_led_rx_pulse();
+            if (m_ble_rx_cb != NULL)
+            {
+                m_ble_rx_cb(p_evt->p_data, p_evt->data_len);
+            }
+            break;
+
+        case BLE_NUS_C_EVT_DISCONNECTED:
+            NRF_LOG_INFO("NUS Service disconnected");
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void nus_c_init(void)
+{
+    ret_code_t       err_code;
+    ble_nus_c_init_t nus_c_init_obj;
+
+    nus_c_init_obj.evt_handler   = nus_c_evt_handler;
+    nus_c_init_obj.error_handler = lbs_error_handler; // Use same error handler
+    nus_c_init_obj.p_gatt_queue  = &m_ble_gatt_queue;
+
+    err_code = ble_nus_c_init(&m_ble_nus_c, &nus_c_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
+
 static void lbs_c_init(void)
 {
     ret_code_t       err_code;
@@ -447,122 +449,9 @@ static void lbs_c_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-/* -------------------------------------------------------------------------
- * Terminal Command logic
- * ---------------------------------------------------------------------- */
-
-static void cmd_connect_to_mac(const char *cmd)
-{
-    unsigned int mac[6];
-    /* sscanf securely parses hex whether they are lowercase or uppercase */
-    if (sscanf(cmd, "%x:%x:%x:%x:%x:%x", &mac[5], &mac[4], &mac[3], &mac[2], &mac[1], &mac[0]) == 6)
-    {
-        uint8_t target_mac[6];
-        for (int i = 0; i < 6; i++) {
-            target_mac[i] = (uint8_t)mac[i];
-        }
-
-        int found_idx = -1;
-        for (int i = 0; i < MAX_KNOWN_DEVICES; i++)
-        {
-            if (m_known_devices[i].active &&
-                memcmp(m_known_devices[i].addr, target_mac, 6) == 0)
-            {
-                found_idx = i;
-                break;
-            }
-        }
-
-        if (found_idx != -1)
-        {
-            NRF_LOG_INFO("CMD: Connecting to MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-                         target_mac[5], target_mac[4], target_mac[3],
-                         target_mac[2], target_mac[1], target_mac[0]);
-
-            if (m_is_connected || m_is_connecting || m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
-            {
-                /* Queue the new target address */
-                memset(&m_pending_target_addr, 0, sizeof(m_pending_target_addr));
-                m_pending_target_addr.addr_id_peer = 0;
-                m_pending_target_addr.addr_type = m_known_devices[found_idx].addr_type;
-                memcpy(m_pending_target_addr.addr, m_known_devices[found_idx].addr, BLE_GAP_ADDR_LEN);
-                m_has_pending_connect = true;
-
-                if (m_is_connected) {
-                    sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-                }
-                
-                NRF_LOG_INFO("CMD: Disconnecting current session... Will auto-connect to new MAC.");
-                return;
-            }
-
-            nrf_ble_scan_stop();
-
-            ble_gap_addr_t target_addr;
-            memset(&target_addr, 0, sizeof(target_addr));
-            target_addr.addr_id_peer = 0;
-            target_addr.addr_type = m_known_devices[found_idx].addr_type;
-            memcpy(target_addr.addr, m_known_devices[found_idx].addr, BLE_GAP_ADDR_LEN);
-
-            ret_code_t err_code = sd_ble_gap_connect(&target_addr,
-                                                     &m_scan.scan_params,
-                                                     &m_scan.conn_params,
-                                                     APP_BLE_CONN_CFG_TAG);
-            
-            if (err_code != NRF_SUCCESS)
-            {
-                NRF_LOG_WARNING("CMD: sd_ble_gap_connect failed: 0x%08x", err_code);
-                m_is_connecting = false;
-                scan_start();
-            }
-            else
-            {
-                m_is_connecting = true;
-            }
-        }
-        else
-        {
-            NRF_LOG_WARNING("CMD: MAC address %s not found in scanned list.", cmd);
-        }
-    }
-}
-
-static void on_usb_rx_line(const char *line)
-{
-    uint16_t min_int, max_int, latency, timeout;
-
-    /* Parse dynamic config command 
-     * Format: "config <min_ms> <max_ms> <latency> <timeout_ms>"
-     * Example: "config 50 75 0 4000"
-     */
-    if (sscanf(line, "config %hu %hu %hu %hu", &min_int, &max_int, &latency, &timeout) == 4)
-    {
-        if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
-        {
-            NRF_LOG_INFO("CMD: Config request min=%u, max=%u, lat=%u, to=%u", 
-                         min_int, max_int, latency, timeout);
-            central_update_conn_params(m_current_conn_handle, min_int, max_int, latency, timeout);
-        }
-        else
-        {
-            NRF_LOG_WARNING("CMD: Cannot update params, not connected!");
-        }
-        return;
-    }
-
-    /* Parse MAC address connection request
-     * Example: "69:3E:39:55:AE:BE" 
-     */
-    if (strlen(line) >= 17) /* minimum length of MAC */
-    {
-        cmd_connect_to_mac(line);
-    }
-}
-
 void button_init(void)
 {
-    /* We don't use button for cycling anymore, wire the USB terminal RX callback */
-    bsp_usbd_rx_line_cb_set(on_usb_rx_line);
+    /* Reserved: no direct USB/terminal control path in central app. */
 }
 
 /* -------------------------------------------------------------------------
@@ -602,35 +491,14 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_is_connected = true;
             m_is_connecting = false;
             m_current_conn_handle = p_gap_evt->conn_handle;
+            m_current_conn_params = p_gap_evt->params.connected.conn_params;
+            m_pending_tx_chunks = 0;
 
-            /* Copy device info from the scan list into the connected record. */
-            int connected_idx = -1;
-            for (int i = 0; i < MAX_KNOWN_DEVICES; i++)
-            {
-                if (m_known_devices[i].active &&
-                    memcmp(m_known_devices[i].addr,
-                           p_gap_evt->params.connected.peer_addr.addr,
-                           BLE_GAP_ADDR_LEN) == 0)
-                {
-                    connected_idx = i;
-                    break;
-                }
-            }
+            m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
+            ble_state_update(protobuf_BLE_STATE_CONNECTED);
 
-            if (connected_idx != -1)
-            {
-                m_connected_device_info = m_known_devices[connected_idx];
-            }
-            else
-            {
-                memset(&m_connected_device_info, 0, sizeof(m_connected_device_info));
-                memcpy(m_connected_device_info.addr,
-                       p_gap_evt->params.connected.peer_addr.addr,
-                       BLE_GAP_ADDR_LEN);
-                strcpy(m_connected_device_info.name, "<Unknown>");
-            }
-
-            app_ble_ui_redraw();
+            /* Start RSSI reporting */
+            sd_ble_gap_rssi_start(p_gap_evt->conn_handle, 0, 0);
 
             /* Assign handles and kick off service discovery. */
             err_code = ble_lbs_c_handles_assign(&m_ble_lbs_c, p_gap_evt->conn_handle, NULL);
@@ -656,14 +524,16 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
         /* ---- Disconnected -------------------------------------------- */
         case BLE_GAP_EVT_DISCONNECTED:
         {
-            uint8_t reason = p_gap_evt->params.disconnected.reason;
-            NRF_LOG_INFO("Disconnected. reason=0x%02x (%s)",
-                         reason, ble_hci_reason_str(reason));
+            uint32_t reason = p_gap_evt->params.disconnected.reason;
+            NRF_LOG_INFO("Disconnected. reason=0x%02x", (unsigned int)reason);
 
             m_is_connected = false;
             m_is_connecting = false;
             m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
-            app_ble_ui_redraw();
+            m_pending_tx_chunks = 0;
+
+            m_last_disconnect_reason = reason;
+            ble_state_update(protobuf_BLE_STATE_IDLE);
 
             if (m_has_pending_connect)
             {
@@ -683,6 +553,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                 else
                 {
                     m_is_connecting = true;
+                    ble_state_update(protobuf_BLE_STATE_CONNECTING);
                 }
             }
             else
@@ -701,6 +572,9 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                 m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
                 m_is_connected = false;
                 m_is_connecting = false;
+                
+                m_last_disconnect_reason = p_gap_evt->params.timeout.src;
+                ble_state_update(protobuf_BLE_STATE_IDLE);
             }
         } break;
 
@@ -715,6 +589,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                          (p_updated->max_conn_interval * 125) % 100,
                          p_updated->slave_latency,
                          p_updated->conn_sup_timeout * 10);
+            m_current_conn_params = *p_updated;
         } break;
 
         case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
@@ -757,6 +632,12 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                          p_gap_evt->params.phy_update.status);
         } break;
 
+        /* ---- RSSI changed ------------------------------------------- */
+        case BLE_GAP_EVT_RSSI_CHANGED:
+        {
+            m_last_rssi_dbm = p_gap_evt->params.rssi_changed.rssi;
+        } break;
+
         /* ---- GATT Client timeout ------------------------------------ */
         case BLE_GATTC_EVT_TIMEOUT:
         {
@@ -764,6 +645,31 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
             APP_ERROR_CHECK(err_code);
         } break;
+
+        case BLE_GATTC_EVT_WRITE_CMD_TX_COMPLETE:
+        {
+            uint16_t completed_count = p_ble_evt->evt.gattc_evt.params.write_cmd_tx_complete.count;
+            if (m_pending_tx_chunks > 0)
+            {
+                if (completed_count >= m_pending_tx_chunks)
+                {
+                    m_pending_tx_chunks = 0;
+                }
+                else
+                {
+                    m_pending_tx_chunks -= completed_count;
+                }
+                bsp_led_tx_pulse();
+            }
+        } break;
+
+        case BLE_GATTC_EVT_WRITE_RSP:
+            if (m_pending_tx_chunks > 0)
+            {
+                m_pending_tx_chunks--;
+                bsp_led_tx_pulse();
+            }
+            break;
 
         /* ---- GATT Server timeout ------------------------------------ */
         case BLE_GATTS_EVT_TIMEOUT:
@@ -836,6 +742,7 @@ static void db_disc_handler(ble_db_discovery_evt_t *p_evt)
     }
 
     ble_lbs_on_db_disc_evt(&m_ble_lbs_c, p_evt);
+    ble_nus_c_on_db_disc_evt(&m_ble_nus_c, p_evt);
 }
 
 /* -------------------------------------------------------------------------
@@ -893,10 +800,12 @@ void scan_init(void)
     ble_gap_scan_params_t scan_param;
     memset(&scan_param, 0, sizeof(scan_param));
     scan_param.active        = 1;
-    scan_param.interval      = SCAN_INTERVAL;
-    scan_param.window        = SCAN_WINDOW;
+    scan_param.interval      = MSEC_TO_UNITS(SYSTEM_CONFIG_SCAN_INTERVAL_MS, UNIT_0_625_MS);
+    scan_param.window        = MSEC_TO_UNITS(SYSTEM_CONFIG_SCAN_WINDOW_MS, UNIT_0_625_MS);
     scan_param.filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL;
-    scan_param.timeout       = SCAN_DURATION;
+    scan_param.timeout       = (SYSTEM_CONFIG_SCAN_DURATION_MS == 0)
+                               ? 0
+                               : (uint16_t)(SYSTEM_CONFIG_SCAN_DURATION_MS / 10U);
     scan_param.scan_phys     = SYSTEM_CONFIG_PREFERRED_PHY;
 
     init_scan.connect_if_match = false; /**< Manual-connect via terminal / button. */
@@ -941,28 +850,24 @@ void button_init(void);
 
 void ble_central_init(void)
 {
-    NRF_LOG_INFO("BLE: ble_stack_init");
+    NRF_LOG_INFO("BLE: ble_central_init");
     ble_stack_init();
-
-    NRF_LOG_INFO("BLE: gatt_init");
     gatt_init();
-
-    NRF_LOG_INFO("BLE: bsp_led_init");
     bsp_led_init();
-
-    NRF_LOG_INFO("BLE: button_init");
     button_init();
-
-    NRF_LOG_INFO("BLE: db_discovery_init");
     db_discovery_init();
-
-    NRF_LOG_INFO("BLE: lbs_c_init");
     lbs_c_init();
-
-    NRF_LOG_INFO("BLE: scan_init");
+    nus_c_init();
     scan_init();
+    ret_code_t err_code = app_timer_create(&m_scan_publish_timer,
+                                           APP_TIMER_MODE_REPEATED,
+                                           scan_publish_timeout_handler);
+    APP_ERROR_CHECK(err_code);
+    err_code = app_timer_start(m_scan_publish_timer,
+                               APP_TIMER_TICKS(2000),
+                               NULL);
+    APP_ERROR_CHECK(err_code);
 
-    NRF_LOG_INFO("BLE: scan_start");
     scan_start();
 }
 
@@ -995,6 +900,176 @@ void central_update_conn_params(uint16_t conn_handle,
     {
         NRF_LOG_ERROR("Failed to update conn params: %x", err_code);
     }
+}
+
+
+/* -------------------------------------------------------------------------
+ * Public APIs for Protocol Bridge
+ * ---------------------------------------------------------------------- */
+void ble_central_rx_cb_register(ble_central_rx_cb_t cb)
+{
+    m_ble_rx_cb = cb;
+}
+void app_ble_central_connect(const uint8_t *mac)
+{
+    uint8_t target_mac[6];
+    memcpy(target_mac, mac, 6);
+
+    int found_idx = -1;
+    for (int i = 0; i < MAX_KNOWN_DEVICES; i++)
+    {
+        if (m_known_devices[i].active &&
+            memcmp(m_known_devices[i].addr, target_mac, 6) == 0)
+        {
+            found_idx = i;
+            break;
+        }
+    }
+
+    if (found_idx != -1)
+    {
+        NRF_LOG_INFO("API: Connecting to MAC...");
+        if (m_is_connected || m_is_connecting || m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+        {
+            memset(&m_pending_target_addr, 0, sizeof(m_pending_target_addr));
+            m_pending_target_addr.addr_id_peer = 0;
+            m_pending_target_addr.addr_type = m_known_devices[found_idx].addr_type;
+            memcpy(m_pending_target_addr.addr, m_known_devices[found_idx].addr, BLE_GAP_ADDR_LEN);
+            m_has_pending_connect = true;
+
+            if (m_is_connected) {
+                sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+            }
+            return;
+        }
+
+        nrf_ble_scan_stop();
+
+        ble_gap_addr_t target_addr;
+        memset(&target_addr, 0, sizeof(target_addr));
+        target_addr.addr_id_peer = 0;
+        target_addr.addr_type = m_known_devices[found_idx].addr_type;
+        memcpy(target_addr.addr, m_known_devices[found_idx].addr, BLE_GAP_ADDR_LEN);
+
+        ret_code_t err_code = sd_ble_gap_connect(&target_addr,
+                                                 &m_scan.scan_params,
+                                                 &m_scan.conn_params,
+                                                 APP_BLE_CONN_CFG_TAG);
+        
+        if (err_code != NRF_SUCCESS)
+        {
+            m_is_connecting = false;
+            scan_start();
+        }
+        else
+        {
+            m_is_connecting = true;
+            ble_state_update(protobuf_BLE_STATE_CONNECTING);
+        }
+    }
+    else
+    {
+        NRF_LOG_WARNING("API: MAC address not found in scanned list.");
+    }
+}
+
+void app_ble_central_disconnect(void)
+{
+    if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+    }
+}
+
+void app_ble_central_conn_params_set(uint16_t min_interval_ms, uint16_t max_interval_ms, uint16_t slave_latency, uint16_t conn_sup_timeout_ms)
+{
+    if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        central_update_conn_params(m_current_conn_handle, min_interval_ms, max_interval_ms, slave_latency, conn_sup_timeout_ms);
+    }
+}
+
+bool app_ble_central_conn_params_get(uint16_t *min_ms, uint16_t *max_ms, uint16_t *lat, uint16_t *to_ms)
+{
+    if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        *min_ms = (m_current_conn_params.min_conn_interval * 125) / 100;
+        *max_ms = (m_current_conn_params.max_conn_interval * 125) / 100;
+        *lat = m_current_conn_params.slave_latency;
+        *to_ms = m_current_conn_params.conn_sup_timeout * 10;
+        return true;
+    }
+    return false;
+}
+
+uint8_t app_ble_central_status_get(void)
+{
+    return m_current_ble_state;
+}
+
+int32_t app_ble_central_rssi_dbm_get(void)
+{
+    return m_last_rssi_dbm;
+}
+
+uint32_t app_ble_central_disconnect_reason_get(void)
+{
+    return m_last_disconnect_reason;
+}
+
+uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length)
+{
+    if (!m_is_connected || m_current_conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (p_data == NULL || length == 0)
+    {
+        return NRF_ERROR_NULL;
+    }
+
+    NRF_LOG_INFO("Forwarding %u bytes over BLE to peripheral...", length);
+
+    uint16_t offset = 0;
+
+    while (offset < length)
+    {
+        uint16_t current_payload_mtu = nrf_ble_gatt_eff_mtu_get(&m_gatt, m_current_conn_handle);
+        if (current_payload_mtu == 0 || current_payload_mtu > SYSTEM_CONFIG_MTU_SIZE)
+        {
+            current_payload_mtu = SYSTEM_CONFIG_MTU_SIZE;
+        }
+
+        current_payload_mtu -= 3; // ATT header
+
+        uint16_t send_len = length - offset;
+
+        if (send_len > current_payload_mtu)
+        {
+            send_len = current_payload_mtu;
+        }
+
+        ret_code_t err_code = ble_nus_c_string_send(&m_ble_nus_c, (uint8_t *)(p_data + offset), send_len);
+
+        if (err_code == NRF_ERROR_RESOURCES)
+        {
+            NRF_LOG_WARNING("BLE Central TX buffer full, dropping remaining: %u", length - offset);
+            return err_code;
+        }
+        else if (err_code != NRF_SUCCESS)
+        {
+            NRF_LOG_ERROR("BLE Central Send Failed! Code: 0x%x", (unsigned int)err_code);
+            return err_code;
+        }
+
+        NRF_LOG_INFO("BLE Central NUS TX queued: %u bytes", send_len);
+        m_pending_tx_chunks++;
+
+        offset += send_len;
+    }
+
+    return NRF_SUCCESS;
 }
 
 /* End of file ------------------------------------------------------------- */

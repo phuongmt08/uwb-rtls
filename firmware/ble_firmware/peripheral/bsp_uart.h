@@ -29,6 +29,6 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb);
  */
 ret_code_t bsp_uart_transmit(const uint8_t *buf, uint16_t len);
 
-void bsp_uart_read_byte();
+void bsp_uart_read_byte(void);
 
 #endif /* BSP_UART_H */
