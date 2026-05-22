@@ -563,6 +563,17 @@ typedef struct _protobuf_battery_info_get_t {
     uint32_t dummy;
 } protobuf_battery_info_get_t;
 
+/* Factory OTP provisioning -------------------------------------------------- */
+typedef struct _protobuf_factory_otp_write_t {
+    uint32_t confirm_magic; /* Must be 0x4F545057 ('OTPW') */
+    uint32_t otp_type; /* firmware/common/otp/otp.h OTP_TYPE_* */
+    protobuf_device_type_t device_type;
+    uint32_t tx_antenna_delay;
+    uint32_t rx_antenna_delay;
+    uint32_t value_u32;
+    uint32_t value_u8;
+} protobuf_factory_otp_write_t;
+
 /* Session ------------------------------------------------------------------- */
 typedef struct _protobuf_end_session_t {
     protobuf_session_end_reason_t reason;
@@ -652,6 +663,8 @@ typedef struct _protobuf_packet_t {
         protobuf_calib_status_get_t calib_status_get;
         protobuf_calib_status_resp_t calib_status_resp;
         protobuf_end_session_t end_session;
+        /* Factory OTP provisioning */
+        protobuf_factory_otp_write_t factory_otp_write;
     } params;
 } protobuf_packet_t;
 
@@ -868,6 +881,8 @@ extern "C" {
 
 
 
+#define protobuf_factory_otp_write_t_device_type_ENUMTYPE protobuf_device_type_t
+
 #define protobuf_end_session_t_reason_ENUMTYPE protobuf_session_end_reason_t
 
 
@@ -942,6 +957,7 @@ extern "C" {
 #define protobuf_fota_state_resp_t_init_default  {_protobuf_fota_state_index_t_MIN}
 #define protobuf_battery_info_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_battery_info_get_t_init_default {0}
+#define protobuf_factory_otp_write_t_init_default {0, 0, _protobuf_device_type_t_MIN, 0, 0, 0, 0}
 #define protobuf_end_session_t_init_default      {_protobuf_session_end_reason_t_MIN}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
 #define protobuf_addr_t_init_zero                {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
@@ -1013,6 +1029,7 @@ extern "C" {
 #define protobuf_fota_state_resp_t_init_zero     {_protobuf_fota_state_index_t_MIN}
 #define protobuf_battery_info_resp_t_init_zero   {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_battery_info_get_t_init_zero    {0}
+#define protobuf_factory_otp_write_t_init_zero   {0, 0, _protobuf_device_type_t_MIN, 0, 0, 0, 0}
 #define protobuf_end_session_t_init_zero         {_protobuf_session_end_reason_t_MIN}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
 
@@ -1207,6 +1224,13 @@ extern "C" {
 #define protobuf_battery_info_resp_t_imu_temp_c_tag 9
 #define protobuf_battery_info_resp_t_error_mask_tag 10
 #define protobuf_battery_info_get_t_dummy_tag    1
+#define protobuf_factory_otp_write_t_confirm_magic_tag 1
+#define protobuf_factory_otp_write_t_otp_type_tag 2
+#define protobuf_factory_otp_write_t_device_type_tag 3
+#define protobuf_factory_otp_write_t_tx_antenna_delay_tag 4
+#define protobuf_factory_otp_write_t_rx_antenna_delay_tag 5
+#define protobuf_factory_otp_write_t_value_u32_tag 6
+#define protobuf_factory_otp_write_t_value_u8_tag 7
 #define protobuf_end_session_t_reason_tag        1
 #define protobuf_packet_t_hdr_tag                1
 #define protobuf_packet_t_none_tag               2
@@ -1269,6 +1293,7 @@ extern "C" {
 #define protobuf_packet_t_calib_status_get_tag   63
 #define protobuf_packet_t_calib_status_resp_tag  64
 #define protobuf_packet_t_end_session_tag        65
+#define protobuf_packet_t_factory_otp_write_tag  66
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1752,6 +1777,17 @@ X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_battery_info_get_t_CALLBACK NULL
 #define protobuf_battery_info_get_t_DEFAULT NULL
 
+#define protobuf_factory_otp_write_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   confirm_magic,     1) \
+X(a, STATIC,   SINGULAR, UINT32,   otp_type,          2) \
+X(a, STATIC,   SINGULAR, UENUM,    device_type,       3) \
+X(a, STATIC,   SINGULAR, UINT32,   tx_antenna_delay,   4) \
+X(a, STATIC,   SINGULAR, UINT32,   rx_antenna_delay,   5) \
+X(a, STATIC,   SINGULAR, UINT32,   value_u32,         6) \
+X(a, STATIC,   SINGULAR, UINT32,   value_u8,          7)
+#define protobuf_factory_otp_write_t_CALLBACK NULL
+#define protobuf_factory_otp_write_t_DEFAULT NULL
+
 #define protobuf_end_session_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    reason,            1)
 #define protobuf_end_session_t_CALLBACK NULL
@@ -1818,7 +1854,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,battery_info_get,params.battery_info_
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_bootloader),  62) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_get,params.calib_status_get),  63) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_resp,params.calib_status_resp),  64) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,end_session,params.end_session),  65)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,end_session,params.end_session),  65) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_write),  66)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -1882,6 +1919,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,end_session,params.end_session),  65)
 #define protobuf_packet_t_params_calib_status_get_MSGTYPE protobuf_calib_status_get_t
 #define protobuf_packet_t_params_calib_status_resp_MSGTYPE protobuf_calib_status_resp_t
 #define protobuf_packet_t_params_end_session_MSGTYPE protobuf_end_session_t
+#define protobuf_packet_t_params_factory_otp_write_MSGTYPE protobuf_factory_otp_write_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -1952,6 +1990,7 @@ extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_fota_state_resp_t_msg;
 extern const pb_msgdesc_t protobuf_battery_info_resp_t_msg;
 extern const pb_msgdesc_t protobuf_battery_info_get_t_msg;
+extern const pb_msgdesc_t protobuf_factory_otp_write_t_msg;
 extern const pb_msgdesc_t protobuf_end_session_t_msg;
 extern const pb_msgdesc_t protobuf_packet_t_msg;
 
@@ -2025,6 +2064,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_fota_state_resp_t_fields &protobuf_fota_state_resp_t_msg
 #define protobuf_battery_info_resp_t_fields &protobuf_battery_info_resp_t_msg
 #define protobuf_battery_info_get_t_fields &protobuf_battery_info_get_t_msg
+#define protobuf_factory_otp_write_t_fields &protobuf_factory_otp_write_t_msg
 #define protobuf_end_session_t_fields &protobuf_end_session_t_msg
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
 
@@ -2062,6 +2102,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_end_session_t_size              2
 #define protobuf_enter_to_bootloader_t_size      6
 #define protobuf_factory_config_reset_t_size     6
+#define protobuf_factory_otp_write_t_size        38
 #define protobuf_flash_data_t_size               203
 #define protobuf_flash_erase_t_size              8
 #define protobuf_flash_read_t_size               12

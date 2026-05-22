@@ -83,6 +83,7 @@ static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt);
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt);
+static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
 static void network_cmd_end_session(const protobuf_packet_t *pkt);
 
@@ -222,6 +223,9 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 63 */
     CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 64 */
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 66 */
+#endif
     //      +=================================================+=======================================+========================+
 };
 
@@ -429,7 +433,6 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 
     sys_config_t *cfg = sys_config_get();
     cfg->uwb = *new_cfg;
-    cfg->device_type = (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_TYPE_TAG : DEVICE_TYPE_ANCHOR;
 
     network_cmd_config_save("sys_config");
 }
@@ -604,6 +607,26 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
     }
 
     network_cmd_config_save("anchor layout");
+}
+
+static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    const protobuf_factory_otp_write_t *req = &pkt->params.factory_otp_write;
+    otp_err_t err = sys_config_factory_otp_write(req);
+
+    if (err == OTP_OK) {
+        RLOG_W(OBJECT_CODE, "Factory OTP write accepted type=0x%02lX", (unsigned long)req->otp_type);
+        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+    } else {
+        RLOG_W(OBJECT_CODE, "Factory OTP write rejected type=0x%02lX status=%d",
+               (unsigned long)req->otp_type, (int)err);
+        network_core_send_ack(s_network_cmd.stream, pkt,
+                              err == OTP_ERR_INVALID_ARG ?
+                              protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE :
+                              protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+    }
 }
 
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)

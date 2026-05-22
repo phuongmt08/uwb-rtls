@@ -44,6 +44,7 @@
 #include <string.h>
 #include "bsp_imu.h"
 #include "sys_pm.h"
+#include "otp/otp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -288,6 +289,11 @@ int main(void)
   int flash_storage_init_status = sys_flash_storage_init();
 
   sys_logger_init();
+#if MOCK_OTP_IN_FLASH && OTP_ENABLE_FLASH_SELF_TEST
+  otp_test_run();
+#else
+  otp_init();
+#endif
   RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
   RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=               APPLICATION STARTED             =");
   RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
@@ -416,20 +422,6 @@ int main(void)
 #endif
   
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-#ifdef USE_DIP_SWITCH
-  /* Read DIP switch - ALWAYS OVERRIDES saved config */
-  uint8_t dip_value = bsp_io_dip_read();
-  if (dip_value == 0 || dip_value > NUM_ANCHORS)
-  {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Using saved Device ID: %u", dip_value, cfg->uwb.device_id);
-  }
-  else
-  {
-    sys_config_set_device_id(dip_value);
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-  }
-#endif
-
   cfg = sys_config_get();
 
   /* Initialize application based on role */

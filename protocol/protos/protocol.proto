@@ -618,6 +618,17 @@ message battery_info_resp_t {
 message battery_info_get_t {
     uint32 dummy = 1;
 }
+
+/* Factory OTP provisioning -------------------------------------------------- */
+message factory_otp_write_t {
+    uint32 confirm_magic     = 1; /* Must be 0x4F545057 ('OTPW') */
+    uint32 otp_type          = 2; /* firmware/common/otp/otp.h OTP_TYPE_* */
+    device_type_t device_type = 3; /* Used by OTP_TYPE_DEVICE_INFO */
+    uint32 tx_antenna_delay  = 4;
+    uint32 rx_antenna_delay  = 5;
+    uint32 value_u32         = 6; /* DDMMYYYY mfg_date for OTP_TYPE_DEVICE_INFO */
+    uint32 value_u8          = 7; /* hw_rev for OTP_TYPE_DEVICE_INFO */
+}
 /* Session ------------------------------------------------------------------- */
 message end_session_t {
     session_end_reason_t reason = 1;
@@ -732,6 +743,9 @@ message packet_t {
         calib_status_resp_t       calib_status_resp       = 64;
         
         end_session_t             end_session             = 65;
+
+        /* Factory OTP provisioning */
+        factory_otp_write_t       factory_otp_write       = 66;
     }
 }
 

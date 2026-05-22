@@ -17,6 +17,4 @@
 /* Experimental features */
 #undef UWB_EVENT_DRIVEN
 
-#undef USE_DIP_SWITCH   /* Define this if your hardware has a physical DIP switch for ID selection */
-
 #endif /* __CONFIG_H */
