@@ -52,7 +52,14 @@ typedef struct {
     bool     charge_enabled;  /* Current state of the CHARGE_EN control pin */
     uint32_t error_mask;      /* Bitmask of all breached thresholds */
     uint32_t critical_mask;   /* Bitmask of faults that are allowed to halt ranging */
+    uint32_t init_mask;       /* Bitmask of successfully initialized modules */
 } sys_pm_status_t;
+
+/* Initialization bits for init_mask */
+#define PM_INIT_ADC_BIT       (1 << 0)
+#define PM_INIT_BATTERY_BIT   (1 << 1)
+#define PM_INIT_IMU_BIT       (1 << 2)
+#define PM_INIT_UWB_BIT       (1 << 3)
 
 /* Error bits for error_mask */
 #define PM_ERR_SOC_BIT        (1 << PM_CH_SOC)
@@ -68,6 +75,10 @@ typedef struct {
 #define PM_ERR_BAT_RESET_BIT   (1 << 9)
 #define PM_ERR_BAT_HW_LOW_BIT  (1 << 10)
 #define PM_ERR_BAT_HW_HIGH_BIT (1 << 11)
+#define PM_ERR_ADC_INIT_FAIL   (1 << 12)
+#define PM_ERR_BAT_INIT_FAIL   (1 << 13)
+#define PM_ERR_IMU_INIT_FAIL   (1 << 14)
+#define PM_ERR_UWB_INIT_FAIL   (1 << 15)
 
 /**
  * @brief  Initialize Power Management and GPIOs.

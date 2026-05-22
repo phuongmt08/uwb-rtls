@@ -21,8 +21,9 @@ typedef struct {
 
 /**
  * @brief  Initialize ADC driver.
+ * @retval true if successful, false otherwise
  */
-void bsp_adc_init(void);
+bool bsp_adc_init(void);
 
 /**
  * @brief  Read latest averaged raw data.

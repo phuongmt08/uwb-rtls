@@ -202,8 +202,8 @@ bool max17048_is_present(max17048_dev_t *dev)
   if (s_read_reg(dev, MAX17048_REG_VERSION, &version) != MAX17048_OK)
     return false;
 
-  /* Datasheet p.11: VERSION register always returns 0x0011 */
-  return (version == 0x0011);
+  /* Datasheet p.11: VERSION register returns 0x0011 for MAX17048, 0x0012 for MAX17049 */
+  return (version == 0x0011 || version == 0x0012);
 }
 
 max17048_err_t max17048_init(max17048_dev_t *dev, const max17048_config_t *config)

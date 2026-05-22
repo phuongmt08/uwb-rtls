@@ -165,6 +165,12 @@ bool bsp_imu_is_data_ready();
  */
 bsp_imu_err_t bsp_imu_get_temp(float *temp);
 
+/**
+ * @brief  Check if IMU driver was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_imu_is_initialized(void);
+
 #endif /* __BSP_IMU_H */
 
 /* End of file -------------------------------------------------------- */

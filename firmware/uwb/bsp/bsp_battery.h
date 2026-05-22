@@ -48,4 +48,10 @@ void bsp_battery_set_thresholds(uint16_t min_mv, uint16_t max_mv);
 
 bool bsp_battery_is_present(void);
 
+/**
+ * @brief  Check if battery fuel gauge was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_battery_is_initialized(void);
+
 #endif /* BSP_BATTERY_H */

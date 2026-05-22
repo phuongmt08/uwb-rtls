@@ -169,12 +169,21 @@ static void ranging_process_task(void *arg)
     if (!s_ranging_halted) {
         bsp_uwb_idle();
         s_ranging_halted = true;
+
+        sys_pm_status_t pm_status;
+        sys_pm_get_status(&pm_status);
+        uint32_t mask = pm_status.critical_mask;
+
+        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_POS_OUT_OF_RANGE,
+               "\033[1;31m[CRITICAL] RANGING HALTED! Safety checks failed. Mask: 0x%04X (SOC: %.1f%%, VDDA: %.1f mV, VBAT: %.1f mV)\033[0m",
+               (unsigned int)mask, pm_status.soc, pm_status.vdda_mv, pm_status.bat_voltage_mv);
     }
     return;
   }
   else if (s_ranging_halted)
   {
       s_ranging_halted = false;
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "\033[1;32m[INFO] RANGING RESUMED! Safety conditions restored.\033[0m");
   }
 
   if (s_ranging_enabled)
@@ -489,7 +498,7 @@ int main(void)
       {
         s_ranging_enabled = false;
         bsp_uwb_idle();
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "\033[1;31mRanging stopped - DW1000 idle (Disabled by Button Double-Click)\033[0m");
       }
       break;
 

@@ -1047,6 +1047,11 @@ bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat)
     return BSP_OK;
 }
 
+bool bsp_uwb_is_initialized(void)
+{
+    return s_initialized;
+}
+
 // float bsp_uwb_compensate_distance_error(float raw_dist_m, float temp_c, float vbat_v)
 // {
 //     const float REF_TEMP = 20.0f; 

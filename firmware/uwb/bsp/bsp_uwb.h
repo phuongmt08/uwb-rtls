@@ -74,6 +74,12 @@ typedef struct {
 bsp_err_t bsp_uwb_init(void);
 
 /**
+ * @brief  Check if UWB driver was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_uwb_is_initialized(void);
+
+/**
  * @brief Configure UWB radio parameters from protobuf UWB config.
  * @param[in] cfg  Pointer to protobuf_uwb_cfg_t (sys_config.uwb)
  * @return BSP_OK on success, BSP_ERR on failure

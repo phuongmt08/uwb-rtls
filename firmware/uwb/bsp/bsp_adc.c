@@ -11,13 +11,21 @@
 static uint16_t s_adc_raw_buf[ADC_CHANNEL_COUNT * ADC_AVG_SAMPLES];
 static volatile bool s_watchdog_fired = false;
 
-void bsp_adc_init(void)
+bool bsp_adc_init(void)
 {
     /* Start Timer 2 (100Hz trigger) */
-    HAL_TIM_Base_Start(&htim2);
+    if (HAL_TIM_Base_Start(&htim2) != HAL_OK)
+    {
+        return false;
+    }
 
     /* Start ADC in DMA mode */
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)s_adc_raw_buf, ADC_CHANNEL_COUNT * ADC_AVG_SAMPLES);
+    if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)s_adc_raw_buf, ADC_CHANNEL_COUNT * ADC_AVG_SAMPLES) != HAL_OK)
+    {
+        return false;
+    }
+
+    return true;
 }
 
 void bsp_adc_read_raw(bsp_adc_raw_data_t *data)
