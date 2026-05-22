@@ -294,10 +294,13 @@ static void fusion_log_task(void *arg)
 		dt = get_dt();
 	}
 
-	if( bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK) imu_get_data_err++;
+	if( bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK)
+	{
+		imu_get_data_err++;
+	}
 	else
 	{
-    float uwb_dists[3] = {0.0};
+		float uwb_dists[NUM_ANCHORS] = {0.0};
 		double fp_amp_norm[NUM_ANCHORS];
 		double fp_snr[NUM_ANCHORS];
 
@@ -497,7 +500,7 @@ int main(void)
     if (fusion_task_id >= 0) sys_task_start(fusion_task_id);
   }
 #endif
-  
+
 #if ENABLE_SYS_FUSION_LOG
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
