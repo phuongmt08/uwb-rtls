@@ -136,7 +136,8 @@ static void test_send_position(void)
   };
   
   /* Send current position */
-  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, test_distances, TEST_POS_ERROR);
+  bsp_err_t ret =     bsp_io_uart_send_fusion_data(s_test_x, s_test_y, 5.554, s_test_y, s_test_x, 6.0, 10);
+
   
   if (ret == BSP_OK) {
     /* Update position for next send */
