@@ -194,7 +194,7 @@ def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
     counter_str = f"({frame_counter:4d}/{frame_data['tx_frame_cnt']:4d})"
     
     if frame_data['tx_frame_cnt'] == 1:
-        line = f"{counter_str} Init    ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']}"
+        line = f"{counter_str} Init    ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']} amp1: {frame_data['fp_amp_norm'][0]:9.6f} amp2: {frame_data['fp_amp_norm'][1]:9.6f} amp3: {frame_data['fp_amp_norm'][2]:9.6f} amp4: {frame_data['fp_amp_norm'][3]:9.6f} snr1: {frame_data['fp_snr'][0]:9.6f} snr2: {frame_data['fp_snr'][1]:9.6f} snr3: {frame_data['fp_snr'][2]:9.6f} snr4: {frame_data['fp_snr'][3]:9.6f}"
         csv_writer.writerow([line])
         return "Init", frame_data['distances'].copy()
         
@@ -211,7 +211,7 @@ def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
                 status = "Update"
     
     new_prev_distances = frame_data['distances'].copy()
-    line = f"{counter_str} {status:7s} ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']}"
+    line = f"{counter_str} {status:7s} ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']} amp1: {frame_data['fp_amp_norm'][0]:9.6f} amp2: {frame_data['fp_amp_norm'][1]:9.6f} amp3: {frame_data['fp_amp_norm'][2]:9.6f} amp4: {frame_data['fp_amp_norm'][3]:9.6f} snr1: {frame_data['fp_snr'][0]:9.6f} snr2: {frame_data['fp_snr'][1]:9.6f} snr3: {frame_data['fp_snr'][2]:9.6f} snr4: {frame_data['fp_snr'][3]:9.6f}"
     csv_writer.writerow([line])
     return status, new_prev_distances
 
@@ -233,4 +233,6 @@ def print_frame_data(frame_data):
           f"dt={frame_data['dt']:.6f}, "
           f"mask={frame_data['anchor_mask']}, "
           f"dist={[f'{d:.3f}' for d in frame_data['distances']]}, "
-          f"err={frame_data['err_cnt']}")
+          f"err={frame_data['err_cnt']}, "
+          f"amp={[f'{a:.3f}' for a in frame_data['fp_amp_norm']]}, "
+          f"snr={[f'{s:.3f}' for s in frame_data['fp_snr']]}")
