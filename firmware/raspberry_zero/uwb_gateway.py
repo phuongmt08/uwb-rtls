@@ -6,8 +6,13 @@ import struct
 import time
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Union
 from config import Config
+
+UART_POSITION_MIN_PAYLOAD_LEN = 16
+UART_FUSION_PAYLOAD_LEN = 33
+UART_FUSION_FORMAT = '<BBBIffffffI'
+UART_FUSION_UDP_FORMAT = '<BIffffffI'
 
 @dataclass
 class UwbPosition:
@@ -33,6 +38,48 @@ class UwbPosition:
             'error': self.error,
             'timestamp': self.timestamp
         }
+
+
+@dataclass
+class UwbFusionFrame:
+    """UKF/UWB fusion data frame from STM uart_fusion_frame_t"""
+    anchor_mask: int
+    tx_frame_cnt: int
+    ukf_x: float
+    ukf_y: float
+    ukf_yaw: float
+    tril_x: float
+    tril_y: float
+    yaw: float
+    error_frame_cnt: int
+    timestamp: float
+
+    def __str__(self):
+        return (
+            f"Fusion(cnt={self.tx_frame_cnt}, mask=0x{self.anchor_mask:02X}, "
+            f"ukf=({self.ukf_x:.3f}, {self.ukf_y:.3f}, {self.ukf_yaw:.2f}deg), "
+            f"tril=({self.tril_x:.3f}, {self.tril_y:.3f}), "
+            f"yaw={self.yaw:.2f}deg, err_cnt={self.error_frame_cnt})"
+        )
+
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'type': 'fusion',
+            'anchor_mask': self.anchor_mask,
+            'tx_frame_cnt': self.tx_frame_cnt,
+            'ukf_x': self.ukf_x,
+            'ukf_y': self.ukf_y,
+            'ukf_yaw': self.ukf_yaw,
+            'tril_x': self.tril_x,
+            'tril_y': self.tril_y,
+            'yaw': self.yaw,
+            'error_frame_cnt': self.error_frame_cnt,
+            'timestamp': self.timestamp
+        }
+
+
+UwbFrame = Union[UwbPosition, UwbFusionFrame]
 
 
 class UwbGateway:
@@ -137,19 +184,39 @@ class UwbGateway:
         if not (Config.ERROR_MIN <= error <= Config.ERROR_MAX):
             return False
         return True
+
+    def validate_fusion_frame(self, frame: UwbFusionFrame) -> bool:
+        """Validate UKF/trilateration fusion frame data"""
+        values = [
+            frame.ukf_x,
+            frame.ukf_y,
+            frame.tril_x,
+            frame.tril_y,
+        ]
+
+        for value in values:
+            if not (Config.POSITION_MIN <= value <= Config.POSITION_MAX):
+                return False
+
+        return True
     
-    def parse_frame(self, frame_bytes: bytes) -> Optional[UwbPosition]:
+    def parse_frame(self, frame_bytes: bytes) -> Optional[UwbFrame]:
         """
         Parse UWB frame
         
-        Frame format (variable):
-            SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + Error(4) + Dists(4*N)
+        Supported STM frame formats:
+            Position:
+                SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + Dists(4*N) + Error(4)
+            Fusion:
+                SOF(1) + LEN(1) + AnchorMask(1) + TxCnt(4)
+                + UKF_X(4) + UKF_Y(4) + UKF_Yaw(4)
+                + Tril_X(4) + Tril_Y(4) + Yaw(4) + ErrorCnt(4)
         
         Args:
             frame_bytes: Raw frame data
             
         Returns:
-            UwbPosition object if valid, None otherwise
+            UwbPosition/UwbFusionFrame object if valid, None otherwise
         """
         try:
             if len(frame_bytes) < 6: # SOF + LEN + at least one float (X)
@@ -162,9 +229,16 @@ class UwbGateway:
             if sof != Config.UWB_SOF:
                 self.logger.debug(f"Invalid SOF: 0x{sof:02X}")
                 return None
+
+            if len(frame_bytes) != length + 2:
+                self.logger.debug(f"Frame size mismatch: len={len(frame_bytes)}, length={length}")
+                return None
+
+            if length == UART_FUSION_PAYLOAD_LEN:
+                return self.parse_fusion_frame(frame_bytes)
             
-            # Validate length (must be multiple of 4: X, Y, Z, Error, and N Distances)
-            if length % 4 != 0 or length < 16: # 3 position + 1 error = 16 bytes min
+            # Validate position length (X, Y, Z, Error, and N Distances are floats)
+            if length % 4 != 0 or length < UART_POSITION_MIN_PAYLOAD_LEN:
                 self.logger.debug(f"Invalid length byte: {length}")
                 return None
             
@@ -173,13 +247,15 @@ class UwbGateway:
             num_anchors = (length // 4) - 4
             
             # Unpack: '<' = little-endian, 'B' = uint8, 'f' = float
-            # Format: SOF(B), LEN(B), X(f), Y(f), Z(f), Error(f), Distances(f*N)
-            fmt = f'<BBffff{num_anchors}f'
+            # STM format: SOF(B), LEN(B), X(f), Y(f), Z(f), Distances(f*N), Error(f)
+            fmt = f'<BBfff{num_anchors}ff'
             unpacked = struct.unpack(fmt, frame_bytes)
             
-            # unpacked indices: 0=sof, 1=length, 2=x, 3=y, 4=z, 5=error, 6...=distances
-            sof, length, x, y, z, error = unpacked[0:6]
-            distances = list(unpacked[6:6+num_anchors])
+            # unpacked indices: 0=sof, 1=length, 2=x, 3=y, 4=z,
+            # 5...(5+N-1)=distances, last=error
+            sof, length, x, y, z = unpacked[0:5]
+            distances = list(unpacked[5:5+num_anchors])
+            error = unpacked[5+num_anchors]
             
             # Validate position data
             if not self.validate_frame(x, y, z, error):
@@ -201,29 +277,90 @@ class UwbGateway:
         except (struct.error, IndexError) as e:
             self.logger.error(f"Frame parse error: {e}")
             return None
+
+    def parse_fusion_frame(self, frame_bytes: bytes) -> Optional[UwbFusionFrame]:
+        """Parse STM uart_fusion_frame_t"""
+        try:
+            unpacked = struct.unpack(UART_FUSION_FORMAT, frame_bytes)
+            (
+                sof,
+                length,
+                anchor_mask,
+                tx_frame_cnt,
+                ukf_x,
+                ukf_y,
+                ukf_yaw,
+                tril_x,
+                tril_y,
+                yaw,
+                error_frame_cnt,
+            ) = unpacked
+
+            if sof != Config.UWB_SOF or length != UART_FUSION_PAYLOAD_LEN:
+                return None
+
+            frame = UwbFusionFrame(
+                anchor_mask=anchor_mask,
+                tx_frame_cnt=tx_frame_cnt,
+                ukf_x=ukf_x,
+                ukf_y=ukf_y,
+                ukf_yaw=ukf_yaw,
+                tril_x=tril_x,
+                tril_y=tril_y,
+                yaw=yaw,
+                error_frame_cnt=error_frame_cnt,
+                timestamp=time.time()
+            )
+
+            if not self.validate_fusion_frame(frame):
+                self.logger.debug(f"Invalid fusion data: {frame}")
+                return None
+
+            return frame
+
+        except (struct.error, IndexError) as e:
+            self.logger.error(f"Fusion frame parse error: {e}")
+            return None
     
-    def send_udp(self, position: UwbPosition) -> bool:
+    def send_udp(self, frame: UwbFrame) -> bool:
         """
-        Send position and distance data via UDP
+        Send parsed UWB data via UDP
         
         Args:
-            position: UwbPosition object
+            frame: UwbPosition or UwbFusionFrame object
             
         Returns:
             True if sent successfully, False otherwise
         """
         try:
+            if isinstance(frame, UwbFusionFrame):
+                data = struct.pack(
+                    UART_FUSION_UDP_FORMAT,
+                    frame.anchor_mask,
+                    frame.tx_frame_cnt,
+                    frame.ukf_x,
+                    frame.ukf_y,
+                    frame.ukf_yaw,
+                    frame.tril_x,
+                    frame.tril_y,
+                    frame.yaw,
+                    frame.error_frame_cnt
+                )
+                self.udp_socket.sendto(data, (self.udp_host, self.udp_port))
+                self.udp_send_count += 1
+                return True
+
             # Format: Binary format with x, y, z, error, and distances
             # Format: f(float) * (4 + N)
-            num_dists = len(position.distances)
+            num_dists = len(frame.distances)
             fmt = f'<{4 + num_dists}f'
             
             data = struct.pack(fmt,
-                position.x,
-                position.y,
-                position.z,
-                position.error,
-                *position.distances
+                frame.x,
+                frame.y,
+                frame.z,
+                frame.error,
+                *frame.distances
             )
             
             self.udp_socket.sendto(data, (self.udp_host, self.udp_port))
@@ -274,15 +411,15 @@ class UwbGateway:
             
             # Complete frame received?
             if self.parse_index == self.expected_len:
-                position = self.parse_frame(bytes(self.parse_buffer))
+                frame = self.parse_frame(bytes(self.parse_buffer))
                 
-                if position:
+                if frame:
                     self.frame_count += 1
-                    self.logger.debug(f"Parsed: {position}")
+                    self.logger.debug(f"Parsed: {frame}")
                     
                     # Send via UDP
-                    if self.send_udp(position):
-                        self.logger.debug(f"Sent UDP: {position}")
+                    if self.send_udp(frame):
+                        self.logger.debug(f"Sent UDP: {frame}")
                     
                 else:
                     self.error_count += 1
