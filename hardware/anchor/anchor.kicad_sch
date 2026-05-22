@@ -9680,7 +9680,7 @@
 	)
 	(rectangle
 		(start 21.59 78.74)
-		(end 165.1 179.07)
+		(end 176.53 179.07)
 		(stroke
 			(width 0)
 			(type dash)
@@ -9844,6 +9844,17 @@
 		)
 		(uuid "c0970c5d-fc64-4a59-a217-9446831ddade")
 	)
+	(text "NOTE: Use a 5 V-tolerant MCU GPIO.\n	  Configure the pin as open-drain.\n"
+		(exclude_from_sim no)
+		(at 151.384 105.156 0)
+		(effects
+			(font
+				(size 0.762 0.762)
+			)
+			(justify left)
+		)
+		(uuid "c3160cef-c7f5-403c-ad01-d548b788884d")
+	)
 	(text "TRACE 50 Ohm !"
 		(exclude_from_sim no)
 		(at 260.604 51.308 0)
@@ -9853,6 +9864,17 @@
 			)
 		)
 		(uuid "d057c818-5717-4266-915f-2382552cab69")
+	)
+	(text "PWR_LATCH low = power off."
+		(exclude_from_sim no)
+		(at 155.448 107.696 0)
+		(effects
+			(font
+				(size 0.762 0.762)
+			)
+			(justify left)
+		)
+		(uuid "d55466f8-266c-48ee-bd13-4ec0acc2d5e9")
 	)
 	(junction
 		(at 210.82 146.05)
@@ -10377,10 +10399,6 @@
 		(uuid "ffa3bf2a-110e-40eb-a64b-6e675a457deb")
 	)
 	(no_connect
-		(at 237.49 201.93)
-		(uuid "070d5493-4552-46a3-a8d1-8549c37e5675")
-	)
-	(no_connect
 		(at 237.49 186.69)
 		(uuid "0c04c879-3769-4dba-9cb4-939e43245752")
 	)
@@ -10760,7 +10778,7 @@
 	)
 	(wire
 		(pts
-			(xy 228.6 207.01) (xy 237.49 207.01)
+			(xy 223.52 207.01) (xy 237.49 207.01)
 		)
 		(stroke
 			(width 0)
@@ -11740,7 +11758,7 @@
 	)
 	(wire
 		(pts
-			(xy 228.6 184.15) (xy 237.49 184.15)
+			(xy 223.52 184.15) (xy 237.49 184.15)
 		)
 		(stroke
 			(width 0)
@@ -11797,6 +11815,16 @@
 			(type default)
 		)
 		(uuid "49d885d9-82c9-41f2-a4f9-5c61991ab8fa")
+	)
+	(wire
+		(pts
+			(xy 223.52 201.93) (xy 237.49 201.93)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4b9b58ea-3a72-41d6-9e4e-270e81ad43c5")
 	)
 	(wire
 		(pts
@@ -12260,7 +12288,7 @@
 	)
 	(wire
 		(pts
-			(xy 229.87 222.25) (xy 237.49 222.25)
+			(xy 223.52 222.25) (xy 237.49 222.25)
 		)
 		(stroke
 			(width 0)
@@ -12760,6 +12788,16 @@
 	)
 	(wire
 		(pts
+			(xy 151.13 101.6) (xy 157.48 101.6)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "7ff045c1-a0b4-41cb-84fb-7f7cdf0f4b5a")
+	)
+	(wire
+		(pts
 			(xy 74.93 224.79) (xy 74.93 231.14)
 		)
 		(stroke
@@ -13030,7 +13068,7 @@
 	)
 	(wire
 		(pts
-			(xy 228.6 212.09) (xy 237.49 212.09)
+			(xy 223.52 212.09) (xy 237.49 212.09)
 		)
 		(stroke
 			(width 0)
@@ -14330,7 +14368,7 @@
 	)
 	(wire
 		(pts
-			(xy 228.6 199.39) (xy 237.49 199.39)
+			(xy 223.52 199.39) (xy 237.49 199.39)
 		)
 		(stroke
 			(width 0)
@@ -14760,7 +14798,7 @@
 	)
 	(wire
 		(pts
-			(xy 228.6 209.55) (xy 237.49 209.55)
+			(xy 223.52 209.55) (xy 237.49 209.55)
 		)
 		(stroke
 			(width 0)
@@ -14919,7 +14957,7 @@
 		(uuid "0e42b121-e790-45de-9e3e-2bcd7a45913d")
 	)
 	(label "DIP3"
-		(at 228.6 212.09 0)
+		(at 223.52 212.09 0)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -15019,7 +15057,7 @@
 		(uuid "3aeb5a0c-b116-446d-8127-0ceb6242045c")
 	)
 	(label "UWB_RST"
-		(at 228.6 199.39 0)
+		(at 223.52 199.39 0)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -15199,7 +15237,7 @@
 		(uuid "718fc5e9-244f-4641-8307-f830335fca7b")
 	)
 	(label "LED_USR"
-		(at 228.6 184.15 0)
+		(at 223.52 184.15 0)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -15328,6 +15366,16 @@
 		)
 		(uuid "9443ae97-cade-47ee-83a9-e3bc0fb7263f")
 	)
+	(label "PWR_LATCH"
+		(at 157.48 101.6 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "9586f652-740b-496a-9a49-ec5c67f5118b")
+	)
 	(label "PA0{slash}BTN_USR"
 		(at 297.18 226.06 180)
 		(effects
@@ -15339,7 +15387,7 @@
 		(uuid "965171a1-95dc-45ab-b630-851a3f860652")
 	)
 	(label "SPI_CS1"
-		(at 229.87 222.25 0)
+		(at 223.52 222.25 0)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -15389,7 +15437,7 @@
 		(uuid "a9624e01-0d84-4811-a425-954f15fb519b")
 	)
 	(label "DIP1"
-		(at 228.6 207.01 0)
+		(at 223.52 207.01 0)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -15459,7 +15507,7 @@
 		(uuid "c37c190e-dfad-4d3d-a6c1-5d984f676ac9")
 	)
 	(label "DIP2"
-		(at 228.6 209.55 0)
+		(at 223.52 209.55 0)
 		(effects
 			(font
 				(size 1.016 1.016)
@@ -15507,6 +15555,16 @@
 			(justify left bottom)
 		)
 		(uuid "de8ee3df-ec2f-4db5-83f0-80316f7c41e7")
+	)
+	(label "PWR_LATCH"
+		(at 223.52 201.93 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "deb40ffe-5131-461e-a3c8-f48c9796293c")
 	)
 	(label "USB_OTG_DM"
 		(at 285.75 194.31 180)
@@ -20069,7 +20127,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "ESD"
+		(property "Value" "MBR230LSFT1G"
 			(at 93.98 214.6299 90)
 			(effects
 				(font
