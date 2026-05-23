@@ -432,7 +432,9 @@ bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, 
   s_fusion_frame.yaw            = yaw;
   s_fusion_frame.error_frame_cnt = err_frame_count;
 
-  if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note
+  if (CDC_Transmit_FS((uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
+
+  // if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note
   {
     return BSP_ERR;
   }
