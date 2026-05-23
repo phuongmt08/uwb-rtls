@@ -34,15 +34,20 @@
 
 #define CALIB_PAIR_SUMMARY_SLOT_MS 20U
 
-#define ANCHOR_SMART_DISCOVERY_ON_MS       40U
-#define ANCHOR_SMART_DISCOVERY_BALANCED_MS 143U
-#define ANCHOR_SMART_DISCOVERY_ECO_MS      307U
-#define ANCHOR_SMART_DISCOVERY_DEEP_ECO_MS 503U
-#define ANCHOR_SMART_TRACK_PRE_POLL_MS     5U
-#define ANCHOR_SMART_TRACK_LATE_MARGIN_MS  12U
-#define ANCHOR_SMART_TRACK_MAX_MISSES      3U
-#define ANCHOR_SMART_TRACK_MIN_WINDOW_MS   8U
-#define ANCHOR_SMART_TRACK_MAX_WINDOW_MS   35U
+#define ANCHOR_SMART_DISCOVERY_ON_MS       70U
+#define ANCHOR_SMART_DISCOVERY_BALANCED_MS 120U
+#define ANCHOR_SMART_DISCOVERY_ECO_MS      220U
+#define ANCHOR_SMART_DISCOVERY_DEEP_ECO_MS 420U
+#define ANCHOR_SMART_TRACK_PRE_POLL_MS     15U
+#define ANCHOR_SMART_TRACK_LATE_MARGIN_MS  25U
+#define ANCHOR_SMART_TRACK_MISS_PRE_STEP_MS 5U
+#define ANCHOR_SMART_TRACK_MISS_LATE_STEP_MS 8U
+#define ANCHOR_SMART_TRACK_MAX_PRE_POLL_MS 30U
+#define ANCHOR_SMART_TRACK_MAX_MISSES      5U
+#define ANCHOR_SMART_TRACK_MIN_WINDOW_MS   30U
+#define ANCHOR_SMART_TRACK_MAX_WINDOW_MS   70U
+#define ANCHOR_SMART_LEVEL_STABLE_SUCCESSES 3U
+#define ANCHOR_SMART_TRACK_REARM_GAP_MS    10U
 
 #define RX_WAIT_IMMEDIATE          false
 #define RX_WAIT_DELAYED            true
@@ -184,7 +189,9 @@ typedef struct {
   uint32_t next_window_tick;
   uint32_t next_poll_tick;
   uint64_t next_poll_dw;
+  uint32_t active_power_mode;
   uint8_t  track_misses;
+  uint8_t  stable_successes;
   bool     initialized;
 } anchor_smart_rx_state_t;
 
@@ -303,6 +310,60 @@ static anchor_poll_rx_plan_t   s_anchor_poll_rx_plan = {0};
 static bool s_ranging_busy = false;
 
 /* Private functions --------------------------------------------------- */
+
+static uint32_t anchor_smart_clamp_power_mode(uint32_t power_mode)
+{
+  if (power_mode > ANCHOR_POWER_MODE_DEEP_ECO)
+  {
+    return ANCHOR_POWER_MODE_BALANCED;
+  }
+  return power_mode;
+}
+
+static const char *anchor_smart_power_mode_name(uint32_t power_mode)
+{
+  switch (anchor_smart_clamp_power_mode(power_mode))
+  {
+  case ANCHOR_POWER_MODE_PERFORMANCE: return "PERFORMANCE";
+  case ANCHOR_POWER_MODE_BALANCED:    return "BALANCED";
+  case ANCHOR_POWER_MODE_ECO:         return "ECO";
+  case ANCHOR_POWER_MODE_DEEP_ECO:    return "DEEP_ECO";
+  default:                            return "BALANCED";
+  }
+}
+
+static uint32_t anchor_smart_active_power_mode(uint32_t configured_mode)
+{
+  uint32_t target = anchor_smart_clamp_power_mode(configured_mode);
+  uint32_t active = anchor_smart_clamp_power_mode(s_anchor_smart_rx.active_power_mode);
+
+  if (!s_anchor_smart_rx.initialized)
+  {
+    return target;
+  }
+
+  if (active > target)
+  {
+    active = target;
+  }
+
+  return active;
+}
+
+static void anchor_smart_set_active_level(uint32_t power_mode, bool log_transition)
+{
+  uint32_t level = anchor_smart_clamp_power_mode(power_mode);
+
+  if (s_anchor_smart_rx.active_power_mode != level)
+  {
+    if (log_transition)
+    {
+      RLOG_I(LOG_OBJECT_CODE_RANGING, "[ANCHOR] RX level -> %s",
+             anchor_smart_power_mode_name(level));
+    }
+    s_anchor_smart_rx.active_power_mode = level;
+  }
+}
 
 static inline bool dstwr_forward_interval_40(uint64_t later, uint64_t earlier, uint64_t *out_delta)
 {
@@ -1534,7 +1595,7 @@ ds_twr_anchor_tdma(uint8_t anchor_id, uint8_t num_anchors, const uint8_t *anchor
   uint64_t rx_start_dw = (expected_final_dw - tdma_us_to_dw(1000U)) & DW_MASK_40;
   int rx_res = -1;
   
-  if (sys_config_get()->uwb.power_mode == ANCHOR_POWER_MODE_PERFORMANCE)
+  if (anchor_smart_active_power_mode(sys_config_get()->uwb.power_mode) == ANCHOR_POWER_MODE_PERFORMANCE)
   {
       rx_res = hal_rx_wait_valid_msg_at(final_buf, sizeof(final_buf), &final_len,
                                         MW_DSTWR_MSG_TYPE_FINAL, final_timeout_us,
@@ -2988,6 +3049,8 @@ static bool anchor_smart_tick_due(uint32_t now, uint32_t due)
 
 static uint32_t anchor_smart_discovery_interval_ms(uint32_t power_mode)
 {
+  power_mode = anchor_smart_clamp_power_mode(power_mode);
+  if (power_mode == ANCHOR_POWER_MODE_PERFORMANCE) return 0U;
   if (power_mode == ANCHOR_POWER_MODE_ECO) return ANCHOR_SMART_DISCOVERY_ECO_MS;
   if (power_mode == ANCHOR_POWER_MODE_DEEP_ECO) return ANCHOR_SMART_DISCOVERY_DEEP_ECO_MS;
   return ANCHOR_SMART_DISCOVERY_BALANCED_MS;
@@ -3017,16 +3080,64 @@ static void anchor_smart_switch_discovery(uint32_t now_tick, bool log_transition
   }
   s_anchor_smart_rx.mode = ANCHOR_RX_DISCOVERY;
   s_anchor_smart_rx.track_misses = 0U;
+  s_anchor_smart_rx.stable_successes = 0U;
+  anchor_smart_set_active_level(ANCHOR_POWER_MODE_PERFORMANCE, log_transition);
   s_anchor_smart_rx.next_window_tick = now_tick;
   s_anchor_smart_rx.next_poll_tick = 0U;
   s_anchor_smart_rx.next_poll_dw = 0ULL;
   s_anchor_smart_rx.initialized = true;
 }
 
+static uint32_t anchor_smart_tracking_pre_poll_ms(void)
+{
+  uint32_t active_mode = anchor_smart_active_power_mode(sys_config_get()->uwb.power_mode);
+  uint32_t pre_ms = ANCHOR_SMART_TRACK_PRE_POLL_MS;
+
+  if (active_mode == ANCHOR_POWER_MODE_PERFORMANCE)
+  {
+    pre_ms += 10U;
+  }
+  else if (active_mode == ANCHOR_POWER_MODE_ECO)
+  {
+    pre_ms -= 3U;
+  }
+  else if (active_mode == ANCHOR_POWER_MODE_DEEP_ECO)
+  {
+    pre_ms -= 5U;
+  }
+
+  pre_ms += ((uint32_t)s_anchor_smart_rx.track_misses * ANCHOR_SMART_TRACK_MISS_PRE_STEP_MS);
+  return anchor_smart_clamp_u32(pre_ms, 8U, ANCHOR_SMART_TRACK_MAX_PRE_POLL_MS);
+}
+
+static uint32_t anchor_smart_tracking_late_margin_ms(void)
+{
+  uint32_t active_mode = anchor_smart_active_power_mode(sys_config_get()->uwb.power_mode);
+  uint32_t late_ms = ANCHOR_SMART_TRACK_LATE_MARGIN_MS;
+
+  if (active_mode == ANCHOR_POWER_MODE_PERFORMANCE)
+  {
+    late_ms += 20U;
+  }
+  else if (active_mode == ANCHOR_POWER_MODE_ECO)
+  {
+    late_ms -= 5U;
+  }
+  else if (active_mode == ANCHOR_POWER_MODE_DEEP_ECO)
+  {
+    late_ms -= 10U;
+  }
+
+  late_ms += ((uint32_t)s_anchor_smart_rx.track_misses * ANCHOR_SMART_TRACK_MISS_LATE_STEP_MS);
+  return late_ms;
+}
+
 static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uint32_t now_tick)
 {
   uint32_t period_ms = sys_config_get()->uwb.ranging_period_ms;
   uint32_t poll_tick = anchor_smart_estimate_poll_tick(result, now_tick);
+  uint32_t pre_poll_ms = anchor_smart_tracking_pre_poll_ms();
+  bool was_tracking = (s_anchor_smart_rx.mode == ANCHOR_RX_TRACKING);
 
   if (period_ms == 0U) {
     period_ms = DEFAULT_RANGING_PERIOD_MS;
@@ -3038,32 +3149,43 @@ static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uin
 
   s_anchor_smart_rx.mode = ANCHOR_RX_TRACKING;
   s_anchor_smart_rx.track_misses = 0U;
+  if (!was_tracking) {
+    s_anchor_smart_rx.stable_successes = 0U;
+  }
   s_anchor_smart_rx.next_poll_tick = poll_tick + period_ms;
   s_anchor_smart_rx.next_poll_dw = (result && result->t2 != 0ULL)
       ? ((result->t2 + tdma_us_to_dw(period_ms * 1000U)) & DW_MASK_40)
       : 0ULL;
-  s_anchor_smart_rx.next_window_tick = s_anchor_smart_rx.next_poll_tick - ANCHOR_SMART_TRACK_PRE_POLL_MS;
+  s_anchor_smart_rx.next_window_tick = s_anchor_smart_rx.next_poll_tick - pre_poll_ms;
   s_anchor_smart_rx.initialized = true;
 }
 
 static uint32_t anchor_smart_tracking_window_ms(void)
 {
   uint32_t period_ms = sys_config_get()->uwb.ranging_period_ms;
-  uint32_t window_ms = ANCHOR_SMART_TRACK_PRE_POLL_MS + ANCHOR_SMART_TRACK_LATE_MARGIN_MS;
+  uint32_t window_ms = anchor_smart_tracking_pre_poll_ms() + anchor_smart_tracking_late_margin_ms();
+  uint32_t max_window_ms = ANCHOR_SMART_TRACK_MAX_WINDOW_MS;
 
-  if (period_ms > 0U) {
-    uint32_t cap = period_ms / 2U;
-    if (cap > 0U) {
-      window_ms = anchor_smart_clamp_u32(window_ms, ANCHOR_SMART_TRACK_MIN_WINDOW_MS, cap);
+  if (period_ms > ANCHOR_SMART_TRACK_REARM_GAP_MS) {
+    uint32_t period_cap = period_ms - ANCHOR_SMART_TRACK_REARM_GAP_MS;
+    if (period_cap < max_window_ms) {
+      max_window_ms = period_cap;
     }
   }
 
-  return anchor_smart_clamp_u32(window_ms, ANCHOR_SMART_TRACK_MIN_WINDOW_MS, ANCHOR_SMART_TRACK_MAX_WINDOW_MS);
+  if (max_window_ms < ANCHOR_SMART_TRACK_MIN_WINDOW_MS) {
+    max_window_ms = ANCHOR_SMART_TRACK_MIN_WINDOW_MS;
+  }
+
+  return anchor_smart_clamp_u32(window_ms, ANCHOR_SMART_TRACK_MIN_WINDOW_MS, max_window_ms);
 }
 
 static uint32_t anchor_smart_window_timeout_ms(uint32_t power_mode, uint32_t default_rx_timeout_ms)
 {
-  if (power_mode == ANCHOR_POWER_MODE_PERFORMANCE) {
+  uint32_t active_mode = anchor_smart_active_power_mode(power_mode);
+
+  if (active_mode == ANCHOR_POWER_MODE_PERFORMANCE &&
+      s_anchor_smart_rx.mode != ANCHOR_RX_TRACKING) {
     return (default_rx_timeout_ms == 0U) ? DEFAULT_RX_TIMEOUT_MS : default_rx_timeout_ms;
   }
 
@@ -3072,6 +3194,40 @@ static uint32_t anchor_smart_window_timeout_ms(uint32_t power_mode, uint32_t def
   }
 
   return ANCHOR_SMART_DISCOVERY_ON_MS;
+}
+
+static void anchor_smart_note_success(uint32_t configured_mode)
+{
+  uint32_t target_mode = anchor_smart_clamp_power_mode(configured_mode);
+  uint32_t active_mode = anchor_smart_active_power_mode(target_mode);
+
+  s_anchor_smart_rx.track_misses = 0U;
+
+  if (active_mode >= target_mode) {
+    s_anchor_smart_rx.stable_successes = 0U;
+    anchor_smart_set_active_level(target_mode, false);
+    return;
+  }
+
+  s_anchor_smart_rx.stable_successes++;
+  if (s_anchor_smart_rx.stable_successes >= ANCHOR_SMART_LEVEL_STABLE_SUCCESSES)
+  {
+    anchor_smart_set_active_level(active_mode + 1U, true);
+    s_anchor_smart_rx.stable_successes = 0U;
+  }
+}
+
+static void anchor_smart_note_tracking_miss(uint32_t configured_mode)
+{
+  uint32_t active_mode = anchor_smart_active_power_mode(configured_mode);
+
+  s_anchor_smart_rx.stable_successes = 0U;
+  s_anchor_smart_rx.track_misses++;
+
+  if (active_mode > ANCHOR_POWER_MODE_PERFORMANCE)
+  {
+    anchor_smart_set_active_level(active_mode - 1U, true);
+  }
 }
 
 static void anchor_smart_prepare_poll_rx_plan(void)
@@ -3087,7 +3243,7 @@ static void anchor_smart_prepare_poll_rx_plan(void)
   s_anchor_poll_rx_plan.enabled = true;
   s_anchor_poll_rx_plan.rx_start_dw =
       (s_anchor_smart_rx.next_poll_dw -
-       tdma_us_to_dw(ANCHOR_SMART_TRACK_PRE_POLL_MS * 1000U)) & DW_MASK_40;
+       tdma_us_to_dw(anchor_smart_tracking_pre_poll_ms() * 1000U)) & DW_MASK_40;
 }
 
 sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
@@ -3095,7 +3251,7 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
                                                   uint32_t rx_timeout_ms)
 {
   uint32_t now = HAL_GetTick();
-  uint32_t power_mode = sys_config_get()->uwb.power_mode;
+  uint32_t power_mode = anchor_smart_clamp_power_mode(sys_config_get()->uwb.power_mode);
   uint8_t anchor_id = sys_config_get()->uwb.device_id;
   bool explicit_start = (s_ctx.state != STATE_IDLE);
   bool auto_started = false;
@@ -3115,6 +3271,9 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
 
   if (power_mode == ANCHOR_POWER_MODE_PERFORMANCE) {
     s_anchor_smart_rx.mode = ANCHOR_RX_PERFORMANCE;
+    anchor_smart_set_active_level(ANCHOR_POWER_MODE_PERFORMANCE, false);
+    s_anchor_smart_rx.stable_successes = 0U;
+    s_anchor_smart_rx.track_misses = 0U;
     s_anchor_smart_rx.next_window_tick = now;
   } else if (s_anchor_smart_rx.mode == ANCHOR_RX_PERFORMANCE) {
     anchor_smart_switch_discovery(now, true);
@@ -3146,6 +3305,7 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
   if (err == SYS_RANGING_OK) {
     if (power_mode != ANCHOR_POWER_MODE_PERFORMANCE) {
       anchor_smart_switch_tracking(&s_ctx.result_single, HAL_GetTick());
+      anchor_smart_note_success(power_mode);
     }
     return SYS_RANGING_OK;
   }
@@ -3164,21 +3324,23 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
   if (power_mode == ANCHOR_POWER_MODE_PERFORMANCE) {
     s_anchor_smart_rx.next_window_tick = HAL_GetTick();
   } else if (s_anchor_smart_rx.mode == ANCHOR_RX_TRACKING) {
-    s_anchor_smart_rx.track_misses++;
+    anchor_smart_note_tracking_miss(power_mode);
     if (s_anchor_smart_rx.track_misses > ANCHOR_SMART_TRACK_MAX_MISSES) {
       anchor_smart_switch_discovery(HAL_GetTick(), true);
     } else {
       uint32_t period_ms = sys_config_get()->uwb.ranging_period_ms;
+      uint32_t pre_poll_ms = anchor_smart_tracking_pre_poll_ms();
       if (period_ms == 0U) period_ms = DEFAULT_RANGING_PERIOD_MS;
       s_anchor_smart_rx.next_poll_tick += period_ms;
       if (s_anchor_smart_rx.next_poll_dw != 0ULL) {
         s_anchor_smart_rx.next_poll_dw =
             (s_anchor_smart_rx.next_poll_dw + tdma_us_to_dw(period_ms * 1000U)) & DW_MASK_40;
       }
-      s_anchor_smart_rx.next_window_tick = s_anchor_smart_rx.next_poll_tick - ANCHOR_SMART_TRACK_PRE_POLL_MS;
+      s_anchor_smart_rx.next_window_tick = s_anchor_smart_rx.next_poll_tick - pre_poll_ms;
     }
   } else {
-    s_anchor_smart_rx.next_window_tick = HAL_GetTick() + anchor_smart_discovery_interval_ms(power_mode);
+    uint32_t active_mode = anchor_smart_active_power_mode(power_mode);
+    s_anchor_smart_rx.next_window_tick = HAL_GetTick() + anchor_smart_discovery_interval_ms(active_mode);
   }
 
   return SYS_RANGING_ERR_BUSY;
