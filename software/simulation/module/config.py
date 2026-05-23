@@ -88,7 +88,7 @@ R_UWB_TEST = 0.1**2
 # MANUAL values (Editable from GUI else block)
 Q_A_MANUAL = 0.04
 Q_G_MANUAL = 4.78e-07
-R_UWB_MANUAL = 0.0001
+R_UWB_MANUAL = 0.01
 
 # Logic to select final values
 if TEST_UKF_Q_R_Params:

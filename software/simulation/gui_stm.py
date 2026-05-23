@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import signal
 import numpy as np
 from PyQt5 import QtWidgets, uic, QtCore
 
@@ -375,5 +376,9 @@ class UKFSimulationGUI_STM(QtWidgets.QMainWindow):
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     window = UKFSimulationGUI_STM()
+    signal.signal(signal.SIGINT, lambda *_: (window.close(), app.quit()))
+    sigint_timer = QtCore.QTimer()
+    sigint_timer.timeout.connect(lambda: None)
+    sigint_timer.start(100)
     window.show()
     sys.exit(app.exec())

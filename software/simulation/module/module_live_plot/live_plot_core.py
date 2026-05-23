@@ -1,5 +1,6 @@
 import sys
 import serial
+from serial.tools import list_ports
 import time
 import os
 import numpy as np
@@ -13,7 +14,7 @@ from PyQt5 import uic
 import pyqtgraph as pg
 
 from ..config import (
-    TARGET_PORT, UART_BAUDRATE, LIVE_FRAME_SIZE, UART_SOF,
+    UART_BAUDRATE, LIVE_FRAME_SIZE, UART_SOF,
     PRINT_DATA, MAX_SAMPLES, ROOM_SIZE_M, ANCHOR_POSITIONS, IMUSample, CSV_UKF_FILENAME_SUFFIX, CSV_UKF_FILENAME_PREFIX,
     GROUND_TRUTH_D1, GROUND_TRUTH_D2, GROUND_TRUTH_D3, GROUND_TRUTH_D4
 )
@@ -110,16 +111,94 @@ class DataThread(QThread):
                 pass
         self.serial_port = None
 
-    def _connect_serial(self):
-        print(f"[INFO] Trying to connect to {TARGET_PORT}...")
-        self.serial_port = serial.Serial(
-            port=TARGET_PORT,
+    def _serial_candidates(self):
+        ignored_ports = {"COM1", "COM2"}
+        candidates = []
+        for port_info in list_ports.comports():
+            device = (port_info.device or "").upper()
+            if device in ignored_ports:
+                continue
+            text = " ".join(
+                str(value or "")
+                for value in (
+                    port_info.device,
+                    port_info.description,
+                    port_info.manufacturer,
+                    port_info.hwid,
+                )
+            ).upper()
+            if "BLUETOOTH" in text:
+                continue
+
+            score = 0
+            if "USB" in text or "VID:PID" in text:
+                score += 100
+            if port_info.vid is not None or port_info.pid is not None:
+                score += 80
+            if any(name in text for name in ("STM", "STLINK", "VCP", "CP210", "CH340", "CH910", "FTDI", "USB-SERIAL", "USB SERIAL")):
+                score += 40
+            candidates.append((score, port_info))
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [port_info for _, port_info in candidates]
+
+    def _probe_port_for_live_frame(self, serial_port, probe_seconds=0.8):
+        deadline = time.monotonic() + probe_seconds
+        probe_buffer = bytearray()
+        while self.running and time.monotonic() < deadline:
+            waiting = serial_port.in_waiting
+            data = serial_port.read(waiting if waiting > 0 else 1)
+            if data:
+                probe_buffer.extend(data)
+                frames = self._extract_live_frames(bytearray(probe_buffer))
+                if frames:
+                    return True, bytes(probe_buffer)
+        return False, bytes(probe_buffer)
+
+    def _open_serial_port(self, port_name):
+        return serial.Serial(
+            port=port_name,
             baudrate=UART_BAUDRATE,
             timeout=0.02,
             write_timeout=0
         )
-        self.connected_signal.emit(TARGET_PORT)
-        print(f"[INFO] Successfully connected to {TARGET_PORT} at {UART_BAUDRATE} baud")
+
+    def _connect_serial(self):
+        candidates = self._serial_candidates()
+        if not candidates:
+            raise serial.SerialException("No USB serial COM port found")
+
+        fallback_port_info = None
+        for port_info in candidates:
+            port_name = port_info.device
+            print(f"[INFO] Probing {port_name}: {port_info.description}")
+            try:
+                serial_port = self._open_serial_port(port_name)
+            except serial.SerialException as e:
+                print(f"[WARNING] Cannot open {port_name}: {e}")
+                continue
+
+            if fallback_port_info is None:
+                fallback_port_info = port_info
+
+            matched, probe_data = self._probe_port_for_live_frame(serial_port)
+            if matched:
+                if probe_data:
+                    self._rx_queue.put(probe_data)
+                self.serial_port = serial_port
+                self.connected_signal.emit(port_name)
+                print(f"[INFO] Connected to live UWB stream on {port_name} at {UART_BAUDRATE} baud")
+                return
+
+            serial_port.close()
+
+        if fallback_port_info is None:
+            raise serial.SerialException("No usable USB serial COM port found")
+
+        port_name = fallback_port_info.device
+        self.serial_port = self._open_serial_port(port_name)
+        self.connected_signal.emit(port_name)
+        print(f"[INFO] Connected to best USB candidate {port_name} at {UART_BAUDRATE} baud")
 
     def _reader_loop(self):
         while self.running and self.serial_port and self.serial_port.is_open:
@@ -134,7 +213,8 @@ class DataThread(QThread):
                     self._dropped_chunks += 1
                     print("[WARNING] RX queue full; host cannot keep up with STM stream")
             except (serial.SerialException, OSError) as e:
-                print(f"[WARNING] Serial reader stopped on {TARGET_PORT}: {e}")
+                port_name = self.serial_port.port if self.serial_port else "USB serial"
+                print(f"[WARNING] Serial reader stopped on {port_name}: {e}")
                 break
 
     def _start_reader(self):
@@ -378,7 +458,7 @@ class DataThread(QThread):
                         self._open_new_csv()
                     self._start_reader()
                 except serial.SerialException as e:
-                    print(f"[WARNING] Failed to connect to {TARGET_PORT}: {e}")
+                    print(f"[WARNING] Failed to auto-connect USB serial: {e}")
                     self.disconnected_signal.emit()
                     time.sleep(1.0) # Wait and retry
                     continue
@@ -417,7 +497,8 @@ class DataThread(QThread):
 
                 self._print_stats(frame_count)
             except serial.SerialException as e:
-                print(f"[WARNING] Disconnected from {TARGET_PORT}: {e}")
+                port_name = self.serial_port.port if self.serial_port else "USB serial"
+                print(f"[WARNING] Disconnected from {port_name}: {e}")
                 self._close_serial()
             except Exception as e:
                 print(f"[ERROR] Unexpected error: {e}")
@@ -552,7 +633,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def on_disconnected(self):
-        self.lineEdit_COM.setText(f"Waiting for {TARGET_PORT}...")
+        self.lineEdit_COM.setText("Waiting for USB COM...")
         self.lineEdit_COM.setStyleSheet("background-color: yellow;")
 
     @pyqtSlot(dict)
