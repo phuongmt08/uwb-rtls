@@ -65,6 +65,8 @@ function updatePlots(res, samples, rawData) {
         Plotly.restyle('fp_amp', { x: [x_axis], y: [sliced_amp[i]], customdata: [plotData.times] }, [i]);
         Plotly.restyle('fp_snr', { x: [x_axis], y: [sliced_snr[i]], customdata: [plotData.times] }, [i]);
     }
+    Plotly.relayout('fp_amp', { 'yaxis.autorange': true });
+    Plotly.relayout('fp_snr', { 'yaxis.autorange': true });
 
     // 4. Sync layout
     const syncLayout = { 'xaxis.range': [0, x_axis.length], 'xaxis2.range': [0, total_time], 'xaxis2.showticklabels': true, 'xaxis2.autorange': false };

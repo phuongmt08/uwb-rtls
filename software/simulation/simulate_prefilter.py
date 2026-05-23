@@ -105,10 +105,6 @@ def parse_log(filepath):
         \s+py:\s*(?P<py>[\d.-]+)               # Pos Y (Firmware)
         \s+dt:\s*(?P<dt>[\d.-]+)               # Delta Time
         .*?                                    # Skip unknown content
-        (?:fp_amp_norm:\s*\[(?P<amp>[\d.,\s]+)\])? # Amplitude (Optional)
-        \s*
-        (?:fp_snr:\s*\[(?P<snr>[\d.,\s]+)\])?      # SNR (Optional)
-        \s*
         (?:mask:\s*(?P<mask>\d+)\s+)?              # Anchor Mask (Optional)
         d1:\s*(?P<d1>[\d.-]+)\s+                   # Distance 1
         d2:\s*(?P<d2>[\d.-]+)\s+                   # Distance 2
@@ -127,14 +123,25 @@ def parse_log(filepath):
                     def parse_float_list(s):
                         return [float(x.strip()) for x in (s or "").split(',') if x.strip()] or [0,0,0,0]
 
+                    def parse_quality(prefix):
+                        bracket = re.search(rf"{prefix}:\s*\[([\d.,\s-]+)\]", raw_line)
+                        if bracket:
+                            return parse_float_list(bracket.group(1))
+
+                        values = []
+                        for anchor_idx in range(1, 5):
+                            scalar = re.search(rf"{prefix}{anchor_idx}:\s*([\d.-]+)", raw_line)
+                            values.append(float(scalar.group(1)) if scalar else 0)
+                        return values
+
                     data.append({
                         'line_no': line_no,
                         'raw_line': raw_line,
                         'type': d['type'],
                         'ax': float(d['ax']), 'ay': float(d['ay']), 'gz': float(d['gz']),
                         'px_fw': float(d['px']), 'py_fw': float(d['py']), 'dt': float(d['dt']),
-                        'fp_amp_norm': parse_float_list(d.get('amp')),
-                        'fp_snr': parse_float_list(d.get('snr')),
+                        'fp_amp_norm': parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0],
+                        'fp_snr': parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0],
                         'mask': int(d['mask']) if d.get('mask') else 15,
                         'distances': [float(d['d1']), float(d['d2']), float(d['d3']), float(d['d4'])],
                         'err': int(d['err'])
@@ -244,6 +251,25 @@ def load_worker_js_bundle():
     )
     return prefix + "\n\n// ---- src/workers/sim_worker.js ----\n" + worker
 
+def get_report_source_mtime():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    paths = [
+        'template_prefilter.html',
+        'src/core/config.js',
+        'src/core/math_utils.js',
+        'src/view/plot_init.js',
+        'src/view/plot_updater.js',
+        'src/controller/ui_utils.js',
+        'src/controller/ui_controller.js',
+        'src/workers/sim_worker.js',
+        'src/filters/prefilter.js',
+    ]
+    return max(
+        os.path.getmtime(os.path.join(script_dir, path))
+        for path in paths
+        if os.path.exists(os.path.join(script_dir, path))
+    )
+
 def render_template(template_content, filename, payload, ground_truths, app_js_bundle, worker_js_bundle):
     html = template_content.replace('__FILENAME__', filename)
     html = html.replace('__DATA_JSON__', json.dumps(payload))
@@ -263,7 +289,7 @@ def main():
     if not logs: return
 
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_prefilter.html')
-    template_mtime = os.path.getmtime(template_path) if os.path.exists(template_path) else 0
+    report_source_mtime = get_report_source_mtime() if os.path.exists(template_path) else 0
     template_content = load_template()
     ground_truths = load_ground_truths()
     app_js_bundle = load_app_js_bundle()
@@ -282,7 +308,7 @@ def main():
             html_exists = os.path.exists(rp)
             html_mtime = os.path.getmtime(rp) if html_exists else 0
             
-            needs_gen = not html_exists or log_mtime > html_mtime or template_mtime > html_mtime
+            needs_gen = not html_exists or log_mtime > html_mtime or report_source_mtime > html_mtime
             
             p = run_gen(lp)
             if not p: continue
