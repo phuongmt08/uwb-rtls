@@ -12,6 +12,7 @@
 /* Includes ----------------------------------------------------------------- */
 #include "sys_config.h"
 #include "sys_logger.h"
+#include "otp/otp.h"
 #include <string.h>
 #include <stddef.h>
 #include "version.h"
@@ -22,6 +23,7 @@
 /* Private defines ---------------------------------------------------------- */
 #define CONFIG_RAM_MAGIC    0xC0FEC0DE
 #define CFG_LOG(fmt, ...) RLOG_I(LOG_OBJECT_CODE_SYS_CFG, fmt, ##__VA_ARGS__)
+#define FACTORY_OTP_CONFIRM_MAGIC 0x4F545057u /* 'OTPW' */
 
 /* Flash sector addresses are defined in sys_flash_storage.h */
 
@@ -37,6 +39,17 @@ typedef struct {
     uint8_t       _reserved[4];
     uint32_t      crc32;        /* must be last */
 } sys_config_storage_t;
+
+typedef struct {
+    uint8_t device_type;
+    uint8_t mfg_date[3];        /* day, month, year - 2000 */
+    uint8_t hw_rev;
+} __attribute__((packed)) sys_config_otp_device_info_t;
+
+typedef struct {
+    uint16_t tx_delay;
+    uint16_t rx_delay;
+} __attribute__((packed)) sys_config_otp_antenna_delay_t;
 
 static sys_config_storage_t g_storage;
 
@@ -68,15 +81,120 @@ static bool sys_config_host_transport_valid(host_transport_t host_transport)
            host_transport == HOST_TRANSPORT_UART;
 }
 
-static device_type_t sys_config_default_device_type_from_role(device_role_t role)
+static device_role_t sys_config_default_role_from_device_type(device_type_t device_type)
 {
-    if (role == DEVICE_ROLE_TAG) {
-        return DEVICE_TYPE_TAG;
+    if (device_type == DEVICE_TYPE_TAG) {
+        return DEVICE_ROLE_TAG;
     }
-    if (role == DEVICE_ROLE_ANCHOR) {
-        return DEVICE_TYPE_ANCHOR;
+    return DEVICE_ROLE_ANCHOR;
+}
+
+static const char *sys_config_device_type_name(device_type_t device_type)
+{
+    switch (device_type) {
+    case DEVICE_TYPE_TAG:
+        return "TAG";
+    case DEVICE_TYPE_ANCHOR:
+        return "ANCHOR";
+    case DEVICE_TYPE_GATEWAY:
+        return "GATEWAY";
+    case DEVICE_TYPE_DEBUG_TOOL:
+        return "DEBUG_TOOL";
+    default:
+        return "UNSPECIFIED";
     }
-    return DEVICE_TYPE_UNSPECIFIED;
+}
+
+static bool sys_config_mfg_date_pack(uint32_t date_ddmmyyyy, uint8_t packed[3])
+{
+    if (!packed) {
+        return false;
+    }
+
+    uint32_t day = date_ddmmyyyy / 1000000u;
+    uint32_t month = (date_ddmmyyyy / 10000u) % 100u;
+    uint32_t year = date_ddmmyyyy % 10000u;
+
+    if (day == 0u || day > 31u || month == 0u || month > 12u ||
+        year < 2000u || year > 2255u) {
+        return false;
+    }
+
+    packed[0] = (uint8_t)day;
+    packed[1] = (uint8_t)month;
+    packed[2] = (uint8_t)(year - 2000u);
+    return true;
+}
+
+static uint32_t sys_config_mfg_date_unpack(const uint8_t packed[3])
+{
+    uint32_t day = packed[0];
+    uint32_t month = packed[1];
+    uint32_t year = 2000u + packed[2];
+    return day * 1000000u + month * 10000u + year;
+}
+
+static otp_err_t sys_config_otp_get_device_info(sys_config_otp_device_info_t *info)
+{
+    if (!info) {
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    uint8_t len = 0u;
+    otp_err_t err = otp_get(OTP_TYPE_DEVICE_INFO, info, sizeof(*info), &len);
+    if (err != OTP_OK) {
+        return err;
+    }
+
+    return (len == sizeof(*info)) ? OTP_OK : OTP_ERR_INVALID_ARG;
+}
+
+static otp_err_t sys_config_otp_set_device_info(device_type_t device_type, uint32_t mfg_date, uint8_t hw_rev)
+{
+    if (device_type == DEVICE_TYPE_UNSPECIFIED || !sys_config_device_type_valid(device_type)) {
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    sys_config_otp_device_info_t info = {
+        .device_type = (uint8_t)device_type,
+        .hw_rev = hw_rev,
+    };
+
+    if (!sys_config_mfg_date_pack(mfg_date, info.mfg_date)) {
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    return otp_set(OTP_TYPE_DEVICE_INFO, sizeof(info), &info);
+}
+
+static otp_err_t sys_config_otp_get_antenna_delay(uint16_t *tx_delay, uint16_t *rx_delay)
+{
+    if (!tx_delay || !rx_delay) {
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    sys_config_otp_antenna_delay_t ant = {0};
+    uint8_t len = 0u;
+    otp_err_t err = otp_get(OTP_TYPE_ANTENNA_DELAY, &ant, sizeof(ant), &len);
+    if (err != OTP_OK) {
+        return err;
+    }
+    if (len != sizeof(ant)) {
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    *tx_delay = ant.tx_delay;
+    *rx_delay = ant.rx_delay;
+    return OTP_OK;
+}
+
+static otp_err_t sys_config_otp_set_antenna_delay(uint16_t tx_delay, uint16_t rx_delay)
+{
+    sys_config_otp_antenna_delay_t ant = {
+        .tx_delay = tx_delay,
+        .rx_delay = rx_delay,
+    };
+    return otp_set(OTP_TYPE_ANTENNA_DELAY, sizeof(ant), &ant);
 }
 
 /* ========================================================================== */
@@ -97,6 +215,27 @@ void sys_config_init(void)
         }
     }
 
+    /* Load and override with OTP factory values if available */
+    sys_config_otp_device_info_t otp_info = {0};
+    if (sys_config_otp_get_device_info(&otp_info) == OTP_OK) {
+        device_type_t otp_device_type = (device_type_t)otp_info.device_type;
+        if (sys_config_set_device_type(otp_device_type) == 0) {
+            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Type overridden by OTP factory config: 0x%02X", otp_info.device_type);
+        } else {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid OTP device type ignored: 0x%02X", otp_info.device_type);
+        }
+    }
+
+    uint16_t otp_tx_delay = 0;
+    uint16_t otp_rx_delay = 0;
+    if (sys_config_otp_get_antenna_delay(&otp_tx_delay, &otp_rx_delay) == OTP_OK) {
+        sys_config_t *cfg = sys_config_get();
+        cfg->uwb.tx_antenna_delay = otp_tx_delay;
+        cfg->uwb.rx_antenna_delay = otp_rx_delay;
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Antenna Delays loaded from OTP: TX=%u, RX=%u", 
+               cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
+    }
+
     sys_config_print();
 }
 
@@ -112,7 +251,6 @@ int sys_config_set_role(device_role_t role)
         return -1;
     }
     g_storage.config.uwb.role = role;
-    g_storage.config.device_type = sys_config_default_device_type_from_role(role);
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Role set to: %s",
            role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
     return 0;
@@ -156,6 +294,54 @@ int sys_config_set_device_id(uint8_t id)
     g_storage.config.uwb.device_id = id;
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device ID set to: 0x%02X", id);
     return 0;
+}
+
+otp_err_t sys_config_factory_otp_write(const protobuf_factory_otp_write_t *req)
+{
+    if (!req || req->confirm_magic != FACTORY_OTP_CONFIRM_MAGIC) {
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    otp_err_t err = OTP_ERR_INVALID_ARG;
+
+    switch (req->otp_type) {
+    case OTP_TYPE_DEVICE_INFO:
+        if (req->device_type == DEVICE_TYPE_UNSPECIFIED ||
+            !sys_config_device_type_valid((device_type_t)req->device_type)) {
+            return OTP_ERR_INVALID_ARG;
+        }
+        if (req->value_u8 > UINT8_MAX) {
+            return OTP_ERR_INVALID_ARG;
+        }
+        err = sys_config_otp_set_device_info((device_type_t)req->device_type,
+                                             req->value_u32,
+                                             (uint8_t)req->value_u8);
+        break;
+
+    case OTP_TYPE_ANTENNA_DELAY:
+        if (req->tx_antenna_delay > UINT16_MAX || req->rx_antenna_delay > UINT16_MAX) {
+            return OTP_ERR_INVALID_ARG;
+        }
+        err = sys_config_otp_set_antenna_delay((uint16_t)req->tx_antenna_delay,
+                                               (uint16_t)req->rx_antenna_delay);
+        break;
+
+    default:
+        return OTP_ERR_INVALID_ARG;
+    }
+
+    if (err != OTP_OK) {
+        return err;
+    }
+
+    if (req->otp_type == OTP_TYPE_DEVICE_INFO) {
+        (void)sys_config_set_device_type((device_type_t)req->device_type);
+    } else if (req->otp_type == OTP_TYPE_ANTENNA_DELAY) {
+        g_storage.config.uwb.tx_antenna_delay = req->tx_antenna_delay;
+        g_storage.config.uwb.rx_antenna_delay = req->rx_antenna_delay;
+    }
+
+    return OTP_OK;
 }
 
 int sys_config_save(void)
@@ -242,15 +428,8 @@ int sys_config_load(void)
     }
 
     if (!sys_config_device_type_valid(temp_storage.config.device_type)) {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid device_type in flash, deriving from role");
-        temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
-        normalize_and_save = true;
-    }
-    else if (temp_storage.config.device_type != sys_config_default_device_type_from_role(temp_storage.config.uwb.role)) {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
-               "device_type/role mismatch in flash, normalizing to %s",
-               temp_storage.config.uwb.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
-        temp_storage.config.device_type = sys_config_default_device_type_from_role(temp_storage.config.uwb.role);
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid device_type in flash, forcing default");
+        temp_storage.config.device_type = DEFAULT_DEVICE_TYPE;
         normalize_and_save = true;
     }
 
@@ -350,7 +529,7 @@ void sys_config_reset_to_defaults(void)
     
     /* UWB Base Configuration
        ---------- */
-    g_storage.config.uwb.role                               =           DEFAULT_DEVICE_ROLE;
+    g_storage.config.uwb.role                               =           sys_config_default_role_from_device_type(DEFAULT_DEVICE_TYPE);
     g_storage.config.uwb.device_id                          =           DEFAULT_DEVICE_ID;
     
     /* UWB Radio Parameters
@@ -408,6 +587,16 @@ void sys_config_reset_to_defaults(void)
 
 void sys_config_print(void)
 {
+    /* Read OTP values to indicate sources */
+    sys_config_otp_device_info_t otp_info = {0};
+    bool has_otp_device = (sys_config_otp_get_device_info(&otp_info) == OTP_OK);
+
+    uint16_t otp_tx_delay = 0;
+    uint16_t otp_rx_delay = 0;
+    bool has_otp_ant = (sys_config_otp_get_antenna_delay(&otp_tx_delay, &otp_rx_delay) == OTP_OK);
+
+    uint32_t otp_mfg_date = has_otp_device ? sys_config_mfg_date_unpack(otp_info.mfg_date) : 0u;
+
     CFG_LOG("");
     CFG_LOG("=========== FIRMWARE VERSION ===========");
     CFG_LOG("FW Version    : %d.%d.%d.%d", FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH, FW_VERSION_BUILD);
@@ -419,7 +608,28 @@ void sys_config_print(void)
     CFG_LOG("Device Role   : %s (0x%02X)",
            g_storage.config.uwb.role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR",
            (unsigned)g_storage.config.uwb.role);
-    CFG_LOG("Device Type   : %u", (unsigned)g_storage.config.device_type);
+    if (has_otp_device) {
+        CFG_LOG("Device Type   : %s (0x%02X, OTP Factory)",
+                sys_config_device_type_name(g_storage.config.device_type),
+                (unsigned)g_storage.config.device_type);
+    } else {
+        CFG_LOG("Device Type   : %s (0x%02X, Flash Default)",
+                sys_config_device_type_name(g_storage.config.device_type),
+                (unsigned)g_storage.config.device_type);
+    }
+    if (has_otp_device) {
+        CFG_LOG("Mfg Date      : %02lu/%02lu/%04lu (OTP Factory)", 
+                (unsigned long)(otp_mfg_date / 1000000), 
+                (unsigned long)((otp_mfg_date / 10000) % 100), 
+                (unsigned long)(otp_mfg_date % 10000));
+    } else {
+        CFG_LOG("Mfg Date      : Not set");
+    }
+    if (has_otp_device) {
+        CFG_LOG("HW Revision   : %u (OTP Factory)", (unsigned)otp_info.hw_rev);
+    } else {
+        CFG_LOG("HW Revision   : Not set");
+    }
     CFG_LOG("Host I/O      : %s",
            g_storage.config.host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
     CFG_LOG("Device ID     : 0x%02X", (unsigned)g_storage.config.uwb.device_id);
@@ -429,8 +639,13 @@ void sys_config_print(void)
     CFG_LOG("Data Rate     : %lu", g_storage.config.uwb.uwb_data_rate);
     CFG_LOG("Preamble Code : %lu", g_storage.config.uwb.uwb_preamble_code);
     CFG_LOG("-------------- CALIBRATION ------------");
-    CFG_LOG("TX Ant Delay  : %lu", g_storage.config.uwb.tx_antenna_delay);
-    CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
+    if (has_otp_ant) {
+        CFG_LOG("TX Ant Delay  : %lu (OTP Factory)", g_storage.config.uwb.tx_antenna_delay);
+        CFG_LOG("RX Ant Delay  : %lu (OTP Factory)", g_storage.config.uwb.rx_antenna_delay);
+    } else {
+        CFG_LOG("TX Ant Delay  : %lu", g_storage.config.uwb.tx_antenna_delay);
+        CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
+    }
     CFG_LOG("TX Power      : 0x%08lX", g_storage.config.uwb.tx_power);
     CFG_LOG("Calib MeanErr : %+.3fm", g_storage.config.calib.last_pair_error_mean_m);
     CFG_LOG("Calib Spread  : %.3fm", g_storage.config.calib.last_pair_error_spread_m);

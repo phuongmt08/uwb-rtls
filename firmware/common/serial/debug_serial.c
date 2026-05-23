@@ -14,13 +14,19 @@
 #define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
 #define DEBUG_RX_BUF_SIZE 1024u
 #define DEBUG_RX_BUF_MASK (DEBUG_RX_BUF_SIZE - 1u)
+#define DEBUG_DMA_BUF_SIZE 256u
 
 static serial_func_t s_tx_handler = 0;
-static hdlc_parser_t s_parser_usb;
-static hdlc_parser_t s_parser_uart;
+static hdlc_parser_t s_parser_host; /* Unified parser for USB and UART DMA */
+
 static uint8_t s_rx_buf[DEBUG_RX_BUF_SIZE];
 static volatile uint32_t s_rx_head = 0u;
 static volatile uint32_t s_rx_tail = 0u;
+
+static uint8_t s_dma_rx_buf[DEBUG_DMA_BUF_SIZE];
+static uint32_t s_last_dma_ptr = 0;
+
+extern DMA_HandleTypeDef hdma_usart1_rx;
 
 static inline bool debug_rx_pop(uint8_t *out)
 {
@@ -33,12 +39,36 @@ static inline bool debug_rx_pop(uint8_t *out)
     return true;
 }
 
+/**
+ * Called from ISR (IDLE or RxCplt) to process new DMA data from UART1.
+ */
+void debug_serial_uart_rx_check(void)
+{
+    uint32_t curr_dma_ptr = DEBUG_DMA_BUF_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
+
+    if (curr_dma_ptr != s_last_dma_ptr) {
+        if (curr_dma_ptr > s_last_dma_ptr) {
+            debug_serial_rx_push(&s_dma_rx_buf[s_last_dma_ptr], curr_dma_ptr - s_last_dma_ptr);
+        } else {
+            debug_serial_rx_push(&s_dma_rx_buf[s_last_dma_ptr], DEBUG_DMA_BUF_SIZE - s_last_dma_ptr);
+            if (curr_dma_ptr > 0) {
+                debug_serial_rx_push(&s_dma_rx_buf[0], curr_dma_ptr);
+            }
+        }
+        s_last_dma_ptr = curr_dma_ptr;
+    }
+}
+
 void debug_serial_init(void)
 {
-    hdlc_parser_init(&s_parser_usb);
-    hdlc_parser_init(&s_parser_uart);
+    hdlc_parser_init(&s_parser_host);
     s_rx_head = 0u;
     s_rx_tail = 0u;
+    s_last_dma_ptr = 0u;
+
+    /* Start DMA circular receive for Console/Network UART */
+    __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
+    HAL_UART_Receive_DMA(&huart1, s_dma_rx_buf, DEBUG_DMA_BUF_SIZE);
 }
 
 void debug_serial_set_tx_handler(serial_func_t handler)
@@ -68,18 +98,9 @@ int debug_serial_read(int file, char *ptr, int len, uint8_t type)
     hdlc_data_chunk_t chunk;
     uint8_t byte;
 
+    /* Both USB (via CDC Callback) and UART (via DMA) push into s_rx_buf */
     while (debug_rx_pop(&byte)) {
-        if (hdlc_parse_byte(&s_parser_usb, byte, &chunk)) {
-            CHECK(chunk.len <= (uint16_t)len, -1);
-            if (chunk.len > 0U) {
-                memcpy(ptr, chunk.data, chunk.len);
-            }
-            return (int)chunk.len;
-        }
-    }
-
-    if (HAL_UART_Receive(&huart1, &byte, 1, 0u) == HAL_OK) {
-        if (hdlc_parse_byte(&s_parser_uart, byte, &chunk)) {
+        if (hdlc_parse_byte(&s_parser_host, byte, &chunk)) {
             CHECK(chunk.len <= (uint16_t)len, -1);
             if (chunk.len > 0U) {
                 memcpy(ptr, chunk.data, chunk.len);

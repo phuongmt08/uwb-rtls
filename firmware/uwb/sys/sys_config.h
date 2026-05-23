@@ -15,6 +15,7 @@
 /* Includes ----------------------------------------------------------------- */
 #include "bsp_util.h"
 #include "config.h"
+#include "otp/otp.h"
 #include "positioning_config.h"
 #include "protos/protocol.pb.h"
 
@@ -111,6 +112,7 @@ int                    sys_config_set_calib(const sys_calib_cfg_t *calib);
 void                   sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);
 int                    sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count);
 int sys_config_set_power_mode(anchor_power_mode_t mode);
+otp_err_t sys_config_factory_otp_write(const protobuf_factory_otp_write_t *req);
 
 
 /* Storage */

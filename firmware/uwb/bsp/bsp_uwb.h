@@ -74,6 +74,12 @@ typedef struct {
 bsp_err_t bsp_uwb_init(void);
 
 /**
+ * @brief  Check if UWB driver was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_uwb_is_initialized(void);
+
+/**
  * @brief Configure UWB radio parameters from protobuf UWB config.
  * @param[in] cfg  Pointer to protobuf_uwb_cfg_t (sys_config.uwb)
  * @return BSP_OK on success, BSP_ERR on failure
@@ -225,6 +231,14 @@ void bsp_uwb_get_event_stats(bsp_uwb_event_stats_t *stats);
  */
 void bsp_uwb_clear_event(void);
 #endif
+
+/**
+ * @brief Read internal temperature and voltage of DW1000 chip.
+ * @param[out] temp  Pointer to float to store temperature in C.
+ * @param[out] vbat  Pointer to float to store battery voltage in V.
+ * @return BSP_OK on success, BSP_ERR on failure.
+ */
+bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat);
 
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */
