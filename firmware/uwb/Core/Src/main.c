@@ -59,7 +59,7 @@
 #define BL_MAGIC_VALUE (0xDEADB007UL)
 
 /* ========== Position Test Mode ========== */
-#define TEST_SEND_POS  1 /* 0=disabled, 1=enabled */
+#define TEST_SEND_POS  0 /* 0=disabled, 1=enabled */
 
 #if TEST_SEND_POS
 #define TEST_DISABLE_RANGING 1    /* 1=disable ranging (UART only), 0=keep ranging */
@@ -78,7 +78,7 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-/* USER CODE END PM */
+/* USER CODE END 	M */
 
 /* Private variables ---------------------------------------------------------*/
 
@@ -550,6 +550,20 @@ int main(void)
   
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
   cfg = sys_config_get();
+if (cfg->device_type == DEVICE_TYPE_ANCHOR){
+  /* Read DIP switch - ALWAYS OVERRIDES saved config */
+  uint8_t dip_value = bsp_io_dip_read();
+  if (dip_value == 0 || dip_value > NUM_ANCHORS)
+  {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Using saved Device ID: %u", dip_value, cfg->uwb.device_id);
+  }
+  else
+  {
+    sys_config_set_device_id(dip_value);
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
+  }
+}
+
 
   /* Initialize application based on role */
   if (cfg->uwb.role == DEVICE_ROLE_TAG) {
