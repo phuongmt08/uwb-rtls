@@ -55,7 +55,7 @@
 #define BL_MAGIC_VALUE (0xDEADB007UL)
 
 /* ========== Position Test Mode ========== */
-#define TEST_SEND_POS  0 /* 0=disabled, 1=enabled */
+#define TEST_SEND_POS  1 /* 0=disabled, 1=enabled */
 
 #if TEST_SEND_POS
 #define TEST_DISABLE_RANGING 1    /* 1=disable ranging (UART only), 0=keep ranging */
