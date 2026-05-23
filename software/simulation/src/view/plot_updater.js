@@ -3,7 +3,7 @@ function updatePlots(res, samples, rawData) {
         simPath, simPathRuled, simPathWLS, simPathTriplet,
         wlsInfo, bestTripletInfo,
         plotData, gatedDist, d2Scores, rejectIdx,
-        pos_errors, pos_errors_wls, pos_errors_triplet,
+        pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet,
         x_axis, total_time 
     } = res;
 
@@ -45,10 +45,16 @@ function updatePlots(res, samples, rawData) {
     Plotly.restyle('yaw_plot', { x: [x_axis, x_axis], y: [plotData.gz, plotData.yaw], customdata: [plotData.times, plotData.times] }, [0, 1]);
 
     Plotly.restyle('pos_error', {
-        x: [x_axis, x_axis, x_axis], y: [pos_errors, pos_errors_wls, pos_errors_triplet],
-        name: [`Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`, `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`, `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`],
-        customdata: [plotData.times, plotData.times, plotData.times]
-    }, [0, 1, 2]);
+        x: [x_axis, x_axis, x_axis, x_axis],
+        y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet],
+        name: [
+            `Pos Error (Firmware) Mean: ${meanErr(pos_errors_fw)}m`,
+            `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
+            `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
+            `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`
+        ],
+        customdata: [plotData.times, plotData.times, plotData.times, plotData.times]
+    }, [0, 1, 2, 3]);
 
     const csv_errors = samples.slice(0, x_axis.length).map(s => s.err);
     Plotly.restyle('error_frame', { x: [x_axis], y: [csv_errors], customdata: [plotData.times] }, [0]);
@@ -59,6 +65,8 @@ function updatePlots(res, samples, rawData) {
         Plotly.restyle('fp_amp', { x: [x_axis], y: [sliced_amp[i]], customdata: [plotData.times] }, [i]);
         Plotly.restyle('fp_snr', { x: [x_axis], y: [sliced_snr[i]], customdata: [plotData.times] }, [i]);
     }
+    Plotly.relayout('fp_amp', { 'yaxis.autorange': true });
+    Plotly.relayout('fp_snr', { 'yaxis.autorange': true });
 
     // 4. Sync layout
     const syncLayout = { 'xaxis.range': [0, x_axis.length], 'xaxis2.range': [0, total_time], 'xaxis2.showticklabels': true, 'xaxis2.autorange': false };

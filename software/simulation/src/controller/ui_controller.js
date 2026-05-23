@@ -5,7 +5,12 @@ let debounceTimer = null;
 
 function initSimulation() {
     if (window.Worker) {
-        simWorker = new Worker('../src/workers/sim_worker.js');
+        if (typeof SIM_WORKER_SOURCE === 'string' && SIM_WORKER_SOURCE.length > 0) {
+            const workerBlob = new Blob([SIM_WORKER_SOURCE], { type: 'application/javascript' });
+            simWorker = new Worker(URL.createObjectURL(workerBlob));
+        } else {
+            simWorker = new Worker('../src/workers/sim_worker.js');
+        }
         simWorker.onmessage = function(e) {
             const res = e.data;
             latestTrajectoryPaths = {
@@ -34,6 +39,7 @@ function requestUpdate() {
 
 function runSimulation() {
     if (!simWorker) return;
+    anchors = readAnchorsFromInputs();
 
     const params = {
         T2_high: parseFloat(document.getElementById('t2_high_range').value),
@@ -70,7 +76,7 @@ function runSimulation() {
     }
 
     simWorker.postMessage({
-        rawData, anchors, gt_square, tagHeight,
+        rawData, anchors, groundTruth: activeGroundTruth, tagHeight,
         params, rules, max_samples
     });
 }

@@ -8,6 +8,7 @@ import http.server
 import socketserver
 import webbrowser
 import threading
+import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 BASE_DIR = r"c:\Users\USER\Desktop\final_project\uwb-rtls\software\simulation"
@@ -15,6 +16,83 @@ GT_SQUARE = {
     'x': [2.44, 7.32, 7.32, 2.44, 2.44],
     'y': [2.44, 2.44, 7.32, 7.32, 2.44]
 }
+
+def parse_graphml_groundtruth(filepath):
+    if not os.path.exists(filepath):
+        return None
+
+    ns = {'g': 'http://graphml.graphdrawing.org/xmlns'}
+    tree = ET.parse(filepath)
+    root = tree.getroot()
+
+    key_names = {}
+    for key in root.findall('g:key', ns):
+        key_id = key.get('id')
+        attr_name = key.get('attr.name')
+        if key_id and attr_name:
+            key_names[key_id] = attr_name
+
+    nodes = {}
+    graph = root.find('g:graph', ns)
+    if graph is None:
+        return None
+
+    for node in graph.findall('g:node', ns):
+        values = {}
+        for data in node.findall('g:data', ns):
+            values[key_names.get(data.get('key'), data.get('key'))] = data.text
+        try:
+            nodes[node.get('id')] = {
+                'x': float(values['x']),
+                'y': float(values['y'])
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    segments = []
+    for edge in graph.findall('g:edge', ns):
+        src = nodes.get(edge.get('source'))
+        dst = nodes.get(edge.get('target'))
+        if src and dst:
+            segments.append([src['x'], src['y'], dst['x'], dst['y']])
+
+    if not segments:
+        return None
+
+    x = []
+    y = []
+    for x1, y1, x2, y2 in segments:
+        x.extend([x1, x2, None])
+        y.extend([y1, y2, None])
+
+    return {
+        'id': 'custom_track',
+        'name': os.path.basename(filepath),
+        'x': x,
+        'y': y,
+        'segments': segments
+    }
+
+def load_ground_truths():
+    square_segments = [
+        [GT_SQUARE['x'][i], GT_SQUARE['y'][i], GT_SQUARE['x'][i + 1], GT_SQUARE['y'][i + 1]]
+        for i in range(len(GT_SQUARE['x']) - 1)
+    ]
+    tracks = [
+        {
+            'id': 'square',
+            'name': 'Original Square',
+            'x': GT_SQUARE['x'],
+            'y': GT_SQUARE['y'],
+            'segments': square_segments
+        }
+    ]
+
+    custom = parse_graphml_groundtruth(os.path.join(BASE_DIR, 'custom_track_modified.xml'))
+    if custom:
+        tracks.append(custom)
+
+    return tracks
 
 def parse_log(filepath):
     data = []
@@ -27,10 +105,6 @@ def parse_log(filepath):
         \s+py:\s*(?P<py>[\d.-]+)               # Pos Y (Firmware)
         \s+dt:\s*(?P<dt>[\d.-]+)               # Delta Time
         .*?                                    # Skip unknown content
-        (?:fp_amp_norm:\s*\[(?P<amp>[\d.,\s]+)\])? # Amplitude (Optional)
-        \s*
-        (?:fp_snr:\s*\[(?P<snr>[\d.,\s]+)\])?      # SNR (Optional)
-        \s*
         (?:mask:\s*(?P<mask>\d+)\s+)?              # Anchor Mask (Optional)
         d1:\s*(?P<d1>[\d.-]+)\s+                   # Distance 1
         d2:\s*(?P<d2>[\d.-]+)\s+                   # Distance 2
@@ -49,14 +123,25 @@ def parse_log(filepath):
                     def parse_float_list(s):
                         return [float(x.strip()) for x in (s or "").split(',') if x.strip()] or [0,0,0,0]
 
+                    def parse_quality(prefix):
+                        bracket = re.search(rf"{prefix}:\s*\[([\d.,\s-]+)\]", raw_line)
+                        if bracket:
+                            return parse_float_list(bracket.group(1))
+
+                        values = []
+                        for anchor_idx in range(1, 5):
+                            scalar = re.search(rf"{prefix}{anchor_idx}:\s*([\d.-]+)", raw_line)
+                            values.append(float(scalar.group(1)) if scalar else 0)
+                        return values
+
                     data.append({
                         'line_no': line_no,
                         'raw_line': raw_line,
                         'type': d['type'],
                         'ax': float(d['ax']), 'ay': float(d['ay']), 'gz': float(d['gz']),
                         'px_fw': float(d['px']), 'py_fw': float(d['py']), 'dt': float(d['dt']),
-                        'fp_amp_norm': parse_float_list(d.get('amp')),
-                        'fp_snr': parse_float_list(d.get('snr')),
+                        'fp_amp_norm': parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0],
+                        'fp_snr': parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0],
                         'mask': int(d['mask']) if d.get('mask') else 15,
                         'distances': [float(d['d1']), float(d['d2']), float(d['d3']), float(d['d4'])],
                         'err': int(d['err'])
@@ -132,6 +217,66 @@ def load_template():
     with open(template_path, 'r', encoding='utf-8') as f:
         return f.read()
 
+def read_text_file(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+def load_app_js_bundle():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parts = [
+        'src/core/config.js',
+        'src/core/math_utils.js',
+        'src/view/plot_init.js',
+        'src/view/plot_updater.js',
+        'src/controller/ui_utils.js',
+        'src/controller/ui_controller.js',
+    ]
+    return "\n\n".join(
+        f"// ---- {part} ----\n" + read_text_file(os.path.join(script_dir, part))
+        for part in parts
+    )
+
+def load_worker_js_bundle():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    worker = read_text_file(os.path.join(script_dir, 'src/workers/sim_worker.js'))
+    worker = re.sub(r"^\s*importScripts\([^\n]+\);\s*\n", "", worker, count=1, flags=re.MULTILINE)
+    parts = [
+        'src/core/config.js',
+        'src/core/math_utils.js',
+        'src/filters/prefilter.js',
+    ]
+    prefix = "\n\n".join(
+        f"// ---- {part} ----\n" + read_text_file(os.path.join(script_dir, part))
+        for part in parts
+    )
+    return prefix + "\n\n// ---- src/workers/sim_worker.js ----\n" + worker
+
+def get_report_source_mtime():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    paths = [
+        'template_prefilter.html',
+        'src/core/config.js',
+        'src/core/math_utils.js',
+        'src/view/plot_init.js',
+        'src/view/plot_updater.js',
+        'src/controller/ui_utils.js',
+        'src/controller/ui_controller.js',
+        'src/workers/sim_worker.js',
+        'src/filters/prefilter.js',
+    ]
+    return max(
+        os.path.getmtime(os.path.join(script_dir, path))
+        for path in paths
+        if os.path.exists(os.path.join(script_dir, path))
+    )
+
+def render_template(template_content, filename, payload, ground_truths, app_js_bundle, worker_js_bundle):
+    html = template_content.replace('__FILENAME__', filename)
+    html = html.replace('__DATA_JSON__', json.dumps(payload))
+    html = html.replace('__GROUND_TRUTHS_JSON__', json.dumps(ground_truths))
+    html = html.replace('__APP_JS_BUNDLE__', app_js_bundle)
+    html = html.replace('__SIM_WORKER_SOURCE_JSON__', json.dumps(worker_js_bundle))
+    return html
 
 def main():
     logs = [
@@ -144,8 +289,11 @@ def main():
     if not logs: return
 
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_prefilter.html')
-    template_mtime = os.path.getmtime(template_path) if os.path.exists(template_path) else 0
+    report_source_mtime = get_report_source_mtime() if os.path.exists(template_path) else 0
     template_content = load_template()
+    ground_truths = load_ground_truths()
+    app_js_bundle = load_app_js_bundle()
+    worker_js_bundle = load_worker_js_bundle()
 
     files_generated = 0
     sim_results = []
@@ -160,16 +308,14 @@ def main():
             html_exists = os.path.exists(rp)
             html_mtime = os.path.getmtime(rp) if html_exists else 0
             
-            needs_gen = not html_exists or log_mtime > html_mtime or template_mtime > html_mtime
+            needs_gen = not html_exists or log_mtime > html_mtime or report_source_mtime > html_mtime
             
             p = run_gen(lp)
             if not p: continue
             
             if needs_gen:
                 with open(rp, 'w', encoding='utf-8') as f:
-                    html = template_content.replace('__FILENAME__', fn)
-                    html = html.replace('__DATA_JSON__', json.dumps(p))
-                    f.write(html)
+                    f.write(render_template(template_content, fn, p, ground_truths, app_js_bundle, worker_js_bundle))
                 files_generated += 1
                 
             num_updates = len([e for e in p['all_entries'] if e['type'] == 'Update'])

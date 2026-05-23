@@ -32,6 +32,13 @@
         .stat-box strong { display: block; color: #1e293b; margin-bottom: 6px; font-size: 0.85rem; }
         .stat-row { display: flex; justify-content: space-between; gap: 10px; line-height: 1.55; }
         .stat-row span:last-child { font-weight: 700; color: #2563eb; }
+        .anchor-editor { border-top: 1px solid #f1f5f9; padding-top: 20px; margin-bottom: 20px; }
+        .anchor-editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .anchor-grid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 10px; }
+        .anchor-row { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
+        .anchor-row strong { color: #1e293b; font-size: 0.85rem; grid-column: span 2; }
+        .anchor-row label { text-transform: none; font-size: 0.7rem; }
+        .anchor-row input { width: 100%; box-sizing: border-box; padding: 5px; border: 1px solid #cbd5e1; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -115,6 +122,14 @@
             </div>
         </div>
 
+        <div class="anchor-editor">
+            <div class="anchor-editor-header">
+                <label style="margin: 0;">Anchor Positions (meters):</label>
+                <button onclick="resetAnchorsToDefault()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #475569; color: white; border: none; border-radius: 6px; font-weight: bold;">Reset Anchors</button>
+            </div>
+            <div id="anchor_editor" class="anchor-grid"></div>
+        </div>
+
         <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 40px; border-top: 1px solid #f1f5f9; padding-top: 20px;">
             <div class="control-item">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -125,6 +140,12 @@
             </div>
             
             <div style="display: flex; flex-direction: column; gap: 15px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="control-item" style="flex-grow: 1;">
+                        <select id="groundtruth_select" onchange="onGroundTruthChanged()" style="padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.85rem; width: 100%;"></select>
+                    </div>
+                </div>
+
                 <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f8fafc; padding: 10px; border-radius: 8px;">
                     <input type="checkbox" id="enable_smoother" onchange="update()"> <span>Enable Distance Smoothing (Alpha: 0.25, Jump Limit: 0.3m)</span>
                 </label>
@@ -173,16 +194,15 @@
     <div class="card"><h3 class="plot-title">Positioning Error (vs Ground Truth)</h3><div id="pos_error" class="plot-md"></div></div>
     <div class="card"><h3 class="plot-title">Log Error Frames (CSV)</h3><div id="error_frame" class="plot-md"></div></div>
 
-    <script src="../src/core/config.js"></script>
-    <script src="../src/core/math_utils.js"></script>
-    <script src="../src/view/plot_init.js"></script>
-    <script src="../src/view/plot_updater.js"></script>
-    <script src="../src/controller/ui_utils.js"></script>
-    <script src="../src/controller/ui_controller.js"></script>
     <script>
+__APP_JS_BUNDLE__
+    </script>
+    <script>
+        const SIM_WORKER_SOURCE = __SIM_WORKER_SOURCE_JSON__;
         const rawData   = __DATA_JSON__;
-        const anchors   = SIM_CONFIG.ENV.ANCHORS;
-        const gt_square = SIM_CONFIG.ENV.GT_SQUARE;
+        const groundTruths = __GROUND_TRUTHS_JSON__;
+        let anchors     = SIM_CONFIG.ENV.ANCHORS.map(a => ({ id: a.id, x: Number(a.x), y: Number(a.y), z: Number(a.z) }));
+        let activeGroundTruth = groundTruths[0];
         const tagHeight = SIM_CONFIG.ENV.TAG_HEIGHT;
         const sourceFilename = "__FILENAME__";
         const samples = rawData.all_entries.filter(e => e.type === 'Update');
@@ -191,8 +211,13 @@
         document.getElementById('max_samples_range').value = rawData.all_entries.length;
         document.getElementById('max_samples_input').value = rawData.all_entries.length;
 
+        // Initialize Anchor Editor
+        initAnchorEditor(anchors);
+        loadDefaults();
+        initGroundTruthSelector();
+
         // Initialize Plots
-        initPlots(anchors, gt_square, rawData, samples);
+        initPlots(anchors, activeGroundTruth, rawData, samples);
 
         // Sync Inputs
         syncInput('t2_high_range', 't2_high_input');
@@ -206,8 +231,7 @@
         // Initialize Simulation Controller & Worker
         initSimulation();
 
-        // Load Defaults & Initial Run
-        loadDefaults();
+        // Initial Run
         if (document.getElementById('rules_container').children.length === 0) {
             addRule(); // Add default rule if none loaded
         }

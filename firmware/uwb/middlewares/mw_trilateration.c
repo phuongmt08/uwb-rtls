@@ -16,14 +16,6 @@
 /* Private defines ---------------------------------------------------- */
 #define MAXZERO  (0.001)
 
-#ifndef MW_TRIL_D2_RECOVER
-#define MW_TRIL_D2_RECOVER 4.0
-#endif
-
-#ifndef MW_TRIL_D2_REJECT
-#define MW_TRIL_D2_REJECT 9.0
-#endif
-
 #ifndef MW_TRIL_RESIDUAL_SCALE_M
 #define MW_TRIL_RESIDUAL_SCALE_M 0.30
 #endif

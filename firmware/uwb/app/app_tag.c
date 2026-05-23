@@ -102,11 +102,15 @@ static void init_filters(void)
 
     /* Clean-history Mahalanobis prefilter:
      * T1 = recover threshold, T2 = reject threshold, R = variance floor. */
-    mw_filter_mahalanobis_init(&s_filters.prefilter, 4.0f, 9.0f, 0.05f);
+    mw_filter_mahalanobis_init(&s_filters.prefilter,
+                               MAHALANOBIS_PREFILTER_D2_RECOVER,
+                               MAHALANOBIS_PREFILTER_D2_REJECT,
+                               MAHALANOBIS_PREFILTER_R_BASE);
 
-    /* Smoothing is enabled by default only when Mahalanobis pre-filter is disabled. */
+    /* Keep smoother initialized but disabled by default. Call/apply it explicitly
+     * from the owner path when smoothing is wanted. */
     mw_filter_distance_smoother_init(&s_filters.smoother,
-                                     (ENABLE_MAHALANOBIS_PREFILTER == 0),
+                                     false,
                                      SMOOTHER_ALPHA,
                                      SMOOTHER_JUMP_LIMIT_M);
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
@@ -248,8 +252,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
             continue;
         }
-#else
-        d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
 #endif
 
         double r2d = 0.0;
@@ -589,9 +591,9 @@ app_err_t app_tag_init(void)
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
 
 #if ENABLE_MAHALANOBIS_PREFILTER
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON, smoothing OFF");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON");
 #else
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF, smoothing ON");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF");
 #endif
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor positions:");

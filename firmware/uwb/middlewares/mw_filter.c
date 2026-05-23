@@ -151,10 +151,10 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     float d_pred = mahal_history_median(state);
     float variance = mahal_history_variance(state);
     float vel_mag = sqrtf(vx * vx + vy * vy + vz * vz);
-    const float k_vel = 0.5f;
+    const float k_vel = MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
     float S = fmaxf(variance, ctx->R_base) + (k_vel * vel_mag);
-    if (S < 1.0e-6f) {
-        S = 1.0e-6f;
+    if (S < MAHALANOBIS_PREFILTER_MIN_COVARIANCE) {
+        S = MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
     }
 
     float r = d_raw - d_pred;

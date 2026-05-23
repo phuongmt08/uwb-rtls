@@ -3,7 +3,7 @@ importScripts('../core/config.js', '../core/math_utils.js', '../filters/prefilte
 
 self.onmessage = function(e) {
     const { 
-        rawData, anchors, gt_square, tagHeight, 
+        rawData, anchors, groundTruth, tagHeight,
         params, rules, max_samples 
     } = e.data;
 
@@ -137,21 +137,24 @@ self.onmessage = function(e) {
     });
 
     const x_axis = simPath.x.map((_, i) => i);
-    const pos_errors = [], pos_errors_wls = [], pos_errors_triplet = [];
+    const pos_errors_fw = [], pos_errors = [], pos_errors_wls = [], pos_errors_triplet = [];
     
+    const gtSegments = (groundTruth && groundTruth.segments) || [];
     const calcErr = (pathX, pathY, out) => {
         pathX.forEach((px, i) => {
             if (px === null) { out.push(null); return; }
             let min_d = 999;
-            for (let j = 0; j < gt_square.x.length - 1; j++) {
-                const x1 = gt_square.x[j], y1 = gt_square.y[j], x2 = gt_square.x[j+1], y2 = gt_square.y[j+1];
+            for (const seg of gtSegments) {
+                const [x1, y1, x2, y2] = seg;
                 const l2 = (x2-x1)**2 + (y2-y1)**2;
+                if (l2 <= 0.000001) continue;
                 let t = Math.max(0, Math.min(1, ((px-x1)*(x2-x1) + (pathY[i]-y1)*(y2-y1)) / l2));
                 min_d = Math.min(min_d, Math.sqrt((px - (x1 + t*(x2-x1)))**2 + (pathY[i] - (y1 + t*(y2-y1)))**2));
             }
             out.push(min_d);
         });
     };
+    calcErr(rawData.fw_path.x.slice(0, x_axis.length), rawData.fw_path.y.slice(0, x_axis.length), pos_errors_fw);
     calcErr(simPathRuled.x, simPathRuled.y, pos_errors);
     calcErr(simPathWLS.x, simPathWLS.y, pos_errors_wls);
     calcErr(simPathTriplet.x, simPathTriplet.y, pos_errors_triplet);
@@ -160,7 +163,7 @@ self.onmessage = function(e) {
         simPath, simPathRuled, simPathWLS, simPathTriplet,
         wlsInfo, bestTripletInfo,
         plotData, gatedDist, d2Scores, rejectIdx,
-        pos_errors, pos_errors_wls, pos_errors_triplet,
+        pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet,
         x_axis, total_time
     });
 };

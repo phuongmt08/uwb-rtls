@@ -1,5 +1,126 @@
 let ruleCounter = 0;
 
+function cloneAnchors(source) {
+    return source.map(a => ({
+        id: a.id,
+        x: Number(a.x),
+        y: Number(a.y),
+        z: Number(a.z)
+    }));
+}
+
+function initAnchorEditor(anchorList) {
+    const container = document.getElementById('anchor_editor');
+    if (!container) return;
+
+    container.innerHTML = anchorList.map(a => `
+        <div class="anchor-row" data-anchor-id="${a.id}">
+            <strong>A${a.id}</strong>
+            <label for="anchor_${a.id}_x">X</label>
+            <input id="anchor_${a.id}_x" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="x" type="number" step="0.001" value="${a.x}" oninput="updateAnchorsFromInputs()">
+            <label for="anchor_${a.id}_y">Y</label>
+            <input id="anchor_${a.id}_y" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="y" type="number" step="0.001" value="${a.y}" oninput="updateAnchorsFromInputs()">
+            <label for="anchor_${a.id}_z">Z</label>
+            <input id="anchor_${a.id}_z" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="z" type="number" step="0.001" value="${a.z}" oninput="updateAnchorsFromInputs()">
+        </div>
+    `).join('');
+}
+
+function readAnchorsFromInputs() {
+    const next = cloneAnchors(anchors);
+    document.querySelectorAll('.anchor-pos').forEach(input => {
+        const idx = parseInt(input.dataset.anchorIndex);
+        const axis = input.dataset.axis;
+        const value = parseFloat(input.value);
+        if (next[idx] && Number.isFinite(value)) {
+            next[idx][axis] = value;
+        }
+    });
+    return next;
+}
+
+function setAnchorInputs(anchorList) {
+    anchorList.forEach((a, idx) => {
+        ['x', 'y', 'z'].forEach(axis => {
+            const input = document.querySelector(`.anchor-pos[data-anchor-index="${idx}"][data-axis="${axis}"]`);
+            if (input) input.value = a[axis];
+        });
+    });
+}
+
+function updateAnchorPlot(anchorList) {
+    const plot = document.getElementById('trajectory');
+    if (!plot || !plot.data) return;
+    Plotly.restyle('trajectory', {
+        x: [anchorList.map(a => a.x)],
+        y: [anchorList.map(a => a.y)],
+        text: [anchorList.map(a => 'A' + a.id)]
+    }, [0]);
+}
+
+function updateAnchorsFromInputs() {
+    anchors = readAnchorsFromInputs();
+    updateAnchorPlot(anchors);
+    if (typeof update === 'function') update();
+}
+
+function resetAnchorsToDefault() {
+    anchors = cloneAnchors(SIM_CONFIG.ENV.ANCHORS);
+    setAnchorInputs(anchors);
+    updateAnchorPlot(anchors);
+    if (typeof update === 'function') update();
+}
+
+function normalizeGroundTruth(track) {
+    if (!track) return { id: 'empty', name: 'Empty', x: [], y: [], segments: [] };
+    if (Array.isArray(track.segments) && track.segments.length > 0) return track;
+
+    const segments = [];
+    const xs = track.x || [];
+    const ys = track.y || [];
+    for (let i = 0; i < Math.min(xs.length, ys.length) - 1; i++) {
+        if ([xs[i], ys[i], xs[i + 1], ys[i + 1]].every(Number.isFinite)) {
+            segments.push([xs[i], ys[i], xs[i + 1], ys[i + 1]]);
+        }
+    }
+    return Object.assign({}, track, { segments });
+}
+
+function initGroundTruthSelector() {
+    const select = document.getElementById('groundtruth_select');
+    if (!select) return;
+
+    select.innerHTML = groundTruths.map((gt, idx) => {
+        const id = gt.id || `gt_${idx}`;
+        return `<option value="${id}">Ground Truth: ${gt.name || id}</option>`;
+    }).join('');
+
+    const saved = localStorage.getItem('uwb_sim_groundtruth');
+    if (saved && groundTruths.some(gt => gt.id === saved)) {
+        select.value = saved;
+    }
+    activeGroundTruth = normalizeGroundTruth(groundTruths.find(gt => gt.id === select.value) || groundTruths[0]);
+}
+
+function updateGroundTruthPlot(track) {
+    const plot = document.getElementById('trajectory');
+    if (!plot || !plot.data) return;
+    Plotly.restyle('trajectory', {
+        x: [track.x],
+        y: [track.y],
+        name: [`Ground Truth (${track.name || track.id})`]
+    }, [1]);
+}
+
+function onGroundTruthChanged() {
+    const select = document.getElementById('groundtruth_select');
+    const selected = select ? select.value : null;
+    activeGroundTruth = normalizeGroundTruth(groundTruths.find(gt => gt.id === selected) || groundTruths[0]);
+    if (selected) localStorage.setItem('uwb_sim_groundtruth', selected);
+    updateGroundTruthPlot(activeGroundTruth);
+    if (typeof update === 'function') update();
+}
+
 function decodeMask(mask) {
     let a = [];
     if (mask & 1) a.push(1);
@@ -191,6 +312,8 @@ function saveDefaults() {
         zupt_gyr: document.getElementById('zupt_gyr_input').value,
         max_samples: document.getElementById('max_samples_input').value,
         enable_smoother: document.getElementById('enable_smoother').checked,
+        groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
+        anchors: readAnchorsFromInputs(),
         rules: []
     };
     const ruleDivs = document.getElementById('rules_container').children;
@@ -203,6 +326,7 @@ function saveDefaults() {
         });
     }
     localStorage.setItem('uwb_sim_defaults', JSON.stringify(config));
+    if (config.groundtruth) localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
     alert('Defaults saved!');
 }
 
@@ -248,6 +372,13 @@ function loadDefaults() {
             }
             if (config.enable_smoother !== undefined) {
                 document.getElementById('enable_smoother').checked = config.enable_smoother;
+            }
+            if (config.groundtruth) {
+                localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
+            }
+            if (Array.isArray(config.anchors) && config.anchors.length === anchors.length) {
+                anchors = cloneAnchors(config.anchors);
+                setAnchorInputs(anchors);
             }
             
             if (config.rules && config.rules.length > 0) {

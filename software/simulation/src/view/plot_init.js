@@ -5,7 +5,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: anchors.map(a => a.x), y: anchors.map(a => a.y), mode: 'markers+text',
           name: 'Anchors', text: anchors.map(a => 'A'+a.id), textposition: 'top center',
           marker: { color: '#1e293b', size: 10, symbol: 'triangle-up' } },
-        { x: gt_square.x, y: gt_square.y, mode: 'lines', name: 'Ground Truth',
+        { x: gt_square.x, y: gt_square.y, mode: 'lines', name: `Ground Truth (${gt_square.name || 'Original Square'})`,
           line: { color: '#f87171', dash: 'dot', width: 1 } },
         { x: samples.map(e => e.px_fw), y: samples.map(e => e.py_fw), mode: 'lines+markers',
           name: 'Firmware Path', type: 'scattergl', marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
@@ -45,7 +45,8 @@ function initPlots(anchors, gt_square, rawData, samples) {
             marker: { color: 'red', symbol: 'x', size: 5 }, visible: 'legendonly'
         });
     });
-    // Trace index 12: Dummy for axis
+
+    // Dummy for axis
     distTraces.push({ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' });
 
     Plotly.newPlot('distances', distTraces, {
@@ -118,6 +119,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 8. Pos Error
     const errTraces = [
+        { x: [], y: [], name: 'Pos Error (Firmware)', mode: 'lines', type: 'scatter', line: { color: '#64748b', width: 1.5 } },
         { x: [], y: [], name: 'Pos Error (Rules)', mode: 'lines', type: 'scatter', line: { color: '#ef4444', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Multilateration)', mode: 'lines', type: 'scatter', line: { color: '#d97706', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Best Triplet)', mode: 'lines', type: 'scatter', line: { color: '#059669', width: 2 } },
