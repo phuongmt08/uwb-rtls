@@ -62,6 +62,7 @@ LOCAL_SOURCES := \
 	$(wildcard app/*.c) $(wildcard bsp/*.c) \
 	$(wildcard deca/deca_driver/*.c) $(wildcard deca/platform/*.c) \
 	$(wildcard middlewares/*.c) $(wildcard middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/*.c) $(wildcard middlewares/ST/STM32_USB_Device_Library/Core/Src/*.c) \
+	$(wildcard middlewares/arm_libs/MatrixFunctions/*.c) \
 	$(wildcard sys/*.c)
 COMMON_SOURCES := \
 	$(wildcard $(REPO_ROOT)/firmware/common/serial/*.c) \
