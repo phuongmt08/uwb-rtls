@@ -6,7 +6,7 @@ from typing import Tuple
 OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\22_05_26\20260522_18g44p_ukf_log_data.csv"
+SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\23_05_26\20260523_13g56p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -42,10 +42,10 @@ ANCHOR_2_X = 9.76
 ANCHOR_2_Y = 0.0
 
 ANCHOR_3_X = 0.0
-ANCHOR_3_Y = 12.2
+ANCHOR_3_Y = 9.76
 
 ANCHOR_4_X = 9.76
-ANCHOR_4_Y = 12.2
+ANCHOR_4_Y = 9.76
 
 # Anchor positions in the room (three corners)
 ANCHOR_POSITIONS = np.array([
@@ -86,9 +86,9 @@ Q_G_TEST = np.deg2rad(2)**2
 R_UWB_TEST = 0.1**2
 
 # MANUAL values (Editable from GUI else block)
-Q_A_MANUAL = 0.04
+Q_A_MANUAL = 0.08
 Q_G_MANUAL = 4.78e-07
-R_UWB_MANUAL = 0.01
+R_UWB_MANUAL = 0.009
 
 # Logic to select final values
 if TEST_UKF_Q_R_Params:
@@ -180,6 +180,14 @@ GROUND_TRUTH_D4 = 3.45
 LIVE_FRAME_FORMAT = '<BBBI5f4f4d4dIf'
 import struct
 LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
+
+# ==================== FUSION FRAME CONFIGURATION ====================
+# Matches firmware uart_fusion_frame_t:
+# sof, length, anchor_mask, tx_frame_cnt,
+# ukf_x, ukf_y, ukf_yaw, tril_x, tril_y, yaw, error_frame_cnt
+FUSION_FRAME_FORMAT = '<BBBI6fI'
+FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
+FUSION_FRAME_PAYLOAD_LEN = FUSION_FRAME_SIZE - 2
 
 # ==================== IMU Q Process CONFIGURATION ====================
 # Frame Structure Format (little-endian)

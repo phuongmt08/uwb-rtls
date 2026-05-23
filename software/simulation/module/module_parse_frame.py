@@ -2,6 +2,7 @@ import struct
 from .config import (
     UART_SOF, 
     LIVE_FRAME_FORMAT, LIVE_FRAME_SIZE, 
+    FUSION_FRAME_FORMAT, FUSION_FRAME_SIZE, FUSION_FRAME_PAYLOAD_LEN,
     IMU_FRAME_FORMAT, IMU_FRAME_SIZE,
     UWB_FRAME_FORMAT, UWB_FRAME_SIZE
 )
@@ -42,6 +43,29 @@ def parse_live_frame(data_bytes):
             'fp_snr': list(unpacked[17:21]),
             'err_cnt': unpacked[21],
             'dt': unpacked[22]
+        }
+    except struct.error:
+        return None
+
+def parse_uart_fusion_frame(data_bytes):
+    try:
+        unpacked = struct.unpack(FUSION_FRAME_FORMAT, data_bytes[:FUSION_FRAME_SIZE])
+        if unpacked[0] != UART_SOF:
+            return None
+        if unpacked[1] != FUSION_FRAME_PAYLOAD_LEN:
+            return None
+        return {
+            'sof': unpacked[0],
+            'length': unpacked[1],
+            'anchor_mask': unpacked[2],
+            'tx_frame_cnt': unpacked[3],
+            'ukf_x': unpacked[4],
+            'ukf_y': unpacked[5],
+            'ukf_yaw': unpacked[6],
+            'tril_x': unpacked[7],
+            'tril_y': unpacked[8],
+            'yaw': unpacked[9],
+            'err_cnt': unpacked[10],
         }
     except struct.error:
         return None
