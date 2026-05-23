@@ -20,6 +20,8 @@
 #define UART_SOF           (0xAA)
 #define UART_TX_TIMEOUT_MS (100)
 #define UART_PAYLOAD_LEN_BYTES ((uint8_t) ((3U + NUM_ANCHORS + 1U) * sizeof(float)))
+#define UART_FUSION_LOG_PAYLOAD_LEN_BYTES ((uint8_t) (sizeof(uart_fusion_log_frame_t) - 2))
+#define UART_FUSION_PAYLOAD_LEN_BYTES ((uint8_t) (sizeof(uart_fusion_frame_t) - 2))
 
 /* Private types ------------------------------------------------------ */
 typedef struct
@@ -32,6 +34,40 @@ typedef struct
   float   distance[NUM_ANCHORS]; /* Distance each anchor */
   float   error;                 /* Error estimate in meters */
 } __attribute__((packed)) uart_position_frame_t;
+
+#if ENABLE_SYS_FUSION_LOG
+typedef struct
+{
+  uint8_t sof;                   /* Start of frame: 0xAA */
+  uint8_t length;                /* Payload length bytes */
+  uint8_t anchor_mask;           /* Bitmask of which anchors are selected */
+  uint32_t tx_frame_cnt;         /* Tx frame count */
+  float   ax;                    /* ax m/s^2 */
+  float   ay;                    /* ay m/s^2 */
+  float   gz;                    /* gz rad/s */
+  float   px;                    /* X position in meters */
+  float   py;                    /* Y position in meters */
+  float   distance[NUM_ANCHORS]; /* Distance each anchor in meters */
+  double fp_amp_norm[NUM_ANCHORS];
+  double fp_snr[NUM_ANCHORS];
+  uint32_t   error_frame_cnt;    /* Error frame count */
+  float   dt;                    /* Time delta in seconds */
+} __attribute__((packed)) uart_fusion_log_frame_t;
+#endif
+
+#if ENABLE_SYS_FUSION
+typedef struct
+{
+  uint8_t sof;                   /* Start of frame: 0xAA */
+  uint8_t length;                /* Payload length bytes */
+  uint8_t anchor_mask;           /* Bitmask of which anchors are selected */
+  uint32_t tx_frame_cnt;         /* Tx frame count */
+  float   px;                    /* X position in meters */
+  float   py;                    /* Y position in meters */
+  float   yaw;                   /* Yaw angle in radians */
+  uint32_t   error_frame_cnt;    /* Error frame count */
+} __attribute__((packed)) uart_fusion_frame_t;
+#endif
 
 /* Private variables -------------------------------------------------- */
 static bsp_io_button_state_t s_button_state       = BSP_IO_BUTTON_IDLE;
@@ -46,6 +82,14 @@ static uint32_t              s_led_blink_off_tick = 0;
 
 static uart_position_frame_t s_frame;
 static volatile uint8_t      s_tx_busy = 0;
+
+#if ENABLE_SYS_FUSION_LOG
+uart_fusion_log_frame_t   	s_fusion_log_frame = {0};
+#endif
+
+#if ENABLE_SYS_FUSION
+uart_fusion_frame_t   	s_fusion_frame = {0};
+#endif
 
 /* UART handle (extern from main.c or usart.c) */
 extern UART_HandleTypeDef huart1;
@@ -305,6 +349,91 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     s_tx_busy = 0;
   }
 }
+
+#if ENABLE_SYS_FUSION_LOG
+bsp_err_t bsp_io_uart_send_fusion_log_data(
+  uint8_t mask, uint32_t err_frame_count, 
+  float ax, float ay, float gz, float px, float py, const float *distance, 
+  const double *fp_amp_norm, const double *fp_snr, 
+  float dt)
+{
+  if (s_tx_busy)
+    return BSP_ERR;  // hoặc queue lại
+
+  s_fusion_log_frame.sof             = UART_SOF;
+  s_fusion_log_frame.length          = UART_FUSION_LOG_PAYLOAD_LEN_BYTES;
+  s_fusion_log_frame.anchor_mask     = mask;
+  s_fusion_log_frame.tx_frame_cnt++;
+  s_fusion_log_frame.ax              = ax;
+  s_fusion_log_frame.ay              = ay;
+  s_fusion_log_frame.gz              = gz;
+  s_fusion_log_frame.px              = px;
+  s_fusion_log_frame.py              = py;
+  s_fusion_log_frame.error_frame_cnt = err_frame_count;
+  s_fusion_log_frame.dt              = dt;
+
+  if (distance != NULL)
+  {
+    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+    {
+    	s_fusion_log_frame.distance[id] = distance[id];
+    }
+  }
+
+  if (fp_amp_norm != NULL)
+  {
+    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+    {
+      s_fusion_log_frame.fp_amp_norm[id] = fp_amp_norm[id];
+    }
+  }
+
+  if (fp_snr != NULL)
+  {
+    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+    {
+      s_fusion_log_frame.fp_snr[id] = fp_snr[id];
+    }
+  }
+
+  if (distance != NULL)
+  {
+    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+    {
+    	s_fusion_log_frame.distance[id] = distance[id];
+    }
+  }
+  
+  if (CDC_Transmit_FS((uint8_t *) &s_fusion_log_frame, sizeof(s_fusion_log_frame)) != HAL_OK)
+  {
+    return BSP_ERR;
+  }
+  return BSP_OK;
+}
+#endif
+
+#if ENABLE_SYS_FUSION
+bsp_err_t bsp_io_uart_send_fusion_data(uint8_t mask, uint32_t err_frame_count, float px, float py, float yaw)
+{
+  if (s_tx_busy)
+    return BSP_ERR;  // hoặc queue lại
+
+  s_fusion_frame.sof             = UART_SOF;
+  s_fusion_frame.length          = UART_FUSION_PAYLOAD_LEN_BYTES;
+  s_fusion_frame.anchor_mask     = mask;
+  s_fusion_frame.tx_frame_cnt++;
+  s_fusion_frame.px              = px;
+  s_fusion_frame.py              = py;
+  s_fusion_frame.yaw             = yaw;
+  s_fusion_frame.error_frame_cnt = err_frame_count;
+
+  if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note
+  {
+    return BSP_ERR;
+  }
+  return BSP_OK;
+}
+#endif
 
 /* Private functions ----------------------------------- */
 

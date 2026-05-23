@@ -202,6 +202,14 @@
 #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
 #endif
 
+#ifndef ENABLE_SYS_FUSION
+#define ENABLE_SYS_FUSION  1
+#endif
+
+#ifndef ENABLE_SYS_FUSION_LOG
+#define ENABLE_SYS_FUSION_LOG  0
+#endif
+
 /**
  * @brief Distance Smoother (EMA Filter) parameters
  *        ALPHA: 0.0 to 1.0 (lower = smoother/more lag, higher = jumpier/less lag)

@@ -20,14 +20,6 @@
 
 /* Public defines ----------------------------------------------------- */
 #define SYS_SENSOR_FUSION_PI 3.14159265358979323846f
-#define ANCHOR_0_X  0.0f
-#define ANCHOR_0_Y  0.0f
-#define ANCHOR_1_X  10.0f
-#define ANCHOR_1_Y  0.0f
-#define ANCHOR_2_X  0.0f
-#define ANCHOR_2_Y  10.0f
-#define ANCHOR_3_X  10.0f
-#define ANCHOR_3_Y  10.0f
 
 /* Public enumerate/structure ----------------------------------------- */
 typedef enum
@@ -53,9 +45,23 @@ typedef struct
 /* Public function prototypes ----------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf);
 
+sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0);
+
 sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_ukf, float dt);
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2);
+sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2, uint8_t mask);
+
+sys_sensor_fusion_err_t sys_sensor_fusion_set_update_flag();
+
+sys_sensor_fusion_err_t sys_sensor_fusion_clear_update_flag();
+
+sys_sensor_fusion_err_t sys_sensor_fusion_set_predict_flag();
+
+sys_sensor_fusion_err_t sys_sensor_fusion_clear_predict_flag();
+
+bool sys_sensor_fusion_check_update_flag();
+
+bool sys_sensor_fusion_check_predict_flag();
 
 #endif /* SYS_SENSOR_FUSION_H_ */
 

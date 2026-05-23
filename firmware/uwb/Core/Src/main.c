@@ -41,6 +41,7 @@
 
 #include <string.h>
 #include "bsp_imu.h"
+#include "sys_sensor_fusion.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -91,6 +92,14 @@ static void ble_peripheral_process_task(void *arg);
 static float    s_test_x              = TEST_POS_START_X;
 static float    s_test_y              = TEST_POS_START_Y;
 static uint32_t s_last_test_send_tick = 0;
+#endif
+
+#if ENABLE_SYS_FUSION_LOG || ENABLE_SYS_FUSION
+float dt;
+uint32_t last_time = 0;
+uint32_t imu_get_data_err = 0;
+bsp_imu_data_t imu_current;
+sys_sensor_fusion_data_t ukf_data = {0};
 #endif
 /* USER CODE END PV */
 
@@ -215,6 +224,92 @@ void app_reset_config(void)
   __enable_irq();
 }
 
+#if ENABLE_SYS_FUSION
+static float get_dt(void)
+{
+    uint32_t current_time = HAL_GetTick(); // milliseconds
+    uint32_t dt_ms = current_time - last_time;
+    last_time = current_time;
+
+    // Giới hạn dt để tránh giá trị bất thường
+    if(dt_ms > 100) dt_ms = 100;
+    if(dt_ms < 1) dt_ms = 1;
+
+    return (float)dt_ms / 1000.0f; // chuyển sang giây
+}
+static void fusion_task(void *arg)
+{
+	if(sys_sensor_fusion_check_predict_flag() == false) return;
+	static uint8_t first_call = 1;
+
+	if(first_call)
+	{
+		last_time = HAL_GetTick();
+		dt = 0.01f; // giá trị mặc định cho lần đầu
+		first_call = 0;
+	}
+	else
+	{
+		dt = get_dt();
+	}
+
+    sys_sensor_fusion_predict(&ukf_data, dt);
+    bsp_io_uart_send_fusion_data(0, 0, ukf_data.px, ukf_data.py, ukf_data.theta);
+//  float uwb_dists[NUM_ANCHORS];
+//	float uwb_err;
+//	uint32_t err_cnt;
+//	app_tag_get_latest_uwb_data(uwb_dists, &uwb_err, &err_cnt);
+//  bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_data.vx, ukf_data.vy, (ukf_data.theta*RAD2DEG),
+//                                      uwb_dists, uwb_err, err_cnt);
+}
+#endif
+
+#if ENABLE_SYS_FUSION_LOG
+static float get_dt(void)
+{
+    uint32_t current_time = HAL_GetTick(); // milliseconds
+    uint32_t dt_ms = current_time - last_time;
+    last_time = current_time;
+
+    // Giới hạn dt để tránh giá trị bất thường
+    if(dt_ms > 100) dt_ms = 100;
+    if(dt_ms < 1) dt_ms = 1;
+
+    return (float)dt_ms / 1000.0f; // chuyển sang giây
+}
+
+static void fusion_log_task(void *arg)
+{
+	if(sys_sensor_fusion_check_predict_flag() == false) return;
+	static uint8_t first_call = 1;
+
+	if(first_call)
+	{
+		last_time = HAL_GetTick();
+		dt = 0.01f;
+		first_call = 0;
+	}
+	else
+	{
+		dt = get_dt();
+	}
+
+	if( bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK) imu_get_data_err++;
+	else
+	{
+    float uwb_dists[3] = {0.0};
+		double fp_amp_norm[NUM_ANCHORS];
+		double fp_snr[NUM_ANCHORS];
+
+		for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+			fp_amp_norm[i] = 0.0f;
+			fp_snr[i] = 0.0f;
+		}
+
+		bsp_io_uart_send_fusion_log_data(0, 0, imu_current.ax, imu_current.ay, imu_current.gz, 0.0, 0.0, uwb_dists, fp_amp_norm, fp_snr, dt);
+	}
+}
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -272,8 +367,8 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "========================================");
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "TEST MODE: Position sending ENABLED");
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Interval: %dms", TEST_POS_INTERVAL_MS);
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)", TEST_POS_START_X, TEST_POS_START_Y,
-         TEST_POS_END_X, TEST_POS_END_Y);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Range: (%.1f,%.1f) to (%.1f,%.1f)",
+         TEST_POS_START_X, TEST_POS_START_Y, TEST_POS_END_X, TEST_POS_END_Y);
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Step: %.2f", TEST_POS_STEP);
 #if TEST_DISABLE_RANGING
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "*** RANGING DISABLED (UART TEST ONLY) ***");
@@ -294,9 +389,7 @@ int main(void)
   else if (!network_cmd_init(&s_network_core))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
-  }
-  else
-  {
+  } else {
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
   }
 
@@ -304,12 +397,20 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
 #else
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing IMU...");
-  if (bsp_imu_init() != BSP_IMU_OK)
+  if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
-
+    #if (ENABLE_SYS_FUSION_LOG || ENABLE_SYS_FUSION)
+    if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
+    {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "Sensor fusion init failed");
+    }
+    #else
+    if(bsp_imu_init() != BSP_IMU_OK)
+    {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "IMU init failed");
+    }
+    #endif
   }
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
   if (bsp_uwb_init() != 0)
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
@@ -340,8 +441,8 @@ int main(void)
 
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
          cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", cfg->uwb.tx_antenna_delay,
-         cfg->uwb.rx_antenna_delay);
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u",
+         cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
 
   bsp_uwb_configure(&cfg->uwb);
 #endif
@@ -388,6 +489,22 @@ int main(void)
       if (ble_task_id >= 0) sys_task_start(ble_task_id);
   }
 
+#if ENABLE_SYS_FUSION
+  if (cfg->uwb.role == DEVICE_ROLE_TAG)
+  {
+    int fusion_task_id = sys_task_add((sys_task_cb_t)fusion_task, NULL, SYS_TASK_TYPE_PERIODIC, 50, 0);
+    if (fusion_task_id >= 0) sys_task_start(fusion_task_id);
+  }
+#endif
+  
+#if ENABLE_SYS_FUSION_LOG
+  if (cfg->uwb.role == DEVICE_ROLE_TAG)
+  {
+    int fusion_log_task_id = sys_task_add((sys_task_cb_t)fusion_log_task, NULL, SYS_TASK_TYPE_PERIODIC, 50, 0);
+    if (fusion_log_task_id >= 0) sys_task_start(fusion_log_task_id);
+  }
+#endif
+
 #if TEST_SEND_POS
   int test_pos_task_id = sys_task_add((sys_task_cb_t)test_send_pos_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
   if (test_pos_task_id >= 0) sys_task_start(test_pos_task_id);
@@ -411,13 +528,10 @@ int main(void)
   cfg = sys_config_get();
 
   /* Initialize application based on role */
-  if (cfg->uwb.role == DEVICE_ROLE_TAG)
-  {
+  if (cfg->uwb.role == DEVICE_ROLE_TAG) {
     app_tag_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Tag application initialized");
-  }
-  else
-  {
+  } else {
     app_anchor_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
@@ -426,6 +540,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t tick = HAL_GetTick();
   while (1)
   {
     bsp_io_button_event_t btn_event = bsp_io_button_event();

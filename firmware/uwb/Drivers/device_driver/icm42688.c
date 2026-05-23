@@ -135,6 +135,11 @@ icm42688_err_t icm42688_init(icm42688_dev_t *dev, const icm42688_config_t *confi
 		CHECK_ERR(icm42688_compute_hardware_offsets(dev, ICM42688_CALIB_SAMPLES) == ICM42688_OK, ICM42688_ERR);
 		CHECK_ERR(icm42688_set_hardware_offsets(dev) == ICM42688_OK, ICM42688_ERR);
 	}
+	else
+	{
+		CHECK_ERR(icm42688_compute_hardware_offsets(dev, ICM42688_CALIB_SAMPLES) == ICM42688_OK, ICM42688_ERR);
+		CHECK_ERR(icm42688_reset_hardware_offsets(dev) == ICM42688_OK, ICM42688_ERR);
+	}
 
 	return ICM42688_OK;
 }
@@ -579,15 +584,6 @@ icm42688_err_t icm42688_compute_hardware_offsets(icm42688_dev_t *dev, uint16_t n
     float raw_ay_f = avg_ay;
     float raw_az_f = avg_az;
 
-    if  (raw_ax_f >  threshold) raw_ax_f -= one_g;
-    else if (raw_ax_f < -threshold) raw_ax_f += one_g;
-
-    if  (raw_ay_f >  threshold) raw_ay_f -= one_g;
-    else if (raw_ay_f < -threshold) raw_ay_f += one_g;
-
-    if  (raw_az_f >  threshold) raw_az_f -= one_g;
-    else if (raw_az_f < -threshold) raw_az_f += one_g;
-
     dev->calib.accel_offset.x = raw_ax_f / accel_sens;
     dev->calib.accel_offset.y = raw_ay_f / accel_sens;
     dev->calib.accel_offset.z = raw_az_f / accel_sens;
@@ -596,6 +592,23 @@ icm42688_err_t icm42688_compute_hardware_offsets(icm42688_dev_t *dev, uint16_t n
     CHECK_ERR(icm42688_set_accel_fs(dev, saved_accel_fs) == ICM42688_OK, ICM42688_ERR);
 
     return ICM42688_OK;
+}
+
+icm42688_err_t icm42688_reset_hardware_offsets(icm42688_dev_t *dev)
+{
+	CHECK_ERR(dev != NULL, ICM42688_ERR_PARAM);
+
+	CHECK_ERR(icm42688_select_bank(dev, 4) == ICM42688_OK, ICM42688_ERR);
+
+	uint8_t zero = 0;
+	for (uint8_t r = ICM42688_REG_OFFSET_USER0; r <= ICM42688_REG_OFFSET_USER8; r++)
+	{
+		CHECK_ERR(icm42688_write_reg(dev, r, &zero, 1) == ICM42688_OK, ICM42688_ERR);
+	}
+
+	CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
+
+	return ICM42688_OK;
 }
 
 icm42688_err_t icm42688_set_hardware_offsets(icm42688_dev_t *dev)
