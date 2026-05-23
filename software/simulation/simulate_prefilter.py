@@ -8,6 +8,7 @@ import http.server
 import socketserver
 import webbrowser
 import threading
+import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +16,83 @@ GT_SQUARE = {
     'x': [2.44, 7.32, 7.32, 2.44, 2.44],
     'y': [2.44, 2.44, 7.32, 7.32, 2.44]
 }
+
+def parse_graphml_groundtruth(filepath):
+    if not os.path.exists(filepath):
+        return None
+
+    ns = {'g': 'http://graphml.graphdrawing.org/xmlns'}
+    tree = ET.parse(filepath)
+    root = tree.getroot()
+
+    key_names = {}
+    for key in root.findall('g:key', ns):
+        key_id = key.get('id')
+        attr_name = key.get('attr.name')
+        if key_id and attr_name:
+            key_names[key_id] = attr_name
+
+    nodes = {}
+    graph = root.find('g:graph', ns)
+    if graph is None:
+        return None
+
+    for node in graph.findall('g:node', ns):
+        values = {}
+        for data in node.findall('g:data', ns):
+            values[key_names.get(data.get('key'), data.get('key'))] = data.text
+        try:
+            nodes[node.get('id')] = {
+                'x': float(values['x']),
+                'y': float(values['y'])
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    segments = []
+    for edge in graph.findall('g:edge', ns):
+        src = nodes.get(edge.get('source'))
+        dst = nodes.get(edge.get('target'))
+        if src and dst:
+            segments.append([src['x'], src['y'], dst['x'], dst['y']])
+
+    if not segments:
+        return None
+
+    x = []
+    y = []
+    for x1, y1, x2, y2 in segments:
+        x.extend([x1, x2, None])
+        y.extend([y1, y2, None])
+
+    return {
+        'id': 'custom_track',
+        'name': os.path.basename(filepath),
+        'x': x,
+        'y': y,
+        'segments': segments
+    }
+
+def load_ground_truths():
+    square_segments = [
+        [GT_SQUARE['x'][i], GT_SQUARE['y'][i], GT_SQUARE['x'][i + 1], GT_SQUARE['y'][i + 1]]
+        for i in range(len(GT_SQUARE['x']) - 1)
+    ]
+    tracks = [
+        {
+            'id': 'square',
+            'name': 'Original Square',
+            'x': GT_SQUARE['x'],
+            'y': GT_SQUARE['y'],
+            'segments': square_segments
+        }
+    ]
+
+    custom = parse_graphml_groundtruth(os.path.join(BASE_DIR, 'custom_track_modified.xml'))
+    if custom:
+        tracks.append(custom)
+
+    return tracks
 
 def parse_log(filepath):
     data = []
@@ -132,6 +210,47 @@ def load_template():
     with open(template_path, 'r', encoding='utf-8') as f:
         return f.read()
 
+def read_text_file(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+def load_app_js_bundle():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parts = [
+        'src/core/config.js',
+        'src/core/math_utils.js',
+        'src/view/plot_init.js',
+        'src/view/plot_updater.js',
+        'src/controller/ui_utils.js',
+        'src/controller/ui_controller.js',
+    ]
+    return "\n\n".join(
+        f"// ---- {part} ----\n" + read_text_file(os.path.join(script_dir, part))
+        for part in parts
+    )
+
+def load_worker_js_bundle():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    worker = read_text_file(os.path.join(script_dir, 'src/workers/sim_worker.js'))
+    worker = re.sub(r"^\s*importScripts\([^\n]+\);\s*\n", "", worker, count=1, flags=re.MULTILINE)
+    parts = [
+        'src/core/config.js',
+        'src/core/math_utils.js',
+        'src/filters/prefilter.js',
+    ]
+    prefix = "\n\n".join(
+        f"// ---- {part} ----\n" + read_text_file(os.path.join(script_dir, part))
+        for part in parts
+    )
+    return prefix + "\n\n// ---- src/workers/sim_worker.js ----\n" + worker
+
+def render_template(template_content, filename, payload, ground_truths, app_js_bundle, worker_js_bundle):
+    html = template_content.replace('__FILENAME__', filename)
+    html = html.replace('__DATA_JSON__', json.dumps(payload))
+    html = html.replace('__GROUND_TRUTHS_JSON__', json.dumps(ground_truths))
+    html = html.replace('__APP_JS_BUNDLE__', app_js_bundle)
+    html = html.replace('__SIM_WORKER_SOURCE_JSON__', json.dumps(worker_js_bundle))
+    return html
 
 def main():
     logs = [
@@ -146,6 +265,9 @@ def main():
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_prefilter.html')
     template_mtime = os.path.getmtime(template_path) if os.path.exists(template_path) else 0
     template_content = load_template()
+    ground_truths = load_ground_truths()
+    app_js_bundle = load_app_js_bundle()
+    worker_js_bundle = load_worker_js_bundle()
 
     files_generated = 0
     sim_results = []
@@ -167,9 +289,7 @@ def main():
             
             if needs_gen:
                 with open(rp, 'w', encoding='utf-8') as f:
-                    html = template_content.replace('__FILENAME__', fn)
-                    html = html.replace('__DATA_JSON__', json.dumps(p))
-                    f.write(html)
+                    f.write(render_template(template_content, fn, p, ground_truths, app_js_bundle, worker_js_bundle))
                 files_generated += 1
                 
             num_updates = len([e for e in p['all_entries'] if e['type'] == 'Update'])

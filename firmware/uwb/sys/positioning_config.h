@@ -164,6 +164,51 @@
 #endif
 
 /**
+ * @brief Mahalanobis pre-filter parameters for raw 3D distances.
+ *
+ * The filter keeps a clean per-anchor distance history. Samples with d2 above
+ * the reject threshold are not inserted into history. Once an anchor is in the
+ * rejected state, it must drop below the recover threshold before it is accepted
+ * again.
+ */
+#ifndef MAHALANOBIS_PREFILTER_HISTORY_WINDOW
+#define MAHALANOBIS_PREFILTER_HISTORY_WINDOW       15U
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_COLD_START_COUNT
+#define MAHALANOBIS_PREFILTER_COLD_START_COUNT     3U
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_D2_RECOVER
+#define MAHALANOBIS_PREFILTER_D2_RECOVER           4.0f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_D2_REJECT
+#define MAHALANOBIS_PREFILTER_D2_REJECT            9.0f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_R_BASE
+#define MAHALANOBIS_PREFILTER_R_BASE               0.05f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT
+#define MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT      0.5f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_MIN_COVARIANCE
+#define MAHALANOBIS_PREFILTER_MIN_COVARIANCE       1.0e-6f
+#endif
+
+/* Keep downstream D2 scoring tied to the same Mahalanobis thresholds. */
+#ifndef MW_TRIL_D2_RECOVER
+#define MW_TRIL_D2_RECOVER                         MAHALANOBIS_PREFILTER_D2_RECOVER
+#endif
+
+#ifndef MW_TRIL_D2_REJECT
+#define MW_TRIL_D2_REJECT                          MAHALANOBIS_PREFILTER_D2_REJECT
+#endif
+
+/**
  * @brief Enable/Disable quality gating based on trilateration error
  *        0 = Accept all trilateration results
  *        1 = Reject results with error > MAX_ACCEPTABLE_ERROR_M

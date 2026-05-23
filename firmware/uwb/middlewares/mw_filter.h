@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "positioning_config.h"
 
 typedef struct {
     float history[5];
@@ -17,9 +18,8 @@ typedef struct {
     uint8_t index;
 } median_filter_1d_t;
 
-#define MW_FILTER_MAHAL_HISTORY_WINDOW 15U
-#define MW_FILTER_MAHAL_COLD_START     3U
-#define UKF_INIT_SAMPLES 50
+#define MW_FILTER_MAHAL_HISTORY_WINDOW MAHALANOBIS_PREFILTER_HISTORY_WINDOW
+#define MW_FILTER_MAHAL_COLD_START     MAHALANOBIS_PREFILTER_COLD_START_COUNT
 
 typedef struct {
     float history[MW_FILTER_MAHAL_HISTORY_WINDOW];
