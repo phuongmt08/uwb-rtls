@@ -6,7 +6,7 @@ from typing import Tuple
 OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\21_05_26\20260521_18g31p_ukf_log_data.csv"
+SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\22_05_26\20260522_18g44p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -42,10 +42,10 @@ ANCHOR_2_X = 9.76
 ANCHOR_2_Y = 0.0
 
 ANCHOR_3_X = 0.0
-ANCHOR_3_Y = 9.76
+ANCHOR_3_Y = 12.2
 
 ANCHOR_4_X = 9.76
-ANCHOR_4_Y = 9.76
+ANCHOR_4_Y = 12.2
 
 # Anchor positions in the room (three corners)
 ANCHOR_POSITIONS = np.array([
@@ -88,7 +88,7 @@ R_UWB_TEST = 0.1**2
 # MANUAL values (Editable from GUI else block)
 Q_A_MANUAL = 0.04
 Q_G_MANUAL = 4.78e-07
-R_UWB_MANUAL = 0.005
+R_UWB_MANUAL = 0.0001
 
 # Logic to select final values
 if TEST_UKF_Q_R_Params:
@@ -151,7 +151,7 @@ class UKFContext:
 # UART Configuration
 UART_BAUDRATE = 115200
 UART_TIMEOUT = 1.0
-TARGET_PORT = "COM8"
+TARGET_PORT = "COM15"
 
 # Protocol Definitions
 UART_SOF = 0xAA
