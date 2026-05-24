@@ -58,6 +58,9 @@
 #define BL_MAGIC_ADDR  (0x2001FFF0UL)
 #define BL_MAGIC_VALUE (0xDEADB007UL)
 
+/* ========== Ranging Diagnostic Mode ========== */
+#define RANGING_DIAG_RANGING_ONLY 0 /* 1=disable background tasks; keep normal init + ranging/logger/network/BLE */
+
 /* ========== Position Test Mode ========== */
 #define TEST_SEND_POS  0 /* 0=disabled, 1=enabled */
 
@@ -437,6 +440,9 @@ int main(void)
   } else {
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
   }
+#if RANGING_DIAG_RANGING_ONLY
+  RLOG_W(LOG_OBJECT_CODE_APPLICATION, "[DIAG] Protocol isolation: normal init kept; PM/fusion/test/button tasks disabled");
+#endif
 
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] UWB init skipped (test mode)");
@@ -499,11 +505,13 @@ int main(void)
   bsp_battery_init(); // Initialize MAX17048 battery fuel gauge
   sys_pm_init();      // Initialize PM Service (including internal ADC)
 
+#if !RANGING_DIAG_RANGING_ONLY
   int pm_task_id = sys_task_add((sys_task_cb_t)sys_pm_task, NULL, SYS_TASK_TYPE_PERIODIC, 100, 0);
   if (pm_task_id >= 0)
   {
     sys_task_start(pm_task_id);
   }
+#endif
 
   int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
   if (rng_task_id >= 0) sys_task_start(rng_task_id);
@@ -527,6 +535,7 @@ int main(void)
       if (ble_task_id >= 0) sys_task_start(ble_task_id);
   }
 
+#if !RANGING_DIAG_RANGING_ONLY
 #if ENABLE_SYS_FUSION
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
@@ -546,6 +555,7 @@ int main(void)
 #if TEST_SEND_POS
   int test_pos_task_id = sys_task_add((sys_task_cb_t)test_send_pos_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
   if (test_pos_task_id >= 0) sys_task_start(test_pos_task_id);
+#endif
 #endif
   
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
@@ -578,7 +588,6 @@ if (cfg->device_type == DEVICE_TYPE_ANCHOR){
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t tick = HAL_GetTick();
   while (1)
   {
     bsp_io_button_event_t btn_event = bsp_io_button_event();

@@ -697,6 +697,7 @@ app_err_t app_tag_init(void)
 void app_tag_process(void)
 {
     static uint32_t last_warn_log = 0;
+    static uint32_t s_reported_period_miss_count = 0;
     sys_config_t *cfg = sys_config_get();
     uint32_t now = HAL_GetTick();
 
@@ -800,10 +801,13 @@ void app_tag_process(void)
         s_last_cycle_done_tick = cycle_done_tick;
         s_last_ranging_tick = cycle_done_tick;
         update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
-        if ((s_period_miss_count % 10U) == 1U && s_period_miss_count > 0U) {
+        if (s_period_miss_count != s_reported_period_miss_count
+            && (s_period_miss_count % 10U) == 1U
+            && s_period_miss_count > 0U) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
                    "Period miss accumulated: %lu",
                    (unsigned long)s_period_miss_count);
+            s_reported_period_miss_count = s_period_miss_count;
         }
         s_is_ranging_active = false;
         return;
