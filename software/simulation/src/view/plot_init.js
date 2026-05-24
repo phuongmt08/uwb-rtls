@@ -119,12 +119,20 @@ function initPlots(anchors, gt_square, rawData, samples) {
           hovertemplate: 'Gz: %{y:.4f} rad/s<extra></extra>' },
         { x: [], y: [], name: 'Yaw Angle', mode: 'lines', type: 'scatter', line: { color: '#7c3aed', width: 2 },
           hovertemplate: 'Yaw: %{y:.2f} deg<extra></extra>' },
+        { x: [], y: [], name: 'UKF Yaw', mode: 'lines', type: 'scatter', line: { color: '#10b981', width: 2 },
+          hovertemplate: 'UKF Yaw: %{y:.2f} deg<extra></extra>' },
+        { x: [], y: [], name: 'UKF Vx', mode: 'lines', type: 'scatter', line: { color: '#2563eb', width: 1.5, dash: 'dash' }, yaxis: 'y3',
+          hovertemplate: 'UKF Vx: %{y:.3f} m/s<extra></extra>' },
+        { x: [], y: [], name: 'UKF Vy', mode: 'lines', type: 'scatter', line: { color: '#ef4444', width: 1.5, dash: 'dash' }, yaxis: 'y3',
+          hovertemplate: 'UKF Vy: %{y:.3f} m/s<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
-        margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
+        margin: { t: 40, b: 40, l: 60, r: 100 }, 
+        xaxis: { title: 'Sample Index', domain: [0, 0.85] },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Yaw (deg)', side: 'left' },
         yaxis2: { title: 'Gyro (rad/s)', overlaying: 'y', side: 'right', showgrid: false },
+        yaxis3: { title: 'Velocity (m/s)', overlaying: 'y', side: 'right', anchor: 'free', position: 0.95, showgrid: false },
         hovermode: 'x unified'
     });
 

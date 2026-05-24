@@ -98,7 +98,10 @@ self.onmessage = function(e) {
         return smoother_state[i].filtered;
     };
 
-    const plotData = { vx: [], vy: [], zupt: [], ax: [], ay: [], gz: [], yaw: [], times: [] };
+    const plotData = { 
+        vx: [], vy: [], zupt: [], ax: [], ay: [], gz: [], yaw: [], times: [],
+        ukf_vx: [], ukf_vy: [], ukf_yaw: [] 
+    };
     let sampleIdx = 0, total_time = 0;
     let last_ax = 0, last_ay = 0, last_gz = 0;
 
@@ -277,6 +280,9 @@ self.onmessage = function(e) {
             plotData.ay.push(last_ay - bias.ay);
             plotData.gz.push(last_gz - bias.gz);
             plotData.yaw.push(yaw * 180 / Math.PI);
+            plotData.ukf_vx.push(filter.ukf.is_initialized ? filter.ukf.x[2] : 0);
+            plotData.ukf_vy.push(filter.ukf.is_initialized ? filter.ukf.x[3] : 0);
+            plotData.ukf_yaw.push(filter.ukf.is_initialized ? filter.ukf.x[4] * 180 / Math.PI : 0);
             plotData.times.push(total_time);
             sampleIdx++;
         }
