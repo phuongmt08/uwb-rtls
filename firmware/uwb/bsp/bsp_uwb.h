@@ -173,6 +173,7 @@ uint16_t bsp_uwb_get_rx_antenna_delay(void);
  * @brief Notify BSP about UWB IRQ edge (call from EXTI callback)
  */
 void bsp_uwb_on_irq(void);
+void bsp_uwb_dwt_isr(void);
 
 /**
  * @brief Clear pending UWB IRQ event flag

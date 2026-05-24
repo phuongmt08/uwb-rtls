@@ -848,9 +848,16 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void)
 void bsp_uwb_on_irq(void)
 {
 #if UWB_EVENT_DRIVEN
-  dwt_isr();
+  osSemaphoreRelease(g_uwb_isr_semHandle);
 #else
   s_irq_event_pending = 1;
+#endif
+}
+
+void bsp_uwb_dwt_isr(void)
+{
+#if UWB_EVENT_DRIVEN
+  dwt_isr();
 #endif
 }
 

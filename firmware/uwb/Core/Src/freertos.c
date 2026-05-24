@@ -251,11 +251,14 @@ void uwb_ranging_entry(void *argument)
   {
     /* Block until DW1000 ISR signals TX done or RX event.            */
     /* 10 ms timeout as fallback to keep state machine alive.         */
-    osSemaphoreAcquire(myBinarySem01Handle, 10);
+    osSemaphoreAcquire(g_uwb_isr_semHandle, 10);
 
     if (!g_ranging_enabled) continue;
 
     osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+#if UWB_EVENT_DRIVEN
+    bsp_uwb_dwt_isr();
+#endif
     if (cfg->uwb.role == DEVICE_ROLE_TAG)
     {
       app_tag_process();
