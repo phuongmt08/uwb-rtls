@@ -287,7 +287,6 @@ void EXTI15_10_IRQHandler(void)
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
 
   /* USER CODE END EXTI15_10_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(UWB_IRQ_Pin);
   HAL_GPIO_EXTI_IRQHandler(IMU_IRQ_Pin);
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */
 
@@ -323,6 +322,11 @@ void OTG_FS_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+void EXTI4_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(UWB_IRQ_Pin);
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2) {

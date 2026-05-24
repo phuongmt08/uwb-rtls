@@ -71,11 +71,14 @@
 #define configTOTAL_HEAP_SIZE                    ((size_t)24576)
 #define configMAX_TASK_NAME_LEN                  ( 16 )
 #define configUSE_TRACE_FACILITY                 1
+#define configGENERATE_RUN_TIME_STATS            1
 #define configUSE_16_BIT_TICKS                   0
 #define configUSE_MUTEXES                        1
 #define configQUEUE_REGISTRY_SIZE                8
 #define configUSE_RECURSIVE_MUTEXES              1
 #define configUSE_COUNTING_SEMAPHORES            1
+#define configCHECK_FOR_STACK_OVERFLOW           2
+#define configUSE_MALLOC_FAILED_HOOK             1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION  0
 /* USER CODE BEGIN MESSAGE_BUFFER_LENGTH_TYPE */
 /* Defaults to size_t for backward compatibility, but can be changed
@@ -165,6 +168,9 @@ standard names. */
 
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() ((void)0)
+#define portGET_RUN_TIME_COUNTER_VALUE()         getRunTimeCounterValue()
+uint32_t getRunTimeCounterValue(void);
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */
