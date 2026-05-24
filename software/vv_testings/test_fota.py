@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 test_fota.py  —  FOTA over USB-CDC test: flash APP firmware via STM32 bootloader
 ==================================================================================
@@ -32,7 +33,9 @@ Memory layout (memorylayout.h):
   MEM_APP_START  = 0x0800_C000
   MEM_APP_END    = 0x0804_0000  (208 KB app region)
 """
-from __future__ import annotations
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 
 import os
 import struct
@@ -42,10 +45,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import protocol_pb2 as pb
-from vv_commands import CommandFactory
+from common import protocol_pb2 as pb
+from common.commands import CommandFactory
 from vv_test_session import VvTestSession
-from vv_transport import VvAddress
+from common.transport import VvAddress
 from test_common import first_param, send_and_print
 
 # ─── Memory layout (must match memorylayout.h) ────────────────────────────────
@@ -62,8 +65,8 @@ ENTER_TIMEOUT_S   = 0.5
 POST_ENTER_WAIT_S = 2   # wait after enter_to_bootloader ACK for reset+bootloader init
 
 DEFAULT_SRC  = int(VvAddress.DEBUG)
-DEFAULT_APP_DST = int(VvAddress.ANCHOR)
-DEFAULT_BL_DST  = int(VvAddress.TAG)
+DEFAULT_APP_DST = int(VvAddress.MCU)
+DEFAULT_BL_DST  = int(VvAddress.MCU)
 DEFAULT_BAUD = 115200
 
 assert CHUNK_SIZE % 4 == 0, "CHUNK_SIZE must be 4-byte aligned"

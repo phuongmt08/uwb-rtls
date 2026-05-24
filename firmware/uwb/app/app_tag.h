@@ -21,8 +21,8 @@
 
 /* Includes ----------------------------------------------------------- */
 #include <stdint.h>
+#include <stdbool.h>
 #include "common.h"
-#include "bsp_io.h"
 
 /* Public enumerate/structure ----------------------------------------- */
 
@@ -58,13 +58,14 @@ void app_tag_set_output_mode(app_tag_output_mode_t mode);
  */
 bool app_tag_get_last_position(float *x_m, float *y_m);
 
-#if ENABLE_TAG_AUTO_CALIB
 /**
- * @brief Handle button events in tag calibration mode
- * @param event Button event from bsp_io
+ * @brief Get latest UWB trilateration position and current ranging error count.
+ * @param x Latest trilateration X position in meters, can be NULL
+ * @param y Latest trilateration Y position in meters, can be NULL
+ * @param err_count Current consecutive/accumulated ranging error count, can be NULL
+ * @return true if a valid trilateration position is available
  */
-void app_tag_on_button(bsp_io_button_event_t event);
-#endif
+bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
 
 #endif /* __APP_TAG_H */
 

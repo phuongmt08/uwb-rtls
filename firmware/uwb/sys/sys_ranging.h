@@ -32,25 +32,18 @@ typedef enum
 } sys_ranging_err_t;
 
 /**
- * @brief Ranging mode
- */
-typedef enum {
-  SYS_RANGING_MODE_SINGLE = 0,    /* Single anchor (legacy) */
-  SYS_RANGING_MODE_TDMA = 1       /* Multi-anchor TDMA */
-} sys_ranging_mode_t;
-
-/**
  * @brief Local calibration state advertised in UWB packets.
  *
  * This is intentionally 1 byte so it can fit into existing packet padding.
+ * Only two states matter:
+ *   NORMAL = calibration not finished (or not running)
+ *   DONE   = calibration converged, antenna delay saved
+ * The Anchor Master uses DONE from peers to decide when the
+ * whole network is calibrated and ready to reset into normal mode.
  */
 typedef enum {
   SYS_CALIB_STATUS_NORMAL = 0,
-  SYS_CALIB_STATUS_COLLECTING = 1,
-  SYS_CALIB_STATUS_CALCULATING = 2,
-  SYS_CALIB_STATUS_PENDING_ACCEPT = 3,
-  SYS_CALIB_STATUS_DONE = 4,
-  SYS_CALIB_STATUS_FACTORY_RESET = 5
+  SYS_CALIB_STATUS_DONE   = 1
 } sys_calib_status_t;
 
 /**
@@ -61,7 +54,8 @@ typedef struct
   float    distance_m;
   uint64_t t1, t2, t3, t4, t5, t6;
   uint8_t  anchor_id;
-  int8_t   rssi;
+  uint16_t fp_amp_norm_q8;
+  uint16_t fp_snr_q8;
   uint8_t  quality;
   uint8_t  calib_status;
   bool     valid;
@@ -73,19 +67,40 @@ typedef struct
 
 typedef struct
 {
-  sys_ranging_result_t results[NUM_ANCHORS];
+  sys_ranging_result_t results[MAX_ANCHORS_SUPPORTED];
   uint8_t count;          /* Number of valid results */
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
+
+#define SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS 3U
+
+typedef struct __attribute__((packed))
+{
+  uint8_t  peer_id;
+  float    known_m;
+  float    mean_m;
+  float    std_m;
+  float    timeout_rate;
+  uint16_t valid_count;
+} sys_calib_pair_summary_item_t;
+
+typedef struct __attribute__((packed))
+{
+  uint8_t msg_type;
+  uint8_t epoch_id;
+  uint8_t sender_id;
+  uint8_t pair_count;
+  uint16_t current_tx_delay;
+  uint16_t current_rx_delay;
+  uint16_t current_combined_delay;
+  sys_calib_pair_summary_item_t pair[SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS];
+} sys_calib_pair_summary_msg_t;
 
 /**
  * @brief Ranging configuration
  */
 typedef struct
 {
-  /* Mode selection */
-  sys_ranging_mode_t mode;          /* SINGLE or TDMA */
-  
   /* Common parameters */
   uint8_t  sequence_num;
   uint32_t rx_timeout_ms;
@@ -168,14 +183,30 @@ void sys_ranging_set_calib_status(sys_calib_status_t status);
 sys_calib_status_t sys_ranging_get_calib_status(void);
 
 /**
- * @brief Process Anchor TDMA ranging (call frequently in loop)
+ * @brief Get the current TDMA slot ID (0=Idle/Poll, 1-N=Anchor slots)
+ */
+uint8_t sys_ranging_get_current_slot(void);
+
+/**
+ * @brief Get the current superframe counter (synced across network)
+ */
+uint32_t sys_ranging_get_superframe_count(void);
+
+/**
+ * @brief Process Anchor TDMA ranging (call frequently in loop).
+ *
+ * If sys_ranging_anchor_start_tdma() was called first, this processes that
+ * explicit transaction. If the anchor is idle, this function owns the normal
+ * anchor receive policy: performance listens continuously, while lower-power
+ * modes use discovery/tracking receive windows around expected POLL timing.
  * @param num_anchors Total number of anchors in network
  * @param anchor_ids Array of all anchor IDs in network
  * @param rx_timeout_ms RX timeout in milliseconds
  * @return
  *   - SYS_RANGING_OK: Ranging complete
+ *   - SYS_RANGING_ERR_BUSY: No complete ranging result yet
  *   - SYS_RANGING_ERR: Error occurred
- *   - SYS_RANGING_ERR_TIMEOUT: Timeout (normal, no TAG poll)
+ *   - SYS_RANGING_ERR_TIMEOUT: Transaction timeout
  */
 sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
                                                   const uint8_t *anchor_ids,
@@ -187,6 +218,18 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
  * @return SYS_RANGING_OK if result available
  */
 sys_ranging_err_t sys_ranging_anchor_get_result_tdma(sys_ranging_result_t *result);
+
+/**
+ * @brief Send one calibration pair summary packet in a deterministic summary slot.
+ */
+sys_ranging_err_t sys_ranging_send_calib_pair_summary(const sys_calib_pair_summary_msg_t *summary,
+                                                      uint8_t slot_id);
+
+/**
+ * @brief Poll for one calibration pair summary packet.
+ */
+sys_ranging_err_t sys_ranging_poll_calib_pair_summary(sys_calib_pair_summary_msg_t *summary,
+                                                      uint32_t timeout_ms);
 
 /* ====================================================================
  * NON-BLOCKING API - LEGACY SINGLE-ANCHOR MODE (backward compatible)
@@ -244,5 +287,10 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
  * @brief Reset ranging statistics
  */
 void sys_ranging_reset_stats(void);
+
+/**
+ * @brief Abort any ongoing ranging and reset state machine to IDLE
+ */
+void sys_ranging_abort(void);
 
 #endif /* __SYS_RANGING_H */

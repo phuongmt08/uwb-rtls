@@ -20,26 +20,25 @@ extern "C" {
 #define TDMA_PROCESSING_MARGIN_US    400      /* SPI + HAL overhead (300-500µs) */
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
-#define TDMA_DEFAULT_GUARD_TIME_US   1500     /* Standard guard (stability profile) */
-
+#define TDMA_DEFAULT_GUARD_TIME_US   2000
 /* ====================================================================
  * TIMING CONSTANTS
  * ==================================================================== */
 #define TDMA_MAX_ANCHORS             8
 
-#define TDMA_DEFAULT_SLOT_DURATION_US      2500   /* 2.5ms payload window per slot */
-#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 3500   /* 3.5ms delay */
-#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 5000  /* 5ms — to give TAG enough headroom to build FINAL message
+#define TDMA_DEFAULT_SLOT_DURATION_US      3000   /* 3.0ms payload window per slot */
+#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 3000   /* 3.0ms delay */
+#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 7000  /* 5ms — to give TAG enough headroom to build FINAL message
                                                    * after RESP loop without hitting
                                                    * ensure_future_tx guard (1500µs).
                                                    * With 4 anchors, loop ends at ~+22000µs,
                                                    * build+TX takes ~300µs, FINAL planned at
                                                    * +25000µs → ahead=2700µs > 1500µs guard. */
-#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 4500 /* 4.5ms — increased to give Anchor
-                                                    * slot 1 enough headroom to discard other 
-                                                    * anchors RESP packets (~2ms for 4 anchors)
-                                                    * and finish SPI processing (~600us)
-                                                    * without triggering ensure_future_tx. */
+#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 9000 /* NOTE: 8.0ms — Anchor slot 1 offset = 6500+3500 = 10000µs.
+                                                    * Processing from FINAL RX to ensure_future_tx
+                                                    * takes ~7400µs (bsp_uwb_rx SPI/LDE/RSSI ~1500µs
+                                                    * + data extract + calculate_distance ~5900µs).
+                                                    * Budget = 10000 - 1500 guard >= 8500µs >> 7400µs. */
 
 /* DW1000 time unit conversions */
 #define DW_TIME_UNIT_NS              15.65f   /* ~15.65 ps per tick */
@@ -49,10 +48,10 @@ extern "C" {
  * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
  * | TAG  | | poll_to_resp_delay| | N ANCHOR RESP     | | TAG   | | final_to_result_d | | N ANCHOR RESULT     |
  * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
- * | POLL | | (3.5ms default)   | | slots 1→N         | | FINAL | | (4.5ms default)   | | slots 1→N           |
- * | tx   | |                   | | N * 4.0ms         | | tx    | |                   | | N * 4.0ms           |
+ * | POLL | | (4.0ms default)   | | slots 1→N         | | FINAL | | (8.0ms default)   | | slots 1→N           |
+ * | tx   | |                   | | N * 3.0ms         | | tx    | |                   | | N * 3.0ms           |
  * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
- *                                ^ each slot = slot_duration (2.5ms) + guard_time (1.5ms) = 4.0ms
+ *                                ^ each slot = slot_duration (2.0ms) + guard_time (1.0ms) = 3.0ms
  *
  * Full timing formula (based on current configuration):
  *   T_superframe(N) = poll_to_resp_delay
@@ -62,20 +61,20 @@ extern "C" {
  *                   + N * (slot_duration + guard_time)
  *                   + slot_duration (last result airtime)
  *
- *   => T_superframe(N) = 3500 + N*4000 + (2500 + 5000) + 4500 + N*4000 + 2500 (us)
- *                      = 18000 + 8000*N (us)
+ *   => T_superframe(N) = 4000 + N*3000 + (2000 + 5000) + 8000 + N*3000 + 2000 (us)
+ *                      = 22500 + 6000*N (us)
  *
  * Case N = 8 anchors (Maximum):
- *   T_active = 18000 + 8000*8 = 82000 us = 82.0 ms
+ *   T_active = 22500 + 6000*8 = 70500 us = 70.5 ms
  *
  * Case N = 6 anchors:
- *   T_active = 18000 + 8000*6 = 66000 us = 66.0 ms
+ *   T_active = 22500 + 6000*6 = 58500 us = 58.5 ms
  *
  * Case N = 4 anchors (Default):
- *   T_active = 18000 + 8000*4 = 50000 us = 50.0 ms
+ *   T_active = 22500 + 6000*4 = 46500 us = 46.5 ms
  *
  * Guard time notes:
- * - guard_time_us (1500us) is a safety gap inside each slot to absorb clock drift and processing jitter.
+ * - guard_time_us (1000us) is a safety gap inside each slot to absorb clock drift and processing jitter.
  * - This large guard ensures stability across all 8 possible anchor slots even with software overhead.
  */
 

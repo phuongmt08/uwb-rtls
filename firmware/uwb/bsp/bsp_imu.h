@@ -15,7 +15,7 @@
 
 /* Includes ----------------------------------------------------------- */
 #include "icm42688.h"
-#include "main.h"
+#include "stm32f4xx_hal.h"
 
 /* Public defines ----------------------------------------------------- */
 /* =============================================================================
@@ -33,8 +33,8 @@
 
 /* --- Chip-select GPIO ----------------------------------------------- */
 #ifndef BSP_IMU_CS_GPIO_PORT
-	#define BSP_IMU_CS_GPIO_PORT  GPIOA
-	#define BSP_IMU_CS_GPIO_PIN   GPIO_PIN_4
+	#define BSP_IMU_CS_GPIO_PORT  GPIOB
+	#define BSP_IMU_CS_GPIO_PIN   GPIO_PIN_13
 #endif
 
 /* =============================================================================
@@ -42,12 +42,12 @@
  * ============================================================================= */
 /** Gyroscope full-scale range.  See icm42688_gyro_fs_t in icm42688.h. */
 #ifndef BSP_IMU_GYRO_FS
-	#define BSP_IMU_GYRO_FS         ICM42688_GYRO_FS_2000DPS
+	#define BSP_IMU_GYRO_FS         ICM42688_GYRO_FS_250DPS
 #endif
 
 /** Accelerometer full-scale range.  See icm42688_accel_fs_t. */
 #ifndef BSP_IMU_ACCEL_FS
-	#define BSP_IMU_ACCEL_FS        ICM42688_ACCEL_FS_16G
+	#define BSP_IMU_ACCEL_FS        ICM42688_ACCEL_FS_4G
 #endif
 
 /** Gyroscope output data rate.  See icm42688_odr_t. */
@@ -99,7 +99,7 @@
 #endif
 
 #ifndef BSP_IMU_CALIB_DATA
-	#define BSP_IMU_CALIB_DATA  (true)
+	#define BSP_IMU_CALIB_DATA  (false)
 #endif
 
 #ifndef BSP_IMU_ENABLE_GYRO_FILTER
@@ -114,24 +114,6 @@
 	#define M_PI  3.1415f
 #endif
 
-/* =============================================================================
- * FILTER CONFIGURATION
- * ============================================================================= */
-#define BSP_IMU_FILTER_COMPLEMENTARY
-/* #define BSP_IMU_FILTER_MADGWICK */
-/* #define BSP_IMU_FILTER_MAHONY   */
-
-/* --- Complementary filter params --- */
-#define BSP_IMU_COMP_ALPHA        (0.98f)   /* 0.0~1.0: càng gần 1 càng tin gyro */
-#define BSP_IMU_DT_S              (0.05f)  /* dt tương ứng ODR 1kHz */
-
-/* --- Madgwick filter params --- */
-#define BSP_IMU_MADGWICK_BETA     (0.1f)    /* gradient descent step, thường 0.01~0.1 */
-
-/* --- Mahony filter params --- */
-#define BSP_IMU_MAHONY_KP         (2.0f)    /* proportional gain */
-#define BSP_IMU_MAHONY_KI         (0.005f)  /* integral gain */
-
 /* Public enumerate/structure ----------------------------------------- */
 typedef icm42688_err_t          bsp_imu_err_t;
 
@@ -141,38 +123,28 @@ typedef icm42688_err_t          bsp_imu_err_t;
 #define BSP_IMU_ERR_TIMEOUT   ICM42688_ERR_TIMEOUT
 #define BSP_IMU_ERR_WHO_AM_I  ICM42688_ERR_WHO_AM_I
 
-/**
- * @brief Euler angles (degrees)
- */
 typedef struct
 {
-    float roll;   /* rotation around X axis, degrees */
-    float pitch;  /* rotation around Y axis, degrees */
-    float yaw;    /* rotation around Z axis, degrees (gyro integrated, drifts) */
-    float temp;
+    float ax;
+    float ay;
+    float gz;
 } bsp_imu_data_t;
 
-/**
- * @brief Filter internal state — khởi tạo zero trước khi dùng
- */
 typedef struct
 {
-#if defined(BSP_IMU_FILTER_MAHONY)
-    float integralFBx;  /* Mahony integral feedback */
-    float integralFBy;
-    float integralFBz;
-#endif
-    float q0, q1, q2, q3;  /* quaternion (Madgwick / Mahony) */
-} bsp_imu_filter_state_t;
+    float bias_ax;
+    float bias_ay;
+    float bias_gz;
+} bsp_imu_bias_t;
 
 /* Public variables --------------------------------------------------- */
 
 /* Public function prototypes ----------------------------------------- */
 bsp_imu_err_t bsp_imu_init(void);
 
-bsp_imu_err_t bsp_imu_get_data(bsp_imu_data_t *euler_data,
-                                icm42688_sensor_data_t *sensor_data,
-                                bsp_imu_filter_state_t *state);
+bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data);
+
+bsp_imu_err_t bsp_imu_get_bias_data(bsp_imu_bias_t *p_bias);
 
 bsp_imu_err_t bsp_imu_soft_reset();
 
@@ -185,6 +157,19 @@ bsp_imu_err_t bsp_imu_clear_interrupt();
 bsp_imu_err_t bsp_imu_irq_handler();
 
 bool bsp_imu_is_data_ready();
+
+/**
+ * @brief Read internal temperature of ICM-42688 IMU chip.
+ * @param[out] temp  Pointer to float to store temperature in C.
+ * @return BSP_IMU_OK on success, BSP_IMU_ERR on failure.
+ */
+bsp_imu_err_t bsp_imu_get_temp(float *temp);
+
+/**
+ * @brief  Check if IMU driver was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_imu_is_initialized(void);
 
 #endif /* __BSP_IMU_H */
 

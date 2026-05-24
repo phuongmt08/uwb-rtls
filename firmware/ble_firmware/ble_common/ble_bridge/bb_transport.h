@@ -37,7 +37,6 @@ typedef void (*bb_transport_state_transition_cb_t)(void);
 /* Public macros ------------------------------------------------------ */
 /* Public variables --------------------------------------------------- */
 /* Public function prototypes ----------------------------------------- */
-/**@brief Initialize timer module.
 /**
  * @brief Initializes the transport layer (HDLC state machines, buffer allocations)
  *
@@ -62,6 +61,11 @@ void bb_transport_process(void);
 bool bb_transport_is_packet_ready(void);
 
 /**
+ * @brief Giải phóng cờ báo hiệu gói tin sẵn sàng để cho phép nhận gói tin tiếp theo.
+ */
+void bb_transport_clear_packet_ready(void);
+
+/**
  * @brief Truyền data theo cấu hình Source.
  *        Nếu type = SERIAL, tiến hành bọc HDLC vào gửi UART.
  *        Nếu type = BLE, gửi raw Protobuf qua môi trường radio.
@@ -71,8 +75,6 @@ bool bb_transport_is_packet_ready(void);
  * @param[in] tx_source Destination source mode (Serial / BLE).
  * @return NRF_SUCCESS if success.
  */
-ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t length, bb_packet_source_t tx_source);
-
-void on_rx_byte(uint8_t byte);
+ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t  length, bb_packet_source_t tx_source);
 
 #endif // BB_TRANSPORT_H

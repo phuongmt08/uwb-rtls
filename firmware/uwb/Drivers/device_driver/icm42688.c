@@ -25,6 +25,7 @@
 #define ICM42688_DISABLE_I2C			0x03
 
 #define ICM42688_ENABLE_SOFT_RESET		0x01
+
 /* Private enumerate/structure ---------------------------------------- */
 /* AAF parameters per icm42688_aaf_t index (datasheet Table 5-5) */
 typedef struct
@@ -68,7 +69,7 @@ static const icm42688_aaf_param_t s_aaf_lut[] =
   /* ICM42688_AAF_997HZ   */ { 21,   440,  6 },
   /* ICM42688_AAF_1962HZ  */ { 37,  1376,  4 },
 };
-
+static uint8_t g_debug = 0;
 /* Public function implementation ------------------------------------------- */
 icm42688_err_t icm42688_init(icm42688_dev_t *dev, const icm42688_config_t *config)
 {
@@ -82,15 +83,16 @@ icm42688_err_t icm42688_init(icm42688_dev_t *dev, const icm42688_config_t *confi
 
 	/* Soft reset */
 	CHECK_ERR(icm42688_soft_reset(dev) == ICM42688_OK, ICM42688_ERR);
-
+	g_debug = 1;
 	/* Verify WHO_AM_I */
 	data = icm42688_who_am_i(dev);
-
+	g_debug = 2;
 	if (data != ICM42688_WHO_AM_I_VALUE)
 	{
+		g_debug = 3;
 		return ICM42688_ERR_WHO_AM_I;
 	}
-
+	g_debug = 4;
 	/* PWR_MGMT0: select operating mode */
 	if (config->use_low_noise_mode)
 	{
@@ -133,6 +135,44 @@ icm42688_err_t icm42688_init(icm42688_dev_t *dev, const icm42688_config_t *confi
 		CHECK_ERR(icm42688_compute_hardware_offsets(dev, ICM42688_CALIB_SAMPLES) == ICM42688_OK, ICM42688_ERR);
 		CHECK_ERR(icm42688_set_hardware_offsets(dev) == ICM42688_OK, ICM42688_ERR);
 	}
+	else
+	{
+		CHECK_ERR(icm42688_compute_hardware_offsets(dev, ICM42688_CALIB_SAMPLES) == ICM42688_OK, ICM42688_ERR);
+		CHECK_ERR(icm42688_reset_hardware_offsets(dev) == ICM42688_OK, ICM42688_ERR);
+	}
+
+	return ICM42688_OK;
+}
+
+icm42688_err_t icm42688_get_raw_data(icm42688_dev_t *dev, icm42688_sensor_data_t *data)
+{
+	uint8_t  buf[14];
+	int16_t  raw_temp;
+	int16_t  raw_ax, raw_ay, raw_az;
+	int16_t  raw_gx, raw_gy, raw_gz;
+
+	/* Burst read from TEMP_DATA1 (0x1D) to GYRO_DATA_Z0 (0x2A) = 14 bytes */
+	CHECK_ERR(icm42688_read_reg(dev, ICM42688_REG_TEMP_DATA1, buf, 14) == ICM42688_OK, ICM42688_ERR);
+
+	/* Big-endian (default): high byte first */
+	raw_temp = (int16_t)((buf[0]  << 8) | buf[1]);
+	raw_ax   = (int16_t)((buf[2]  << 8) | buf[3]);
+	raw_ay   = (int16_t)((buf[4]  << 8) | buf[5]);
+	raw_az   = (int16_t)((buf[6]  << 8) | buf[7]);
+	raw_gx   = (int16_t)((buf[8]  << 8) | buf[9]);
+	raw_gy   = (int16_t)((buf[10] << 8) | buf[11]);
+	raw_gz   = (int16_t)((buf[12] << 8) | buf[13]);
+
+	float gyro_sens  = ICM42688_GYRO_SENS_LUT[(uint8_t)dev->config.gyro_fs  & 0x07];
+	float accel_sens = ICM42688_ACCEL_SENS_LUT[(uint8_t)dev->config.accel_fs & 0x03];
+
+	data->temp    	= ((float)raw_temp / ICM42688_TEMP_SENSITIVITY) + ICM42688_TEMP_OFFSET;
+	data->accel.x 	= ((float)raw_ax / accel_sens);
+	data->accel.y 	= ((float)raw_ay / accel_sens);
+	data->accel.z 	= ((float)raw_az / accel_sens);
+	data->gyro.x 	= ((float)raw_gx / gyro_sens);
+	data->gyro.y 	= ((float)raw_gy / gyro_sens);
+	data->gyro.z 	= ((float)raw_gz / gyro_sens);
 
 	return ICM42688_OK;
 }
@@ -544,15 +584,6 @@ icm42688_err_t icm42688_compute_hardware_offsets(icm42688_dev_t *dev, uint16_t n
     float raw_ay_f = avg_ay;
     float raw_az_f = avg_az;
 
-    if  (raw_ax_f >  threshold) raw_ax_f -= one_g;
-    else if (raw_ax_f < -threshold) raw_ax_f += one_g;
-
-    if  (raw_ay_f >  threshold) raw_ay_f -= one_g;
-    else if (raw_ay_f < -threshold) raw_ay_f += one_g;
-
-    if  (raw_az_f >  threshold) raw_az_f -= one_g;
-    else if (raw_az_f < -threshold) raw_az_f += one_g;
-
     dev->calib.accel_offset.x = raw_ax_f / accel_sens;
     dev->calib.accel_offset.y = raw_ay_f / accel_sens;
     dev->calib.accel_offset.z = raw_az_f / accel_sens;
@@ -561,6 +592,23 @@ icm42688_err_t icm42688_compute_hardware_offsets(icm42688_dev_t *dev, uint16_t n
     CHECK_ERR(icm42688_set_accel_fs(dev, saved_accel_fs) == ICM42688_OK, ICM42688_ERR);
 
     return ICM42688_OK;
+}
+
+icm42688_err_t icm42688_reset_hardware_offsets(icm42688_dev_t *dev)
+{
+	CHECK_ERR(dev != NULL, ICM42688_ERR_PARAM);
+
+	CHECK_ERR(icm42688_select_bank(dev, 4) == ICM42688_OK, ICM42688_ERR);
+
+	uint8_t zero = 0;
+	for (uint8_t r = ICM42688_REG_OFFSET_USER0; r <= ICM42688_REG_OFFSET_USER8; r++)
+	{
+		CHECK_ERR(icm42688_write_reg(dev, r, &zero, 1) == ICM42688_OK, ICM42688_ERR);
+	}
+
+	CHECK_ERR(icm42688_select_bank(dev, 0) == ICM42688_OK, ICM42688_ERR);
+
+	return ICM42688_OK;
 }
 
 icm42688_err_t icm42688_set_hardware_offsets(icm42688_dev_t *dev)

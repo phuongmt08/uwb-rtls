@@ -29,6 +29,7 @@
 #include "network_core.h"
 #include "network_cmd.h"
 #include "sys_logger_bl.h"
+#include "dma.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -105,10 +106,12 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* USER CODE END SysInitbsp_rtc_get_timestamp_ms */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USB_DEVICE_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
@@ -117,12 +120,6 @@ int main(void)
   
   /* Check if app requested DFU mode via magic flag */
   bool force_dfu = bl_should_enter_dfu();
-  
-  /* Always enter DFU mode with timeout window to allow:
-   * 1. User to flash new firmware (even if current app is valid)
-   * 2. App-requested DFU mode (via magic flag)
-   * 3. No valid app case (must stay in DFU)
-   */
 
   /* Logger must be initialized before any RLOG/sys_logger_write_record usage. */
   sys_logger_init();
@@ -130,10 +127,10 @@ int main(void)
   RLOG_D(OBJECT_CODE, "=               BOOTLOADER STARTED              =");
   RLOG_D(OBJECT_CODE, "=================================================");
   /* Initialize protocol stack */
-  serial_init();  // TEMP: Test
-  network_core_init(&s_net_core, protobuf_device_addr_t_PACKET_ADDR_TAG, s_net_rx_buf, sizeof(s_net_rx_buf));
-  network_cmd_init(&s_net_core);  // TEMP: Test
-  bl_fota_init(&s_net_core);  // TEMP: Disabled to isolate hardfault source
+  serial_init();
+  network_core_init(&s_net_core, protobuf_PACKET_ADDR_MCU, s_net_rx_buf, sizeof(s_net_rx_buf));
+  network_cmd_init(&s_net_core);
+  bl_fota_init(&s_net_core);
 
   uint32_t t0 = HAL_GetTick();
   uint32_t t_last_blink = t0;

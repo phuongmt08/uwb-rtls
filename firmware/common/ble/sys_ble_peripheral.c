@@ -12,6 +12,7 @@
 #include "sys_ble_peripheral.h"
 #include "stm32f4xx_hal.h"
 #include "network/network_cmd.h"
+#include "network/network_core.h"
 #ifdef BOOTLOADER
     #include "bsp_util_bl.h"
     #include "sys_logger_bl.h"
@@ -80,6 +81,40 @@ static void ble_set_state(protobuf_ble_state_t new_state, int32_t rssi_dbm)
    }
 }
 
+static void __attribute__((unused)) test_send_log_data_to_host(void)
+{
+    if (!s_ble_peri.stream) return;
+
+    protobuf_packet_t log_pkt;
+    memset(&log_pkt, 0, sizeof(log_pkt));
+    log_pkt.which_params = protobuf_packet_t_log_data_tag;
+    log_pkt.params.log_data.type = protobuf_log_type_t_LOG_TYPE_DEVICE_LOG;
+
+    const char *msg = "testing BLE transmittion form MCU to HOST";
+    uint8_t msg_len = (uint8_t)strlen(msg);
+    uint16_t rec_len = 1 + 1 + 6 + 1 + msg_len;
+    uint16_t total_len = 2 + rec_len;
+    uint16_t padded_len = (total_len + 3) & ~3;
+
+    if (padded_len > sizeof(log_pkt.params.log_data.data.bytes)) return;
+
+    uint8_t *buf = log_pkt.params.log_data.data.bytes;
+    buf[0] = rec_len & 0xFF;
+    buf[1] = (rec_len >> 8) & 0xFF;
+    buf[2] = 0xFE; // INFO level
+    buf[3] = OBJECT_CODE;
+    memset(&buf[4], 0, 6); // timestamp = 0
+    buf[10] = msg_len;
+    memcpy(&buf[11], msg, msg_len);
+
+    for (uint16_t i = total_len; i < padded_len; ++i) {
+        buf[i] = 0;
+    }
+    RLOG_I(OBJECT_CODE, "Prepared log packet with padded length %u bytes", padded_len);
+    log_pkt.params.log_data.data.size = padded_len;
+    network_core_send_packet(s_ble_peri.stream, protobuf_PACKET_ADDR_HOST, &log_pkt);
+}
+
 static void ble_poll_status(void)
 {
    if (!s_ble_peri.stream) return;
@@ -87,6 +122,9 @@ static void ble_poll_status(void)
    if (!network_send_ble_status_get(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL)) {
        RLOG_W(OBJECT_CODE, "ble_status_get send failed");
    }
+//    // Send the message stub to check the transmission from MCU to HOST via BLE
+//    RLOG_I(OBJECT_CODE, "send testing BLE transmittion log to HOST");
+//    test_send_log_data_to_host();
 }
 
 /* ─────────────────────────────────────────────

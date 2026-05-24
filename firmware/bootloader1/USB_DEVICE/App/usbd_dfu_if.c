@@ -289,8 +289,12 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
   /* Mass erase from host tool: erase all user sectors (keep bootloader sectors 0-2). */
   if ((Add == 0xFFFFFFFFUL) ||
       (Add == 0x00000000UL) ||
-      (Add == 0x08000000UL) ||
-      (Add == MEM_APP_START))
+      (Add == 0x08000000UL))
+  {
+    status = DFU_Erase_UserSectors();
+  }
+  /* Erase application sectors specifically when MEM_APP_START is targeted */
+  else if (Add == MEM_APP_START)
   {
     status = DFU_Erase_AppSectors();
   }
@@ -329,10 +333,10 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
   /* USER CODE BEGIN 3 */
   g_dfu_last_activity = HAL_GetTick();
 
-  /* Verify destination is in application space (sector 3-5 only) */
+  /* Verify destination is in user space (sectors 3-7) */
   uint32_t addr = (uint32_t)dest;
-  if (addr < MEM_APP_START || addr >= MEM_APP_END) {
-    /* Reject writes to bootloader area (< MEM_APP_START) or data storage (>= MEM_APP_END) */
+  if (addr < MEM_APP_START || addr >= MEM_DATA_STORAGE_END) {
+    /* Reject writes to bootloader area (< MEM_APP_START) */
     return USBD_FAIL;
   }
 

@@ -50,6 +50,15 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uart.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uarte.c \
   $(PROJ_DIR)/../ble_common/boards.c \
+    $(PROJ_DIR)/../ble_common/hdlc.c \
+    $(PROJ_DIR)/../ble_common/ble_bridge/bb_cmd_hdl.c \
+    $(PROJ_DIR)/../ble_common/ble_bridge/bb_router.c \
+    $(PROJ_DIR)/../ble_common/ble_bridge/bb_transport.c \
+    $(PROJ_DIR)/../../../protocol/nanopb/pb_common.c \
+    $(PROJ_DIR)/../../../protocol/nanopb/pb_decode.c \
+    $(PROJ_DIR)/../../../protocol/nanopb/pb_encode.c \
+    $(PROJ_DIR)/../../../protocol/protos/protocol.pb.c \
+  $(PROJ_DIR)/../ble_common/logger.c \
   $(SDK_ROOT)/components/libraries/bsp/bsp.c \
   $(SDK_ROOT)/components/libraries/bsp/bsp_btn_ble.c \
   $(PROJ_DIR)/app/main.c \
@@ -71,6 +80,7 @@ SRC_FILES += \
   $(SDK_ROOT)/components/ble/nrf_ble_scan/nrf_ble_scan.c \
   $(SDK_ROOT)/external/utf_converter/utf.c \
   $(SDK_ROOT)/components/ble/ble_services/ble_lbs_c/ble_lbs_c.c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_nus_c/ble_nus_c.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh_ble.c \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c \
@@ -90,6 +100,10 @@ INC_FOLDERS += \
   $(PROJ_DIR) \
   $(PROJ_DIR)/bsp \
   $(PROJ_DIR)/config \
+  $(PROJ_DIR)/../ble_common \
+  $(PROJ_DIR)/../ble_common/ble_bridge \
+  $(PROJ_DIR)/../../../protocol/nanopb \
+  $(PROJ_DIR)/../../../protocol/protos \
   $(SDK_ROOT)/components/nfc/ndef/generic/message \
   $(SDK_ROOT)/components/nfc/t2t_lib \
   $(SDK_ROOT)/components/nfc/t4t_parser/hl_detection_procedure \

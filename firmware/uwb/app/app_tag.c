@@ -13,7 +13,6 @@
 #include "bsp_io.h"
 #include "bsp_util.h"
 #include "bsp_uwb.h"
-#include "mw_calibration.h"
 #include "mw_filter.h"
 #include "mw_tdma_scheduler.h"
 #include "mw_trilateration.h"
@@ -26,24 +25,20 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#if (ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG)
+#include "sys_sensor_fusion.h"
+#endif
+
+#if (ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG)
+#include "bsp_imu.h"
+#endif
 
 /* Private types ------------------------------------------------------ */
-#if ENABLE_TAG_AUTO_CALIB
-typedef enum {
-    TAG_STATE_IDLE = 0,
-    TAG_STATE_CALIB_COLLECTING,
-    TAG_STATE_CALIB_CALCULATE,
-    TAG_STATE_CALIB_PENDING_ACCEPT,
-    TAG_STATE_CALIB_DONE
-} tag_app_state_t;
-#endif
 typedef struct {
     mahalanobis_prefilter_t prefilter;
     distance_smoother_t smoother;
 
 } filter_state_t;
-
-/* Private variables --------------------------------------------------- */
 
 /* Private variables -------------------------------------------------- */
 static uint32_t s_error_count = 0;
@@ -55,17 +50,29 @@ static vec2d_t s_last_position = {.x = 0.0f, .y = 0.0f};
 static bool s_is_ranging_active = false;
 static uint8_t s_pending_num_anchors = 0;
 static uint8_t s_pending_anchor_ids[NUM_ANCHORS] = {0};
-static bool s_pending_calib_mode = false;
 static uint32_t s_next_due_tick = 0;
 static uint32_t s_cycle_start_tick = 0;
+static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
 static app_tag_output_mode_t s_output_mode = APP_TAG_MODE_TRILATERATION;
 static bool s_position_valid = false;
+static uint8_t s_last_selected_anchors_mask = 0;
 
-#if ENABLE_TAG_AUTO_CALIB
-static mw_calib_ctx_t s_tag_calib = {0};
-static tag_app_state_t s_tag_app_state = TAG_STATE_IDLE;
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+static bool s_ukf_initialized = false;
+static ukf_init_filter_t s_ukf_init_filter;
+static ukf_init_distance_filter_t s_ukf_init_dist_filter;
+static float s_latest_error = 0.0f;
+static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
+static bool s_latest_fusion_position_valid = false;
+bsp_imu_bias_t t_imu_bias;
+uint8_t test = 0;
+static float s_latest_distances[NUM_ANCHORS] = {0};
+#endif
+
+#if ENABLE_SYS_FUSION
+extern sys_sensor_fusion_data_t ukf_data;
 #endif
 
 /* Private prototypes --------------------------------------------------- */
@@ -76,13 +83,8 @@ static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
-#if ENABLE_TAG_AUTO_CALIB
-static void tag_calib_reset(void);
-static bool tag_calib_add_sample(float distance);
-static void tag_calib_calculate_and_adjust(void);
-static void tag_calib_apply_and_save(void);
-static float tag_calib_get_ref_distance_3d(void);
-#endif
+static void record_ranging_error(void);
+static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
 
 /* Private functions --------------------------------------------------- */
 static void init_filters(void)
@@ -105,14 +107,23 @@ static void init_filters(void)
     s_last_position.x = init_x;
     s_last_position.y = init_y;
 
-    /* Initialize Mahalanobis Prefilter (T1=6.0, T2=16.0, BaseR=0.1) */
-    mw_filter_mahalanobis_init(&s_filters.prefilter, 6.0f, 16.0f, 0.1f);
+    /* Clean-history Mahalanobis prefilter:
+     * T1 = recover threshold, T2 = reject threshold, R = variance floor. */
+    mw_filter_mahalanobis_init(&s_filters.prefilter,
+                               MAHALANOBIS_PREFILTER_D2_RECOVER,
+                               MAHALANOBIS_PREFILTER_D2_REJECT,
+                               MAHALANOBIS_PREFILTER_R_BASE);
 
-    /* Smoothing is enabled by default only when Mahalanobis pre-filter is disabled. */
+    /* Keep smoother initialized but disabled by default. Call/apply it explicitly
+     * from the owner path when smoothing is wanted. */
     mw_filter_distance_smoother_init(&s_filters.smoother,
-                                     (ENABLE_MAHALANOBIS_PREFILTER == 0),
-                                     0.25f,
-                                     0.30f);
+                                     false,
+                                     SMOOTHER_ALPHA,
+                                     SMOOTHER_JUMP_LIMIT_M);
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+    mw_filter_ukf_init_reset(&s_ukf_init_filter);
+    mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
+#endif
 }
 
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
@@ -204,138 +215,22 @@ static void update_period_schedule(uint32_t now_tick, uint32_t period_ms)
     }
 }
 
-#if ENABLE_TAG_AUTO_CALIB
-static float tag_calib_get_ref_distance_3d(void)
+static void record_ranging_error(void)
 {
-    float dz = (float)(CALIB_ANCHOR_HEIGHT_M - CALIB_TAG_HEIGHT_M);
-    return sqrtf(CALIB_REF_DISTANCE_XY_M * CALIB_REF_DISTANCE_XY_M + dz * dz);
+    s_error_count++;
 }
 
-static const mw_calib_config_t s_tag_calib_cfg = {
-    .samples_per_round = CALIB_SAMPLES,
-    .min_valid_distance_m = 0.1f,
-    .max_valid_distance_m = 50.0f,
-    .error_threshold_m = CALIB_ERROR_THRESHOLD_M,
-    .min_delta_step = CALIB_MIN_DELTA_STEP,
-    .max_rounds = CALIB_MAX_ROUNDS,
-    .max_std_m = CALIB_MAX_STD_M,
-    .initial_delta_step = 100,
-    .initial_last_error = 999.0f
-};
-
-static void tag_calib_reset(void)
+static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context)
 {
-    sys_config_t *cfg = sys_config_get();
-    mw_calib_reset(&s_tag_calib, &s_tag_calib_cfg, cfg->uwb.tx_antenna_delay);
+    if (count >= 3U) {
+        return true;
+    }
 
-    s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
-    sys_ranging_set_calib_status(SYS_CALIB_STATUS_COLLECTING);
-    RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Start: delay=%u target=%.3fm",
-           s_tag_calib.current_delay, tag_calib_get_ref_distance_3d());
+    RLOG_W(LOG_OBJECT_CODE_TAG, "%s: %u/3 anchors", context, count);
+    record_ranging_error();
+    return false;
 }
 
-static bool tag_calib_add_sample(float distance)
-{
-    uint16_t prev_count = s_tag_calib.count;
-    bool full = mw_calib_add_sample(&s_tag_calib, distance);
-
-    if (s_tag_calib.count != prev_count && (s_tag_calib.count % 5 == 0)) {
-        bsp_io_led_toggle();
-    }
-
-    return full;
-}
-
-static void tag_calib_calculate_and_adjust(void)
-{
-    mw_calib_step_result_t step = mw_calib_calculate_and_adjust(&s_tag_calib,
-                                                                 tag_calib_get_ref_distance_3d());
-
-    if (step == MW_CALIB_STEP_NOT_READY) {
-        return;
-    }
-
-    if (step == MW_CALIB_STEP_REJECTED_STD) {
-        RLOG_W(LOG_OBJECT_CODE_TAG,
-               "[R%u] REJECTED std=%.3fm > %.3fm",
-               s_tag_calib.round + 1, s_tag_calib.std_dev, CALIB_MAX_STD_M);
-        return;
-    }
-
-    RLOG_I(LOG_OBJECT_CODE_TAG, "[R%u] mean=%.3fm std=%.3fm err=%+.3fm delay=%u step=%u",
-           s_tag_calib.round, s_tag_calib.mean, s_tag_calib.std_dev, s_tag_calib.error,
-           s_tag_calib.current_delay, s_tag_calib.delta_step);
-
-    if (step == MW_CALIB_STEP_DONE) {
-        if (s_tag_calib.done_by_threshold) {
-            RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] DONE! delay=%u err=%.3fm",
-                   s_tag_calib.current_delay, s_tag_calib.error);
-        } else {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "[CALIB] STOP! delay=%u err=%.3fm",
-                   s_tag_calib.current_delay, s_tag_calib.error);
-        }
-        RLOG_I(LOG_OBJECT_CODE_TAG, "HOLD=accept CLICK=retry");
-        s_tag_app_state = TAG_STATE_CALIB_PENDING_ACCEPT;
-        sys_ranging_set_calib_status(SYS_CALIB_STATUS_PENDING_ACCEPT);
-        bsp_io_led_on();
-        return;
-    }
-
-    if (step == MW_CALIB_STEP_ADJUSTED) {
-        sys_config_t *cfg = sys_config_get();
-        protobuf_uwb_cfg_t tmp = cfg->uwb;
-        tmp.tx_antenna_delay = s_tag_calib.current_delay;
-        tmp.rx_antenna_delay = CALIB_FIXED_RX_ANT_DLY;
-        bsp_uwb_configure(&tmp);
-        s_tag_app_state = TAG_STATE_CALIB_COLLECTING;
-        sys_ranging_set_calib_status(SYS_CALIB_STATUS_COLLECTING);
-    }
-}
-
-static void tag_calib_apply_and_save(void)
-{
-    if (!s_tag_calib.converged) return;
-
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saving TX delay=%u (RX fixed=%u)...",
-            s_tag_calib.current_delay,
-            (unsigned)CALIB_FIXED_RX_ANT_DLY);
-
-    sys_ranging_set_calib_status(SYS_CALIB_STATUS_DONE);
-
-    sys_config_t *cfg = sys_config_get();
-    cfg->uwb.tx_antenna_delay = s_tag_calib.current_delay;
-        cfg->uwb.rx_antenna_delay = CALIB_FIXED_RX_ANT_DLY;
-
-    if (sys_config_save() == 0) {
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Saved! Restarting...");
-        bsp_delay_ms(1000);
-        HAL_NVIC_SystemReset();
-    } else {
-        RLOG_E(LOG_OBJECT_CODE_TAG, ERR_HAL, "[CALIB] Save failed!");
-    }
-}
-
-void app_tag_on_button(bsp_io_button_event_t event)
-{
-    if (s_tag_app_state != TAG_STATE_CALIB_PENDING_ACCEPT) return;
-
-    if (event == BSP_IO_EVENT_HOLD) {
-        tag_calib_apply_and_save();
-        s_tag_app_state = TAG_STATE_CALIB_DONE;
-    } else if (event == BSP_IO_EVENT_CLICK) {
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Retry...");
-        tag_calib_reset();
-    } else if (event == BSP_IO_EVENT_DOUBLE_CLICK) {
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB] Reset to factory...");
-        sys_config_t *cfg = sys_config_get();
-        cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-        cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-        sys_config_save();
-        s_tag_app_state = TAG_STATE_IDLE;
-        sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
-    }
-}
-#endif
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
     // RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", s_success_count + 1);  // DISABLED - causes 20ms delay
@@ -345,15 +240,21 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     
     for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
-    sys_config_t *cfg = sys_config_get();
+    float anchor_distances[NUM_ANCHORS] = {0.0f};
     
     /* 1. Extract, Filter and Project Ranging Results */
     for (int i = 0; i < num_success; i++) {
         sys_ranging_result_t *r = &results[i];
-        if (!r->valid) continue;
-
         uint8_t aid = r->anchor_id;
         if (aid < 1 || aid > NUM_ANCHORS) continue;
+        anchor_distances[aid - 1] = r->distance_m;
+
+        if (!r->valid) {
+            RLOG_W(LOG_OBJECT_CODE_TAG,
+                   "Anchor #%u invalid distance marker %.3fm - skipped for position",
+                   aid, r->distance_m);
+            continue;
+        }
 
         vec3d_t anchor_pos;
         if (!get_anchor_position(aid, &anchor_pos)) {
@@ -374,8 +275,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
             continue;
         }
-#else
-        d_used = mw_filter_distance_smoother_apply(&s_filters.smoother, aid - 1, d_used);
 #endif
 
         double r2d = 0.0;
@@ -388,36 +287,42 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         /* Store valid anchor data */
         anchors_by_id[aid].position = anchor_pos;
         anchors_by_id[aid].distance = (double)r2d;
-        anchors_by_id[aid].rssi = (int8_t)r->rssi;
         anchors_by_id[aid].id = aid;
         anchors_by_id[aid].valid = true;
         anchors_by_id[aid].d2_score = (double)d2_score;
         anchors_by_id[aid].r_adaptive = (double)r_adapt;
+        anchors_by_id[aid].fp_amp_norm = (double)r->fp_amp_norm_q8 / 256.0;
+        anchors_by_id[aid].fp_snr = (double)r->fp_snr_q8 / 256.0;
+        RLOG_I(LOG_OBJECT_CODE_TAG,
+               "[FP] Anchor #%u amp_norm=%.3f snr=%.3f raw_amp_q8=%u raw_snr_q8=%u",
+               aid,
+               anchors_by_id[aid].fp_amp_norm,
+               anchors_by_id[aid].fp_snr,
+               (unsigned)r->fp_amp_norm_q8,
+               (unsigned)r->fp_snr_q8);
+        anchors_by_id[aid].quality_valid = (r->quality != 0U);
+        anchors_by_id[aid].selection_score = 0.0;
+        anchors_by_id[aid].residual_rms = 0.0;
+        anchors_by_id[aid].gdop_penalty = 0.0;
+        anchors_by_id[aid].fp_penalty = 0.0;
+        anchors_by_id[aid].fp_snr_penalty = 0.0;
         valid_count++;
 
-        RLOG_D(LOG_OBJECT_CODE_TAG, "Anchor #%u: r3d=%.3fm -> r2d=%.3fm (dz=%.2fm)", aid, d_used, (float)r2d, (float)dz);
     }
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
-            RLOG_I(LOG_OBJECT_CODE_TAG, "  Anchor #%u: dist=%.3fm RSSI=%ddBm",
-                   id, anchors_by_id[id].distance, anchors_by_id[id].rssi);
-        }
-    }
-
-    float uart_distances[NUM_ANCHORS] = {0.0f};
-    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
-        if (anchors_by_id[id].valid) {
-            uart_distances[id - 1] = anchors_by_id[id].distance;
+            anchor_distances[id - 1] = anchors_by_id[id].distance;
         }
     }
 
     /* Need at least 3 anchors for trilateration */
     if (valid_count < 3) {
-        RLOG_W(LOG_OBJECT_CODE_TAG, 
-               "Not enough valid anchors: %u/3 minimum", valid_count);
+        RLOG_I(LOG_OBJECT_CODE_TAG,
+               "Dist A1=%.3fm A2=%.3fm A3=%.3fm A4=%.3fm",
+               anchor_distances[0], anchor_distances[1], anchor_distances[2], anchor_distances[3]);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        s_error_count++;
+        (void)ensure_minimum_ranging_anchors(valid_count, "Not enough valid anchors");
         return;
     }
 
@@ -431,9 +336,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
     }
 
-    if (compact_idx < 3) {
-        RLOG_W(LOG_OBJECT_CODE_TAG, "Not enough anchors passed filter (%u/3)", compact_idx);
-        s_error_count++;
+    if (!ensure_minimum_ranging_anchors(compact_idx, "Not enough anchors passed filter")) {
         return;
     }
 
@@ -441,26 +344,229 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     mw_tril_anchor_t best_3_anchors[3];
     uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3);
     
-    if (best_count < 3) {
-        s_error_count++;
+    if (!ensure_minimum_ranging_anchors(best_count, "Not enough anchors selected")) {
         return;
+    }
+
+    /* Build anchor selection mask */
+    s_last_selected_anchors_mask = 0;
+    for (uint8_t i = 0; i < 3; i++) {
+        s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
     }
 
     /* ==== STEP 3: Handle Output Modes ==== */
     if (s_output_mode == APP_TAG_MODE_SENSOR_FUSION) {
-        /* In Sensor Fusion mode, we just push filtered distances to the queue.
-         * We do NOT run trilateration here to save CPU and maintain logic separation. */
+        /* In Sensor Fusion mode, push filtered distances to the queue.
+         * SensorFusion task runs UKF independently. */
         uwb_distance_msg_t msg = {0};
         msg.count = (best_count < 3U) ? best_count : 3U;
+        msg.mask  = s_last_selected_anchors_mask;
         for (uint8_t i = 0; i < msg.count; i++) {
             msg.distances[i]  = best_3_anchors[i].distance;
             msg.anchor_ids[i] = best_3_anchors[i].id;
         }
         osMessageQueuePut(g_uwb_distance_queue, &msg, 0, 0);
+        s_success_count++;
         return;
     }
 
-    /* ==== STEP 4: Trilateration (TRILATERATION Mode / Calibration) ==== */
+#if ENABLE_SYS_FUSION_LOG
+    /* ==== STEP 3-ALT: UKF Initialization or Update (LOG mode) ==== */
+    if (!s_ukf_initialized)
+    {
+        vec2d_t tril_position;
+        mw_tril_result_t tril_result;
+
+        mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+        if (err != MW_TRIL_OK) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
+            return;
+        }
+
+        float init_x, init_y;
+        float init_d0, init_d1, init_d2;
+        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter, (float)tril_position.x, (float)tril_position.y, &init_x, &init_y);
+        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter, (float)best_3_anchors[0].distance, (float)best_3_anchors[1].distance, (float)best_3_anchors[2].distance, &init_d0, &init_d1, &init_d2);
+
+        if (pos_done && dist_done)
+        {
+            /* Set initial position for UKF */
+            s_ukf_initialized = true;
+
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
+
+            for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
+            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
+            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
+
+            bsp_imu_get_bias_data(&t_imu_bias);
+
+            double fp_amp_norm[NUM_ANCHORS];
+            double fp_snr[NUM_ANCHORS];
+
+            for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+                fp_amp_norm[i] = 0.0f;
+                fp_snr[i] = 0.0f;
+            }
+
+            bsp_io_uart_send_fusion_log_data(0, s_error_count, t_imu_bias.bias_ax, t_imu_bias.bias_ay, t_imu_bias.bias_gz, init_x, init_y, s_latest_distances, fp_amp_norm, fp_snr, 0.0);
+            sys_sensor_fusion_set_predict_flag();
+
+            s_latest_error = (float)tril_result.error_estimate;
+        }
+        else
+        {
+            /* Still collecting data to initialize UKF */
+            int collected = s_ukf_init_filter.count >= UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count - UKF_INIT_DISCARD_SAMPLES : 0;
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d (discarded %d/%d)",
+                   collected, UKF_INIT_SAMPLES,
+                   s_ukf_init_filter.count < UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count : UKF_INIT_DISCARD_SAMPLES,
+                   UKF_INIT_DISCARD_SAMPLES);
+        }
+    }
+    else
+    {
+
+        for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+        for(int i=0; i<compact_idx; i++)
+        {
+            s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
+        }
+
+    	/* ==== STEP 3: Trilateration ==== */
+		vec2d_t tril_position;
+		mw_tril_result_t tril_result;
+
+		mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+		if (err != MW_TRIL_OK) {
+			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
+			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
+            return;
+		}
+
+		s_last_selected_anchors_mask = 0;
+		for (uint8_t i = 0; i < 3; i++) {
+			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
+		}
+		test = s_last_selected_anchors_mask;
+
+        double fp_amp_norm[NUM_ANCHORS];
+        double fp_snr[NUM_ANCHORS];
+
+        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+            fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
+            fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+        }
+
+        bsp_io_uart_send_fusion_log_data((uint8_t)test, s_error_count, 0.0, 0.0, 0.0, tril_position.x, tril_position.y, s_latest_distances, fp_amp_norm, fp_snr, 0.0);
+    }
+
+    s_success_count++;
+#elif ENABLE_SYS_FUSION
+ /* ==== STEP 3: UKF Initialization or Update ==== */
+    if (!s_ukf_initialized)
+    {
+        vec2d_t tril_position;
+        mw_tril_result_t tril_result;
+
+        mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+        if (err != MW_TRIL_OK) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
+            return;
+        }
+
+        float init_x, init_y;
+        float init_d0, init_d1, init_d2;
+        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter, (float)tril_position.x, (float)tril_position.y, &init_x, &init_y);
+        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter, (float)best_3_anchors[0].distance, (float)best_3_anchors[1].distance, (float)best_3_anchors[2].distance, &init_d0, &init_d1, &init_d2);
+
+        if (pos_done && dist_done)
+        {
+            /* Set initial position for UKF */
+            s_ukf_initialized = true;
+
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
+
+            for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
+            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
+            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
+
+            double fp_amp_norm[NUM_ANCHORS];
+            double fp_snr[NUM_ANCHORS];
+
+            for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+                fp_amp_norm[i] = 0.0f;
+                fp_snr[i] = 0.0f;
+            }
+
+
+            sys_sensor_fusion_set_predict_flag();
+            sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
+            s_latest_fusion_position.x = init_x;
+            s_latest_fusion_position.y = init_y;
+            s_latest_fusion_position_valid = true;
+            // s_latest_error = (float)tril_result.error_estimate;
+        }
+        else
+        {
+            /* Still collecting data to initialize UKF */
+            int collected = s_ukf_init_filter.count >= UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count - UKF_INIT_DISCARD_SAMPLES : 0;
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d (discarded %d/%d)",
+                   collected, UKF_INIT_SAMPLES,
+                   s_ukf_init_filter.count < UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count : UKF_INIT_DISCARD_SAMPLES,
+                   UKF_INIT_DISCARD_SAMPLES);
+        }
+    }
+    else
+    {
+
+        for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+        for(int i=0; i<compact_idx; i++)
+        {
+            s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
+        }
+
+    	/* ==== STEP 3: Trilateration ==== */
+		vec2d_t tril_position;
+		mw_tril_result_t tril_result;
+
+		mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+		if (err != MW_TRIL_OK) {
+			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
+			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
+            return;
+		}
+
+		s_last_selected_anchors_mask = 0;
+		for (uint8_t i = 0; i < 3; i++) {
+			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
+		}
+		test = s_last_selected_anchors_mask;
+
+        double fp_amp_norm[NUM_ANCHORS];
+        double fp_snr[NUM_ANCHORS];
+
+        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+            fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
+            fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+        }
+
+        sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, test);
+        s_latest_fusion_position = tril_position;
+        s_latest_fusion_position_valid = true;
+    }
+
+    s_success_count++;
+#else
+    /* ==== STEP 3: Trilateration (Default/Calibration mode) ==== */
     vec2d_t tril_position;
     mw_tril_result_t tril_result;
     mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
@@ -468,36 +574,46 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     if (err != MW_TRIL_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        s_error_count++;
         return;
     }
-    
+
+    /* ==== STEP 4: Quality gating ==== */
 #if ENABLE_QUALITY_GATING
     if (tril_result.error_estimate > MAX_ACCEPTABLE_ERROR_M) {
         RLOG_W(LOG_OBJECT_CODE_TAG,
                "[TRIL] Error %.3fm > %.3fm - REJECTED",
                (float)tril_result.error_estimate, MAX_ACCEPTABLE_ERROR_M);
+        RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
         s_error_count++;
         return;
     }
 #endif
 
-    s_last_position.x = tril_position.x;
-    s_last_position.y = tril_position.y;
+    /* ==== STEP 5: Final Handling ==== */
+    vec2d_t final_position = tril_position;
+
+    s_last_position.x = final_position.x;
+    s_last_position.y = final_position.y;
     s_position_valid = true;
+    
     s_success_count++;
     s_error_count = 0;
 
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Tril Px=%.3fm Py=%.3fm Z=%.2fm Error=%.3fm", 
-           (float)tril_position.x, (float)tril_position.y, (float)TAG_HEIGHT_M, (float)tril_result.error_estimate);
+    RLOG_I(LOG_OBJECT_CODE_TAG,
+           "Dist A1=%.3fm A2=%.3fm A3=%.3fm A4=%.3fm",
+           anchor_distances[0], anchor_distances[1], anchor_distances[2], anchor_distances[3]);
+    RLOG_I(LOG_OBJECT_CODE_TAG,
+           "Pos x=%.3fm y=%.3fm z=%.2fm err=%.3fm",
+           (float)final_position.x, (float)final_position.y,
+           TAG_HEIGHT_M, (float)tril_result.error_estimate);
 
-    /* Send via UART (Trilateration result is the primary output in TRIL mode) */
-    if (bsp_io_uart_send_position(tril_position.x, tril_position.y,
+    if (bsp_io_uart_send_position(final_position.x, final_position.y,
                                   TAG_HEIGHT_M,
-                                  uart_distances,
+                                  anchor_distances,
                                   (float)tril_result.error_estimate) != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[UART] Failed to send position");
     }
+#endif
 }
 /* Public functions --------------------------------------------------- */
 
@@ -514,6 +630,39 @@ bool app_tag_get_last_position(float *x_m, float *y_m)
     *x_m = (float)s_last_position.x;
     *y_m = (float)s_last_position.y;
     return true;
+}
+
+bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count)
+{
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+    if (x != NULL) {
+        *x = (float)s_latest_fusion_position.x;
+    }
+
+    if (y != NULL) {
+        *y = (float)s_latest_fusion_position.y;
+    }
+
+    if (err_count != NULL) {
+        *err_count = s_error_count;
+    }
+
+    return s_latest_fusion_position_valid;
+#else
+    if (x != NULL) {
+        *x = (float)s_last_position.x;
+    }
+
+    if (y != NULL) {
+        *y = (float)s_last_position.y;
+    }
+
+    if (err_count != NULL) {
+        *err_count = s_error_count;
+    }
+
+    return true;
+#endif
 }
 
 app_err_t app_tag_init(void)
@@ -533,18 +682,10 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
 
-#ifdef PRESET_WORST_CASE
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: WORST_CASE");
-#elif defined(PRESET_BEST_CASE)
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: BEST_CASE");
-#else
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Preset: MANUAL");
-#endif
-
 #if ENABLE_MAHALANOBIS_PREFILTER
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON, smoothing OFF");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON");
 #else
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF, smoothing ON");
+    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF");
 #endif
 
     RLOG_I(LOG_OBJECT_CODE_TAG, "Anchor positions:");
@@ -581,15 +722,11 @@ app_err_t app_tag_init(void)
     s_last_ranging_tick = HAL_GetTick();
     s_next_due_tick = s_last_ranging_tick + cfg->uwb.ranging_period_ms;
     s_cycle_start_tick = 0;
+    s_last_cycle_done_tick = 0;
     s_period_miss_count = 0;
     s_period_overrun_count = 0;
 
-#if ENABLE_TAG_AUTO_CALIB
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Calib Mode: Target=%.3fm", tag_calib_get_ref_distance_3d());
-    tag_calib_reset();
-#else
     sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
-#endif
 
     init_filters();
     return APP_OK;
@@ -597,17 +734,10 @@ app_err_t app_tag_init(void)
 
 void app_tag_process(void)
 {
-    static uint32_t last_log = 0;
     static uint32_t last_warn_log = 0;
+    static uint32_t s_reported_period_miss_count = 0;
     sys_config_t *cfg = sys_config_get();
     uint32_t now = HAL_GetTick();
-
-#if ENABLE_TAG_AUTO_CALIB
-    if (s_tag_app_state == TAG_STATE_CALIB_PENDING_ACCEPT ||
-        s_tag_app_state == TAG_STATE_CALIB_DONE) {
-        return;
-    }
-#endif
 
     if (!s_is_ranging_active && s_next_due_tick != 0U && (int32_t)(now - s_next_due_tick) > 0) {
         uint32_t lateness_ms = now - s_next_due_tick;
@@ -624,18 +754,8 @@ void app_tag_process(void)
     if (!s_is_ranging_active && ((int32_t)(now - s_next_due_tick) >= 0)) {
         uint8_t num_anchors = 1;
         uint8_t anchor_ids[NUM_ANCHORS] = {0};
-        bool calib_mode = false;
 
         get_tdma_config(&num_anchors, anchor_ids);
-
-#if ENABLE_TAG_AUTO_CALIB
-        calib_mode = (!s_tag_calib.converged &&
-                      s_tag_app_state == TAG_STATE_CALIB_COLLECTING);
-        if (calib_mode) {
-            num_anchors = 1;
-            anchor_ids[0] = CALIB_ANCHOR_ID;
-        }
-#endif
 
         sys_ranging_err_t start_err = sys_ranging_tag_start_tdma(num_anchors,
                                                                   anchor_ids,
@@ -645,7 +765,6 @@ void app_tag_process(void)
             s_sequence_num++;
             s_pending_num_anchors = num_anchors;
             memcpy(s_pending_anchor_ids, anchor_ids, sizeof(s_pending_anchor_ids));
-            s_pending_calib_mode = calib_mode;
             s_is_ranging_active = true;
             s_cycle_start_tick = now;
             return;
@@ -661,7 +780,7 @@ void app_tag_process(void)
                 last_warn_log = now;
             }
         } else {
-            s_error_count++;
+            record_ranging_error();
         }
         return;
     }
@@ -676,37 +795,13 @@ void app_tag_process(void)
                                                           cfg->uwb.rx_timeout_ms);
 
     if (err == SYS_RANGING_OK) {
-        sys_ranging_multi_result_t multi_results;
+        sys_ranging_multi_result_t multi_results = {0};
         bool cycle_success = false;
         if (sys_ranging_tag_get_results_tdma(&multi_results) == SYS_RANGING_OK) {
             cycle_success = true;
-#if ENABLE_TAG_AUTO_CALIB
-            if (s_pending_calib_mode) {
-                bool found = false;
-                for (uint8_t i = 0; i < multi_results.count; i++) {
-                    sys_ranging_result_t *res = &multi_results.results[i];
-                    if (res->valid && res->anchor_id == CALIB_ANCHOR_ID) {
-                        found = true;
-                        if (tag_calib_add_sample(res->distance_m)) {
-                            s_tag_app_state = TAG_STATE_CALIB_CALCULATE;
-                            tag_calib_calculate_and_adjust();
-                        }
-                        break;
-                    }
-                }
-                if (!found) {
-                    RLOG_W(LOG_OBJECT_CODE_TAG,
-                           "[CALIB] No valid result from anchor %u",
-                           CALIB_ANCHOR_ID);
-                }
-            } else {
-                process_ranging_results(multi_results.results, multi_results.count);
-            }
-#else
             process_ranging_results(multi_results.results, multi_results.count);
-#endif
         } else {
-            s_error_count++;
+            record_ranging_error();
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
         }
 
@@ -714,17 +809,23 @@ void app_tag_process(void)
             bsp_io_led_blink(5);
         }
 
-        s_last_ranging_tick = HAL_GetTick();
+        uint32_t cycle_done_tick = HAL_GetTick();
         if (s_cycle_start_tick != 0U) {
-            uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
+            uint32_t cycle_ms = cycle_done_tick - s_cycle_start_tick;
+            uint32_t interval_ms = (s_last_cycle_done_tick == 0U)
+                                   ? cfg->uwb.ranging_period_ms
+                                   : (cycle_done_tick - s_last_cycle_done_tick);
+            float current_hz = (interval_ms > 0U) ? (1000.0f / (float)interval_ms) : 0.0f;
+
             RLOG_I(LOG_OBJECT_CODE_TAG,
-                   "[TAG] Cycle complete: duration=%lums target_period=%ums anchors=%u valid=%u",
+                   "Cycle duration=%lums period=%ums rate=%.2fHz anchors=%u valid=%u",
                    (unsigned long)cycle_ms,
-                     (unsigned)cfg->uwb.ranging_period_ms,
+                   (unsigned)cfg->uwb.ranging_period_ms,
+                   current_hz,
                    (unsigned)s_pending_num_anchors,
                    (unsigned)multi_results.count);
-            
-                 if (cycle_ms > cfg->uwb.ranging_period_ms) {
+
+            if (cycle_ms > cfg->uwb.ranging_period_ms) {
                 s_period_overrun_count++;
                 if ((s_period_overrun_count % 5U) == 1U) {
                     RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -735,20 +836,23 @@ void app_tag_process(void)
                 }
             }
         }
+        s_last_cycle_done_tick = cycle_done_tick;
+        s_last_ranging_tick = cycle_done_tick;
         update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
-        if ((s_period_miss_count % 10U) == 1U && s_period_miss_count > 0U) {
+        if (s_period_miss_count != s_reported_period_miss_count
+            && (s_period_miss_count % 10U) == 1U
+            && s_period_miss_count > 0U) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
                    "Period miss accumulated: %lu",
                    (unsigned long)s_period_miss_count);
+            s_reported_period_miss_count = s_period_miss_count;
         }
         s_is_ranging_active = false;
         return;
     }
 
-    if (err == SYS_RANGING_ERR_TIMEOUT ||
-        err == SYS_RANGING_ERR ||
-        err == SYS_RANGING_ERR_NOT_STARTED) {
-        s_error_count++;
+    if (err != SYS_RANGING_ERR_BUSY) {
+        record_ranging_error();
         s_last_ranging_tick = HAL_GetTick();
         uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
         if (s_error_count % 10 == 0) {
