@@ -30,12 +30,18 @@
 #include "app_tag.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
+#include "bsp_imu.h"
 #include "bsp_uwb.h"
 #include "bsp_util.h"
 #include "network/network_core.h"
 #include "network/network_cmd.h"
 #include "sys_config.h"
 #include "sys_logger.h"
+#include "sys_pm.h"
+#include "positioning_config.h"
+#if ENABLE_SYS_FUSION
+#include "sys_sensor_fusion.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,11 +65,16 @@
 osMessageQueueId_t g_uwb_distance_queue;
 
 bool g_ranging_enabled = true;
+bool g_pm_ranging_blocked = false;
 
 /* Network objects — non-static so main.c can init via extern */
 network_core_t g_network_core;
-network_cmd_t  g_network_cmd;
 uint8_t        g_network_rx_buf[512];
+
+#if ENABLE_SYS_FUSION
+static uint32_t s_fusion_last_tick = 0U;
+static bool     s_fusion_first_run = true;
+#endif
 
 /* USER CODE END Variables */
 /* Definitions for UwbRanging */
@@ -253,7 +264,7 @@ void uwb_ranging_entry(void *argument)
     /* 10 ms timeout as fallback to keep state machine alive.         */
     osSemaphoreAcquire(g_uwb_isr_semHandle, 10);
 
-    if (!g_ranging_enabled) continue;
+    if (!g_ranging_enabled || g_pm_ranging_blocked) continue;
 
     osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
 #if UWB_EVENT_DRIVEN
@@ -282,57 +293,56 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-  /* ── Phase 1: TRILATERATION mode ─────────────────────────────────────────
-   * Wait until UwbRanging has produced at least one valid position via
-   * trilateration. That position is used to:
-   *   a) Provide initial x,y to UKF state vector
-   *   b) Allow IMU calibration offset collection at a known position
-   * ─────────────────────────────────────────────────────────────────────── */
-  float init_x = 0.0f, init_y = 0.0f;
-  while (!app_tag_get_last_position(&init_x, &init_y))
+#if ENABLE_SYS_FUSION
+  if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
-    osDelay(50); /* poll until first trilateration result is ready */
+    osThreadExit();
   }
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION,
-         "[SF] Initial position from trilateration: X=%.3f Y=%.3f",
-         init_x, init_y);
-
-  /* ── Switch UwbRanging to SENSOR_FUSION output mode ─────────────────────
-   * From this point, app_tag_process() will push uwb_distance_msg_t to
-   * g_uwb_distance_queue instead of calling trilateration.
-   * ─────────────────────────────────────────────────────────────────────── */
-  app_tag_set_output_mode(APP_TAG_MODE_SENSOR_FUSION);
-
-  /* ── Phase 2: SENSOR_FUSION mode (UKF) ──────────────────────────────────
-   * TODO: sys_sensor_fusion_init(&g_ukf_state, init_x, init_y);
-   * ─────────────────────────────────────────────────────────────────────── */
-  uint32_t tick = osKernelGetTickCount();
 
   for (;;)
   {
-    tick += 20U; /* 50 Hz default */
-    osDelayUntil(tick);
+    osDelay(50);
 
-    /* TODO: sys_sensor_fusion_predict(&g_ukf_state, 0.020f); */
-
-    uwb_distance_msg_t msg;
-    if (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0) == osOK)
+    if (!sys_sensor_fusion_check_predict_flag())
     {
-      /* TODO: sys_sensor_fusion_update(&g_ukf_state,
-       *           msg.distances[0], msg.distances[1], msg.distances[2]); */
-      (void)msg;
+      continue;
+    }
 
-      /* TODO (after UKF implemented):
-#if DEVELOPER_MODE
-       * {
-       *   float ukf_x, ukf_y;
-       *   sys_sensor_fusion_get_position(&g_ukf_state, &ukf_x, &ukf_y);
-       *   bsp_io_uart_send_position(ukf_x, ukf_y, TAG_HEIGHT_M, 0.0f);
-       * }
-#endif
-       */
+    float dt = 0.01f;
+    if (s_fusion_first_run)
+    {
+      s_fusion_last_tick = HAL_GetTick();
+      s_fusion_first_run = false;
+    }
+    else
+    {
+      uint32_t now = HAL_GetTick();
+      uint32_t dt_ms = now - s_fusion_last_tick;
+      s_fusion_last_tick = now;
+      if (dt_ms > 100U) dt_ms = 100U;
+      if (dt_ms < 1U) dt_ms = 1U;
+      dt = (float)dt_ms / 1000.0f;
+    }
+
+    sys_sensor_fusion_predict(&ukf_data, dt);
+
+    {
+      float tril_x = 0.0f;
+      float tril_y = 0.0f;
+      uint32_t err_count = 0U;
+      float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+      float yaw = sys_sensor_fusion_get_yaw_deg();
+
+      app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
+      bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
     }
   }
+#else
+  for (;;)
+  {
+    osDelay(osWaitForever);
+  }
+#endif
   /* USER CODE END sensor_fusion_entry */
 }
 
@@ -349,7 +359,7 @@ void network_entry(void *argument)
   for (;;)
   {
     network_core_process(&g_network_core);
-    network_cmd_process(&g_network_cmd);
+    network_cmd_process();
     osDelay(5);
   }
   /* USER CODE END network_entry */
@@ -387,7 +397,7 @@ void flash_storage_entry(void *argument)
   for (;;)
   {
     osDelay(2000); /* every 2 seconds */
-#ifdef HAVE_FLASH_STORAGE
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     sys_logger_flash_persist();
 #endif
   }
@@ -459,10 +469,40 @@ void io_entry(void *argument)
 void power_manage_entry(void *argument)
 {
   /* USER CODE BEGIN power_manage_entry */
+  static bool s_ranging_halted_by_pm = false;
+
   for (;;)
   {
-    osDelay(1000); /* 1 Hz */
-    bsp_battery_task();
+    osDelay(100); /* 10 Hz, aligned with develop PM cadence */
+    sys_pm_task(NULL);
+
+    if (!sys_pm_is_safe())
+    {
+      if (!s_ranging_halted_by_pm)
+      {
+        sys_pm_status_t pm_status;
+
+        g_pm_ranging_blocked = true;
+        bsp_uwb_idle();
+        s_ranging_halted_by_pm = true;
+        sys_pm_get_status(&pm_status);
+
+        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_POS_OUT_OF_RANGE,
+               "[CRITICAL] RANGING HALTED! Safety checks failed. Mask: 0x%04X (SOC: %.1f%%, VDDA: %.1f mV, VBAT: %.1f mV)",
+               (unsigned int)pm_status.critical_mask,
+               pm_status.soc,
+               pm_status.vdda_mv,
+               pm_status.bat_voltage_mv);
+      }
+      continue;
+    }
+
+    if (s_ranging_halted_by_pm)
+    {
+      s_ranging_halted_by_pm = false;
+      g_pm_ranging_blocked = false;
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INFO] RANGING RESUMED! Safety conditions restored.");
+    }
   }
   /* USER CODE END power_manage_entry */
 }
@@ -476,7 +516,7 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
    called if a stack overflow is detected. */
    
    /* Halt system and log error */
-   RLOG_E("SYS", "Stack Overflow in task: %s", pcTaskName);
+   RLOG_E(LOG_OBJECT_CODE_TASK, ERR_SYSTEM, "Stack Overflow in task: %s", pcTaskName);
    __disable_irq();
    while(1)
    {
@@ -490,6 +530,15 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
 uint32_t getRunTimeCounterValue(void)
 {
   return HAL_GetTick(); // Temporary fallback to ms, use high-speed timer for better resolution
+}
+
+void vApplicationMallocFailedHook(void)
+{
+  RLOG_E(LOG_OBJECT_CODE_TASK, ERR_SYSTEM, "FreeRTOS heap exhausted");
+  __disable_irq();
+  while (1)
+  {
+  }
 }
 /* USER CODE END Application */
 

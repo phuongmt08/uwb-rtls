@@ -74,11 +74,11 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BTN_USR_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pin : UWB_IRQ_Pin */
+  GPIO_InitStruct.Pin = UWB_IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(UWB_IRQ_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : UWB_RST_Pin SPI1_CS2_Pin */
   GPIO_InitStruct.Pin = UWB_RST_Pin|SPI1_CS2_Pin;

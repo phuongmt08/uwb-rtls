@@ -23,6 +23,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "common.h"
+#include "positioning_config.h"
+
+#if ENABLE_SYS_FUSION
+#include "sys_sensor_fusion.h"
+#endif
 
 /* Public enumerate/structure ----------------------------------------- */
 
@@ -66,6 +71,10 @@ bool app_tag_get_last_position(float *x_m, float *y_m);
  * @return true if a valid trilateration position is available
  */
 bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
+
+#if ENABLE_SYS_FUSION
+extern sys_sensor_fusion_data_t ukf_data;
+#endif
 
 #endif /* __APP_TAG_H */
 

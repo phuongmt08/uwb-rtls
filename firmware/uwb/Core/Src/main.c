@@ -38,7 +38,8 @@
 #include "sys_config.h"
 #include "sys_flash_storage.h"
 #include "sys_logger.h"
-#include "sys_task.h" /* Deprecated */
+//#include "sys_task.h" /* Deprecated */
+#include "sys_pm.h"
 #include "app_rtos_handles.h"
 
 #include <string.h>
@@ -78,6 +79,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+extern network_core_t g_network_core;
+extern uint8_t g_network_rx_buf[512];
 
 /* USER CODE BEGIN PV */
 extern bool g_ranging_enabled;
@@ -232,11 +235,11 @@ int main(void)
   sys_config_t *cfg = sys_config_get();
 
   serial_init();
-  if (!network_core_init(&g_network_core, g_network_rx_buf, sizeof(g_network_rx_buf)))
+  if (!network_core_init(&g_network_core, protobuf_PACKET_ADDR_MCU, g_network_rx_buf, sizeof(g_network_rx_buf)))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
   }
-  else if (!network_cmd_init(&g_network_cmd, &g_network_core))
+  else if (!network_cmd_init(&g_network_core))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
   }
@@ -283,6 +286,7 @@ int main(void)
 
   /* sys_task scheduler removed — tasks are managed by FreeRTOS */
   bsp_battery_init(); /* Still init hardware; task runs in power_manage_entry */
+  sys_pm_init();
 
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
   /* Read DIP switch - ALWAYS OVERRIDES saved config */

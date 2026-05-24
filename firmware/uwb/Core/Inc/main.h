@@ -66,6 +66,9 @@ void Error_Handler(void);
 #define UART2_BLE_TX_GPIO_Port GPIOA
 #define UART2_BLE_RX_Pin GPIO_PIN_3
 #define UART2_BLE_RX_GPIO_Port GPIOA
+#define UWB_IRQ_Pin GPIO_PIN_4
+#define UWB_IRQ_GPIO_Port GPIOA
+#define UWB_IRQ_EXTI_IRQn EXTI4_IRQn
 #define AUX0_Pin GPIO_PIN_0
 #define AUX0_GPIO_Port GPIOB
 #define AUX1_Pin GPIO_PIN_1

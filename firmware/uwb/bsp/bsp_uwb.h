@@ -18,6 +18,8 @@
 #include "protos/protocol.pb.h"
 #include "config.h"
 
+#include "main.h"
+
 typedef struct {
     uint16_t fp_amp1;
     uint16_t fp_amp2;
@@ -55,14 +57,26 @@ typedef struct {
 #define UWB_SCK_PIN         GPIO_PIN_5   /* PA5 - SPICLK (Pin 20) */
 #define UWB_MISO_PIN        GPIO_PIN_6   /* PA6 - SPIMISO (Pin 19) */
 #define UWB_MOSI_PIN        GPIO_PIN_7   /* PA7 - SPIMOSI (Pin 18) */
-#define UWB_CS_PORT         GPIOB
-#define UWB_CS_PIN          GPIO_PIN_12  /* PB12 - SPICS (Pin 17) */
+#ifdef UWB_CS_PORT
+#undef UWB_CS_PORT
+#endif
+#ifdef UWB_CS_PIN
+#undef UWB_CS_PIN
+#endif
+#define UWB_CS_PORT         SPI1_CS1_GPIO_Port
+#define UWB_CS_PIN          SPI1_CS1_Pin  /* PB12 - SPICS (Pin 17) */
 
 /* Control pins */
-#define UWB_RST_PORT        GPIOB
-#define UWB_RST_PIN         GPIO_PIN_2   /* PB2 - RST (Pin 3) */
-#define UWB_IRQ_PORT        GPIOA
-#define UWB_IRQ_PIN         GPIO_PIN_4   /* PA4 - IRQ/GPIO8 (Pin 22) */
+#ifdef UWB_RST_PORT
+#undef UWB_RST_PORT
+#endif
+#ifdef UWB_RST_PIN
+#undef UWB_RST_PIN
+#endif
+#define UWB_RST_PORT        UWB_RST_GPIO_Port
+#define UWB_RST_PIN         UWB_RST_Pin   /* PB2 - RST (Pin 3) */
+#define UWB_IRQ_PORT        UWB_IRQ_GPIO_Port
+#define UWB_IRQ_PIN         UWB_IRQ_Pin   /* PA4 - IRQ/GPIO8 (Pin 22) */
 
 /* Note: RX/TX LEDs are controlled by DW1000 GPIO2/GPIO3 directly, not STM32 */
 

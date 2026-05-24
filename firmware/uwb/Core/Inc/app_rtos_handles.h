@@ -41,18 +41,14 @@ typedef struct {
     uint8_t mask;          /**< Active anchor mask */
 } uwb_distance_msg_t;      /* sizeof = 42 bytes */
 
-/** UwbRanging → SensorFusion: 4 items × 16 bytes = 64 bytes RAM */
+/** UwbRanging → SensorFusion queue, item size follows uwb_distance_msg_t. */
 extern osMessageQueueId_t g_uwb_distance_queue;
 
 /* ── Shared state ───────────────────────────────────────────────────────── */
 
 /** Set false via IO task DOUBLE_CLICK; set true via IO task CLICK */
 extern bool g_ranging_enabled;
-
-#include "network/network_core.h"
-#include "network/network_cmd.h"
-extern network_core_t g_network_core;
-extern network_cmd_t  g_network_cmd;
-extern uint8_t        g_network_rx_buf[512];
+/** Set true while PM wants ranging paused; independent from manual stop/start. */
+extern bool g_pm_ranging_blocked;
 
 #endif /* APP_RTOS_HANDLES_H */

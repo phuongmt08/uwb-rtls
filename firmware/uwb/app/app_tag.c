@@ -72,7 +72,7 @@ static float s_latest_distances[NUM_ANCHORS] = {0};
 #endif
 
 #if ENABLE_SYS_FUSION
-extern sys_sensor_fusion_data_t ukf_data;
+sys_sensor_fusion_data_t ukf_data;
 #endif
 
 /* Private prototypes --------------------------------------------------- */
