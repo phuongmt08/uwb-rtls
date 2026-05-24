@@ -392,7 +392,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     {
 
         for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-        for(int i=0; i<NUM_ANCHORS; i++)
+        for(int i=0; i<compact_idx; i++)
         {
             s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
         }
@@ -484,7 +484,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     {
 
         for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-        for(int i=0; i<NUM_ANCHORS; i++)
+        for(int i=0; i<compact_idx; i++)
         {
             s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
         }

@@ -24,7 +24,7 @@ function multilaterate(vAnchors) {
         const Ci = a.r*a.r - ref.r*ref.r
                  - a.x*a.x + ref.x*ref.x
                  - a.y*a.y + ref.y*ref.y;
-        const w = 1 / (1 + (a.d2 || 0));
+        const w = anchorWeight(ref) * anchorWeight(a);
         hxx += w * Ai * Ai;
         hxy += w * Ai * Bi;
         hyy += w * Bi * Bi;
@@ -42,6 +42,24 @@ function multilaterate(vAnchors) {
 
 function clamp01(v) {
     return Math.max(0, Math.min(1, v));
+}
+
+function fpAmpPenalty(fpAmp) {
+    if (!Number.isFinite(fpAmp) || fpAmp <= 0) return 1.0;
+    return clamp01(1.0 - (fpAmp / SIM_CONFIG.FILTER.FP_AMP_GOOD));
+}
+
+function fpAmpWeight(fpAmp) {
+    return SIM_CONFIG.FILTER.FP_AMP_WEIGHT_FLOOR +
+        (1.0 - SIM_CONFIG.FILTER.FP_AMP_WEIGHT_FLOOR) * (1.0 - fpAmpPenalty(fpAmp));
+}
+
+function anchorWeight(anchor) {
+    const d2 = Number.isFinite(anchor.d2) ? Math.max(0, anchor.d2) : 0;
+    const d2Weight = 1.0 / (1.0 + d2);
+    const qualityWeight = fpAmpWeight(anchor.fp_amp);
+    const rescueWeight = anchor.rescue ? SIM_CONFIG.FILTER.RESCUE_SORT_WEIGHT : 1.0;
+    return d2Weight * qualityWeight * rescueWeight;
 }
 
 function residualRms(pos, anchorSet) {
@@ -92,7 +110,8 @@ function selectBestTriplet(vAnchors, d2Reject) {
                 if (!Number.isFinite(gdop)) continue;
                 const residual = residualRms(pos, triplet);
                 const avgD2Raw = triplet.reduce((s, a) => s + (a.d2 || 0), 0) / 3;
-                candidates.push({ triplet, pos, gdop, residual, avgD2Raw });
+                const avgFpAmpPenalty = triplet.reduce((s, a) => s + fpAmpPenalty(a.fp_amp), 0) / 3;
+                candidates.push({ triplet, pos, gdop, residual, avgD2Raw, avgFpAmpPenalty });
                 minGdop = Math.min(minGdop, gdop);
                 maxGdop = Math.max(maxGdop, gdop);
             }
@@ -106,7 +125,8 @@ function selectBestTriplet(vAnchors, d2Reject) {
         const avgD2Penalty = c.triplet.reduce((s, a) => s + d2Penalty(a.d2, d2Reject), 0) / 3;
         const gdopPenalty = clamp01((c.gdop - minGdop) / gdopSpan);
         const residualPenalty = clamp01(c.residual / 0.30);
-        const score = 0.45*avgD2Penalty + 0.25*gdopPenalty + 0.30*residualPenalty;
+        const fpAmpPenaltyAvg = c.avgFpAmpPenalty;
+        const score = 0.35*avgD2Penalty + 0.15*fpAmpPenaltyAvg + 0.20*gdopPenalty + 0.30*residualPenalty;
 
         if (!best || score < best.score) {
             best = {
@@ -117,6 +137,7 @@ function selectBestTriplet(vAnchors, d2Reject) {
                 avgD2Penalty,
                 gdopRaw: c.gdop,
                 gdopPenalty,
+                fpAmpPenalty: fpAmpPenaltyAvg,
                 residual: c.residual,
                 residualPenalty
             };

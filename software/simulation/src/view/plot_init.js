@@ -16,33 +16,51 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], mode: 'lines', name: 'Simulated Path (Multilateration)',
            type: 'scattergl', line: { color: '#d97706', width: 2, dash: 'dash' } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Best Triplet)',
-           type: 'scattergl', marker: { size: 3 }, line: { color: '#059669', width: 2 } }
+           type: 'scattergl', marker: { size: 3 }, line: { color: '#059669', width: 2 } },
+        { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion)',
+           type: 'scattergl', marker: { size: 3 }, line: { color: '#8b5cf6', width: 2 } }
     ], {
-        margin: { t: 40, b: 40, l: 50, r: 50 },
+        margin: { t: 40, b: 100, l: 50, r: 50 },
         xaxis: { title: 'X (m)', gridcolor: '#f1f5f9' },
-        yaxis: { title: 'Y (m)', gridcolor: '#f1f5f9', scaleanchor: 'x', scaleratio: 1 },
+        yaxis: { title: 'Y (m)', gridcolor: '#f1f5f9' },
         hovermode: 'closest',
-        height: 600
+        legend: {
+            orientation: 'h',
+            yanchor: 'top',
+            y: -0.15,
+            xanchor: 'center',
+            x: 0.5
+        },
+        width: 800,
+        height: 800
+    }, {
+        responsive: true,
+        scrollZoom: true
     });
 
-    // 2. Distances (3 traces per anchor: Raw, Gated, Rejected)
+    // 2. Distances (4 traces per anchor: Raw, Gated, Rejected, Rescue)
     const distTraces = [];
     anchors.forEach((a, i) => {
-        // i*3: Raw
+        // i*4: Raw
         distTraces.push({
             x: samples.map((_, idx) => idx), y: samples.map(e => e.distances[i]),
             name: `A${a.id} Raw`, mode: 'lines', type: 'scattergl',
             line: { color: colors[i], width: 1, opacity: 0.3 }, visible: 'legendonly'
         });
-        // i*3+1: Gated
+        // i*4+1: Gated
         distTraces.push({
             x: [], y: [], name: `A${a.id} Gated`, mode: 'lines', type: 'scattergl',
             line: { color: colors[i], width: 2 }
         });
-        // i*3+2: Rejected
+        // i*4+2: Rejected
         distTraces.push({
             x: [], y: [], name: `A${a.id} Rejected`, mode: 'markers', type: 'scattergl',
             marker: { color: 'red', symbol: 'x', size: 5 }, visible: 'legendonly'
+        });
+        // i*4+3: Rescue
+        distTraces.push({
+            x: [], y: [], name: `A${a.id} Rescue`, mode: 'markers', type: 'scattergl',
+            marker: { color: '#f59e0b', symbol: 'circle-open', size: 7 }
         });
     });
 
@@ -53,7 +71,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Distance (m)' }, hovermode: 'x unified',
-        height: 600
+        height: 800
     });
 
     // 3. D2 Scores
@@ -65,7 +83,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
     Plotly.newPlot('scores', sTraces, {
         margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
-        yaxis: { range: [0, 20], title: 'D2 Score' }, hovermode: 'x unified'
+        yaxis: { title: 'D2 Score' }, hovermode: 'x unified'
     });
 
     // 4. Accel
@@ -123,6 +141,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], name: 'Pos Error (Rules)', mode: 'lines', type: 'scatter', line: { color: '#ef4444', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Multilateration)', mode: 'lines', type: 'scatter', line: { color: '#d97706', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Best Triplet)', mode: 'lines', type: 'scatter', line: { color: '#059669', width: 2 } },
+        { x: [], y: [], name: 'Pos Error (UKF Fusion)', mode: 'lines', type: 'scatter', line: { color: '#8b5cf6', width: 2 } },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ];
     Plotly.newPlot('pos_error', errTraces, {

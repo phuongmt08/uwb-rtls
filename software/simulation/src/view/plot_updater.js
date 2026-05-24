@@ -1,33 +1,39 @@
 function updatePlots(res, samples, rawData) {
     const { 
-        simPath, simPathRuled, simPathWLS, simPathTriplet,
+        simPath, simPathRuled, simPathWLS, simPathTriplet, simPathUKF, simPathUKF_plot,
         wlsInfo, bestTripletInfo,
-        plotData, gatedDist, d2Scores, rejectIdx,
-        pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet,
+        plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist,
+        pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf,
         x_axis, total_time 
     } = res;
 
     // 1. Trajectory
     Plotly.restyle('trajectory', { 
-        x: [rawData.fw_path.x.slice(0, x_axis.length), simPath.x, simPathRuled.x, simPathWLS.x, simPathTriplet.x], 
-        y: [rawData.fw_path.y.slice(0, x_axis.length), simPath.y, simPathRuled.y, simPathWLS.y, simPathTriplet.y],
+        x: [rawData.fw_path.x.slice(0, x_axis.length), simPath.x, simPathRuled.x, simPathWLS.x, simPathTriplet.x, simPathUKF.x],
+        y: [rawData.fw_path.y.slice(0, x_axis.length), simPath.y, simPathRuled.y, simPathWLS.y, simPathTriplet.y, simPathUKF.y],
         text: [
             samples.slice(0, x_axis.length).map((_, i) => 'Idx: ' + i + '<br>Mask: ' + rawData.fw_path.mask[i] + ' (A' + decodeMask(rawData.fw_path.mask[i]) + ')'), 
             simPath.x.map((_, i) => 'Idx: ' + i),
             simPathRuled.x.map((_, i) => 'Idx: ' + i),
             simPathWLS.x.map((_, i) => 'Idx: ' + i + '<br>Multilateration: ' + wlsInfo[i]),
-            simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i])
+            simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i]),
+            simPathUKF.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion')
         ]
-    }, [2, 3, 4, 5, 6]);
+    }, [2, 3, 4, 5, 6, 7]);
 
     // 2. Distances & Scores
     for (let i = 0; i < 4; i++) {
         Plotly.restyle('distances', {
-            x: [x_axis, x_axis, rejectIdx[i]],
-            y: [samples.slice(0, x_axis.length).map(s => s.distances[i] <= 0.1 ? null : s.distances[i]), gatedDist[i], rejectIdx[i].map(idx => samples[idx].distances[i])],
-            customdata: [plotData.times, plotData.times, rejectIdx[i].map(idx => plotData.times[idx])],
+            x: [x_axis, x_axis, rejectIdx[i], rescueIdx[i]],
+            y: [
+                samples.slice(0, x_axis.length).map(s => s.distances[i] <= 0.1 ? null : s.distances[i]),
+                gatedDist[i],
+                rejectIdx[i].map(idx => samples[idx].distances[i]),
+                rescueDist[i]
+            ],
+            customdata: [plotData.times, plotData.times, rejectIdx[i].map(idx => plotData.times[idx]), rescueIdx[i].map(idx => plotData.times[idx])],
             hovertemplate: 'Time: %{customdata:.4f}s | %{y:.6f}m<extra></extra>'
-        }, [i*3, i*3+1, i*3+2]);
+        }, [i*4, i*4+1, i*4+2, i*4+3]);
 
         Plotly.restyle('scores', {
             x: [x_axis], y: [d2Scores[i]],
@@ -38,6 +44,7 @@ function updatePlots(res, samples, rawData) {
     const T2_high = parseFloat(document.getElementById('t2_high_range').value);
     const T2_low  = parseFloat(document.getElementById('t2_low_range').value);
     Plotly.restyle('scores', { x: [[0, x_axis.length], [0, x_axis.length]], y: [[T2_high, T2_high], [T2_low, T2_low]] }, [4, 5]);
+    Plotly.relayout('scores', { 'yaxis.autorange': true });
 
     // 3. Other plots
     Plotly.restyle('accel', { x: [x_axis, x_axis], y: [plotData.ax, plotData.ay], customdata: [plotData.times, plotData.times] }, [0, 1]);
@@ -45,16 +52,17 @@ function updatePlots(res, samples, rawData) {
     Plotly.restyle('yaw_plot', { x: [x_axis, x_axis], y: [plotData.gz, plotData.yaw], customdata: [plotData.times, plotData.times] }, [0, 1]);
 
     Plotly.restyle('pos_error', {
-        x: [x_axis, x_axis, x_axis, x_axis],
-        y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet],
+        x: [x_axis, x_axis, x_axis, x_axis, x_axis],
+        y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf],
         name: [
             `Pos Error (Firmware) Mean: ${meanErr(pos_errors_fw)}m`,
             `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
             `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
-            `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`
+            `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,
+            `Pos Error (UKF Fusion) Mean: ${meanErr(pos_errors_ukf)}m`
         ],
-        customdata: [plotData.times, plotData.times, plotData.times, plotData.times]
-    }, [0, 1, 2, 3]);
+        customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
+    }, [0, 1, 2, 3, 4]);
 
     const csv_errors = samples.slice(0, x_axis.length).map(s => s.err);
     Plotly.restyle('error_frame', { x: [x_axis], y: [csv_errors], customdata: [plotData.times] }, [0]);

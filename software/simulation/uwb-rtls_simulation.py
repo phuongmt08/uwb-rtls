@@ -54,16 +54,22 @@ def parse_graphml_groundtruth(filepath):
         src = nodes.get(edge.get('source'))
         dst = nodes.get(edge.get('target'))
         if src and dst:
-            segments.append([src['x'], src['y'], dst['x'], dst['y']])
+            # Read the 'dotted' attribute (d2 key): True = single lane (22cm), False = double lane (44cm)
+            is_dotted = False
+            for data in edge.findall('g:data', ns):
+                attr_name = key_names.get(data.get('key'), data.get('key'))
+                if attr_name == 'dotted' and data.text:
+                    is_dotted = data.text.strip().lower() == 'true'
+            segments.append([src['x'], src['y'], dst['x'], dst['y'], is_dotted])
 
     if not segments:
         return None
 
     x = []
     y = []
-    for x1, y1, x2, y2 in segments:
-        x.extend([x1, x2, None])
-        y.extend([y1, y2, None])
+    for seg in segments:
+        x.extend([seg[0], seg[2], None])
+        y.extend([seg[1], seg[3], None])
 
     return {
         'id': 'custom_track',
@@ -75,7 +81,7 @@ def parse_graphml_groundtruth(filepath):
 
 def load_ground_truths():
     square_segments = [
-        [GT_SQUARE['x'][i], GT_SQUARE['y'][i], GT_SQUARE['x'][i + 1], GT_SQUARE['y'][i + 1]]
+        [GT_SQUARE['x'][i], GT_SQUARE['y'][i], GT_SQUARE['x'][i + 1], GT_SQUARE['y'][i + 1], False]
         for i in range(len(GT_SQUARE['x']) - 1)
     ]
     tracks = [
@@ -199,7 +205,7 @@ def run_gen(log_file):
         
         svg_content = f"""
             <polyline points="{gt_pts}" fill="none" stroke="#fecaca" stroke-width="1.5" stroke-dasharray="2,2" />
-            <polyline points="{fw_pts}" fill="none" stroke="#2563eb" stroke-width="1.2" />
+            <polyline points="{fw_pts}" fill="none" stroke="#8b5cf6" stroke-width="1.2" />
         """
     
     payload = {
@@ -213,7 +219,7 @@ def run_gen(log_file):
 
 def load_template():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    template_path = os.path.join(script_dir, 'template_prefilter.html')
+    template_path = os.path.join(script_dir, 'template_ukf_prefilter.html')
     with open(template_path, 'r', encoding='utf-8') as f:
         return f.read()
 
@@ -243,7 +249,7 @@ def load_worker_js_bundle():
     parts = [
         'src/core/config.js',
         'src/core/math_utils.js',
-        'src/filters/prefilter.js',
+        'src/filters/ukf_prefilter.js',
     ]
     prefix = "\n\n".join(
         f"// ---- {part} ----\n" + read_text_file(os.path.join(script_dir, part))
@@ -254,7 +260,7 @@ def load_worker_js_bundle():
 def get_report_source_mtime():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     paths = [
-        'template_prefilter.html',
+        'template_ukf_prefilter.html',
         'src/core/config.js',
         'src/core/math_utils.js',
         'src/view/plot_init.js',
@@ -262,7 +268,7 @@ def get_report_source_mtime():
         'src/controller/ui_utils.js',
         'src/controller/ui_controller.js',
         'src/workers/sim_worker.js',
-        'src/filters/prefilter.js',
+        'src/filters/ukf_prefilter.js',
     ]
     return max(
         os.path.getmtime(os.path.join(script_dir, path))
@@ -276,6 +282,9 @@ def render_template(template_content, filename, payload, ground_truths, app_js_b
     html = html.replace('__GROUND_TRUTHS_JSON__', json.dumps(ground_truths))
     html = html.replace('__APP_JS_BUNDLE__', app_js_bundle)
     html = html.replace('__SIM_WORKER_SOURCE_JSON__', json.dumps(worker_js_bundle))
+    # Replace biases specifically
+    html = html.replace('__BIAS_X__', f"{payload['biases']['ax']:.4f}")
+    html = html.replace('__BIAS_Y__', f"{payload['biases']['ay']:.4f}")
     return html
 
 def main():
@@ -288,7 +297,7 @@ def main():
     logs.sort(reverse=True)
     if not logs: return
 
-    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_prefilter.html')
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_ukf_prefilter.html')
     report_source_mtime = get_report_source_mtime() if os.path.exists(template_path) else 0
     template_content = load_template()
     ground_truths = load_ground_truths()
@@ -373,7 +382,7 @@ def main():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UWB Pro-Tuning Simulation</title>
+    <title>UWB-RTLS Simulation</title>
     <style>
         body {{ 
             font-family: 'Inter', -apple-system, sans-serif; 
@@ -416,7 +425,7 @@ def main():
             padding: 15px 20px; 
             border-bottom: 1px solid #f1f5f9; 
             text-decoration: none; 
-            color: #2563eb; 
+            color: #7c3aed; 
             font-weight: 500;
             transition: background 0.2s;
             background: white;
@@ -439,7 +448,7 @@ def main():
 </head>
 <body>
     <div class="container">
-        <h1>UWB Pro-Tuning Simulation</h1>
+        <h1>UWB-RTLS Simulation</h1>
         <p>Select a simulation log file to start real-time tuning and analysis.</p>
         {list_html}
     </div>

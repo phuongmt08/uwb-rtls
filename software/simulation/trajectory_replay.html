@@ -1,0 +1,1632 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UWB Trajectory Replay & Heading Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #090d16;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(124, 58, 237, 0.2);
+            --accent: #8b5cf6;
+            --accent-glow: rgba(139, 92, 246, 0.4);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --neon-green: #10b981;
+            --neon-blue: #0ea5e9;
+            --neon-orange: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        header {
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+            backdrop-filter: blur(12px);
+            background: rgba(9, 13, 22, 0.5);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .title-group h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #a78bfa 0%, #38bdf8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+        }
+
+        .title-group p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .back-btn {
+            background: rgba(124, 58, 237, 0.1);
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-btn:hover {
+            background: var(--accent);
+            box-shadow: 0 0 15px var(--accent-glow);
+            border-color: var(--accent);
+        }
+
+        .dashboard {
+            display: none;
+        }
+
+        .hud-panel {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        .hud-panel .card {
+            pointer-events: auto;
+            background: rgba(9, 13, 22, 0.85);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .hud-panel .card:hover {
+            border-color: rgba(139, 92, 246, 0.5);
+            box-shadow: 0 10px 35px rgba(139, 92, 246, 0.15);
+        }
+
+        /* Custom scrollbar for HUD panels */
+        .hud-panel::-webkit-scrollbar {
+            width: 4px;
+        }
+        .hud-panel::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .hud-panel::-webkit-scrollbar-thumb {
+            background: rgba(139, 92, 246, 0.35);
+            border-radius: 2px;
+        }
+        .hud-panel::-webkit-scrollbar-thumb:hover {
+            background: rgba(139, 92, 246, 0.7);
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 16px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--accent), var(--neon-blue));
+            opacity: 0.7;
+        }
+
+        .canvas-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .canvas-wrapper {
+            display: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            background: #05070c;
+        }
+
+        /* --- Replay Controls --- */
+        .controls-card {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            width: 100%;
+        }
+
+        .scrub-slider {
+            flex-grow: 1;
+            -webkit-appearance: none;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .scrub-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .scrub-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .time-display {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--accent);
+            min-width: 100px;
+            text-align: right;
+        }
+
+        .buttons-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            width: 100%;
+        }
+
+        .btn-play {
+            background: var(--accent);
+            border: none;
+            color: white;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 15px var(--accent-glow);
+            transition: all 0.2s;
+        }
+
+        .btn-play:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 25px var(--accent);
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .speed-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+        }
+
+        .speed-btn.active, .speed-btn:hover {
+            background: rgba(124, 58, 237, 0.15);
+            color: var(--accent);
+        }
+
+        .toggle-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .toggle-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .toggle-btn.active {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+        }
+
+        /* --- Telemetry Panel --- */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        .panel-title {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 12px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        /* --- Compass/Heading Gauge --- */
+        .gauge-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 10px 0;
+        }
+
+        .compass-outer {
+            width: 160px;
+            height: 160px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.03);
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(rgba(139, 92, 246, 0.03) 0%, transparent 70%);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .compass-dial {
+            width: 140px;
+            height: 140px;
+            position: absolute;
+            transition: transform 0.1s linear;
+        }
+
+        .compass-ring {
+            width: 100%;
+            height: 100%;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="%2394a3b8" stroke-width="0.5"><circle cx="50" cy="50" r="48" stroke-dasharray="1 3"/><text x="47.5" y="10" font-family="sans-serif" font-weight="bold" font-size="8" fill="%238b5cf6">N</text><text x="47.5" y="97" font-family="sans-serif" font-weight="bold" font-size="8" fill="%2394a3b8">S</text><text x="5" y="53" font-family="sans-serif" font-weight="bold" font-size="8" fill="%2394a3b8">W</text><text x="89" y="53" font-family="sans-serif" font-weight="bold" font-size="8" fill="%2394a3b8">E</text></svg>');
+            background-size: contain;
+            width: 100%;
+            height: 100%;
+        }
+
+        .compass-arrow {
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 24px solid %23ef4444;
+            filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.6));
+            top: 25px;
+        }
+
+        .compass-arrow-south {
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 24px solid var(--text-muted);
+            bottom: 25px;
+        }
+
+        .compass-center {
+            width: 80px;
+            height: 80px;
+            background: #0f172a;
+            border: 1px solid rgba(139, 92, 246, 0.15);
+            border-radius: 50%;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+
+        .yaw-val {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1.15rem;
+            color: var(--text-main);
+            font-weight: 700;
+            text-shadow: 0 0 8px rgba(255,255,255,0.2);
+        }
+
+        .yaw-lbl {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+            margin-top: 2px;
+        }
+
+        /* --- Digital Telemetry Card --- */
+        .digital-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .digital-item {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .dig-lbl {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            font-weight: 500;
+            letter-spacing: 0.05em;
+        }
+
+        .dig-val {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1.1rem;
+            color: var(--neon-blue);
+            font-weight: bold;
+        }
+
+        .dig-val.green {
+            color: var(--neon-green);
+        }
+
+        .dig-val.violet {
+            color: var(--accent);
+        }
+
+        .path-selector-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .path-checkbox-lbl {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            transition: all 0.2s;
+        }
+
+        .path-checkbox-lbl:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(139, 92, 246, 0.15);
+        }
+
+        .path-checkbox-lbl input {
+            cursor: pointer;
+            accent-color: var(--accent);
+            width: 15px;
+            height: 15px;
+        }
+
+        .dot-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* --- Interactive Legend colors --- */
+        .color-ukf { background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+        .color-fw { background: var(--text-muted); }
+        .color-triplet { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); }
+        .color-wls { background: var(--neon-orange); box-shadow: 0 0 8px var(--neon-orange); }
+
+        .info-card-text {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Floating Reset Button -->
+    <button id="resetViewBtn" onclick="resetZoomPan()" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(17, 24, 39, 0.85); border: 1px solid rgba(124, 58, 237, 0.4); color: var(--text-main); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; font-weight: 500; backdrop-filter: blur(8px); display: flex; align-items: center; gap: 6px; transition: all 0.2s; z-index: 10;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        Reset View
+    </button>
+
+    <!-- Canvas sits directly in body, taking up full screen -->
+    <canvas id="trackCanvas"></canvas>
+
+    <!-- LEFT HUD Widget (Controls, File Info, Back Navigation) -->
+    <div class="hud-panel left-hud" style="position: absolute; top: 20px; left: 20px; width: 300px; display: flex; flex-direction: column; gap: 15px; z-index: 10; pointer-events: none;">
+        <!-- Card 1: File Info & Back Link -->
+        <div class="card" style="pointer-events: auto;">
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <a href="simulation_dashboard.html" class="back-btn" id="back_btn_link" style="width: fit-content;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                    Back to Dashboard
+                </a>
+                <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px; margin-top: 4px;">
+                    <h2 style="font-size: 1rem; font-weight: 700; color: var(--text-main); margin-bottom: 2px;">UWB-RTLS Simulation</h2>
+                    <p id="log_filename" style="font-size: 0.75rem; color: var(--text-muted);">Loading simulation data...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 2: Play Controls -->
+        <div class="card controls-card" style="pointer-events: auto;">
+            <div class="slider-group">
+                <button class="btn-play" id="playBtn" onclick="togglePlay()">
+                    <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    <svg id="pauseIcon" style="display:none;" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+                </button>
+                <input type="range" class="scrub-slider" id="scrubSlider" value="0" min="0" max="100" oninput="scrub(this.value)">
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 5px;">
+                <div class="time-display" id="timeDisplay" style="text-align: left; font-size:0.85rem;">0.000 / 0.000 s</div>
+                <div class="toggle-group">
+                    <button class="toggle-btn active" id="toggleAnchors" onclick="toggleOption('anchors')" style="padding: 4px 8px; font-size: 0.7rem;">Anchors</button>
+                    <button class="toggle-btn active" id="toggleTrace" onclick="toggleOption('trace')" style="padding: 4px 8px; font-size: 0.7rem;">Breadcrumbs</button>
+                </div>
+            </div>
+            <div class="speed-control" style="margin-top: 5px; width: 100%; display: flex; justify-content: space-around;">
+                <button class="speed-btn" id="speed_0.5" onclick="setSpeed(0.5)">0.5x</button>
+                <button class="speed-btn active" id="speed_1" onclick="setSpeed(1)">1x</button>
+                <button class="speed-btn" id="speed_2" onclick="setSpeed(2)">2x</button>
+                <button class="speed-btn" id="speed_5" onclick="setSpeed(5)">5x</button>
+                <button class="speed-btn" id="speed_10" onclick="setSpeed(10)">10x</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT HUD Widget (Telemetry, Path Selector, Info) -->
+    <div class="hud-panel right-hud" style="position: absolute; top: 20px; right: 20px; width: 300px; display: flex; flex-direction: column; gap: 15px; z-index: 10; pointer-events: none; max-height: calc(100vh - 40px); overflow-y: auto; padding-right: 4px;">
+        <!-- Card 1: Orientation Compass & Info -->
+        <div class="card" style="pointer-events: auto;">
+            <div class="panel-title">Real-Time Orientation</div>
+            <div class="gauge-wrapper">
+                <div class="compass-outer" style="width: 140px; height: 140px;">
+                    <div class="compass-dial" id="compassDial" style="width: 120px; height: 120px;">
+                        <div class="compass-ring"></div>
+                        <div style="position:absolute; width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:18px solid #ef4444; top:12px; left:54px; filter:drop-shadow(0 0 5px rgba(239, 68, 68, 0.6));"></div>
+                        <div style="position:absolute; width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; border-top:18px solid #64748b; bottom:12px; left:54px;"></div>
+                    </div>
+                    <div class="compass-center" style="width: 70px; height: 70px;">
+                        <div class="yaw-val" id="yawVal" style="font-size: 1rem;">0.0°</div>
+                        <div class="yaw-lbl" id="yawDirection" style="font-size: 0.55rem;">N</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="digital-grid" style="margin-top: 10px;">
+                <div class="digital-item" style="padding: 8px;">
+                    <div class="dig-lbl">Yaw Angle</div>
+                    <div class="dig-val violet" id="yawValRaw" style="font-size: 0.95rem;">0.00°</div>
+                </div>
+                <div class="digital-item" style="padding: 8px;">
+                    <div class="dig-lbl">Estimated Velocity</div>
+                    <div class="dig-val green" id="velocityVal" style="font-size: 0.95rem;">0.00 m/s</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 10px; background: rgba(255, 255, 255, 0.01); border: 1px solid rgba(255, 255, 255, 0.03); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="dig-lbl" style="font-weight: 600;">Yaw Offset</span>
+                    <span id="yawOffsetVal" style="font-family: 'Share Tech Mono', monospace; font-size: 0.85rem; color: var(--accent); font-weight: bold;">0°</span>
+                </div>
+                <input type="range" id="yawOffsetSlider" min="-180" max="180" step="5" value="0" style="width: 100%; accent-color: var(--accent); cursor: pointer;" oninput="updateYawOffset(this.value)">
+            </div>
+        </div>
+
+        <!-- Card 2: Path Selection -->
+        <div class="card" style="pointer-events: auto;">
+            <div class="panel-title">Path Selection</div>
+            <div class="path-selector-group" style="gap: 6px;">
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_gt" checked onchange="drawFrame()">
+                    <span class="dot-color" style="background:#f87171; box-shadow: 0 0 8px #f87171;"></span>
+                    <span style="font-weight: 500;">Ground Truth Path</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_ukf" checked onchange="drawFrame()">
+                    <span class="dot-color color-ukf"></span>
+                    <span style="font-weight: 500;">UKF Fusion Path (20Hz)</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_fw" checked onchange="drawFrame()">
+                    <span class="dot-color color-fw"></span>
+                    <span style="font-weight: 500;">Firmware Path</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_triplet" checked onchange="drawFrame()">
+                    <span class="dot-color color-triplet"></span>
+                    <span style="font-weight: 500;">Best Triplet</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_wls" onchange="drawFrame()">
+                    <span class="dot-color color-wls"></span>
+                    <span style="font-weight: 500;">Multilateration</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Card 3: Telemetry Coordinates -->
+        <div class="card" style="pointer-events: auto;">
+            <div class="panel-title">Telemetry Coordinates</div>
+            <div class="digital-grid" style="grid-template-columns: 1fr; gap: 8px; margin-top: 5px;">
+                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
+                    <span class="dig-lbl">UKF Position</span>
+                    <span class="dig-val violet" id="telemetry_ukf" style="font-size: 0.9rem;">X: --, Y: --</span>
+                </div>
+                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
+                    <span class="dig-lbl">FW Position</span>
+                    <span class="dig-val" style="color:var(--text-muted); font-size: 0.9rem;" id="telemetry_fw">X: --, Y: --</span>
+                </div>
+            </div>
+            <div class="info-card-text" style="font-size: 0.75rem; margin-top: 10px; line-height: 1.4;">
+                Track widths: <strong>22cm</strong> (1 lane, dotted) or <strong>44cm</strong> (2 lanes, dashed divider). <strong>◆ Cyan diamond</strong> = UKF Update, <strong>● Orange circle</strong> = UKF Predict.
+            </div>
+        </div>
+    </div> </div>
+
+    <script>
+        // Load data from localStorage
+        const replayDataRaw = localStorage.getItem('uwb_replay_data');
+        if (!replayDataRaw) {
+            alert('Simulation data not found! Please open from the Dashboard and click "Replay Trajectory".');
+            window.location.href = 'simulation_dashboard.html';
+        }
+        const data = JSON.parse(replayDataRaw);
+
+        document.getElementById('log_filename').innerText = "Log: " + (data.filename || "ukf_log_data.csv") + " (" + data.x_axis.length + " samples)";
+
+        // Dynamically update Back button link to go back to the specific simulation HTML page
+        const backBtn = document.getElementById('back_btn_link');
+        if (backBtn) {
+            let targetUrl = 'simulation_dashboard.html';
+            
+            // 1. Try to read originating simulation page URL from data
+            if (data.simPageUrl && data.simPageUrl.endsWith('_sim.html')) {
+                targetUrl = data.simPageUrl;
+            }
+            // 2. Fallback to document.referrer if valid
+            else if (document.referrer && document.referrer.includes(window.location.host) && document.referrer.endsWith('_sim.html')) {
+                targetUrl = document.referrer;
+            }
+            // 3. Fallback to default name replacement if directory was root-level
+            else if (data.filename) {
+                targetUrl = data.filename.replace('.csv', '_sim.html');
+            }
+            
+            backBtn.href = targetUrl;
+            backBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                Back to Simulation
+            `;
+        }
+
+        // Global variables for animation control
+        let isPlaying = false;
+        let currentIndex = 0;
+        let animationSpeed = 1.0; // multiplier
+        let lastTimestamp = 0;
+        let accumulatedTime = 0.0;
+        let animFrameId = null;
+
+        // Toggle state options
+        const options = {
+            anchors: true,
+            trace: true
+        };
+
+        const canvas = document.getElementById('trackCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Extract values from data
+        let anchorsList = data.anchors;
+        let gt = data.groundTruth;
+        let totalSamples = data.x_axis.length;
+        let times = data.times;
+
+        // Helper to chain connected line segments together to avoid "fish scale" artifacts
+        function chainSegments(segs) {
+            if (!segs || segs.length === 0) return [];
+            const remaining = [...segs];
+            const chains = [];
+            
+            while (remaining.length > 0) {
+                const first = remaining.shift();
+                const chain = [ { x: first[0], y: first[1] }, { x: first[2], y: first[3] } ];
+                
+                let found = true;
+                while (found) {
+                    found = false;
+                    const endPt = chain[chain.length - 1];
+                    for (let i = 0; i < remaining.length; i++) {
+                        const s = remaining[i];
+                        if (Math.abs(s[0] - endPt.x) < 0.005 && Math.abs(s[1] - endPt.y) < 0.005) {
+                            chain.push({ x: s[2], y: s[3] });
+                            remaining.splice(i, 1);
+                            found = true;
+                            break;
+                        } else if (Math.abs(s[2] - endPt.x) < 0.005 && Math.abs(s[3] - endPt.y) < 0.005) {
+                            chain.push({ x: s[0], y: s[1] });
+                            remaining.splice(i, 1);
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!found) {
+                        const startPt = chain[0];
+                        for (let i = 0; i < remaining.length; i++) {
+                            const s = remaining[i];
+                            if (Math.abs(s[2] - startPt.x) < 0.005 && Math.abs(s[3] - startPt.y) < 0.005) {
+                                chain.unshift({ x: s[0], y: s[1] });
+                                remaining.splice(i, 1);
+                                found = true;
+                                break;
+                            } else if (Math.abs(s[0] - startPt.x) < 0.005 && Math.abs(s[1] - startPt.y) < 0.005) {
+                                chain.unshift({ x: s[2], y: s[3] });
+                                remaining.splice(i, 1);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                chains.push(chain);
+            }
+            return chains;
+        }
+
+        let solidChains = [];
+        let dottedChains = [];
+        
+        function updateChains() {
+            solidChains = [];
+            dottedChains = [];
+            if (gt && gt.segments) {
+                const solidSegs = [];
+                const dottedSegs = [];
+                gt.segments.forEach(seg => {
+                    const isDotted = seg.length > 4 ? seg[4] : false;
+                    if (isDotted) {
+                        dottedSegs.push(seg);
+                    } else {
+                        solidSegs.push(seg);
+                    }
+                });
+                solidChains = chainSegments(solidSegs);
+                dottedChains = chainSegments(dottedSegs);
+            }
+        }
+        
+        updateChains();
+
+        // Setup sliders
+        const scrubSlider = document.getElementById('scrubSlider');
+        scrubSlider.max = totalSamples - 1;
+
+        // Calculate scaling and offsets to fit anchors and Ground Truth in the canvas beautifully
+        // Combining anchors and ground truth boundaries
+        let allX = anchorsList.map(a => a.x);
+        let allY = anchorsList.map(a => a.y);
+        
+        if (gt && gt.x) {
+            allX = allX.concat(gt.x.filter(x => x !== null));
+            allY = allY.concat(gt.y.filter(y => y !== null));
+        }
+
+        let minX = Math.min(...allX) - 1.0; // add 1m margin
+        let maxX = Math.max(...allX) + 1.0;
+        let minY = Math.min(...allY) - 1.0;
+        let maxY = Math.max(...allY) + 1.0;
+
+        let rangeX = maxX - minX;
+        let rangeY = maxY - minY;
+
+        // Padding around canvas for HUD bounds
+        const padding = 60;
+
+        let scaleX = 1.0;
+        let scaleY = 1.0;
+        let scale = 1.0;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        function updateScaleAndOffsets() {
+            scaleX = (canvas.width - 2 * padding) / rangeX;
+            scaleY = (canvas.height - 2 * padding) / rangeY;
+            scale = Math.min(scaleX, scaleY);
+            
+            offsetX = (canvas.width - 2 * padding - rangeX * scale) / 2;
+            offsetY = (canvas.height - 2 * padding - rangeY * scale) / 2;
+        }
+
+        let zoomScale = 1.0;
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let startX, startY;
+        let yawOffset = 0.0;
+
+        function updateYawOffset(val) {
+            yawOffset = parseFloat(val);
+            document.getElementById('yawOffsetVal').innerText = (yawOffset >= 0 ? "+" : "") + yawOffset + "°";
+            updateUI(0.0);
+            drawFrame(0.0);
+        }
+
+        // --- Live Storage Change Event Listener for Real-Time Sync ---
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'uwb_replay_data') {
+                const newData = JSON.parse(e.newValue);
+                // Dynamically update the main data object
+                Object.assign(data, newData);
+                
+                // Update log filename display
+                document.getElementById('log_filename').innerText = "Log: " + (data.filename || "ukf_log_data.csv") + " (" + data.x_axis.length + " samples)";
+                
+                // Re-extract values
+                anchorsList = data.anchors;
+                gt = data.groundTruth;
+                totalSamples = data.x_axis.length;
+                times = data.times;
+                updateChains();
+                
+                scrubSlider.max = totalSamples - 1;
+                
+                // Recalculate scaling boundaries dynamically
+                let allX = anchorsList.map(a => a.x);
+                let allY = anchorsList.map(a => a.y);
+                if (gt && gt.x) {
+                    allX = allX.concat(gt.x.filter(x => x !== null));
+                    allY = allY.concat(gt.y.filter(y => y !== null));
+                }
+                
+                minX = Math.min(...allX) - 1.0;
+                maxX = Math.max(...allX) + 1.0;
+                minY = Math.min(...allY) - 1.0;
+                maxY = Math.max(...allY) + 1.0;
+                
+                rangeX = maxX - minX;
+                rangeY = maxY - minY;
+                
+                updateScaleAndOffsets();
+                
+                // Reset index if out of bounds
+                if (currentIndex >= totalSamples) {
+                    currentIndex = totalSamples - 1;
+                }
+                
+                updateUI(0.0);
+                drawFrame(0.0);
+            }
+        });
+
+        // Coordinate conversion helper functions (flipped Y axis for bottom-left origin) with Interactive Pan & Zoom
+        function toCanvasX(x) {
+            const rawX = padding + offsetX + (x - minX) * scale;
+            return panX + rawX * zoomScale;
+        }
+
+        function toCanvasY(y) {
+            const rawY = canvas.height - padding - offsetY - (y - minY) * scale;
+            return panY + rawY * zoomScale;
+        }
+
+        function toCanvasLength(len) {
+            return len * scale * zoomScale;
+        }
+
+        // Reset Pan and Zoom to original values
+        function resetZoomPan() {
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
+            drawFrame();
+        }
+
+        // --- Canvas Interactive Mouse Event Listeners for Panning ---
+        canvas.style.cursor = 'grab';
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX - panX;
+            startY = e.clientY - panY;
+            canvas.style.cursor = 'grabbing';
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                canvas.style.cursor = 'grab';
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            panX = e.clientX - startX;
+            panY = e.clientY - startY;
+            drawFrame();
+        });
+
+        // --- Canvas Interactive Mouse Wheel Event Listener for Zooming ---
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomFactor = 1.1;
+            const mouseX = e.offsetX;
+            const mouseY = e.offsetY;
+
+            // Calculate zoom center in "unzoomed/unpanned" coordinates
+            const constX = (mouseX - panX) / zoomScale;
+            const constY = (mouseY - panY) / zoomScale;
+
+            if (e.deltaY < 0) {
+                // Zoom in
+                zoomScale *= zoomFactor;
+            } else {
+                // Zoom out
+                zoomScale /= zoomFactor;
+                if (zoomScale < 0.1) zoomScale = 0.1;
+            }
+
+            // Adjust pan to zoom towards the mouse pointer
+            panX = mouseX - constX * zoomScale;
+            panY = mouseY - constY * zoomScale;
+
+            drawFrame();
+        }, { passive: false });
+
+        let elapsedSimulationTime = 0.0;
+
+        function lerp(val1, val2, ratio) {
+            if (val1 === null || val2 === null || isNaN(val1) || isNaN(val2)) return val1;
+            return val1 + (val2 - val1) * ratio;
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            const playIcon = document.getElementById('playIcon');
+            const pauseIcon = document.getElementById('pauseIcon');
+            const playBtn = document.getElementById('playBtn');
+
+            if (isPlaying) {
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'block';
+                playBtn.style.background = 'var(--neon-green)';
+                playBtn.style.boxShadow = '0 0 15px rgba(16, 185, 129, 0.4)';
+                lastTimestamp = performance.now();
+                elapsedSimulationTime = times[currentIndex] - times[0];
+                animate();
+            } else {
+                playIcon.style.display = 'block';
+                pauseIcon.style.display = 'none';
+                playBtn.style.background = 'var(--accent)';
+                playBtn.style.boxShadow = '0 0 15px var(--accent-glow)';
+                if (animFrameId) cancelAnimationFrame(animFrameId);
+            }
+        }
+
+        function setSpeed(speed) {
+            animationSpeed = speed;
+            document.querySelectorAll('.speed-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('speed_' + (speed === 1 ? '1' : speed)).classList.add('active');
+        }
+
+        function toggleOption(opt) {
+            options[opt] = !options[opt];
+            const btn = document.getElementById('toggle' + opt.charAt(0).toUpperCase() + opt.slice(1));
+            if (options[opt]) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+            drawFrame();
+        }
+
+        function scrub(val) {
+            currentIndex = parseInt(val, 10);
+            elapsedSimulationTime = times[currentIndex] - times[0];
+            updateUI(0.0);
+            drawFrame(0.0);
+        }
+
+        function animate() {
+            if (!isPlaying) return;
+
+            const now = performance.now();
+            let dt = (now - lastTimestamp) / 1000.0;
+            lastTimestamp = now;
+
+            if (dt > 0.1) dt = 0.1;
+
+            elapsedSimulationTime += dt * animationSpeed;
+            const targetTime = times[0] + elapsedSimulationTime;
+
+            let idx = 0;
+            while (idx < totalSamples - 1 && times[idx + 1] < targetTime) {
+                idx++;
+            }
+
+            currentIndex = idx;
+
+            let ratio = 0.0;
+            if (idx < totalSamples - 1) {
+                const t1 = times[idx];
+                const t2 = times[idx + 1];
+                if (t2 > t1) {
+                    ratio = Math.max(0, Math.min(1, (targetTime - t1) / (t2 - t1)));
+                }
+            } else {
+                ratio = 1.0;
+                togglePlay();
+            }
+
+            updateUI(ratio);
+            drawFrame(ratio);
+
+            animFrameId = requestAnimationFrame(animate);
+        }
+
+        function updateUI(ratio = 0.0) {
+            scrubSlider.value = currentIndex;
+            
+            const nextIdx = Math.min(totalSamples - 1, currentIndex + 1);
+            const currentT = lerp(times[currentIndex], times[nextIdx], ratio);
+            const maxT = times[totalSamples - 1];
+            document.getElementById('timeDisplay').innerText = currentT.toFixed(3) + " / " + maxT.toFixed(3) + " s";
+
+            let ukfX = null, ukfY = null, isUpdate = false;
+            const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+            
+            if (has20Hz) {
+                const nextIdx6 = Math.min(totalSamples - 1, currentIndex + 1);
+                const currentT = lerp(times[currentIndex], times[nextIdx6], ratio);
+                
+                let k20 = 0;
+                for (let k = 0; k < data.ukfTimes20Hz.length; k++) {
+                    if (data.ukfTimes20Hz[k] <= currentT) {
+                        k20 = k;
+                    } else {
+                        break;
+                    }
+                }
+                const nextK20 = Math.min(data.ukfTimes20Hz.length - 1, k20 + 1);
+                let ratio20 = 0;
+                const t1_20 = data.ukfTimes20Hz[k20];
+                const t2_20 = data.ukfTimes20Hz[nextK20];
+                if (t2_20 > t1_20) {
+                    ratio20 = Math.max(0, Math.min(1, (currentT - t1_20) / (t2_20 - t1_20)));
+                }
+                ukfX = lerp(data.ukfPath20Hz.x[k20], data.ukfPath20Hz.x[nextK20], ratio20);
+                ukfY = lerp(data.ukfPath20Hz.y[k20], data.ukfPath20Hz.y[nextK20], ratio20);
+                isUpdate = (data.ukfModes20Hz[k20] === 1);
+            } else {
+                ukfX = lerp(data.ukfPath.x[currentIndex], data.ukfPath.x[nextIdx], ratio);
+                ukfY = lerp(data.ukfPath.y[currentIndex], data.ukfPath.y[nextIdx], ratio);
+                isUpdate = (data.ukfModes && data.ukfModes[currentIndex] === 1);
+            }
+
+            const fwX = lerp(data.firmwarePath.x[currentIndex], data.firmwarePath.x[nextIdx], ratio);
+            const fwY = lerp(data.firmwarePath.y[currentIndex], data.firmwarePath.y[nextIdx], ratio);
+
+            document.getElementById('telemetry_ukf').innerText = 
+                ukfX !== null ? `X: ${ukfX.toFixed(3)}m, Y: ${ukfY.toFixed(3)}m (${isUpdate ? 'Update' : 'Predict'})` : "X: N/A, Y: N/A";
+            document.getElementById('telemetry_fw').innerText = 
+                fwX !== null ? `X: ${fwX.toFixed(3)}m, Y: ${fwY.toFixed(3)}m` : "X: N/A, Y: N/A";
+
+            const rawYaw = lerp(data.yaw[currentIndex], data.yaw[nextIdx], ratio) || 0.0;
+            const yaw = rawYaw + yawOffset;
+            document.getElementById('yawVal').innerText = yaw.toFixed(1) + "°";
+            document.getElementById('yawValRaw').innerText = rawYaw.toFixed(2) + "° (Offset: " + (yawOffset >= 0 ? "+" : "") + yawOffset + "°)";
+
+            let direction = "N";
+            const normYaw = (yaw % 360 + 360) % 360;
+            if (normYaw >= 337.5 || normYaw < 22.5) direction = "N";
+            else if (normYaw >= 22.5 && normYaw < 67.5) direction = "NE";
+            else if (normYaw >= 67.5 && normYaw < 112.5) direction = "E";
+            else if (normYaw >= 112.5 && normYaw < 157.5) direction = "SE";
+            else if (normYaw >= 157.5 && normYaw < 202.5) direction = "S";
+            else if (normYaw >= 202.5 && normYaw < 247.5) direction = "SW";
+            else if (normYaw >= 247.5 && normYaw < 292.5) direction = "W";
+            else if (normYaw >= 292.5 && normYaw < 337.5) direction = "NW";
+
+            document.getElementById('yawDirection').innerText = direction;
+
+            const compassDial = document.getElementById('compassDial');
+            compassDial.style.transform = `rotate(${yaw}deg)`;
+
+            let velocity = 0.0;
+            if (currentIndex > 0 && ukfX !== null) {
+                const prevX = data.ukfPath.x[currentIndex - 1];
+                const prevY = data.ukfPath.y[currentIndex - 1];
+                if (prevX !== null) {
+                    const dx = ukfX - prevX;
+                    const dy = ukfY - prevY;
+                    const dt = times[currentIndex] - times[currentIndex - 1];
+                    if (dt > 0) {
+                        velocity = Math.sqrt(dx*dx + dy*dy) / dt;
+                    }
+                }
+            }
+            document.getElementById('velocityVal').innerText = velocity.toFixed(2) + " m/s";
+        }
+
+        // --- Crossroads & T-Junctions Clearance Calculations ---
+        const junctions = [];
+        if (gt && gt.segments) {
+            const pointCounts = {};
+            const getPointKey = (x, y) => `${x.toFixed(3)},${y.toFixed(3)}`;
+            
+            gt.segments.forEach(seg => {
+                const k1 = getPointKey(seg[0], seg[1]);
+                const k2 = getPointKey(seg[2], seg[3]);
+                
+                pointCounts[k1] = (pointCounts[k1] || 0) + 1;
+                pointCounts[k2] = (pointCounts[k2] || 0) + 1;
+            });
+            
+            for (const key in pointCounts) {
+                if (pointCounts[key] >= 3) {
+                    const [xStr, yStr] = key.split(',');
+                    junctions.push({
+                        x: parseFloat(xStr),
+                        y: parseFloat(yStr),
+                        count: pointCounts[key]
+                    });
+                }
+            }
+        }
+
+        // Helper to shorten segments around junctions to provide clean clearances
+        function getShortenedSegment(seg, rClear) {
+            const [x1, y1, x2, y2] = seg;
+            let ax = x1, ay = y1;
+            let bx = x2, by = y2;
+            
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const L = Math.sqrt(dx*dx + dy*dy);
+            if (L < 0.001) return null;
+            
+            const ux = dx / L;
+            const uy = dy / L;
+            
+            // Check if start point A is at a junction
+            for (const junc of junctions) {
+                const distA = Math.sqrt((x1 - junc.x)**2 + (y1 - junc.y)**2);
+                if (distA < 0.05) {
+                    ax = x1 + ux * rClear;
+                    break;
+                }
+            }
+            
+            // Check if end point B is at a junction
+            for (const junc of junctions) {
+                const distB = Math.sqrt((x2 - junc.x)**2 + (y2 - junc.y)**2);
+                if (distB < 0.05) {
+                    bx = x2 - ux * rClear;
+                    break;
+                }
+            }
+            
+            const newDx = bx - ax;
+            const newDy = by - ay;
+            if (newDx * ux + newDy * uy <= 0) {
+                return null;
+            }
+            
+            return [ax, ay, bx, by];
+        }
+
+        // Draw track, anchors, path lines, and animated vehicle with smooth interpolation
+        function drawFrame(ratio = 0.0) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const nextIdx = Math.min(totalSamples - 1, currentIndex + 1);
+
+            // 1. Draw Grid Lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+            ctx.lineWidth = 1;
+            const gridSpacing = toCanvasLength(1.0); // 1 meter grid
+            for (let x = minX; x <= maxX; x += 1.0) {
+                ctx.beginPath();
+                ctx.moveTo(toCanvasX(x), 0);
+                ctx.lineTo(toCanvasX(x), canvas.height);
+                ctx.stroke();
+            }
+            for (let y = minY; y <= maxY; y += 1.0) {
+                ctx.beginPath();
+                ctx.moveTo(0, toCanvasY(y));
+                ctx.lineTo(canvas.width, toCanvasY(y));
+                ctx.stroke();
+            }
+
+            // 2. Draw Ground Truth roadbed with correct lane widths (layer-by-layer for clean joints)
+            // segment[4] = is_dotted: true → 1 lane (22cm), false → 2 lanes (44cm + center divider)
+            if (gt && gt.segments) {
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                const drawSegLayer = (styleFn) => {
+                    // Draw Solid Chains (44cm 2-lane roads)
+                    if (solidChains.length > 0) {
+                        const roadWidth = toCanvasLength(0.44);
+                        styleFn(roadWidth);
+                        solidChains.forEach(chain => {
+                            ctx.beginPath();
+                            chain.forEach((pt, idx) => {
+                                if (idx === 0) ctx.moveTo(toCanvasX(pt.x), toCanvasY(pt.y));
+                                else ctx.lineTo(toCanvasX(pt.x), toCanvasY(pt.y));
+                            });
+                            ctx.stroke();
+                        });
+                    }
+                    
+                    // Draw Dotted Chains (22cm 1-lane roads)
+                    if (dottedChains.length > 0) {
+                        const roadWidth = toCanvasLength(0.22);
+                        styleFn(roadWidth);
+                        dottedChains.forEach(chain => {
+                            ctx.beginPath();
+                            chain.forEach((pt, idx) => {
+                                if (idx === 0) ctx.moveTo(toCanvasX(pt.x), toCanvasY(pt.y));
+                                else ctx.lineTo(toCanvasX(pt.x), toCanvasY(pt.y));
+                            });
+                            ctx.stroke();
+                        });
+                    }
+                };
+
+                // Layer A: Soft subtle outer glow
+                drawSegLayer(w => { ctx.strokeStyle = 'rgba(124, 58, 237, 0.08)'; ctx.lineWidth = w + 4; });
+                // Layer B: Dark border
+                drawSegLayer(w => { ctx.strokeStyle = '#27272a'; ctx.lineWidth = w + 2; });
+                // Layer C: Slate pavement
+                drawSegLayer(w => { ctx.strokeStyle = '#0f172a'; ctx.lineWidth = w; });
+
+                // Layer D: White dashed lane divider ONLY for double-lane (solidChains)
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+                ctx.lineWidth = 2.0;
+                ctx.setLineDash([8, 8]);
+                solidChains.forEach(chain => {
+                    ctx.beginPath();
+                    chain.forEach((pt, idx) => {
+                        if (idx === 0) ctx.moveTo(toCanvasX(pt.x), toCanvasY(pt.y));
+                        else ctx.lineTo(toCanvasX(pt.x), toCanvasY(pt.y));
+                    });
+                    ctx.stroke();
+                });
+                ctx.setLineDash([]); // Reset dash
+            }
+
+            // 3. Draw Breadcrumbs (past paths trails)
+            if (options.trace && currentIndex > 0) {
+                const drawPathTrail = (pathArray, strokeStyle, width) => {
+                    ctx.beginPath();
+                    ctx.strokeStyle = strokeStyle;
+                    ctx.lineWidth = width;
+                    let started = false;
+                    for (let k = 0; k <= currentIndex; k++) {
+                        const px = pathArray.x[k];
+                        const py = pathArray.y[k];
+                        if (px === null) {
+                            started = false;
+                            continue;
+                        }
+                        if (!started) {
+                            ctx.moveTo(toCanvasX(px), toCanvasY(py));
+                            started = true;
+                        } else {
+                            ctx.lineTo(toCanvasX(px), toCanvasY(py));
+                        }
+                    }
+                    ctx.stroke();
+                };
+
+                // Draw enabled trails
+                if (document.getElementById('chk_wls').checked) drawPathTrail(data.wlsPath, 'rgba(245, 158, 11, 0.25)', 1.5);
+                if (document.getElementById('chk_triplet').checked) drawPathTrail(data.tripletPath, 'rgba(16, 185, 129, 0.25)', 1.5);
+                if (document.getElementById('chk_fw').checked) drawPathTrail(data.firmwarePath, 'rgba(148, 163, 184, 0.2)', 1);
+                
+                if (document.getElementById('chk_ukf').checked) {
+                    // Use 20Hz data if available, otherwise fall back to 6Hz
+                    const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+                    const ukfP = has20Hz ? data.ukfPath20Hz : data.ukfPath;
+                    const ukfM = has20Hz ? data.ukfModes20Hz : (data.ukfModes || []);
+                    const ukfT = has20Hz ? data.ukfTimes20Hz : times;
+                    
+                    // Find the last 20Hz index that fits within the current animation time
+                    const nextIdx6 = Math.min(totalSamples - 1, currentIndex + 1);
+                    const currentT = lerp(times[currentIndex], times[nextIdx6], ratio);
+                    let maxK = 0;
+                    for (let k = 0; k < ukfT.length; k++) {
+                        if (ukfT[k] <= currentT) maxK = k;
+                        else break;
+                    }
+                    
+                    // Draw path lines with distinct styles
+                    for (let k = 1; k <= maxK; k++) {
+                        const px1 = ukfP.x[k-1];
+                        const py1 = ukfP.y[k-1];
+                        const px2 = ukfP.x[k];
+                        const py2 = ukfP.y[k];
+                        if (px1 === null || px2 === null) continue;
+
+                        ctx.beginPath();
+                        ctx.moveTo(toCanvasX(px1), toCanvasY(py1));
+                        ctx.lineTo(toCanvasX(px2), toCanvasY(py2));
+                        
+                        const isUpdate = (ukfM[k] === 1);
+                        if (isUpdate) {
+                            ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'; // bright cyan for Update
+                            ctx.lineWidth = 3.0;
+                            ctx.setLineDash([]);
+                        } else {
+                            ctx.strokeStyle = 'rgba(251, 146, 60, 0.5)'; // orange for Predict
+                            ctx.lineWidth = 1.5;
+                            ctx.setLineDash([3, 5]);
+                        }
+                        ctx.stroke();
+                    }
+                    ctx.setLineDash([]);
+                    
+                    // Draw markers: Update = diamond ◆ (cyan), Predict = circle ● (orange)
+                    for (let k = 0; k <= maxK; k++) {
+                        const px = ukfP.x[k];
+                        const py = ukfP.y[k];
+                        if (px === null || py === null) continue;
+                        
+                        const isUpdate = (ukfM[k] === 1);
+                        const cx = toCanvasX(px);
+                        const cy = toCanvasY(py);
+                        
+                        if (isUpdate) {
+                            // DIAMOND — bright cyan, 4px
+                            const s = 4;
+                            ctx.beginPath();
+                            ctx.moveTo(cx, cy - s);
+                            ctx.lineTo(cx + s, cy);
+                            ctx.lineTo(cx, cy + s);
+                            ctx.lineTo(cx - s, cy);
+                            ctx.closePath();
+                            ctx.fillStyle = '#38bdf8';
+                            ctx.shadowColor = '#38bdf8';
+                            ctx.shadowBlur = 6;
+                            ctx.fill();
+                            ctx.shadowBlur = 0;
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        } else {
+                            // CIRCLE — orange, 2.5px
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, 2.5, 0, 2 * Math.PI);
+                            ctx.fillStyle = 'rgba(251, 146, 60, 0.7)';
+                            ctx.fill();
+                            ctx.strokeStyle = 'rgba(194, 65, 12, 0.5)';
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+
+            // 7. Draw Canvas HUD Legend (Explain UKF Predict vs Update)
+            if (options.trace && document.getElementById('chk_ukf').checked) {
+                const lx = 20;
+                const ly = canvas.height - 75;
+                
+                // Draw rounded glass card overlay
+                ctx.fillStyle = 'rgba(17, 24, 39, 0.9)';
+                ctx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(lx, ly, 240, 55, 6);
+                ctx.fill();
+                ctx.stroke();
+                
+                // UKF Update marker — diamond shape (cyan)
+                const dCx = lx + 20, dCy = ly + 17, ds = 5;
+                ctx.beginPath();
+                ctx.moveTo(dCx, dCy - ds);
+                ctx.lineTo(dCx + ds, dCy);
+                ctx.lineTo(dCx, dCy + ds);
+                ctx.lineTo(dCx - ds, dCy);
+                ctx.closePath();
+                ctx.fillStyle = '#38bdf8';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                ctx.font = '600 10px Outfit';
+                ctx.fillStyle = '#f1f5f9';
+                ctx.textAlign = 'left';
+                ctx.fillText('◆ UKF Update (IMU + UWB fused)', lx + 35, ly + 21);
+                
+                // UKF Predict marker — small circle (orange)
+                ctx.beginPath();
+                ctx.arc(lx + 20, ly + 39, 3, 0, 2 * Math.PI);
+                ctx.fillStyle = 'rgba(251, 146, 60, 0.6)';
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(194, 65, 12, 0.5)';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+                
+                ctx.fillStyle = '#94a3b8';
+                ctx.fillText('● UKF Predict (Pure IMU, drift)', lx + 35, ly + 42);
+            }
+
+            // 4. Draw Glowing UWB Anchors
+            if (options.anchors) {
+                anchorsList.forEach(anc => {
+                    const ax = toCanvasX(anc.x);
+                    const ay = toCanvasY(anc.y);
+
+                    // Pulsing glow circle
+                    const pulseRadius = 15 + Math.sin(performance.now() / 150) * 3;
+                    ctx.beginPath();
+                    ctx.arc(ax, ay, pulseRadius, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'rgba(14, 165, 233, 0.05)';
+                    ctx.fill();
+
+                    // Anchor Triangle
+                    ctx.beginPath();
+                    ctx.moveTo(ax, ay - 8);
+                    ctx.lineTo(ax - 7, ay + 6);
+                    ctx.lineTo(ax + 7, ay + 6);
+                    ctx.closePath();
+                    ctx.fillStyle = '#0ea5e9';
+                    ctx.shadowColor = '#0ea5e9';
+                    ctx.shadowBlur = 10;
+                    ctx.fill();
+                    ctx.shadowBlur = 0; // reset glow
+
+                    // Text label
+                    ctx.font = '600 11px Outfit';
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('A' + anc.id, ax, ay - 14);
+                });
+            }
+
+            // 5. Draw Animated Tag arrowheads
+            const drawTagVehicle = (x, y, headingAngle, color, labelText) => {
+                const tx = toCanvasX(x);
+                const ty = toCanvasY(y);
+
+                const headingRad = (-headingAngle * Math.PI) / 180.0;
+
+                ctx.save();
+                ctx.translate(tx, ty);
+                // Convert heading: 0 degrees is +X (pointing East/Right)
+                ctx.rotate(headingRad); 
+
+                // A. Glowing headlight beam extending out based on Yaw (forward is along positive X-axis in rotated space)
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, 35, -0.25, 0.25);
+                ctx.closePath();
+                const beamGlow = ctx.createRadialGradient(0, 0, 5, 0, 0, 35);
+                beamGlow.addColorStop(0, color.replace('1)', '0.3)'));
+                beamGlow.addColorStop(1, color.replace('1)', '0)'));
+                ctx.fillStyle = beamGlow;
+                ctx.fill();
+
+                // B. Tag core circle
+                ctx.beginPath();
+                ctx.arc(0, 0, 8, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 12;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // C. Directional Pointer Triangle rotating based on Yaw
+                ctx.beginPath();
+                ctx.moveTo(7, 0);       // Nose pointing forward
+                ctx.lineTo(-5, -4);     // Back left
+                ctx.lineTo(-2, 0);      // Inner center tail
+                ctx.lineTo(-5, 4);      // Back right
+                ctx.closePath();
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                
+                ctx.restore();
+
+                // D. Tag text labels (drawn in global coordinates to stay upright)
+                ctx.font = '700 10px Outfit';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'left';
+                ctx.fillText(labelText, tx + 12, ty - 2);
+            };
+
+            // Get Yaw heading in degrees incorporating our manual offset with smooth interpolation
+            const rawYaw = lerp(data.yaw[currentIndex], data.yaw[nextIdx], ratio) || 0.0;
+            const yaw = rawYaw + yawOffset;
+
+            // Draw paths tags
+            if (document.getElementById('chk_wls').checked) {
+                const wlsX = lerp(data.wlsPath.x[currentIndex], data.wlsPath.x[nextIdx], ratio);
+                const wlsY = lerp(data.wlsPath.y[currentIndex], data.wlsPath.y[nextIdx], ratio);
+                if (wlsX !== null && wlsY !== null) drawTagVehicle(wlsX, wlsY, yaw, 'rgba(245, 158, 11, 1)', 'WLS');
+            }
+            if (document.getElementById('chk_triplet').checked) {
+                const tripX = lerp(data.tripletPath.x[currentIndex], data.tripletPath.x[nextIdx], ratio);
+                const tripY = lerp(data.tripletPath.y[currentIndex], data.tripletPath.y[nextIdx], ratio);
+                if (tripX !== null && tripY !== null) drawTagVehicle(tripX, tripY, yaw, 'rgba(16, 185, 129, 1)', 'Triplet');
+            }
+            if (document.getElementById('chk_fw').checked) {
+                const fwX = lerp(data.firmwarePath.x[currentIndex], data.firmwarePath.x[nextIdx], ratio);
+                const fwY = lerp(data.firmwarePath.y[currentIndex], data.firmwarePath.y[nextIdx], ratio);
+                if (fwX !== null && fwY !== null) drawTagVehicle(fwX, fwY, yaw, 'rgba(148, 163, 184, 0.7)', 'FW');
+            }
+            if (document.getElementById('chk_ukf').checked) {
+                const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+                let ukfX = null, ukfY = null, isUpdate = false;
+                
+                if (has20Hz) {
+                    const nextIdx6 = Math.min(totalSamples - 1, currentIndex + 1);
+                    const currentT = lerp(times[currentIndex], times[nextIdx6], ratio);
+                    
+                    // Find the best index in 20Hz times
+                    let k20 = 0;
+                    for (let k = 0; k < data.ukfTimes20Hz.length; k++) {
+                        if (data.ukfTimes20Hz[k] <= currentT) {
+                            k20 = k;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // Interpolate 20Hz position for extra smoothness
+                    const nextK20 = Math.min(data.ukfTimes20Hz.length - 1, k20 + 1);
+                    let ratio20 = 0;
+                    const t1_20 = data.ukfTimes20Hz[k20];
+                    const t2_20 = data.ukfTimes20Hz[nextK20];
+                    if (t2_20 > t1_20) {
+                        ratio20 = Math.max(0, Math.min(1, (currentT - t1_20) / (t2_20 - t1_20)));
+                    }
+                    
+                    ukfX = lerp(data.ukfPath20Hz.x[k20], data.ukfPath20Hz.x[nextK20], ratio20);
+                    ukfY = lerp(data.ukfPath20Hz.y[k20], data.ukfPath20Hz.y[nextK20], ratio20);
+                    isUpdate = (data.ukfModes20Hz[k20] === 1);
+                } else {
+                    // Fallback to 6Hz if 20Hz is not available
+                    ukfX = lerp(data.ukfPath.x[currentIndex], data.ukfPath.x[nextIdx], ratio);
+                    ukfY = lerp(data.ukfPath.y[currentIndex], data.ukfPath.y[nextIdx], ratio);
+                    isUpdate = (data.ukfModes && data.ukfModes[currentIndex] === 1);
+                }
+                
+                if (ukfX !== null && ukfY !== null) {
+                    const label = isUpdate ? 'UKF ◆ Update' : 'UKF ● Predict';
+                    const color = isUpdate ? 'rgba(56, 189, 248, 1)' : 'rgba(251, 146, 60, 1)';
+                    drawTagVehicle(ukfX, ukfY, yaw, color, label);
+                }
+            }
+
+            // 6. Draw Ground Truth Path breadcrumbs (thin dashed red line)
+            if (document.getElementById('chk_gt').checked && gt && gt.x) {
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(248, 113, 113, 0.75)';
+                ctx.lineWidth = 2.0;
+                ctx.setLineDash([4, 4]);
+                let started = false;
+                for (let k = 0; k < gt.x.length; k++) {
+                    const gx = gt.x[k];
+                    const gy = gt.y[k];
+                    if (gx === null || gy === null) {
+                        started = false;
+                        continue;
+                    }
+                    if (!started) {
+                        ctx.moveTo(toCanvasX(gx), toCanvasY(gy));
+                        started = true;
+                    } else {
+                        ctx.lineTo(toCanvasX(gx), toCanvasY(gy));
+                    }
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+
+        // Initialize display
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            updateScaleAndOffsets();
+            updateUI(0.0);
+            drawFrame(0.0);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+    </script>
+</body>
+</html>
