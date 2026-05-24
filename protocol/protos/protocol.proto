@@ -266,14 +266,23 @@ message ranging_result_t {
 
 /* Sensor Fusion  ---------------------------------------------- */
 
-/* TODO: Implement sensor fusion configuration handler in positioning task */
 message sensor_fusion_cfg_t {
-    filter_mode_t mode       = 1;
-    float q_process_noise    = 2;
-    float r_base             = 3;
-    float innovation_alpha   = 4;
-    float r_scale_min        = 5;
-    float r_scale_max        = 6;
+    float alpha              = 1;
+    float kappa              = 2;
+    float beta               = 3;
+    float q_a                = 4; /* Accel process noise */
+    float q_g                = 5; /* Gyro process noise */
+    float r_uwb              = 6; /* UWB measurement noise */
+    
+    /* Initial state covariance (P matrix diagonal) */
+    float init_p_px          = 7;
+    float init_p_py          = 8;
+    float init_p_vx          = 9;
+    float init_p_vy          = 10;
+    float init_p_theta       = 11;
+    float init_p_bias_ax     = 12;
+    float init_p_bias_ay     = 13;
+    float init_p_bias_gz     = 14;
 }
 
 message sensor_fusion_cfg_get_t {
@@ -292,6 +301,15 @@ message sensor_fusion_result_t {
     uint32 dummy = 1;
 }
 */
+
+/* IMU / ICM configuration -------------------------------------------------- */
+message imu_reset_t {
+    uint32 dummy = 1;
+}
+
+message imu_calib_retry_t {
+    uint32 dummy = 1;
+}
 
 /* Commands ----------------------------------------------------------------- */
 
@@ -605,9 +623,29 @@ message battery_info_resp_t {
     uint32 bat_soc_percent = 2;
     int32  remaining_min   = 3;
     bool   is_charging     = 4;
+
+    /* Hardware telemetry fields */
+    float  mcu_temp_c       = 5;  /* MCU internal temperature in degrees Celsius */
+    uint32 vdda_mv          = 6;  /* Actual VDDA voltage in mV after calibration */
+    float  uwb_temp_c       = 7;  /* DW1000 chip internal temperature in degrees Celsius */
+    uint32 uwb_vbat_mv      = 8;  /* DW1000 VBAT supply voltage in mV */
+    float  imu_temp_c       = 9;  /* IMU sensor internal temperature in degrees Celsius */
+    
+    uint32 error_mask      = 10; /* Bitmask of breached thresholds */
 }
 message battery_info_get_t {
     uint32 dummy = 1;
+}
+
+/* Factory OTP provisioning -------------------------------------------------- */
+message factory_otp_write_t {
+    uint32 confirm_magic     = 1; /* Must be 0x4F545057 ('OTPW') */
+    uint32 otp_type          = 2; /* firmware/common/otp/otp.h OTP_TYPE_* */
+    device_type_t device_type = 3; /* Used by OTP_TYPE_DEVICE_INFO */
+    uint32 tx_antenna_delay  = 4;
+    uint32 rx_antenna_delay  = 5;
+    uint32 value_u32         = 6; /* DDMMYYYY mfg_date for OTP_TYPE_DEVICE_INFO */
+    uint32 value_u8          = 7; /* hw_rev for OTP_TYPE_DEVICE_INFO */
 }
 /* Session ------------------------------------------------------------------- */
 message end_session_t {
@@ -654,6 +692,10 @@ message packet_t {
         sensor_fusion_cfg_get_t   sensor_fusion_cfg_get   = 21;
         sensor_fusion_cfg_set_t   sensor_fusion_cfg_set   = 22;
         sensor_fusion_cfg_resp_t  sensor_fusion_cfg_resp  = 23;
+
+        /* IMU operations */
+        imu_reset_t               imu_reset               = 69;
+        imu_calib_retry_t         imu_calib_start         = 70;
 
         /* System commands */
         device_reset_t            device_reset            = 24;
@@ -723,6 +765,9 @@ message packet_t {
         calib_status_resp_t       calib_status_resp       = 64;
         
         end_session_t             end_session             = 65;
+
+        /* Factory OTP provisioning */
+        factory_otp_write_t       factory_otp_write       = 66;
     }
 }
 

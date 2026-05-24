@@ -275,13 +275,15 @@ bool mw_filter_ukf_init_add(ukf_init_filter_t *ctx, float x, float y, float *out
 {
     if (!ctx) return false;
 
-    if (ctx->count < UKF_INIT_SAMPLES) {
-        ctx->x_history[ctx->count] = x;
-        ctx->y_history[ctx->count] = y;
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
+        if (ctx->count >= UKF_INIT_DISCARD_SAMPLES) {
+            ctx->x_history[ctx->count - UKF_INIT_DISCARD_SAMPLES] = x;
+            ctx->y_history[ctx->count - UKF_INIT_DISCARD_SAMPLES] = y;
+        }
         ctx->count++;
     }
 
-    if (ctx->count < UKF_INIT_SAMPLES) {
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
         return false;
     }
 
@@ -331,14 +333,16 @@ bool mw_filter_ukf_init_distance_add(ukf_init_distance_filter_t *ctx, float d0, 
 {
     if (!ctx) return false;
 
-    if (ctx->count < UKF_INIT_SAMPLES) {
-        ctx->d_history[0][ctx->count] = d0;
-        ctx->d_history[1][ctx->count] = d1;
-        ctx->d_history[2][ctx->count] = d2;
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
+        if (ctx->count >= UKF_INIT_DISCARD_SAMPLES) {
+            ctx->d_history[0][ctx->count - UKF_INIT_DISCARD_SAMPLES] = d0;
+            ctx->d_history[1][ctx->count - UKF_INIT_DISCARD_SAMPLES] = d1;
+            ctx->d_history[2][ctx->count - UKF_INIT_DISCARD_SAMPLES] = d2;
+        }
         ctx->count++;
     }
 
-    if (ctx->count < UKF_INIT_SAMPLES) {
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
         return false;
     }
 

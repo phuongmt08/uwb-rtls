@@ -61,6 +61,8 @@ static bool s_ukf_initialized = false;
 static ukf_init_filter_t s_ukf_init_filter;
 static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static float s_latest_error = 0.0f;
+static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
+static bool s_latest_fusion_position_valid = false;
 bsp_imu_bias_t t_imu_bias;
 uint8_t test = 0;
 static float s_latest_distances[NUM_ANCHORS] = {0};
@@ -78,6 +80,8 @@ static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
+static void record_ranging_error(void);
+static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
 
 /* Private functions --------------------------------------------------- */
 static void init_filters(void)
@@ -208,6 +212,22 @@ static void update_period_schedule(uint32_t now_tick, uint32_t period_ms)
     }
 }
 
+static void record_ranging_error(void)
+{
+    s_error_count++;
+}
+
+static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context)
+{
+    if (count >= 3U) {
+        return true;
+    }
+
+    RLOG_W(LOG_OBJECT_CODE_TAG, "%s: %u/3 anchors", context, count);
+    record_ranging_error();
+    return false;
+}
+
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
     // RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", s_success_count + 1);  // DISABLED - causes 20ms delay
@@ -298,10 +318,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         RLOG_I(LOG_OBJECT_CODE_TAG,
                "Dist A1=%.3fm A2=%.3fm A3=%.3fm A4=%.3fm",
                anchor_distances[0], anchor_distances[1], anchor_distances[2], anchor_distances[3]);
-        RLOG_W(LOG_OBJECT_CODE_TAG, 
-               "Not enough valid anchors: %u/3 minimum", valid_count);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        s_error_count++;
+        (void)ensure_minimum_ranging_anchors(valid_count, "Not enough valid anchors");
         return;
     }
 
@@ -315,9 +333,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
     }
 
-    if (compact_idx < 3) {
-        RLOG_W(LOG_OBJECT_CODE_TAG, "Not enough anchors passed filter (%u/3)", compact_idx);
-        s_error_count++;
+    if (!ensure_minimum_ranging_anchors(compact_idx, "Not enough anchors passed filter")) {
         return;
     }
 
@@ -325,8 +341,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     mw_tril_anchor_t best_3_anchors[3];
     uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3);
     
-    if (best_count < 3) {
-        s_error_count++;
+    if (!ensure_minimum_ranging_anchors(best_count, "Not enough anchors selected")) {
         return;
     }
 
@@ -346,7 +361,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (err != MW_TRIL_OK) {
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
             RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-            s_error_count++;
             return;
         }
 
@@ -385,7 +399,11 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         else
         {
             /* Still collecting data to initialize UKF */
-            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d", s_ukf_init_filter.count, UKF_INIT_SAMPLES);
+            int collected = s_ukf_init_filter.count >= UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count - UKF_INIT_DISCARD_SAMPLES : 0;
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d (discarded %d/%d)",
+                   collected, UKF_INIT_SAMPLES,
+                   s_ukf_init_filter.count < UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count : UKF_INIT_DISCARD_SAMPLES,
+                   UKF_INIT_DISCARD_SAMPLES);
         }
     }
     else
@@ -406,7 +424,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 		if (err != MW_TRIL_OK) {
 			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
 			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-			s_error_count++;
+            return;
 		}
 
 		s_last_selected_anchors_mask = 0;
@@ -439,7 +457,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (err != MW_TRIL_OK) {
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
             RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-            s_error_count++;
             return;
         }
 
@@ -471,13 +488,19 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
             sys_sensor_fusion_set_predict_flag();
             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
-            // bsp_io_uart_send_fusion_data((uint8_t)0, s_error_count, ukf_data.px, ukf_data.py, ukf_data.thetao);
+            s_latest_fusion_position.x = init_x;
+            s_latest_fusion_position.y = init_y;
+            s_latest_fusion_position_valid = true;
             // s_latest_error = (float)tril_result.error_estimate;
         }
         else
         {
             /* Still collecting data to initialize UKF */
-            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d", s_ukf_init_filter.count, UKF_INIT_SAMPLES);
+            int collected = s_ukf_init_filter.count >= UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count - UKF_INIT_DISCARD_SAMPLES : 0;
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d (discarded %d/%d)",
+                   collected, UKF_INIT_SAMPLES,
+                   s_ukf_init_filter.count < UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count : UKF_INIT_DISCARD_SAMPLES,
+                   UKF_INIT_DISCARD_SAMPLES);
         }
     }
     else
@@ -498,7 +521,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 		if (err != MW_TRIL_OK) {
 			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
 			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-			s_error_count++;
+            return;
 		}
 
 		s_last_selected_anchors_mask = 0;
@@ -516,8 +539,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
 
         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, test);
-
-//        bsp_io_uart_send_fusion_data(test, s_error_count, ukf_data.px, ukf_data.py, ukf_data.theta);
+        s_latest_fusion_position = tril_position;
+        s_latest_fusion_position_valid = true;
     }
 
     s_success_count++;
@@ -531,7 +554,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     if (err != MW_TRIL_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        s_error_count++;
         return;
     }
 
@@ -542,7 +564,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
                "[TRIL] Error %.3fm > %.3fm - REJECTED",
                (float)tril_result.error_estimate, MAX_ACCEPTABLE_ERROR_M);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        s_error_count++;
         return;
     }
 #endif
@@ -573,6 +594,39 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 #endif
 }
 /* Public functions --------------------------------------------------- */
+bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count)
+{
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+    if (x != NULL) {
+        *x = (float)s_latest_fusion_position.x;
+    }
+
+    if (y != NULL) {
+        *y = (float)s_latest_fusion_position.y;
+    }
+
+    if (err_count != NULL) {
+        *err_count = s_error_count;
+    }
+
+    return s_latest_fusion_position_valid;
+#else
+    if (x != NULL) {
+        *x = (float)s_last_position.x;
+    }
+
+    if (y != NULL) {
+        *y = (float)s_last_position.y;
+    }
+
+    if (err_count != NULL) {
+        *err_count = s_error_count;
+    }
+
+    return true;
+#endif
+}
+
 app_err_t app_tag_init(void)
 {
     sys_config_t *cfg = sys_config_get();
@@ -687,7 +741,7 @@ void app_tag_process(void)
                 last_warn_log = now;
             }
         } else {
-            s_error_count++;
+            record_ranging_error();
         }
         return;
     }
@@ -702,13 +756,13 @@ void app_tag_process(void)
                                                           cfg->uwb.rx_timeout_ms);
 
     if (err == SYS_RANGING_OK) {
-        sys_ranging_multi_result_t multi_results;
+        sys_ranging_multi_result_t multi_results = {0};
         bool cycle_success = false;
         if (sys_ranging_tag_get_results_tdma(&multi_results) == SYS_RANGING_OK) {
             cycle_success = true;
             process_ranging_results(multi_results.results, multi_results.count);
         } else {
-            s_error_count++;
+            record_ranging_error();
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
         }
 
@@ -755,10 +809,8 @@ void app_tag_process(void)
         return;
     }
 
-    if (err == SYS_RANGING_ERR_TIMEOUT ||
-        err == SYS_RANGING_ERR ||
-        err == SYS_RANGING_ERR_NOT_STARTED) {
-        s_error_count++;
+    if (err != SYS_RANGING_ERR_BUSY) {
+        record_ranging_error();
         s_last_ranging_tick = HAL_GetTick();
         uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
         if (s_error_count % 10 == 0) {

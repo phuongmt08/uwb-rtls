@@ -6,7 +6,7 @@ from typing import Tuple
 OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\data\20260513_16g34p_ukf_log_data_rules_trajectory.csv"
+SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\23_05_26\20260523_13g56p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -59,19 +59,19 @@ ANCHOR_POSITIONS = np.array([
 UKF_STATE_SIZE = 8
 UKF_PROCESS_NOISE_SIZE = 3
 UKF_MEASUREMENT_SIZE = 3
-UKF_ALPHA = 0.1
+UKF_ALPHA = 0.001
 UKF_KAPPA = 0.0
 UKF_BETA = 2.0
 
 # Initial filter uncertainty variables
-P_PX = 1e-06
-P_PY = 1e-06
-P_VX = 1e-06
-P_VY = 1e-06
-P_THETA = 1e-20
+P_PX = 0.1
+P_PY = 0.1
+P_VX = 0.1
+P_VY = 0.1
+P_THETA = 1e-10
 P_BAX = 1e-05
 P_BAY = 1e-05
-P_BGZ = 1e-05
+P_BGZ = 1e-10
 
 INITIAL_P = np.diag([
     P_PX, P_PY, P_VX, P_VY, P_THETA, P_BAX, P_BAY, P_BGZ
@@ -86,9 +86,9 @@ Q_G_TEST = np.deg2rad(2)**2
 R_UWB_TEST = 0.1**2
 
 # MANUAL values (Editable from GUI else block)
-Q_A_MANUAL = 0.04
+Q_A_MANUAL = 0.08
 Q_G_MANUAL = 4.78e-07
-R_UWB_MANUAL = 0.01
+R_UWB_MANUAL = 0.009
 
 # Logic to select final values
 if TEST_UKF_Q_R_Params:
@@ -151,12 +151,17 @@ class UKFContext:
 # UART Configuration
 UART_BAUDRATE = 115200
 UART_TIMEOUT = 1.0
-TARGET_PORT = "COM8"
+TARGET_PORT = "COM15"
 
 # Protocol Definitions
 UART_SOF = 0xAA
 
 # ==================== LIVE PLOT CONFIGURATION ====================
+GROUND_TRUTH_D1 = 4.88 * np.sqrt(2)
+GROUND_TRUTH_D2 = 4.88 * np.sqrt(2)
+GROUND_TRUTH_D3 = 4.88 * np.sqrt(2)
+GROUND_TRUTH_D4 = 3.45
+
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
 # - B: unsigned char (1 byte) for length  
@@ -168,11 +173,21 @@ UART_SOF = 0xAA
 # - f: float (4 bytes) for px
 # - f: float (4 bytes) for py
 # - 4f: 4 floats (16 bytes) for distance array
+# - 4d: 4 doubles (32 bytes) for fp_amp_norm array
+# - 4d: 4 doubles (32 bytes) for fp_snr array
 # - I: unsigned int (4 bytes) for error_frame_cnt
 # - f: float (4 bytes) for dt
-LIVE_FRAME_FORMAT = '<BBBI5f4fIf'
+LIVE_FRAME_FORMAT = '<BBBI5f4f4d4dIf'
 import struct
 LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
+
+# ==================== FUSION FRAME CONFIGURATION ====================
+# Matches firmware uart_fusion_frame_t:
+# sof, length, anchor_mask, tx_frame_cnt,
+# ukf_x, ukf_y, ukf_yaw, tril_x, tril_y, yaw, error_frame_cnt
+FUSION_FRAME_FORMAT = '<BBBI6fI'
+FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
+FUSION_FRAME_PAYLOAD_LEN = FUSION_FRAME_SIZE - 2
 
 # ==================== IMU Q Process CONFIGURATION ====================
 # Frame Structure Format (little-endian)

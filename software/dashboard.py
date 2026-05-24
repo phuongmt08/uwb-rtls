@@ -28,6 +28,9 @@ import time
 class UDPReceiver(QThread):
     """Thread to receive UDP data"""
     position_received = pyqtSignal(dict)
+    FUSION_FRAME_FORMAT = '<BBB I f f f f f f I'
+    FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
+    FUSION_FRAME_PAYLOAD_SIZE = FUSION_FRAME_SIZE - 2
 
     def __init__(self, port=5005):
         super().__init__()
@@ -48,6 +51,38 @@ class UDPReceiver(QThread):
                     data, addr = self.sock.recvfrom(1024)
                     
                     try:
+                        if len(data) == self.FUSION_FRAME_SIZE and data[0] == 0xAA:
+                            (
+                                sof, payload_len, anchor_mask, tx_frame_cnt,
+                                ukf_x, ukf_y, ukf_yaw,
+                                tril_x, tril_y, yaw,
+                                error_frame_cnt
+                            ) = struct.unpack(self.FUSION_FRAME_FORMAT, data)
+
+                            if payload_len not in (self.FUSION_FRAME_PAYLOAD_SIZE, self.FUSION_FRAME_SIZE):
+                                print(f"Warning: Fusion frame length field mismatch ({payload_len} bytes).")
+
+                            position = {
+                                'x': ukf_x,
+                                'y': ukf_y,
+                                'z': 0.0,
+                                'ukf_x': ukf_x,
+                                'ukf_y': ukf_y,
+                                'ukf_yaw': ukf_yaw,
+                                'tril_x': tril_x,
+                                'tril_y': tril_y,
+                                'yaw': yaw,
+                                'anchor_mask': anchor_mask,
+                                'tx_frame_cnt': tx_frame_cnt,
+                                'error_frame_cnt': error_frame_cnt,
+                                'err_cnt': error_frame_cnt,
+                                'error': 0.0,
+                                'frame_type': 'fusion'
+                            }
+
+                            self.position_received.emit(position)
+                            continue
+
                         # Try parsing as string format: Position(x=..., y=..., vx=..., vy=..., yaw=..., err=..., dists=[...])
                         msg = data.decode('utf-8').strip()
                         if msg.startswith("Position("):
@@ -70,6 +105,11 @@ class UDPReceiver(QThread):
                                 'x': pos_data.get('x', 0.0),
                                 'y': pos_data.get('y', 0.0),
                                 'z': pos_data.get('z', 0.0), # Default to 0 if not present
+                                'ukf_x': pos_data.get('x', 0.0),
+                                'ukf_y': pos_data.get('y', 0.0),
+                                'ukf_yaw': pos_data.get('yaw', 0.0),
+                                'tril_x': pos_data.get('x', 0.0),
+                                'tril_y': pos_data.get('y', 0.0),
                                 'vx': pos_data.get('vx', 0.0),
                                 'vy': pos_data.get('vy', 0.0),
                                 'yaw': pos_data.get('yaw', 0.0),
@@ -96,6 +136,11 @@ class UDPReceiver(QThread):
                             'x': x,
                             'y': y,
                             'z': z,
+                            'ukf_x': x,
+                            'ukf_y': y,
+                            'ukf_yaw': 0.0,
+                            'tril_x': x,
+                            'tril_y': y,
                             'error': error,
                             'd1': d1,
                             'd2': d2,
@@ -133,9 +178,14 @@ class ModernPositionCanvas(QWidget):
         super().__init__()
         self.setMinimumSize(700, 550)
         
-        self.position = {'x': 0, 'y': 0, 'z': 0}
+        self.position = {
+            'x': 0, 'y': 0, 'z': 0,
+            'ukf_x': 0, 'ukf_y': 0, 'ukf_yaw': 0,
+            'tril_x': 0, 'tril_y': 0, 'yaw': 0
+        }
         self.anchors = []
         self.history = []
+        self.tril_history = []
         self.max_history = 30
         
         # Throttle updates
@@ -150,9 +200,12 @@ class ModernPositionCanvas(QWidget):
         
         self.last_update_time = current_time
         self.position = position
-        self.history.append((position['x'], position['y']))
+        self.history.append((position['ukf_x'], position['ukf_y']))
+        self.tril_history.append((position['tril_x'], position['tril_y']))
         if len(self.history) > self.max_history:
             self.history.pop(0)
+        if len(self.tril_history) > self.max_history:
+            self.tril_history.pop(0)
         self.update()
     
     def set_anchors(self, anchors):
@@ -174,12 +227,16 @@ class ModernPositionCanvas(QWidget):
         width = self.width() - 2 * margin
         height = self.height() - 2 * margin
         
-        all_x = [a['x'] for a in self.anchors] + [self.position['x']]
-        all_y = [a['y'] for a in self.anchors] + [self.position['y']]
+        all_x = [a['x'] for a in self.anchors] + [self.position['ukf_x'], self.position['tril_x']]
+        all_y = [a['y'] for a in self.anchors] + [self.position['ukf_y'], self.position['tril_y']]
         
         if self.history:
             all_x.extend([h[0] for h in self.history])
             all_y.extend([h[1] for h in self.history])
+
+        if self.tril_history:
+            all_x.extend([h[0] for h in self.tril_history])
+            all_y.extend([h[1] for h in self.tril_history])
         
         min_x = min(all_x) - 1 if all_x else -5
         max_x = max(all_x) + 1 if all_x else 5
@@ -218,16 +275,25 @@ class ModernPositionCanvas(QWidget):
             x, y = to_canvas(min_x, i)
             painter.drawText(margin - 35, y + 5, f"{i}m")
         
-        # Draw history trail - simplified
+        # Draw UKF history trail - simplified
         if len(self.history) > 1:
             painter.setPen(QPen(QColor(96, 165, 250, 120), 2))
             for i in range(len(self.history) - 1):
                 x1, y1 = to_canvas(self.history[i][0], self.history[i][1])
                 x2, y2 = to_canvas(self.history[i+1][0], self.history[i+1][1])
                 painter.drawLine(x1, y1, x2, y2)
+
+        # Draw trilateration history trail
+        if len(self.tril_history) > 1:
+            painter.setPen(QPen(QColor(251, 146, 60, 120), 2, Qt.DashLine))
+            for i in range(len(self.tril_history) - 1):
+                x1, y1 = to_canvas(self.tril_history[i][0], self.tril_history[i][1])
+                x2, y2 = to_canvas(self.tril_history[i+1][0], self.tril_history[i+1][1])
+                painter.drawLine(x1, y1, x2, y2)
         
         # Draw connection lines from tag to anchors (faded)
-        px, py = to_canvas(self.position['x'], self.position['y'])
+        px, py = to_canvas(self.position['ukf_x'], self.position['ukf_y'])
+        tx, ty = to_canvas(self.position['tril_x'], self.position['tril_y'])
         for anchor in self.anchors:
             ax, ay = to_canvas(anchor['x'], anchor['y'])
             painter.setPen(QPen(QColor(99, 102, 241, 40), 1, Qt.DashLine))
@@ -272,13 +338,20 @@ class ModernPositionCanvas(QWidget):
             painter.setBrush(QColor(239, 68, 68, 20))
             painter.drawEllipse(int(px - error_radius), int(py - error_radius), 
                               int(error_radius * 2), int(error_radius * 2))
+
+        # Trilateration marker
+        painter.setPen(QPen(QColor(251, 146, 60), 2))
+        painter.setBrush(QColor(251, 146, 60, 80))
+        painter.drawEllipse(tx - 8, ty - 8, 16, 16)
+        painter.drawLine(tx - 12, ty, tx + 12, ty)
+        painter.drawLine(tx, ty - 12, tx, ty + 12)
         
         # Position marker (Directional Arrow for Yaw)
         painter.save()
         painter.translate(px, py)
         # Assuming yaw is in degrees, positive is CCW
         # UWB systems often have different yaw conventions.
-        painter.rotate(-self.position.get('yaw', 0)) 
+        painter.rotate(-self.position.get('ukf_yaw', 0))
         
         # Draw a sleek directional shape
         painter.setPen(QPen(QColor(37, 99, 235), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
@@ -314,7 +387,7 @@ class ModernPositionCanvas(QWidget):
         painter.drawEllipse(px - 18, py - 18, 36, 36)
         
         # Coordinates label (Small floating label)
-        coord_text = f"{self.position['x']:.2f}, {self.position['y']:.2f}"
+        coord_text = f"UKF {self.position['ukf_x']:.2f}, {self.position['ukf_y']:.2f}"
         painter.setFont(QFont('Segoe UI', 9, QFont.Bold))
         text_rect = painter.fontMetrics().boundingRect(coord_text)
         text_rect.translate(px + 15, py + 15)
@@ -325,6 +398,15 @@ class ModernPositionCanvas(QWidget):
         
         painter.setPen(QColor(255, 255, 255))
         painter.drawText(px + 15, py + 15 + text_rect.height() - 4, coord_text)
+
+        tril_text = f"TRIL {self.position['tril_x']:.2f}, {self.position['tril_y']:.2f}"
+        tril_rect = painter.fontMetrics().boundingRect(tril_text)
+        tril_rect.translate(tx + 15, ty - 24)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(15, 23, 42, 180))
+        painter.drawRoundedRect(tril_rect.adjusted(-4, -2, 4, 2), 4, 4)
+        painter.setPen(QColor(251, 146, 60))
+        painter.drawText(tx + 15, ty - 24 + tril_rect.height() - 4, tril_text)
 
 
 class CollapsibleCard(QFrame):
@@ -451,7 +533,13 @@ class MainWindow(QMainWindow):
             {'x': 0.0, 'y': 5.0, 'label': 'A3'},
         ]
         
-        self.position = {'x': 0, 'y': 0, 'z': 0, 'error': 0}
+        self.position = {
+            'x': 0, 'y': 0, 'z': 0,
+            'ukf_x': 0, 'ukf_y': 0, 'ukf_yaw': 0,
+            'tril_x': 0, 'tril_y': 0, 'yaw': 0,
+            'anchor_mask': 0, 'tx_frame_cnt': 0,
+            'error_frame_cnt': 0, 'err_cnt': 0, 'error': 0
+        }
         self.frame_count = 0
         self.start_time = time.time()
         self.udp_receiver = None
@@ -723,6 +811,28 @@ class MainWindow(QMainWindow):
             ])
         ]
         
+        groups = [
+            ("FRAME", [
+                ("SOF:", "sof_label", "#60a5fa", ""),
+                ("Length:", "length_label", "#60a5fa", "bytes"),
+                ("Anchor Mask:", "anchor_mask_label", "#60a5fa", "")
+            ]),
+            ("COUNTERS", [
+                ("Tx Frames:", "tx_frame_cnt_label", "#2dd4bf", ""),
+                ("Err Frames:", "error_frame_cnt_label", "#f87171", "")
+            ]),
+            ("UKF", [
+                ("X:", "ukf_x_label", "#60a5fa", "m"),
+                ("Y:", "ukf_y_label", "#60a5fa", "m"),
+                ("Yaw:", "ukf_yaw_label", "#f472b6", "deg")
+            ]),
+            ("TRILATERATION", [
+                ("X:", "tril_x_label", "#f59e0b", "m"),
+                ("Y:", "tril_y_label", "#f59e0b", "m"),
+                ("Yaw:", "yaw_label", "#f472b6", "deg")
+            ])
+        ]
+
         current_row = 0
         for group_name, items in groups:
             group_label = QLabel(group_name)
@@ -884,10 +994,11 @@ class MainWindow(QMainWindow):
             try:
                 self.record_file = open(filename, "a", encoding="utf-8")
                 
-                # Create header: Time, X, Y, Z, VX, VY, Yaw, Error, ErrCnt, D1, D2,...
-                header = "Time(s), X(m), Y(m), Z(m), VX(m/s), VY(m/s), Yaw(deg), Error(m), ErrCnt"
-                for i in range(len(self.anchors)):
-                    header += f", D{i+1}(m)"
+                header = (
+                    "Time(s), SOF, Length, AnchorMask, TxFrameCnt, "
+                    "UKF_X(m), UKF_Y(m), UKF_Yaw(deg), "
+                    "Tril_X(m), Tril_Y(m), Yaw(deg), ErrorFrameCnt"
+                )
                 self.record_file.write(header + "\n")
                 
                 self.record_btn.setText("Stop Recording")
@@ -905,21 +1016,21 @@ class MainWindow(QMainWindow):
         self.position = position
         self.frame_count += 1
         
-        self.x_label.setText(f"{position['x']:.3f} m")
-        self.y_label.setText(f"{position['y']:.3f} m")
-        self.z_label.setText(f"{position['z']:.3f} m")
-        
-        self.vx_label.setText(f"{position.get('vx', 0):.3f} m/s")
-        self.vy_label.setText(f"{position.get('vy', 0):.3f} m/s")
-        self.yaw_label.setText(f"{position.get('yaw', 0):.1f} °")
-        
-        self.d1_label.setText(f"{position.get('d1', 0):.3f} m")
-        self.d2_label.setText(f"{position.get('d2', 0):.3f} m")
-        self.d3_label.setText(f"{position.get('d3', 0):.3f} m")
-        self.d4_label.setText(f"{position.get('d4', 0):.3f} m")
-        self.error_label.setText(f"{position.get('error', 0):.3f} m")
-        self.err_cnt_label.setText(f"{position.get('err_cnt', 0)}")
-        
+        anchor_mask = position.get('anchor_mask', 0)
+        self.sof_label.setText("0xAA")
+        self.length_label.setText(f"{UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE} bytes")
+        self.anchor_mask_label.setText(f"0x{anchor_mask:02X} ({anchor_mask:08b})")
+        self.tx_frame_cnt_label.setText(str(position.get('tx_frame_cnt', 0)))
+        self.error_frame_cnt_label.setText(str(position.get('error_frame_cnt', 0)))
+
+        self.ukf_x_label.setText(f"{position.get('ukf_x', 0):.3f} m")
+        self.ukf_y_label.setText(f"{position.get('ukf_y', 0):.3f} m")
+        self.ukf_yaw_label.setText(f"{position.get('ukf_yaw', 0):.1f} deg")
+
+        self.tril_x_label.setText(f"{position.get('tril_x', 0):.3f} m")
+        self.tril_y_label.setText(f"{position.get('tril_y', 0):.3f} m")
+        self.yaw_label.setText(f"{position.get('yaw', 0):.1f} deg")
+
         if self.anchors:
             min_x = min(a['x'] for a in self.anchors)
             max_x = max(a['x'] for a in self.anchors)
@@ -927,7 +1038,7 @@ class MainWindow(QMainWindow):
             max_y = max(a['y'] for a in self.anchors)
             
             # If tag is outside the rectangle formed by anchors
-            if not (min_x <= position['x'] <= max_x and min_y <= position['y'] <= max_y):
+            if not (min_x <= position['ukf_x'] <= max_x and min_y <= position['ukf_y'] <= max_y):
                 self.warning_label.setVisible(True)
             else:
                 self.warning_label.setVisible(False)
@@ -936,25 +1047,14 @@ class MainWindow(QMainWindow):
             
         if hasattr(self, 'record_btn') and self.record_btn.isChecked() and self.record_file:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            error_val = position.get('error', 0.0)
-            vx = position.get('vx', 0.0)
-            vy = position.get('vy', 0.0)
-            yaw = position.get('yaw', 0.0)
-            err_cnt = position.get('err_cnt', 0)
-            log_str = f"{timestamp}, {position['x']:.3f}, {position['y']:.3f}, {position['z']:.3f}, {vx:.3f}, {vy:.3f}, {yaw:.1f}, {error_val:.3f}, {err_cnt}"
-            
-            for i, a in enumerate(self.anchors):
-                # Prefer distances from received package if available
-                dist_key = f'd{i+1}'
-                if dist_key in position:
-                    dist = position[dist_key]
-                else:
-                    # Fallback for old package (x, y, z only): calculate manually (Euclidean 3D, anchor z=0)
-                    dx = position['x'] - a['x']
-                    dy = position['y'] - a['y']
-                    dz = position['z'] - 0.0
-                    dist = math.sqrt(dx**2 + dy**2 + dz**2)
-                log_str += f", {dist:.3f}"
+            log_str = (
+                f"{timestamp}, 0xAA, {UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE}, "
+                f"0x{position.get('anchor_mask', 0):02X}, {position.get('tx_frame_cnt', 0)}, "
+                f"{position.get('ukf_x', 0):.3f}, {position.get('ukf_y', 0):.3f}, "
+                f"{position.get('ukf_yaw', 0):.1f}, {position.get('tril_x', 0):.3f}, "
+                f"{position.get('tril_y', 0):.3f}, {position.get('yaw', 0):.1f}, "
+                f"{position.get('error_frame_cnt', 0)}"
+            )
                 
             self.record_file.write(log_str + "\n")
             self.record_file.flush()

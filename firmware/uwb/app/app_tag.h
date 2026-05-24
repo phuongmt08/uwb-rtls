@@ -21,6 +21,7 @@
 
 /* Includes ----------------------------------------------------------- */
 #include <stdint.h>
+#include <stdbool.h>
 #include "common.h"
 
 /* Public enumerate/structure ----------------------------------------- */
@@ -38,6 +39,15 @@ app_err_t app_tag_init(void);
  * @brief Main Tag process loop (never returns)
  */
 void app_tag_process(void);
+
+/**
+ * @brief Get latest UWB trilateration position and current ranging error count.
+ * @param x Latest trilateration X position in meters, can be NULL
+ * @param y Latest trilateration Y position in meters, can be NULL
+ * @param err_count Current consecutive/accumulated ranging error count, can be NULL
+ * @return true if a valid trilateration position is available
+ */
+bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
 
 #endif /* __APP_TAG_H */
 

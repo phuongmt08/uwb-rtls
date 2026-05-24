@@ -117,6 +117,39 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="groupBox_csv">
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+           <weight>75</weight>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="title">
+          <string>CSV Logs</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_csv">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="checkBox_createCsv">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>50</weight>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="text">
+             <string>Create new CSV</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QFrame" name="frame_4">
          <property name="frameShape">
           <enum>QFrame::StyledPanel</enum>

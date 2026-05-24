@@ -27,7 +27,7 @@
 #define NUM_PREDICT_SIGMA  		(2*N + 1)
 #define NUM_UPDATE_SIGMA  		(2*M + 1)
 
-#define UKF_ALPHA               1e-3f
+#define UKF_ALPHA               1.0f
 #define UKF_KAPPA               0.0f
 #define UKF_BETA                2.0f
 #define N_PLUS_LAMBDA_N         (UKF_ALPHA * UKF_ALPHA * (N + UKF_KAPPA))
@@ -37,12 +37,13 @@
 #define UKF_LAMBDA_M  			(M_PLUS_LAMBDA_M - M)
 #define GAMMA_M       			sqrtf(M_PLUS_LAMBDA_M)
 
-#define Qa						(4.066e-5f)
-#define Qg						(2.388e-7f)
-#define R_uwb					(0.1f)
+#define Qa						(0.04f)
+#define Qg						(4.066e-5f)
+#define R_uwb					(0.01f)
 
 #define SYS_SENSOR_FUSION_PI    3.14159265358979323846f
 #define SYS_SENSOR_FUSION_2PI   (2.0f * SYS_SENSOR_FUSION_PI)
+#define RAD2DEG							180.0f / 3.14159265358979323846f
 
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
@@ -90,6 +91,9 @@ unsigned long sys_update_cholesky_err_count = 0;
 unsigned long sys_update_inverse_err_count = 0;
 
 /* Private variables -------------------------------------------------- */
+float yaw = 0.0f;
+float b_gz_t = 0.0f;
+
 /* Private function prototypes ---------------------------------------- */
 static float normalize_angle(float angle);
 
@@ -105,6 +109,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 	ukf.state.b_ax = imu_bias.bias_ax;
 	ukf.state.b_ay = imu_bias.bias_ay;
 	ukf.state.b_gz = imu_bias.bias_gz;
+	b_gz_t = imu_bias.bias_gz;
 
 	// P
     for(int i=0; i<64; i++) ukf.P_data[i] = 0.0f;
@@ -112,10 +117,10 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 	ukf.P_data[9] 	= 0.1f;   	// p_y
 	ukf.P_data[18] 	= 0.1f; 	// v_x
 	ukf.P_data[27] 	= 0.1f;  	// v_y
-	ukf.P_data[36] 	= 0.1f;  	// theta
-	ukf.P_data[45] 	= 1e-3f; 	// Bias
-	ukf.P_data[54] 	= 1e-3f;
-	ukf.P_data[63] 	= 1e-3f;
+	ukf.P_data[36] 	= 1.0e-10f;  	// theta
+	ukf.P_data[45] 	= 1.0e-5f; 	// Bias
+	ukf.P_data[54] 	= 1.0e-5f;
+	ukf.P_data[63] 	= 1.0e-10f;
 
     // Q
     for(int i=0; i<9; i++) ukf.Q_data[i] = 0.0f;
@@ -170,6 +175,8 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	sys_predict_count++;
 
 	bsp_imu_get_raw_data(&ukf.imu_current);
+
+	yaw += (0.5f * (ukf.imu_old.gz + ukf.imu_current.gz) - b_gz_t) * dt;
 
 	if (ukf.is_first_frame)
 	{
@@ -524,6 +531,16 @@ bool sys_sensor_fusion_check_update_flag()
 bool sys_sensor_fusion_check_predict_flag()
 {
 	return ukf.enable_predict;
+}
+
+float sys_sensor_fusion_get_ukf_yaw_deg()
+{
+	return ukf.state.theta * RAD2DEG;
+}
+
+float sys_sensor_fusion_get_yaw_deg()
+{
+	return yaw * RAD2DEG;
 }
 
 /* Private definitions ------------------------------------------------ */

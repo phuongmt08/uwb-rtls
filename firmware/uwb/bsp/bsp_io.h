@@ -150,9 +150,7 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
   const double *fp_amp_norm, const double *fp_snr, 
   float dt);
 
-bsp_err_t bsp_io_uart_send_fusion_data(
-  uint8_t mask, uint32_t err_frame_count, 
-  float px, float py, float yaw);
+bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);
 
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

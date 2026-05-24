@@ -71,6 +71,43 @@ def find_latest_csv_file(directory: str = None, file_type: str = "ukf_log_data")
 
 def parse_csv_data(filepath: str) -> list[SensorEvent]:
     events = []
+    
+    with open(filepath, "r", encoding="utf-8") as f:
+        first_line = f.readline()
+        f.seek(0)
+        
+        # Check if it's the new standard CSV format
+        if "frame_counter" in first_line:
+            import csv
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    dt_val = float(row['dt'])
+                    # Sanitize dt to prevent simulation breaking with corrupted data
+                    if dt_val < 0 or dt_val > 5.0:
+                        dt_val = 0.01  # Default to 10ms
+                    # If Predict row has 0 dt, assume 100Hz (0.01s)
+                    if dt_val == 0.0 and row['status'].strip() == 'Predict':
+                        dt_val = 0.01
+                    
+                    events.append(SensorEvent(
+                        type=row['status'].strip(),
+                        ax=float(row['ax']),
+                        ay=float(row['ay']),
+                        gz=float(row['gz']),
+                        px=float(row['px']) if row.get('px') else 0.0,
+                        py=float(row['py']) if row.get('py') else 0.0,
+                        distances=np.array([float(row['d1']), float(row['d2']), float(row['d3']), float(row['d4'])]),
+                        dt=dt_val,
+                        mask=int(row['mask']) if row.get('mask') else 0,
+                        raw_line=",".join(str(v) for v in row.values())
+                    ))
+                except (ValueError, KeyError, TypeError):
+                    # Skip corrupted rows missing necessary data
+                    continue
+            return events
+
+    # Fallback to older text-based regex parser
     init_pattern = re.compile(
         r"Init\s+"
         r"(?:bias_ax|ax):\s*(?P<ax>[-\d.]+)\s+"
@@ -137,7 +174,9 @@ def generate_timestamp_filename(prefix, suffix):
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%Hg%Mp")
     date_folder = now.strftime("%d_%m_%y")
-    directory = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv"
+    # Base directory relative to this file's location
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    directory = os.path.join(base_dir, "csv")
     date_directory = os.path.join(directory, date_folder)
     if not os.path.exists(date_directory):
         os.makedirs(date_directory)
@@ -155,7 +194,7 @@ def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
     counter_str = f"({frame_counter:4d}/{frame_data['tx_frame_cnt']:4d})"
     
     if frame_data['tx_frame_cnt'] == 1:
-        line = f"{counter_str} Init    ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']}"
+        line = f"{counter_str} Init    ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']} amp1: {frame_data['fp_amp_norm'][0]:9.6f} amp2: {frame_data['fp_amp_norm'][1]:9.6f} amp3: {frame_data['fp_amp_norm'][2]:9.6f} amp4: {frame_data['fp_amp_norm'][3]:9.6f} snr1: {frame_data['fp_snr'][0]:9.6f} snr2: {frame_data['fp_snr'][1]:9.6f} snr3: {frame_data['fp_snr'][2]:9.6f} snr4: {frame_data['fp_snr'][3]:9.6f}"
         csv_writer.writerow([line])
         return "Init", frame_data['distances'].copy()
         
@@ -172,7 +211,7 @@ def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
                 status = "Update"
     
     new_prev_distances = frame_data['distances'].copy()
-    line = f"{counter_str} {status:7s} ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']}"
+    line = f"{counter_str} {status:7s} ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']} amp1: {frame_data['fp_amp_norm'][0]:9.6f} amp2: {frame_data['fp_amp_norm'][1]:9.6f} amp3: {frame_data['fp_amp_norm'][2]:9.6f} amp4: {frame_data['fp_amp_norm'][3]:9.6f} snr1: {frame_data['fp_snr'][0]:9.6f} snr2: {frame_data['fp_snr'][1]:9.6f} snr3: {frame_data['fp_snr'][2]:9.6f} snr4: {frame_data['fp_snr'][3]:9.6f}"
     csv_writer.writerow([line])
     return status, new_prev_distances
 
@@ -194,4 +233,6 @@ def print_frame_data(frame_data):
           f"dt={frame_data['dt']:.6f}, "
           f"mask={frame_data['anchor_mask']}, "
           f"dist={[f'{d:.3f}' for d in frame_data['distances']]}, "
-          f"err={frame_data['err_cnt']}")
+          f"err={frame_data['err_cnt']}, "
+          f"amp={[f'{a:.3f}' for a in frame_data['fp_amp_norm']]}, "
+          f"snr={[f'{s:.3f}' for s in frame_data['fp_snr']]}")

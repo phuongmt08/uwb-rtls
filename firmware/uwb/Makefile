@@ -62,11 +62,13 @@ LOCAL_SOURCES := \
 	$(wildcard app/*.c) $(wildcard bsp/*.c) \
 	$(wildcard deca/deca_driver/*.c) $(wildcard deca/platform/*.c) \
 	$(wildcard middlewares/*.c) $(wildcard middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/*.c) $(wildcard middlewares/ST/STM32_USB_Device_Library/Core/Src/*.c) \
+	$(wildcard middlewares/arm_libs/MatrixFunctions/*.c) \
 	$(wildcard sys/*.c)
 COMMON_SOURCES := \
 	$(wildcard $(REPO_ROOT)/firmware/common/serial/*.c) \
 	$(wildcard $(REPO_ROOT)/firmware/common/network/*.c) \
-	$(wildcard $(REPO_ROOT)/firmware/common/ble/*.c)
+	$(wildcard $(REPO_ROOT)/firmware/common/ble/*.c) \
+	$(wildcard $(REPO_ROOT)/firmware/common/otp/*.c)
 PROTOCOL_SOURCES := \
 	$(REPO_ROOT)/protocol/protos/protocol.pb.c \
 	$(REPO_ROOT)/protocol/nanopb/pb_common.c \
@@ -75,7 +77,7 @@ PROTOCOL_SOURCES := \
 STARTUP := Core/Startup/startup_stm32f411ceux.s
 
 # Include directories
-INCLUDE_DIRS := Core/Inc Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS/Include Drivers/STM32F4xx_HAL_Driver/Inc Drivers/STM32F4xx_HAL_Driver/Inc/Legacy Drivers/device_driver USB_DEVICE/App USB_DEVICE/Target app bsp deca deca/deca_driver deca/platform middlewares middlewares/arm_libs middlewares/arm_libs/Include middlewares/arm_libs/PrivateInclude middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc middlewares/ST/STM32_USB_Device_Library/Core/Inc sys $(REPO_ROOT)/protocol $(REPO_ROOT)/protocol/nanopb $(REPO_ROOT)/firmware/common $(GENERATED_DIR)
+INCLUDE_DIRS := Core/Inc Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS/Include Drivers/STM32F4xx_HAL_Driver/Inc Drivers/STM32F4xx_HAL_Driver/Inc/Legacy Drivers/device_driver USB_DEVICE/App USB_DEVICE/Target app bsp deca deca/deca_driver deca/platform middlewares middlewares/arm_libs middlewares/arm_libs/Include middlewares/arm_libs/PrivateInclude middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc middlewares/ST/STM32_USB_Device_Library/Core/Inc sys $(REPO_ROOT)/protocol $(REPO_ROOT)/protocol/nanopb $(REPO_ROOT)/firmware/common $(REPO_ROOT)/firmware/common/otp $(GENERATED_DIR)
 INCLUDES := $(addprefix -I,$(INCLUDE_DIRS))
 
 CFLAGS := $(CPUFLAGS) -std=gnu11 $(OPTFLAGS) $(DEFS) $(INCLUDES) -ffunction-sections -fdata-sections -fstack-usage -Wall --specs=nano.specs

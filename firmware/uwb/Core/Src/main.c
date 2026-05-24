@@ -11,7 +11,9 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
+#include "adc.h"
 #include "crc.h"
+#include "dma.h"
 #include "gpio.h"
 #include "i2c.h"
 #include "rtc.h"
@@ -42,6 +44,8 @@
 #include <string.h>
 #include "bsp_imu.h"
 #include "sys_sensor_fusion.h"
+#include "sys_pm.h"
+#include "otp/otp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -74,7 +78,7 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-/* USER CODE END PM */
+/* USER CODE END 	M */
 
 /* Private variables ---------------------------------------------------------*/
 
@@ -136,7 +140,8 @@ static void test_send_position(void)
   };
   
   /* Send current position */
-  bsp_err_t ret = bsp_io_uart_send_position(s_test_x, s_test_y, TEST_POS_Z, test_distances, TEST_POS_ERROR);
+  bsp_err_t ret =     bsp_io_uart_send_fusion_data(s_test_x, s_test_y, 5.554, s_test_y, s_test_x, 6.0, 10);
+
   
   if (ret == BSP_OK) {
     /* Update position for next send */
@@ -163,12 +168,35 @@ static void test_send_pos_task(void *arg)
   test_send_position();
 }
 #endif
-
 static void ranging_process_task(void *arg)
 {
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
   /* Ranging disabled in test mode */
 #else
+  static bool s_ranging_halted = false;
+  if (!sys_pm_is_safe())
+  {
+    /* Halt ranging to protect the hardware under brownout conditions */
+    if (!s_ranging_halted) {
+        bsp_uwb_idle();
+        s_ranging_halted = true;
+
+        sys_pm_status_t pm_status;
+        sys_pm_get_status(&pm_status);
+        uint32_t mask = pm_status.critical_mask;
+
+        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_POS_OUT_OF_RANGE,
+               "\033[1;31m[CRITICAL] RANGING HALTED! Safety checks failed. Mask: 0x%04X (SOC: %.1f%%, VDDA: %.1f mV, VBAT: %.1f mV)\033[0m",
+               (unsigned int)mask, pm_status.soc, pm_status.vdda_mv, pm_status.bat_voltage_mv);
+    }
+    return;
+  }
+  else if (s_ranging_halted)
+  {
+      s_ranging_halted = false;
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "\033[1;32m[INFO] RANGING RESUMED! Safety conditions restored.\033[0m");
+  }
+
   if (s_ranging_enabled)
   {
     sys_config_t *cfg_curr = sys_config_get();
@@ -254,7 +282,13 @@ static void fusion_task(void *arg)
 	}
 
     sys_sensor_fusion_predict(&ukf_data, dt);
-    bsp_io_uart_send_fusion_data(0, 0, ukf_data.px, ukf_data.py, ukf_data.theta);
+    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+    float yaw = sys_sensor_fusion_get_yaw_deg();
+    float tril_x = 0.0f;
+    float tril_y = 0.0f;
+    uint32_t err_count = 0;
+    app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
+    bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
 //  float uwb_dists[NUM_ANCHORS];
 //	float uwb_err;
 //	uint32_t err_cnt;
@@ -294,10 +328,13 @@ static void fusion_log_task(void *arg)
 		dt = get_dt();
 	}
 
-	if( bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK) imu_get_data_err++;
+	if( bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK)
+	{
+		imu_get_data_err++;
+	}
 	else
 	{
-    float uwb_dists[3] = {0.0};
+		float uwb_dists[NUM_ANCHORS] = {0.0};
 		double fp_amp_norm[NUM_ANCHORS];
 		double fp_snr[NUM_ANCHORS];
 
@@ -340,10 +377,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
+  MX_TIM2_Init();
+  MX_ADC1_Init();
   MX_TIM10_Init();
   MX_USB_DEVICE_Init();
   MX_TIM11_Init();
@@ -354,6 +394,11 @@ int main(void)
   int flash_storage_init_status = sys_flash_storage_init();
 
   sys_logger_init();
+#if MOCK_OTP_IN_FLASH && OTP_ENABLE_FLASH_SELF_TEST
+  otp_test_run();
+#else
+  otp_init();
+#endif
   RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
   RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=               APPLICATION STARTED             =");
   RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
@@ -451,20 +496,13 @@ int main(void)
   bsp_io_led_off();
 
   sys_task_init();
-  bsp_battery_err_t bat_init_ret = bsp_battery_init();
-  if (bat_init_ret == BSP_BATTERY_OK)
+  bsp_battery_init(); // Initialize MAX17048 battery fuel gauge
+  sys_pm_init();      // Initialize PM Service (including internal ADC)
+
+  int pm_task_id = sys_task_add((sys_task_cb_t)sys_pm_task, NULL, SYS_TASK_TYPE_PERIODIC, 100, 0);
+  if (pm_task_id >= 0)
   {
-    int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
-    if (bat_task_id >= 0)
-    {
-      sys_task_start(bat_task_id);
-    }
-  }
-  else
-  {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION,
-           "Battery init failed (%d), battery task disabled",
-           (int)bat_init_ret);
+    sys_task_start(pm_task_id);
   }
 
   int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
@@ -496,7 +534,7 @@ int main(void)
     if (fusion_task_id >= 0) sys_task_start(fusion_task_id);
   }
 #endif
-  
+
 #if ENABLE_SYS_FUSION_LOG
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
@@ -511,7 +549,8 @@ int main(void)
 #endif
   
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-#ifdef USE_DIP_SWITCH
+  cfg = sys_config_get();
+if (cfg->device_type == DEVICE_TYPE_ANCHOR){
   /* Read DIP switch - ALWAYS OVERRIDES saved config */
   uint8_t dip_value = bsp_io_dip_read();
   if (dip_value == 0 || dip_value > NUM_ANCHORS)
@@ -523,9 +562,8 @@ int main(void)
     sys_config_set_device_id(dip_value);
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
   }
-#endif
+}
 
-  cfg = sys_config_get();
 
   /* Initialize application based on role */
   if (cfg->uwb.role == DEVICE_ROLE_TAG) {
@@ -591,7 +629,7 @@ int main(void)
       {
         s_ranging_enabled = false;
         bsp_uwb_idle();
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "\033[1;31mRanging stopped - DW1000 idle (Disabled by Button Double-Click)\033[0m");
       }
       break;
 
@@ -637,9 +675,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState   = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource  = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM       = 6;
-  RCC_OscInitStruct.PLL.PLLN       = 168;
-  RCC_OscInitStruct.PLL.PLLP       = RCC_PLLP_DIV4;
-  RCC_OscInitStruct.PLL.PLLQ       = 7;
+  RCC_OscInitStruct.PLL.PLLN       = 96;
+  RCC_OscInitStruct.PLL.PLLP       = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ       = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -654,7 +692,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }

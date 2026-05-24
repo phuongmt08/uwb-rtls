@@ -14,6 +14,7 @@
     #include "sys_config.h"
     #include "bsp_battery.h"
     #include "sys_logger.h"
+    #include "sys_pm.h"
 #else
     #include "sys_logger_bl.h"
 
@@ -82,6 +83,7 @@ static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt);
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt);
+static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
 static void network_cmd_end_session(const protobuf_packet_t *pkt);
 
@@ -221,6 +223,9 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 63 */
     CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 64 */
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 66 */
+#endif
     //      +=================================================+=======================================+========================+
 };
 
@@ -428,7 +433,6 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 
     sys_config_t *cfg = sys_config_get();
     cfg->uwb = *new_cfg;
-    cfg->device_type = (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_TYPE_TAG : DEVICE_TYPE_ANCHOR;
 
     network_cmd_config_save("sys_config");
 }
@@ -605,22 +609,49 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
     network_cmd_config_save("anchor layout");
 }
 
+static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    const protobuf_factory_otp_write_t *req = &pkt->params.factory_otp_write;
+    otp_err_t err = sys_config_factory_otp_write(req);
+
+    if (err == OTP_OK) {
+        RLOG_W(OBJECT_CODE, "Factory OTP write accepted type=0x%02lX", (unsigned long)req->otp_type);
+        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+    } else {
+        RLOG_W(OBJECT_CODE, "Factory OTP write rejected type=0x%02lX status=%d",
+               (unsigned long)req->otp_type, (int)err);
+        network_core_send_ack(s_network_cmd.stream, pkt,
+                              err == OTP_ERR_INVALID_ARG ?
+                              protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE :
+                              protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+    }
+}
+
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
 
-    bsp_battery_info_t battery_info;
-    if (bsp_battery_get_info(&battery_info) != BSP_BATTERY_OK) {
-        RLOG_W(OBJECT_CODE, "Failed to get battery info");
-        return;
-    }
+    sys_pm_status_t pm_status;
+    sys_pm_get_status(&pm_status);
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_battery_info_resp_tag);
-    resp.hdr                             = pkt->hdr;
-    resp.params.battery_info_resp.bat_voltage_mv   = battery_info.voltage_mv;
-    resp.params.battery_info_resp.bat_soc_percent  = battery_info.soc_pct;
-    resp.params.battery_info_resp.remaining_min    = battery_info.remaining_min;
-    resp.params.battery_info_resp.is_charging      = battery_info.is_charging;
+    resp.params.battery_info_resp.bat_voltage_mv   = (uint32_t)pm_status.bat_voltage_mv;
+    resp.params.battery_info_resp.bat_soc_percent  = (uint32_t)pm_status.soc;
+    resp.params.battery_info_resp.remaining_min    = pm_status.remaining_min;
+    resp.params.battery_info_resp.is_charging      = pm_status.is_charging;
+    
+    // Hardware telemetry fields
+    resp.params.battery_info_resp.mcu_temp_c       = pm_status.temp_degc;
+    resp.params.battery_info_resp.vdda_mv          = (uint32_t)pm_status.vdda_mv;
+    resp.params.battery_info_resp.uwb_temp_c       = pm_status.uwb_temp_c;
+    resp.params.battery_info_resp.uwb_vbat_mv      = (uint32_t)pm_status.uwb_vbat_mv;
+    resp.params.battery_info_resp.imu_temp_c       = pm_status.imu_temp_c;
+    
+    // Alert flags
+    resp.params.battery_info_resp.error_mask       = pm_status.error_mask;
+
     network_cmd_send_packet(&resp);
 }
 

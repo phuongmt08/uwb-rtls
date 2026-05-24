@@ -1,8 +1,11 @@
 import sys
 import serial
+from serial.tools import list_ports
 import time
 import os
 import numpy as np
+import threading
+import queue
 
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QTimer
@@ -11,8 +14,9 @@ from PyQt5 import uic
 import pyqtgraph as pg
 
 from ..config import (
-    TARGET_PORT, UART_BAUDRATE, UART_TIMEOUT, LIVE_FRAME_SIZE, UART_SOF, 
-    PRINT_DATA, MAX_SAMPLES, ROOM_SIZE_M, ANCHOR_POSITIONS, IMUSample, CSV_UKF_FILENAME_SUFFIX, CSV_UKF_FILENAME_PREFIX
+    UART_BAUDRATE, LIVE_FRAME_SIZE, UART_SOF,
+    PRINT_DATA, MAX_SAMPLES, ROOM_SIZE_M, ANCHOR_POSITIONS, IMUSample, CSV_UKF_FILENAME_SUFFIX, CSV_UKF_FILENAME_PREFIX,
+    GROUND_TRUTH_D1, GROUND_TRUTH_D2, GROUND_TRUTH_D3, GROUND_TRUTH_D4
 )
 from ..module_parse_frame import parse_live_frame
 from ..module_csv import generate_timestamp_filename, create_csv_file, write_frame_to_csv, print_frame_data
@@ -25,6 +29,7 @@ class DataThread(QThread):
     connected_signal = pyqtSignal(str)
     disconnected_signal = pyqtSignal()
     data_signal = pyqtSignal(dict)
+    csv_created_signal = pyqtSignal()
     
     def __init__(self):
         super().__init__()
@@ -54,13 +59,243 @@ class DataThread(QThread):
         self.prev_distances = None
         self.last_active_mask = 0
         self.new_csv_requested = False
+        self.create_csv_enabled = True
+        self._serial_reader = None
+        self._rx_queue = queue.Queue()
+        self._request_lock = threading.Lock()
+        self._stats_last_print = time.monotonic()
+        self._parsed_frames = 0
+        self._bad_frames = 0
+        self._dropped_chunks = 0
+        self._last_tx_frame_cnt = None
+        self._tx_gap_count = 0
+        self._last_gui_emit = 0.0
 
     def stop(self):
         self.running = False
+        if self.serial_port and self.serial_port.is_open:
+            try:
+                self.serial_port.cancel_read()
+            except (AttributeError, serial.SerialException, OSError):
+                pass
+        if self._serial_reader and self._serial_reader.is_alive():
+            self._serial_reader.join(timeout=1.0)
         self.wait()
 
     def request_new_csv(self):
-        self.new_csv_requested = True
+        with self._request_lock:
+            self.new_csv_requested = True
+
+    def _take_new_csv_request(self):
+        with self._request_lock:
+            requested = self.new_csv_requested
+            self.new_csv_requested = False
+            return requested
+
+    def _open_new_csv(self):
+        if self.csv_file:
+            self.csv_file.flush()
+            self.csv_file.close()
+        filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
+        self.csv_file, self.csv_writer = create_csv_file(filename)
+        self.prev_distances = None
+        self.csv_created_signal.emit()
+        print("[INFO] Started new data collection csv...")
+
+    def _close_serial(self):
+        if self.serial_port:
+            try:
+                if self.serial_port.is_open:
+                    self.serial_port.close()
+            except serial.SerialException:
+                pass
+        self.serial_port = None
+
+    def _serial_candidates(self):
+        ignored_ports = {"COM1", "COM2"}
+        candidates = []
+        for port_info in list_ports.comports():
+            device = (port_info.device or "").upper()
+            if device in ignored_ports:
+                continue
+            text = " ".join(
+                str(value or "")
+                for value in (
+                    port_info.device,
+                    port_info.description,
+                    port_info.manufacturer,
+                    port_info.hwid,
+                )
+            ).upper()
+            if "BLUETOOTH" in text:
+                continue
+
+            score = 0
+            if "USB" in text or "VID:PID" in text:
+                score += 100
+            if port_info.vid is not None or port_info.pid is not None:
+                score += 80
+            if any(name in text for name in ("STM", "STLINK", "VCP", "CP210", "CH340", "CH910", "FTDI", "USB-SERIAL", "USB SERIAL")):
+                score += 40
+            candidates.append((score, port_info))
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [port_info for _, port_info in candidates]
+
+    def _probe_port_for_live_frame(self, serial_port, probe_seconds=0.8):
+        deadline = time.monotonic() + probe_seconds
+        probe_buffer = bytearray()
+        while self.running and time.monotonic() < deadline:
+            waiting = serial_port.in_waiting
+            data = serial_port.read(waiting if waiting > 0 else 1)
+            if data:
+                probe_buffer.extend(data)
+                frames = self._extract_live_frames(bytearray(probe_buffer))
+                if frames:
+                    return True, bytes(probe_buffer)
+        return False, bytes(probe_buffer)
+
+    def _open_serial_port(self, port_name):
+        return serial.Serial(
+            port=port_name,
+            baudrate=UART_BAUDRATE,
+            timeout=0.02,
+            write_timeout=0
+        )
+
+    def _connect_serial(self):
+        candidates = self._serial_candidates()
+        if not candidates:
+            raise serial.SerialException("No USB serial COM port found")
+
+        fallback_port_info = None
+        for port_info in candidates:
+            port_name = port_info.device
+            print(f"[INFO] Probing {port_name}: {port_info.description}")
+            try:
+                serial_port = self._open_serial_port(port_name)
+            except serial.SerialException as e:
+                print(f"[WARNING] Cannot open {port_name}: {e}")
+                continue
+
+            if fallback_port_info is None:
+                fallback_port_info = port_info
+
+            matched, probe_data = self._probe_port_for_live_frame(serial_port)
+            if matched:
+                if probe_data:
+                    self._rx_queue.put(probe_data)
+                self.serial_port = serial_port
+                self.connected_signal.emit(port_name)
+                print(f"[INFO] Connected to live UWB stream on {port_name} at {UART_BAUDRATE} baud")
+                return
+
+            serial_port.close()
+
+        if fallback_port_info is None:
+            raise serial.SerialException("No usable USB serial COM port found")
+
+        port_name = fallback_port_info.device
+        self.serial_port = self._open_serial_port(port_name)
+        self.connected_signal.emit(port_name)
+        print(f"[INFO] Connected to best USB candidate {port_name} at {UART_BAUDRATE} baud")
+
+    def _reader_loop(self):
+        while self.running and self.serial_port and self.serial_port.is_open:
+            try:
+                waiting = self.serial_port.in_waiting
+                data = self.serial_port.read(waiting if waiting > 0 else 1)
+                if not data:
+                    continue
+                try:
+                    self._rx_queue.put(data, timeout=0.05)
+                except queue.Full:
+                    self._dropped_chunks += 1
+                    print("[WARNING] RX queue full; host cannot keep up with STM stream")
+            except (serial.SerialException, OSError) as e:
+                port_name = self.serial_port.port if self.serial_port else "USB serial"
+                print(f"[WARNING] Serial reader stopped on {port_name}: {e}")
+                break
+
+    def _start_reader(self):
+        self._serial_reader = threading.Thread(
+            target=self._reader_loop,
+            name="ukf-serial-reader",
+            daemon=True
+        )
+        self._serial_reader.start()
+
+    def _drain_rx_queue(self, buffer, max_chunks=512):
+        drained = 0
+        while drained < max_chunks:
+            try:
+                buffer.extend(self._rx_queue.get_nowait())
+                drained += 1
+            except queue.Empty:
+                break
+        return drained
+
+    def _extract_live_frames(self, buffer):
+        frames = []
+        while len(buffer) >= LIVE_FRAME_SIZE:
+            sof_idx = buffer.find(bytes((UART_SOF,)))
+            if sof_idx < 0:
+                del buffer[:]
+                break
+            if sof_idx > 0:
+                del buffer[:sof_idx]
+            if len(buffer) < LIVE_FRAME_SIZE:
+                break
+
+            frame_bytes = bytes(buffer[:LIVE_FRAME_SIZE])
+            frame_data = parse_live_frame(frame_bytes)
+            if frame_data is None:
+                self._bad_frames += 1
+                del buffer[0]
+                continue
+            frames.append(frame_data)
+            del buffer[:LIVE_FRAME_SIZE]
+        return frames
+
+    def _classify_frame_status(self, frame_data):
+        if frame_data['tx_frame_cnt'] == 1:
+            self.prev_distances = frame_data['distances'].copy()
+            return "Init"
+
+        from ..module_csv import PREDICT_THRESHOLD
+
+        status = "Predict"
+        all_distances_zero = all(abs(d) < 1e-6 for d in frame_data['distances'])
+        if not all_distances_zero and self.prev_distances is not None:
+            for i in range(len(frame_data['distances'])):
+                if abs(frame_data['distances'][i] - self.prev_distances[i]) > PREDICT_THRESHOLD:
+                    status = "Update"
+                    break
+        self.prev_distances = frame_data['distances'].copy()
+        return status
+
+    def _track_tx_gap(self, tx_frame_cnt):
+        if self._last_tx_frame_cnt is None:
+            self._last_tx_frame_cnt = tx_frame_cnt
+            return
+        expected = self._last_tx_frame_cnt + 1
+        if tx_frame_cnt != expected and tx_frame_cnt > self._last_tx_frame_cnt:
+            gap = tx_frame_cnt - expected
+            self._tx_gap_count += gap
+            print(f"[WARNING] STM frame counter gap: expected {expected}, got {tx_frame_cnt}, missing {gap}")
+        self._last_tx_frame_cnt = tx_frame_cnt
+
+    def _print_stats(self, frame_count):
+        now = time.monotonic()
+        if now - self._stats_last_print < 2.0:
+            return
+        self._stats_last_print = now
+        print(
+            "[STATS] "
+            f"csv_frames={frame_count} parsed={self._parsed_frames} "
+            f"rx_queue={self._rx_queue.qsize()} bad_frames={self._bad_frames} "
+            f"tx_gaps={self._tx_gap_count} dropped_chunks={self._dropped_chunks}"
+        )
 
     def process_frame(self, frame_data, status):
         if status == "Init" or self.ukf_ctx is None:
@@ -156,7 +391,7 @@ class DataThread(QThread):
         # 3. UKF Predict & Update
         if status == "Predict":
             imu_sample = IMUSample(ax=frame_data['ax'], ay=frame_data['ay'], gz=frame_data['gz'])
-            # ukf_predict(self.ukf_ctx, imu_sample, dt)
+            ukf_predict(self.ukf_ctx, imu_sample, dt)
         
         if status == "Update":
             d_meas_all = np.array(frame_data['distances'])
@@ -164,7 +399,7 @@ class DataThread(QThread):
             if len(active_indices) >= 3:
                 active_d_meas = d_meas_all[active_indices][:3]
                 active_anchors = ANCHOR_POSITIONS[active_indices][:3]
-                # ukf_update(self.ukf_ctx, active_d_meas, active_anchors)
+                ukf_update(self.ukf_ctx, active_d_meas, active_anchors)
                 
         res = {
             'imu_x': self.imu_x,
@@ -192,8 +427,6 @@ class DataThread(QThread):
             if res['mask'] != self.last_active_mask:
                 print(f"[DEBUG] Mask changed: {self.last_active_mask} -> {res['mask']}")
             self.last_active_mask = res['mask']
-        
-        print(f"Mask: {res['mask']} (Last active: {self.last_active_mask}) | Status: {status}")
             
         res['last_active_mask'] = self.last_active_mask
         return res
@@ -207,81 +440,73 @@ class DataThread(QThread):
         buffer = bytearray()
         
         while self.running:
-            if getattr(self, 'new_csv_requested', False):
-                if self.csv_file:
-                    self.csv_file.close()
-                filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
-                self.csv_file, self.csv_writer = create_csv_file(filename)
-                print("[INFO] Started new data collection csv...")
+            if self._take_new_csv_request() and self.create_csv_enabled:
+                self._open_new_csv()
                 frame_count = 0
-                self.new_csv_requested = False
 
-            if self.serial_port is None or not self.serial_port.is_open:
-                print(f"[INFO] Trying to connect to {TARGET_PORT}...")
+            if (
+                self.serial_port is None
+                or not self.serial_port.is_open
+                or self._serial_reader is None
+                or not self._serial_reader.is_alive()
+            ):
+                self._close_serial()
+                self.disconnected_signal.emit()
                 try:
-                    self.serial_port = serial.Serial(
-                        port=TARGET_PORT,
-                        baudrate=UART_BAUDRATE,
-                        timeout=UART_TIMEOUT
-                    )
-                    self.connected_signal.emit(TARGET_PORT)
-                    print(f"[INFO] Successfully connected to {TARGET_PORT} at {UART_BAUDRATE} baud")
-                    
-                    if self.csv_file is None:
-                        filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
-                        self.csv_file, self.csv_writer = create_csv_file(filename)
-                        print("[INFO] Starting data collection...")
-                        
+                    self._connect_serial()
+                    if self.create_csv_enabled and self.csv_file is None:
+                        self._open_new_csv()
+                    self._start_reader()
                 except serial.SerialException as e:
-                    print(f"[WARNING] Failed to connect to {TARGET_PORT}: {e}")
+                    print(f"[WARNING] Failed to auto-connect USB serial: {e}")
                     self.disconnected_signal.emit()
                     time.sleep(1.0) # Wait and retry
                     continue
                     
             try:
-                if self.serial_port.in_waiting > 0:
-                    data = self.serial_port.read(self.serial_port.in_waiting)
-                    buffer.extend(data)
-                    
-                    while len(buffer) >= LIVE_FRAME_SIZE:
-                        while len(buffer) > 0 and buffer[0] != UART_SOF:
-                            buffer.pop(0)
-                        
-                        if len(buffer) >= LIVE_FRAME_SIZE:
-                            frame_bytes = buffer[:LIVE_FRAME_SIZE]
-                            buffer = buffer[LIVE_FRAME_SIZE:]
-                            
-                            frame_data = parse_live_frame(frame_bytes)
-                            if frame_data:
-                                frame_count += 1
-                                status, self.prev_distances = write_frame_to_csv(
-                                    self.csv_writer, frame_data, frame_count, self.prev_distances
-                                )
-                                
-                                # Flush periodically
-                                if frame_count % 10 == 0:
-                                    self.csv_file.flush()
-                                
-                                # Process and emit data for GUI
-                                result = self.process_frame(frame_data, status)
-                                if result is not None:
-                                    self.data_signal.emit(result)
-                                    
-                                if PRINT_DATA:
-                                    print_frame_data(frame_data)
-                else:
+                drained = self._drain_rx_queue(buffer)
+                if drained == 0:
+                    self._print_stats(frame_count)
                     time.sleep(0.001)
+                    continue
+
+                for frame_data in self._extract_live_frames(buffer):
+                    frame_count += 1
+                    self._parsed_frames += 1
+                    self._track_tx_gap(frame_data['tx_frame_cnt'])
+
+                    if self.csv_writer is not None:
+                        status, self.prev_distances = write_frame_to_csv(
+                            self.csv_writer, frame_data, frame_count, self.prev_distances
+                        )
+                    else:
+                        status = self._classify_frame_status(frame_data)
+
+                    if self.csv_file is not None and frame_count % 25 == 0:
+                        self.csv_file.flush()
+
+                    result = self.process_frame(frame_data, status)
+                    if result is not None:
+                        now = time.monotonic()
+                        if result.get('type') == 'Init' or now - self._last_gui_emit >= 0.03:
+                            self.data_signal.emit(result)
+                            self._last_gui_emit = now
+
+                    if PRINT_DATA and frame_count % 50 == 0:
+                        print_frame_data(frame_data)
+
+                self._print_stats(frame_count)
             except serial.SerialException as e:
-                print(f"[WARNING] Disconnected from {TARGET_PORT}: {e}")
-                self.serial_port.close()
-                self.serial_port = None
+                port_name = self.serial_port.port if self.serial_port else "USB serial"
+                print(f"[WARNING] Disconnected from {port_name}: {e}")
+                self._close_serial()
             except Exception as e:
                 print(f"[ERROR] Unexpected error: {e}")
                 
         # Cleanup
-        if self.serial_port and self.serial_port.is_open:
-            self.serial_port.close()
+        self._close_serial()
         if self.csv_file:
+            self.csv_file.flush()
             self.csv_file.close()
 
 class MainWindow(QMainWindow):
@@ -320,6 +545,16 @@ class MainWindow(QMainWindow):
         self.plot_d3 = self.graph_d.plot(pen=pg.mkPen('b', width=1.5), name="d3")
         self.plot_d4 = self.graph_d.plot(pen=pg.mkPen('m', width=1.5), name="d4")
         
+        # Ground truth horizontal lines
+        self.gt_line_d1 = pg.InfiniteLine(pos=GROUND_TRUTH_D1, angle=0, pen=pg.mkPen('r', width=3, style=pg.QtCore.Qt.DashLine))
+        self.gt_line_d2 = pg.InfiniteLine(pos=GROUND_TRUTH_D2, angle=0, pen=pg.mkPen('g', width=3, style=pg.QtCore.Qt.DashLine))
+        self.gt_line_d3 = pg.InfiniteLine(pos=GROUND_TRUTH_D3, angle=0, pen=pg.mkPen('b', width=3, style=pg.QtCore.Qt.DashLine))
+        self.gt_line_d4 = pg.InfiniteLine(pos=GROUND_TRUTH_D4, angle=0, pen=pg.mkPen('m', width=3, style=pg.QtCore.Qt.DashLine))
+        self.graph_d.addItem(self.gt_line_d1)
+        self.graph_d.addItem(self.gt_line_d2)
+        self.graph_d.addItem(self.gt_line_d3)
+        self.graph_d.addItem(self.gt_line_d4)
+        
         # Draw Anchors on plot
         for idx, anchor in enumerate(ANCHOR_POSITIONS):
             anchor_scatter = pg.ScatterPlotItem([anchor[0]], [anchor[1]], size=15, pen=pg.mkPen(None), brush=pg.mkBrush('k'), symbol='t')
@@ -338,6 +573,7 @@ class MainWindow(QMainWindow):
         
         # Setup UI connections
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
+        self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
         
         # Setup Timer for GUI updates (~30fps)
         self.timer = QTimer()
@@ -346,10 +582,19 @@ class MainWindow(QMainWindow):
         
         # Start Data Thread
         self.thread = DataThread()
+        self.thread.create_csv_enabled = self.checkBox_createCsv.isChecked()
         self.thread.connected_signal.connect(self.on_connected)
         self.thread.disconnected_signal.connect(self.on_disconnected)
         self.thread.data_signal.connect(self.on_data)
+        self.thread.csv_created_signal.connect(self.on_csv_created)
         self.thread.start()
+
+    def on_checkbox_csv_changed(self, state):
+        if hasattr(self, 'thread') and self.thread is not None:
+            self.thread.create_csv_enabled = (state == pg.QtCore.Qt.Checked)
+
+    def on_csv_created(self):
+        self.checkBox_createCsv.setChecked(False)
 
     def clear_graph(self):
         self.imu_xs.clear()
@@ -378,7 +623,8 @@ class MainWindow(QMainWindow):
         self.plot_d4.setData([])
         
         if hasattr(self, 'thread') and self.thread is not None:
-            self.thread.request_new_csv()
+            if self.checkBox_createCsv.isChecked():
+                self.thread.request_new_csv()
 
     @pyqtSlot(str)
     def on_connected(self, port):
@@ -387,7 +633,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def on_disconnected(self):
-        self.lineEdit_COM.setText(f"Waiting for {TARGET_PORT}...")
+        self.lineEdit_COM.setText("Waiting for USB COM...")
         self.lineEdit_COM.setStyleSheet("background-color: yellow;")
 
     @pyqtSlot(dict)

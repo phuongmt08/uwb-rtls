@@ -20,8 +20,7 @@ extern "C" {
 #define TDMA_PROCESSING_MARGIN_US    400      /* SPI + HAL overhead (300-500µs) */
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
-#define TDMA_DEFAULT_GUARD_TIME_US   1000     /* Standard guard (stability profile) */
-
+#define TDMA_DEFAULT_GUARD_TIME_US   1500
 /* ====================================================================
  * TIMING CONSTANTS
  * ==================================================================== */
@@ -35,7 +34,7 @@ extern "C" {
                                                    * With 4 anchors, loop ends at ~+22000µs,
                                                    * build+TX takes ~300µs, FINAL planned at
                                                    * +25000µs → ahead=2700µs > 1500µs guard. */
-#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 8000 /* NOTE: 8.0ms — Anchor slot 1 offset = 6500+3500 = 10000µs.
+#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 6500 /* NOTE: 8.0ms — Anchor slot 1 offset = 6500+3500 = 10000µs.
                                                     * Processing from FINAL RX to ensure_future_tx
                                                     * takes ~7400µs (bsp_uwb_rx SPI/LDE/RSSI ~1500µs
                                                     * + data extract + calculate_distance ~5900µs).

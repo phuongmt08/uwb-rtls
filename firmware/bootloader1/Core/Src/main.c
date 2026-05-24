@@ -29,6 +29,7 @@
 #include "network_core.h"
 #include "network_cmd.h"
 #include "sys_logger_bl.h"
+#include "dma.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -110,6 +111,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USB_DEVICE_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
