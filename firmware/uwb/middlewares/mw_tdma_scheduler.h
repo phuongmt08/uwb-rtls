@@ -20,21 +20,21 @@ extern "C" {
 #define TDMA_PROCESSING_MARGIN_US    400      /* SPI + HAL overhead (300-500µs) */
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
-#define TDMA_DEFAULT_GUARD_TIME_US   1500
+#define TDMA_DEFAULT_GUARD_TIME_US   2000
 /* ====================================================================
  * TIMING CONSTANTS
  * ==================================================================== */
 #define TDMA_MAX_ANCHORS             8
 
-#define TDMA_DEFAULT_SLOT_DURATION_US      2000   /* 2.0ms payload window per slot */
-#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 4000   /* 3.0ms delay */
-#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 5000  /* 5ms — to give TAG enough headroom to build FINAL message
+#define TDMA_DEFAULT_SLOT_DURATION_US      3000   /* 3.0ms payload window per slot */
+#define TDMA_DEFAULT_POLL_TO_RESP_DELAY_US 3000   /* 3.0ms delay */
+#define TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US 7000  /* 5ms — to give TAG enough headroom to build FINAL message
                                                    * after RESP loop without hitting
                                                    * ensure_future_tx guard (1500µs).
                                                    * With 4 anchors, loop ends at ~+22000µs,
                                                    * build+TX takes ~300µs, FINAL planned at
                                                    * +25000µs → ahead=2700µs > 1500µs guard. */
-#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 6500 /* NOTE: 8.0ms — Anchor slot 1 offset = 6500+3500 = 10000µs.
+#define TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US 9000 /* NOTE: 8.0ms — Anchor slot 1 offset = 6500+3500 = 10000µs.
                                                     * Processing from FINAL RX to ensure_future_tx
                                                     * takes ~7400µs (bsp_uwb_rx SPI/LDE/RSSI ~1500µs
                                                     * + data extract + calculate_distance ~5900µs).

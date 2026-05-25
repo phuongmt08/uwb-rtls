@@ -11,6 +11,7 @@ from utils.workers import WorkerSignals
 class DongleMonitorThread(QThread):
     dongle_connected = Signal(str, int)  # port, serial_number
     dongle_disconnected = Signal()
+    ble_connection_status = Signal(str)  # "Connected" or "Disconnected"
 
     def __init__(self, fota_service):
         super().__init__()
@@ -20,20 +21,37 @@ class DongleMonitorThread(QThread):
         self.suspended = False
 
     def run(self):
+        failed_ports = set()
         while self.running:
             if self.suspended:
                 self.msleep(100)
                 continue
 
             if not self.current_port:
-                probe = self.fota_service.auto_probe_dongle()
-                if probe:
-                    self.current_port = probe.port
-                    self.dongle_connected.emit(probe.port, probe.serial_number)
+                from serial.tools import list_ports
+                current_ports = {p.device for p in list_ports.comports()}
+                
+                # Remove any ports from failed_ports that are no longer physically present
+                failed_ports = {p for p in failed_ports if p in current_ports}
+                
+                candidates = current_ports - failed_ports
+                if candidates:
+                    probe = self.fota_service.auto_probe_dongle(ignore_ports=failed_ports)
+                    if probe:
+                        self.current_port = probe.port
+                        self.dongle_connected.emit(probe.port, probe.serial_number)
+                    else:
+                        # Since auto_probe returned None, all candidate ports that were probed failed.
+                        # Blacklist them until they are unplugged.
+                        failed_ports.update(candidates)
             else:
                 if not self.fota_service.ping_dongle(self.current_port):
                     self.current_port = None
                     self.dongle_disconnected.emit()
+                else:
+                    status = self.fota_service.get_ble_status(self.current_port)
+                    if status is not None:
+                        self.ble_connection_status.emit(status)
             
             self.msleep(1000)
 
@@ -63,6 +81,7 @@ class FotaController(QObject):
         self.monitor_thread = DongleMonitorThread(self.fota_service)
         self.monitor_thread.dongle_connected.connect(self._on_dongle_connected)
         self.monitor_thread.dongle_disconnected.connect(self._on_dongle_disconnected)
+        self.monitor_thread.ble_connection_status.connect(self._on_ble_connection_status_monitored)
         self.monitor_thread.start()
 
     def shutdown(self):
@@ -81,6 +100,27 @@ class FotaController(QObject):
         self.view.lbl_dongle_status.setText("Searching for Central Dongle...")
         self.view.lbl_dongle_status.setStyleSheet("color: #F59E0B; font-weight: bold;") # Yellow/Orange
         self.signals.log.emit("[FOTA] Dongle Disconnected. Waiting for device...")
+        
+        # Revert connection state to idle/disconnected if dongle is unplugged
+        self.is_connected = False
+        self.connected_mac_str = None
+        self.connected_mac_bytes = None
+        self._on_connection_status("Disconnected")
+
+    def _on_ble_connection_status_monitored(self, status: str):
+        if status == "Connected":
+            if not self.is_connected:
+                mac_str = self.connected_mac_str or "Device"
+                self.is_connected = True
+                self._on_connection_status(f"Connected: {mac_str}")
+                self.signals.log.emit(f"[FOTA] BLE status monitored: Connected ({mac_str})")
+        else: # "Disconnected"
+            if self.is_connected:
+                self.is_connected = False
+                self.connected_mac_str = None
+                self.connected_mac_bytes = None
+                self._on_connection_status("Disconnected")
+                self.signals.log.emit("[FOTA] BLE status monitored: Disconnected (Connection lost)")
 
     def _on_task_done(self, ok: bool, msg: str):
         self.monitor_thread.suspended = False
@@ -258,12 +298,22 @@ class FotaController(QObject):
         self.main_ctrl.run_task(task_connect)
 
     def on_erase_app(self):
+        if not self.is_connected:
+            self.signals.log.emit("[FOTA] ERROR: Device is not connected.")
+            return
         self.signals.log.emit("[FOTA] Erasing app sectors via OTA... (Not implemented yet)")
 
     def on_verify(self):
+        if not self.is_connected:
+            self.signals.log.emit("[FOTA] ERROR: Device is not connected.")
+            return
         self.signals.log.emit("[FOTA] Verifying... (Not implemented yet)")
 
     def on_auto_fota(self):
+        if not self.is_connected:
+            self.signals.log.emit("[FOTA] ERROR: Device is not connected. Please connect to a BLE device first.")
+            return
+            
         port = self.current_dongle_port
         if not port:
             self.signals.log.emit("[FOTA] ERROR: Dongle not detected.")

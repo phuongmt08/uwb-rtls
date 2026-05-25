@@ -113,9 +113,11 @@ class DongleSession:
         return ports
 
     @classmethod
-    def auto_probe(cls, src: int = int(VvAddress.DEBUG), debug: bool = True):
+    def auto_probe(cls, src: int = int(VvAddress.DEBUG), debug: bool = True, ignore_ports: set | None = None):
         dst = int(VvAddress.CENTRAL)
         for port_info in cls.prioritized_ports():
+            if ignore_ports and port_info.device in ignore_ports:
+                continue
             for baud in BAUD_CANDIDATES:
                 print(f"[PROBE] Trying port {port_info.device} at baud {baud}...")
                 try:

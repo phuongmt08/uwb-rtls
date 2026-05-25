@@ -1,4 +1,5 @@
 let ruleCounter = 0;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 4;
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -212,14 +213,25 @@ function exportTrajectoryCsv() {
         let px = entry.px_fw;
         let py = entry.py_fw;
 
-        if (entry.type === 'Update') {
-            const nextPx = path.x ? path.x[updateIdx] : null;
-            const nextPy = path.y ? path.y[updateIdx] : null;
+        if (selected === 'ukf') {
+            // UKF has a position for EVERY log entry (20Hz)
+            const nextPx = path.x ? path.x[index] : null;
+            const nextPy = path.y ? path.y[index] : null;
             if (Number.isFinite(nextPx) && Number.isFinite(nextPy)) {
                 px = nextPx;
                 py = nextPy;
             }
-            updateIdx++;
+        } else {
+            // Other paths are only aligned with Update events (6Hz)
+            if (entry.type === 'Update') {
+                const nextPx = path.x ? path.x[updateIdx] : null;
+                const nextPy = path.y ? path.y[updateIdx] : null;
+                if (Number.isFinite(nextPx) && Number.isFinite(nextPy)) {
+                    px = nextPx;
+                    py = nextPy;
+                }
+                updateIdx++;
+            }
         }
 
         const sourceLine = entry.raw_line || formatFallbackLogLine(entry, entry.px_fw, entry.py_fw, index + 1);
@@ -263,7 +275,7 @@ function updatePositionRateDisplay(totalTimeOverride) {
     }
 }
 
-function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength, samples) {
+function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, rescueIdx, ambiguityEvents, xAxisLength, samples) {
     const elem = document.getElementById('d2_distance_stats');
     if (!elem) return;
 
@@ -274,10 +286,11 @@ function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength, samp
         }
     });
 
-    elem.innerHTML = [0, 1, 2, 3].map(i => {
+    const anchorStats = [0, 1, 2, 3].map(i => {
         const d2 = meanFinite(d2Scores[i]);
         const gatedCount = gatedDist[i].filter(v => Number.isFinite(v)).length;
         const rejectCount = rejectIdx[i].length;
+        const rescueCount = rescueIdx && rescueIdx[i] ? rescueIdx[i].length : 0;
         const meanText = d2.mean === null ? '--' : d2.mean.toFixed(3);
         return `
             <div class="stat-box">
@@ -286,10 +299,19 @@ function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength, samp
                 <div class="stat-row"><span>D2 Count</span><span>${d2.count}</span></div>
                 <div class="stat-row"><span>Raw Dist</span><span>${rawCounts[i]}</span></div>
                 <div class="stat-row"><span>Gated Dist</span><span>${gatedCount}</span></div>
+                <div class="stat-row"><span>Rescued</span><span>${rescueCount}</span></div>
                 <div class="stat-row"><span>Rejected</span><span>${rejectCount}</span></div>
             </div>
         `;
     }).join('');
+
+    const ambiguityCount = Array.isArray(ambiguityEvents) ? ambiguityEvents.length : 0;
+    elem.innerHTML = anchorStats + `
+        <div class="stat-box">
+            <strong>Raw Geometry</strong>
+            <div class="stat-row"><span>Ambiguous</span><span>${ambiguityCount}</span></div>
+        </div>
+    `;
 }
 
 function syncInput(rangeId, inputId) {
@@ -305,16 +327,30 @@ function syncInput(rangeId, inputId) {
 
 function saveDefaults() {
     const config = {
+        schema_version: UWB_SIM_DEFAULTS_SCHEMA_VERSION,
         t2_high: document.getElementById('t2_high_input').value,
         t2_low: document.getElementById('t2_low_input').value,
-        r_base: document.getElementById('r_input').value,
+        rescue_noise_max: document.getElementById('r_input').value,
+        rescue_min_anchors: document.getElementById('win_input').value,
         zupt_acc: document.getElementById('zupt_acc_input').value,
         zupt_gyr: document.getElementById('zupt_gyr_input').value,
+        enable_zupt_ukf: document.getElementById('enable_zupt_ukf').checked,
         max_samples: document.getElementById('max_samples_input').value,
         enable_smoother: document.getElementById('enable_smoother').checked,
+        enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
         groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
         anchors: readAnchorsFromInputs(),
-        rules: []
+        rules: [],
+        tag_height: document.getElementById('tag_height_input').value,
+
+        // Save UKF parameters
+        ukf_alpha: document.getElementById('ukf_alpha_input').value,
+        ukf_beta: document.getElementById('ukf_beta_input').value,
+        ukf_kappa: document.getElementById('ukf_kappa_input').value,
+        q_a: document.getElementById('ukf_qa_input').value,
+        q_g: document.getElementById('ukf_qg_input').value,
+        r_uwb: document.getElementById('ukf_ruwb_input').value,
+        r_gate: document.getElementById('ukf_rgate_input').value
     };
     const ruleDivs = document.getElementById('rules_container').children;
     for (let i = 0; i < ruleDivs.length; i++) {
@@ -340,38 +376,61 @@ function loadDefaults() {
     if (saved) {
         try {
             const config = JSON.parse(saved);
-            if (config.t2_high) {
+            const loadTuning = config.schema_version === UWB_SIM_DEFAULTS_SCHEMA_VERSION;
+            if (!loadTuning) {
+                console.warn('Ignoring stale simulation tuning defaults. Ground truth and anchors are still restored.');
+            }
+
+            if (loadTuning && config.t2_high) {
                 document.getElementById('t2_high_input').value = config.t2_high;
                 document.getElementById('t2_high_range').value = config.t2_high;
                 document.getElementById('t2_high_val').innerText = config.t2_high;
             }
-            if (config.t2_low) {
+            if (loadTuning && config.t2_low) {
                 document.getElementById('t2_low_input').value = config.t2_low;
                 document.getElementById('t2_low_range').value = config.t2_low;
                 document.getElementById('t2_low_val').innerText = config.t2_low;
             }
-            if (config.r_base) {
-                document.getElementById('r_input').value = config.r_base;
-                document.getElementById('r_range').value = config.r_base;
-                document.getElementById('r_val').innerText = config.r_base;
+            if (loadTuning && config.rescue_noise_max) {
+                const rescueNoiseMax = Math.min(5.0, Math.max(0.01, parseFloat(config.rescue_noise_max)));
+                document.getElementById('r_input').value = rescueNoiseMax;
+                document.getElementById('r_range').value = rescueNoiseMax;
+                document.getElementById('r_val').innerText = rescueNoiseMax;
             }
-            if (config.zupt_acc) {
+            if (loadTuning && config.rescue_min_anchors) {
+                document.getElementById('win_input').value = config.rescue_min_anchors;
+                document.getElementById('win_range').value = config.rescue_min_anchors;
+                document.getElementById('win_val').innerText = config.rescue_min_anchors;
+            }
+            if (loadTuning && config.zupt_acc) {
                 document.getElementById('zupt_acc_input').value = config.zupt_acc;
                 document.getElementById('zupt_acc_range').value = config.zupt_acc;
                 document.getElementById('zupt_acc_val').innerText = config.zupt_acc;
             }
-            if (config.zupt_gyr) {
+            if (loadTuning && config.zupt_gyr) {
                 document.getElementById('zupt_gyr_input').value = config.zupt_gyr;
                 document.getElementById('zupt_gyr_range').value = config.zupt_gyr;
                 document.getElementById('zupt_gyr_val').innerText = config.zupt_gyr;
             }
-            if (config.max_samples) {
+            if (loadTuning && config.enable_zupt_ukf !== undefined) {
+                document.getElementById('enable_zupt_ukf').checked = config.enable_zupt_ukf;
+            }
+            if (loadTuning && config.max_samples) {
                 document.getElementById('max_samples_input').value = config.max_samples;
                 document.getElementById('max_samples_range').value = config.max_samples;
                 document.getElementById('max_samples_val').innerText = config.max_samples;
             }
-            if (config.enable_smoother !== undefined) {
+            if (loadTuning && config.enable_smoother !== undefined) {
                 document.getElementById('enable_smoother').checked = config.enable_smoother;
+            }
+            if (loadTuning && config.enable_mahalanobis !== undefined) {
+                document.getElementById('enable_mahalanobis').checked = config.enable_mahalanobis;
+            }
+            if (loadTuning && config.tag_height) {
+                document.getElementById('tag_height_input').value = config.tag_height;
+                document.getElementById('tag_height_range').value = config.tag_height;
+                document.getElementById('tag_height_val').innerText = config.tag_height;
+                tagHeight = parseFloat(config.tag_height);
             }
             if (config.groundtruth) {
                 localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
@@ -381,7 +440,44 @@ function loadDefaults() {
                 setAnchorInputs(anchors);
             }
             
-            if (config.rules && config.rules.length > 0) {
+            // Load UKF parameters
+            if (loadTuning && config.ukf_alpha) {
+                document.getElementById('ukf_alpha_input').value = config.ukf_alpha;
+                document.getElementById('ukf_alpha_range').value = config.ukf_alpha;
+                document.getElementById('ukf_alpha_val').innerText = config.ukf_alpha;
+            }
+            if (loadTuning && config.ukf_beta) {
+                document.getElementById('ukf_beta_input').value = config.ukf_beta;
+                document.getElementById('ukf_beta_range').value = config.ukf_beta;
+                document.getElementById('ukf_beta_val').innerText = config.ukf_beta;
+            }
+            if (loadTuning && config.ukf_kappa) {
+                document.getElementById('ukf_kappa_input').value = config.ukf_kappa;
+                document.getElementById('ukf_kappa_range').value = config.ukf_kappa;
+                document.getElementById('ukf_kappa_val').innerText = config.ukf_kappa;
+            }
+            if (loadTuning && config.q_a) {
+                document.getElementById('ukf_qa_input').value = config.q_a;
+                document.getElementById('ukf_qa_range').value = config.q_a;
+                document.getElementById('ukf_qa_val').innerText = config.q_a;
+            }
+            if (loadTuning && config.q_g) {
+                document.getElementById('ukf_qg_input').value = config.q_g;
+                document.getElementById('ukf_qg_range').value = config.q_g;
+                document.getElementById('ukf_qg_val').innerText = parseFloat(config.q_g).toExponential(3);
+            }
+            if (loadTuning && config.r_uwb) {
+                document.getElementById('ukf_ruwb_input').value = config.r_uwb;
+                document.getElementById('ukf_ruwb_range').value = config.r_uwb;
+                document.getElementById('ukf_ruwb_val').innerText = config.r_uwb;
+            }
+            if (loadTuning && config.r_gate) {
+                document.getElementById('ukf_rgate_input').value = config.r_gate;
+                document.getElementById('ukf_rgate_range').value = config.r_gate;
+                document.getElementById('ukf_rgate_val').innerText = config.r_gate;
+            }
+
+            if (loadTuning && config.rules && config.rules.length > 0) {
                 document.getElementById('rules_container').innerHTML = '';
                 config.rules.forEach(r => {
                     addRule(r.start, r.end, r.anchors);

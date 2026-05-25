@@ -116,6 +116,12 @@ class BuildController(QObject):
             self.view.table_archives.setItem(row, 1, i2)
             self.view.table_archives.setItem(row, 2, i3)
 
+        # Auto select the newly built firmware if the flag is set
+        if getattr(self, 'select_new_build_after_refresh', False) and len(archives_data) > 0:
+            self.select_new_build_after_refresh = False
+            self.view.table_archives.selectRow(0)
+            self.set_active_firmware()
+
 
 
 
@@ -253,6 +259,7 @@ class BuildController(QObject):
                     with open(meta_path, "w") as f:
                         json.dump(self.main_ctrl.current_build_meta, f)
 
+                self.select_new_build_after_refresh = True
                 
                 # Update UI in main thread
                 QMetaObject.invokeMethod(self, "refresh_history", Qt.QueuedConnection)

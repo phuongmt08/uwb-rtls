@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from typing import Optional
 
 # Ensure common is in sys.path
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -72,12 +73,29 @@ class FotaService:
     def __init__(self):
         self.factory = CommandFactory()
 
-    def auto_probe_dongle(self):
-        return DongleSession.auto_probe(src=int(VvAddress.HOST), debug=False)
+    def auto_probe_dongle(self, ignore_ports=None):
+        return DongleSession.auto_probe(src=int(VvAddress.HOST), debug=False, ignore_ports=ignore_ports)
 
     def ping_dongle(self, port):
         # Elegant, conflict-free hotplug check: just verify if the virtual COM port still exists in the OS
         return any(p.device == port for p in list_ports.comports())
+
+    def get_ble_status(self, port) -> Optional[str]:
+        if not port:
+            return None
+        try:
+            with DongleSession(port, baud=115200, debug=False) as session:
+                seq = session.proto.next_seq()
+                pkt = self.factory.ble_status_get(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
+                match, _ = session.send_expect_param(pkt, "ble_status_resp", timeout_s=0.3)
+                if match is not None:
+                    if match.ble_status_resp.state == pb.BLE_STATE_CONNECTED:
+                        return "Connected"
+                    else:
+                        return "Disconnected"
+        except Exception:
+            pass
+        return None
 
     def scan_nearby_devices(self, port, log_cb, result_cb):
         if not port:
@@ -87,7 +105,7 @@ class FotaService:
         with DongleSession(port, baud=115200, debug=False) as session:
             seq = session.proto.next_seq()
             pkt = self.factory.ble_scan_start(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
-            pkt.ble_scan_start.duration_ms = 4000
+            pkt.ble_scan_start.duration_ms = 2000
             pkt.ble_scan_start.interval_ms = 100
             pkt.ble_scan_start.window_ms = 50
             pkt.ble_scan_start.active_scanning = True
@@ -95,7 +113,7 @@ class FotaService:
             session.send_packet(pkt)
             
             results = {}
-            deadline = time.time() + 4.5
+            deadline = time.time() + 2.2
             while time.time() < deadline:
                 pkts = session.recv_packets(0.1)
                 for p in pkts:
@@ -153,10 +171,37 @@ class FotaService:
             pkt = self.factory.ble_disconnect(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             session.send_packet(pkt)
             log_cb("[FOTA] Disconnect command sent to Central Dongle.")
-            time.sleep(0.5)
+            
+            # Poll status to verify it's actually disconnected
+            deadline = time.time() + 3.0
+            disconnected = False
+            while time.time() < deadline:
+                # Query status
+                seq_status = session.proto.next_seq()
+                pkt_status = self.factory.ble_status_get(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq_status)
+                session.send_packet(pkt_status)
+                
+                # Receive responses
+                pkts = session.recv_packets(0.15)
+                for p in pkts:
+                    if p.WhichOneof("params") == "ble_status_resp":
+                        log_cb(f"[FOTA] Dongle state reported: {p.ble_status_resp.state}")
+                        if p.ble_status_resp.state != pb.BLE_STATE_CONNECTED:
+                            disconnected = True
+                            break
+                if disconnected:
+                    break
+                time.sleep(0.1)
+            
+            if disconnected:
+                log_cb("[FOTA] Disconnection confirmed by Dongle state.")
+            else:
+                log_cb("[FOTA] WARNING: Dongle did not confirm disconnection (timeout).")
+                
             disconnected_cb("Disconnected")
 
     def execute_ota_flash(self, port, hex_path, chunk_size, mac_bytes, mac_str, log_cb, progress_cb, status_cb):
+        start_time = time.time()
         if chunk_size % 4 != 0:
             log_cb(f"[FOTA] ERROR: Chunk size ({chunk_size}) must be a multiple of 4.")
             return
@@ -302,24 +347,26 @@ class FotaService:
                 if finished: break
             
             if finished:
-                log_cb("[FOTA] FOTA TEST ✓ PASSED. Device will reboot now.")
+                elapsed_time = time.time() - start_time
+                log_cb(f"[FOTA] FOTA TEST ✓ PASSED. Device will reboot now. (OTA took {elapsed_time:.1f}s)")
                 progress_cb(100)
             else:
                 log_cb("[FOTA] [FAIL] Image verification failed (no FINISHED state).")
                 
-            # Device reboots and severs connection, so we are now disconnected
-            status_cb("Disconnected")
+            # The background monitor thread will query the actual BLE status of the dongle
+            # and automatically transition the UI to Disconnected when the link is severed.
 
     def _scan_and_reconnect(self, session, src, mac_bytes, mac_str, log_cb):
         import time
         from common.transport import VvAddress
         log_cb(f"[FOTA] Re-scanning for {mac_str} in Bootloader mode...")
-        deadline = time.time() + 15.0
+        deadline = time.time() + 8.0
         found = False
         
         # Send scan start
         seq = session.proto.next_seq()
         pkt_scan = self.factory.ble_scan_start(src, int(VvAddress.CENTRAL), seq)
+        pkt_scan.ble_scan_start.duration_ms = 8000
         session.send_packet(pkt_scan)
         
         while time.time() < deadline:
@@ -344,15 +391,17 @@ class FotaService:
         log_cb("[FOTA] Device found! Sending Connect command...")
         seq = session.proto.next_seq()
         pkt_conn = self.factory.ble_connect(src, int(VvAddress.CENTRAL), seq)
-        pkt_conn.ble_connect.mac = mac_bytes
+        pkt_conn.ble_connect.mac_address = mac_bytes
         session.send_packet(pkt_conn)
         
-        deadline = time.time() + 5.0
+        deadline = time.time() + 8.0
         connected = False
+        last_state = "Unknown"
         while time.time() < deadline:
             for p in session.recv_packets(0.1):
                 if p.WhichOneof("params") == "ble_status_resp":
-                    if p.ble_status_resp.state == 2:  # CONNECTED
+                    last_state = str(p.ble_status_resp.state)
+                    if p.ble_status_resp.state == pb.BLE_STATE_CONNECTED:
                         connected = True
                         break
             if connected:
@@ -363,4 +412,5 @@ class FotaService:
             time.sleep(1.0) # Wait for MTU / param exchange
             return True
         else:
+            log_cb(f"[FOTA] [FAIL] Connection timeout. Dongle reported last state: {last_state} (expected {pb.BLE_STATE_CONNECTED}).")
             return False
