@@ -70,11 +70,12 @@ def count_commits(prev: str, current: str) -> int:
 # ─────────────────────────── AI providers ───────────────────────────────────
 
 def call_gemini(api_key: str, system: str, user: str) -> str:
-    """Gọi Gemini 1.5 Flash (miễn phí) qua REST API — không cần thư viện ngoài."""
-    print("Calling Gemini 1.5 Flash (free tier)…")
+    """Gọi Gemini 2.0 Flash (miễn phí) qua REST API — không cần thư viện ngoài."""
+    model = "gemini-2.0-flash"
+    print(f"Calling {model} (free tier)…")
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models"
-        f"/gemini-1.5-flash:generateContent?key={api_key}"
+        f"/{model}:generateContent?key={api_key}"
     )
     payload = {
         "system_instruction": {"parts": [{"text": system}]},
@@ -84,8 +85,13 @@ def call_gemini(api_key: str, system: str, user: str) -> str:
     data = json.dumps(payload).encode()
     req  = urllib.request.Request(url, data=data,
                                   headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        body = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
+        raise
     return body["candidates"][0]["content"]["parts"][0]["text"]
 
 
