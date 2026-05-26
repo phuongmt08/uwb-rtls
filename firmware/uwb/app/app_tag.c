@@ -728,6 +728,14 @@ app_err_t app_tag_init(void)
 
     sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
 
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+    if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
+        RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
+    } else {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
+    }
+#endif
+
     init_filters();
     return APP_OK;
 }
@@ -863,5 +871,27 @@ void app_tag_process(void)
         s_is_ranging_active = false;
     }
     
+}
+
+void app_tag_reset_fusion(void)
+{
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state...");
+    sys_sensor_fusion_clear_predict_flag();
+    sys_sensor_fusion_clear_update_flag();
+    init_filters();
+    s_ukf_initialized = false;
+    s_latest_fusion_position_valid = false;
+    s_latest_fusion_position.x = 0.0f;
+    s_latest_fusion_position.y = 0.0f;
+    s_is_ranging_active = false;
+    s_error_count = 0;
+    
+    if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialization failed");
+    } else {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
+    }
+#endif
 }
 /* End of file -------------------------------------------------------- */

@@ -26,7 +26,7 @@ SIZE := $(TOOLCHAIN_BIN)/arm-none-eabi-size
 PYTHON ?= python
 
 CPUFLAGS := -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
-OPTFLAGS := -Og -g3
+OPTFLAGS := -O2 -g3
 DEFS := -DDEBUG -DUSE_HAL_DRIVER -DSTM32F411xE
 
 FW_GIT_SHA ?= $(shell git -C $(REPO_ROOT) rev-parse --short=16 HEAD 2>/dev/null | tr -d '\n' || echo 00000000)

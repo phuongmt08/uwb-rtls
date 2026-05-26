@@ -15,20 +15,22 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "main.h"
+
 /* Public defines ----------------------------------------------------- */
 /* LED PC13 */
-#define BSP_IO_LED_PORT        GPIOC
-#define BSP_IO_LED_PIN         GPIO_PIN_13
+#define BSP_IO_LED_PORT        LED_USR_GPIO_Port
+#define BSP_IO_LED_PIN         LED_USR_Pin
 
 /* Button PA0 */
-#define BSP_IO_BUTTON_PORT     GPIOA
-#define BSP_IO_BUTTON_PIN      GPIO_PIN_0
+#define BSP_IO_BUTTON_PORT     BTN_USR_GPIO_Port
+#define BSP_IO_BUTTON_PIN      BTN_USR_Pin
 
 /* DIP Switch 3-bit: PB5, PB6, PB7 */
-#define BSP_IO_DIP_PORT        GPIOB
-#define BSP_IO_DIP_PIN_0       GPIO_PIN_5  /* LSB */
-#define BSP_IO_DIP_PIN_1       GPIO_PIN_6
-#define BSP_IO_DIP_PIN_2       GPIO_PIN_7  /* MSB */
+#define BSP_IO_DIP_PORT        DIP1_GPIO_Port
+#define BSP_IO_DIP_PIN_0       DIP1_Pin  /* LSB */
+#define BSP_IO_DIP_PIN_1       DIP2_Pin
+#define BSP_IO_DIP_PIN_2       DIP3_Pin  /* MSB */
 
 /* Button timing constants (ms) */
 #define BSP_IO_DEBOUNCE_MS     25 

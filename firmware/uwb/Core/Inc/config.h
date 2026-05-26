@@ -14,8 +14,7 @@
 #define ENABLE_DEBUG_LOGGING
 #define HAVE_BLE_PERIPHERAL
 
-/* Experimental features */
-#define UWB_EVENT_DRIVEN 1
+/* Developer diagnostics */
 #define DEVELOPER_MODE   1
 
 #endif /* __CONFIG_H */

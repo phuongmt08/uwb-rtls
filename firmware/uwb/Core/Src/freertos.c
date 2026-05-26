@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 #include "app_rtos_handles.h"
 #include "app_anchor.h"
 #include "app_tag.h"
@@ -257,6 +258,7 @@ void uwb_ranging_entry(void *argument)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN uwb_ranging_entry */
   sys_config_t *cfg = sys_config_get();
+  static bool was_ranging_active = false;
 
   for (;;)
   {
@@ -264,12 +266,26 @@ void uwb_ranging_entry(void *argument)
     /* 10 ms timeout as fallback to keep state machine alive.         */
     osSemaphoreAcquire(g_uwb_isr_semHandle, 10);
 
-    if (!g_ranging_enabled || g_pm_ranging_blocked) continue;
+    bool is_ranging_active = g_ranging_enabled && !g_pm_ranging_blocked;
+
+    if (!is_ranging_active && was_ranging_active)
+    {
+      if (cfg->uwb.role == DEVICE_ROLE_TAG)
+      {
+        app_tag_reset_fusion();
+      }
+      was_ranging_active = false;
+    }
+
+    if (is_ranging_active)
+    {
+      was_ranging_active = true;
+    }
+
+    if (!is_ranging_active) continue;
 
     osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
-#if UWB_EVENT_DRIVEN
     bsp_uwb_dwt_isr();
-#endif
     if (cfg->uwb.role == DEVICE_ROLE_TAG)
     {
       app_tag_process();
@@ -375,11 +391,10 @@ void network_entry(void *argument)
 void logger_entry(void *argument)
 {
   /* USER CODE BEGIN logger_entry */
-  /* Log drain to USB CDC removed — flash persistence handled by FlashStorage task.
-   * Logger task kept as placeholder; logs retrieved via network layer. */
   for (;;)
   {
-    osDelay(osWaitForever); /* suspend permanently until future feature added */
+    osDelay(30000); /* 30 seconds */
+    bsp_util_print_cpu_stats();
   }
   /* USER CODE END logger_entry */
 }
@@ -509,36 +524,6 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
-{
-   /* Run time stack overflow checking is performed if
-   configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
-   called if a stack overflow is detected. */
-   
-   /* Halt system and log error */
-   RLOG_E(LOG_OBJECT_CODE_TASK, ERR_SYSTEM, "Stack Overflow in task: %s", pcTaskName);
-   __disable_irq();
-   while(1)
-   {
-     /* Blink LED rapidly or trigger watchdog */
-   }
-}
 
-/* For configGENERATE_RUN_TIME_STATS */
-/* Note: You need to configure a high speed timer (e.g. TIM10) in CubeMX 
-   to increment a counter every 10-100us for this to work accurately. */
-uint32_t getRunTimeCounterValue(void)
-{
-  return HAL_GetTick(); // Temporary fallback to ms, use high-speed timer for better resolution
-}
-
-void vApplicationMallocFailedHook(void)
-{
-  RLOG_E(LOG_OBJECT_CODE_TASK, ERR_SYSTEM, "FreeRTOS heap exhausted");
-  __disable_irq();
-  while (1)
-  {
-  }
-}
 /* USER CODE END Application */
 

@@ -96,6 +96,8 @@ Button ISR --(Semaphore)-->    IO Task                      |
 ## 5. Quản Lý Tài Nguyên & Đồng Bộ Hóa
 
 ### 5.1. Quản lý Bus SPI (SPI1) & Cơ chế Đồng bộ hóa Ngắt (Hybrid Event-Driven)
+> **Implementation note (develop-rtos):** Hybrid event-driven is the only supported UWB runtime path. Do not reintroduce `UWB_EVENT_DRIVEN` as a compile-time switch. EXTI wakeup, `dwt_isr()` drain in `UwbRanging`, callback event queue, and short timeout fallback are one integrated flow.
+
 Để đảm bảo **không xung đột với IMU** (cũng chạy trên `SPI1`) và đạt hiệu quả CPU cao nhất dưới FreeRTOS mà không bị "starve" các task khác, hệ thống áp dụng cơ chế **Hybrid Event-Driven**:
 *   **EXTI chỉ phát tín hiệu (Signal only):** Chân ngắt UWB IRQ (PA4) kích hoạt EXTI ISR. Bên trong ISR của STM32, ta tuyệt đối **không thực hiện bất kỳ giao tiếp SPI nào** (không gọi `dwt_isr()`, không đọc status/rx_data/tx_ts). Hàm ngắt chỉ làm một nhiệm vụ duy nhất là nhả Semaphore:
     `osSemaphoreRelease(g_uwb_isr_semHandle)`.

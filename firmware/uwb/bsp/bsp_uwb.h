@@ -32,7 +32,6 @@ typedef struct {
     bool     valid;
 } bsp_uwb_rx_quality_t;
 
-#ifdef UWB_EVENT_DRIVEN
 typedef enum {
     BSP_UWB_EVENT_NONE = 0,
     BSP_UWB_EVENT_RX_OK,
@@ -49,7 +48,6 @@ typedef struct {
     uint64_t             tx_ts;
     bsp_uwb_rx_quality_t rx_quality;
 } bsp_uwb_event_t;
-#endif
 
 /* Pin definitions (based on BU01 schematic) ------------------------- */
 /* SPI pins - connected to SPI1 peripheral */
@@ -219,7 +217,6 @@ void bsp_uwb_clear_irq_event(void);
  */
 bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms);
 
-#ifdef UWB_EVENT_DRIVEN
 typedef struct
 {
   uint32_t tx_done;
@@ -245,7 +242,6 @@ void bsp_uwb_get_event_stats(bsp_uwb_event_stats_t *stats);
  * @brief Discard any pending UWB events
  */
 void bsp_uwb_clear_event(void);
-#endif
 
 /**
  * @brief Read internal temperature and voltage of DW1000 chip.

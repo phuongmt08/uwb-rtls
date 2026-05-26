@@ -420,8 +420,7 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
-    bsp_io_led_toggle();
-    HAL_Delay(100);
+
   }
   /* USER CODE END Error_Handler_Debug */
 }

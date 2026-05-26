@@ -72,6 +72,11 @@ bool app_tag_get_last_position(float *x_m, float *y_m);
  */
 bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
 
+/**
+ * @brief Reset the sensor fusion filters, flags, and states when ranging stops.
+ */
+void app_tag_reset_fusion(void);
+
 #if ENABLE_SYS_FUSION
 extern sys_sensor_fusion_data_t ukf_data;
 #endif

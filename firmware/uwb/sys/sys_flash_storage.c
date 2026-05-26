@@ -41,10 +41,10 @@ int sys_flash_storage_init(void)
         return 0;
     }
 
-    /* Initialise CRC / RTC hardware (safe to call multiple times) */
+    /* Prepare utility helpers; Cube owns CRC/RTC peripheral init. */
     if (bsp_util_init() != BSP_UTIL_OK)
     {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "bsp_util_init failed — CRC/RTC may be unavailable");
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "bsp_util_init failed");
     }
 
     bsp_flash_status_t status = bsp_flash_dual_init(

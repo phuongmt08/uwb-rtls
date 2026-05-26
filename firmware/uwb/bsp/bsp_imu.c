@@ -11,6 +11,7 @@
 
 /* Includes ----------------------------------------------------------- */
 #include "bsp_imu.h"
+#include "app_rtos_handles.h"
 #include "bsp_util.h"
 #include "err.h"
 #include <math.h>
@@ -24,6 +25,8 @@ extern SPI_HandleTypeDef BSP_IMU_SPI_HANDLE;
 icm42688_dev_t bsp_imu;
 
 /* Private variables -------------------------------------------------- */
+static bool s_spi1_cs_mutex_locked = false;
+
 static const icm42688_config_t s_default_cfg =
 {
 	.gyro_fs             	= BSP_IMU_GYRO_FS,
@@ -150,20 +153,56 @@ bsp_imu_err_t bsp_imu_self_test()
 }
 
 /* Private definitions ------------------------------------------------ */
+static bool bsp_spi1_mutex_is_available(void)
+{
+	osKernelState_t state = osKernelGetState();
+	return (g_spi1_mutexHandle != NULL) &&
+	       ((state == osKernelRunning) || (state == osKernelLocked));
+}
+
+static bool bsp_spi1_mutex_acquire(void)
+{
+	if (!bsp_spi1_mutex_is_available())
+	{
+		return true;
+	}
+
+	return (osMutexAcquire(g_spi1_mutexHandle, osWaitForever) == osOK);
+}
+
+static void bsp_spi1_mutex_release(void)
+{
+	if (bsp_spi1_mutex_is_available())
+	{
+		(void)osMutexRelease(g_spi1_mutexHandle);
+	}
+}
+
 static void bsp_cs_set(bool select)
 {
 	if (select)
 	{
+		if (!bsp_spi1_mutex_acquire())
+		{
+			return;
+		}
+		s_spi1_cs_mutex_locked = true;
 		HAL_GPIO_WritePin(BSP_IMU_CS_GPIO_PORT, BSP_IMU_CS_GPIO_PIN, GPIO_PIN_RESET);
 	}
 	else
 	{
 		HAL_GPIO_WritePin(BSP_IMU_CS_GPIO_PORT, BSP_IMU_CS_GPIO_PIN, GPIO_PIN_SET);
+		if (s_spi1_cs_mutex_locked)
+		{
+			s_spi1_cs_mutex_locked = false;
+			bsp_spi1_mutex_release();
+		}
 	}
 }
 
 static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 {
+	HAL_StatusTypeDef status;
 
 	/* Temporary buffers for the NULL side of the transaction */
 	uint8_t tx_dummy[64] = {0};
@@ -178,11 +217,19 @@ static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 		return false;
 	}
 
-	CHECK_ERR((HAL_SPI_TransmitReceive(&BSP_IMU_SPI_HANDLE,
+	if (!bsp_spi1_mutex_acquire())
+	{
+		return false;
+	}
+
+	status = HAL_SPI_TransmitReceive(&BSP_IMU_SPI_HANDLE,
 			(uint8_t *)tx_ptr,
 			rx_ptr,
 			length,
-			BSP_IMU_SPI_TIMEOUT_MS) == HAL_OK), false);
+			BSP_IMU_SPI_TIMEOUT_MS);
+	bsp_spi1_mutex_release();
+
+	CHECK_ERR((status == HAL_OK), false);
 
 	return true;
 }

@@ -48,10 +48,10 @@ extern "C" {
  * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
  * | TAG  | | poll_to_resp_delay| | N ANCHOR RESP     | | TAG   | | final_to_result_d | | N ANCHOR RESULT     |
  * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
- * | POLL | | (4.0ms default)   | | slots 1→N         | | FINAL | | (8.0ms default)   | | slots 1→N           |
- * | tx   | |                   | | N * 3.0ms         | | tx    | |                   | | N * 3.0ms           |
+ * | POLL | | (3.0ms default)   | | slots 1→N         | | FINAL | | (9.0ms default)   | | slots 1→N           |
+ * | tx   | |                   | | N * 5.0ms         | | tx    | |                   | | N * 5.0ms           |
  * +------+ +-------------------+ +-------------------+ +-------+ +-------------------+ +---------------------+
- *                                ^ each slot = slot_duration (2.0ms) + guard_time (1.0ms) = 3.0ms
+ *                                ^ each slot = slot_duration (3.0ms) + guard_time (2.0ms) = 5.0ms
  *
  * Full timing formula (based on current configuration):
  *   T_superframe(N) = poll_to_resp_delay
@@ -61,20 +61,20 @@ extern "C" {
  *                   + N * (slot_duration + guard_time)
  *                   + slot_duration (last result airtime)
  *
- *   => T_superframe(N) = 4000 + N*3000 + (2000 + 5000) + 8000 + N*3000 + 2000 (us)
- *                      = 22500 + 6000*N (us)
+ *   => T_superframe(N) = 3000 + N*5000 + (3000 + 7000) + 9000 + N*5000 + 3000 (us)
+ *                      = 25000 + 10000*N (us)
  *
  * Case N = 8 anchors (Maximum):
- *   T_active = 22500 + 6000*8 = 70500 us = 70.5 ms
+ *   T_active = 25000 + 10000*8 = 105000 us = 105.0 ms
  *
  * Case N = 6 anchors:
- *   T_active = 22500 + 6000*6 = 58500 us = 58.5 ms
+ *   T_active = 25000 + 10000*6 = 85000 us = 85.0 ms
  *
  * Case N = 4 anchors (Default):
- *   T_active = 22500 + 6000*4 = 46500 us = 46.5 ms
+ *   T_active = 25000 + 10000*4 = 65000 us = 65.0 ms
  *
  * Guard time notes:
- * - guard_time_us (1000us) is a safety gap inside each slot to absorb clock drift and processing jitter.
+ * - guard_time_us (2000us) is a safety gap inside each slot to absorb clock drift and processing jitter.
  * - This large guard ensures stability across all 8 possible anchor slots even with software overhead.
  */
 

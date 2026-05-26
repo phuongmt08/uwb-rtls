@@ -79,7 +79,13 @@ void MX_TIM10_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM10_Init 2 */
-
+  /* Re-initialize TIM10 with Prescaler = 959 to run at exactly 100 kHz (1 tick = 10us) for FreeRTOS run time stats. */
+  htim10.Init.Prescaler = 959;
+  if (HAL_TIM_Base_Init(&htim10) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  HAL_TIM_Base_Start(&htim10);
   /* USER CODE END TIM10_Init 2 */
 
 }
