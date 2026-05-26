@@ -189,10 +189,10 @@ def main():
         sys.exit(1)
 
     # Chọn provider theo thứ tự ưu tiên
-    if groq_key:
-        provider = "groq"
-    elif gemini_key:
+    if gemini_key:
         provider = "gemini"
+    elif groq_key:
+        provider = "groq"
     elif anthropic_key:
         provider = "claude"
     else:
