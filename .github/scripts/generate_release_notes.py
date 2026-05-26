@@ -71,8 +71,8 @@ def count_commits(prev: str, current: str) -> int:
 
 def call_gemini(api_key: str, system: str, user: str) -> str:
     """Gọi Gemini 2.0 Flash (miễn phí) qua REST API — không cần thư viện ngoài."""
+    import time
     model = "gemini-2.0-flash"
-    print(f"Calling {model} (free tier)…")
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models"
         f"/{model}:generateContent?key={api_key}"
@@ -85,14 +85,24 @@ def call_gemini(api_key: str, system: str, user: str) -> str:
     data = json.dumps(payload).encode()
     req  = urllib.request.Request(url, data=data,
                                   headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            body = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode()
-        print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
-        raise
-    return body["candidates"][0]["content"]["parts"][0]["text"]
+
+    max_retries = 3
+    wait = 20   # seconds — free tier retry delay thường ~17s
+    for attempt in range(1, max_retries + 1):
+        print(f"Calling {model} (attempt {attempt}/{max_retries})…")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = json.loads(resp.read())
+            return body["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()
+            if e.code == 429 and attempt < max_retries:
+                print(f"Rate limited (429). Waiting {wait}s before retry…")
+                time.sleep(wait)
+                wait *= 2   # exponential backoff: 20s → 40s → 80s
+            else:
+                print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
+                raise
 
 
 def call_claude(api_key: str, system: str, user: str) -> str:
