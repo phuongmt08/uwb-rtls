@@ -46,9 +46,10 @@ jobs:
       # ── 4. Gọi AI để sinh release notes ──────────────────────────────────
       - name: Generate AI Release Notes
         env:
-          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}   # tự động có sẵn, không cần setup!
+          GROQ_API_KEY:      ${{ secrets.GROQ_API_KEY }}       # FREE, khuyến nghị
           GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
           CURRENT_TAG: ${{ steps.tags.outputs.current }}
           PREV_TAG:    ${{ steps.tags.outputs.prev }}
         run: python .github/scripts/generate_release_notes.py

@@ -4,15 +4,14 @@ generate_release_notes.py
 Thu thập git log + diff stats từ PREV_TAG → CURRENT_TAG,
 gửi cho AI model và lưu release notes ra /tmp/release_notes.md.
 
-Thứ tự ưu tiên provider (dùng cái nào có key trước):
-  1. GITHUB_TOKEN    – GitHub Models (MIỄN PHÍ, tự động có trong Actions, KHUYẾN NGHỊ)
-                       Không cần setup gì thêm!
-  2. GEMINI_API_KEY  – Google Gemini 2.0 Flash (FREE tier)
-                       Tạo tại: https://aistudio.google.com/app/apikey
+Thứ tự ưu tiên provider:
+  1. GROQ_API_KEY      – Groq (MIỄN PHÍ, ổn định, KHUYẾN NGHỊ)
+                         Đăng ký tại: https://console.groq.com
+  2. GEMINI_API_KEY    – Google Gemini 2.0 Flash (FREE tier, rate limit thấp)
   3. ANTHROPIC_API_KEY – Claude Haiku (trả phí, ~$0.001/lần)
 
-  CURRENT_TAG        – tag vừa push (vd: 1.2.1)
-  PREV_TAG           – tag liền trước (vd: 1.2.0), có thể rỗng nếu là release đầu tiên
+  CURRENT_TAG          – tag vừa push (vd: 1.2.1)
+  PREV_TAG             – tag liền trước (vd: 1.2.0), có thể rỗng nếu là release đầu tiên
 """
 
 import json
@@ -71,7 +70,34 @@ def count_commits(prev: str, current: str) -> int:
 
 # ─────────────────────────── AI providers ───────────────────────────────────
 
-def call_github_models(token: str, system: str, user: str) -> str:
+def call_groq(api_key: str, system: str, user: str) -> str:
+    """Gọi Groq API (miễn phí, 30 req/phút) — OpenAI-compatible format."""
+    print("Calling Groq (llama-3.3-70b-versatile, free tier)…")
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
+        ],
+        "max_tokens": 1024,
+        "temperature": 0.3,
+    }
+    data = json.dumps(payload).encode()
+    req  = urllib.request.Request(url, data=data, headers={
+        "Content-Type":  "application/json",
+        "Authorization": f"Bearer {api_key}",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read())
+        return body["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        print(f"Groq API error {e.code}: {err_body}", file=sys.stderr)
+        raise
+
+
     """Gọi GitHub Models qua GITHUB_TOKEN — không cần API key riêng, miễn phí."""
     print("Calling GitHub Models (Llama-3.3-70B via GITHUB_TOKEN)…")
     url = "https://models.inference.ai.azure.com/chat/completions"
@@ -116,23 +142,15 @@ def call_gemini(api_key: str, system: str, user: str) -> str:
     req  = urllib.request.Request(url, data=data,
                                   headers={"Content-Type": "application/json"})
 
-    max_retries = 3
-    wait = 20   # seconds — free tier retry delay thường ~17s
-    for attempt in range(1, max_retries + 1):
-        print(f"Calling {model} (attempt {attempt}/{max_retries})…")
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                body = json.loads(resp.read())
-            return body["candidates"][0]["content"]["parts"][0]["text"]
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode()
-            if e.code == 429 and attempt < max_retries:
-                print(f"Rate limited (429). Waiting {wait}s before retry…")
-                time.sleep(wait)
-                wait *= 2   # exponential backoff: 20s → 40s → 80s
-            else:
-                print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
-                raise
+    print(f"Calling {model}…")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read())
+        return body["candidates"][0]["content"]["parts"][0]["text"]
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
+        raise
 
 
 def call_claude(api_key: str, system: str, user: str) -> str:
@@ -159,24 +177,26 @@ def call_claude(api_key: str, system: str, user: str) -> str:
 # ─────────────────────────── main ───────────────────────────────────────────
 
 def main():
-    github_token  = os.environ.get("GITHUB_TOKEN", "")
+    groq_key      = os.environ.get("GROQ_API_KEY", "")
     gemini_key    = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    github_token  = os.environ.get("GITHUB_TOKEN", "")
     current_tag   = os.environ.get("CURRENT_TAG", "unknown")
     prev_tag      = os.environ.get("PREV_TAG", "")
 
-    if not github_token and not gemini_key and not anthropic_key:
-        print("ERROR: Không tìm thấy API key nào. Cần ít nhất một trong:", file=sys.stderr)
-        print("  GITHUB_TOKEN (tự động), GEMINI_API_KEY, hoặc ANTHROPIC_API_KEY", file=sys.stderr)
+    if not groq_key and not gemini_key and not anthropic_key:
+        print("ERROR: Cần ít nhất một API key: GROQ_API_KEY, GEMINI_API_KEY, hoặc ANTHROPIC_API_KEY", file=sys.stderr)
         sys.exit(1)
 
     # Chọn provider theo thứ tự ưu tiên
-    if github_token:
-        provider = "github"
+    if groq_key:
+        provider = "groq"
     elif gemini_key:
         provider = "gemini"
-    else:
+    elif anthropic_key:
         provider = "claude"
+    else:
+        provider = "github"
     print(f"Using provider: {provider}")
 
     print(f"Generating release notes: {prev_tag or '<first>'} → {current_tag}")
@@ -239,7 +259,9 @@ Please write the release note now.
 """
 
     # ── Gọi AI API ───────────────────────────────────────────────────────────
-    if provider == "github":
+    if provider == "groq":
+        release_notes = call_groq(groq_key, system_prompt, user_message)
+    elif provider == "github":
         release_notes = call_github_models(github_token, system_prompt, user_message)
     elif provider == "gemini":
         release_notes = call_gemini(gemini_key, system_prompt, user_message)
