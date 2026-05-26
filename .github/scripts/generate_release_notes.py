@@ -4,10 +4,12 @@ generate_release_notes.py
 Thu thập git log + diff stats từ PREV_TAG → CURRENT_TAG,
 gửi cho AI model và lưu release notes ra /tmp/release_notes.md.
 
-Env vars — chỉ cần set MỘT trong hai:
-  GEMINI_API_KEY     – Google Gemini API key (FREE, khuyến nghị)
+Thứ tự ưu tiên provider (dùng cái nào có key trước):
+  1. GITHUB_TOKEN    – GitHub Models (MIỄN PHÍ, tự động có trong Actions, KHUYẾN NGHỊ)
+                       Không cần setup gì thêm!
+  2. GEMINI_API_KEY  – Google Gemini 2.0 Flash (FREE tier)
                        Tạo tại: https://aistudio.google.com/app/apikey
-  ANTHROPIC_API_KEY  – Claude API key (trả phí, fallback)
+  3. ANTHROPIC_API_KEY – Claude Haiku (trả phí, ~$0.001/lần)
 
   CURRENT_TAG        – tag vừa push (vd: 1.2.1)
   PREV_TAG           – tag liền trước (vd: 1.2.0), có thể rỗng nếu là release đầu tiên
@@ -69,6 +71,34 @@ def count_commits(prev: str, current: str) -> int:
 
 # ─────────────────────────── AI providers ───────────────────────────────────
 
+def call_github_models(token: str, system: str, user: str) -> str:
+    """Gọi GitHub Models qua GITHUB_TOKEN — không cần API key riêng, miễn phí."""
+    print("Calling GitHub Models (Llama-3.3-70B via GITHUB_TOKEN)…")
+    url = "https://models.inference.ai.azure.com/chat/completions"
+    payload = {
+        "model": "Meta-Llama-3.3-70B-Instruct",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
+        ],
+        "max_tokens": 1024,
+        "temperature": 0.3,
+    }
+    data = json.dumps(payload).encode()
+    req  = urllib.request.Request(url, data=data, headers={
+        "Content-Type":  "application/json",
+        "Authorization": f"Bearer {token}",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read())
+        return body["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        print(f"GitHub Models error {e.code}: {err_body}", file=sys.stderr)
+        raise
+
+
 def call_gemini(api_key: str, system: str, user: str) -> str:
     """Gọi Gemini 2.0 Flash (miễn phí) qua REST API — không cần thư viện ngoài."""
     import time
@@ -129,16 +159,25 @@ def call_claude(api_key: str, system: str, user: str) -> str:
 # ─────────────────────────── main ───────────────────────────────────────────
 
 def main():
+    github_token  = os.environ.get("GITHUB_TOKEN", "")
     gemini_key    = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     current_tag   = os.environ.get("CURRENT_TAG", "unknown")
     prev_tag      = os.environ.get("PREV_TAG", "")
 
-    if not gemini_key and not anthropic_key:
-        print("ERROR: Set either GEMINI_API_KEY (free) or ANTHROPIC_API_KEY in GitHub Secrets.", file=sys.stderr)
+    if not github_token and not gemini_key and not anthropic_key:
+        print("ERROR: Không tìm thấy API key nào. Cần ít nhất một trong:", file=sys.stderr)
+        print("  GITHUB_TOKEN (tự động), GEMINI_API_KEY, hoặc ANTHROPIC_API_KEY", file=sys.stderr)
         sys.exit(1)
 
-    use_gemini = bool(gemini_key)   # Gemini được ưu tiên nếu có
+    # Chọn provider theo thứ tự ưu tiên
+    if github_token:
+        provider = "github"
+    elif gemini_key:
+        provider = "gemini"
+    else:
+        provider = "claude"
+    print(f"Using provider: {provider}")
 
     print(f"Generating release notes: {prev_tag or '<first>'} → {current_tag}")
 
@@ -200,7 +239,9 @@ Please write the release note now.
 """
 
     # ── Gọi AI API ───────────────────────────────────────────────────────────
-    if use_gemini:
+    if provider == "github":
+        release_notes = call_github_models(github_token, system_prompt, user_message)
+    elif provider == "gemini":
         release_notes = call_gemini(gemini_key, system_prompt, user_message)
     else:
         release_notes = call_claude(anthropic_key, system_prompt, user_message)

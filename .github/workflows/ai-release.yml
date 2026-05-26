@@ -46,7 +46,7 @@ jobs:
       # ── 4. Gọi AI để sinh release notes ──────────────────────────────────
       - name: Generate AI Release Notes
         env:
-          # Dùng Gemini (FREE) hoặc Anthropic — set ít nhất một trong hai trong GitHub Secrets
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}   # tự động có sẵn, không cần setup!
           GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CURRENT_TAG: ${{ steps.tags.outputs.current }}
