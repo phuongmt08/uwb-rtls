@@ -1,0 +1,64 @@
+name: 🚀 AI Release Notes
+
+on:
+  push:
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'   # matches 1.2.0, 2.0.1, ...
+      - 'v[0-9]*.[0-9]*.[0-9]*'  # matches v1.2.0, v2.0.1, ...
+
+permissions:
+  contents: write   # needed to create GitHub Release
+
+jobs:
+  generate-release:
+    name: Generate AI Release Notes
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout với full history để lấy git log ──────────────────────
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      # ── 2. Python env ─────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 3. Tìm tag trước để lấy diff range ───────────────────────────────
+      - name: Resolve previous tag
+        id: tags
+        run: |
+          CURRENT="${GITHUB_REF_NAME}"
+          # Lấy tag ngay trước current tag (sort theo semver)
+          PREV=$(git tag --sort=-version:refname \
+                   | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+                   | grep -v "^${CURRENT}$" \
+                   | head -1)
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "prev=${PREV}"       >> "$GITHUB_OUTPUT"
+          echo "▶ Current tag : ${CURRENT}"
+          echo "▶ Previous tag: ${PREV:-<none – first release>}"
+
+      # ── 4. Gọi AI để sinh release notes ──────────────────────────────────
+      - name: Generate AI Release Notes
+        env:
+          # Dùng Gemini (FREE) hoặc Anthropic — set ít nhất một trong hai trong GitHub Secrets
+          GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CURRENT_TAG: ${{ steps.tags.outputs.current }}
+          PREV_TAG:    ${{ steps.tags.outputs.prev }}
+        run: python .github/scripts/generate_release_notes.py
+
+      # ── 5. Tạo GitHub Release với nội dung vừa sinh ──────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Release ${{ steps.tags.outputs.current }}"
+          body_path: /tmp/release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.tags.outputs.current, '-') }}
+
