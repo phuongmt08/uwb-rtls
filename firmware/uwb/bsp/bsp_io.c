@@ -12,6 +12,7 @@
 #include "gpio.h"
 #include "positioning_config.h"
 #include "stm32f4xx_hal.h"
+#include "usbd_cdc_if.h"
 #include "app_rtos_handles.h"
 
 #include <string.h>
