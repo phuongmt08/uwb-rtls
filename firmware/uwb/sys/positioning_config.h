@@ -222,7 +222,7 @@
 #endif
 
 #ifndef MW_TRIL_FP_AMP_GOOD
-#define MW_TRIL_FP_AMP_GOOD                        45.0
+#define MW_TRIL_FP_AMP_GOOD                        40.0
 #endif
 
 #ifndef MW_TRIL_WEIGHT_D2

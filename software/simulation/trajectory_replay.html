@@ -837,6 +837,9 @@
         let isDragging = false;
         let startX, startY;
         let yawOffset = 0.0;
+        let hoverPoint = null;
+        let lastMouseEvent = null;
+        let lastDrawRatio = 0.0;
 
         function updateYawOffset(val) {
             yawOffset = parseFloat(val);
@@ -915,11 +918,152 @@
             drawFrame();
         }
 
+        function getCanvasMouse(e) {
+            const rect = canvas.getBoundingClientRect();
+            const sx = canvas.width / rect.width;
+            const sy = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * sx,
+                y: (e.clientY - rect.top) * sy
+            };
+        }
+
+        function formatTimeValue(t) {
+            return Number.isFinite(t) ? `${t.toFixed(4)}s` : 'N/A';
+        }
+
+        function getCurrentReplayTime() {
+            const nextIdx = Math.min(totalSamples - 1, currentIndex + 1);
+            return lerp(times[currentIndex], times[nextIdx], lastDrawRatio);
+        }
+
+        function updateHoverFromMouse(e) {
+            lastMouseEvent = e;
+            if (!e || isDragging) {
+                hoverPoint = null;
+                return;
+            }
+
+            const mouse = getCanvasMouse(e);
+            const currentT = getCurrentReplayTime();
+            const thresholdPx = 12;
+            let best = null;
+
+            const considerPoint = (item) => {
+                if (!Number.isFinite(item.x) || !Number.isFinite(item.y)) return;
+                const sx = toCanvasX(item.x);
+                const sy = toCanvasY(item.y);
+                const dx = sx - mouse.x;
+                const dy = sy - mouse.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > thresholdPx) return;
+                if (!best || dist < best.dist) {
+                    best = { ...item, sx, sy, dist };
+                }
+            };
+
+            const scanPath = (label, path, pathTimes, limitIndex, color, modeProvider) => {
+                if (!path || !path.x || !path.y) return;
+                const maxIndex = Math.min(limitIndex, path.x.length - 1, path.y.length - 1);
+                for (let k = 0; k <= maxIndex; k++) {
+                    const x = path.x[k];
+                    const y = path.y[k];
+                    if (x === null || y === null) continue;
+                    const mode = modeProvider ? modeProvider(k) : '';
+                    considerPoint({
+                        label,
+                        index: k,
+                        time: pathTimes && Number.isFinite(pathTimes[k]) ? pathTimes[k] : null,
+                        x,
+                        y,
+                        mode,
+                        color
+                    });
+                }
+            };
+
+            if (document.getElementById('chk_wls').checked) {
+                scanPath('WLS', data.wlsPath, times, currentIndex, '#f59e0b');
+            }
+            if (document.getElementById('chk_triplet').checked) {
+                scanPath('Triplet', data.tripletPath, times, currentIndex, '#10b981');
+            }
+            if (document.getElementById('chk_fw').checked) {
+                scanPath('Firmware', data.firmwarePath, times, currentIndex, '#94a3b8');
+            }
+            if (document.getElementById('chk_ukf').checked) {
+                const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+                if (has20Hz) {
+                    let maxK = 0;
+                    for (let k = 0; k < data.ukfTimes20Hz.length; k++) {
+                        if (data.ukfTimes20Hz[k] <= currentT) maxK = k;
+                        else break;
+                    }
+                    scanPath('UKF', data.ukfPath20Hz, data.ukfTimes20Hz, maxK, '#38bdf8',
+                        k => data.ukfModes20Hz[k] === 1 ? 'Update' : 'Predict');
+                } else {
+                    scanPath('UKF', data.ukfPath, times, currentIndex, '#38bdf8',
+                        k => data.ukfModes && data.ukfModes[k] === 1 ? 'Update' : 'Predict');
+                }
+            }
+
+            hoverPoint = best;
+        }
+
+        function drawHoverTooltip() {
+            if (!hoverPoint) return;
+
+            const lines = [
+                `${hoverPoint.label}${hoverPoint.mode ? ' - ' + hoverPoint.mode : ''}`,
+                `Idx: ${hoverPoint.index}   Time: ${formatTimeValue(hoverPoint.time)}`,
+                `X: ${hoverPoint.x.toFixed(3)} m   Y: ${hoverPoint.y.toFixed(3)} m`
+            ];
+
+            ctx.save();
+            ctx.font = '12px Share Tech Mono';
+            const lineHeight = 17;
+            const paddingX = 10;
+            const paddingY = 8;
+            const width = Math.max(...lines.map(line => ctx.measureText(line).width)) + paddingX * 2;
+            const height = lines.length * lineHeight + paddingY * 2;
+            let x = hoverPoint.sx + 14;
+            let y = hoverPoint.sy - height - 14;
+            if (x + width > canvas.width - 8) x = hoverPoint.sx - width - 14;
+            if (y < 8) y = hoverPoint.sy + 14;
+
+            ctx.beginPath();
+            ctx.arc(hoverPoint.sx, hoverPoint.sy, 6, 0, 2 * Math.PI);
+            ctx.fillStyle = hoverPoint.color;
+            ctx.shadowColor = hoverPoint.color;
+            ctx.shadowBlur = 10;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.roundRect(x, y, width, height, 7);
+            ctx.fillStyle = 'rgba(9, 13, 22, 0.94)';
+            ctx.strokeStyle = hoverPoint.color;
+            ctx.lineWidth = 1;
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.textAlign = 'left';
+            lines.forEach((line, i) => {
+                ctx.fillText(line, x + paddingX, y + paddingY + 12 + i * lineHeight);
+            });
+            ctx.restore();
+        }
+
         // --- Canvas Interactive Mouse Event Listeners for Panning ---
         canvas.style.cursor = 'grab';
 
         canvas.addEventListener('mousedown', (e) => {
             isDragging = true;
+            hoverPoint = null;
             startX = e.clientX - panX;
             startY = e.clientY - panY;
             canvas.style.cursor = 'grabbing';
@@ -928,15 +1072,32 @@
         window.addEventListener('mouseup', () => {
             if (isDragging) {
                 isDragging = false;
-                canvas.style.cursor = 'grab';
+                canvas.style.cursor = hoverPoint ? 'crosshair' : 'grab';
+                if (lastMouseEvent) {
+                    updateHoverFromMouse(lastMouseEvent);
+                    drawFrame(lastDrawRatio);
+                }
             }
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            panX = e.clientX - startX;
-            panY = e.clientY - startY;
-            drawFrame();
+            if (isDragging) {
+                panX = e.clientX - startX;
+                panY = e.clientY - startY;
+                drawFrame(lastDrawRatio);
+                return;
+            }
+
+            updateHoverFromMouse(e);
+            canvas.style.cursor = hoverPoint ? 'crosshair' : 'grab';
+            drawFrame(lastDrawRatio);
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            lastMouseEvent = null;
+            hoverPoint = null;
+            canvas.style.cursor = 'grab';
+            drawFrame(lastDrawRatio);
         });
 
         // --- Canvas Interactive Mouse Wheel Event Listener for Zooming ---
@@ -1211,6 +1372,7 @@
 
         // Draw track, anchors, path lines, and animated vehicle with smooth interpolation
         function drawFrame(ratio = 0.0) {
+            lastDrawRatio = ratio;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const nextIdx = Math.min(totalSamples - 1, currentIndex + 1);
 
@@ -1591,6 +1753,11 @@
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
+
+            if (lastMouseEvent && !isDragging) {
+                updateHoverFromMouse(lastMouseEvent);
+            }
+            drawHoverTooltip();
         }
 
         // Initialize display

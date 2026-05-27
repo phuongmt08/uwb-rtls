@@ -59,7 +59,8 @@ self.onmessage = function(e) {
         return Math.sqrt(Math.max(0, d**2 - (anchor.z - tagHeight)**2));
     };
 
-    let v_clean = { x: 0, y: 0 }, yaw = 0, zupt_cnt = 0;
+    let v_raw = { x: 0, y: 0 }, v_clean = { x: 0, y: 0 }, yaw = 0, zupt_cnt = 0;
+    let zuptActive = false;
     const simPath  = { x: [], y: [] };
     const simPathRuled = { x: [], y: [] };
     const simPathWLS     = { x: [], y: [] };
@@ -99,8 +100,8 @@ self.onmessage = function(e) {
     };
 
     const plotData = { 
-        vx: [], vy: [], zupt: [], ax: [], ay: [], gz: [], yaw: [], times: [],
-        ukf_vx: [], ukf_vy: [], ukf_yaw: [] 
+        vx_raw: [], vy_raw: [], vx: [], vy: [], zupt: [], ax: [], ay: [], gz: [], yaw: [], times: [],
+        ukf_yaw: [] 
     };
     let sampleIdx = 0, total_time = 0;
     let last_ax = 0, last_ay = 0, last_gz = 0;
@@ -119,20 +120,14 @@ self.onmessage = function(e) {
             const acc_mag = Math.sqrt((entry.ax - bias.ax)**2 + (entry.ay - bias.ay)**2);
             const gyr_mag = Math.abs(entry.gz - bias.gz);
             if (acc_mag < params.zupt_acc && gyr_mag < params.zupt_gyr) zupt_cnt++; else zupt_cnt = 0;
-            const zuptActive = zupt_cnt > SIM_CONFIG.IMU.ZUPT_COUNT_THRESHOLD;
-            const applyZuptToUkf = params.enable_zupt_ukf === true;
-            const zeroImu = {
-                ax: filter.ukf.is_initialized ? filter.ukf.x[5] : bias.ax,
-                ay: filter.ukf.is_initialized ? filter.ukf.x[6] : bias.ay,
-                gz: filter.ukf.is_initialized ? filter.ukf.x[7] : bias.gz
-            };
-            const imuForUkf = (applyZuptToUkf && zuptActive) ? zeroImu : { ax: entry.ax, ay: entry.ay, gz: entry.gz };
-
+            zuptActive = zupt_cnt > SIM_CONFIG.IMU.ZUPT_COUNT_THRESHOLD;
             // UKF Predict
-            filter.predict(imuForUkf, entry.dt);
-            if (applyZuptToUkf && zuptActive) {
-                filter.applyZupt();
-            }
+            filter.predict({ ax: entry.ax, ay: entry.ay, gz: entry.gz }, entry.dt);
+
+            v_raw.x += (entry.ax - bias.ax) * entry.dt;
+            v_raw.y += (entry.ay - bias.ay) * entry.dt;
+            v_raw.x *= SIM_CONFIG.IMU.VELOCITY_DECAY;
+            v_raw.y *= SIM_CONFIG.IMU.VELOCITY_DECAY;
 
             if (zuptActive) {
                 v_clean.x = 0;
@@ -143,7 +138,7 @@ self.onmessage = function(e) {
                 v_clean.x *= SIM_CONFIG.IMU.VELOCITY_DECAY;
                 v_clean.y *= SIM_CONFIG.IMU.VELOCITY_DECAY;
             }
-            yaw += (imuForUkf.gz - bias.gz) * entry.dt;
+            yaw += (entry.gz - bias.gz) * entry.dt;
         }
 
         if (entry.type === 'Update') {
@@ -263,7 +258,7 @@ self.onmessage = function(e) {
             simPathWLS.y.push(pos_wls ? pos_wls.y : null);
             wlsInfo.push(pos_wls ? `N=${v_anchors_best.length}<br>${v_anchors_best.map(a => `A${a.id}(w=${anchorWeight(a).toFixed(2)},amp=${(a.fp_amp || 0).toFixed(1)})`).join(', ')}` : 'None');
 
-            const bestTriplet = selectBestTriplet(v_anchors_best, params.T2_high);
+            const bestTriplet = selectBestTriplet(v_anchors_best, params.T2_high, params.triplet_weights);
             simPathTriplet.x.push(bestTriplet ? bestTriplet.pos.x : null);
             simPathTriplet.y.push(bestTriplet ? bestTriplet.pos.y : null);
             bestTripletInfo.push(bestTriplet ? `${bestTriplet.triplet.map(a => 'A'+a.id).join(',')}<br>score=${bestTriplet.score.toFixed(3)} fp=${bestTriplet.fpAmpPenalty.toFixed(2)}` : 'None');
@@ -273,15 +268,15 @@ self.onmessage = function(e) {
             simPathUKF_plot.y.push(filter.ukf.is_initialized ? filter.ukf.x[1] : null);
             simPathUKF_modes.push(acceptedMeasurements.length > 0 ? 1 : 0);
 
+            plotData.vx_raw.push(v_raw.x);
+            plotData.vy_raw.push(v_raw.y);
             plotData.vx.push(v_clean.x);
             plotData.vy.push(v_clean.y);
-            plotData.zupt.push(zupt_cnt > SIM_CONFIG.IMU.ZUPT_COUNT_THRESHOLD ? 0.1 : 0);
+            plotData.zupt.push(zuptActive ? 1.0 : 0.0);
             plotData.ax.push(last_ax - bias.ax);
             plotData.ay.push(last_ay - bias.ay);
             plotData.gz.push(last_gz - bias.gz);
             plotData.yaw.push(yaw * 180 / Math.PI);
-            plotData.ukf_vx.push(filter.ukf.is_initialized ? filter.ukf.x[2] : 0);
-            plotData.ukf_vy.push(filter.ukf.is_initialized ? filter.ukf.x[3] : 0);
             plotData.ukf_yaw.push(filter.ukf.is_initialized ? filter.ukf.x[4] * 180 / Math.PI : 0);
             plotData.times.push(total_time);
             sampleIdx++;

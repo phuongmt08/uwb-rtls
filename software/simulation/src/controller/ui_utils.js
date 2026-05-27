@@ -140,13 +140,13 @@ function addRule(start, end, activeAnchors) {
     const div = document.createElement('div');
     div.id = 'rule_' + id;
     div.style.display = 'flex';
-    div.style.gap = '10px';
+    div.style.gap = '8px';
     div.style.alignItems = 'center';
     div.style.background = '#f8fafc';
-    div.style.padding = '8px 12px';
+    div.style.padding = '6px 10px';
     div.style.borderRadius = '6px';
     div.style.border = '1px solid #e2e8f0';
-    div.style.fontSize = '0.85rem';
+    div.style.fontSize = '0.8rem';
 
     let checksHTML = '';
     for (let i = 0; i < 4; i++) {
@@ -157,14 +157,14 @@ function addRule(start, end, activeAnchors) {
     div.innerHTML = `
         <div style="display:flex; align-items:center; gap:5px;">
             <span style="font-weight:bold; color:#64748b;">Range:</span>
-            <input type="number" class="rule-start" value="${start}" style="width: 70px; padding: 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
+            <input type="number" class="rule-start" value="${start}" style="width: 60px; padding: 3px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
             <span>-</span>
-            <input type="number" class="rule-end" value="${end}" style="width: 70px; padding: 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
+            <input type="number" class="rule-end" value="${end}" style="width: 60px; padding: 3px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
         </div>
-        <div style="display:flex; gap: 12px; margin-left: 15px; flex-grow: 1;">
+        <div style="display:flex; gap: 8px; margin-left: 10px; flex-grow: 1;">
             ${checksHTML}
         </div>
-        <button onclick="removeRule(${id})" style="cursor:pointer; color: #ef4444; border:none; background:none; font-weight:bold; font-size:1.2rem; padding:0 5px;" title="Remove Rule">&times;</button>
+        <button onclick="removeRule(${id})" style="cursor:pointer; color: #ef4444; border:none; background:none; font-weight:bold; font-size:1rem; padding:0 4px;" title="Remove Rule">&times;</button>
     `;
 
     document.getElementById('rules_container').appendChild(div);
@@ -365,7 +365,6 @@ function saveDefaults() {
         rescue_min_anchors: document.getElementById('win_input').value,
         zupt_acc: document.getElementById('zupt_acc_input').value,
         zupt_gyr: document.getElementById('zupt_gyr_input').value,
-        enable_zupt_ukf: document.getElementById('enable_zupt_ukf').checked,
         max_samples: document.getElementById('max_samples_input').value,
         enable_smoother: document.getElementById('enable_smoother').checked,
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
@@ -381,7 +380,11 @@ function saveDefaults() {
         q_a: document.getElementById('ukf_qa_input').value,
         q_g: document.getElementById('ukf_qg_input').value,
         r_uwb: document.getElementById('ukf_ruwb_input').value,
-        r_gate: document.getElementById('ukf_rgate_input').value
+        r_gate: document.getElementById('ukf_rgate_input').value,
+        triplet_w_d2: document.getElementById('triplet_w_d2_input').value,
+        triplet_w_fp: document.getElementById('triplet_w_fp_input').value,
+        triplet_w_gdop: document.getElementById('triplet_w_gdop_input').value,
+        triplet_w_resid: document.getElementById('triplet_w_resid_input').value
     };
     const ruleDivs = document.getElementById('rules_container').children;
     for (let i = 0; i < ruleDivs.length; i++) {
@@ -443,9 +446,6 @@ function loadDefaults() {
                 document.getElementById('zupt_gyr_range').value = config.zupt_gyr;
                 document.getElementById('zupt_gyr_val').innerText = config.zupt_gyr;
             }
-            if (loadTuning && config.enable_zupt_ukf !== undefined) {
-                document.getElementById('enable_zupt_ukf').checked = config.enable_zupt_ukf;
-            }
             if (loadTuning && config.max_samples) {
                 document.getElementById('max_samples_input').value = config.max_samples;
                 document.getElementById('max_samples_range').value = config.max_samples;
@@ -506,6 +506,26 @@ function loadDefaults() {
                 document.getElementById('ukf_rgate_input').value = config.r_gate;
                 document.getElementById('ukf_rgate_range').value = config.r_gate;
                 document.getElementById('ukf_rgate_val').innerText = config.r_gate;
+            }
+            if (loadTuning && config.triplet_w_d2 !== undefined) {
+                document.getElementById('triplet_w_d2_input').value = config.triplet_w_d2;
+                document.getElementById('triplet_w_d2_range').value = config.triplet_w_d2;
+                document.getElementById('triplet_w_d2_val').innerText = config.triplet_w_d2;
+            }
+            if (loadTuning && config.triplet_w_fp !== undefined) {
+                document.getElementById('triplet_w_fp_input').value = config.triplet_w_fp;
+                document.getElementById('triplet_w_fp_range').value = config.triplet_w_fp;
+                document.getElementById('triplet_w_fp_val').innerText = config.triplet_w_fp;
+            }
+            if (loadTuning && config.triplet_w_gdop !== undefined) {
+                document.getElementById('triplet_w_gdop_input').value = config.triplet_w_gdop;
+                document.getElementById('triplet_w_gdop_range').value = config.triplet_w_gdop;
+                document.getElementById('triplet_w_gdop_val').innerText = config.triplet_w_gdop;
+            }
+            if (loadTuning && config.triplet_w_resid !== undefined) {
+                document.getElementById('triplet_w_resid_input').value = config.triplet_w_resid;
+                document.getElementById('triplet_w_resid_range').value = config.triplet_w_resid;
+                document.getElementById('triplet_w_resid_val').innerText = config.triplet_w_resid;
             }
 
             if (loadTuning && config.rules && config.rules.length > 0) {

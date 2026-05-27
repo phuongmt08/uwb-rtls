@@ -56,7 +56,63 @@
         <a href="/simulation_dashboard.html" class="btn-dashboard">← Back to Dashboard</a>
     </div>
     <div class="config-card">
-        <strong style="color: #475569; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 15px; border-left: 4px solid #475569; padding-left: 10px;">Mahalanobis Hysteresis Parameters</strong>
+        <div class="anchor-editor" style="border-top:none; padding-top:0;">
+            <div class="anchor-editor-header">
+                <label style="margin: 0;">Anchor Positions (meters):</label>
+                <button onclick="resetAnchorsToDefault()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #475569; color: white; border: none; border-radius: 6px; font-weight: bold;">Reset Anchors</button>
+            </div>
+            <div id="anchor_editor" class="anchor-grid"></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 24px; align-items: start; border-top: 1px solid #f1f5f9; padding-top: 20px;">
+            <div class="control-item">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <label style="margin: 0;">Anchor Selection Rules:</label>
+                    <button onclick="addRule()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #8b5cf6; color: white; border: none; border-radius: 6px; font-weight: bold;">+ Add Rule</button>
+                </div>
+                <div id="rules_container" style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; padding-right: 4px;"></div>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="control-item" style="flex-grow: 1;">
+                        <select id="groundtruth_select" onchange="onGroundTruthChanged()" style="padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.85rem; width: 100%;"></select>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 0;">
+                        <input type="checkbox" id="enable_mahalanobis" checked onchange="update()"> <span style="font-weight: 600; color: #1e293b;">Enable Mahalanobis Prefilter Gate</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 0;">
+                        <input type="checkbox" id="enable_smoother" onchange="update()"> <span style="color: #475569;">Enable Distance Smoothing (Alpha: 0.25, Jump Limit: 0.3m)</span>
+                    </label>
+                </div>
+                
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="control-item" style="flex-grow: 1;">
+                        <select id="export_path_select" onchange="updatePositionRateDisplay()" style="padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <option value="firmware">Export: Firmware Path</option>
+                            <option value="rules">Export: Simulated Path (Rules)</option>
+                            <option value="wls">Export: Simulated Path (Multilateration)</option>
+                            <option value="triplet">Export: Simulated Path (Best Triplet)</option>
+                            <option value="ukf" selected>Export: Simulated Path (UKF Fusion)</option>
+                        </select>
+                    </div>
+                    <button onclick="exportTrajectoryCsv()" style="background: #8b5cf6; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Export CSV</button>
+                    <button onclick="openReplayPage()" style="background: #7c3aed; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Replay Trajectory</button>
+                </div>
+
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="saveDefaults()" style="flex: 1; background: #10b981; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Save Defaults</button>
+                    <button onclick="clearDefaults()" style="flex: 1; background: #ef4444; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Clear Defaults</button>
+                </div>
+                
+                <div id="position_rate_info" style="font-size: 0.85rem; color: #1e293b; font-weight: 600; padding: 5px; text-align: right;">Position Hz: --</div>
+            </div>
+        </div>
+
+        <strong style="color: #475569; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin: 25px 0 15px; border-left: 4px solid #475569; padding-left: 10px;">Mahalanobis Hysteresis Parameters</strong>
         <div class="config-grid">
             <div class="control-group">
                 <div class="control-item">
@@ -201,63 +257,45 @@
             </div>
         </div>
 
-        <div class="anchor-editor">
-            <div class="anchor-editor-header">
-                <label style="margin: 0;">Anchor Positions (meters):</label>
-                <button onclick="resetAnchorsToDefault()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #475569; color: white; border: none; border-radius: 6px; font-weight: bold;">Reset Anchors</button>
-            </div>
-            <div id="anchor_editor" class="anchor-grid"></div>
+        <div style="border-top: 1px solid #e2e8f0; margin-top: 25px; padding-top: 20px; margin-bottom: 15px;">
+            <strong style="color: #475569; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 15px; border-left: 4px solid #0ea5e9; padding-left: 10px;">Triplet Score Weights</strong>
         </div>
-
-        <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 40px; border-top: 1px solid #f1f5f9; padding-top: 20px;">
-            <div class="control-item">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <label style="margin: 0;">Anchor Selection Rules:</label>
-                    <button onclick="addRule()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #8b5cf6; color: white; border: none; border-radius: 6px; font-weight: bold;">+ Add Rule</button>
+        <div class="config-grid">
+            <div class="control-group">
+                <div class="control-item">
+                    <label>D2 Weight (%): <span id="triplet_w_d2_val" class="val">35</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="triplet_w_d2_range" min="0" max="100" step="1" value="35" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_w_d2_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="35" onchange="update()">
+                    </div>
                 </div>
-                <div id="rules_container" style="display: flex; flex-direction: column; gap: 8px;"></div>
             </div>
-            
-            <div style="display: flex; flex-direction: column; gap: 15px;">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <div class="control-item" style="flex-grow: 1;">
-                        <select id="groundtruth_select" onchange="onGroundTruthChanged()" style="padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.85rem; width: 100%;"></select>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>FP Amp Weight (%): <span id="triplet_w_fp_val" class="val">15</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="triplet_w_fp_range" min="0" max="100" step="1" value="15" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_w_fp_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="15" onchange="update()">
                     </div>
                 </div>
-
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 0;">
-                        <input type="checkbox" id="enable_mahalanobis" checked onchange="update()"> <span style="font-weight: 600; color: #1e293b;">Enable Mahalanobis Prefilter Gate</span>
-                    </label>
-                    <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 0;">
-                        <input type="checkbox" id="enable_zupt_ukf" onchange="update()"> <span style="color: #475569;">Apply ZUPT Correction to UKF</span>
-                    </label>
-                    <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f8fafc; padding: 10px; border-radius: 8px; margin: 0;">
-                        <input type="checkbox" id="enable_smoother" onchange="update()"> <span style="color: #475569;">Enable Distance Smoothing (Alpha: 0.25, Jump Limit: 0.3m)</span>
-                    </label>
-                </div>
-                
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <div class="control-item" style="flex-grow: 1;">
-                        <select id="export_path_select" onchange="updatePositionRateDisplay()" style="padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.85rem; width: 100%;">
-                            <option value="firmware">Export: Firmware Path</option>
-                            <option value="all">Export: Simulated Path (All)</option>
-                            <option value="rules">Export: Simulated Path (Rules)</option>
-                            <option value="wls">Export: Simulated Path (Multilateration)</option>
-                            <option value="triplet">Export: Simulated Path (Best Triplet)</option>
-                            <option value="ukf" selected>Export: Simulated Path (UKF Fusion)</option>
-                        </select>
+            </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>GDOP Weight (%): <span id="triplet_w_gdop_val" class="val">20</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="triplet_w_gdop_range" min="0" max="100" step="1" value="20" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_w_gdop_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="20" onchange="update()">
                     </div>
-                    <button onclick="exportTrajectoryCsv()" style="background: #8b5cf6; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Export CSV</button>
-                    <button onclick="openReplayPage()" style="background: #7c3aed; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Replay Trajectory</button>
                 </div>
-
-                <div style="display: flex; gap: 10px;">
-                    <button onclick="saveDefaults()" style="flex: 1; background: #10b981; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Save Defaults</button>
-                    <button onclick="clearDefaults()" style="flex: 1; background: #ef4444; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Clear Defaults</button>
+            </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>Residual Weight (%): <span id="triplet_w_resid_val" class="val">30</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="triplet_w_resid_range" min="0" max="100" step="1" value="30" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_w_resid_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="30" onchange="update()">
+                    </div>
                 </div>
-                
-                <div id="position_rate_info" style="font-size: 0.85rem; color: #1e293b; font-weight: 600; padding: 5px; text-align: right;">Position Hz: --</div>
             </div>
         </div>
     </div>
@@ -278,6 +316,11 @@
     <div class="grid-2">
         <div class="card"><h3 class="plot-title">First Path Amplitude (fp_amp_norm)</h3><div id="fp_amp" class="plot-md"></div></div>
         <div class="card"><h3 class="plot-title">First Path SNR (fp_snr)</h3><div id="fp_snr" class="plot-md"></div></div>
+    </div>
+
+    <div class="card">
+        <h3 class="plot-title">Path Loss Analysis (First Path Amplitude vs. Distance)</h3>
+        <div id="path_loss" class="plot-md"></div>
     </div>
 
     <div class="card"><h3 class="plot-title">Positioning Error (vs Ground Truth)</h3><div id="pos_error" class="plot-md"></div></div>
@@ -325,6 +368,12 @@ __APP_JS_BUNDLE__
         syncInput('ukf_qg_range', 'ukf_qg_input');
         syncInput('ukf_ruwb_range', 'ukf_ruwb_input');
         syncInput('ukf_rgate_range', 'ukf_rgate_input');
+
+        // Sync Triplet Weight Inputs
+        syncInput('triplet_w_d2_range', 'triplet_w_d2_input');
+        syncInput('triplet_w_fp_range', 'triplet_w_fp_input');
+        syncInput('triplet_w_gdop_range', 'triplet_w_gdop_input');
+        syncInput('triplet_w_resid_range', 'triplet_w_resid_input');
         
         // Sync Tag Height Input
         syncInput('tag_height_range', 'tag_height_input');

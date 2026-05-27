@@ -1,3 +1,74 @@
+const TIME_AXIS_PLOTS = ['distances', 'scores', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame', 'fp_amp', 'fp_snr'];
+
+function sampleToTime(sampleIndex, times, totalTime) {
+    if (!times || times.length === 0 || !Number.isFinite(sampleIndex)) return 0;
+    if (sampleIndex <= 0) return 0;
+    if (sampleIndex >= times.length) return totalTime;
+
+    const lo = Math.floor(sampleIndex);
+    const hi = Math.ceil(sampleIndex);
+    const tLo = lo <= 0 ? 0 : times[Math.min(lo, times.length - 1)];
+    const tHi = hi >= times.length ? totalTime : times[hi];
+    if (lo === hi) return tLo;
+
+    return tLo + (tHi - tLo) * (sampleIndex - lo);
+}
+
+function timeRangeForSampleRange(sampleRange) {
+    const sync = window.__uwbTimeAxisSync;
+    if (!sync || !sampleRange || sampleRange.length < 2) return null;
+
+    return [
+        sampleToTime(sampleRange[0], sync.times, sync.totalTime),
+        sampleToTime(sampleRange[1], sync.times, sync.totalTime)
+    ];
+}
+
+function setTimeAxisSyncData(xAxis, times, totalTime) {
+    window.__uwbTimeAxisSync = {
+        sampleCount: xAxis ? xAxis.length : 0,
+        times: times || [],
+        totalTime: Number.isFinite(totalTime) ? totalTime : 0
+    };
+}
+
+function syncTimeAxisToSampleRange(plotId, sampleRange) {
+    const timeRange = timeRangeForSampleRange(sampleRange);
+    if (!timeRange) return;
+
+    Plotly.relayout(plotId, {
+        'xaxis2.range': timeRange,
+        'xaxis2.autorange': false,
+        'xaxis2.showticklabels': true
+    });
+}
+
+function attachTimeAxisZoomSync(plotId) {
+    const plot = document.getElementById(plotId);
+    if (!plot || plot.__timeAxisZoomSyncAttached) return;
+
+    plot.__timeAxisZoomSyncAttached = true;
+    plot.on('plotly_relayout', (eventData) => {
+        const sync = window.__uwbTimeAxisSync;
+        if (!sync) return;
+
+        if (eventData['xaxis.autorange']) {
+            syncTimeAxisToSampleRange(plotId, [0, sync.sampleCount]);
+            return;
+        }
+
+        const x0 = eventData['xaxis.range[0]'];
+        const x1 = eventData['xaxis.range[1]'];
+        if (Number.isFinite(x0) && Number.isFinite(x1)) {
+            syncTimeAxisToSampleRange(plotId, [x0, x1]);
+        }
+    });
+}
+
+function attachAllTimeAxisZoomSync() {
+    TIME_AXIS_PLOTS.forEach(attachTimeAxisZoomSync);
+}
+
 function initPlots(anchors, gt_square, rawData, samples) {
     const colors = SIM_CONFIG.VIEW.COLORS;
     // 1. Trajectory
@@ -8,9 +79,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: gt_square.x, y: gt_square.y, mode: 'lines', name: `Ground Truth (${gt_square.name || 'Original Square'})`,
           line: { color: '#f87171', dash: 'dot', width: 1 } },
         { x: samples.map(e => e.px_fw), y: samples.map(e => e.py_fw), mode: 'lines+markers',
-          name: 'Firmware Path', type: 'scattergl', marker: { size: 3, color: '#e2e8f0' }, line: { color: '#cbd5e1', width: 2.5 } },
-        { x: [], y: [], mode: 'lines', name: 'Simulated Path (All)',
-           type: 'scattergl', line: { color: '#94a3b8', width: 1, dash: 'dot' } },
+          name: 'Firmware Path', type: 'scattergl', marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Rules)',
            type: 'scattergl', marker: { size: 3 }, line: { color: '#2563eb', width: 2 } },
         { x: [], y: [], mode: 'lines', name: 'Simulated Path (Multilateration)',
@@ -92,11 +161,14 @@ function initPlots(anchors, gt_square, rawData, samples) {
           hovertemplate: 'Ax: %{y:.3f} m/s²<extra></extra>' },
         { x: [], y: [], name: 'Ay', mode: 'lines', type: 'scatter', line: { color: '#16a34a' },
           hovertemplate: 'Ay: %{y:.3f} m/s²<extra></extra>' },
+        { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', yaxis: 'y2', mode: 'lines', line: { color: '#cbd5e1', width: 0 }, opacity: 0.3, hovertemplate: 'ZUPT Active<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
         margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
-        yaxis: { title: 'Acceleration (m/s²)' }, hovermode: 'x unified'
+        yaxis: { title: 'Acceleration (m/s²)' },
+        yaxis2: { overlaying: 'y', side: 'right', range: [0, 1], showgrid: false, zeroline: false, showticklabels: false },
+        hovermode: 'x unified'
     });
 
     // 5. Velocity
@@ -105,14 +177,14 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], name: 'Vy Raw', mode: 'lines', type: 'scatter', line: { color: '#f87171', dash: 'dot', width: 1 }, visible: 'legendonly', hovertemplate: 'Vy Raw: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'Vx Clean', mode: 'lines', type: 'scatter', line: { color: '#2563eb', width: 2 }, hovertemplate: 'Vx: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'Vy Clean', mode: 'lines', type: 'scatter', line: { color: '#16a34a', width: 2 }, hovertemplate: 'Vy: %{y:.3f} m/s<extra></extra>' },
-        { x: [], y: [], name: 'UKF Vx', mode: 'lines', type: 'scatter', line: { color: '#60a5fa', width: 1.8, dash: 'dash' }, hovertemplate: 'UKF Vx: %{y:.3f} m/s<extra></extra>' },
-        { x: [], y: [], name: 'UKF Vy', mode: 'lines', type: 'scatter', line: { color: '#f87171', width: 1.8, dash: 'dash' }, hovertemplate: 'UKF Vy: %{y:.3f} m/s<extra></extra>' },
-        { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', mode: 'lines', line: { color: '#cbd5e1', width: 0 }, opacity: 0.3, hovertemplate: 'ZUPT Active<extra></extra>' },
+        { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', yaxis: 'y2', mode: 'lines', line: { color: '#cbd5e1', width: 0 }, opacity: 0.3, hovertemplate: 'ZUPT Active<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
         margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
-        yaxis: { title: 'Velocity (m/s)' }, hovermode: 'x unified'
+        yaxis: { title: 'Velocity (m/s)' },
+        yaxis2: { overlaying: 'y', side: 'right', range: [0, 1], showgrid: false, zeroline: false, showticklabels: false },
+        hovermode: 'x unified'
     });
 
     // 6. Yaw
@@ -125,7 +197,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
           hovertemplate: 'UKF Yaw: %{y:.2f} deg<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
-        margin: { t: 40, b: 40, l: 60, r: 60 }, 
+        margin: { t: 40, b: 40, l: 60, r: 70 },
         xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Yaw (deg)', side: 'left' },
@@ -139,6 +211,18 @@ function initPlots(anchors, gt_square, rawData, samples) {
     fpTraces.push({ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' });
     Plotly.newPlot('fp_amp', JSON.parse(JSON.stringify(fpTraces)), Object.assign({}, fpTpl, { yaxis: { title: 'Amplitude Norm' } }));
     Plotly.newPlot('fp_snr', JSON.parse(JSON.stringify(fpTraces)), Object.assign({}, fpTpl, { yaxis: { title: 'SNR' } }));
+
+    // 7b. Path Loss (FP Amp vs. Distance Scatter)
+    const pathLossTraces = anchors.map((a, i) => ({
+        x: [], y: [], name: `A${a.id}`, mode: 'markers', type: 'scatter',
+        marker: { color: colors[i], size: 5, opacity: 0.7 }
+    }));
+    Plotly.newPlot('path_loss', pathLossTraces, {
+        margin: { t: 40, b: 40, l: 50, r: 50 },
+        xaxis: { title: 'Distance (m)', gridcolor: '#f1f5f9' },
+        yaxis: { title: 'First Path Amplitude', gridcolor: '#f1f5f9' },
+        hovermode: 'closest'
+    });
 
     // 8. Pos Error
     const errTraces = [
@@ -164,6 +248,8 @@ function initPlots(anchors, gt_square, rawData, samples) {
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Frame Count' }, hovermode: 'x unified'
     });
+
+    attachAllTimeAxisZoomSync();
 }
 
 // Helper for mean calculation

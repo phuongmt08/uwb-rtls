@@ -17,7 +17,6 @@ function initSimulation() {
             latestSimulationResult = res;
             latestTrajectoryPaths = {
                 firmware: { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) },
-                all: res.simPath,
                 rules: res.simPathRuled,
                 wls: res.simPathWLS,
                 triplet: res.simPathTriplet,
@@ -52,7 +51,6 @@ function runSimulation() {
         rescue_min_anchors: parseInt(document.getElementById('win_range').value),
         zupt_acc: parseFloat(document.getElementById('zupt_acc_range').value),
         zupt_gyr: parseFloat(document.getElementById('zupt_gyr_range').value),
-        enable_zupt_ukf: document.getElementById('enable_zupt_ukf').checked,
         enable_smoother: document.getElementById('enable_smoother').checked,
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
 
@@ -63,7 +61,13 @@ function runSimulation() {
         q_a: parseFloat(document.getElementById('ukf_qa_range').value),
         q_g: parseFloat(document.getElementById('ukf_qg_range').value),
         r_uwb: parseFloat(document.getElementById('ukf_ruwb_range').value),
-        r_gate: parseFloat(document.getElementById('ukf_rgate_range').value)
+        r_gate: parseFloat(document.getElementById('ukf_rgate_range').value),
+        triplet_weights: {
+            d2: parseFloat(document.getElementById('triplet_w_d2_range').value),
+            fp_amp: parseFloat(document.getElementById('triplet_w_fp_range').value),
+            gdop: parseFloat(document.getElementById('triplet_w_gdop_range').value),
+            residual: parseFloat(document.getElementById('triplet_w_resid_range').value)
+        }
     };
 
     let max_samples = parseInt(document.getElementById('max_samples_range').value);
@@ -85,6 +89,10 @@ function runSimulation() {
     document.getElementById('ukf_qg_val').innerText    = params.q_g.toExponential(3);
     document.getElementById('ukf_ruwb_val').innerText  = params.r_uwb.toFixed(3);
     document.getElementById('ukf_rgate_val').innerText = params.r_gate.toFixed(3);
+    document.getElementById('triplet_w_d2_val').innerText = params.triplet_weights.d2.toFixed(0);
+    document.getElementById('triplet_w_fp_val').innerText = params.triplet_weights.fp_amp.toFixed(0);
+    document.getElementById('triplet_w_gdop_val').innerText = params.triplet_weights.gdop.toFixed(0);
+    document.getElementById('triplet_w_resid_val').innerText = params.triplet_weights.residual.toFixed(0);
 
     const maxRangeElem = document.getElementById('max_samples_range');
     document.getElementById('max_samples_val').innerText = (max_samples >= parseInt(maxRangeElem.max)) ? "All" : max_samples;

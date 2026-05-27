@@ -140,14 +140,21 @@ def parse_log(filepath):
                             values.append(float(scalar.group(1)) if scalar else 0)
                         return values
 
+                    amp_vals = parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0]
+                    snr_vals = parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0]
+
+                    # Sanitize extreme outliers (values > 5000 or non-finite)
+                    amp_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in amp_vals]
+                    snr_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in snr_vals]
+
                     data.append({
                         'line_no': line_no,
                         'raw_line': raw_line,
                         'type': d['type'],
                         'ax': float(d['ax']), 'ay': float(d['ay']), 'gz': float(d['gz']),
                         'px_fw': float(d['px']), 'py_fw': float(d['py']), 'dt': float(d['dt']),
-                        'fp_amp_norm': parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0],
-                        'fp_snr': parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0],
+                        'fp_amp_norm': amp_vals,
+                        'fp_snr': snr_vals,
                         'mask': int(d['mask']) if d.get('mask') else 15,
                         'distances': [float(d['d1']), float(d['d2']), float(d['d3']), float(d['d4'])],
                         'err': int(d['err'])

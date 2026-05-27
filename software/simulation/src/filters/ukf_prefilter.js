@@ -85,6 +85,31 @@ function invertMatrix(M) {
     return inv;
 }
 
+function invert2x2(M) {
+    if (!M || M.length !== 2 || M[0].length !== 2 || M[1].length !== 2) {
+        return null;
+    }
+
+    const a = M[0][0];
+    const b = M[0][1];
+    const c = M[1][0];
+    const d = M[1][1];
+    if (![a, b, c, d].every(Number.isFinite)) {
+        return null;
+    }
+
+    const det = (a * d) - (b * c);
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-12) {
+        return null;
+    }
+
+    const invDet = 1.0 / det;
+    return [
+        new Float64Array([ d * invDet, -b * invDet ]),
+        new Float64Array([ -c * invDet, a * invDet ])
+    ];
+}
+
 class UnscentedKalmanFilter {
     constructor(config) {
         // State variables: [px, py, vx, vy, theta, bax, bay, bgz]
@@ -232,7 +257,7 @@ class UnscentedKalmanFilter {
         this.P[1][1] = 1e-6; // py
         this.P[2][2] = 1e-6; // vx
         this.P[3][3] = 1e-6; // vy
-        this.P[4][4] = 1e-20; // theta
+        this.P[4][4] = 1e-8; // theta (increased from 1e-20 for Cholesky 11x11 numerical stability)
         this.P[5][5] = 1e-5; // bax
         this.P[6][6] = 1e-5; // bay
         this.P[7][7] = 1e-5; // bgz
@@ -582,26 +607,70 @@ class UnscentedKalmanFilter {
 
     applyZupt() {
         if (!this.is_initialized) return;
-
-        this.x[2] = Number.isFinite(this.x[2]) ? this.x[2] * 0.1 : 0.0;
-        this.x[3] = Number.isFinite(this.x[3]) ? this.x[3] * 0.1 : 0.0;
-
         const velVar = Math.max(1e-6, this.zupt_velocity_variance);
+        const prevX = Float64Array.from(this.x);
+        const prevP = this.cloneCovariance();
+
+        const S = [
+            new Float64Array([
+                (Number.isFinite(this.P[2][2]) ? this.P[2][2] : 0.0) + velVar,
+                Number.isFinite(this.P[2][3]) ? this.P[2][3] : 0.0
+            ]),
+            new Float64Array([
+                Number.isFinite(this.P[3][2]) ? this.P[3][2] : 0.0,
+                (Number.isFinite(this.P[3][3]) ? this.P[3][3] : 0.0) + velVar
+            ])
+        ];
+        const invS = invert2x2(S);
+        if (!invS) {
+            this.restoreState(prevX, prevP);
+            return;
+        }
+
+        const K = Array.from({ length: this.L }, () => new Float64Array(2));
         for (let i = 0; i < this.L; i++) {
-            if (i !== 2) {
-                const v = Number.isFinite(this.P[2][i]) ? this.P[2][i] * 0.25 : 0.0;
-                this.P[2][i] = v;
-                this.P[i][2] = v;
-            }
-            if (i !== 3) {
-                const v = Number.isFinite(this.P[3][i]) ? this.P[3][i] * 0.25 : 0.0;
-                this.P[3][i] = v;
-                this.P[i][3] = v;
+            const pi2 = Number.isFinite(this.P[i][2]) ? this.P[i][2] : 0.0;
+            const pi3 = Number.isFinite(this.P[i][3]) ? this.P[i][3] : 0.0;
+            K[i][0] = (pi2 * invS[0][0]) + (pi3 * invS[1][0]);
+            K[i][1] = (pi2 * invS[0][1]) + (pi3 * invS[1][1]);
+        }
+
+        const innovation = new Float64Array([
+            -this.x[2],
+            -this.x[3]
+        ]);
+        for (let i = 0; i < this.L; i++) {
+            this.x[i] += (K[i][0] * innovation[0]) + (K[i][1] * innovation[1]);
+        }
+        this.x[4] = normalizeAngle(this.x[4]);
+
+        const KS = Array.from({ length: this.L }, () => new Float64Array(2));
+        for (let i = 0; i < this.L; i++) {
+            KS[i][0] = (K[i][0] * S[0][0]) + (K[i][1] * S[1][0]);
+            KS[i][1] = (K[i][0] * S[0][1]) + (K[i][1] * S[1][1]);
+        }
+        for (let i = 0; i < this.L; i++) {
+            for (let j = 0; j < this.L; j++) {
+                this.P[i][j] -= (KS[i][0] * K[j][0]) + (KS[i][1] * K[j][1]);
             }
         }
-        this.P[2][2] = Math.max(velVar, Math.min(Number.isFinite(this.P[2][2]) ? this.P[2][2] : velVar, velVar * 10.0));
-        this.P[3][3] = Math.max(velVar, Math.min(Number.isFinite(this.P[3][3]) ? this.P[3][3] : velVar, velVar * 10.0));
+
+        this.P[2][2] = Math.max(velVar, Number.isFinite(this.P[2][2]) ? this.P[2][2] : velVar);
+        this.P[3][3] = Math.max(velVar, Number.isFinite(this.P[3][3]) ? this.P[3][3] : velVar);
+
+        for (let i = 0; i < this.L; i++) {
+            for (let j = 0; j < i; j++) {
+                const sym = 0.5 * (this.P[i][j] + this.P[j][i]);
+                this.P[i][j] = sym;
+                this.P[j][i] = sym;
+            }
+        }
+
         this.stabilizeCovariance();
+        if (!this.isSaneState()) {
+            this.restoreState(prevX, prevP);
+            return;
+        }
         this.seedSigmaPredictionFromState();
     }
 }
