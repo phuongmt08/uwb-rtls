@@ -209,26 +209,28 @@ static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
 
 static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
 {
-  dwt_rxdiag_t diag;
-  memset(&diag, 0, sizeof(diag));
   memset(out_quality, 0, sizeof(*out_quality));
 
-  dwt_readdignostics(&diag);
+  /* Directly query DW1000 registers to bypass compiler strict-aliasing optimization bugs on block-reads */
+  uint16_t max_noise      = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_THRESH_OFFSET);
+  uint16_t fp_amp1        = dwt_read16bitoffsetreg(RX_TIME_ID, 0x7);
+  uint16_t std_noise      = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x0);
+  uint16_t fp_amp2        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x2);
+  uint16_t fp_amp3        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x4);
+  uint16_t rx_pream_count = (uint16_t)((dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXPACC_MASK) >> RX_FINFO_RXPACC_SHIFT);
 
-  out_quality->fp_amp1        = diag.firstPathAmp1;
-  out_quality->fp_amp2        = diag.firstPathAmp2;
-  out_quality->fp_amp3        = diag.firstPathAmp3;
-  out_quality->std_noise      = diag.stdNoise;
-  out_quality->max_noise      = diag.maxNoise;
-  out_quality->rx_pream_count = diag.rxPreamCount;
+  out_quality->fp_amp1        = fp_amp1;
+  out_quality->fp_amp2        = fp_amp2;
+  out_quality->fp_amp3        = fp_amp3;
+  out_quality->std_noise      = std_noise;
+  out_quality->max_noise      = max_noise;
+  out_quality->rx_pream_count = rx_pream_count;
 
-  if (diag.rxPreamCount > 0U &&
-      (diag.firstPathAmp1 != 0U || diag.firstPathAmp2 != 0U || diag.firstPathAmp3 != 0U))
+  if (rx_pream_count > 0U && (fp_amp1 != 0U || fp_amp2 != 0U || fp_amp3 != 0U))
   {
-    uint32_t fp_sum = (uint32_t)diag.firstPathAmp1 + (uint32_t)diag.firstPathAmp2
-                      + (uint32_t)diag.firstPathAmp3;
-    uint32_t fp_norm_q8 = (fp_sum << 8) / (uint32_t)diag.rxPreamCount;
-    uint32_t fp_snr_q8  = (fp_sum << 8) / ((uint32_t)diag.stdNoise + 1U);
+    uint32_t fp_sum = (uint32_t)fp_amp1 + (uint32_t)fp_amp2 + (uint32_t)fp_amp3;
+    uint32_t fp_norm_q8 = (fp_sum << 8) / (uint32_t)rx_pream_count;
+    uint32_t fp_snr_q8  = (fp_sum << 8) / ((uint32_t)std_noise + 1U);
 
     out_quality->fp_amp_norm_q8 = (fp_norm_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_norm_q8;
     out_quality->fp_snr_q8      = (fp_snr_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_snr_q8;
