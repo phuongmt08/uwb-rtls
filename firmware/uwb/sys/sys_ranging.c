@@ -50,6 +50,8 @@
 #define ANCHOR_SMART_DISCOVERY_DECAY_MISSES 3U
 #define ANCHOR_SMART_TRACK_REARM_GAP_MS    10U
 
+#define TAG_MIN_ANCHOR_SAMPLES             3U
+
 /* Software margin needed before programming DW1000 delayed TX.
  * Keep this separate from TDMA slot guard: slot guard protects adjacent slots,
  * while this only decides whether it is still worth attempting delayed TX. */
@@ -850,7 +852,7 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
            res->anchor_id, res->sequence_num);
   }
 
-  if (!expected_anchor || duplicate || s_ctx.result_multi.count >= 8U)
+  if (!expected_anchor || duplicate || res->valid != 1U || s_ctx.result_multi.count >= 8U)
   {
     s_tag_diag.result_rejects++;
     return false;
@@ -1537,13 +1539,22 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               if (resp_mask == configured_mask) {
                   s_tag_diag.resp_all_configured++;
               }
-              if (s_sys_ranging_ev.num_responses == 0) {
-                  s_tag_diag.resp_none++;
+              if (s_sys_ranging_ev.num_responses < TAG_MIN_ANCHOR_SAMPLES) {
+                  if (s_sys_ranging_ev.num_responses == 0) {
+                      s_tag_diag.resp_none++;
+                  } else {
+                      s_tag_diag.resp_partial++;
+                  }
                   s_ctx.result_multi.count = 0;
                   RLOG_W(LOG_OBJECT_CODE_RANGING,
-                         "[TAG] No RESP received (seq=%u anchors=%u resp_mask=0x%02X)",
-                         s_ctx.sequence_num, num_anchors, resp_mask);
-                  return event_tag_complete_with_results();
+                         "[TAG] RESP insufficient seq=%u resp=%u/%u min=%u resp_mask=0x%02X - abort before FINAL",
+                         s_ctx.sequence_num,
+                         s_sys_ranging_ev.num_responses,
+                         num_anchors,
+                         TAG_MIN_ANCHOR_SAMPLES,
+                         resp_mask);
+                  sys_ranging_abort();
+                  return SYS_RANGING_ERR_PARTIAL;
               }
               if (s_sys_ranging_ev.num_responses < num_anchors) {
                   s_tag_diag.resp_partial++;
@@ -1687,6 +1698,18 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               }
               for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
                   log_ranging_result(&s_ctx.result_multi.results[i], "TAG");
+              }
+              if (s_ctx.result_multi.count < TAG_MIN_ANCHOR_SAMPLES) {
+                  s_tag_diag.result_partial++;
+                  RLOG_W(LOG_OBJECT_CODE_RANGING,
+                         "[TAG] RESULT insufficient seq=%u got=%u/%u resp_mask=0x%02X result_mask=0x%02X - abort cycle",
+                         s_ctx.sequence_num,
+                         s_ctx.result_multi.count,
+                         TAG_MIN_ANCHOR_SAMPLES,
+                         resp_mask,
+                         result_mask);
+                  sys_ranging_abort();
+                  return SYS_RANGING_ERR_PARTIAL;
               }
               if (s_ctx.result_multi.count < s_sys_ranging_ev.num_responses || result_mask != resp_mask) {
                   s_tag_diag.result_partial++;
