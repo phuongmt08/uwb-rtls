@@ -298,7 +298,6 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         anchor_entry.residual_rms = 0.0;
         anchor_entry.gdop_penalty = 0.0;
         anchor_entry.fp_penalty = 0.0;
-        anchor_entry.fp_snr_penalty = 0.0;
 
 #if SYS_FUSION_PREFILTER_ENABLED
         if (s_ukf_initialized) {
