@@ -155,40 +155,49 @@
  * =================================================================== */
 
 /**
- * @brief Enable/Disable Mahalanobis pre-filter on raw 3D distances.
+ * @brief Enable/Disable the mw_filter Mahalanobis pre-filter.
  *        0 = bypass Mahalanobis gate
- *        1 = apply Mahalanobis gate
+ *        1 = apply Mahalanobis gate before anchor selection
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
 #define ENABLE_MAHALANOBIS_PREFILTER  0
 #endif
 
 /**
- * @brief Mahalanobis pre-filter parameters for raw 3D distances.
+ * @brief Mahalanobis pre-filter parameters.
  *
- * The filter keeps a clean per-anchor distance history. Samples with d2 above
- * the reject threshold are not inserted into history. Once an anchor is in the
- * rejected state, it must drop below the recover threshold before it is accepted
- * again.
+ * The firmware prefilter state lives in mw_filter. It keeps a clean per-anchor
+ * rejected/accepted state. d2 is computed from the current sensor-fusion
+ * predicted range to the anchor; T2_REJECT enters rejected state, and
+ * T2_RECOVER exits that state. Rescue is a separate frame-level policy
+ * controlled by RESCUE_MIN_ANCHORS.
  */
-#ifndef MAHALANOBIS_PREFILTER_HISTORY_WINDOW
-#define MAHALANOBIS_PREFILTER_HISTORY_WINDOW       15U
-#endif
-
-#ifndef MAHALANOBIS_PREFILTER_COLD_START_COUNT
-#define MAHALANOBIS_PREFILTER_COLD_START_COUNT     3U
-#endif
-
 #ifndef MAHALANOBIS_PREFILTER_D2_RECOVER
-#define MAHALANOBIS_PREFILTER_D2_RECOVER           4.0f
+#define MAHALANOBIS_PREFILTER_D2_RECOVER           5.0f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_D2_REJECT
-#define MAHALANOBIS_PREFILTER_D2_REJECT            9.0f
+#define MAHALANOBIS_PREFILTER_D2_REJECT            7.5f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_R_BASE
 #define MAHALANOBIS_PREFILTER_R_BASE               0.05f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_R_GATE
+#define MAHALANOBIS_PREFILTER_R_GATE               0.10f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   1U
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
+#define MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN 4.0f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_MAX
+#define MAHALANOBIS_PREFILTER_RESCUE_NOISE_MAX     0.25f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT
@@ -228,6 +237,38 @@
 
 #ifndef ENABLE_SYS_FUSION_LOG
 #define ENABLE_SYS_FUSION_LOG  1
+#endif
+
+#ifndef SYS_FUSION_PREFILTER_ENABLED
+#define SYS_FUSION_PREFILTER_ENABLED (ENABLE_SYS_FUSION && ENABLE_MAHALANOBIS_PREFILTER)
+#endif
+
+#ifndef SYS_FUSION_USE_PLANAR_RANGES
+#define SYS_FUSION_USE_PLANAR_RANGES 1
+#endif
+
+#ifndef SYS_FUSION_UKF_ALPHA
+#define SYS_FUSION_UKF_ALPHA   0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_KAPPA
+#define SYS_FUSION_UKF_KAPPA   0.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_BETA
+#define SYS_FUSION_UKF_BETA    2.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_QA
+#define SYS_FUSION_UKF_QA      0.25f
+#endif
+
+#ifndef SYS_FUSION_UKF_QG
+#define SYS_FUSION_UKF_QG      1.0e-6f
+#endif
+
+#ifndef SYS_FUSION_UKF_R_UWB
+#define SYS_FUSION_UKF_R_UWB   0.05f
 #endif
 
 /**

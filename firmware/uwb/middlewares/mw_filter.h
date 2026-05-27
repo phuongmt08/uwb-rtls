@@ -18,15 +18,10 @@ typedef struct {
     uint8_t index;
 } median_filter_1d_t;
 
-#define MW_FILTER_MAHAL_HISTORY_WINDOW MAHALANOBIS_PREFILTER_HISTORY_WINDOW
-#define MW_FILTER_MAHAL_COLD_START     MAHALANOBIS_PREFILTER_COLD_START_COUNT
 #define UKF_INIT_SAMPLES 50
 #define UKF_INIT_DISCARD_SAMPLES 10
 
 typedef struct {
-    float history[MW_FILTER_MAHAL_HISTORY_WINDOW];
-    uint8_t count;
-    uint8_t index;
     bool rejected;
 } mahalanobis_anchor_state_t;
 
