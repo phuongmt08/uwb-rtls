@@ -17,13 +17,13 @@
  * 0 = Use calibrated values (if available)
  * 1 = Force antenna delay to factory defaults
  */
-#define ENABLE_FORCE_DEFAULT_ANT_DLY    0
+#define ENABLE_FORCE_DEFAULT_ANT_DLY    1
 
 #define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16283
-#define ANCHOR_DEFAULT_RX_ANT_DLY   16283
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16187
+#define ANCHOR_DEFAULT_RX_ANT_DLY   16187
 
 /* Legacy fixed RX delay used by older calibration paths. V1 A2A summary
  * solver only logs candidate delays and does not apply this value. */
@@ -36,7 +36,7 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.465f)
+#define TAG_HEIGHT_M            (0.45f)
 
 /**
  * @brief Anchor height from ground (meters)
@@ -222,15 +222,13 @@
 #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
 #endif
 
-#ifdef ENABLE_SYS_FUSION
-#undef ENABLE_SYS_FUSION
-#endif
+#ifndef ENABLE_SYS_FUSION
 #define ENABLE_SYS_FUSION  0
-
-#ifdef ENABLE_SYS_FUSION_LOG
-#undef ENABLE_SYS_FUSION_LOG
 #endif
+
+#ifndef ENABLE_SYS_FUSION_LOG
 #define ENABLE_SYS_FUSION_LOG  1
+#endif
 
 /**
  * @brief Distance Smoother (EMA Filter) parameters

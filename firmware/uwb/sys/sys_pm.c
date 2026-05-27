@@ -327,15 +327,20 @@ static void sys_pm_update_uwb_telemetry(void)
 static void sys_pm_handle_charging(uint32_t critical_errors)
 {
     float current_soc  = s_pm_status.soc;
-    float current_temp = s_pm_status.temp_degc;
+    float current_mcu_temp = s_pm_status.temp_degc;
+    float currint_uwb_temp = s_pm_status.uwb_temp_c;
+
     bool  is_now_safe  = (critical_errors == 0);
 
     /* Emergency Stop: Temperature too high */
-    if (current_temp > CHG_MAX_TEMP_DEGC) {
-        if (s_pm_status.charge_enabled) {
-            RLOG_I(LOG_OBJECT_CODE_PM, "High Temperature (%.1f C). Charging suspended.", current_temp);
+    if (current_mcu_temp > CHG_MAX_TEMP_DEGC) {
+            RLOG_I(LOG_OBJECT_CODE_PM, "High Temperature (%.1f C). Charging suspended.", current_mcu_temp);
             sys_pm_set_charge_en(false);
-        }
+        return;
+    }
+    if (currint_uwb_temp > CHG_MAX_TEMP_DEGC) {
+            RLOG_I(LOG_OBJECT_CODE_PM, "High UWB Temperature (%.1f C). Charging suspended.", currint_uwb_temp);
+            sys_pm_set_charge_en(false);
         return;
     }
 
