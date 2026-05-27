@@ -18,7 +18,13 @@ def _is_pipe_error(exc: Exception) -> bool:
 def kill_competing_processes(log_cb):
     try:
         import psutil
-        import os
+    except ModuleNotFoundError:
+        if not getattr(kill_competing_processes, "_missing_psutil_logged", False):
+            log_cb("[WARN] psutil not installed; auto-kill disabled.")
+            kill_competing_processes._missing_psutil_logged = True
+        return
+
+    try:
         current_pid = os.getpid()
         killed = 0
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
@@ -29,7 +35,7 @@ def kill_competing_processes(log_cb):
                 name = (proc.info['name'] or '').lower()
                 cmdline = proc.info['cmdline'] or []
                 cwd = (proc.info['cwd'] or '').lower()
-                
+
                 # Check if it's a python process running in our workspace
                 is_competing = False
                 if "python" in name:
@@ -39,7 +45,7 @@ def kill_competing_processes(log_cb):
                         arg_low = arg.lower()
                         if "uwb-rtls" in arg_low or "simulate" in arg_low:
                             is_competing = True
-                
+
                 if is_competing:
                     log_cb(f"[FORCE] Terminating competing process PID {pid} ({name})...")
                     proc.terminate()

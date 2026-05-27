@@ -94,7 +94,33 @@ function tripletGdop(pos, triplet) {
     return Math.sqrt((hxx + hyy) / det);
 }
 
-function selectBestTriplet(vAnchors, d2Reject) {
+function normalizeTripletWeights(weights) {
+    const defaults = {
+        d2: SIM_CONFIG.FILTER.TRIPLET_W_D2,
+        fp_amp: SIM_CONFIG.FILTER.TRIPLET_W_FP,
+        gdop: SIM_CONFIG.FILTER.TRIPLET_W_GDOP,
+        residual: SIM_CONFIG.FILTER.TRIPLET_W_RESIDUAL
+    };
+
+    const w = {
+        d2: weights && Number.isFinite(weights.d2) ? weights.d2 : defaults.d2,
+        fp_amp: weights && Number.isFinite(weights.fp_amp) ? weights.fp_amp : defaults.fp_amp,
+        gdop: weights && Number.isFinite(weights.gdop) ? weights.gdop : defaults.gdop,
+        residual: weights && Number.isFinite(weights.residual) ? weights.residual : defaults.residual
+    };
+
+    const sum = w.d2 + w.fp_amp + w.gdop + w.residual;
+    if (!Number.isFinite(sum) || sum <= 0) return defaults;
+
+    return {
+        d2: w.d2 / sum,
+        fp_amp: w.fp_amp / sum,
+        gdop: w.gdop / sum,
+        residual: w.residual / sum
+    };
+}
+
+function selectBestTriplet(vAnchors, d2Reject, weights) {
     if (vAnchors.length < 3) return null;
     const candidates = [];
     let minGdop = Infinity;
@@ -120,13 +146,18 @@ function selectBestTriplet(vAnchors, d2Reject) {
     if (!candidates.length) return null;
 
     let best = null;
+    const w = normalizeTripletWeights(weights);
     const gdopSpan = Math.max(0.001, maxGdop - minGdop);
     for (const c of candidates) {
         const avgD2Penalty = c.triplet.reduce((s, a) => s + d2Penalty(a.d2, d2Reject), 0) / 3;
         const gdopPenalty = clamp01((c.gdop - minGdop) / gdopSpan);
         const residualPenalty = clamp01(c.residual / 0.30);
         const fpAmpPenaltyAvg = c.avgFpAmpPenalty;
-        const score = 0.35*avgD2Penalty + 0.15*fpAmpPenaltyAvg + 0.20*gdopPenalty + 0.30*residualPenalty;
+        const score =
+            w.d2 * avgD2Penalty +
+            w.fp_amp * fpAmpPenaltyAvg +
+            w.gdop * gdopPenalty +
+            w.residual * residualPenalty;
 
         if (!best || score < best.score) {
             best = {

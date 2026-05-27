@@ -1,6 +1,6 @@
 function updatePlots(res, samples, rawData) {
     const { 
-        simPath, simPathRuled, simPathWLS, simPathTriplet, simPathUKF, simPathUKF_plot,
+        simPathRuled, simPathWLS, simPathTriplet, simPathUKF, simPathUKF_plot,
         wlsInfo, bestTripletInfo,
         plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist,
         pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf,
@@ -9,17 +9,16 @@ function updatePlots(res, samples, rawData) {
 
     // 1. Trajectory
     Plotly.restyle('trajectory', { 
-        x: [rawData.fw_path.x.slice(0, x_axis.length), simPath.x, simPathRuled.x, simPathWLS.x, simPathTriplet.x, simPathUKF.x],
-        y: [rawData.fw_path.y.slice(0, x_axis.length), simPath.y, simPathRuled.y, simPathWLS.y, simPathTriplet.y, simPathUKF.y],
+        x: [rawData.fw_path.x.slice(0, x_axis.length), simPathRuled.x, simPathWLS.x, simPathTriplet.x, simPathUKF.x],
+        y: [rawData.fw_path.y.slice(0, x_axis.length), simPathRuled.y, simPathWLS.y, simPathTriplet.y, simPathUKF.y],
         text: [
             samples.slice(0, x_axis.length).map((_, i) => 'Idx: ' + i + '<br>Mask: ' + rawData.fw_path.mask[i] + ' (A' + decodeMask(rawData.fw_path.mask[i]) + ')'), 
-            simPath.x.map((_, i) => 'Idx: ' + i),
             simPathRuled.x.map((_, i) => 'Idx: ' + i),
             simPathWLS.x.map((_, i) => 'Idx: ' + i + '<br>Multilateration: ' + wlsInfo[i]),
             simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i]),
             simPathUKF.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion')
         ]
-    }, [2, 3, 4, 5, 6, 7]);
+    }, [2, 3, 4, 5, 6]);
 
     // 2. Distances & Scores
     for (let i = 0; i < 4; i++) {
@@ -47,13 +46,21 @@ function updatePlots(res, samples, rawData) {
     Plotly.relayout('scores', { 'yaxis.autorange': true });
 
     // 3. Other plots
-    Plotly.restyle('accel', { x: [x_axis, x_axis], y: [plotData.ax, plotData.ay], customdata: [plotData.times, plotData.times] }, [0, 1]);
-    Plotly.restyle('velocity', { x: [x_axis, x_axis, x_axis, x_axis, x_axis], y: [[], [], plotData.vx, plotData.vy, plotData.zupt], customdata: [[], [], plotData.times, plotData.times, plotData.times] }, [0, 1, 2, 3, 4]);
-    Plotly.restyle('yaw_plot', { 
-        x: [x_axis, x_axis, x_axis, x_axis, x_axis], 
-        y: [plotData.gz, plotData.yaw, plotData.ukf_yaw, plotData.ukf_vx, plotData.ukf_vy], 
-        customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times] 
+    Plotly.restyle('accel', { 
+        x: [x_axis, x_axis, x_axis], 
+        y: [plotData.ax, plotData.ay, plotData.zupt], 
+        customdata: [plotData.times, plotData.times, plotData.times] 
+    }, [0, 1, 2]);
+    Plotly.restyle('velocity', {
+        x: [x_axis, x_axis, x_axis, x_axis, x_axis],
+        y: [plotData.vx_raw, plotData.vy_raw, plotData.vx, plotData.vy, plotData.zupt],
+        customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
     }, [0, 1, 2, 3, 4]);
+    Plotly.restyle('yaw_plot', { 
+        x: [x_axis, x_axis, x_axis],
+        y: [plotData.gz, plotData.yaw, plotData.ukf_yaw],
+        customdata: [plotData.times, plotData.times, plotData.times]
+    }, [0, 1, 2]);
 
     Plotly.restyle('pos_error', {
         x: [x_axis, x_axis, x_axis, x_axis, x_axis],
@@ -71,16 +78,60 @@ function updatePlots(res, samples, rawData) {
     const csv_errors = samples.slice(0, x_axis.length).map(s => s.err);
     Plotly.restyle('error_frame', { x: [x_axis], y: [csv_errors], customdata: [plotData.times] }, [0]);
 
-    const sliced_amp = [0,1,2,3].map(i => (rawData.fp_logs.amp[i] || []).slice(0, x_axis.length).map(v => v === 0 ? null : v));
-    const sliced_snr = [0,1,2,3].map(i => (rawData.fp_logs.snr[i] || []).slice(0, x_axis.length).map(v => v === 0 ? null : v));
+    function getStats(arr) {
+        const valid = arr.filter(v => v !== null && v !== undefined && !isNaN(v));
+        if (valid.length === 0) return { min: "N/A", max: "N/A", mean: "N/A" };
+        const min = Math.min(...valid);
+        const max = Math.max(...valid);
+        const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
+        return {
+            min: min.toFixed(1),
+            max: max.toFixed(1),
+            mean: mean.toFixed(1)
+        };
+    }
+
+    const pathLossData = [0,1,2,3].map(i => {
+        const x = [];
+        const y = [];
+        samples.slice(0, x_axis.length).forEach((s, idx) => {
+            const dist = s.distances[i];
+            const amp = rawData.fp_logs.amp[i] ? rawData.fp_logs.amp[i][idx] : 0;
+            if (dist > 0.1 && amp > 0) {
+                x.push(dist);
+                y.push(amp);
+            }
+        });
+        return { x, y };
+    });
+
+    const sliced_amp = [0,1,2,3].map(i => (rawData.fp_logs.amp[i] || []).slice(0, x_axis.length).map(v => (v <= 0 || v > 5000) ? null : v));
+    const sliced_snr = [0,1,2,3].map(i => (rawData.fp_logs.snr[i] || []).slice(0, x_axis.length).map(v => (v <= 0 || v > 5000) ? null : v));
     for(let i=0; i<4; ++i) {
-        Plotly.restyle('fp_amp', { x: [x_axis], y: [sliced_amp[i]], customdata: [plotData.times] }, [i]);
-        Plotly.restyle('fp_snr', { x: [x_axis], y: [sliced_snr[i]], customdata: [plotData.times] }, [i]);
+        const ampStats = getStats(sliced_amp[i]);
+        Plotly.restyle('fp_amp', { 
+            x: [x_axis], 
+            y: [sliced_amp[i]], 
+            name: [`A${i+1} (Min: ${ampStats.min}, Max: ${ampStats.max}, Mean: ${ampStats.mean})`],
+            customdata: [plotData.times] 
+        }, [i]);
+
+        const snrStats = getStats(sliced_snr[i]);
+        Plotly.restyle('fp_snr', { 
+            x: [x_axis], 
+            y: [sliced_snr[i]], 
+            name: [`A${i+1} (Min: ${snrStats.min}, Max: ${snrStats.max}, Mean: ${snrStats.mean})`],
+            customdata: [plotData.times] 
+        }, [i]);
+
+        Plotly.restyle('path_loss', { x: [pathLossData[i].x], y: [pathLossData[i].y] }, [i]);
     }
     Plotly.relayout('fp_amp', { 'yaxis.autorange': true });
     Plotly.relayout('fp_snr', { 'yaxis.autorange': true });
+    Plotly.relayout('path_loss', { 'xaxis.autorange': true, 'yaxis.autorange': true });
 
     // 4. Sync layout
+    setTimeAxisSyncData(x_axis, plotData.times, total_time);
     const syncLayout = { 'xaxis.range': [0, x_axis.length], 'xaxis2.range': [0, total_time], 'xaxis2.showticklabels': true, 'xaxis2.autorange': false };
-    ['distances', 'scores', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame', 'fp_amp', 'fp_snr'].forEach(id => Plotly.relayout(id, syncLayout));
+    TIME_AXIS_PLOTS.forEach(id => Plotly.relayout(id, syncLayout));
 }
