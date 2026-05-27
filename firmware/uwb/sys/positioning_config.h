@@ -217,6 +217,30 @@
 #define MW_TRIL_D2_REJECT                          MAHALANOBIS_PREFILTER_D2_REJECT
 #endif
 
+#ifndef MW_TRIL_RESIDUAL_SCALE_M
+#define MW_TRIL_RESIDUAL_SCALE_M                   0.30
+#endif
+
+#ifndef MW_TRIL_FP_AMP_GOOD
+#define MW_TRIL_FP_AMP_GOOD                        45.0
+#endif
+
+#ifndef MW_TRIL_WEIGHT_D2
+#define MW_TRIL_WEIGHT_D2                          0.35
+#endif
+
+#ifndef MW_TRIL_WEIGHT_FP_AMP
+#define MW_TRIL_WEIGHT_FP_AMP                      0.15
+#endif
+
+#ifndef MW_TRIL_WEIGHT_GDOP
+#define MW_TRIL_WEIGHT_GDOP                        0.20
+#endif
+
+#ifndef MW_TRIL_WEIGHT_RESIDUAL
+#define MW_TRIL_WEIGHT_RESIDUAL                    0.30
+#endif
+
 /**
  * @brief Enable/Disable quality gating based on trilateration error
  *        0 = Accept all trilateration results
