@@ -63,7 +63,6 @@ static uint8_t s_last_selected_anchors_mask = 0;
 static bool s_ukf_initialized = false;
 static ukf_init_filter_t s_ukf_init_filter;
 static ukf_init_distance_filter_t s_ukf_init_dist_filter;
-static float s_latest_error = 0.0f;
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
 bsp_imu_bias_t t_imu_bias;

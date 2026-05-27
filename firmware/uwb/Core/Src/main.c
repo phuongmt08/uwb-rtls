@@ -44,6 +44,9 @@
 
 #include <string.h>
 #include "bsp_imu.h"
+#ifdef DEVELOPER_MODE
+#include "SEGGER_SYSVIEW.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -315,16 +318,22 @@ int main(void)
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
 #endif
-  /* USER CODE END 2 */
+#ifdef DEVELOPER_MODE
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "DEVELOPER MODE ENABLED: Verbose");
+  // Init the system viewer for real-time monitoring 
+  SEGGER_SYSVIEW_Conf();
+  SEGGER_SYSVIEW_Start();
+  #pragma message("Developer mode: SystemView enabled")
+#endif
+/* Init scheduler */
+osKernelInitialize();  /* Call init function for freertos objects (in cmsis_os2.c) */
+MX_FREERTOS_Init();
 
-  /* Init scheduler */
-  osKernelInitialize();  /* Call init function for freertos objects (in cmsis_os2.c) */
-  MX_FREERTOS_Init();
+/* Start scheduler */
+osKernelStart();
 
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
+/* We should never get here as control is now taken by the scheduler */
+/* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */

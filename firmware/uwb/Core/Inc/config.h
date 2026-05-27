@@ -15,6 +15,6 @@
 #define HAVE_BLE_PERIPHERAL
 
 /* Developer diagnostics */
-#define DEVELOPER_MODE   1
+#define DEVELOPER_MODE
 
 #endif /* __CONFIG_H */

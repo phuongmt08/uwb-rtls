@@ -292,31 +292,31 @@ static void logger_init(void)
   initialized = true;
 }
 
-static void logger_test_stub(void)
-{
-  static uint8_t  tick_init = 0u;
-  static uint32_t last_tick_ms = 0u;
-  static uint32_t seq = 0u;
-  uint32_t now_ms = HAL_GetTick();
-
-  if (tick_init == 0u)
-  {
-    last_tick_ms = now_ms;
-    tick_init = 1u;
-    return;
-  }
-
-  uint32_t elapsed_ms = (uint32_t)(now_ms - last_tick_ms);
-  if (elapsed_ms < LOGGER_STUB_PERIOD_MS)
-    return;
-
-  last_tick_ms = now_ms;
-  (void)RLOG_I(LOG_OBJECT_CODE_TASK,
-               "stub-log seq=%lu dt=%lums",
-               (unsigned long)seq,
-               (unsigned long)elapsed_ms);
-  seq++;
-}
+//static void logger_test_stub(void)
+//{
+//  static uint8_t  tick_init = 0u;
+//  static uint32_t last_tick_ms = 0u;
+//  static uint32_t seq = 0u;
+//  uint32_t now_ms = HAL_GetTick();
+//
+//  if (tick_init == 0u)
+//  {
+//    last_tick_ms = now_ms;
+//    tick_init = 1u;
+//    return;
+//  }
+//
+//  uint32_t elapsed_ms = (uint32_t)(now_ms - last_tick_ms);
+//  if (elapsed_ms < LOGGER_STUB_PERIOD_MS)
+//    return;
+//
+//  last_tick_ms = now_ms;
+//  (void)RLOG_I(LOG_OBJECT_CODE_TASK,
+//               "stub-log seq=%lu dt=%lums",
+//               (unsigned long)seq,
+//               (unsigned long)elapsed_ms);
+//  seq++;
+//}
 
 /* Public implementations --------------------------------------------------- */
 void sys_logger_init(void)

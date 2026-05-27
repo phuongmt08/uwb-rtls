@@ -66,30 +66,30 @@ static bsp_fl_status_t write_words(uint32_t addr, const uint8_t *data, uint32_t 
     return BSP_FL_OK;
 }
 
-static uint32_t crc32_hw(const uint8_t *data, uint32_t length)
-{
-    /* Use STM32 hardware CRC32 peripheral (polynomial 0x04C11DB7) */
-    __HAL_RCC_CRC_CLK_ENABLE();
+// static uint32_t crc32_hw(const uint8_t *data, uint32_t length)
+// {
+//     /* Use STM32 hardware CRC32 peripheral (polynomial 0x04C11DB7) */
+//     __HAL_RCC_CRC_CLK_ENABLE();
 
-    CRC->CR = CRC_CR_RESET;
+//     CRC->CR = CRC_CR_RESET;
 
-    const uint32_t *words     = (const uint32_t *)data;
-    uint32_t        word_count = length / 4u;
+//     const uint32_t *words     = (const uint32_t *)data;
+//     uint32_t        word_count = length / 4u;
 
-    for (uint32_t i = 0; i < word_count; i++) {
-        CRC->DR = words[i];
-    }
+//     for (uint32_t i = 0; i < word_count; i++) {
+//         CRC->DR = words[i];
+//     }
 
-    /* Handle remaining bytes (< 4) by padding with 0xFF */
-    uint32_t remainder = length % 4u;
-    if (remainder > 0u) {
-        uint32_t tail = 0xFFFFFFFFu;
-        memcpy(&tail, data + word_count * 4u, remainder);
-        CRC->DR = tail;
-    }
+//     /* Handle remaining bytes (< 4) by padding with 0xFF */
+//     uint32_t remainder = length % 4u;
+//     if (remainder > 0u) {
+//         uint32_t tail = 0xFFFFFFFFu;
+//         memcpy(&tail, data + word_count * 4u, remainder);
+//         CRC->DR = tail;
+//     }
 
-    return CRC->DR;
-}
+//     return CRC->DR;
+// }
 
 static uint32_t crc32_hw_with_zero_word(const uint8_t *data,
                                         uint32_t length,

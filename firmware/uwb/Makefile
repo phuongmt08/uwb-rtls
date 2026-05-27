@@ -67,6 +67,11 @@ LOCAL_SOURCES := \
 	$(wildcard middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/*.c) \
 	$(wildcard middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/*.c) \
 	$(wildcard middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/*.c) \
+	$(wildcard middlewares/Third_Party/SEGGER/RTT/RTT/*.c) \
+	$(wildcard middlewares/Third_Party/SEGGER/RTT/RTT/*.S) \
+	$(wildcard middlewares/Third_Party/SEGGER/SystemView/SYSVIEW/*.c) \
+	$(wildcard middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10/*.c) \
+	$(wildcard middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10/Config/Cortex-M/*.c) \
 	$(wildcard sys/*.c)
 COMMON_SOURCES := \
 	$(wildcard $(REPO_ROOT)/firmware/common/serial/*.c) \
@@ -81,7 +86,13 @@ PROTOCOL_SOURCES := \
 STARTUP := Core/Startup/startup_stm32f411ceux.s
 
 # Include directories
-INCLUDE_DIRS := Core/Inc Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS/Include Drivers/STM32F4xx_HAL_Driver/Inc Drivers/STM32F4xx_HAL_Driver/Inc/Legacy Drivers/device_driver USB_DEVICE/App USB_DEVICE/Target app bsp deca deca/deca_driver deca/platform middlewares middlewares/arm_libs middlewares/arm_libs/Include middlewares/arm_libs/PrivateInclude middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc middlewares/ST/STM32_USB_Device_Library/Core/Inc sys middlewares/Third_Party/FreeRTOS/Source/include middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2 middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F $(REPO_ROOT)/protocol $(REPO_ROOT)/protocol/nanopb $(REPO_ROOT)/firmware/common $(REPO_ROOT)/firmware/common/otp $(GENERATED_DIR)
+INCLUDE_DIRS := Core/Inc Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS/Include Drivers/STM32F4xx_HAL_Driver/Inc Drivers/STM32F4xx_HAL_Driver/Inc/Legacy Drivers/device_driver USB_DEVICE/App USB_DEVICE/Target app bsp deca deca/deca_driver deca/platform middlewares middlewares/arm_libs middlewares/arm_libs/Include middlewares/arm_libs/PrivateInclude middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc middlewares/ST/STM32_USB_Device_Library/Core/Inc sys middlewares/Third_Party/FreeRTOS/Source/include middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2 middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F $(REPO_ROOT)/protocol $(REPO_ROOT)/protocol/nanopb $(REPO_ROOT)/firmware/common $(REPO_ROOT)/firmware/common/otp $(GENERATED_DIR) \
+	middlewares/Third_Party/SEGGER/SystemView/Config \
+	middlewares/Third_Party/SEGGER/SystemView/SEGGER \
+	middlewares/Third_Party/SEGGER/SystemView/SYSVIEW \
+	middlewares/Third_Party/SEGGER/RTT/Config \
+	middlewares/Third_Party/SEGGER/RTT/RTT \
+	middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10
 INCLUDES := $(addprefix -I,$(INCLUDE_DIRS))
 
 CFLAGS := $(CPUFLAGS) -std=gnu11 $(OPTFLAGS) $(DEFS) $(INCLUDES) -ffunction-sections -fdata-sections -fstack-usage -Wall --specs=nano.specs
@@ -90,7 +101,9 @@ ASFLAGS := $(CPUFLAGS) -x assembler-with-cpp $(DEFS) $(INCLUDES) -g3
 LDSCRIPT := STM32F411CEUX_FLASH.ld
 LDFLAGS := $(CPUFLAGS) -T$(LDSCRIPT) -Wl,-Map=$(TARGET).map,--gc-sections -Wl,--print-memory-usage -static -u _printf_float --specs=nano.specs --specs=nosys.specs -Wl,--start-group -lc -lm -Wl,--end-group
 
-LOCAL_OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(LOCAL_SOURCES))
+LOCAL_OBJECTS_C := $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(LOCAL_SOURCES)))
+LOCAL_OBJECTS_ASM := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(LOCAL_SOURCES))) $(patsubst %.s,$(BUILD_DIR)/%.o,$(filter %.s,$(LOCAL_SOURCES)))
+LOCAL_OBJECTS := $(LOCAL_OBJECTS_C) $(LOCAL_OBJECTS_ASM)
 COMMON_OBJECTS := $(patsubst $(REPO_ROOT)/%.c,$(BUILD_DIR)/%.o,$(COMMON_SOURCES))
 PROTOCOL_OBJECTS := $(BUILD_DIR)/protocol/protos/protocol.pb.o \
 	$(BUILD_DIR)/protocol/nanopb/pb_common.o \
@@ -136,6 +149,10 @@ $(BUILD_DIR)/firmware/common/%.o: $(REPO_ROOT)/firmware/common/%.c $(FW_IMAGE_ME
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.s
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) -c $< -o $@
 

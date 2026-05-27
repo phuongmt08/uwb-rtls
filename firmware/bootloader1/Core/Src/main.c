@@ -67,19 +67,19 @@ static void bl_led_tick(void)
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
 
-static void bl_log_stub_task(void)
-{
-  static uint32_t s_last_log_ms = 0u;
-  uint32_t now = HAL_GetTick();
-
-  if ((now - s_last_log_ms) >= 500u) {
-    s_last_log_ms = now;
-    (void)sys_logger_write_record(INFO_LOG,
-                    OBJECT_CODE,
-                    "BL stub log tick=%lu",
-                    (unsigned long)now);
-  }
-}
+//static void bl_log_stub_task(void)
+//{
+//  static uint32_t s_last_log_ms = 0u;
+//  uint32_t now = HAL_GetTick();
+//
+//  if ((now - s_last_log_ms) >= 500u) {
+//    s_last_log_ms = now;
+//    (void)sys_logger_write_record(INFO_LOG,
+//                    OBJECT_CODE,
+//                    "BL stub log tick=%lu",
+//                    (unsigned long)now);
+//  }
+//}
 /* USER CODE END 0 */
 
 /**
