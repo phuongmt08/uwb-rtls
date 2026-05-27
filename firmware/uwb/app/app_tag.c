@@ -104,12 +104,14 @@ static void init_filters(void)
     s_last_position.x = init_x;
     s_last_position.y = init_y;
 
-    /* Clean-history Mahalanobis prefilter:
-     * T1 = recover threshold, T2 = reject threshold, R = variance floor. */
+#if SYS_FUSION_PREFILTER_ENABLED
+    /* Fusion-predicted Mahalanobis prefilter state:
+     * T1 = recover threshold, T2 = reject threshold, R = adaptive output base. */
     mw_filter_mahalanobis_init(&s_filters.prefilter,
                                MAHALANOBIS_PREFILTER_D2_RECOVER,
                                MAHALANOBIS_PREFILTER_D2_REJECT,
                                MAHALANOBIS_PREFILTER_R_BASE);
+#endif
 
     /* Keep smoother initialized but disabled by default. Call/apply it explicitly
      * from the owner path when smoothing is wanted. */
@@ -238,6 +240,10 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
     float anchor_distances[NUM_ANCHORS] = {0.0f};
+#if (SYS_FUSION_PREFILTER_ENABLED && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
+    mw_tril_anchor_t prefilter_rejects[NUM_ANCHORS];
+    uint8_t prefilter_reject_count = 0U;
+#endif
     
     /* 1. Extract, Filter and Project Ranging Results */
     for (int i = 0; i < num_success; i++) {
@@ -261,18 +267,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 
         float d_used = r->distance_m;
         float d2_score = 0.0f;
-        float r_adapt = 0.0f;
-
-#if ENABLE_MAHALANOBIS_PREFILTER
-        bool is_accepted = mw_filter_mahalanobis_update(&s_filters.prefilter, aid - 1, d_used,
-                                                        (float)s_last_position.x, (float)s_last_position.y, (float)TAG_HEIGHT_M,
-                                                        0.0f, 0.0f, 0.0f, (float)anchor_pos.x, (float)anchor_pos.y, (float)anchor_pos.z,
-                                                        &d_used, &d2_score, &r_adapt);
-        if (!is_accepted) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u rejected by Mahalanobis (d2=%.2f)", aid, d2_score);
-            continue;
-        }
-#endif
+        float r_adapt = MAHALANOBIS_PREFILTER_R_BASE;
 
         double r2d = 0.0;
         double dz = anchor_pos.z - (double)TAG_HEIGHT_M;
@@ -280,32 +275,105 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)", aid, d_used, (float)dz);
             continue;
         }
+        anchor_distances[aid - 1] = (float)r2d;
+        d_used = (float)r2d;
 
-        /* Store valid anchor data */
-        anchors_by_id[aid].position = anchor_pos;
-        anchors_by_id[aid].distance = (double)r2d;
-        anchors_by_id[aid].id = aid;
-        anchors_by_id[aid].valid = true;
-        anchors_by_id[aid].d2_score = (double)d2_score;
-        anchors_by_id[aid].r_adaptive = (double)r_adapt;
-        anchors_by_id[aid].fp_amp_norm = (double)r->fp_amp_norm_q8 / 256.0;
-        anchors_by_id[aid].fp_snr = (double)r->fp_snr_q8 / 256.0;
+        mw_tril_anchor_t anchor_entry = {0};
+        anchor_entry.position = anchor_pos;
+        anchor_entry.distance = (double)r2d;
+        anchor_entry.id = aid;
+        anchor_entry.valid = true;
+        anchor_entry.r_adaptive = (double)r_adapt;
+        anchor_entry.fp_amp_norm = (double)r->fp_amp_norm_q8 / 256.0;
+        anchor_entry.fp_snr = (double)r->fp_snr_q8 / 256.0;
         RLOG_I(LOG_OBJECT_CODE_TAG,
                "[FP] Anchor #%u amp_norm=%.3f snr=%.3f raw_amp_q8=%u raw_snr_q8=%u",
                aid,
-               anchors_by_id[aid].fp_amp_norm,
-               anchors_by_id[aid].fp_snr,
+               anchor_entry.fp_amp_norm,
+               anchor_entry.fp_snr,
                (unsigned)r->fp_amp_norm_q8,
                (unsigned)r->fp_snr_q8);
-        anchors_by_id[aid].quality_valid = (r->quality != 0U);
-        anchors_by_id[aid].selection_score = 0.0;
-        anchors_by_id[aid].residual_rms = 0.0;
-        anchors_by_id[aid].gdop_penalty = 0.0;
-        anchors_by_id[aid].fp_penalty = 0.0;
-        anchors_by_id[aid].fp_snr_penalty = 0.0;
+        anchor_entry.quality_valid = (r->quality != 0U);
+        anchor_entry.selection_score = 0.0;
+        anchor_entry.residual_rms = 0.0;
+        anchor_entry.gdop_penalty = 0.0;
+        anchor_entry.fp_penalty = 0.0;
+        anchor_entry.fp_snr_penalty = 0.0;
+
+#if SYS_FUSION_PREFILTER_ENABLED
+        if (s_ukf_initialized) {
+            bool pass = mw_filter_mahalanobis_update(&s_filters.prefilter,
+                                                     aid - 1U,
+                                                     d_used,
+                                                     ukf_data.px,
+                                                     ukf_data.py,
+                                                     TAG_HEIGHT_M,
+                                                     ukf_data.vx,
+                                                     ukf_data.vy,
+                                                     0.0f,
+                                                     (float)anchor_pos.x,
+                                                     (float)anchor_pos.y,
+                                                     (float)anchor_pos.z,
+                                                     &d_used,
+                                                     &d2_score,
+                                                     &r_adapt);
+            anchor_entry.d2_score = (double)d2_score;
+            anchor_entry.r_adaptive = (double)r_adapt;
+
+            if (!pass) {
+#if (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U)
+                if (prefilter_reject_count < NUM_ANCHORS) {
+                    prefilter_rejects[prefilter_reject_count++] = anchor_entry;
+                }
+#endif
+                RLOG_W(LOG_OBJECT_CODE_TAG,
+                       "Anchor #%u rejected by fusion mw_filter Mahalanobis (d2=%.2f r2d=%.3fm)",
+                       aid, d2_score, d_used);
+                continue;
+            }
+        } else {
+            anchor_entry.d2_score = (double)d2_score;
+        }
+#else
+        anchor_entry.d2_score = (double)d2_score;
+#endif
+
+        anchors_by_id[aid] = anchor_entry;
         valid_count++;
 
     }
+
+#if (SYS_FUSION_PREFILTER_ENABLED && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
+    if (valid_count < MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS &&
+        prefilter_reject_count > 0U) {
+        for (uint8_t i = 1U; i < prefilter_reject_count; i++) {
+            mw_tril_anchor_t key = prefilter_rejects[i];
+            int j = (int)i - 1;
+            while (j >= 0 && prefilter_rejects[j].d2_score > key.d2_score) {
+                prefilter_rejects[j + 1] = prefilter_rejects[j];
+                j--;
+            }
+            prefilter_rejects[j + 1] = key;
+        }
+
+        uint8_t rescue_target = MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS;
+        if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
+        for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
+            uint8_t aid = prefilter_rejects[i].id;
+            if (aid == 0U || aid > NUM_ANCHORS || anchors_by_id[aid].valid) {
+                continue;
+            }
+            anchors_by_id[aid] = prefilter_rejects[i];
+            valid_count++;
+            RLOG_W(LOG_OBJECT_CODE_TAG,
+                   "Anchor #%u rescued by fusion mw_filter Mahalanobis (d2=%.2f, valid=%u/%u)",
+                   aid,
+                   prefilter_rejects[i].d2_score,
+                   valid_count,
+                   rescue_target);
+        }
+    }
+#endif
 
     for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
@@ -644,8 +712,10 @@ app_err_t app_tag_init(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
 
-#if ENABLE_MAHALANOBIS_PREFILTER
-    RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis ON");
+#if SYS_FUSION_PREFILTER_ENABLED
+    RLOG_I(LOG_OBJECT_CODE_TAG,
+           "Pre-Filter: fusion mw_filter Mahalanobis ON (rescue_min=%u)",
+           (unsigned)MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS);
 #else
     RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF");
 #endif

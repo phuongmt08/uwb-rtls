@@ -255,7 +255,7 @@ void app_reset_config(void)
   __enable_irq();
 }
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 static float get_dt(void)
 {
     uint32_t current_time = HAL_GetTick(); // milliseconds
@@ -268,6 +268,9 @@ static float get_dt(void)
 
     return (float)dt_ms / 1000.0f; // chuyển sang giây
 }
+#endif
+
+#if ENABLE_SYS_FUSION
 static void fusion_task(void *arg)
 {
 	if(sys_sensor_fusion_check_predict_flag() == false) return;
@@ -302,18 +305,6 @@ static void fusion_task(void *arg)
 #endif
 
 #if ENABLE_SYS_FUSION_LOG
-static float get_dt(void)
-{
-    uint32_t current_time = HAL_GetTick(); // milliseconds
-    uint32_t dt_ms = current_time - last_time;
-    last_time = current_time;
-
-    // Giới hạn dt để tránh giá trị bất thường
-    if(dt_ms > 100) dt_ms = 100;
-    if(dt_ms < 1) dt_ms = 1;
-
-    return (float)dt_ms / 1000.0f; // chuyển sang giây
-}
 
 static void fusion_log_task(void *arg)
 {
