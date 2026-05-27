@@ -17,63 +17,6 @@
  * UWB Mahalanobis Pre-Filter
  * ==================================================================== */
 
-static void mahal_history_push(mahalanobis_anchor_state_t *state, float value)
-{
-    state->history[state->index] = value;
-    state->index = (uint8_t)((state->index + 1U) % MW_FILTER_MAHAL_HISTORY_WINDOW);
-    if (state->count < MW_FILTER_MAHAL_HISTORY_WINDOW) {
-        state->count++;
-    }
-}
-
-static float mahal_history_median(const mahalanobis_anchor_state_t *state)
-{
-    float sorted[MW_FILTER_MAHAL_HISTORY_WINDOW];
-    for (uint8_t i = 0; i < state->count; i++) {
-        sorted[i] = state->history[i];
-    }
-
-    for (uint8_t i = 1; i < state->count; i++) {
-        float key = sorted[i];
-        int j = i - 1;
-        while (j >= 0 && sorted[j] > key) {
-            sorted[j + 1] = sorted[j];
-            j--;
-        }
-        sorted[j + 1] = key;
-    }
-
-    if (state->count == 0U) {
-        return 0.0f;
-    }
-    if ((state->count & 1U) != 0U) {
-        return sorted[state->count / 2U];
-    }
-
-    uint8_t mid = state->count / 2U;
-    return 0.5f * (sorted[mid - 1U] + sorted[mid]);
-}
-
-static float mahal_history_variance(const mahalanobis_anchor_state_t *state)
-{
-    if (state->count == 0U) {
-        return 0.0f;
-    }
-
-    float mean = 0.0f;
-    for (uint8_t i = 0; i < state->count; i++) {
-        mean += state->history[i];
-    }
-    mean /= (float)state->count;
-
-    float variance = 0.0f;
-    for (uint8_t i = 0; i < state->count; i++) {
-        float err = state->history[i] - mean;
-        variance += err * err;
-    }
-    return variance / (float)state->count;
-}
-
 float mw_filter_median_update(median_filter_1d_t *med, float new_val)
 {
     med->history[med->index] = new_val;
@@ -108,12 +51,7 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
 {
     if (!ctx) return;
     for (uint8_t i = 0; i < 8; i++) {
-        ctx->anchors[i].count = 0;
-        ctx->anchors[i].index = 0;
         ctx->anchors[i].rejected = false;
-        for (uint8_t j = 0; j < MW_FILTER_MAHAL_HISTORY_WINDOW; j++) {
-            ctx->anchors[i].history[j] = 0.0f;
-        }
     }
     ctx->T1 = T1;
     ctx->T2 = T2;
@@ -130,29 +68,36 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
 {
     if (!ctx || !ctx->initialized || anchor_id >= 8) return false;
 
-    (void)px;
-    (void)py;
-    (void)pz;
-    (void)ax;
-    (void)ay;
-    (void)az;
-
     mahalanobis_anchor_state_t *state = &ctx->anchors[anchor_id];
 
-    /* Cold-start: seed clean history with valid raw readings before gating. */
-    if (state->count < MW_FILTER_MAHAL_COLD_START) {
-        mahal_history_push(state, d_raw);
+    if (!isfinite(d_raw) ||
+        !isfinite(px) || !isfinite(py) || !isfinite(pz) ||
+        !isfinite(ax) || !isfinite(ay) || !isfinite(az)) {
         if (d_out) *d_out = d_raw;
-        if (d2_score) *d2_score = 0.0f;
+        if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
-        return true;
+        state->rejected = true;
+        return false;
     }
 
-    float d_pred = mahal_history_median(state);
-    float variance = mahal_history_variance(state);
+    float dx = px - ax;
+    float dy = py - ay;
+#if SYS_FUSION_USE_PLANAR_RANGES
+    float d_pred = sqrtf((dx * dx) + (dy * dy));
+#else
+    float dz = pz - az;
+    float d_pred = sqrtf((dx * dx) + (dy * dy) + (dz * dz));
+#endif
     float vel_mag = sqrtf(vx * vx + vy * vy + vz * vz);
     const float k_vel = MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
-    float S = fmaxf(variance, ctx->R_base) + (k_vel * vel_mag);
+    float S = MAHALANOBIS_PREFILTER_R_GATE + (k_vel * vel_mag);
+    if (!isfinite(d_pred) || !isfinite(S)) {
+        if (d_out) *d_out = d_raw;
+        if (d2_score) *d2_score = INFINITY;
+        if (R_adaptive) *R_adaptive = ctx->R_base;
+        state->rejected = true;
+        return false;
+    }
     if (S < MAHALANOBIS_PREFILTER_MIN_COVARIANCE) {
         S = MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
     }
@@ -178,8 +123,6 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     if (!accepted) {
         return false;
     }
-
-    mahal_history_push(state, d_raw);
 
     if (R_adaptive) {
         float scale = 1.0f;

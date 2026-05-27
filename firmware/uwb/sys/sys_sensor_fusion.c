@@ -27,9 +27,9 @@
 #define NUM_PREDICT_SIGMA  		(2*N + 1)
 #define NUM_UPDATE_SIGMA  		(2*M + 1)
 
-#define UKF_ALPHA               1.0f
-#define UKF_KAPPA               0.0f
-#define UKF_BETA                2.0f
+#define UKF_ALPHA               SYS_FUSION_UKF_ALPHA
+#define UKF_KAPPA               SYS_FUSION_UKF_KAPPA
+#define UKF_BETA                SYS_FUSION_UKF_BETA
 #define N_PLUS_LAMBDA_N         (UKF_ALPHA * UKF_ALPHA * (N + UKF_KAPPA))
 #define UKF_LAMBDA_N  			(N_PLUS_LAMBDA_N - N)
 #define GAMMA_N       			sqrtf(N_PLUS_LAMBDA_N)
@@ -37,9 +37,9 @@
 #define UKF_LAMBDA_M  			(M_PLUS_LAMBDA_M - M)
 #define GAMMA_M       			sqrtf(M_PLUS_LAMBDA_M)
 
-#define Qa						(0.04f)
-#define Qg						(4.066e-5f)
-#define R_uwb					(0.01f)
+#define Qa						SYS_FUSION_UKF_QA
+#define Qg						SYS_FUSION_UKF_QG
+#define R_uwb					SYS_FUSION_UKF_R_UWB
 
 #define SYS_SENSOR_FUSION_PI    3.14159265358979323846f
 #define SYS_SENSOR_FUSION_2PI   (2.0f * SYS_SENSOR_FUSION_PI)
