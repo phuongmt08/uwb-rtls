@@ -105,6 +105,15 @@ static const char *sys_config_device_type_name(device_type_t device_type)
     }
 }
 
+static void sys_config_apply_forced_mode(void)
+{
+#if FORCE_DEVICE_TAG_MODE
+    g_storage.config.device_type = DEVICE_TYPE_TAG;
+    g_storage.config.uwb.role = DEVICE_ROLE_TAG;
+    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: forcing Device Type/Role to TAG");
+#endif
+}
+
 static bool sys_config_mfg_date_pack(uint32_t date_ddmmyyyy, uint8_t packed[3])
 {
     if (!packed) {
@@ -236,6 +245,8 @@ void sys_config_init(void)
                cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
     }
 
+    sys_config_apply_forced_mode();
+
     sys_config_print();
 }
 
@@ -246,6 +257,13 @@ sys_config_t *sys_config_get(void)
 
 int sys_config_set_role(device_role_t role)
 {
+#if FORCE_DEVICE_TAG_MODE
+    (void)role;
+    g_storage.config.uwb.role = DEVICE_ROLE_TAG;
+    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: role forced to TAG");
+    return 0;
+#endif
+
     if (!sys_config_device_role_valid(role)) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid role: %d", role);
         return -1;
@@ -258,6 +276,14 @@ int sys_config_set_role(device_role_t role)
 
 int sys_config_set_device_type(device_type_t device_type)
 {
+#if FORCE_DEVICE_TAG_MODE
+    (void)device_type;
+    g_storage.config.device_type = DEVICE_TYPE_TAG;
+    g_storage.config.uwb.role = DEVICE_ROLE_TAG;
+    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: device_type forced to TAG");
+    return 0;
+#endif
+
     if (!sys_config_device_type_valid(device_type)) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid device_type: %d", device_type);
         return -1;

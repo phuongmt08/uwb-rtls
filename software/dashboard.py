@@ -545,6 +545,9 @@ class MainWindow(QMainWindow):
         self.udp_receiver = None
         self.is_listening = False
         self.record_file = None
+        self.record_start_time = None
+        self.record_last_time = None
+        self.record_line_no = 0
         
         self.setup_ui()
         
@@ -993,13 +996,9 @@ class MainWindow(QMainWindow):
             filename = os.path.join(log_dir, datetime.now().strftime("uwb_data_%Y%m%d_%H%M%S.csv"))
             try:
                 self.record_file = open(filename, "a", encoding="utf-8")
-                
-                header = (
-                    "Time(s), SOF, Length, AnchorMask, TxFrameCnt, "
-                    "UKF_X(m), UKF_Y(m), UKF_Yaw(deg), "
-                    "Tril_X(m), Tril_Y(m), Yaw(deg), ErrorFrameCnt"
-                )
-                self.record_file.write(header + "\n")
+                self.record_start_time = time.time()
+                self.record_last_time = None
+                self.record_line_no = 0
                 
                 self.record_btn.setText("Stop Recording")
             except Exception as e:
@@ -1009,6 +1008,9 @@ class MainWindow(QMainWindow):
             if self.record_file:
                 self.record_file.close()
                 self.record_file = None
+            self.record_start_time = None
+            self.record_last_time = None
+            self.record_line_no = 0
             self.record_btn.setText("Start Recording")
 
     def on_position_received(self, position):
@@ -1046,14 +1048,28 @@ class MainWindow(QMainWindow):
             self.warning_label.setVisible(False)
             
         if hasattr(self, 'record_btn') and self.record_btn.isChecked() and self.record_file:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            now = time.time()
+            dt = 0.0 if self.record_last_time is None else now - self.record_last_time
+            self.record_last_time = now
+            self.record_line_no += 1
+
+            tx_frame_cnt = int(position.get('tx_frame_cnt', self.record_line_no))
+            anchor_mask = int(position.get('anchor_mask', 0))
+            error_frame_cnt = int(position.get('error_frame_cnt', 0))
+
             log_str = (
-                f"{timestamp}, 0xAA, {UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE}, "
-                f"0x{position.get('anchor_mask', 0):02X}, {position.get('tx_frame_cnt', 0)}, "
-                f"{position.get('ukf_x', 0):.3f}, {position.get('ukf_y', 0):.3f}, "
-                f"{position.get('ukf_yaw', 0):.1f}, {position.get('tril_x', 0):.3f}, "
-                f"{position.get('tril_y', 0):.3f}, {position.get('yaw', 0):.1f}, "
-                f"{position.get('error_frame_cnt', 0)}"
+                f"({self.record_line_no:4d}/{tx_frame_cnt:4d}) Update  "
+                f"ax: {0.0: .6f} ay: {0.0: .6f} gz: {0.0: .6f} "
+                f"px: {position.get('ukf_x', 0): .6f} "
+                f"py: {position.get('ukf_y', 0): .6f} "
+                f"dt: {dt: .6f} mask: {anchor_mask} "
+                f"d1: {0.0: .6f} d2: {0.0: .6f} "
+                f"d3: {0.0: .6f} d4: {0.0: .6f} "
+                f"err: {error_frame_cnt} "
+                f"amp1: {0.0: .6f} amp2: {0.0: .6f} "
+                f"amp3: {0.0: .6f} amp4: {0.0: .6f} "
+                f"snr1: {0.0: .6f} snr2: {0.0: .6f} "
+                f"snr3: {0.0: .6f} snr4: {0.0: .6f}"
             )
                 
             self.record_file.write(log_str + "\n")

@@ -6,7 +6,7 @@ from typing import Tuple
 OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\23_05_26\20260523_13g56p_ukf_log_data.csv"
+SOURCE_DATA_FILE = None
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
