@@ -208,6 +208,7 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM10_Init();
   MX_TIM11_Init();
+  MX_TIM2_Init();
   MX_CRC_Init();
   MX_RTC_Init();
   MX_ADC1_Init();

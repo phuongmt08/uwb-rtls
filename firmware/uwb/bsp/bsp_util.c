@@ -462,10 +462,21 @@ uint32_t getRunTimeCounterValue(void)
   return ((s_runtime_counter_high << 16) | now);
 }
 
+volatile char g_overflowed_task_name[16] = {0};
+
 void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
 {
+   if (pcTaskName != NULL)
+   {
+       for (int i = 0; i < 15; i++)
+       {
+           g_overflowed_task_name[i] = (char)pcTaskName[i];
+           if (pcTaskName[i] == '\0') break;
+       }
+       g_overflowed_task_name[15] = '\0';
+   }
+   
    /* Halt system and log error */
-   RLOG_E(LOG_OBJECT_CODE_TASK, ERR_SYSTEM, "Stack Overflow in task: %s", pcTaskName);
    __disable_irq();
    while(1)
    {
@@ -507,7 +518,7 @@ void bsp_util_print_cpu_stats(void)
     {
       s_stats_buf[len - 3] = '\0'; /* Trim the trailing " | " */
     }
-    RLOG_I(LOG_OBJECT_CODE_TASK, "%s", s_stats_buf);
+    RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stats_buf);
   }
 #endif
 }

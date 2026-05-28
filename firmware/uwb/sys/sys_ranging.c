@@ -1048,16 +1048,19 @@ static uint64_t ensure_future_tx(uint64_t tx_time_dw, uint32_t schedule_guard_us
  
   uint64_t ahead_dw = (tx_time_dw - now) & DW_MASK_40;
   if (ahead_dw == 0ULL || ahead_dw >= (1ULL << 39)) {
-    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TX] Slot already passed - aborting TX");
+    uint32_t behind_us = tdma_dw_to_us((now - tx_time_dw) & DW_MASK_40);
+    RLOG_W(LOG_OBJECT_CODE_RANGING, "[TX] Slot already passed - aborting TX (tx=" DW_FMT " now=" DW_FMT " behind=%luus)",
+           DW_ARG(tx_time_dw), DW_ARG(now), (unsigned long)behind_us);
     return 0ULL;
   }
 
   if (ahead_dw <= guard_dw) {
     uint32_t ahead_us = tdma_dw_to_us(ahead_dw);
     RLOG_W(LOG_OBJECT_CODE_RANGING,
-           "[TX] Slot too close: ahead=%luus guard=%luus - aborting TX",
+           "[TX] Slot too close: ahead=%luus guard=%luus - aborting TX (tx=" DW_FMT " now=" DW_FMT ")",
            (unsigned long) ahead_us,
-           (unsigned long) schedule_guard_us);
+           (unsigned long) schedule_guard_us,
+           DW_ARG(tx_time_dw), DW_ARG(now));
     return 0ULL;
   }
   return tx_time_dw;
@@ -1544,12 +1547,15 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               }
               if (s_sys_ranging_ev.num_responses < num_anchors) {
                   s_tag_diag.resp_partial++;
+                  /* Commented out to prevent blocking print from causing us to miss the FINAL TX slot */
+                  /*
                   RLOG_W(LOG_OBJECT_CODE_RANGING,
                          "[TAG] RESP partial seq=%u resp=%u/%u resp_mask=0x%02X",
                          s_ctx.sequence_num,
                          s_sys_ranging_ev.num_responses,
                          num_anchors,
                          resp_mask);
+                  */
               } else {
                   s_tag_diag.resp_full++;
               }
@@ -2445,4 +2451,31 @@ void sys_ranging_reset_stats(void)
   s_stats.total_count   = 0;
   s_stats.success_count = 0;
   s_stats.error_count   = 0;
+}
+
+uint32_t sys_ranging_get_ms_to_deadline(void)
+{
+  if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE)
+  {
+    return 10;
+  }
+
+  uint64_t now_dw      = bsp_uwb_get_current_time_dw();
+  uint64_t deadline_dw = s_sys_ranging_ev.deadline_dw;
+  uint64_t remaining   = (deadline_dw - now_dw) & DW_MASK_40;
+
+  if (remaining == 0ULL || remaining >= (1ULL << 39))
+  {
+    return 1; /* Past deadline or extremely close */
+  }
+
+  uint32_t remaining_us = tdma_dw_to_us(remaining);
+  uint32_t remaining_ms = remaining_us / 1000U;
+
+  if (remaining_ms == 0)
+  {
+    return 1;
+  }
+
+  return (remaining_ms > 10) ? 10 : remaining_ms;
 }

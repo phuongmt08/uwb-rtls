@@ -68,10 +68,8 @@ static bool s_latest_fusion_position_valid = false;
 bsp_imu_bias_t t_imu_bias;
 uint8_t test = 0;
 static float s_latest_distances[NUM_ANCHORS] = {0};
-#endif
-
-#if ENABLE_SYS_FUSION
 sys_sensor_fusion_data_t ukf_data;
+static float s_latest_error = 0.0f;
 #endif
 
 /* Private prototypes --------------------------------------------------- */
@@ -825,7 +823,7 @@ void app_tag_process(void)
             float current_hz = (interval_ms > 0U) ? (1000.0f / (float)interval_ms) : 0.0f;
 
             RLOG_I(LOG_OBJECT_CODE_TAG,
-                   "Cycle duration=%lums period=%ums rate=%.2fHz anchors=%u valid=%u",
+                   "Cycle duration=%lums period=%ums success rate=%.2fHz anchors=%u valid=%u",
                    (unsigned long)cycle_ms,
                    (unsigned)cfg->uwb.ranging_period_ms,
                    current_hz,

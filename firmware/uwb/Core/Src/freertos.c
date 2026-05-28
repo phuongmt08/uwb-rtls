@@ -39,8 +39,10 @@
 #include "sys_config.h"
 #include "sys_logger.h"
 #include "sys_pm.h"
+#include "sys_ranging.h"
 #include "positioning_config.h"
-#if ENABLE_SYS_FUSION
+#include "bsp_io.h"
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 #include "sys_sensor_fusion.h"
 #endif
 /* USER CODE END Includes */
@@ -72,7 +74,7 @@ bool g_pm_ranging_blocked = false;
 network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 static uint32_t s_fusion_last_tick = 0U;
 static bool     s_fusion_first_run = true;
 #endif
@@ -82,7 +84,7 @@ static bool     s_fusion_first_run = true;
 osThreadId_t UwbRangingHandle;
 const osThreadAttr_t UwbRanging_attributes = {
   .name = "UwbRanging",
-  .stack_size = 512 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityRealtime,
 };
 /* Definitions for SensorFusion */
@@ -110,21 +112,21 @@ const osThreadAttr_t Logger_attributes = {
 osThreadId_t FlashStorageHandle;
 const osThreadAttr_t FlashStorage_attributes = {
   .name = "FlashStorage",
-  .stack_size = 256 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for IO */
 osThreadId_t IOHandle;
 const osThreadAttr_t IO_attributes = {
   .name = "IO",
-  .stack_size = 256 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for PM */
 osThreadId_t PMHandle;
 const osThreadAttr_t PM_attributes = {
   .name = "PM",
-  .stack_size = 256 * 4,
+  .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for g_spi1_mutex */
@@ -262,9 +264,15 @@ void uwb_ranging_entry(void *argument)
 
   for (;;)
   {
+    /* Calculate dynamic timeout based on UWB deadline to prevent missing FINAL TX slot */
+    uint32_t wait_ms = 10;
+    if (g_ranging_enabled && !g_pm_ranging_blocked)
+    {
+      wait_ms = sys_ranging_get_ms_to_deadline();
+    }
+
     /* Block until DW1000 ISR signals TX done or RX event.            */
-    /* 10 ms timeout as fallback to keep state machine alive.         */
-    osSemaphoreAcquire(g_uwb_isr_semHandle, 10);
+    osSemaphoreAcquire(g_uwb_isr_semHandle, wait_ms);
 
     bool is_ranging_active = g_ranging_enabled && !g_pm_ranging_blocked;
 
@@ -309,7 +317,7 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
@@ -350,14 +358,13 @@ void sensor_fusion_entry(void *argument)
       float yaw = sys_sensor_fusion_get_yaw_deg();
 
       app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
+#if ENABLE_SYS_FUSION
       bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
+#endif
     }
   }
 #else
-  for (;;)
-  {
-    osDelay(osWaitForever);
-  }
+  osThreadExit();
 #endif
   /* USER CODE END sensor_fusion_entry */
 }
@@ -491,32 +498,29 @@ void power_manage_entry(void *argument)
     osDelay(100); /* 10 Hz, aligned with develop PM cadence */
     sys_pm_task(NULL);
 
+    /* Ranging halt logic completely bypassed as requested. 
+     * We only log warnings but NEVER call bsp_uwb_idle() or set g_pm_ranging_blocked. */
     if (!sys_pm_is_safe())
     {
       if (!s_ranging_halted_by_pm)
       {
         sys_pm_status_t pm_status;
-
-        g_pm_ranging_blocked = true;
-        bsp_uwb_idle();
         s_ranging_halted_by_pm = true;
         sys_pm_get_status(&pm_status);
 
-        RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_POS_OUT_OF_RANGE,
-               "[CRITICAL] RANGING HALTED! Safety checks failed. Mask: 0x%04X (SOC: %.1f%%, VDDA: %.1f mV, VBAT: %.1f mV)",
+        RLOG_W(LOG_OBJECT_CODE_APPLICATION,
+               "[PM WARNING] Safety checks failed! Mask: 0x%04X (SOC: %.1f%%, VDDA: %.1f mV, VBAT: %.1f mV) - Ranging forced to run.",
                (unsigned int)pm_status.critical_mask,
                pm_status.soc,
                pm_status.vdda_mv,
                pm_status.bat_voltage_mv);
       }
-      continue;
     }
-
-    if (s_ranging_halted_by_pm)
+    else if (s_ranging_halted_by_pm)
     {
       s_ranging_halted_by_pm = false;
       g_pm_ranging_blocked = false;
-      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INFO] RANGING RESUMED! Safety conditions restored.");
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[PM INFO] Safety conditions restored.");
     }
   }
   /* USER CODE END power_manage_entry */

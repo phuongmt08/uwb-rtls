@@ -217,17 +217,11 @@ static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 		return false;
 	}
 
-	if (!bsp_spi1_mutex_acquire())
-	{
-		return false;
-	}
-
 	status = HAL_SPI_TransmitReceive(&BSP_IMU_SPI_HANDLE,
 			(uint8_t *)tx_ptr,
 			rx_ptr,
 			length,
 			BSP_IMU_SPI_TIMEOUT_MS);
-	bsp_spi1_mutex_release();
 
 	CHECK_ERR((status == HAL_OK), false);
 

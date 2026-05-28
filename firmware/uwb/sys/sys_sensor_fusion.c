@@ -180,9 +180,13 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 	if (ukf.is_first_frame)
 	{
-		float32_t P_aug[N * N] = {0};
-		float32_t L_aug[N * N] = {0};
-		arm_matrix_instance_f32 mat_Paug, mat_Laug;
+		static float32_t P_aug[N * N];
+		static float32_t L_aug[N * N];
+		static arm_matrix_instance_f32 mat_Paug, mat_Laug;
+		
+		memset(P_aug, 0, sizeof(P_aug));
+		memset(L_aug, 0, sizeof(L_aug));
+		
 		arm_mat_init_f32(&mat_Paug, N, N, P_aug);
 		arm_mat_init_f32(&mat_Laug, N, N, L_aug);
 
@@ -322,9 +326,13 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     uint32_t sys_update_tick_ms = HAL_GetTick();
 	sys_update_count++;
 
-    float32_t P_aug[M * M] = {0};
-    float32_t L_aug[M * M] = {0};
-    arm_matrix_instance_f32 mat_Paug, mat_Laug;
+    static float32_t P_aug[M * M];
+    static float32_t L_aug[M * M];
+    static arm_matrix_instance_f32 mat_Paug, mat_Laug;
+    
+    memset(P_aug, 0, sizeof(P_aug));
+    memset(L_aug, 0, sizeof(L_aug));
+    
     arm_mat_init_f32(&mat_Paug, M, M, P_aug);
     arm_mat_init_f32(&mat_Laug, M, M, L_aug);
 
@@ -351,8 +359,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     // L_aug *= GAMMA_M
     for(int i=0; i<M*M; i++) L_aug[i] *= GAMMA_M;
 
-    float32_t X_sigma[NUM_STATE][NUM_UPDATE_SIGMA] = {0};
-    float32_t D_sigma[NUM_UPDATE_NOISE][NUM_UPDATE_SIGMA] = {0};
+    static float32_t X_sigma[NUM_STATE][NUM_UPDATE_SIGMA];
+    static float32_t D_sigma[NUM_UPDATE_NOISE][NUM_UPDATE_SIGMA];
+    
+    memset(X_sigma, 0, sizeof(X_sigma));
+    memset(D_sigma, 0, sizeof(D_sigma));
 
     float32_t x_aug[M] = {
         ukf.state.px, ukf.state.py, ukf.state.vx, ukf.state.vy, ukf.state.theta,
@@ -412,8 +423,10 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
 
     // P_dd += Wc_M[m] * diff_d * diff_dᵀ
     // P_xd += Wc_M[m] * diff_x * diff_dᵀ
-    float32_t P_dd[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE] = {0};
-    float32_t P_xd[NUM_STATE * NUM_UPDATE_NOISE] = {0};
+    static float32_t P_dd[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
+    static float32_t P_xd[NUM_STATE * NUM_UPDATE_NOISE];
+    memset(P_dd, 0, sizeof(P_dd));
+    memset(P_xd, 0, sizeof(P_xd));
 
     for(int m=0; m<NUM_UPDATE_SIGMA; m++)
     {
@@ -433,8 +446,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         }
     }
 
-    float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE], K_data[NUM_STATE * NUM_UPDATE_NOISE];
-    arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
+    static float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
+    static float32_t K_data[NUM_STATE * NUM_UPDATE_NOISE];
+    static arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
+    memset(P_dd_inv, 0, sizeof(P_dd_inv));
+    memset(K_data, 0, sizeof(K_data));
     arm_mat_init_f32(&mat_Pdd, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd);
     arm_mat_init_f32(&mat_Pdd_inv, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd_inv);
     arm_mat_init_f32(&mat_Pxd, NUM_STATE, NUM_UPDATE_NOISE, P_xd);
@@ -468,10 +484,10 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         if (i == 7) ukf.state.b_gz += update_val;
     }
 
-    float32_t Pxd_t_data[NUM_UPDATE_NOISE * NUM_STATE];
-	float32_t K_Pxd_t_data[NUM_STATE * NUM_STATE];
+    static float32_t Pxd_t_data[NUM_UPDATE_NOISE * NUM_STATE];
+	static float32_t K_Pxd_t_data[NUM_STATE * NUM_STATE];
 
-	arm_matrix_instance_f32 mat_Pxd_t, mat_K_Pxd_t;
+	static arm_matrix_instance_f32 mat_Pxd_t, mat_K_Pxd_t;
 	arm_mat_init_f32(&mat_Pxd_t, NUM_UPDATE_NOISE, NUM_STATE, Pxd_t_data);
 	arm_mat_init_f32(&mat_K_Pxd_t, NUM_STATE, NUM_STATE, K_Pxd_t_data);
 

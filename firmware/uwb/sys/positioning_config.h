@@ -222,13 +222,15 @@
 #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
 #endif
 
-#ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  1
+#ifdef ENABLE_SYS_FUSION
+#undef ENABLE_SYS_FUSION
 #endif
+#define ENABLE_SYS_FUSION  0
 
-#ifndef ENABLE_SYS_FUSION_LOG
-#define ENABLE_SYS_FUSION_LOG  0
+#ifdef ENABLE_SYS_FUSION_LOG
+#undef ENABLE_SYS_FUSION_LOG
 #endif
+#define ENABLE_SYS_FUSION_LOG  1
 
 /**
  * @brief Distance Smoother (EMA Filter) parameters

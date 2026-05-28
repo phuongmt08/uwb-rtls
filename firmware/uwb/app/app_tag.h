@@ -25,7 +25,7 @@
 #include "common.h"
 #include "positioning_config.h"
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 #include "sys_sensor_fusion.h"
 #endif
 
@@ -77,7 +77,7 @@ bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
  */
 void app_tag_reset_fusion(void);
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 extern sys_sensor_fusion_data_t ukf_data;
 #endif
 

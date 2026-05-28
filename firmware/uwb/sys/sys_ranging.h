@@ -284,6 +284,12 @@ sys_ranging_err_t sys_ranging_anchor_process(void);
 sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
 
 /**
+ * @brief Get remaining time in milliseconds until the active ranging deadline
+ * @return Remaining time in ms (1-10 ms)
+ */
+uint32_t sys_ranging_get_ms_to_deadline(void);
+
+/**
  * @brief Reset ranging statistics
  */
 void sys_ranging_reset_stats(void);
