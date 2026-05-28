@@ -172,6 +172,7 @@ standard names. */
 #define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() ((void)0)
 #define portGET_RUN_TIME_COUNTER_VALUE()         getRunTimeCounterValue()
 uint32_t getRunTimeCounterValue(void);
+#define INCLUDE_pxTaskGetStackStart              1
 #include "SEGGER_SYSVIEW_FreeRTOS.h"
 /* USER CODE END Defines */
 
