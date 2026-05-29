@@ -498,7 +498,7 @@
 
         /* --- Interactive Legend colors --- */
         .color-ukf { background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
-        .color-fw { background: var(--text-muted); }
+        .color-fw { background: #e2e8f0; box-shadow: 0 0 8px rgba(226, 232, 240, 0.55); }
         .color-triplet { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); }
         .color-wls { background: var(--neon-orange); box-shadow: 0 0 8px var(--neon-orange); }
 
@@ -547,7 +547,10 @@
                 <input type="range" class="scrub-slider" id="scrubSlider" value="0" min="0" max="100" oninput="scrub(this.value)">
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 5px;">
-                <div class="time-display" id="timeDisplay" style="text-align: left; font-size:0.85rem;">0.000 / 0.000 s</div>
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                    <div class="time-display" id="timeDisplay" style="text-align: left; font-size:0.85rem;">0.000 / 0.000 s</div>
+                    <div class="time-display" id="sampleDisplay" style="text-align: left; font-size:0.75rem; color: var(--text-muted);">Sample 0 / 0</div>
+                </div>
                 <div class="toggle-group">
                     <button class="toggle-btn active" id="toggleAnchors" onclick="toggleOption('anchors')" style="padding: 4px 8px; font-size: 0.7rem;">Anchors</button>
                     <button class="toggle-btn active" id="toggleTrace" onclick="toggleOption('trace')" style="padding: 4px 8px; font-size: 0.7rem;">Breadcrumbs</button>
@@ -1061,6 +1064,7 @@
             const currentT = lerp(times[currentIndex], times[nextIdx], ratio);
             const maxT = times[totalSamples - 1];
             document.getElementById('timeDisplay').innerText = currentT.toFixed(3) + " / " + maxT.toFixed(3) + " s";
+            document.getElementById('sampleDisplay').innerText = "Sample " + (currentIndex + 1) + " / " + totalSamples;
 
             let ukfX = null, ukfY = null, isUpdate = false;
             const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
@@ -1287,32 +1291,29 @@
 
             // 3. Draw Breadcrumbs (past paths trails)
             if (options.trace && currentIndex > 0) {
-                const drawPathTrail = (pathArray, strokeStyle, width) => {
-                    ctx.beginPath();
-                    ctx.strokeStyle = strokeStyle;
-                    ctx.lineWidth = width;
-                    let started = false;
+                const drawPathTrail = (pathArray, fillStyle, radius, strokeStyle = null, strokeWidth = 0) => {
                     for (let k = 0; k <= currentIndex; k++) {
                         const px = pathArray.x[k];
                         const py = pathArray.y[k];
-                        if (px === null) {
-                            started = false;
+                        if (px === null || py === null) {
                             continue;
                         }
-                        if (!started) {
-                            ctx.moveTo(toCanvasX(px), toCanvasY(py));
-                            started = true;
-                        } else {
-                            ctx.lineTo(toCanvasX(px), toCanvasY(py));
+                        ctx.beginPath();
+                        ctx.arc(toCanvasX(px), toCanvasY(py), radius, 0, 2 * Math.PI);
+                        ctx.fillStyle = fillStyle;
+                        ctx.fill();
+                        if (strokeStyle && strokeWidth > 0) {
+                            ctx.strokeStyle = strokeStyle;
+                            ctx.lineWidth = strokeWidth;
+                            ctx.stroke();
                         }
                     }
-                    ctx.stroke();
                 };
 
                 // Draw enabled trails
-                if (document.getElementById('chk_wls').checked) drawPathTrail(data.wlsPath, 'rgba(245, 158, 11, 0.25)', 1.5);
-                if (document.getElementById('chk_triplet').checked) drawPathTrail(data.tripletPath, 'rgba(16, 185, 129, 0.25)', 1.5);
-                if (document.getElementById('chk_fw').checked) drawPathTrail(data.firmwarePath, 'rgba(148, 163, 184, 0.2)', 1);
+                if (document.getElementById('chk_wls').checked) drawPathTrail(data.wlsPath, 'rgba(245, 158, 11, 0.35)', 2.2);
+                if (document.getElementById('chk_triplet').checked) drawPathTrail(data.tripletPath, 'rgba(16, 185, 129, 0.35)', 2.2);
+                if (document.getElementById('chk_fw').checked) drawPathTrail(data.firmwarePath, 'rgba(226, 232, 240, 0.78)', 3.0, 'rgba(15, 23, 42, 0.65)', 0.8);
                 
                 if (document.getElementById('chk_ukf').checked) {
                     // Use 20Hz data if available, otherwise fall back to 6Hz
@@ -1331,31 +1332,6 @@
                     }
                     
                     // Draw path lines with distinct styles
-                    for (let k = 1; k <= maxK; k++) {
-                        const px1 = ukfP.x[k-1];
-                        const py1 = ukfP.y[k-1];
-                        const px2 = ukfP.x[k];
-                        const py2 = ukfP.y[k];
-                        if (px1 === null || px2 === null) continue;
-
-                        ctx.beginPath();
-                        ctx.moveTo(toCanvasX(px1), toCanvasY(py1));
-                        ctx.lineTo(toCanvasX(px2), toCanvasY(py2));
-                        
-                        const isUpdate = (ukfM[k] === 1);
-                        if (isUpdate) {
-                            ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'; // bright cyan for Update
-                            ctx.lineWidth = 3.0;
-                            ctx.setLineDash([]);
-                        } else {
-                            ctx.strokeStyle = 'rgba(251, 146, 60, 0.5)'; // orange for Predict
-                            ctx.lineWidth = 1.5;
-                            ctx.setLineDash([3, 5]);
-                        }
-                        ctx.stroke();
-                    }
-                    ctx.setLineDash([]);
-                    
                     // Draw markers: Update = diamond ◆ (cyan), Predict = circle ● (orange)
                     for (let k = 0; k <= maxK; k++) {
                         const px = ukfP.x[k];
@@ -1545,7 +1521,7 @@
             if (document.getElementById('chk_fw').checked) {
                 const fwX = lerp(data.firmwarePath.x[currentIndex], data.firmwarePath.x[nextIdx], ratio);
                 const fwY = lerp(data.firmwarePath.y[currentIndex], data.firmwarePath.y[nextIdx], ratio);
-                if (fwX !== null && fwY !== null) drawTagVehicle(fwX, fwY, yaw, 'rgba(148, 163, 184, 0.7)', 'FW');
+                if (fwX !== null && fwY !== null) drawTagVehicle(fwX, fwY, yaw, 'rgba(226, 232, 240, 1)', 'FW');
             }
             if (document.getElementById('chk_ukf').checked) {
                 const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;

@@ -205,7 +205,7 @@ def run_gen(log_file):
         
         svg_content = f"""
             <polyline points="{gt_pts}" fill="none" stroke="#fecaca" stroke-width="1.5" stroke-dasharray="2,2" />
-            <polyline points="{fw_pts}" fill="none" stroke="#8b5cf6" stroke-width="1.2" />
+            <polyline points="{fw_pts}" fill="none" stroke="#a78bfa" stroke-width="1.6" />
         """
     
     payload = {

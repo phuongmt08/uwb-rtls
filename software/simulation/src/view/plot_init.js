@@ -8,7 +8,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: gt_square.x, y: gt_square.y, mode: 'lines', name: `Ground Truth (${gt_square.name || 'Original Square'})`,
           line: { color: '#f87171', dash: 'dot', width: 1 } },
         { x: samples.map(e => e.px_fw), y: samples.map(e => e.py_fw), mode: 'lines+markers',
-          name: 'Firmware Path', type: 'scattergl', marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
+          name: 'Firmware Path', type: 'scattergl', marker: { size: 3, color: '#e2e8f0' }, line: { color: '#cbd5e1', width: 2.5 } },
         { x: [], y: [], mode: 'lines', name: 'Simulated Path (All)',
            type: 'scattergl', line: { color: '#94a3b8', width: 1, dash: 'dot' } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Rules)',
@@ -105,6 +105,8 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], name: 'Vy Raw', mode: 'lines', type: 'scatter', line: { color: '#f87171', dash: 'dot', width: 1 }, visible: 'legendonly', hovertemplate: 'Vy Raw: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'Vx Clean', mode: 'lines', type: 'scatter', line: { color: '#2563eb', width: 2 }, hovertemplate: 'Vx: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'Vy Clean', mode: 'lines', type: 'scatter', line: { color: '#16a34a', width: 2 }, hovertemplate: 'Vy: %{y:.3f} m/s<extra></extra>' },
+        { x: [], y: [], name: 'UKF Vx', mode: 'lines', type: 'scatter', line: { color: '#60a5fa', width: 1.8, dash: 'dash' }, hovertemplate: 'UKF Vx: %{y:.3f} m/s<extra></extra>' },
+        { x: [], y: [], name: 'UKF Vy', mode: 'lines', type: 'scatter', line: { color: '#f87171', width: 1.8, dash: 'dash' }, hovertemplate: 'UKF Vy: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', mode: 'lines', line: { color: '#cbd5e1', width: 0 }, opacity: 0.3, hovertemplate: 'ZUPT Active<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
@@ -121,18 +123,13 @@ function initPlots(anchors, gt_square, rawData, samples) {
           hovertemplate: 'Yaw: %{y:.2f} deg<extra></extra>' },
         { x: [], y: [], name: 'UKF Yaw', mode: 'lines', type: 'scatter', line: { color: '#10b981', width: 2 },
           hovertemplate: 'UKF Yaw: %{y:.2f} deg<extra></extra>' },
-        { x: [], y: [], name: 'UKF Vx', mode: 'lines', type: 'scatter', line: { color: '#2563eb', width: 1.5, dash: 'dash' }, yaxis: 'y3',
-          hovertemplate: 'UKF Vx: %{y:.3f} m/s<extra></extra>' },
-        { x: [], y: [], name: 'UKF Vy', mode: 'lines', type: 'scatter', line: { color: '#ef4444', width: 1.5, dash: 'dash' }, yaxis: 'y3',
-          hovertemplate: 'UKF Vy: %{y:.3f} m/s<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
-        margin: { t: 40, b: 40, l: 60, r: 100 }, 
-        xaxis: { title: 'Sample Index', domain: [0, 0.85] },
+        margin: { t: 40, b: 40, l: 60, r: 60 }, 
+        xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Yaw (deg)', side: 'left' },
         yaxis2: { title: 'Gyro (rad/s)', overlaying: 'y', side: 'right', showgrid: false },
-        yaxis3: { title: 'Velocity (m/s)', overlaying: 'y', side: 'right', anchor: 'free', position: 0.95, showgrid: false },
         hovermode: 'x unified'
     });
 

@@ -48,12 +48,16 @@ function updatePlots(res, samples, rawData) {
 
     // 3. Other plots
     Plotly.restyle('accel', { x: [x_axis, x_axis], y: [plotData.ax, plotData.ay], customdata: [plotData.times, plotData.times] }, [0, 1]);
-    Plotly.restyle('velocity', { x: [x_axis, x_axis, x_axis, x_axis, x_axis], y: [[], [], plotData.vx, plotData.vy, plotData.zupt], customdata: [[], [], plotData.times, plotData.times, plotData.times] }, [0, 1, 2, 3, 4]);
+    Plotly.restyle('velocity', {
+        x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
+        y: [[], [], plotData.vx, plotData.vy, plotData.ukf_vx, plotData.ukf_vy, plotData.zupt],
+        customdata: [[], [], plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
+    }, [0, 1, 2, 3, 4, 5, 6]);
     Plotly.restyle('yaw_plot', { 
-        x: [x_axis, x_axis, x_axis, x_axis, x_axis], 
-        y: [plotData.gz, plotData.yaw, plotData.ukf_yaw, plotData.ukf_vx, plotData.ukf_vy], 
-        customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times] 
-    }, [0, 1, 2, 3, 4]);
+        x: [x_axis, x_axis, x_axis], 
+        y: [plotData.gz, plotData.yaw, plotData.ukf_yaw], 
+        customdata: [plotData.times, plotData.times, plotData.times] 
+    }, [0, 1, 2]);
 
     Plotly.restyle('pos_error', {
         x: [x_axis, x_axis, x_axis, x_axis, x_axis],

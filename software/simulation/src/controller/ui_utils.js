@@ -260,6 +260,28 @@ function countValidPositions(path) {
     return count;
 }
 
+function getRateStatsFromDt(entries, types) {
+    const allowedTypes = new Set(types);
+    let count = 0;
+    let dtSum = 0;
+
+    entries.forEach(entry => {
+        const dt = Number(entry.dt);
+        if (allowedTypes.has(entry.type) && Number.isFinite(dt) && dt > 0) {
+            count++;
+            dtSum += dt;
+        }
+    });
+
+    const meanDt = count > 0 ? dtSum / count : 0;
+    return {
+        count,
+        dtSum,
+        meanDt,
+        hz: meanDt > 0 ? 1 / meanDt : 0
+    };
+}
+
 function updatePositionRateDisplay(totalTimeOverride) {
     if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
     const select = document.getElementById('export_path_select');
@@ -267,11 +289,20 @@ function updatePositionRateDisplay(totalTimeOverride) {
     const path = latestTrajectoryPaths[selected] || latestTrajectoryPaths.firmware;
     const validCount = countValidPositions(path);
     const totalCount = path && path.x ? path.x.length : 0;
-    const hz = latestTotalTime > 0 ? validCount / latestTotalTime : 0;
+    const processedCount = latestSimulationResult && latestSimulationResult.simPathUKF_allTimes
+        ? latestSimulationResult.simPathUKF_allTimes.length
+        : rawData.all_entries.length;
+    const entriesForRate = rawData.all_entries.slice(0, processedCount);
+    const predictRate = getRateStatsFromDt(entriesForRate, ['Predict']);
+    const updateRate = getRateStatsFromDt(entriesForRate, ['Update']);
+    const allRate = getRateStatsFromDt(entriesForRate, ['Predict', 'Update']);
+    const exportRate = selected === 'firmware' || selected === 'rules' || selected === 'wls' || selected === 'triplet'
+        ? updateRate
+        : allRate;
     const label = select ? select.options[select.selectedIndex].text : 'Trajectory';
     const elem = document.getElementById('position_rate_info');
     if (elem) {
-        elem.textContent = `${label}: ${hz.toFixed(2)} Hz (${validCount}/${totalCount} points, ${latestTotalTime.toFixed(2)}s)`;
+        elem.textContent = `${label}: ${exportRate.hz.toFixed(2)} Hz (${validCount}/${totalCount} points) | Predict: ${predictRate.hz.toFixed(2)} Hz | Update: ${updateRate.hz.toFixed(2)} Hz`;
     }
 }
 
