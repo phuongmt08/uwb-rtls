@@ -77,6 +77,9 @@ uint8_t        g_network_rx_buf[512];
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 static uint32_t s_fusion_last_tick = 0U;
 static bool     s_fusion_first_run = true;
+#if ENABLE_SYS_FUSION_LOG
+static uint32_t s_last_fusion_log_seq = 0U;
+#endif
 #endif
 
 /* USER CODE END Variables */
@@ -325,7 +328,7 @@ void sensor_fusion_entry(void *argument)
 
   for (;;)
   {
-    osDelay(50);
+    osDelay(20);
 
     if (!sys_sensor_fusion_check_predict_flag())
     {
@@ -357,6 +360,13 @@ void sensor_fusion_entry(void *argument)
 
       if (app_tag_get_latest_fusion_log_data(&log_data))
       {
+        float log_dt = dt;
+        if (log_data.seq != s_last_fusion_log_seq)
+        {
+          s_last_fusion_log_seq = log_data.seq;
+          log_dt = log_data.ranging_dt;
+        }
+
         (void)bsp_imu_get_raw_data(&imu_data);
         bsp_io_uart_send_fusion_log_data(log_data.mask,
                                          log_data.err_count,
@@ -368,7 +378,7 @@ void sensor_fusion_entry(void *argument)
                                          log_data.distances,
                                          log_data.fp_amp_norm,
                                          log_data.fp_snr,
-                                         dt);
+                                         log_dt);
       }
     }
 #endif

@@ -39,7 +39,9 @@ typedef enum {
 #if ENABLE_SYS_FUSION_LOG
 typedef struct {
     uint8_t  mask;
+    uint32_t seq;
     uint32_t err_count;
+    float    ranging_dt;
     float    tril_x;
     float    tril_y;
     float    distances[NUM_ANCHORS];

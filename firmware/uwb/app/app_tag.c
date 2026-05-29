@@ -74,6 +74,9 @@ static float s_latest_error = 0.0f;
 #if ENABLE_SYS_FUSION_LOG
 static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0};
 static double s_latest_fp_snr[NUM_ANCHORS] = {0};
+static float s_latest_ranging_dt = 0.0f;
+static uint32_t s_fusion_log_seq = 0U;
+static uint32_t s_last_fusion_log_tick = 0U;
 #endif
 
 /* Private prototypes --------------------------------------------------- */
@@ -86,6 +89,9 @@ static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
 static void record_ranging_error(void);
 static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
+#if ENABLE_SYS_FUSION_LOG
+static void record_fusion_log_update_timing(void);
+#endif
 
 /* Private functions --------------------------------------------------- */
 static void init_filters(void)
@@ -131,6 +137,11 @@ static void init_filters(void)
         s_latest_fp_snr[i] = 0.0;
 #endif
     }
+#if ENABLE_SYS_FUSION_LOG
+    s_latest_ranging_dt = 0.0f;
+    s_fusion_log_seq = 0U;
+    s_last_fusion_log_tick = 0U;
+#endif
 #endif
 }
 
@@ -238,6 +249,25 @@ static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context)
     record_ranging_error();
     return false;
 }
+
+#if ENABLE_SYS_FUSION_LOG
+static void record_fusion_log_update_timing(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (s_last_fusion_log_tick == 0U) {
+        s_latest_ranging_dt = 0.0f;
+    } else {
+        uint32_t dt_ms = now - s_last_fusion_log_tick;
+        if (dt_ms > 5000U) dt_ms = 5000U;
+        if (dt_ms < 1U) dt_ms = 1U;
+        s_latest_ranging_dt = (float)dt_ms / 1000.0f;
+    }
+
+    s_last_fusion_log_tick = now;
+    s_fusion_log_seq++;
+}
+#endif
 
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
@@ -420,6 +450,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             s_latest_fusion_position.x = init_x;
             s_latest_fusion_position.y = init_y;
             s_latest_fusion_position_valid = true;
+            record_fusion_log_update_timing();
 
             s_latest_error = (float)tril_result.error_estimate;
         }
@@ -468,6 +499,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, test);
         s_latest_fusion_position = tril_position;
         s_latest_fusion_position_valid = true;
+        record_fusion_log_update_timing();
         s_latest_error = (float)tril_result.error_estimate;
     }
 
@@ -679,7 +711,9 @@ bool app_tag_get_latest_fusion_log_data(app_tag_fusion_log_data_t *out)
     }
 
     out->mask = s_last_selected_anchors_mask;
+    out->seq = s_fusion_log_seq;
     out->err_count = s_error_count;
+    out->ranging_dt = s_latest_ranging_dt;
     out->tril_x = (float)s_latest_fusion_position.x;
     out->tril_y = (float)s_latest_fusion_position.y;
 
