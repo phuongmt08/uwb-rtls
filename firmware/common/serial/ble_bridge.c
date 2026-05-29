@@ -20,6 +20,8 @@ static uint32_t s_last_dma_ptr = 0;
 
 static serial_func_t s_tx_handler = 0;
 static hdlc_parser_t s_parser;
+static uint8_t s_tx_frame[HDLC_FRAME_MAX_LEN];
+static volatile uint8_t s_tx_busy = 0u;
 
 extern DMA_HandleTypeDef hdma_usart2_rx;
 
@@ -93,6 +95,13 @@ void ble_bridge_uart_rx_cplt(void)
     ble_bridge_uart_rx_check();
 }
 
+void ble_bridge_on_tx_cplt(UART_HandleTypeDef *huart)
+{
+    if (huart != NULL && huart->Instance == USART2) {
+        s_tx_busy = 0u;
+    }
+}
+
 /**
  * Non-blocking read: drains bytes from the ring buffer through the HDLC
  * parser. Returns the decoded frame length, or -1 if no complete frame yet.
@@ -125,14 +134,20 @@ int ble_bridge_write(int file, char *ptr, int len, uint8_t type)
     (void)file;
 
     CHECK(ptr && len > 0, -1);
+    CHECK(!s_tx_busy, -1);
 
-    uint8_t frame[HDLC_FRAME_MAX_LEN];
-    int frame_len = hdlc_build(frame, sizeof(frame), type, (const uint8_t *)ptr, (uint16_t)len);
+    int frame_len = hdlc_build(s_tx_frame, sizeof(s_tx_frame), type, (const uint8_t *)ptr, (uint16_t)len);
     CHECK(frame_len > 0, -1);
 
     if (s_tx_handler) {
-        return s_tx_handler(file, (char *)frame, frame_len, type);
+        return s_tx_handler(file, (char *)s_tx_frame, frame_len, type);
     }
 
-    return (HAL_UART_Transmit(&huart2, frame, (uint16_t)frame_len, 100) == HAL_OK) ? len : -1;
+    s_tx_busy = 1u;
+    if (HAL_UART_Transmit_IT(&huart2, s_tx_frame, (uint16_t)frame_len) != HAL_OK) {
+        s_tx_busy = 0u;
+        return -1;
+    }
+
+    return len;
 }

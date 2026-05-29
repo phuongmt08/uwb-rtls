@@ -102,6 +102,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 {
 	CHECK_ERR((bsp_imu_init() == BSP_IMU_OK || p_ukf != NULL), SYS_SENSOR_FUSION_ERR);
 
+#if ENABLE_IMU_EVENT_DRIVEN_PREDICT
+	CHECK_ERR(bsp_imu_setup_interrupt() == BSP_IMU_OK, SYS_SENSOR_FUSION_ERR);
+	(void)bsp_imu_clear_interrupt();
+#endif
+
 	bsp_imu_bias_t imu_bias;
 
 	CHECK_ERR((bsp_imu_get_bias_data(&imu_bias) == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);

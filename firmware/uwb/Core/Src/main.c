@@ -270,10 +270,40 @@ static float get_dt(void)
 }
 #endif
 
+#if ENABLE_APP_UKF_STREAM
+static void fusion_app_stream_try_send(float ukf_x, float ukf_y, float rms_error)
+{
+    static uint32_t s_last_app_stream_tick = 0;
+    uint32_t now = HAL_GetTick();
+
+    if ((uint32_t)(now - s_last_app_stream_tick) < APP_UKF_STREAM_PERIOD_MS)
+    {
+        return;
+    }
+
+    protobuf_packet_t pkt = protobuf_packet_t_init_zero;
+    pkt.which_params = protobuf_packet_t_ranging_result_tag;
+    pkt.params.ranging_result.pos_x_m = ukf_x;
+    pkt.params.ranging_result.pos_y_m = ukf_y;
+    pkt.params.ranging_result.pos_z_m = TAG_HEIGHT_M;
+    pkt.params.ranging_result.rms_error_m = rms_error;
+    pkt.params.ranging_result.timestamp_ms = now;
+    pkt.params.ranging_result.anchors_count = 0;
+
+    if (network_core_send_packet(&s_network_core, protobuf_PACKET_ADDR_HOST, &pkt))
+    {
+        s_last_app_stream_tick = now;
+    }
+}
+#endif
+
 #if ENABLE_SYS_FUSION
 static void fusion_task(void *arg)
 {
 	if(sys_sensor_fusion_check_predict_flag() == false) return;
+#if ENABLE_IMU_EVENT_DRIVEN_PREDICT
+	if(!bsp_imu_is_data_ready()) return;
+#endif
 	static uint8_t first_call = 1;
 
 	if(first_call)
@@ -294,7 +324,13 @@ static void fusion_task(void *arg)
     float tril_y = 0.0f;
     uint32_t err_count = 0;
     app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
-    bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
+    if (bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count) != BSP_OK)
+    {
+        return;
+    }
+#if ENABLE_APP_UKF_STREAM
+    fusion_app_stream_try_send(ukf_data.px, ukf_data.py, 0.0f);
+#endif
 //  float uwb_dists[NUM_ANCHORS];
 //	float uwb_err;
 //	uint32_t err_cnt;
@@ -530,7 +566,12 @@ int main(void)
 #if ENABLE_SYS_FUSION
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
-    int fusion_task_id = sys_task_add((sys_task_cb_t)fusion_task, NULL, SYS_TASK_TYPE_PERIODIC, 50, 0);
+    int fusion_task_id = sys_task_add((sys_task_cb_t)fusion_task, NULL,
+#if ENABLE_IMU_EVENT_DRIVEN_PREDICT
+                                      SYS_TASK_TYPE_FREERUN, 0, 0);
+#else
+                                      SYS_TASK_TYPE_PERIODIC, 50, 0);
+#endif
     if (fusion_task_id >= 0) sys_task_start(fusion_task_id);
   }
 #endif

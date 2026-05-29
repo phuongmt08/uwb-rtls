@@ -296,6 +296,27 @@
 #endif
 
 /**
+ * @brief Enable IMU data-ready event driven predict.
+ *        0 = keep periodic predict task timing
+ *        1 = predict only after IMU data-ready interrupt
+ */
+#ifndef ENABLE_IMU_EVENT_DRIVEN_PREDICT
+#define ENABLE_IMU_EVENT_DRIVEN_PREDICT  0
+#endif
+
+/**
+ * @brief Send UKF position to app through nRF UART bridge (HDLC + protobuf).
+ *        UART1 raw fusion stream remains the priority path.
+ */
+#ifndef ENABLE_APP_UKF_STREAM
+#define ENABLE_APP_UKF_STREAM  1
+#endif
+
+#ifndef APP_UKF_STREAM_PERIOD_MS
+#define APP_UKF_STREAM_PERIOD_MS  100U
+#endif
+
+/**
  * @brief Distance Smoother (EMA Filter) parameters
  *        ALPHA: 0.0 to 1.0 (lower = smoother/more lag, higher = jumpier/less lag)
  *        JUMP_LIMIT: Max allowed delta between consecutive samples (meters)

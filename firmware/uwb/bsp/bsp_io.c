@@ -8,9 +8,11 @@
 /* Includes ----------------------------------------------------------- */
 #include "bsp_io.h"
 
+#include "bsp_imu.h"
 #include "bsp_uwb.h"
 #include "gpio.h"
 #include "positioning_config.h"
+#include "serial/ble_bridge.h"
 #include "stm32f4xx_hal.h"
 
 #include <string.h>
@@ -351,6 +353,8 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   {
     s_tx_busy = 0;
   }
+
+  ble_bridge_on_tx_cplt(huart);
 }
 
 #if ENABLE_SYS_FUSION_LOG
@@ -432,10 +436,12 @@ bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, 
   s_fusion_frame.yaw            = yaw;
   s_fusion_frame.error_frame_cnt = err_frame_count;
 
-  if (CDC_Transmit_FS((uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
+  // if (CDC_Transmit_FS((uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
 
-  // if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note
+  s_tx_busy = 1;
+  if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note
   {
+    s_tx_busy = 0;
     return BSP_ERR;
   }
   return BSP_OK;
@@ -469,6 +475,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (GPIO_Pin == UWB_IRQ_PIN)
   {
     bsp_uwb_on_irq();
+  }
+
+  /* IMU data-ready interrupt PB15 */
+  if (GPIO_Pin == IMU_IRQ_Pin)
+  {
+    (void)bsp_imu_irq_handler();
   }
 }
 
