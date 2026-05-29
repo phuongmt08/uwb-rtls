@@ -6,7 +6,7 @@ from typing import Tuple
 OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\csv\23_05_26\20260523_13g56p_ukf_log_data.csv"
+SOURCE_DATA_FILE = None
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -42,10 +42,10 @@ ANCHOR_2_X = 9.76
 ANCHOR_2_Y = 0.0
 
 ANCHOR_3_X = 0.0
-ANCHOR_3_Y = 9.76
+ANCHOR_3_Y = 12.2
 
 ANCHOR_4_X = 9.76
-ANCHOR_4_Y = 9.76
+ANCHOR_4_Y = 12.2
 
 # Anchor positions in the room (three corners)
 ANCHOR_POSITIONS = np.array([

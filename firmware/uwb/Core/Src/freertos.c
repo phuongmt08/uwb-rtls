@@ -350,6 +350,30 @@ void sensor_fusion_entry(void *argument)
 
     sys_sensor_fusion_predict(&ukf_data, dt);
 
+#if ENABLE_SYS_FUSION_LOG
+    {
+      app_tag_fusion_log_data_t log_data;
+      bsp_imu_data_t imu_data = {0};
+
+      if (app_tag_get_latest_fusion_log_data(&log_data))
+      {
+        (void)bsp_imu_get_raw_data(&imu_data);
+        bsp_io_uart_send_fusion_log_data(log_data.mask,
+                                         log_data.err_count,
+                                         imu_data.ax,
+                                         imu_data.ay,
+                                         imu_data.gz,
+                                         log_data.tril_x,
+                                         log_data.tril_y,
+                                         log_data.distances,
+                                         log_data.fp_amp_norm,
+                                         log_data.fp_snr,
+                                         dt);
+      }
+    }
+#endif
+
+#if ENABLE_SYS_FUSION
     {
       float tril_x = 0.0f;
       float tril_y = 0.0f;
@@ -358,10 +382,9 @@ void sensor_fusion_entry(void *argument)
       float yaw = sys_sensor_fusion_get_yaw_deg();
 
       app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
-#if ENABLE_SYS_FUSION
       bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
-#endif
     }
+#endif
   }
 #else
   osThreadExit();

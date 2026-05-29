@@ -36,6 +36,18 @@ typedef enum {
     APP_TAG_MODE_SENSOR_FUSION = 1,
 } app_tag_output_mode_t;
 
+#if ENABLE_SYS_FUSION_LOG
+typedef struct {
+    uint8_t  mask;
+    uint32_t err_count;
+    float    tril_x;
+    float    tril_y;
+    float    distances[NUM_ANCHORS];
+    double   fp_amp_norm[NUM_ANCHORS];
+    double   fp_snr[NUM_ANCHORS];
+} app_tag_fusion_log_data_t;
+#endif
+
 /* Public function prototypes ----------------------------------------- */
 
 /**
@@ -71,6 +83,16 @@ bool app_tag_get_last_position(float *x_m, float *y_m);
  * @return true if a valid trilateration position is available
  */
 bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
+
+#if ENABLE_SYS_FUSION_LOG
+/**
+ * @brief Get latest data needed by the SensorFusion task for fusion log frames.
+ * @param[out] out Latest selected anchor mask, trilateration position,
+ *                 distances, first-path quality, and ranging error count.
+ * @return true if a valid fusion log snapshot is available
+ */
+bool app_tag_get_latest_fusion_log_data(app_tag_fusion_log_data_t *out);
+#endif
 
 /**
  * @brief Reset the sensor fusion filters, flags, and states when ranging stops.
