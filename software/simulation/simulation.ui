@@ -14,7 +14,7 @@
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,5,1">
+   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,5,1,0">
     <item>
      <widget class="QGroupBox" name="DataSource">
       <property name="font">
@@ -649,6 +649,20 @@
       </property>
       <property name="text">
        <string>Run</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="pushButton_genLogfile">
+      <property name="font">
+       <font>
+        <pointsize>15</pointsize>
+        <weight>75</weight>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Gen log file</string>
       </property>
      </widget>
     </item>

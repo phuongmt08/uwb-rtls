@@ -10,6 +10,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 from module import config
+from module.module_log import generate_log_from_csv
 from simulation import run_simulation_with_params
 
 class UKFSimulationGUI(QtWidgets.QMainWindow):
@@ -93,6 +94,7 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
         
         # Run Button
         self.pushButton_run.clicked.connect(self.run_simulation)
+        self.pushButton_genLogfile.clicked.connect(self.generate_log_file)
 
     def load_config_to_ui(self):
         """Đổ dữ liệu từ config.py lên giao diện"""
@@ -384,6 +386,31 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
         finally:
             self.pushButton_run.setEnabled(True)
             self.pushButton_run.setText("Run")
+
+    def generate_log_file(self):
+        """Gen file .log tu file CSV dang chon hoac CSV moi nhat."""
+        source_path = None
+        if self.checkBox_csvPath.isChecked():
+            source_path = self.lineEdit_csvPath.text().strip() or None
+            config.SOURCE_DATA_FILE = source_path
+            self.save_to_config_file()
+
+        self.pushButton_genLogfile.setEnabled(False)
+        self.pushButton_genLogfile.setText("Generating...")
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            log_path, html_path = generate_log_from_csv(source_path)
+            QtWidgets.QMessageBox.information(
+                self,
+                "Gen log file",
+                f"Da tao file log:\n{log_path}\n\nFile mau de xem tren browser:\n{html_path}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Loi gen log file", str(e))
+        finally:
+            self.pushButton_genLogfile.setEnabled(True)
+            self.pushButton_genLogfile.setText("Gen log file")
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
