@@ -42,7 +42,7 @@
 #include "sys_ranging.h"
 #include "positioning_config.h"
 #include "bsp_io.h"
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
 #endif
 /* USER CODE END Includes */
@@ -54,6 +54,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define UWB_RANGING_PERIOD_MS 60U
 
 /* USER CODE END PD */
 
@@ -74,12 +75,9 @@ bool g_pm_ranging_blocked = false;
 network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 static uint32_t s_fusion_last_tick = 0U;
 static bool     s_fusion_first_run = true;
-#if ENABLE_SYS_FUSION_LOG
-static uint32_t s_last_fusion_log_seq = 0U;
-#endif
 #endif
 
 /* USER CODE END Variables */
@@ -263,6 +261,7 @@ void uwb_ranging_entry(void *argument)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN uwb_ranging_entry */
   sys_config_t *cfg = sys_config_get();
+  cfg->uwb.ranging_period_ms = UWB_RANGING_PERIOD_MS;
   static bool was_ranging_active = false;
 
   for (;;)
@@ -351,36 +350,25 @@ void sensor_fusion_entry(void *argument)
       dt = (float)dt_ms / 1000.0f;
     }
 
-    sys_sensor_fusion_predict(&ukf_data, dt);
 
 #if ENABLE_SYS_FUSION_LOG
-    {
-      app_tag_fusion_log_data_t log_data;
-      bsp_imu_data_t imu_data = {0};
+    if( bsp_imu_get_raw_data(&imu_current) != BSP_IMU_OK)
+	{
+		imu_get_data_err++;
+	}
+	else
+	{
+		float uwb_dists[NUM_ANCHORS] = {0.0};
+		double fp_amp_norm[NUM_ANCHORS];
+		double fp_snr[NUM_ANCHORS];
 
-      if (app_tag_get_latest_fusion_log_data(&log_data))
-      {
-        float log_dt = dt;
-        if (log_data.seq != s_last_fusion_log_seq)
-        {
-          s_last_fusion_log_seq = log_data.seq;
-          log_dt = log_data.ranging_dt;
-        }
+		for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+			fp_amp_norm[i] = 0.0f;
+			fp_snr[i] = 0.0f;
+		}
 
-        (void)bsp_imu_get_raw_data(&imu_data);
-        bsp_io_uart_send_fusion_log_data(log_data.mask,
-                                         log_data.err_count,
-                                         imu_data.ax,
-                                         imu_data.ay,
-                                         imu_data.gz,
-                                         log_data.tril_x,
-                                         log_data.tril_y,
-                                         log_data.distances,
-                                         log_data.fp_amp_norm,
-                                         log_data.fp_snr,
-                                         log_dt);
-      }
-    }
+		bsp_io_uart_send_fusion_log_data(0, 0, imu_current.ax, imu_current.ay, imu_current.gz, 0.0, 0.0, uwb_dists, fp_amp_norm, fp_snr, dt);
+	}
 #endif
 
 #if ENABLE_SYS_FUSION
@@ -390,7 +378,7 @@ void sensor_fusion_entry(void *argument)
       uint32_t err_count = 0U;
       float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
       float yaw = sys_sensor_fusion_get_yaw_deg();
-
+      sys_sensor_fusion_predict(&ukf_data, dt);
       app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
       bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
     }
