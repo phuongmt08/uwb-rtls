@@ -42,8 +42,11 @@
 #include "sys_ranging.h"
 #include "positioning_config.h"
 #include "bsp_io.h"
+#include <math.h>
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 #include "sys_sensor_fusion.h"
+#include "mw_filter.h"
+#include "mw_trilateration.h"
 #endif
 /* USER CODE END Includes */
 
@@ -80,6 +83,22 @@ static bool     s_fusion_first_run = true;
 #if ENABLE_SYS_FUSION_LOG
 static uint32_t s_last_fusion_log_seq = 0U;
 #endif
+
+/* Owner variables for decoupled active Sensor Fusion */
+sys_sensor_fusion_data_t ukf_data;
+static bool s_ukf_initialized = false;
+static mahalanobis_prefilter_t s_prefilter;
+static ukf_init_filter_t s_ukf_init_filter;
+static ukf_init_distance_filter_t s_ukf_init_dist_filter;
+
+static float s_latest_distances[NUM_ANCHORS] = {0.0f};
+static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
+static double s_latest_fp_snr[NUM_ANCHORS] = {0.0};
+static float s_latest_ranging_dt = 0.0f;
+static uint32_t s_fusion_log_seq = 0U;
+static uint32_t s_last_fusion_log_tick = 0U;
+static uint32_t s_error_count = 0U;
+static uint8_t s_last_selected_anchors_mask = 0U;
 #endif
 
 /* USER CODE END Variables */
@@ -160,7 +179,11 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
+static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+void sys_sensor_fusion_reset(void);
+#endif
 /* USER CODE END FunctionPrototypes */
 
 void uwb_ranging_entry(void *argument);
@@ -275,25 +298,45 @@ void uwb_ranging_entry(void *argument)
     }
 
     /* Block until DW1000 ISR signals TX done or RX event.            */
-    osSemaphoreAcquire(g_uwb_isr_semHandle, wait_ms);
+    osStatus_t status = osSemaphoreAcquire(g_uwb_isr_semHandle, wait_ms);
 
     bool is_ranging_active = g_ranging_enabled && !g_pm_ranging_blocked;
 
-    if (!is_ranging_active && was_ranging_active)
+    if (!is_ranging_active)
     {
-      if (cfg->uwb.role == DEVICE_ROLE_TAG)
+      if (was_ranging_active)
       {
-        app_tag_reset_fusion();
+        if (cfg->uwb.role == DEVICE_ROLE_TAG)
+        {
+          app_tag_reset_fusion();
+        }
+        was_ranging_active = false;
       }
-      was_ranging_active = false;
+      continue;
     }
 
-    if (is_ranging_active)
+    was_ranging_active = true;
+    if (status == osErrorTimeout)
     {
-      was_ranging_active = true;
-    }
+      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == GPIO_PIN_SET)
+      {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[UWB] EXTI Missed! Stuck IRQ detected (PA4=HIGH), running auto-recovery...");
 
-    if (!is_ranging_active) continue;
+        osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+        bsp_uwb_dwt_isr();
+        if (cfg->uwb.role == DEVICE_ROLE_TAG)
+        {
+          app_tag_process();
+        }
+        else
+        {
+          app_anchor_process(NULL);
+        }
+        osMutexRelease(g_spi1_mutexHandle);
+        
+        continue; 
+      }
+    }
 
     osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
     bsp_uwb_dwt_isr();
@@ -324,6 +367,20 @@ void sensor_fusion_entry(void *argument)
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
+  }
+
+  /* Khởi tạo bộ lọc định vị và prefilter */
+  mw_filter_mahalanobis_init(&s_prefilter,
+                             MAHALANOBIS_PREFILTER_D2_RECOVER,
+                             MAHALANOBIS_PREFILTER_D2_REJECT,
+                             MAHALANOBIS_PREFILTER_R_BASE);
+  mw_filter_ukf_init_reset(&s_ukf_init_filter);
+  mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
+  
+  if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
+      RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
+  } else {
+      RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
   }
 
   for (;;)
@@ -385,6 +442,243 @@ void sensor_fusion_entry(void *argument)
 
 #if ENABLE_SYS_FUSION
     {
+      uwb_distance_msg_t msg;
+      if (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+      {
+        /* 1. Calculate dynamic dt for ranging if needed, and update logs */
+        uint32_t now_log = HAL_GetTick();
+        if (s_last_fusion_log_tick == 0U) {
+            s_latest_ranging_dt = 0.0f;
+        } else {
+            uint32_t dt_ms = now_log - s_last_fusion_log_tick;
+            if (dt_ms > 5000U) dt_ms = 5000U;
+            if (dt_ms < 1U) dt_ms = 1U;
+            s_latest_ranging_dt = (float)dt_ms / 1000.0f;
+        }
+        s_last_fusion_log_tick = now_log;
+        s_fusion_log_seq++;
+
+        /* 2. Process, project to 2D, and Mahalanobis filter the ranges */
+        mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1];
+        uint8_t valid_count = 0;
+        for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
+
+#if ENABLE_MAHALANOBIS_PREFILTER
+        mw_tril_anchor_t prefilter_rejects[NUM_ANCHORS];
+        uint8_t prefilter_reject_count = 0U;
+#endif
+
+        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+            uint8_t aid = msg.anchor_ids[i];
+            if (aid < 1 || aid > NUM_ANCHORS) continue;
+
+            float d_raw = msg.distances[i];
+
+            /* Check if ranging result for this anchor is valid in the mask */
+            if (!(msg.mask & (1 << (aid - 1)))) {
+                continue;
+            }
+
+            vec3d_t anchor_pos;
+            if (!get_anchor_position(aid, &anchor_pos)) {
+                continue;
+            }
+
+            float d_used = d_raw;
+            float d2_score = 0.0f;
+            float r_adapt = MAHALANOBIS_PREFILTER_R_BASE;
+
+            double r2d = 0.0;
+            double dz = anchor_pos.z - (double)TAG_HEIGHT_M;
+            if (!convert_3d_to_2d_distance((double)d_used, dz, &r2d)) {
+                continue;
+            }
+            d_used = (float)r2d;
+
+            mw_tril_anchor_t anchor_entry = {0};
+            anchor_entry.position = anchor_pos;
+            anchor_entry.distance = (double)r2d;
+            anchor_entry.id = aid;
+            anchor_entry.valid = true;
+            anchor_entry.r_adaptive = (double)r_adapt;
+            anchor_entry.fp_amp_norm = (double)msg.fp_amp_norm[aid - 1];
+            anchor_entry.fp_snr = (double)msg.fp_snr[aid - 1];
+            anchor_entry.quality_valid = true;
+            anchor_entry.selection_score = 0.0;
+            anchor_entry.residual_rms = 0.0;
+            anchor_entry.gdop_penalty = 0.0;
+            anchor_entry.fp_penalty = 0.0;
+
+#if ENABLE_MAHALANOBIS_PREFILTER
+            if (s_ukf_initialized) {
+                /* Running Mahalanobis prefilter dynamically inside SensorFusion task context */
+                bool pass = mw_filter_mahalanobis_update(&s_prefilter,
+                                                         aid - 1U,
+                                                         d_used,
+                                                         ukf_data.px,
+                                                         ukf_data.py,
+                                                         TAG_HEIGHT_M,
+                                                         ukf_data.vx,
+                                                         ukf_data.vy,
+                                                         0.0f,
+                                                         (float)anchor_pos.x,
+                                                         (float)anchor_pos.y,
+                                                         (float)anchor_pos.z,
+                                                         &d_used,
+                                                         &d2_score,
+                                                         &r_adapt);
+                anchor_entry.d2_score = (double)d2_score;
+                anchor_entry.r_adaptive = (double)r_adapt;
+
+                if (!pass) {
+#if (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U)
+                    if (prefilter_reject_count < NUM_ANCHORS) {
+                        prefilter_rejects[prefilter_reject_count++] = anchor_entry;
+                    }
+#endif
+                    RLOG_W(LOG_OBJECT_CODE_TAG,
+                           "[FUSION PREFILTER] Anchor #%u rejected by Mahalanobis (d2=%.2f r2d=%.3fm)",
+                           aid, d2_score, d_used);
+                    continue;
+                }
+            } else {
+                anchor_entry.d2_score = (double)d2_score;
+            }
+#else
+            anchor_entry.d2_score = (double)d2_score;
+#endif
+
+            anchors_by_id[aid] = anchor_entry;
+            valid_count++;
+        }
+
+#if (ENABLE_MAHALANOBIS_PREFILTER && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
+        if (valid_count < MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS && prefilter_reject_count > 0U) {
+            for (uint8_t i = 1U; i < prefilter_reject_count; i++) {
+                mw_tril_anchor_t key = prefilter_rejects[i];
+                int j = (int)i - 1;
+                while (j >= 0 && prefilter_rejects[j].d2_score > key.d2_score) {
+                    prefilter_rejects[j + 1] = prefilter_rejects[j];
+                    j--;
+                }
+                prefilter_rejects[j + 1] = key;
+            }
+
+            uint8_t rescue_target = MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS;
+            if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
+            for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
+                uint8_t aid = prefilter_rejects[i].id;
+                if (aid == 0U || aid > NUM_ANCHORS || anchors_by_id[aid].valid) {
+                    continue;
+                }
+                anchors_by_id[aid] = prefilter_rejects[i];
+                valid_count++;
+                RLOG_W(LOG_OBJECT_CODE_TAG,
+                       "[FUSION RESCUE] Anchor #%u rescued (d2=%.2f, valid=%u/%u)",
+                       aid, prefilter_rejects[i].d2_score, valid_count, rescue_target);
+            }
+        }
+#endif
+
+        /* anchor_distances is unused in decoupled Sensor Fusion thread */
+
+        /* 3. Sort and Select the Best 3 anchors for UKF Update */
+        if (valid_count >= 3) {
+            mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
+            uint8_t compact_idx = 0;
+            for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+                if (anchors_by_id[id].valid) {
+                    anchors_compact[compact_idx++] = anchors_by_id[id];
+                }
+            }
+
+            mw_tril_anchor_t best_3_anchors[3];
+            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3);
+
+            if (best_count >= 3) {
+                s_last_selected_anchors_mask = 0;
+                for (uint8_t i = 0; i < 3; i++) {
+                    s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
+                }
+
+                vec2d_t tril_position = {0.0f, 0.0f};
+                mw_tril_result_t tril_result = {0};
+                mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+
+                if (err == MW_TRIL_OK) {
+                    if (!s_ukf_initialized) {
+                        /* UKF initialization */
+                        float init_x, init_y;
+                        float init_d0, init_d1, init_d2;
+                        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter, (float)tril_position.x, (float)tril_position.y, &init_x, &init_y);
+                        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter, (float)best_3_anchors[0].distance, (float)best_3_anchors[1].distance, (float)best_3_anchors[2].distance, &init_d0, &init_d1, &init_d2);
+
+                        if (pos_done && dist_done) {
+                            s_ukf_initialized = true;
+                            RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
+
+                            for(int k=0; k<NUM_ANCHORS; k++) s_latest_distances[k] = 0.0f;
+                            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
+                            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
+                            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
+
+                            for (uint8_t k = 0; k < NUM_ANCHORS; k++) {
+                                s_latest_fp_amp_norm[k] = anchors_by_id[k + 1].fp_amp_norm;
+                                s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
+                            }
+
+                            sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
+                            sys_sensor_fusion_set_predict_flag();
+                            s_error_count = 0;
+
+                            /* Update app_tag mailboxes passively */
+                            app_tag_set_latest_fusion_data(init_x, init_y, true, s_error_count);
+                        }
+                    } else {
+                        /* Normal UKF Update */
+                        for(int k=0; k<NUM_ANCHORS; k++) s_latest_distances[k] = 0.0f;
+                        for(int k=0; k<compact_idx; k++) {
+                            s_latest_distances[anchors_compact[k].id - 1] = (float)anchors_compact[k].distance;
+                        }
+
+                        for (uint8_t k = 0; k < NUM_ANCHORS; k++) {
+                            s_latest_fp_amp_norm[k] = anchors_by_id[k + 1].fp_amp_norm;
+                            s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
+                        }
+
+                        sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, s_last_selected_anchors_mask);
+                        s_error_count = 0;
+
+                        /* Update app_tag mailboxes passively */
+                        app_tag_set_latest_fusion_data(ukf_data.px, ukf_data.py, true, s_error_count);
+                    }
+                } else {
+                    s_error_count++;
+                    app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+                }
+            } else {
+                s_error_count++;
+                app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+            }
+        } else {
+            s_error_count++;
+            app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+        }
+
+        /* Update logging metrics mailbox passively when in Sensor Fusion mode */
+#if ENABLE_SYS_FUSION_LOG
+        app_tag_set_latest_fusion_log_data(s_last_selected_anchors_mask,
+                                           s_fusion_log_seq,
+                                           s_latest_ranging_dt,
+                                           (float)ukf_data.px,
+                                           (float)ukf_data.py,
+                                           s_latest_distances,
+                                           s_latest_fp_amp_norm,
+                                           s_latest_fp_snr);
+#endif
+      }
+
+      /* 4. Output the fusion position and logs directly */
       float tril_x = 0.0f;
       float tril_y = 0.0f;
       uint32_t err_count = 0U;
@@ -434,6 +728,7 @@ void logger_entry(void *argument)
   for (;;)
   {
     osDelay(30000); /* 30 seconds */
+    bsp_util_print_mem_stats();
     bsp_util_print_cpu_stats();
   }
   /* USER CODE END logger_entry */
@@ -529,7 +824,22 @@ void power_manage_entry(void *argument)
   for (;;)
   {
     osDelay(100); /* 10 Hz, aligned with develop PM cadence */
-    sys_pm_task(NULL);
+
+    bool allow_uwb_telemetry = !sys_ranging_is_active();
+    bool telemetry_lock_held = false;
+    if (allow_uwb_telemetry) {
+      if (osMutexAcquire(g_spi1_mutexHandle, 0U) == osOK) {
+        telemetry_lock_held = true;
+      } else {
+        allow_uwb_telemetry = false;
+      }
+    }
+
+    sys_pm_task(&allow_uwb_telemetry);
+
+    if (telemetry_lock_held) {
+      osMutexRelease(g_spi1_mutexHandle);
+    }
 
     /* Ranging halt logic completely bypassed as requested. 
      * We only log warnings but NEVER call bsp_uwb_idle() or set g_pm_ranging_blocked. */
@@ -561,6 +871,71 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
+{
+    if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
+        return false;
+    }
+    double dz_abs = fabs(dz);
+    if (r3d <= dz_abs + 1e-6) {
+        return false;
+    }
+    double r2d_sq = r3d * r3d - dz * dz;
+    if (r2d_sq < 0.0) {
+        return false;
+    }
+    *r2d_out = sqrt(r2d_sq);
+    return true;
+}
 
+static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out)
+{
+    sys_config_t *cfg = sys_config_get();
+    for (uint32_t i = 0; i < cfg->anchor_count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == aid) {
+            pos_out->x = (double)cfg->anchor_layout[i].x_m;
+            pos_out->y = (double)cfg->anchor_layout[i].y_m;
+            pos_out->z = (double)cfg->anchor_layout[i].z_m;
+            return true;
+        }
+    }
+    return false;
+}
+
+void sys_sensor_fusion_reset(void)
+{
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state from thread...");
+    sys_sensor_fusion_clear_predict_flag();
+    sys_sensor_fusion_clear_update_flag();
+    s_ukf_initialized = false;
+    s_fusion_first_run = true;
+    s_fusion_last_tick = 0U;
+    s_error_count = 0U;
+    s_last_selected_anchors_mask = 0U;
+    
+    mw_filter_ukf_init_reset(&s_ukf_init_filter);
+    mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
+    mw_filter_mahalanobis_init(&s_prefilter,
+                               MAHALANOBIS_PREFILTER_D2_RECOVER,
+                               MAHALANOBIS_PREFILTER_D2_REJECT,
+                               MAHALANOBIS_PREFILTER_R_BASE);
+                               
+    for (int i = 0; i < NUM_ANCHORS; i++) {
+        s_latest_distances[i] = 0.0f;
+        s_latest_fp_amp_norm[i] = 0.0;
+        s_latest_fp_snr[i] = 0.0;
+    }
+    s_latest_ranging_dt = 0.0f;
+    s_fusion_log_seq = 0U;
+    s_last_fusion_log_tick = 0U;
+    
+    if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialization failed");
+    } else {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
+    }
+}
+#endif
 /* USER CODE END Application */
 

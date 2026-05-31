@@ -1443,9 +1443,9 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
   if (s_ctx.state == STATE_IDLE) return SYS_RANGING_ERR_NOT_STARTED;
   if (s_ctx.state != STATE_TAG_RANGING_TDMA) return SYS_RANGING_ERR;
   
-  uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
-  /* Use the specified timeout for the entire TDMA cycle plus some overhead */
-  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms + 500) {
+  uint32_t timeout_ms = (rx_timeout_ms == 0) ? DEFAULT_RX_TIMEOUT_MS : rx_timeout_ms;
+  /* Use the configured timeout as the whole-cycle watchdog. */
+  if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
     state_machine_reset();
     s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
     return SYS_RANGING_ERR_TIMEOUT;
@@ -1743,8 +1743,8 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
   if (s_ctx.state == STATE_IDLE) return SYS_RANGING_ERR_NOT_STARTED;
   if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA) return SYS_RANGING_ERR;
   
-  uint32_t timeout_ms = (rx_timeout_ms == 0) ? 100 : rx_timeout_ms;
-  uint32_t sm_watchdog_ms = timeout_ms + 500; /* Generous overarching state machine watchdog */
+  uint32_t timeout_ms = (rx_timeout_ms == 0) ? DEFAULT_RX_TIMEOUT_MS : rx_timeout_ms;
+  uint32_t sm_watchdog_ms = timeout_ms;
   
   if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE || s_sys_ranging_ev.step == SYS_RANGING_EV_ANCHOR_WAIT_POLL) {
       s_ctx.state_entry_tick = HAL_GetTick(); // keep state machine armed
@@ -2501,4 +2501,10 @@ uint32_t sys_ranging_get_ms_to_deadline(void)
   }
 
   return (remaining_ms > 10) ? 10 : remaining_ms;
+}
+
+bool sys_ranging_is_active(void)
+{
+  return (s_ctx.state != STATE_IDLE) ||
+         (s_sys_ranging_ev.step != SYS_RANGING_EV_SYS_IDLE);
 }

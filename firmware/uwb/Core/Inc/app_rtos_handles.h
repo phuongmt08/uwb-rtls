@@ -35,11 +35,13 @@ extern osMutexId_t g_logger_mutexHandle;
  * @brief Payload sent from UwbRanging → SensorFusion after each ranging cycle.
  */
 typedef struct {
-    float   distances[8];  /**< Filtered 2D distances [m] to anchors */
-    uint8_t anchor_ids[8]; /**< Anchor IDs corresponding to each distance */
-    uint8_t count;         /**< Number of valid distance entries */
-    uint8_t mask;          /**< Active anchor mask */
-} uwb_distance_msg_t;      /* sizeof = 42 bytes */
+    float   distances[8];     /**< Raw 3D distances [m] to anchors */
+    uint8_t anchor_ids[8];    /**< Anchor IDs corresponding to each distance */
+    float   fp_amp_norm[8];   /**< First path amplitude normalized */
+    float   fp_snr[8];        /**< First path SNR */
+    uint8_t count;            /**< Number of valid distance entries */
+    uint8_t mask;             /**< Active anchor mask (valid ranging) */
+} uwb_distance_msg_t;
 
 /** UwbRanging → SensorFusion queue, item size follows uwb_distance_msg_t. */
 extern osMessageQueueId_t g_uwb_distance_queue;

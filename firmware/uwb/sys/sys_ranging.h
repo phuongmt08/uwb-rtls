@@ -290,6 +290,12 @@ sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
 uint32_t sys_ranging_get_ms_to_deadline(void);
 
 /**
+ * @brief Return true while the shared ranging state machine is inside a live
+ *        TAG or ANCHOR transaction.
+ */
+bool sys_ranging_is_active(void);
+
+/**
  * @brief Reset ranging statistics
  */
 void sys_ranging_reset_stats(void);

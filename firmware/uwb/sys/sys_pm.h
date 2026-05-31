@@ -102,7 +102,7 @@ void sys_pm_get_status(sys_pm_status_t *status);
 
 /**
  * @brief  Periodic task to run PM process and battery task.
- * @param  arg  Task argument (unused)
+ * @param  arg  Optional const bool*: true allows direct DW1000 telemetry reads.
  */
 void sys_pm_task(void *arg);
 

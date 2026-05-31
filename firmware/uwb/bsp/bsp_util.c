@@ -14,6 +14,7 @@
   #include "stm32f4xx_ll_rtc.h"
 #endif
 #include <string.h>
+#include <stdio.h>
 
 /* External peripherals from CubeMX */
 extern CRC_HandleTypeDef hcrc;
@@ -521,6 +522,74 @@ void bsp_util_print_cpu_stats(void)
     RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stats_buf);
   }
 #endif
+}
+
+extern osThreadId_t UwbRangingHandle;
+extern osThreadId_t SensorFusionHandle;
+extern osThreadId_t NetworkHandle;
+extern osThreadId_t LoggerHandle;
+extern osThreadId_t FlashStorageHandle;
+extern osThreadId_t IOHandle;
+extern osThreadId_t PMHandle;
+
+typedef struct {
+    osThreadId_t handle;
+    const char  *name;
+    uint32_t     stack_size_words;
+} task_mem_info_t;
+
+void bsp_util_print_mem_stats(void)
+{
+  uint32_t total_heap    = configTOTAL_HEAP_SIZE;
+  uint32_t free_heap     = xPortGetFreeHeapSize();
+  uint32_t min_free_heap = xPortGetMinimumEverFreeHeapSize();
+  
+  uint32_t current_heap_used_pct = ((total_heap - free_heap) * 100) / total_heap;
+  uint32_t peak_heap_used_pct    = ((total_heap - min_free_heap) * 100) / total_heap;
+  
+  RLOG_D(LOG_OBJECT_CODE_TASK, "HEAP: Current Used %lu%% (%lu/%lu B) | Peak Used %lu%%", 
+         (unsigned long)current_heap_used_pct, 
+         (unsigned long)(total_heap - free_heap), 
+         (unsigned long)total_heap, 
+         (unsigned long)peak_heap_used_pct);
+
+  const task_mem_info_t tasks[] = {
+      { (osThreadId_t)UwbRangingHandle,    "UwbRanging",   1536 },
+      { (osThreadId_t)SensorFusionHandle,  "SensorFusion", 1024 },
+      { (osThreadId_t)NetworkHandle,       "Network",      512  },
+      { (osThreadId_t)LoggerHandle,        "Logger",       512  },
+      { (osThreadId_t)FlashStorageHandle,  "FlashStorage", 512  },
+      { (osThreadId_t)IOHandle,            "IO",           512  },
+      { (osThreadId_t)PMHandle,            "PM",           1024 }
+  };
+  
+  static char s_stack_buf[256];
+  int len = snprintf(s_stack_buf, sizeof(s_stack_buf), "STACK: ");
+  
+  for (size_t i = 0; i < sizeof(tasks)/sizeof(tasks[0]); i++)
+  {
+      if (tasks[i].handle != NULL)
+      {
+          TaskHandle_t xTask = (TaskHandle_t)tasks[i].handle; 
+          UBaseType_t high_water_mark_words = uxTaskGetStackHighWaterMark(xTask);
+          
+          uint32_t stack_used_words = tasks[i].stack_size_words - high_water_mark_words;
+          uint32_t stack_used_pct   = (stack_used_words * 100) / tasks[i].stack_size_words;
+          
+          int ret = snprintf(s_stack_buf + len, sizeof(s_stack_buf) - len, "%s:%lu%% | ",
+                             tasks[i].name, (unsigned long)stack_used_pct);
+          if (ret > 0)
+          {
+              len += ret;
+          }
+      }
+  }
+  
+  if (len > 7)
+  {
+      s_stack_buf[len - 3] = '\0'; /* Trim trailing " | " */
+  }
+  RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stack_buf);
 }
 
 /* End of file -------------------------------------------------------- */
