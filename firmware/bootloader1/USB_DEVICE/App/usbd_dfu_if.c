@@ -31,7 +31,7 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 volatile uint32_t g_dfu_last_activity = 0;
-static uint8_t g_erase_done = 0;  /* Flag to track if erase was done */
+static uint8_t g_erased_sector_mask = 0;
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -130,6 +130,9 @@ static uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer);
 static uint16_t DFU_Erase_AppSectors(void);
 static uint16_t DFU_Erase_UserSectors(void);
 static uint32_t DFU_GetSectorFromAddress(uint32_t address);
+static uint8_t DFU_SectorMask(uint32_t sector);
+static uint16_t DFU_Erase_Sector(uint32_t sector);
+static void DFU_SetPollTimeout(uint8_t *buffer, uint32_t timeout_ms);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
 
@@ -161,7 +164,7 @@ __ALIGN_BEGIN USBD_DFU_MediaTypeDef USBD_DFU_fops_FS __ALIGN_END =
 uint16_t MEM_If_Init_FS(void)
 {
   /* USER CODE BEGIN 0 */
-  g_erase_done = 0;  /* Reset erase flag on DFU init */
+  g_erased_sector_mask = 0;
   return (USBD_OK);
   /* USER CODE END 0 */
 }
@@ -179,76 +182,94 @@ uint16_t MEM_If_DeInit_FS(void)
 
 static uint16_t DFU_Erase_AppSectors(void)
 {
-  uint32_t SectorError = 0;
-  FLASH_EraseInitTypeDef EraseInitStruct;
-
-  EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-  EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-  EraseInitStruct.NbSectors = 1;
-
-  EraseInitStruct.Sector = FLASH_SECTOR_3;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  if (DFU_Erase_Sector(FLASH_SECTOR_3) != USBD_OK)
   {
     return USBD_FAIL;
   }
 
-  EraseInitStruct.Sector = FLASH_SECTOR_4;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  if (DFU_Erase_Sector(FLASH_SECTOR_4) != USBD_OK)
   {
     return USBD_FAIL;
   }
 
-  EraseInitStruct.Sector = FLASH_SECTOR_5;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
+  if (DFU_Erase_Sector(FLASH_SECTOR_5) != USBD_OK)
   {
     return USBD_FAIL;
   }
 
-  g_erase_done = 1;
   return USBD_OK;
 }
 
 static uint16_t DFU_Erase_UserSectors(void)
 {
+  if (DFU_Erase_Sector(FLASH_SECTOR_3) != USBD_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  if (DFU_Erase_Sector(FLASH_SECTOR_4) != USBD_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  if (DFU_Erase_Sector(FLASH_SECTOR_5) != USBD_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  if (DFU_Erase_Sector(FLASH_SECTOR_6) != USBD_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  if (DFU_Erase_Sector(FLASH_SECTOR_7) != USBD_OK)
+  {
+    return USBD_FAIL;
+  }
+
+  return USBD_OK;
+}
+
+static uint8_t DFU_SectorMask(uint32_t sector)
+{
+  switch (sector)
+  {
+    case FLASH_SECTOR_3: return (1U << 0);
+    case FLASH_SECTOR_4: return (1U << 1);
+    case FLASH_SECTOR_5: return (1U << 2);
+    case FLASH_SECTOR_6: return (1U << 3);
+    case FLASH_SECTOR_7: return (1U << 4);
+    default:             return 0U;
+  }
+}
+
+static uint16_t DFU_Erase_Sector(uint32_t sector)
+{
   uint32_t SectorError = 0;
   FLASH_EraseInitTypeDef EraseInitStruct;
+
+  __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR |
+                         FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
 
   EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
   EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
   EraseInitStruct.NbSectors = 1;
+  EraseInitStruct.Sector = sector;
 
-  EraseInitStruct.Sector = FLASH_SECTOR_3;
   if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
   {
     return USBD_FAIL;
   }
 
-  EraseInitStruct.Sector = FLASH_SECTOR_4;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  EraseInitStruct.Sector = FLASH_SECTOR_5;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  EraseInitStruct.Sector = FLASH_SECTOR_6;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  EraseInitStruct.Sector = FLASH_SECTOR_7;
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  g_erase_done = 1;
+  g_erased_sector_mask |= DFU_SectorMask(sector);
   return USBD_OK;
+}
+
+static void DFU_SetPollTimeout(uint8_t *buffer, uint32_t timeout_ms)
+{
+  buffer[1] = (uint8_t)(timeout_ms & 0xFFU);
+  buffer[2] = (uint8_t)((timeout_ms >> 8) & 0xFFU);
+  buffer[3] = (uint8_t)((timeout_ms >> 16) & 0xFFU);
 }
 
 static uint32_t DFU_GetSectorFromAddress(uint32_t address)
@@ -301,18 +322,9 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
   /* Selected erase: erase the addressed app sector only. */
   else if ((Add >= MEM_APP_START) && (Add < MEM_DATA_STORAGE_END))
   {
-    uint32_t SectorError = 0;
-    FLASH_EraseInitTypeDef EraseInitStruct;
-
-    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    EraseInitStruct.NbSectors = 1;
-    EraseInitStruct.Sector = DFU_GetSectorFromAddress(Add);
-
-    if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) == HAL_OK)
+    if (DFU_Erase_Sector(DFU_GetSectorFromAddress(Add)) == USBD_OK)
     {
       status = USBD_OK;
-      g_erase_done = 1;
     }
   }
 
@@ -342,8 +354,9 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
 
   HAL_FLASH_Unlock();
   
-  /* Auto-erase on first write as a safety fallback if host skipped erase command */
-  if (!g_erase_done) {
+  /* A write at MEM_APP_START starts a new image download. Erase the app again
+   * even if a previous DFU transfer in the same bootloader session did it. */
+  if ((addr == MEM_APP_START) || ((g_erased_sector_mask & 0x07U) != 0x07U)) {
     if (DFU_Erase_AppSectors() != USBD_OK) {
       HAL_FLASH_Lock();
       return USBD_FAIL;
@@ -368,6 +381,8 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
     }
 
     /* Program the word */
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR |
+                           FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
     if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 
                           (uint32_t)dest + data_offset, 
                           data) != HAL_OK) {
@@ -414,27 +429,30 @@ uint8_t *MEM_If_Read_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
 uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer)
 {
   /* USER CODE BEGIN 5 */
-
-  UNUSED(Add);
+  const uint32_t program_timeout_ms = 1U;
+  const uint32_t erase_timeout_ms = 5000U;
+  const uint8_t app_erased_mask = 0x07U;
 
   switch (Cmd)
   {
     case DFU_MEDIA_PROGRAM:
-      buffer[1] = (uint8_t)(1);      /* 1ms for programming */
-      buffer[2] = (uint8_t)(0);
-      buffer[3] = (uint8_t)(0);
+      if ((Add == MEM_APP_START) ||
+          ((g_erased_sector_mask & app_erased_mask) != app_erased_mask))
+      {
+        DFU_SetPollTimeout(buffer, erase_timeout_ms);
+      }
+      else
+      {
+        DFU_SetPollTimeout(buffer, program_timeout_ms);
+      }
       break;
 
     case DFU_MEDIA_ERASE:
-      buffer[1] = (uint8_t)(50);     /* 50ms for erase */
-      buffer[2] = (uint8_t)(0);
-      buffer[3] = (uint8_t)(0);
+      DFU_SetPollTimeout(buffer, erase_timeout_ms);
       break;
       
     default:
-      buffer[1] = (uint8_t)(0);
-      buffer[2] = (uint8_t)(0);
-      buffer[3] = (uint8_t)(0);
+      DFU_SetPollTimeout(buffer, 0U);
       break;
   }
   return (USBD_OK);
