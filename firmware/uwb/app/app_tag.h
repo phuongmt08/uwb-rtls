@@ -25,7 +25,7 @@
 #include "common.h"
 #include "positioning_config.h"
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 #include "sys_sensor_fusion.h"
 #endif
 
@@ -35,6 +35,20 @@ typedef enum {
     APP_TAG_MODE_TRILATERATION = 0,
     APP_TAG_MODE_SENSOR_FUSION = 1,
 } app_tag_output_mode_t;
+
+#if ENABLE_SYS_FUSION_LOG
+typedef struct {
+    uint8_t  mask;
+    uint32_t seq;
+    uint32_t err_count;
+    float    ranging_dt;
+    float    tril_x;
+    float    tril_y;
+    float    distances[NUM_ANCHORS];
+    double   fp_amp_norm[NUM_ANCHORS];
+    double   fp_snr[NUM_ANCHORS];
+} app_tag_fusion_log_data_t;
+#endif
 
 /* Public function prototypes ----------------------------------------- */
 
@@ -103,7 +117,7 @@ void app_tag_set_latest_fusion_log_data(uint8_t mask, uint32_t seq, float rangin
  */
 void app_tag_reset_fusion(void);
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 extern sys_sensor_fusion_data_t ukf_data;
 #endif
 

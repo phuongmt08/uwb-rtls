@@ -25,7 +25,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#if ENABLE_SYS_FUSION
+#if (ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG)
 #include "sys_sensor_fusion.h"
 #endif
 
@@ -319,6 +319,7 @@ static void record_fusion_log_update_timing(void)
     }
 
     s_last_fusion_log_tick = now;
+    s_fusion_log_seq++;
 }
 #endif
 
@@ -731,6 +732,30 @@ bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count)
 #endif
 }
 
+#if ENABLE_SYS_FUSION_LOG
+bool app_tag_get_latest_fusion_log_data(app_tag_fusion_log_data_t *out)
+{
+    if (out == NULL || !s_latest_fusion_position_valid) {
+        return false;
+    }
+
+    out->mask = s_last_selected_anchors_mask;
+    out->seq = s_fusion_log_seq;
+    out->err_count = s_error_count;
+    out->ranging_dt = s_latest_ranging_dt;
+    out->tril_x = (float)s_latest_fusion_position.x;
+    out->tril_y = (float)s_latest_fusion_position.y;
+
+    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+        out->distances[i] = s_latest_distances[i];
+        out->fp_amp_norm[i] = s_latest_fp_amp_norm[i];
+        out->fp_snr[i] = s_latest_fp_snr[i];
+    }
+
+    return true;
+}
+#endif
+
 app_err_t app_tag_init(void)
 {
     sys_config_t *cfg = sys_config_get();
@@ -796,7 +821,7 @@ app_err_t app_tag_init(void)
 
     sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
 
-#if ENABLE_SYS_FUSION
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
     if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
         RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
     } else {
@@ -954,10 +979,8 @@ void app_tag_reset_fusion(void)
 {
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
     RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state...");
-#if ENABLE_SYS_FUSION
     sys_sensor_fusion_clear_predict_flag();
     sys_sensor_fusion_clear_update_flag();
-#endif
     init_filters();
     s_latest_fusion_position_valid = false;
     s_latest_fusion_position.x = 0.0f;
