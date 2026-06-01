@@ -696,7 +696,7 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
   } else {
     /* RESPONDER MODE */
     if (!s_anchor_resp_active) {
-      sys_ranging_err_t start_err = sys_ranging_anchor_start_tdma(my_id, n_all, all_ids, 60U);
+      sys_ranging_err_t start_err = sys_ranging_anchor_start_tdma(my_id, n_all, all_ids, rx_timeout_ms);
       if (start_err == SYS_RANGING_OK) {
         s_anchor_resp_active = true;
       } else if (start_err == SYS_RANGING_ERR_BUSY) {
@@ -753,7 +753,8 @@ app_err_t app_anchor_init(void) {
 
 void app_anchor_process(void *arg) {
   (void)arg;
-  uint32_t rx_timeout_ms = 75U;
+  sys_config_t *cfg = sys_config_get();
+  uint32_t rx_timeout_ms = cfg->uwb.rx_timeout_ms;
 
 #if ENABLE_ANCHOR_AUTO_CALIB
   if (s_app_state == ANCHOR_STATE_CALIB_COLLECTING || s_app_state == ANCHOR_STATE_CALIB_DONE) {
@@ -803,7 +804,7 @@ void app_anchor_process(void *arg) {
       sys_ranging_result_t res;
       if (sys_ranging_anchor_get_result_tdma(&res) == SYS_RANGING_OK && res.valid) {
         RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[DIST] Anchor #%u: tag_distance=%.3fm",
-               sys_config_get()->uwb.device_id,
+               cfg->uwb.device_id,
                res.distance_m);
       }
     }

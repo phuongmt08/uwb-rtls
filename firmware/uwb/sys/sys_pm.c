@@ -267,7 +267,10 @@ void sys_pm_get_status(sys_pm_status_t *status)
 
 void sys_pm_task(void *arg)
 {
-    (void)arg;
+    bool allow_uwb_telemetry = true;
+    if (arg != NULL) {
+        allow_uwb_telemetry = *((const bool *)arg);
+    }
 
     static uint8_t  battery_tick = 0;
     static uint16_t uwb_tick = 0;
@@ -283,7 +286,11 @@ void sys_pm_task(void *arg)
     }
 
     // DW1000 temp/vbat reads touch internal radio state, so keep them slow.
-    if (++uwb_tick >= UWB_TELEMETRY_PERIOD_TICKS)
+    if (uwb_tick < UWB_TELEMETRY_PERIOD_TICKS) {
+        uwb_tick++;
+    }
+
+    if (uwb_tick >= UWB_TELEMETRY_PERIOD_TICKS && allow_uwb_telemetry)
     {
         uwb_tick = 0;
         sys_pm_update_uwb_telemetry();

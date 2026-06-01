@@ -107,5 +107,6 @@ bsp_util_status_t bsp_util_device_reset(void);
 bsp_util_status_t bsp_util_enter_bootloader(void);
 uint32_t          getRunTimeCounterValue(void);
 void              bsp_util_print_cpu_stats(void);
+void              bsp_util_print_mem_stats(void);
 
 #endif /* BSP_UTIL_H */

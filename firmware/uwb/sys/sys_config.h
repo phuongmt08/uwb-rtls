@@ -71,14 +71,14 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            23   /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            24   /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_ROLE_TAG
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_HOST_TRANSPORT    HOST_TRANSPORT_USB
 #define DEFAULT_DEVICE_ID         0x01
 #define DEFAULT_RANGING_PERIOD_MS 75
-#define DEFAULT_RX_TIMEOUT_MS     90
+#define DEFAULT_RX_TIMEOUT_MS     60
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
 #define DEFAULT_UWB_DATA_RATE     2 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */

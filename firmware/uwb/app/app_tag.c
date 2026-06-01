@@ -33,11 +33,19 @@
 #include "bsp_imu.h"
 #endif
 
+#if ENABLE_SYS_FUSION
+#ifdef SYS_FUSION_PREFILTER_ENABLED
+#undef SYS_FUSION_PREFILTER_ENABLED
+#endif
+#define SYS_FUSION_PREFILTER_ENABLED 0
+#endif
+
 /* Private types ------------------------------------------------------ */
 typedef struct {
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
     mahalanobis_prefilter_t prefilter;
+#endif
     distance_smoother_t smoother;
-
 } filter_state_t;
 
 /* Private variables -------------------------------------------------- */
@@ -60,25 +68,28 @@ static bool s_position_valid = false;
 static uint8_t s_last_selected_anchors_mask = 0;
 
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
-static bool s_ukf_initialized = false;
-static ukf_init_filter_t s_ukf_init_filter;
-static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
 uint8_t test = 0;
 static float s_latest_distances[NUM_ANCHORS] = {0};
 static float s_latest_error = 0.0f;
+
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
+static bool s_ukf_initialized = false;
+static ukf_init_filter_t s_ukf_init_filter;
+static ukf_init_distance_filter_t s_ukf_init_dist_filter;
+#endif
 #endif
 
-#if ENABLE_SYS_FUSION
-sys_sensor_fusion_data_t ukf_data;
-#endif
-
-#if ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0};
 static double s_latest_fp_snr[NUM_ANCHORS] = {0};
 static float s_latest_ranging_dt = 0.0f;
+static uint32_t s_fusion_log_seq = 0U;
+
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
 static uint32_t s_last_fusion_log_tick = 0U;
+#endif
 #endif
 
 /* Private prototypes --------------------------------------------------- */
@@ -90,8 +101,13 @@ static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
 static void record_ranging_error(void);
+static void finish_failed_ranging_cycle(sys_ranging_err_t err,
+                                        uint32_t now_tick,
+                                        uint32_t period_ms,
+                                        bool abort_ranging,
+                                        const char *reason);
 static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
-#if ENABLE_SYS_FUSION_LOG
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
 static void record_fusion_log_update_timing(void);
 #endif
 
@@ -116,6 +132,7 @@ static void init_filters(void)
     s_last_position.x = init_x;
     s_last_position.y = init_y;
 
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
 #if SYS_FUSION_PREFILTER_ENABLED
     /* Fusion-predicted Mahalanobis prefilter state:
      * T1 = recover threshold, T2 = reject threshold, R = adaptive output base. */
@@ -123,6 +140,7 @@ static void init_filters(void)
                                MAHALANOBIS_PREFILTER_D2_RECOVER,
                                MAHALANOBIS_PREFILTER_D2_REJECT,
                                MAHALANOBIS_PREFILTER_R_BASE);
+#endif
 #endif
 
     /* Keep smoother initialized but disabled by default. Call/apply it explicitly
@@ -132,17 +150,18 @@ static void init_filters(void)
                                      SMOOTHER_ALPHA,
                                      SMOOTHER_JUMP_LIMIT_M);
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
     mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
+#endif
     for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
         s_latest_distances[i] = 0.0f;
-#if ENABLE_SYS_FUSION_LOG
         s_latest_fp_amp_norm[i] = 0.0;
         s_latest_fp_snr[i] = 0.0;
-#endif
     }
-#if ENABLE_SYS_FUSION_LOG
     s_latest_ranging_dt = 0.0f;
+    s_fusion_log_seq = 0U;
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
     s_last_fusion_log_tick = 0U;
 #endif
 #endif
@@ -229,17 +248,49 @@ static void update_period_schedule(uint32_t now_tick, uint32_t period_ms)
         return;
     }
 
-    s_next_due_tick += period_ms;
+    uint32_t next_due_tick = s_next_due_tick + period_ms;
 
-    while ((int32_t)(now_tick - s_next_due_tick) >= 0) {
-        s_next_due_tick += period_ms;
+    if ((int32_t)(now_tick - next_due_tick) >= 0) {
+        s_next_due_tick = now_tick;
         s_period_miss_count++;
+        return;
     }
+
+    s_next_due_tick = next_due_tick;
 }
 
 static void record_ranging_error(void)
 {
     s_error_count++;
+}
+
+static void finish_failed_ranging_cycle(sys_ranging_err_t err,
+                                        uint32_t now_tick,
+                                        uint32_t period_ms,
+                                        bool abort_ranging,
+                                        const char *reason)
+{
+    if (abort_ranging) {
+        sys_ranging_abort();
+    }
+
+    record_ranging_error();
+    s_last_ranging_tick = now_tick;
+    uint32_t cycle_ms = (s_cycle_start_tick != 0U)
+                        ? (now_tick - s_cycle_start_tick)
+                        : 0U;
+
+    if ((s_error_count % 10U) == 0U) {
+        RLOG_W(LOG_OBJECT_CODE_TAG,
+               "[TAG] %s: err=%d duration=%lums period=%ums",
+               reason,
+               err,
+               (unsigned long)cycle_ms,
+               (unsigned)period_ms);
+    }
+
+    update_period_schedule(s_last_ranging_tick, period_ms);
+    s_is_ranging_active = false;
 }
 
 static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context)
@@ -253,7 +304,7 @@ static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context)
     return false;
 }
 
-#if ENABLE_SYS_FUSION_LOG
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
 static void record_fusion_log_update_timing(void)
 {
     uint32_t now = HAL_GetTick();
@@ -274,6 +325,31 @@ static void record_fusion_log_update_timing(void)
 static void process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
     // RLOG_I(LOG_OBJECT_CODE_TAG, "========== RANGING #%lu ==========", s_success_count + 1);  // DISABLED - causes 20ms delay
+
+    /* Decoupled logic: When Sensor Fusion is active, package raw data and post to queue immediately */
+    if (s_output_mode == APP_TAG_MODE_SENSOR_FUSION) {
+        uwb_distance_msg_t msg = {0};
+        msg.count = 0;
+        msg.mask  = 0;
+        for (int i = 0; i < num_success; i++) {
+            sys_ranging_result_t *r = &results[i];
+            uint8_t aid = r->anchor_id;
+            if (aid < 1 || aid > NUM_ANCHORS) continue;
+            
+            msg.distances[aid - 1] = r->distance_m;
+            msg.anchor_ids[aid - 1] = aid;
+            msg.fp_amp_norm[aid - 1] = (float)r->fp_amp_norm_q8 / 256.0f;
+            msg.fp_snr[aid - 1] = (float)r->fp_snr_q8 / 256.0f;
+            
+            if (r->valid) {
+                msg.mask |= (1 << (aid - 1));
+            }
+            msg.count++;
+        }
+        osMessageQueuePut(g_uwb_distance_queue, &msg, 0, 0);
+        s_success_count++;
+        return;
+    }
 
     mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1];
     uint8_t valid_count = 0;
@@ -459,23 +535,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
     }
 
-    /* ==== STEP 3: Handle Output Modes ==== */
-    if (s_output_mode == APP_TAG_MODE_SENSOR_FUSION) {
-        /* In Sensor Fusion mode, push filtered distances to the queue.
-         * SensorFusion task runs UKF independently. */
-        uwb_distance_msg_t msg = {0};
-        msg.count = (best_count < 3U) ? best_count : 3U;
-        msg.mask  = s_last_selected_anchors_mask;
-        for (uint8_t i = 0; i < msg.count; i++) {
-            msg.distances[i]  = best_3_anchors[i].distance;
-            msg.anchor_ids[i] = best_3_anchors[i].id;
-        }
-        osMessageQueuePut(g_uwb_distance_queue, &msg, 0, 0);
-        s_success_count++;
-        return;
-    }
-
-#if ENABLE_SYS_FUSION_LOG
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
     /* ==== STEP 3-ALT: UKF Initialization or Update (LOG mode) ==== */
     if (!s_ukf_initialized)
     {
@@ -507,17 +567,12 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
             s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
             s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
 
-            bsp_imu_get_bias_data(&t_imu_bias);
-
-            double fp_amp_norm[NUM_ANCHORS];
-            double fp_snr[NUM_ANCHORS];
-
             for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-                fp_amp_norm[i] = 0.0f;
-                fp_snr[i] = 0.0f;
+                s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
+                s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
             }
 
-            bsp_io_uart_send_fusion_log_data(0, s_error_count, t_imu_bias.bias_ax, t_imu_bias.bias_ay, t_imu_bias.bias_gz, init_x, init_y, s_latest_distances, fp_amp_norm, fp_snr, 0.0);
+            sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
             sys_sensor_fusion_set_predict_flag();
             s_latest_fusion_position.x = init_x;
             s_latest_fusion_position.y = init_y;
@@ -563,116 +618,16 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 		}
 		test = s_last_selected_anchors_mask;
 
-        double fp_amp_norm[NUM_ANCHORS];
-        double fp_snr[NUM_ANCHORS];
-
         for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-            fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
-            fp_snr[i] = anchors_by_id[i + 1].fp_snr;
-        }
-
-        record_fusion_log_update_timing();
-        bsp_io_uart_send_fusion_log_data((uint8_t)test, s_error_count, 0.0, 0.0, 0.0, tril_position.x, tril_position.y, s_latest_distances, fp_amp_norm, fp_snr, s_latest_ranging_dt);
-        s_latest_error = (float)tril_result.error_estimate;
-    }
-
-    s_success_count++;
-#elif ENABLE_SYS_FUSION
- /* ==== STEP 3: UKF Initialization or Update ==== */
-    if (!s_ukf_initialized)
-    {
-        vec2d_t tril_position;
-        mw_tril_result_t tril_result;
-
-        mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
-
-        if (err != MW_TRIL_OK) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
-            RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-            return;
-        }
-
-        float init_x, init_y;
-        float init_d0, init_d1, init_d2;
-        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter, (float)tril_position.x, (float)tril_position.y, &init_x, &init_y);
-        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter, (float)best_3_anchors[0].distance, (float)best_3_anchors[1].distance, (float)best_3_anchors[2].distance, &init_d0, &init_d1, &init_d2);
-
-        if (pos_done && dist_done)
-        {
-            /* Set initial position for UKF */
-            s_ukf_initialized = true;
-
-            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
-
-            for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
-            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
-            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
-
-            double fp_amp_norm[NUM_ANCHORS];
-            double fp_snr[NUM_ANCHORS];
-
-            for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-                fp_amp_norm[i] = 0.0f;
-                fp_snr[i] = 0.0f;
-            }
-
-
-            sys_sensor_fusion_set_predict_flag();
-            sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
-            s_latest_fusion_position.x = init_x;
-            s_latest_fusion_position.y = init_y;
-            s_latest_fusion_position_valid = true;
-            // s_latest_error = (float)tril_result.error_estimate;
-        }
-        else
-        {
-            /* Still collecting data to initialize UKF */
-            int collected = s_ukf_init_filter.count >= UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count - UKF_INIT_DISCARD_SAMPLES : 0;
-            RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Collecting %d/%d (discarded %d/%d)",
-                   collected, UKF_INIT_SAMPLES,
-                   s_ukf_init_filter.count < UKF_INIT_DISCARD_SAMPLES ? s_ukf_init_filter.count : UKF_INIT_DISCARD_SAMPLES,
-                   UKF_INIT_DISCARD_SAMPLES);
-        }
-    }
-    else
-    {
-
-        for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-        for(int i=0; i<compact_idx; i++)
-        {
-            s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
-        }
-
-    	/* ==== STEP 3: Trilateration ==== */
-		vec2d_t tril_position;
-		mw_tril_result_t tril_result;
-
-		mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
-
-		if (err != MW_TRIL_OK) {
-			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
-			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-            return;
-		}
-
-		s_last_selected_anchors_mask = 0;
-		for (uint8_t i = 0; i < 3; i++) {
-			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
-		}
-		test = s_last_selected_anchors_mask;
-
-        double fp_amp_norm[NUM_ANCHORS];
-        double fp_snr[NUM_ANCHORS];
-
-        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-            fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
-            fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+            s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
+            s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
         }
 
         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, test);
         s_latest_fusion_position = tril_position;
         s_latest_fusion_position_valid = true;
+        record_fusion_log_update_timing();
+        s_latest_error = (float)tril_result.error_estimate;
     }
 
     s_success_count++;
@@ -859,6 +814,9 @@ void app_tag_process(void)
     static uint32_t s_reported_period_miss_count = 0;
     sys_config_t *cfg = sys_config_get();
     uint32_t now = HAL_GetTick();
+    uint32_t period_ms = (cfg->uwb.ranging_period_ms == 0U)
+                         ? 1U
+                         : cfg->uwb.ranging_period_ms;
 
     if (!s_is_ranging_active && s_next_due_tick != 0U && (int32_t)(now - s_next_due_tick) > 0) {
         uint32_t lateness_ms = now - s_next_due_tick;
@@ -911,6 +869,16 @@ void app_tag_process(void)
         return;
     }
 
+    if (s_cycle_start_tick != 0U &&
+        (int32_t)(now - s_cycle_start_tick) >= (int32_t)period_ms) {
+        finish_failed_ranging_cycle(SYS_RANGING_ERR_TIMEOUT,
+                                    now,
+                                    period_ms,
+                                    true,
+                                    "Period watchdog abort");
+        return;
+    }
+
     sys_ranging_err_t err = sys_ranging_tag_process_tdma(s_pending_num_anchors,
                                                           s_pending_anchor_ids,
                                                           cfg->uwb.rx_timeout_ms);
@@ -959,7 +927,7 @@ void app_tag_process(void)
         }
         s_last_cycle_done_tick = cycle_done_tick;
         s_last_ranging_tick = cycle_done_tick;
-        update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
+        update_period_schedule(s_last_ranging_tick, period_ms);
         if (s_period_miss_count != s_reported_period_miss_count
             && (s_period_miss_count % 10U) == 1U
             && s_period_miss_count > 0U) {
@@ -973,15 +941,11 @@ void app_tag_process(void)
     }
 
     if (err != SYS_RANGING_ERR_BUSY) {
-        record_ranging_error();
-        s_last_ranging_tick = HAL_GetTick();
-        uint32_t cycle_ms = s_last_ranging_tick - s_cycle_start_tick;
-        if (s_error_count % 10 == 0) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] Ranging failed: err=%d duration=%lums", err, (unsigned long)cycle_ms);
-        }
-        
-        update_period_schedule(s_last_ranging_tick, cfg->uwb.ranging_period_ms);
-        s_is_ranging_active = false;
+        finish_failed_ranging_cycle(err,
+                                    HAL_GetTick(),
+                                    period_ms,
+                                    false,
+                                    "Ranging failed");
     }
     
 }
@@ -995,20 +959,61 @@ void app_tag_reset_fusion(void)
     sys_sensor_fusion_clear_update_flag();
 #endif
     init_filters();
-    s_ukf_initialized = false;
     s_latest_fusion_position_valid = false;
     s_latest_fusion_position.x = 0.0f;
     s_latest_fusion_position.y = 0.0f;
     s_is_ranging_active = false;
     s_error_count = 0;
-
-#if ENABLE_SYS_FUSION
+    
+#if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
+    s_ukf_initialized = false;
     if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialization failed");
     } else {
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
+#else
+    /* For active Sensor Fusion, delegate the reset to freertos.c */
+    void sys_sensor_fusion_reset(void);
+    sys_sensor_fusion_reset();
 #endif
 #endif
 }
+
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+void app_tag_set_latest_fusion_data(float x, float y, bool valid, uint32_t err_count)
+{
+    s_latest_fusion_position.x = x;
+    s_latest_fusion_position.y = y;
+    s_latest_fusion_position_valid = valid;
+    s_error_count = err_count;
+}
+#endif
+
+#if ENABLE_SYS_FUSION_LOG
+void app_tag_set_latest_fusion_log_data(uint8_t mask, uint32_t seq, float ranging_dt, float tril_x, float tril_y, const float *distances, const double *fp_amp_norm, const double *fp_snr)
+{
+    s_last_selected_anchors_mask = mask;
+    s_fusion_log_seq = seq;
+    s_latest_ranging_dt = ranging_dt;
+    s_latest_fusion_position.x = tril_x;
+    s_latest_fusion_position.y = tril_y;
+    s_latest_fusion_position_valid = true;
+    if (distances) {
+        for (int i = 0; i < NUM_ANCHORS; i++) {
+            s_latest_distances[i] = distances[i];
+        }
+    }
+    if (fp_amp_norm) {
+        for (int i = 0; i < NUM_ANCHORS; i++) {
+            s_latest_fp_amp_norm[i] = fp_amp_norm[i];
+        }
+    }
+    if (fp_snr) {
+        for (int i = 0; i < NUM_ANCHORS; i++) {
+            s_latest_fp_snr[i] = fp_snr[i];
+        }
+    }
+}
+#endif
 /* End of file -------------------------------------------------------- */

@@ -259,8 +259,15 @@
 #define ENABLE_SYS_FUSION  0
 #endif
 
+#if ENABLE_SYS_FUSION
+#ifdef ENABLE_SYS_FUSION_LOG
+#undef ENABLE_SYS_FUSION_LOG
+#endif
+#define ENABLE_SYS_FUSION_LOG  0
+#else
 #ifndef ENABLE_SYS_FUSION_LOG
 #define ENABLE_SYS_FUSION_LOG  1
+#endif
 #endif
 
 #ifndef SYS_FUSION_PREFILTER_ENABLED

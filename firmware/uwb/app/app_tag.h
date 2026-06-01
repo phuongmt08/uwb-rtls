@@ -72,6 +72,32 @@ bool app_tag_get_last_position(float *x_m, float *y_m);
  */
 bool app_tag_get_latest_fusion_data(float *x, float *y, uint32_t *err_count);
 
+#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+/**
+ * @brief Set latest UWB trilateration position and current ranging error count.
+ * @param x Latest trilateration X position in meters
+ * @param y Latest trilateration Y position in meters
+ * @param valid True if position is valid
+ * @param err_count Current consecutive/accumulated ranging error count
+ */
+void app_tag_set_latest_fusion_data(float x, float y, bool valid, uint32_t err_count);
+#endif
+
+#if ENABLE_SYS_FUSION_LOG
+/**
+ * @brief Get latest data needed by the SensorFusion task for fusion log frames.
+ * @param[out] out Latest selected anchor mask, trilateration position,
+ *                 distances, first-path quality, and ranging error count.
+ * @return true if a valid fusion log snapshot is available
+ */
+bool app_tag_get_latest_fusion_log_data(app_tag_fusion_log_data_t *out);
+
+/**
+ * @brief Set latest data needed for fusion log frames passively.
+ */
+void app_tag_set_latest_fusion_log_data(uint8_t mask, uint32_t seq, float ranging_dt, float tril_x, float tril_y, const float *distances, const double *fp_amp_norm, const double *fp_snr);
+#endif
+
 /**
  * @brief Reset the sensor fusion filters, flags, and states when ranging stops.
  */

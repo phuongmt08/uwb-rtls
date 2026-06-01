@@ -477,6 +477,7 @@ int sys_config_load(void)
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx_timeout=%lu in flash, forcing to %u ms",
                temp_storage.config.uwb.rx_timeout_ms, DEFAULT_RX_TIMEOUT_MS);
         temp_storage.config.uwb.rx_timeout_ms = DEFAULT_RX_TIMEOUT_MS;
+        normalize_and_save = true;
     }
 
     if (temp_storage.config.uwb.ranging_period_ms > 5000 || temp_storage.config.uwb.ranging_period_ms < 50) {
