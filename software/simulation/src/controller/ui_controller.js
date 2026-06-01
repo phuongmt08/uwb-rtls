@@ -20,7 +20,8 @@ function initSimulation() {
                 rules: res.simPathRuled,
                 wls: res.simPathWLS,
                 triplet: res.simPathTriplet,
-                ukf: res.simPathUKF
+                ukf: res.simPathUKF,
+                ukf_lpf: res.simPathUKF_lpf
             };
             latestTotalTime = res.total_time;
             updatePlots(res, samples, rawData);
@@ -53,6 +54,8 @@ function runSimulation() {
         zupt_gyr: parseFloat(document.getElementById('zupt_gyr_range').value),
         enable_smoother: document.getElementById('enable_smoother').checked,
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
+        enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
+        imu_lpf_cutoff_hz: parseFloat(document.getElementById('imu_lpf_cutoff_range').value),
 
         // Add UKF Parameters
         ukf_alpha: parseFloat(document.getElementById('ukf_alpha_range').value),
@@ -80,6 +83,7 @@ function runSimulation() {
     document.getElementById('win_val').innerText     = params.rescue_min_anchors;
     document.getElementById('zupt_acc_val').innerText = params.zupt_acc;
     document.getElementById('zupt_gyr_val').innerText = params.zupt_gyr;
+    document.getElementById('imu_lpf_cutoff_val').innerText = params.imu_lpf_cutoff_hz.toFixed(2);
 
     // Update UKF value labels
     document.getElementById('ukf_alpha_val').innerText = params.ukf_alpha;
@@ -123,17 +127,27 @@ function openReplayPage() {
         alert('Vui lòng đợi mô phỏng chạy xong trước khi Replay!');
         return;
     }
+    const imuLpfCutoffInput = document.getElementById('imu_lpf_cutoff_range');
+    const enableImuLpfInput = document.getElementById('enable_imu_lpf');
+
     // Package data for replay
     const replayData = {
         anchors: anchors,
         groundTruth: activeGroundTruth,
         firmwarePath: latestTrajectoryPaths.firmware,
         ukfPath: latestSimulationResult.simPathUKF_plot, // 6Hz aligned
+        ukfLpfPath: latestSimulationResult.simPathUKF_lpf_plot,
         ukfModes: latestSimulationResult.simPathUKF_modes, // 6Hz predict vs update modes
+        ukfLpfModes: latestSimulationResult.simPathUKF_lpf_modes,
         // 20Hz UKF data for predict/update breadcrumb visualization
         ukfPath20Hz: latestSimulationResult.simPathUKF, // 20Hz full resolution
+        ukfLpfPath20Hz: latestSimulationResult.simPathUKF_lpf,
         ukfModes20Hz: latestSimulationResult.simPathUKF_allModes, // 20Hz: 0=Predict, 1=Update
         ukfTimes20Hz: latestSimulationResult.simPathUKF_allTimes, // 20Hz timestamps
+        imuLpfConfig: {
+            enabled: enableImuLpfInput ? enableImuLpfInput.checked : true,
+            cutoff_hz: imuLpfCutoffInput ? parseFloat(imuLpfCutoffInput.value) : null
+        },
         tripletPath: latestTrajectoryPaths.triplet,
         wlsPath: latestTrajectoryPaths.wls,
         yaw: latestSimulationResult.plotData.yaw,

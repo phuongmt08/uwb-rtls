@@ -498,6 +498,7 @@
 
         /* --- Interactive Legend colors --- */
         .color-ukf { background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+        .color-ukf-lpf { background: #a78bfa; box-shadow: 0 0 8px #a78bfa; }
         .color-fw { background: #e2e8f0; box-shadow: 0 0 8px rgba(226, 232, 240, 0.55); }
         .color-triplet { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); }
         .color-wls { background: var(--neon-orange); box-shadow: 0 0 8px var(--neon-orange); }
@@ -620,6 +621,11 @@
                     <span style="font-weight: 500;">UKF Fusion Path (20Hz)</span>
                 </label>
                 <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_ukf_lpf" checked onchange="drawFrame()">
+                    <span class="dot-color color-ukf-lpf"></span>
+                    <span style="font-weight: 500;">UKF Fusion + IMU LPF</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
                     <input type="checkbox" id="chk_fw" checked onchange="drawFrame()">
                     <span class="dot-color color-fw"></span>
                     <span style="font-weight: 500;">Firmware Path</span>
@@ -646,9 +652,17 @@
                     <span class="dig-val violet" id="telemetry_ukf" style="font-size: 0.9rem;">X: --, Y: --</span>
                 </div>
                 <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
+                    <span class="dig-lbl">UKF LPF Position</span>
+                    <span class="dig-val" id="telemetry_ukf_lpf" style="color:#a78bfa; font-size: 0.9rem;">X: --, Y: --</span>
+                </div>
+                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
                     <span class="dig-lbl">FW Position</span>
                     <span class="dig-val" style="color:var(--text-muted); font-size: 0.9rem;" id="telemetry_fw">X: --, Y: --</span>
                 </div>
+            </div>
+            <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px; margin-top: 8px;">
+                <span class="dig-lbl">IMU LPF Config</span>
+                <span class="dig-val" id="telemetry_lpf_cfg" style="color:#a78bfa; font-size: 0.85rem;">--</span>
             </div>
             <div class="info-card-text" style="font-size: 0.75rem; margin-top: 10px; line-height: 1.4;">
                 Track widths: <strong>22cm</strong> (1 lane, dotted) or <strong>44cm</strong> (2 lanes, dashed divider). <strong>◆ Cyan diamond</strong> = UKF Update, <strong>● Orange circle</strong> = UKF Predict.
@@ -666,6 +680,9 @@
         const data = JSON.parse(replayDataRaw);
 
         document.getElementById('log_filename').innerText = "Log: " + (data.filename || "ukf_log_data.csv") + " (" + data.x_axis.length + " samples)";
+        const lpfCfg = data.imuLpfConfig || {};
+        document.getElementById('telemetry_lpf_cfg').innerText =
+            `${lpfCfg.enabled === false ? 'OFF' : 'ON'} | fc=${Number.isFinite(lpfCfg.cutoff_hz) ? lpfCfg.cutoff_hz.toFixed(2) : '--'} Hz`;
 
         // Dynamically update Back button link to go back to the specific simulation HTML page
         const backBtn = document.getElementById('back_btn_link');
@@ -857,6 +874,9 @@
                 
                 // Update log filename display
                 document.getElementById('log_filename').innerText = "Log: " + (data.filename || "ukf_log_data.csv") + " (" + data.x_axis.length + " samples)";
+                const lpfCfg = data.imuLpfConfig || {};
+                document.getElementById('telemetry_lpf_cfg').innerText =
+                    `${lpfCfg.enabled === false ? 'OFF' : 'ON'} | fc=${Number.isFinite(lpfCfg.cutoff_hz) ? lpfCfg.cutoff_hz.toFixed(2) : '--'} Hz`;
                 
                 // Re-extract values
                 anchorsList = data.anchors;
@@ -937,6 +957,40 @@
             return lerp(times[currentIndex], times[nextIdx], lastDrawRatio);
         }
 
+        function findTimeIndex(pathTimes, currentT) {
+            if (!Array.isArray(pathTimes) || pathTimes.length === 0) return 0;
+            let idx = 0;
+            for (let k = 0; k < pathTimes.length; k++) {
+                if (pathTimes[k] <= currentT) idx = k;
+                else break;
+            }
+            return idx;
+        }
+
+        function interpolateTimedPath(path, pathTimes, currentT, fallbackIndex, ratio) {
+            if (!path || !path.x || !path.y) return { x: null, y: null, index: 0 };
+            if (Array.isArray(pathTimes) && pathTimes.length > 0) {
+                const k = findTimeIndex(pathTimes, currentT);
+                const nextK = Math.min(pathTimes.length - 1, k + 1);
+                let ratioPath = 0;
+                const t1 = pathTimes[k];
+                const t2 = pathTimes[nextK];
+                if (t2 > t1) ratioPath = Math.max(0, Math.min(1, (currentT - t1) / (t2 - t1)));
+                return {
+                    x: lerp(path.x[k], path.x[nextK], ratioPath),
+                    y: lerp(path.y[k], path.y[nextK], ratioPath),
+                    index: k
+                };
+            }
+
+            const nextIdx = Math.min(totalSamples - 1, fallbackIndex + 1);
+            return {
+                x: lerp(path.x[fallbackIndex], path.x[nextIdx], ratio),
+                y: lerp(path.y[fallbackIndex], path.y[nextIdx], ratio),
+                index: fallbackIndex
+            };
+        }
+
         function updateHoverFromMouse(e) {
             lastMouseEvent = e;
             if (!e || isDragging) {
@@ -1004,6 +1058,21 @@
                 } else {
                     scanPath('UKF', data.ukfPath, times, currentIndex, '#38bdf8',
                         k => data.ukfModes && data.ukfModes[k] === 1 ? 'Update' : 'Predict');
+                }
+            }
+            if (document.getElementById('chk_ukf_lpf').checked && (data.ukfLpfPath20Hz || data.ukfLpfPath)) {
+                const has20Hz = data.ukfLpfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+                if (has20Hz) {
+                    let maxK = 0;
+                    for (let k = 0; k < data.ukfTimes20Hz.length; k++) {
+                        if (data.ukfTimes20Hz[k] <= currentT) maxK = k;
+                        else break;
+                    }
+                    scanPath('UKF LPF', data.ukfLpfPath20Hz, data.ukfTimes20Hz, maxK, '#a78bfa',
+                        k => data.ukfModes20Hz[k] === 1 ? 'Update' : 'Predict');
+                } else {
+                    scanPath('UKF LPF', data.ukfLpfPath, times, currentIndex, '#a78bfa',
+                        k => data.ukfLpfModes && data.ukfLpfModes[k] === 1 ? 'Update' : 'Predict');
                 }
             }
 
@@ -1228,34 +1297,29 @@
             document.getElementById('sampleDisplay').innerText = "Sample " + (currentIndex + 1) + " / " + totalSamples;
 
             let ukfX = null, ukfY = null, isUpdate = false;
+            let ukfLpfX = null, ukfLpfY = null, isLpfUpdate = false;
             const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
             
             if (has20Hz) {
-                const nextIdx6 = Math.min(totalSamples - 1, currentIndex + 1);
-                const currentT = lerp(times[currentIndex], times[nextIdx6], ratio);
-                
-                let k20 = 0;
-                for (let k = 0; k < data.ukfTimes20Hz.length; k++) {
-                    if (data.ukfTimes20Hz[k] <= currentT) {
-                        k20 = k;
-                    } else {
-                        break;
-                    }
-                }
-                const nextK20 = Math.min(data.ukfTimes20Hz.length - 1, k20 + 1);
-                let ratio20 = 0;
-                const t1_20 = data.ukfTimes20Hz[k20];
-                const t2_20 = data.ukfTimes20Hz[nextK20];
-                if (t2_20 > t1_20) {
-                    ratio20 = Math.max(0, Math.min(1, (currentT - t1_20) / (t2_20 - t1_20)));
-                }
-                ukfX = lerp(data.ukfPath20Hz.x[k20], data.ukfPath20Hz.x[nextK20], ratio20);
-                ukfY = lerp(data.ukfPath20Hz.y[k20], data.ukfPath20Hz.y[nextK20], ratio20);
-                isUpdate = (data.ukfModes20Hz[k20] === 1);
+                const interp = interpolateTimedPath(data.ukfPath20Hz, data.ukfTimes20Hz, currentT, currentIndex, ratio);
+                ukfX = interp.x;
+                ukfY = interp.y;
+                isUpdate = (data.ukfModes20Hz[interp.index] === 1);
             } else {
                 ukfX = lerp(data.ukfPath.x[currentIndex], data.ukfPath.x[nextIdx], ratio);
                 ukfY = lerp(data.ukfPath.y[currentIndex], data.ukfPath.y[nextIdx], ratio);
                 isUpdate = (data.ukfModes && data.ukfModes[currentIndex] === 1);
+            }
+
+            if (data.ukfLpfPath20Hz && data.ukfTimes20Hz) {
+                const interpLpf = interpolateTimedPath(data.ukfLpfPath20Hz, data.ukfTimes20Hz, currentT, currentIndex, ratio);
+                ukfLpfX = interpLpf.x;
+                ukfLpfY = interpLpf.y;
+                isLpfUpdate = (data.ukfModes20Hz && data.ukfModes20Hz[interpLpf.index] === 1);
+            } else if (data.ukfLpfPath) {
+                ukfLpfX = lerp(data.ukfLpfPath.x[currentIndex], data.ukfLpfPath.x[nextIdx], ratio);
+                ukfLpfY = lerp(data.ukfLpfPath.y[currentIndex], data.ukfLpfPath.y[nextIdx], ratio);
+                isLpfUpdate = (data.ukfLpfModes && data.ukfLpfModes[currentIndex] === 1);
             }
 
             const fwX = lerp(data.firmwarePath.x[currentIndex], data.firmwarePath.x[nextIdx], ratio);
@@ -1263,6 +1327,8 @@
 
             document.getElementById('telemetry_ukf').innerText = 
                 ukfX !== null ? `X: ${ukfX.toFixed(3)}m, Y: ${ukfY.toFixed(3)}m (${isUpdate ? 'Update' : 'Predict'})` : "X: N/A, Y: N/A";
+            document.getElementById('telemetry_ukf_lpf').innerText =
+                ukfLpfX !== null ? `X: ${ukfLpfX.toFixed(3)}m, Y: ${ukfLpfY.toFixed(3)}m (${isLpfUpdate ? 'Update' : 'Predict'})` : "X: N/A, Y: N/A";
             document.getElementById('telemetry_fw').innerText = 
                 fwX !== null ? `X: ${fwX.toFixed(3)}m, Y: ${fwY.toFixed(3)}m` : "X: N/A, Y: N/A";
 
@@ -1533,6 +1599,56 @@
                         }
                     }
                 }
+                if (document.getElementById('chk_ukf_lpf').checked && (data.ukfLpfPath20Hz || data.ukfLpfPath)) {
+                    const has20Hz = data.ukfLpfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+                    const ukfP = has20Hz ? data.ukfLpfPath20Hz : data.ukfLpfPath;
+                    const ukfM = has20Hz ? data.ukfModes20Hz : (data.ukfLpfModes || []);
+                    const ukfT = has20Hz ? data.ukfTimes20Hz : times;
+
+                    const nextIdx6 = Math.min(totalSamples - 1, currentIndex + 1);
+                    const currentT = lerp(times[currentIndex], times[nextIdx6], ratio);
+                    let maxK = 0;
+                    for (let k = 0; k < ukfT.length; k++) {
+                        if (ukfT[k] <= currentT) maxK = k;
+                        else break;
+                    }
+
+                    for (let k = 0; k <= maxK; k++) {
+                        const px = ukfP.x[k];
+                        const py = ukfP.y[k];
+                        if (px === null || py === null) continue;
+
+                        const isUpdate = (ukfM[k] === 1);
+                        const cx = toCanvasX(px);
+                        const cy = toCanvasY(py);
+
+                        if (isUpdate) {
+                            const s = 4;
+                            ctx.beginPath();
+                            ctx.moveTo(cx, cy - s);
+                            ctx.lineTo(cx + s, cy);
+                            ctx.lineTo(cx, cy + s);
+                            ctx.lineTo(cx - s, cy);
+                            ctx.closePath();
+                            ctx.fillStyle = '#a78bfa';
+                            ctx.shadowColor = '#a78bfa';
+                            ctx.shadowBlur = 6;
+                            ctx.fill();
+                            ctx.shadowBlur = 0;
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        } else {
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, 2.5, 0, 2 * Math.PI);
+                            ctx.fillStyle = 'rgba(167, 139, 250, 0.55)';
+                            ctx.fill();
+                            ctx.strokeStyle = 'rgba(109, 40, 217, 0.5)';
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    }
+                }
             }
 
             // 7. Draw Canvas HUD Legend (Explain UKF Predict vs Update)
@@ -1726,6 +1842,21 @@
                     const label = isUpdate ? 'UKF ◆ Update' : 'UKF ● Predict';
                     const color = isUpdate ? 'rgba(56, 189, 248, 1)' : 'rgba(251, 146, 60, 1)';
                     drawTagVehicle(ukfX, ukfY, yaw, color, label);
+                }
+            }
+            if (document.getElementById('chk_ukf_lpf').checked && (data.ukfLpfPath20Hz || data.ukfLpfPath)) {
+                const currentT = lerp(times[currentIndex], times[nextIdx], ratio);
+                const has20Hz = data.ukfLpfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
+                const interp = has20Hz
+                    ? interpolateTimedPath(data.ukfLpfPath20Hz, data.ukfTimes20Hz, currentT, currentIndex, ratio)
+                    : interpolateTimedPath(data.ukfLpfPath, null, currentT, currentIndex, ratio);
+                const isUpdate = has20Hz
+                    ? (data.ukfModes20Hz[interp.index] === 1)
+                    : (data.ukfLpfModes && data.ukfLpfModes[interp.index] === 1);
+
+                if (interp.x !== null && interp.y !== null) {
+                    const label = isUpdate ? 'UKF LPF Update' : 'UKF LPF Predict';
+                    drawTagVehicle(interp.x, interp.y, yaw, 'rgba(167, 139, 250, 1)', label);
                 }
             }
 

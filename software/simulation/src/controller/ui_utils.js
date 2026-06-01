@@ -1,5 +1,5 @@
 let ruleCounter = 0;
-const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 4;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 5;
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -213,7 +213,7 @@ function exportTrajectoryCsv() {
         let px = entry.px_fw;
         let py = entry.py_fw;
 
-        if (selected === 'ukf') {
+        if (selected === 'ukf' || selected === 'ukf_lpf') {
             // UKF has a position for EVERY log entry (20Hz)
             const nextPx = path.x ? path.x[index] : null;
             const nextPy = path.y ? path.y[index] : null;
@@ -368,6 +368,8 @@ function saveDefaults() {
         max_samples: document.getElementById('max_samples_input').value,
         enable_smoother: document.getElementById('enable_smoother').checked,
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
+        enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
+        imu_lpf_cutoff_hz: document.getElementById('imu_lpf_cutoff_input').value,
         groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
         anchors: readAnchorsFromInputs(),
         rules: [],
@@ -456,6 +458,14 @@ function loadDefaults() {
             }
             if (loadTuning && config.enable_mahalanobis !== undefined) {
                 document.getElementById('enable_mahalanobis').checked = config.enable_mahalanobis;
+            }
+            if (loadTuning && config.enable_imu_lpf !== undefined) {
+                document.getElementById('enable_imu_lpf').checked = config.enable_imu_lpf;
+            }
+            if (loadTuning && config.imu_lpf_cutoff_hz) {
+                document.getElementById('imu_lpf_cutoff_input').value = config.imu_lpf_cutoff_hz;
+                document.getElementById('imu_lpf_cutoff_range').value = config.imu_lpf_cutoff_hz;
+                document.getElementById('imu_lpf_cutoff_val').innerText = parseFloat(config.imu_lpf_cutoff_hz).toFixed(2);
             }
             if (loadTuning && config.tag_height) {
                 document.getElementById('tag_height_input').value = config.tag_height;

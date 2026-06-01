@@ -193,3 +193,86 @@ function meanErr(arr) {
     const valid = arr.filter(v => v !== null);
     return valid.length ? (valid.reduce((s, v) => s + v, 0) / valid.length).toFixed(3) : "N/A";
 }
+
+function computeTimeDomainSpectrum(values, times) {
+    const clean = [];
+    const cleanTimes = [];
+    values.forEach((v, i) => {
+        const t = times && times[i];
+        if (Number.isFinite(v) && Number.isFinite(t)) {
+            clean.push(v);
+            cleanTimes.push(t);
+        }
+    });
+
+    const n = clean.length;
+    if (n < 4) return { freq: [], mag: [] };
+
+    const maxFftSize = 16384;
+    let nfft = 1;
+    while ((nfft * 2) <= n && (nfft * 2) <= maxFftSize) nfft *= 2;
+    if (nfft < 4) return { freq: [], mag: [] };
+
+    const start = Math.max(0, n - nfft);
+    const duration = cleanTimes[start + nfft - 1] - cleanTimes[start];
+    const fs = duration > 0 ? (nfft - 1) / duration : 0;
+    if (!Number.isFinite(fs) || fs <= 0) return { freq: [], mag: [] };
+
+    let mean = 0;
+    for (let i = 0; i < nfft; i++) mean += clean[start + i];
+    mean /= nfft;
+
+    const re = new Array(nfft);
+    const im = new Array(nfft).fill(0);
+    let windowSum = 0;
+    for (let i = 0; i < nfft; i++) {
+        const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (nfft - 1));
+        re[i] = (clean[start + i] - mean) * w;
+        windowSum += w;
+    }
+
+    for (let i = 1, j = 0; i < nfft; i++) {
+        let bit = nfft >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            const tr = re[i]; re[i] = re[j]; re[j] = tr;
+            const ti = im[i]; im[i] = im[j]; im[j] = ti;
+        }
+    }
+
+    for (let len = 2; len <= nfft; len <<= 1) {
+        const angle = -2 * Math.PI / len;
+        const wLenRe = Math.cos(angle);
+        const wLenIm = Math.sin(angle);
+        for (let i = 0; i < nfft; i += len) {
+            let wRe = 1;
+            let wIm = 0;
+            const half = len >> 1;
+            for (let j = 0; j < half; j++) {
+                const uRe = re[i + j];
+                const uIm = im[i + j];
+                const vRe = re[i + j + half] * wRe - im[i + j + half] * wIm;
+                const vIm = re[i + j + half] * wIm + im[i + j + half] * wRe;
+                re[i + j] = uRe + vRe;
+                im[i + j] = uIm + vIm;
+                re[i + j + half] = uRe - vRe;
+                im[i + j + half] = uIm - vIm;
+
+                const nextWRe = wRe * wLenRe - wIm * wLenIm;
+                wIm = wRe * wLenIm + wIm * wLenRe;
+                wRe = nextWRe;
+            }
+        }
+    }
+
+    const freq = [];
+    const mag = [];
+    const scale = windowSum > 0 ? 2 / windowSum : 2 / nfft;
+    for (let k = 1; k <= Math.floor(nfft / 2); k++) {
+        freq.push(k * fs / nfft);
+        mag.push(scale * Math.sqrt(re[k] * re[k] + im[k] * im[k]));
+    }
+
+    return { freq, mag };
+}

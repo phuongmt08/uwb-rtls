@@ -359,10 +359,11 @@ def main():
     sorted_folders = sorted(grouped_results.keys(), reverse=True)
 
     html_sections = []
+    cache_token = str(int(report_source_mtime))
     for folder in sorted_folders:
         items = grouped_results[folder]
         items_html = "".join([
-            f'<a href="{r["path"]}" class="log-item">'
+            f'<a href="{r["path"]}?v={cache_token}" class="log-item">'
             f'  <div style="display:flex;align-items:center;gap:15px;">'
             f'    <div class="thumb">{r["thumb"]}</div>'
             f'    <span>{r["name"]}</span>'
@@ -474,7 +475,15 @@ def main():
     # --- AUTO SERVER & BROWSER ---
     PORT = 8000
     MAX_TRIES = 10
-    Handler = http.server.SimpleHTTPRequestHandler
+
+    class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+            super().end_headers()
+
+    Handler = NoCacheHTTPRequestHandler
     
     # Change directory to BASE_DIR to serve files correctly
     os.chdir(BASE_DIR)

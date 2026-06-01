@@ -37,7 +37,9 @@ const SIM_CONFIG = {
         DEFAULT_ENABLE_ZUPT_UKF: false,
         ZUPT_COUNT_THRESHOLD: 10,
         DEFAULT_ZUPT_ACC: 0.15,
-        DEFAULT_ZUPT_GYR: 0.05
+        DEFAULT_ZUPT_GYR: 0.05,
+        DEFAULT_ENABLE_LPF: true,
+        DEFAULT_LPF_CUTOFF_HZ: 2.0
     },
 
     // --- Visualization ---
