@@ -829,6 +829,13 @@ app_err_t app_tag_init(void)
     }
 #endif
 
+#if ENABLE_SYS_FUSION
+    /* Route ranging results into the decoupled SensorFusion queue. Without this,
+     * s_output_mode stays TRILATERATION and process_ranging_results() never posts
+     * to g_uwb_distance_queue, so the SensorFusion thread starves. */
+    app_tag_set_output_mode(APP_TAG_MODE_SENSOR_FUSION);
+#endif
+
     init_filters();
     return APP_OK;
 }

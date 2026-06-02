@@ -387,11 +387,12 @@ void sensor_fusion_entry(void *argument)
   {
     osDelay(20);
 
-    if (!sys_sensor_fusion_check_predict_flag())
+    /* Gate ONLY the predict step on the flag (set once the UKF is initialized
+     * on the first fix). Do NOT gate queue draining on it — otherwise the queue
+     * is never consumed, the UKF never initializes, and the flag can never be
+     * set: a bootstrap deadlock that kills the whole fusion pipeline. */
+    if (sys_sensor_fusion_check_predict_flag())
     {
-      continue;
-    }
-
     float dt = 0.01f;
     if (s_fusion_first_run)
     {
@@ -439,11 +440,14 @@ void sensor_fusion_entry(void *argument)
       }
     }
 #endif
+    } /* end predict-flag gate; queue draining below runs every loop */
 
 #if ENABLE_SYS_FUSION
     {
       uwb_distance_msg_t msg;
-      if (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+      /* Drain ALL queued ranging messages: absorbs bursts and makes the UKF
+       * init (which sets the predict flag) reachable on the very first message. */
+      while (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
       {
         /* 1. Calculate dynamic dt for ranging if needed, and update logs */
         uint32_t now_log = HAL_GetTick();

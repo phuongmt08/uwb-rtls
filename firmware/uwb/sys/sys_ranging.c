@@ -1921,7 +1921,18 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                   uint64_t ptx_tag=0; memcpy(&ptx_tag, &fmsg->poll_tx_ts, sizeof(ptx_tag)); ptx_tag &= DW_MASK_40;
                   uint64_t rrx_tag=0, ftx_tag=0;
                   bool found = false;
-                  for (uint8_t i=0; i<fmsg->num_responses; i++) {
+                  /* fmsg->num_responses comes off-air and is untrusted; rx_data is a
+                   * fixed 128-byte buffer. Bound the parse by BOTH the logical max and
+                   * the bytes actually received so an inflated count cannot walk past
+                   * the buffer (OOB read). */
+                  uint8_t n_resp = fmsg->num_responses;
+                  uint8_t max_fit = 0U;
+                  if (final_evt.rx_len > sizeof(final_msg_t)) {
+                      max_fit = (uint8_t)((final_evt.rx_len - sizeof(final_msg_t)) / sizeof(final_anchor_data_t));
+                  }
+                  if (n_resp > max_fit) n_resp = max_fit;
+                  if (n_resp > MAX_ANCHORS_SUPPORTED) n_resp = MAX_ANCHORS_SUPPORTED;
+                  for (uint8_t i=0; i<n_resp; i++) {
                       uint8_t *entry = final_evt.rx_data + sizeof(final_msg_t) + (i*sizeof(final_anchor_data_t));
                       if (entry[0] == s_ctx.anchor_id) {
                           memcpy(&rrx_tag, entry+1, sizeof(rrx_tag));
