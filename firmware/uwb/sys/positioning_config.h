@@ -17,7 +17,7 @@
  * 0 = Use calibrated values (if available)
  * 1 = Force antenna delay to factory defaults
  */
-#define ENABLE_FORCE_DEFAULT_ANT_DLY    1
+#define ENABLE_FORCE_DEFAULT_ANT_DLY    0
 
 #define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
@@ -125,10 +125,10 @@
 #define ANCHOR_2_Y   0.0f
 
 #define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   12.2f
+#define ANCHOR_3_Y   9.76f
 
 #define ANCHOR_4_X   9.76f
-#define ANCHOR_4_Y   12.2f
+#define ANCHOR_4_Y   9.76f
 
 #ifndef ANCHOR_1_Z
 #define ANCHOR_1_Z ANCHOR_HEIGHT_M
