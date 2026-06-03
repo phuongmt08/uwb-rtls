@@ -18,7 +18,7 @@
 # Nordic Semiconductor NRF52840 Dongle
 DONGLE_VID = 0x1915             # Nordic Semiconductor ASA
 DONGLE_PID = 0x520F             # NRF52840 USB CDC ACM (cần verify PID thực tế)
-DONGLE_DETECT_TIMEOUT_S = 10    # Timeout cho auto-detect
+DONGLE_DETECT_TIMEOUT_S = 15    # Timeout cho auto-detect
 DONGLE_DETECT_POLL_MS = 500     # Polling interval khi scan COM ports
 
 # ── Serial Communication ──────────────────────────────────────────
@@ -28,9 +28,11 @@ SERIAL_WRITE_TIMEOUT_S = 1.0
 
 # ── Protocol Addresses ────────────────────────────────────────────
 # Sync với protocol.proto device_addr_t
-ADDR_HOST = 0x5                 # PACKET_ADDR_HOST
-ADDR_CENTRAL = 0x3              # PACKET_ADDR_CENTRAL (dongle)
-ADDR_PERIPHERAL = 0x4           # PACKET_ADDR_PERIPHERAL (tag/anchor)
+ADDR_HOST        = 0x5                 # PACKET_ADDR_HOST
+ADDR_CENTRAL     = 0x3                 # PACKET_ADDR_CENTRAL (dongle)
+ADDR_PERIPHERAL  = 0x4                 # PACKET_ADDR_PERIPHERAL (tag/anchor)
+ADDR_MCU         = 0x2                 # PACKET_ADDR_MCU
+ADDR_BCAS        = 0x9                 # PACKET_ADDR_BCAS
 
 # ── UI Settings ───────────────────────────────────────────────────
 MAIN_WINDOW_MIN_WIDTH = 1200

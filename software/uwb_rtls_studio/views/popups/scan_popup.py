@@ -1,36 +1,50 @@
 """
-UWB RTLS Studio — BLE Scan Popup (Frontend Only)
-Popup 2: Quét BLE devices và cho user select/connect.
+===============================================================================
+  UWB RTLS Studio — BLE Scan Popup (Real Backend)
+===============================================================================
+  File        : views/popups/scan_popup.py
+  Description : Popup 2 — BLE scan, select device, connect.
+                Pure View: UI chỉ hiển thị data từ ScanViewModel.
+
+  MVVM Role   : VIEW — pure UI, NO business logic.
+===============================================================================
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QProgressBar
+    QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QProgressBar, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 
-# Demo data
-DEMO_DEVICES = [
-    {"name": "UWB-Tag-001",     "type": "TAG",    "rssi": -42, "mac": "AA:BB:CC:DD:01:01", "serial": "0x00010001"},
-    {"name": "UWB-Tag-002",     "type": "TAG",    "rssi": -58, "mac": "AA:BB:CC:DD:01:02", "serial": "0x00010002"},
-    {"name": "UWB-Anchor-A1",   "type": "ANCHOR", "rssi": -35, "mac": "AA:BB:CC:DD:02:01", "serial": "0x00020001"},
-    {"name": "UWB-Anchor-A2",   "type": "ANCHOR", "rssi": -40, "mac": "AA:BB:CC:DD:02:02", "serial": "0x00020002"},
-    {"name": "UWB-Anchor-A3",   "type": "ANCHOR", "rssi": -52, "mac": "AA:BB:CC:DD:02:03", "serial": "0x00020003"},
-    {"name": "UWB-Anchor-A4",   "type": "ANCHOR", "rssi": -48, "mac": "AA:BB:CC:DD:02:04", "serial": "0x00020004"},
-]
-
 
 class ScanPopup(QDialog):
-    """Popup Window 2: BLE Scan → Select → Connect."""
-    def __init__(self, parent=None):
+    """Popup 2: BLE Scan → Select → Connect.
+
+    Bindings:
+        ScanViewModel.scan_started         → indeterminate progress
+        ScanViewModel.scan_stopped         → progress 100%
+        ScanViewModel.device_list_updated  → refresh table
+        ScanViewModel.device_connecting    → disable button
+        ScanViewModel.device_connected     → auto accept()
+        ScanViewModel.connection_failed    → show error
+        ScanViewModel.log_message          → log label
+    """
+
+    def __init__(self, viewmodel, parent=None):
         super().__init__(parent)
+        self._vm = viewmodel
+        self._selected_mac: str = ""
+
         self.setWindowTitle("UWB RTLS Studio — BLE Scanner")
         self.setMinimumSize(720, 520)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._selected_row = -1
+
         self._build_ui()
-        self._start_scan_demo()
+        self._bind_viewmodel()
+
+        # Auto start scan
+        QTimer.singleShot(300, self._vm.start_scan)
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
@@ -51,6 +65,7 @@ class ScanPopup(QDialog):
         title.setStyleSheet("color: #22D3EE; background: transparent;")
         header.addWidget(title)
         header.addStretch()
+
         self._scan_badge = QLabel("● Scanning...")
         self._scan_badge.setStyleSheet("""
             color: #10B981; background: rgba(16,185,129,0.12);
@@ -59,9 +74,9 @@ class ScanPopup(QDialog):
         header.addWidget(self._scan_badge)
         layout.addLayout(header)
 
-        # Progress
+        # Progress bar
         self._progress = QProgressBar()
-        self._progress.setRange(0, 0)
+        self._progress.setRange(0, 0)  # Indeterminate
         self._progress.setFixedHeight(4)
         self._progress.setTextVisible(False)
         self._progress.setStyleSheet("""
@@ -77,8 +92,8 @@ class ScanPopup(QDialog):
         layout.addWidget(self._count_label)
 
         # Device table
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["Name", "Type", "RSSI", "MAC Address", "Serial"])
+        self._table = QTableWidget(0, 4)
+        self._table.setHorizontalHeaderLabels(["Name", "RSSI", "MAC Address", "Serial"])
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -101,7 +116,7 @@ class ScanPopup(QDialog):
         self._table.currentCellChanged.connect(self._on_selection)
         layout.addWidget(self._table)
 
-        # Log area
+        # Log label
         self._log = QLabel("")
         self._log.setStyleSheet("color: #64748B; font-size: 11px; background: transparent;")
         self._log.setWordWrap(True)
@@ -143,86 +158,122 @@ class ScanPopup(QDialog):
         btn_row.addWidget(self._btn_cancel)
         layout.addLayout(btn_row)
 
-        self._btn_cancel.clicked.connect(self.reject)
-        self._btn_connect.clicked.connect(self._demo_connect)
-        self._btn_rescan.clicked.connect(self._start_scan_demo)
+        # Button connections
+        self._btn_cancel.clicked.connect(self._on_cancel)
+        self._btn_connect.clicked.connect(self._on_connect)
+        self._btn_rescan.clicked.connect(self._on_rescan)
 
         outer.addWidget(card)
 
-    def _on_selection(self, row, col, prev_row, prev_col):
-        self._selected_row = row
-        self._btn_connect.setEnabled(row >= 0)
-        if row >= 0:
-            name = self._table.item(row, 0).text()
-            self._log.setText(f"Selected: {name}")
+    def _bind_viewmodel(self):
+        """Connect ViewModel signals → View slots."""
+        self._vm.scan_started.connect(self._on_scan_started)
+        self._vm.scan_stopped.connect(self._on_scan_stopped)
+        self._vm.device_list_updated.connect(self._on_device_list)
+        self._vm.device_connecting.connect(self._on_connecting)
+        self._vm.device_connected.connect(self._on_connected)
+        self._vm.connection_failed.connect(self._on_connect_failed)
+        self._vm.log_message.connect(self._log.setText)
+        self._vm.dongle_disconnected.connect(self._on_dongle_disconnected)
 
-    def _start_scan_demo(self):
-        """Simulate BLE scan with progressive device discovery."""
-        self._table.setRowCount(0)
+    # ── View Slots ───────────────────────────────────────────────────
+
+    def _on_selection(self, row, col, prev_row, prev_col):
+        """User chọn 1 row trong table."""
+        if row >= 0 and self._table.item(row, 2):
+            self._selected_mac = self._table.item(row, 2).text()
+            name = self._table.item(row, 0).text()
+            self._btn_connect.setEnabled(True)
+            self._log.setText(f"Selected: {name} ({self._selected_mac})")
+        else:
+            self._selected_mac = ""
+            self._btn_connect.setEnabled(False)
+
+    def _on_scan_started(self):
         self._scan_badge.setText("● Scanning...")
         self._scan_badge.setStyleSheet("""
             color: #10B981; background: rgba(16,185,129,0.12);
             border-radius: 10px; padding: 4px 12px; font-weight: bold;
         """)
         self._progress.setRange(0, 0)
-        self._count_label.setText("Found: 0 devices")
-        self._log.setText("Sending ble_scan_start (tag=51)...")
-        self._btn_connect.setEnabled(False)
 
-        # Add devices one by one with delay
-        for i, dev in enumerate(DEMO_DEVICES):
-            QTimer.singleShot(600 + i * 400, lambda d=dev: self._add_device(d))
-        QTimer.singleShot(600 + len(DEMO_DEVICES) * 400 + 500, self._scan_complete)
-
-    def _add_device(self, dev):
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-
-        items = [
-            dev["name"], dev["type"], f"{dev['rssi']} dBm",
-            dev["mac"], dev["serial"]
-        ]
-        for col, text in enumerate(items):
-            item = QTableWidgetItem(text)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            # Color code by type
-            if col == 1:
-                if dev["type"] == "TAG":
-                    item.setForeground(QColor("#22D3EE"))
-                else:
-                    item.setForeground(QColor("#F59E0B"))
-            # Color code RSSI
-            if col == 2:
-                rssi = dev["rssi"]
-                if rssi > -50:
-                    item.setForeground(QColor("#10B981"))
-                elif rssi > -60:
-                    item.setForeground(QColor("#F59E0B"))
-                else:
-                    item.setForeground(QColor("#EF4444"))
-            self._table.setItem(row, col, item)
-
-        self._count_label.setText(f"Found: {row + 1} devices")
-
-    def _scan_complete(self):
-        self._scan_badge.setText("● Scan Complete")
+    def _on_scan_stopped(self):
+        self._scan_badge.setText("● Stopped")
+        self._scan_badge.setStyleSheet("""
+            color: #94A3B8; background: rgba(148,163,184,0.12);
+            border-radius: 10px; padding: 4px 12px; font-weight: bold;
+        """)
         self._progress.setRange(0, 100)
         self._progress.setValue(100)
-        self._log.setText("Scan complete. Select a TAG device and click Connect.")
 
-    def _demo_connect(self):
-        if self._selected_row < 0:
-            return
-        name = self._table.item(self._selected_row, 0).text()
-        self._log.setText(f"Connecting to {name}...")
+    def _on_device_list(self, devices: list):
+        """Refresh toàn bộ table với device list mới."""
+        # Lưu lại selected MAC
+        prev_selected = self._selected_mac
+
+        self._table.setRowCount(len(devices))
+        for row, dev in enumerate(devices):
+            items_data = [
+                dev.get("name", ""),
+                f"{dev.get('rssi', 0)} dBm",
+                dev.get("mac", ""),
+                dev.get("serial", ""),
+            ]
+            for col, text in enumerate(items_data):
+                item = QTableWidgetItem(text)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+                # Color RSSI
+                if col == 1:
+                    rssi = dev.get("rssi", -100)
+                    if rssi > -50:
+                        item.setForeground(QColor("#10B981"))
+                    elif rssi > -70:
+                        item.setForeground(QColor("#F59E0B"))
+                    else:
+                        item.setForeground(QColor("#EF4444"))
+
+                self._table.setItem(row, col, item)
+
+            # Restore selection
+            if dev.get("mac") == prev_selected:
+                self._table.selectRow(row)
+
+        self._count_label.setText(f"Found: {len(devices)} device(s)")
+
+    def _on_connecting(self, mac: str):
         self._btn_connect.setEnabled(False)
-        self._btn_connect.setText("Connecting...")
-        QTimer.singleShot(1500, lambda: self._demo_connected(name))
+        self._btn_connect.setText("⏳ Connecting...")
+        self._btn_rescan.setEnabled(False)
 
-    def _demo_connected(self, name):
-        self._log.setText(f"✅ Connected to {name}!")
+    def _on_connected(self, info: dict):
         self._btn_connect.setText("✅ Connected")
+        self._log.setText("✅ Connected! Opening main window...")
         QTimer.singleShot(800, self.accept)
+
+    def _on_connect_failed(self, msg: str):
+        self._btn_connect.setEnabled(True)
+        self._btn_connect.setText("⚡ Connect")
+        self._btn_rescan.setEnabled(True)
+        self._log.setText(f"❌ {msg}")
+
+    def _on_connect(self):
+        if self._selected_mac:
+            self._vm.connect_device(self._selected_mac)
+
+    def _on_rescan(self):
+        self._vm.start_scan()
+
+    def _on_cancel(self):
+        self._vm.cleanup()
+        self.reject()
+
+    def _on_dongle_disconnected(self, msg: str):
+        QMessageBox.warning(self, "Disconnected", msg)
+        self._vm.cleanup()
+        self.done(2)  # Return custom code for disconnect
+
+    # ── Drag support ─────────────────────────────────────────────────
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

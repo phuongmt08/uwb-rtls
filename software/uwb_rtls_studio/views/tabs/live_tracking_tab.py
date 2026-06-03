@@ -19,12 +19,12 @@ class TrackingCanvas(QWidget):
     """Custom 2D map widget with anchors, tag, trajectory, and grid."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(15000, 15000)
         self._anchors = [
             {"id": "A1", "x": 0.0, "y": 0.0},
-            {"id": "A2", "x": 5.0, "y": 0.0},
-            {"id": "A3", "x": 0.0, "y": 4.0},
-            {"id": "A4", "x": 5.0, "y": 4.0},
+            {"id": "A2", "x": 9.76, "y": 0.0},
+            {"id": "A3", "x": 0.0, "y": 9.76},
+            {"id": "A4", "x": 9.76, "y": 9.76},
         ]
         self._tag_pos = QPointF(2.5, 2.0)
         self._trajectory = []
@@ -173,10 +173,17 @@ class TrackingCanvas(QWidget):
 class LiveTrackingTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._is_ranging = False
+        self._vm = None
         self._build_ui()
-        self._demo_timer = QTimer(self)
-        self._demo_timer.timeout.connect(self._demo_update)
+
+    def set_viewmodel(self, vm):
+        self._vm = vm
+        # Connect signals
+        self._vm.ranging_started.connect(self._on_ranging_started)
+        self._vm.ranging_stopped.connect(self._on_ranging_stopped)
+        self._vm.position_updated.connect(self._on_position_updated)
+        self._vm.anchor_distances_updated.connect(self._on_anchor_distances)
+
 
     def _build_ui(self):
         main = QHBoxLayout(self)
@@ -287,43 +294,33 @@ class LiveTrackingTab(QWidget):
         main.addLayout(right, 35)
 
     def _start_ranging(self):
-        self._is_ranging = True
-        self._btn_start.setEnabled(False)
-        self._btn_stop.setEnabled(True)
-        self._demo_timer.start(100)  # 10 Hz
+        if self._vm:
+            self._vm.start_ranging()
 
     def _stop_ranging(self):
-        self._is_ranging = False
+        if self._vm:
+            self._vm.stop_ranging()
+
+    def _on_ranging_started(self):
+        self._btn_start.setEnabled(False)
+        self._btn_stop.setEnabled(True)
+
+    def _on_ranging_stopped(self):
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
-        self._demo_timer.stop()
 
-    def _demo_update(self):
-        """Simulate position streaming with smooth motion."""
-        if not hasattr(self, '_demo_t'):
-            self._demo_t = 0.0
-        self._demo_t += 0.05
-
-        # Lissajous-like pattern
-        x = 2.5 + 1.8 * math.sin(self._demo_t * 0.7)
-        y = 2.0 + 1.2 * math.cos(self._demo_t * 0.5)
-        x += random.gauss(0, 0.02)
-        y += random.gauss(0, 0.02)
-
+    def _on_position_updated(self, x, y, z, rms):
         self._canvas.set_tag_position(x, y)
         self._lbl_x.setText(f"X: {x:.2f} m")
         self._lbl_y.setText(f"Y: {y:.2f} m")
-        self._lbl_z.setText(f"Z: 0.00 m")
-
-        # Update distances
-        for aid, anchor in zip(["A1", "A2", "A3", "A4"],
-                                [(0,0), (5,0), (0,4), (5,4)]):
-            d = math.sqrt((x - anchor[0])**2 + (y - anchor[1])**2)
-            d_cm = d * 100
-            val, bar = self._dist_values[aid]
-            val.setText(f"{d_cm:.1f} cm")
-            bar.setValue(min(int(d_cm), 500))
-
-        # Update quality
-        rms = abs(random.gauss(0.04, 0.01))
+        self._lbl_z.setText(f"Z: {z:.2f} m")
         self._qual_values["RMS Error:"].setText(f"{rms:.3f} m")
+
+    def _on_anchor_distances(self, anchors):
+        for anchor in anchors:
+            aid = anchor["id"]
+            if aid in self._dist_values:
+                val, bar = self._dist_values[aid]
+                d_cm = anchor["distance_cm"]
+                val.setText(f"{d_cm:.1f} cm")
+                bar.setValue(min(int(d_cm), 500))

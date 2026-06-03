@@ -18,8 +18,10 @@ from views.tabs.log_tab import LogTab
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, live_tracking_vm=None, device_info_vm=None, parent=None):
         super().__init__(parent)
+        self._live_tracking_vm = live_tracking_vm
+        self._device_info_vm = device_info_vm
         self.setWindowTitle("🔵 UWB RTLS Studio v0.1.0")
         self.setMinimumSize(1280, 820)
         self._is_developer = False
@@ -27,7 +29,10 @@ class MainWindow(QMainWindow):
         self._session_seconds = 0
         self._build_ui()
         self._build_statusbar()
-        self._start_session_timer()
+        
+        # Init session timer but do not start it yet
+        self._session_timer = QTimer(self)
+        self._session_timer.timeout.connect(self._tick_session)
 
     def _build_ui(self):
         central = QWidget()
@@ -52,7 +57,7 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(app_title)
 
         # Connected device badge
-        self._device_badge = QLabel("● UWB-Tag-001")
+        self._device_badge = QLabel("● -")
         self._device_badge.setStyleSheet("""
             color: #10B981; background: rgba(16,185,129,0.1);
             border: 1px solid rgba(16,185,129,0.3); border-radius: 12px;
@@ -102,7 +107,14 @@ class MainWindow(QMainWindow):
 
         # Create tabs
         self._tab_device = DeviceInfoTab()
+        if self._device_info_vm:
+            self._tab_device.set_viewmodel(self._device_info_vm)
+            self._device_info_vm.device_info_updated.connect(self._on_device_changed)
+            
         self._tab_tracking = LiveTrackingTab()
+        if self._live_tracking_vm:
+            self._tab_tracking.set_viewmodel(self._live_tracking_vm)
+            
         self._tab_config = ConfigTab(is_developer=False)
         self._tab_calibration = CalibrationTab()
         self._tab_log = LogTab(is_developer=False)
@@ -127,15 +139,15 @@ class MainWindow(QMainWindow):
         """)
 
         # Connection status
-        self._status_conn = QLabel("🟢 Connected: UWB-Tag-001")
-        self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
+        self._status_conn = QLabel("🔴 Disconnected")
+        self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
         status.addWidget(self._status_conn)
 
         status.addWidget(self._make_separator())
 
         # Battery
-        self._status_bat = QLabel("🔋 78%")
-        self._status_bat.setStyleSheet("color: #10B981;")
+        self._status_bat = QLabel("🔋 ---")
+        self._status_bat.setStyleSheet("color: #94A3B8;")
         status.addWidget(self._status_bat)
 
         status.addWidget(self._make_separator())
@@ -148,19 +160,19 @@ class MainWindow(QMainWindow):
         status.addWidget(self._make_separator())
 
         # RSSI
-        self._status_rssi = QLabel("📡 RSSI: -45 dBm")
+        self._status_rssi = QLabel("📡 RSSI: ---")
         status.addWidget(self._status_rssi)
 
         status.addWidget(self._make_separator())
 
         # RMS
-        self._status_rms = QLabel("📊 RMS: 0.045 m")
+        self._status_rms = QLabel("📊 RMS: ---")
         status.addWidget(self._status_rms)
 
         status.addWidget(self._make_separator())
 
         # Update rate
-        self._status_rate = QLabel("🔄 10.2 Hz")
+        self._status_rate = QLabel("🔄 ---")
         status.addWidget(self._status_rate)
 
         # Right side: mode indicator
@@ -169,6 +181,74 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(self._status_mode)
 
         self.setStatusBar(status)
+        
+        # Connect signals for status bar updates
+        if self._device_info_vm:
+            # We already connect device_info_updated to _on_device_changed in _build_ui, 
+            # but let's make sure it handles statusbar too.
+            self._device_info_vm.telemetry_updated.connect(self._on_telemetry_status)
+            self._device_info_vm.ble_info_updated.connect(self._on_ble_info_status)
+        if self._live_tracking_vm:
+            self._live_tracking_vm.position_updated.connect(self._on_position_status)
+
+    # Removed _on_device_connected_status, logic moved to _on_device_changed
+            
+    def _on_telemetry_status(self, data: dict):
+        soc = data.get("bat_soc_percent")
+        if soc is not None:
+            self._status_bat.setText(f"🔋 {soc}%")
+            self._status_bat.setStyleSheet("color: #10B981;" if soc > 20 else "color: #EF4444;")
+
+    def _on_ble_info_status(self, data: dict):
+        rssi = data.get("rssi_dbm")
+        if rssi is not None:
+            self._status_rssi.setText(f"📡 RSSI: {rssi} dBm")
+
+    def _on_position_status(self, x, y, z, rms):
+        self._status_rms.setText(f"📊 RMS: {rms:.3f} m")
+
+    def _on_device_changed(self, info: dict):
+        name = info.get("Device Name")
+        status_text = info.get("Status", "Connected")
+        
+        if name and name != "Unknown" and name != "-":
+            self._device_badge.setText(f"● {name}")
+            
+            if status_text == "Connecting":
+                self._status_conn.setText(f"⏳ Connecting: {name}")
+                self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
+                self._status_rate.setText("🔄 ---")
+                
+                # Stop session timer while connecting
+                self._session_active = False
+                self._session_timer.stop()
+                self._status_session.setText("⏱ Session: 00:00:00")
+                self._status_session.setStyleSheet("color: #94A3B8;")
+            else:
+                self._status_conn.setText(f"🟢 Connected: {name}")
+                self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
+                self._status_rate.setText("🔄 30 FPS") # Target FPS
+                
+                # Start session timer if not active
+                if not self._session_active:
+                    self._session_active = True
+                    self._session_seconds = 0
+                    self._session_timer.start(1000)
+        else:
+            self._device_badge.setText("● -")
+            self._status_conn.setText("🔴 Disconnected")
+            self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
+            self._status_bat.setText("🔋 ---")
+            self._status_bat.setStyleSheet("color: #94A3B8;")
+            self._status_rssi.setText("📡 RSSI: ---")
+            self._status_rms.setText("📊 RMS: ---")
+            self._status_rate.setText("🔄 ---")
+            
+            # Stop session timer
+            self._session_active = False
+            self._session_timer.stop()
+            self._status_session.setText("⏱ Session: 00:00:00")
+            self._status_session.setStyleSheet("color: #94A3B8;")
 
     def _make_separator(self):
         sep = QLabel("|")
@@ -209,13 +289,29 @@ class MainWindow(QMainWindow):
             self._session_seconds = 0
             self._status_session.setText("⏱ Session: Ended")
             self._status_session.setStyleSheet("color: #F59E0B;")
-            # Would trigger ViewModel end_session here
+            # Just send end_session command for "End Session" button
+            if self._device_info_vm and self._device_info_vm.protocol:
+                try:
+                    self._device_info_vm.protocol.send_command("end_session", reason=0)
+                except Exception:
+                    pass
+
+    def _safe_shutdown(self):
+        if self._device_info_vm and self._device_info_vm.protocol:
+            try:
+                self._device_info_vm.protocol.send_command("ble_disconnect")
+                self._device_info_vm.protocol.send_command("end_session", reason=0)
+                import time
+                time.sleep(0.5)
+            except Exception:
+                pass
 
     def _start_session_timer(self):
-        self._session_active = True
-        self._session_timer = QTimer(self)
-        self._session_timer.timeout.connect(self._tick_session)
-        self._session_timer.start(1000)
+        # Kept for compatibility if used elsewhere, but managed by _on_device_changed now
+        if not self._session_active:
+            self._session_active = True
+            self._session_seconds = 0
+            self._session_timer.start(1000)
 
     def _tick_session(self):
         if self._session_active:
@@ -239,4 +335,6 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
+        
+        self._safe_shutdown()
         event.accept()

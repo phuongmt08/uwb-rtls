@@ -1,28 +1,46 @@
 """
 ===============================================================================
-  UWB RTLS Studio — Application Entry Point (Frontend Demo)
+  UWB RTLS Studio — Application Entry Point
 ===============================================================================
   File        : main.py
   Author      : Trung Quan
-  Description : Entry point — khởi chạy toàn bộ UI Frontend.
+  Description : Entry point — khởi chạy toàn bộ app.
                 Flow: DonglePopup → ScanPopup → MainWindow.
-                Chỉ có Frontend, chưa có Backend logic.
+                Tất cả đều dùng real backend (serial + protobuf).
+
+  Wiring (Dependency Injection):
+    1. Tạo Services (singleton): SerialService, ProtocolService
+    2. Tạo ViewModels: DongleViewModel, ScanViewModel
+    3. Tạo Views (popups): DonglePopup(vm), ScanPopup(vm)
+    4. Chạy flow: popup1.exec() → popup2.exec() → MainWindow
+
+  Giải thích:
+    - Services được tạo 1 lần, share giữa tất cả ViewModels.
+    - ViewModels nhận Services qua constructor (dependency injection).
+    - Views nhận ViewModel qua constructor (MVVM binding).
+    - main.py là "composition root" — nơi duy nhất wire dependencies.
 ===============================================================================
 """
 import sys
 import os
+import logging
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add parent directory for common module access
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt
 
 from utils.theme import DARK_STYLESHEET
-from views.popups.dongle_popup import DonglePopup
-from views.popups.scan_popup import ScanPopup
-from views.windows.main_window import MainWindow
+
+# ── Logging setup ────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 
 def main():
@@ -38,25 +56,100 @@ def main():
     # Apply dark theme
     app.setStyleSheet(DARK_STYLESHEET)
 
-    # ═══ FLOW 1: Dongle Detection ═══
-    dongle_popup = DonglePopup()
-    result = dongle_popup.exec()
-    if result != DonglePopup.DialogCode.Accepted:
-        print("Dongle detection cancelled. Exiting.")
-        sys.exit(0)
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 1: Create Services (singleton, shared)
+    # ═══════════════════════════════════════════════════════════════
+    from services.serial_service import SerialService
+    from services.protocol_service import ProtocolService
 
-    # ═══ FLOW 2: BLE Scan & Connect ═══
-    scan_popup = ScanPopup()
-    result = scan_popup.exec()
-    if result != ScanPopup.DialogCode.Accepted:
-        print("BLE scan cancelled. Exiting.")
-        sys.exit(0)
+    serial_service = SerialService()
+    protocol_service = ProtocolService(serial_service)
 
-    # ═══ FLOW 3: Main Window ═══
-    window = MainWindow()
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 2 & 3: Connection Flow
+    # ═══════════════════════════════════════════════════════════════
+    from models.dongle_model import DongleModel
+    from viewmodels.dongle_viewmodel import DongleViewModel
+    from views.popups.dongle_popup import DonglePopup
+    
+    from models.scan_model import ScanModel
+    from viewmodels.scan_viewmodel import ScanViewModel
+    from views.popups.scan_popup import ScanPopup
+
+    while True:
+        dongle_model = DongleModel(serial_service, protocol_service)
+        dongle_vm = DongleViewModel(dongle_model)
+        dongle_popup = DonglePopup(dongle_vm)
+
+        result = dongle_popup.exec()
+        if result != DonglePopup.DialogCode.Accepted:
+            logging.info("Dongle detection cancelled. Exiting.")
+            serial_service.close()
+            sys.exit(0)
+
+        scan_model = ScanModel(protocol_service, serial_service)
+        scan_vm = ScanViewModel(scan_model)
+        scan_popup = ScanPopup(scan_vm)
+
+        result = scan_popup.exec()
+        if result == ScanPopup.DialogCode.Accepted:
+            break
+        elif result == 2:
+            # Dongle disconnected during scan, go back to dongle detection
+            logging.warning("Dongle disconnected, restarting detection.")
+            serial_service.close()
+            continue
+        else:
+            logging.info("BLE scan cancelled. Exiting.")
+            serial_service.close()
+            sys.exit(0)
+
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 4: Main Window
+    # ═══════════════════════════════════════════════════════════════
+    from views.windows.main_window import MainWindow
+    from models.ranging_model import RangingModel
+    from viewmodels.live_tracking_viewmodel import LiveTrackingViewModel
+    from viewmodels.device_info_viewmodel import DeviceInfoViewModel
+
+    # Extract connected device info from scan_model before cleanup
+    connected_name = ""
+    connected_mac = ""
+    if scan_model._devices:
+        # The last connected device is the one user selected
+        # scan_popup._selected_mac has it
+        sel_mac = getattr(scan_popup, '_selected_mac', '')
+        if sel_mac and sel_mac in scan_model._devices:
+            dev = scan_model._devices[sel_mac]
+            connected_name = dev.get("name", "")
+            connected_mac = dev.get("mac", sel_mac)
+
+    # Disconnect scan_model from protocol to avoid duplicate handlers
+    scan_model.cleanup()
+    try:
+        protocol_service.packet_received.disconnect(scan_model._on_packet)
+    except TypeError:
+        pass
+
+    ranging_model = RangingModel(protocol_service)
+    live_tracking_vm = LiveTrackingViewModel(ranging_model, protocol_service)
+    device_info_vm = DeviceInfoViewModel(protocol_service, dongle_model)
+
+    # Seed the connected device info so the tab shows it immediately
+    if connected_name and connected_mac:
+        device_info_vm.set_connected_device(connected_name, connected_mac)
+
+    window = MainWindow(
+        live_tracking_vm=live_tracking_vm,
+        device_info_vm=device_info_vm
+    )
     window.show()
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+
+    # Cleanup
+    serial_service.close()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -14,20 +14,7 @@ import random
 from datetime import datetime, timedelta
 
 
-DEMO_LOG_MESSAGES = [
-    ("INFO",     "DEVICE",   "Ranging result received: x=2.45, y=1.89, z=0.00"),
-    ("INFO",     "DEVICE",   "Anchor A1 distance: 234.5 cm, FP_AMP=512"),
-    ("WARN",     "DEVICE",   "Anchor A3 response timeout (>70ms)"),
-    ("INFO",     "DEVICE",   "Battery SoC: 78%, voltage: 3.82V"),
-    ("ERROR",    "DEVICE",   "UWB CRC error on channel 5, retrying..."),
-    ("DEBUG",    "DEVICE",   "TWR exchange: poll_tx=0x1A2B, resp_rx=0x3C4D"),
-    ("INFO",     "APP",      "Position update rate: 10.2 Hz"),
-    ("DEBUG",    "PROTOCOL", "TX [tag=16] ranging_start_t → peripheral"),
-    ("DEBUG",    "PROTOCOL", "RX [tag=18] ranging_result_t ← peripheral"),
-    ("INFO",     "DEVICE",   "IMU accel: x=0.02g, y=-0.01g, z=1.00g"),
-    ("WARN",     "DEVICE",   "RSSI dropped below -70 dBm for Anchor A2"),
-    ("INFO",     "DEVICE",   "Clock sync offset: +12 μs"),
-]
+
 
 
 class LogTab(QWidget):
@@ -35,7 +22,7 @@ class LogTab(QWidget):
         super().__init__(parent)
         self._is_developer = is_developer
         self._build_ui()
-        self._start_demo_log()
+        self._log_entry_count = 0
 
     def set_developer_mode(self, enabled: bool):
         self._is_developer = enabled
@@ -161,8 +148,8 @@ class LogTab(QWidget):
         self._session_table.verticalHeader().setVisible(False)
         history_layout.addWidget(self._session_table)
 
-        # Populate demo sessions
-        self._populate_demo_sessions()
+        # Placeholder for real data
+        pass
 
         splitter.addWidget(history_widget)
         splitter.setSizes([400, 250])
@@ -176,82 +163,3 @@ class LogTab(QWidget):
         # In real app, this would filter the log entries
         pass
 
-    def _populate_demo_sessions(self):
-        demo_sessions = [
-            ("SES_20260530_123000", "Ranging", "2026-05-30 12:30:00", "15m 23s", "9,231", "3"),
-            ("SES_20260530_110500", "Streaming", "2026-05-30 11:05:00", "8m 45s", "5,120", "0"),
-            ("SES_20260529_160000", "Ranging", "2026-05-29 16:00:00", "42m 10s", "25,340", "12"),
-            ("SES_20260529_091500", "Log", "2026-05-29 09:15:00", "2m 30s", "1,024", "0"),
-            ("SES_20260528_143000", "Ranging", "2026-05-28 14:30:00", "1h 05m", "38,912", "8"),
-        ]
-        for session in demo_sessions:
-            row = self._session_table.rowCount()
-            self._session_table.insertRow(row)
-            for col, text in enumerate(session):
-                item = QTableWidgetItem(text)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if col == 1:  # Type
-                    colors = {"Ranging": "#22D3EE", "Streaming": "#10B981", "Log": "#F59E0B"}
-                    item.setForeground(QColor(colors.get(text, "#F8FAFC")))
-                if col == 5 and text != "0":  # Errors
-                    item.setForeground(QColor("#EF4444"))
-                self._session_table.setItem(row, col, item)
-
-            # Action button placeholder
-            btn_open = QPushButton("📂 Open")
-            btn_open.setFixedHeight(28)
-            btn_open.setStyleSheet("""
-                QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE;
-                    border-radius: 4px; font-size: 11px; font-weight: bold; }
-                QPushButton:hover { background: #22D3EE; color: #0F172A; }
-            """)
-            self._session_table.setCellWidget(row, 6, btn_open)
-
-    def _start_demo_log(self):
-        self._demo_timer = QTimer(self)
-        self._demo_timer.timeout.connect(self._add_demo_log)
-        self._demo_timer.start(1500)
-        self._log_entry_count = 0
-
-    def _add_demo_log(self):
-        msg = random.choice(DEMO_LOG_MESSAGES)
-        level, source, text = msg
-
-        # Filter by mode
-        if not self._is_developer and source in ("APP", "PROTOCOL"):
-            return
-        if not self._is_developer and level == "DEBUG":
-            return
-
-        now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-
-        # Color format
-        colors = {
-            "INFO": "#10B981", "WARN": "#F59E0B",
-            "ERROR": "#EF4444", "DEBUG": "#94A3B8"
-        }
-        color = colors.get(level, "#F8FAFC")
-
-        cursor = self._log_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#475569"))
-        cursor.insertText(f"[{now}] ", fmt)
-
-        fmt.setForeground(QColor(color))
-        fmt.setFontWeight(QFont.Weight.Bold)
-        cursor.insertText(f"[{level:5s}] ", fmt)
-
-        fmt.setForeground(QColor("#64748B"))
-        fmt.setFontWeight(QFont.Weight.Normal)
-        cursor.insertText(f"[{source:8s}] ", fmt)
-
-        fmt.setForeground(QColor("#F8FAFC") if level != "DEBUG" else QColor("#94A3B8"))
-        cursor.insertText(f"{text}\n", fmt)
-
-        self._log_text.setTextCursor(cursor)
-        self._log_text.ensureCursorVisible()
-
-        self._log_entry_count += 1
-        self._log_count.setText(f"{self._log_entry_count} entries")

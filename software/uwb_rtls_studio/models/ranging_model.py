@@ -71,4 +71,34 @@
         update_rate_hz: float               # Computed từ timestamps
 ===============================================================================
 """
-pass
+import logging
+from PyQt6.QtCore import QObject, pyqtSignal
+from services.protocol_service import ProtocolService
+
+log = logging.getLogger(__name__)
+
+class RangingModel(QObject):
+    position_updated = pyqtSignal(float, float, float, float) # x, y, z, rms
+    anchor_distances_updated = pyqtSignal(list)
+    stats_updated = pyqtSignal(dict)
+
+    def __init__(self, protocol_service: ProtocolService, parent=None):
+        super().__init__(parent)
+        self._protocol = protocol_service
+        self._protocol.packet_received.connect(self._on_packet)
+        self.is_ranging = False
+        
+    def _on_packet(self, param_name: str, pkt) -> None:
+        if param_name == "ranging_result":
+            res = pkt.ranging_result
+            self.position_updated.emit(res.x_m, res.y_m, res.z_m, res.rms_error_m)
+            
+            # Extract anchor distances if available
+            anchors = []
+            for a in res.anchor_distances:
+                anchors.append({
+                    "id": f"A{a.anchor_id}",
+                    "distance_cm": a.distance_mm / 10.0
+                })
+            if anchors:
+                self.anchor_distances_updated.emit(anchors)

@@ -49,4 +49,36 @@
     - anchor_layout_get_t / _resp_t (43, 45)
 ===============================================================================
 """
-pass
+import logging
+from PyQt6.QtCore import QObject, pyqtSignal
+from models.ranging_model import RangingModel
+from services.protocol_service import ProtocolService
+
+log = logging.getLogger(__name__)
+
+class LiveTrackingViewModel(QObject):
+    ranging_started = pyqtSignal()
+    ranging_stopped = pyqtSignal()
+    position_updated = pyqtSignal(float, float, float, float)
+    anchor_distances_updated = pyqtSignal(list)
+    stats_updated = pyqtSignal(dict)
+
+    def __init__(self, model: RangingModel, protocol_service: ProtocolService, parent=None):
+        super().__init__(parent)
+        self.model = model
+        self.protocol = protocol_service
+        
+        self.model.position_updated.connect(self.position_updated.emit)
+        self.model.anchor_distances_updated.connect(self.anchor_distances_updated.emit)
+        self.model.stats_updated.connect(self.stats_updated.emit)
+
+    def start_ranging(self) -> None:
+        # Gọi command tới BE từ ViewModel
+        self.protocol.send_command("ranging_start")
+        self.model.is_ranging = True
+        self.ranging_started.emit()
+
+    def stop_ranging(self) -> None:
+        self.protocol.send_command("ranging_stop")
+        self.model.is_ranging = False
+        self.ranging_stopped.emit()
