@@ -34,6 +34,7 @@
 #include "bsp_imu.h"
 #include "bsp_uwb.h"
 #include "bsp_util.h"
+#include "common.h"
 #include "network/network_core.h"
 #include "network/network_cmd.h"
 #include "sys_config.h"
@@ -287,6 +288,9 @@ void uwb_ranging_entry(void *argument)
   /* USER CODE BEGIN uwb_ranging_entry */
   sys_config_t *cfg = sys_config_get();
   static bool was_ranging_active = false;
+  SYSVIEW_RECORD_START();
+  SYSVIEW_PRINTF("SystemView started after scheduler");
+  SYSVIEW_PRINTF(SYSVIEW_MARKERS_DESC);
 
   for (;;)
   {
@@ -323,6 +327,7 @@ void uwb_ranging_entry(void *argument)
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[UWB] EXTI Missed! Stuck IRQ detected (PA4=HIGH), running auto-recovery...");
 
         osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+        SYSVIEW_START(SYSVIEW_MARK_UWB_ISR_DISPATCH);
         bsp_uwb_dwt_isr();
         if (cfg->uwb.role == DEVICE_ROLE_TAG)
         {
@@ -332,6 +337,7 @@ void uwb_ranging_entry(void *argument)
         {
           app_anchor_process(NULL);
         }
+        SYSVIEW_STOP(SYSVIEW_MARK_UWB_ISR_DISPATCH);
         osMutexRelease(g_spi1_mutexHandle);
         
         continue; 
@@ -339,6 +345,7 @@ void uwb_ranging_entry(void *argument)
     }
 
     osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+    SYSVIEW_START(SYSVIEW_MARK_UWB_ISR_DISPATCH);
     bsp_uwb_dwt_isr();
     if (cfg->uwb.role == DEVICE_ROLE_TAG)
     {
@@ -348,6 +355,7 @@ void uwb_ranging_entry(void *argument)
     {
       app_anchor_process(NULL);
     }
+    SYSVIEW_STOP(SYSVIEW_MARK_UWB_ISR_DISPATCH);
     osMutexRelease(g_spi1_mutexHandle);
   }
   /* USER CODE END uwb_ranging_entry */
@@ -408,7 +416,9 @@ void sensor_fusion_entry(void *argument)
       dt = (float)dt_ms / 1000.0f;
     }
 
+    SYSVIEW_START(SYSVIEW_MARK_FUSION_PREDICT);
     sys_sensor_fusion_predict(&ukf_data, dt);
+    SYSVIEW_STOP(SYSVIEW_MARK_FUSION_PREDICT);
 
 #if ENABLE_SYS_FUSION_LOG
     {
@@ -602,8 +612,10 @@ void sensor_fusion_entry(void *argument)
                 }
 
                 vec2d_t tril_position = {0.0f, 0.0f};
+                SYSVIEW_START(SYSVIEW_MARK_FUSION_TRILATERATION);
                 mw_tril_result_t tril_result = {0};
                 mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+                SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
 
                 if (err == MW_TRIL_OK) {
                     if (!s_ukf_initialized) {
@@ -646,7 +658,9 @@ void sensor_fusion_entry(void *argument)
                             s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
                         }
 
+                        SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, s_last_selected_anchors_mask);
+                        SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                         s_error_count = 0;
 
                         /* Update app_tag mailboxes passively */

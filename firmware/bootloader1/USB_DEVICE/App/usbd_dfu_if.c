@@ -63,9 +63,10 @@ static uint8_t g_erased_sector_mask = 0;
   */
 
 /* DFU descriptor string (DfuSe memory map format).
- * Full STM32F411 512KB flash layout (S0..S7).
+ * Expose only the application partition. Keeping S0..S2 and S6..S7 out of
+ * the USB DFU map avoids accidental bootloader/storage erase from host tools.
  */
-#define FLASH_DESC_STR      "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,03*128Kg"
+#define FLASH_DESC_STR      "@App Flash       /0x0800C000/01*016Kg,01*064Kg,01*128Kg"
 
 /* USER CODE BEGIN PRIVATE_DEFINES */
 
@@ -133,6 +134,7 @@ static uint32_t DFU_GetSectorFromAddress(uint32_t address);
 static uint8_t DFU_SectorMask(uint32_t sector);
 static uint16_t DFU_Erase_Sector(uint32_t sector);
 static void DFU_SetPollTimeout(uint8_t *buffer, uint32_t timeout_ms);
+static uint8_t DFU_AppSectorsErased(void);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
 
@@ -202,32 +204,7 @@ static uint16_t DFU_Erase_AppSectors(void)
 
 static uint16_t DFU_Erase_UserSectors(void)
 {
-  if (DFU_Erase_Sector(FLASH_SECTOR_3) != USBD_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  if (DFU_Erase_Sector(FLASH_SECTOR_4) != USBD_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  if (DFU_Erase_Sector(FLASH_SECTOR_5) != USBD_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  if (DFU_Erase_Sector(FLASH_SECTOR_6) != USBD_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  if (DFU_Erase_Sector(FLASH_SECTOR_7) != USBD_OK)
-  {
-    return USBD_FAIL;
-  }
-
-  return USBD_OK;
+  return DFU_Erase_AppSectors();
 }
 
 static uint8_t DFU_SectorMask(uint32_t sector)
@@ -272,8 +249,22 @@ static void DFU_SetPollTimeout(uint8_t *buffer, uint32_t timeout_ms)
   buffer[3] = (uint8_t)((timeout_ms >> 16) & 0xFFU);
 }
 
+static uint8_t DFU_AppSectorsErased(void)
+{
+  const uint8_t app_erased_mask =
+      DFU_SectorMask(FLASH_SECTOR_3) |
+      DFU_SectorMask(FLASH_SECTOR_4) |
+      DFU_SectorMask(FLASH_SECTOR_5);
+
+  return ((g_erased_sector_mask & app_erased_mask) == app_erased_mask) ? 1U : 0U;
+}
+
 static uint32_t DFU_GetSectorFromAddress(uint32_t address)
 {
+  if (address < MEM_APP_START || address >= MEM_APP_END)
+  {
+    return 0xFFFFFFFFUL;
+  }
   if (address < 0x08010000UL)
   {
     return FLASH_SECTOR_3;
@@ -286,11 +277,7 @@ static uint32_t DFU_GetSectorFromAddress(uint32_t address)
   {
     return FLASH_SECTOR_5;
   }
-  if (address < 0x08060000UL)
-  {
-    return FLASH_SECTOR_6;
-  }
-  return FLASH_SECTOR_7;
+  return 0xFFFFFFFFUL;
 }
 
 /**
@@ -307,7 +294,7 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
 
   uint16_t status = USBD_FAIL;
 
-  /* Mass erase from host tool: erase all user sectors (keep bootloader sectors 0-2). */
+  /* Mass erase from host tool: erase the application partition only. */
   if ((Add == 0xFFFFFFFFUL) ||
       (Add == 0x00000000UL) ||
       (Add == 0x08000000UL))
@@ -320,9 +307,10 @@ uint16_t MEM_If_Erase_FS(uint32_t Add)
     status = DFU_Erase_AppSectors();
   }
   /* Selected erase: erase the addressed app sector only. */
-  else if ((Add >= MEM_APP_START) && (Add < MEM_DATA_STORAGE_END))
+  else if ((Add >= MEM_APP_START) && (Add < MEM_APP_END))
   {
-    if (DFU_Erase_Sector(DFU_GetSectorFromAddress(Add)) == USBD_OK)
+    uint32_t sector = DFU_GetSectorFromAddress(Add);
+    if (sector != 0xFFFFFFFFUL && DFU_Erase_Sector(sector) == USBD_OK)
     {
       status = USBD_OK;
     }
@@ -345,18 +333,30 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
   /* USER CODE BEGIN 3 */
   g_dfu_last_activity = HAL_GetTick();
 
-  /* Verify destination is in user space (sectors 3-7) */
+  if (!src || Len == 0U)
+  {
+    return USBD_FAIL;
+  }
+
+  /* Verify destination is inside the app partition only. */
   uint32_t addr = (uint32_t)dest;
-  if (addr < MEM_APP_START || addr >= MEM_DATA_STORAGE_END) {
-    /* Reject writes to bootloader area (< MEM_APP_START) */
+  uint32_t end = addr + Len;
+  if (end < addr || addr < MEM_APP_START || end > MEM_APP_END) {
+    return USBD_FAIL;
+  }
+
+  uint32_t padded_len = (Len + 3U) & ~3U;
+  uint32_t padded_end = addr + padded_len;
+  if (padded_end < addr || padded_end > MEM_APP_END) {
     return USBD_FAIL;
   }
 
   HAL_FLASH_Unlock();
   
-  /* A write at MEM_APP_START starts a new image download. Erase the app again
-   * even if a previous DFU transfer in the same bootloader session did it. */
-  if ((addr == MEM_APP_START) || ((g_erased_sector_mask & 0x07U) != 0x07U)) {
+  /* Erase once per DFU session. Re-erasing on a repeated MEM_APP_START block
+   * can destroy chunks that were already programmed.
+   */
+  if (!DFU_AppSectorsErased()) {
     if (DFU_Erase_AppSectors() != USBD_OK) {
       HAL_FLASH_Lock();
       return USBD_FAIL;
@@ -380,11 +380,17 @@ uint16_t MEM_If_Write_FS(uint8_t *src, uint8_t *dest, uint32_t Len)
       }
     }
 
+    uint32_t target = addr + data_offset;
+    if ((*(const uint32_t *)target & data) != data) {
+      HAL_FLASH_Lock();
+      return USBD_FAIL;
+    }
+
     /* Program the word */
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR |
                            FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
     if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 
-                          (uint32_t)dest + data_offset, 
+                          target, 
                           data) != HAL_OK) {
       HAL_FLASH_Lock();
       return USBD_FAIL;
@@ -431,13 +437,11 @@ uint16_t MEM_If_GetStatus_FS(uint32_t Add, uint8_t Cmd, uint8_t *buffer)
   /* USER CODE BEGIN 5 */
   const uint32_t program_timeout_ms = 1U;
   const uint32_t erase_timeout_ms = 5000U;
-  const uint8_t app_erased_mask = 0x07U;
 
   switch (Cmd)
   {
     case DFU_MEDIA_PROGRAM:
-      if ((Add == MEM_APP_START) ||
-          ((g_erased_sector_mask & app_erased_mask) != app_erased_mask))
+      if (!DFU_AppSectorsErased())
       {
         DFU_SetPollTimeout(buffer, erase_timeout_ms);
       }

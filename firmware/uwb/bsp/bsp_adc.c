@@ -67,5 +67,5 @@ void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef* hadc)
 {
     if (hadc->Instance == ADC1) {
         s_watchdog_fired = true;
-x    }
+    }
 }

@@ -44,9 +44,6 @@
 
 #include <string.h>
 #include "bsp_imu.h"
-#ifdef DEVELOPER_MODE
-#include "SEGGER_SYSVIEW.h"
-#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -321,9 +318,8 @@ int main(void)
 #endif
 #ifdef DEVELOPER_MODE
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "DEVELOPER MODE ENABLED: Verbose");
-  // Init the system viewer for real-time monitoring 
-  SEGGER_SYSVIEW_Conf();
-  SEGGER_SYSVIEW_Start();
+  // Configure SystemView here; recording starts after the scheduler is running.
+  SYSVIEW_INIT();
   #pragma message("Developer mode: SystemView enabled")
 #endif
 /* Init scheduler */
