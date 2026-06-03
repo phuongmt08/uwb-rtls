@@ -71,9 +71,9 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            24   /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            22     /* bump → forces flash reset on upgrade */
 
-#define DEFAULT_DEVICE_ROLE       DEVICE_ROLE_TAG
+#define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_HOST_TRANSPORT    HOST_TRANSPORT_USB
 #define DEFAULT_DEVICE_ID         0x01

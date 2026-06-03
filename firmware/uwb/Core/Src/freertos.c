@@ -121,7 +121,7 @@ const osThreadAttr_t SensorFusion_attributes = {
 osThreadId_t NetworkHandle;
 const osThreadAttr_t Network_attributes = {
   .name = "Network",
-  .stack_size = 512 * 4,
+  .stack_size = 768 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for Logger */
@@ -135,21 +135,21 @@ const osThreadAttr_t Logger_attributes = {
 osThreadId_t FlashStorageHandle;
 const osThreadAttr_t FlashStorage_attributes = {
   .name = "FlashStorage",
-  .stack_size = 512 * 4,
+  .stack_size = 384 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for IO */
 osThreadId_t IOHandle;
 const osThreadAttr_t IO_attributes = {
   .name = "IO",
-  .stack_size = 512 * 4,
+  .stack_size = 384 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for PM */
 osThreadId_t PMHandle;
 const osThreadAttr_t PM_attributes = {
   .name = "PM",
-  .stack_size = 1024 * 4,
+  .stack_size = 640 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for g_spi1_mutex */

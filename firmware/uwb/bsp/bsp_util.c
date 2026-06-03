@@ -532,10 +532,17 @@ extern osThreadId_t FlashStorageHandle;
 extern osThreadId_t IOHandle;
 extern osThreadId_t PMHandle;
 
+extern const osThreadAttr_t UwbRanging_attributes;
+extern const osThreadAttr_t SensorFusion_attributes;
+extern const osThreadAttr_t Network_attributes;
+extern const osThreadAttr_t Logger_attributes;
+extern const osThreadAttr_t FlashStorage_attributes;
+extern const osThreadAttr_t IO_attributes;
+extern const osThreadAttr_t PM_attributes;
+
 typedef struct {
-    osThreadId_t handle;
-    const char  *name;
-    uint32_t     stack_size_words;
+    osThreadId_t          handle;
+    const osThreadAttr_t *attr;
 } task_mem_info_t;
 
 void bsp_util_print_mem_stats(void)
@@ -554,13 +561,13 @@ void bsp_util_print_mem_stats(void)
          (unsigned long)peak_heap_used_pct);
 
   const task_mem_info_t tasks[] = {
-      { (osThreadId_t)UwbRangingHandle,    "UwbRanging",   1536 },
-      { (osThreadId_t)SensorFusionHandle,  "SensorFusion", 1024 },
-      { (osThreadId_t)NetworkHandle,       "Network",      512  },
-      { (osThreadId_t)LoggerHandle,        "Logger",       512  },
-      { (osThreadId_t)FlashStorageHandle,  "FlashStorage", 512  },
-      { (osThreadId_t)IOHandle,            "IO",           512  },
-      { (osThreadId_t)PMHandle,            "PM",           1024 }
+      { (osThreadId_t)UwbRangingHandle,    &UwbRanging_attributes   },
+      { (osThreadId_t)SensorFusionHandle,  &SensorFusion_attributes },
+      { (osThreadId_t)NetworkHandle,       &Network_attributes      },
+      { (osThreadId_t)LoggerHandle,        &Logger_attributes       },
+      { (osThreadId_t)FlashStorageHandle,  &FlashStorage_attributes },
+      { (osThreadId_t)IOHandle,            &IO_attributes           },
+      { (osThreadId_t)PMHandle,            &PM_attributes           }
   };
   
   static char s_stack_buf[256];
@@ -568,16 +575,19 @@ void bsp_util_print_mem_stats(void)
   
   for (size_t i = 0; i < sizeof(tasks)/sizeof(tasks[0]); i++)
   {
-      if (tasks[i].handle != NULL)
+      if (tasks[i].handle != NULL && tasks[i].attr != NULL && tasks[i].attr->stack_size > 0U)
       {
           TaskHandle_t xTask = (TaskHandle_t)tasks[i].handle; 
-          UBaseType_t high_water_mark_words = uxTaskGetStackHighWaterMark(xTask);
-          
-          uint32_t stack_used_words = tasks[i].stack_size_words - high_water_mark_words;
-          uint32_t stack_used_pct   = (stack_used_words * 100) / tasks[i].stack_size_words;
+          uint32_t high_water_mark_bytes = (uint32_t)uxTaskGetStackHighWaterMark(xTask) *
+                                           (uint32_t)sizeof(StackType_t);
+          uint32_t stack_size_bytes = tasks[i].attr->stack_size;
+          uint32_t stack_used_bytes = (high_water_mark_bytes < stack_size_bytes)
+                                      ? (stack_size_bytes - high_water_mark_bytes)
+                                      : 0U;
+          uint32_t stack_used_pct   = (stack_used_bytes * 100U) / stack_size_bytes;
           
           int ret = snprintf(s_stack_buf + len, sizeof(s_stack_buf) - len, "%s:%lu%% | ",
-                             tasks[i].name, (unsigned long)stack_used_pct);
+                             tasks[i].attr->name, (unsigned long)stack_used_pct);
           if (ret > 0)
           {
               len += ret;
