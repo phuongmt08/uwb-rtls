@@ -278,6 +278,31 @@ bsp_err_t bsp_uwb_init(void)
   return BSP_OK;
 }
 
+static uint16_t get_sfd_timeout(uint32_t preamble_len, uint32_t ns_sfd, uint32_t rx_pac)
+{
+    uint32_t plen = 512;
+    switch (preamble_len) {
+        case 0x04: plen = 64; break;
+        case 0x14: plen = 128; break;
+        case 0x24: plen = 256; break;
+        case 0x34: plen = 512; break;
+        case 0x08: plen = 1024; break;
+        case 0x18: plen = 1536; break;
+        case 0x28: plen = 2048; break;
+        case 0x0C: plen = 4096; break;
+        default: plen = 512; break;
+    }
+    uint32_t pac = 16;
+    switch (rx_pac) {
+        case 0: pac = 8; break;
+        case 1: pac = 16; break;
+        case 2: pac = 32; break;
+        case 3: pac = 64; break;
+        default: pac = 16; break;
+    }
+    return (uint16_t)(plen + ns_sfd + pac - 8);
+}
+
 bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 {
   CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
@@ -286,20 +311,20 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
     dwt_config_t dw_cfg = {
         .chan           = cfg->uwb_channel,
         .prf            = (cfg->uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
-        .txPreambLength = DWT_PLEN_512,
-        .rxPAC          = DWT_PAC16,
-        .txCode         = 17,
-        .rxCode         = 17,
-        .nsSFD          = 1,
+        .txPreambLength = cfg->uwb_preamble_len,
+        .rxPAC          = cfg->uwb_rx_pac,
+        .txCode         = cfg->uwb_preamble_code,
+        .rxCode         = cfg->uwb_preamble_code,
+        .nsSFD          = cfg->uwb_ns_sfd,
         .dataRate       = cfg->uwb_data_rate,
-        .phrMode        = DWT_PHRMODE_STD,
-        .sfdTO          = (512 + 1 + 16 - 8)   
+        .phrMode        = cfg->uwb_phr_mode,
+        .sfdTO          = get_sfd_timeout(cfg->uwb_preamble_len, cfg->uwb_ns_sfd, cfg->uwb_rx_pac)
     };
     
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
            dw_cfg.chan, cfg->uwb_prf, dw_cfg.dataRate, dw_cfg.txCode);
-    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=512 PAC=16 SFD=%u nsSFD=%u PHR=%u",
-           dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=%u PAC=%u SFD=%u nsSFD=%u PHR=%u",
+           cfg->uwb_preamble_len, cfg->uwb_rx_pac, dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
 
   if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS)
   {
@@ -308,10 +333,10 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 
   dwt_txconfig_t tx_cfg;
   tx_cfg.power = cfg->tx_power;
-  tx_cfg.PGdly = 0xC2;
+  tx_cfg.PGdly = cfg->pg_delay;
   dwt_configuretxrf(&tx_cfg);
   // Add smart power configuration 
-  dwt_setsmarttxpower(1);
+  dwt_setsmarttxpower(cfg->smart_tx_power ? 1 : 0);
 
   dwt_setrxantennadelay(cfg->rx_antenna_delay);
   dwt_settxantennadelay(cfg->tx_antenna_delay);

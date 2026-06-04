@@ -136,56 +136,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     return true;
 }
 
-void mw_filter_distance_smoother_init(distance_smoother_t *ctx,
-                                      bool enabled,
-                                      float alpha,
-                                      float jump_limit_m)
-{
-    if (!ctx) return;
 
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->enabled = enabled;
-    ctx->alpha = alpha;
-    ctx->jump_limit_m = jump_limit_m;
-}
-
-void mw_filter_distance_smoother_reset(distance_smoother_t *ctx)
-{
-    if (!ctx) return;
-
-    for (uint8_t i = 0; i < 8; i++) {
-        ctx->anchors[i].initialized = false;
-        ctx->anchors[i].filtered_m = 0.0f;
-    }
-}
-
-float mw_filter_distance_smoother_apply(distance_smoother_t *ctx,
-                                        uint8_t anchor_index,
-                                        float raw_distance_m)
-{
-    if (!ctx || !ctx->enabled || anchor_index >= 8) {
-        return raw_distance_m;
-    }
-
-    anchor_distance_smoother_t *flt = &ctx->anchors[anchor_index];
-    if (!flt->initialized) {
-        flt->filtered_m = raw_distance_m;
-        flt->initialized = true;
-        return raw_distance_m;
-    }
-
-    float delta = raw_distance_m - flt->filtered_m;
-    float bounded_measurement = raw_distance_m;
-
-    if (delta > ctx->jump_limit_m) {
-        bounded_measurement = flt->filtered_m + ctx->jump_limit_m;
-    } else if (delta < -ctx->jump_limit_m) {
-        bounded_measurement = flt->filtered_m - ctx->jump_limit_m;
-    }
-
-    flt->filtered_m += ctx->alpha * (bounded_measurement - flt->filtered_m);
-    return flt->filtered_m;
-}
 
 /* ====================================================================
  * UKF Initialization Filter (Median over N samples)

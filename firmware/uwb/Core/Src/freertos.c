@@ -743,11 +743,11 @@ void network_entry(void *argument)
 void logger_entry(void *argument)
 {
   /* USER CODE BEGIN logger_entry */
+  bsp_util_rtos_monitor_update();
   for (;;)
   {
     osDelay(30000); /* 30 seconds */
-    bsp_util_print_mem_stats();
-    bsp_util_print_cpu_stats();
+    bsp_util_rtos_monitor_update();
   }
   /* USER CODE END logger_entry */
 }

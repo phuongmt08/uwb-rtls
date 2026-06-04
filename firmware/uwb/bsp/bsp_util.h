@@ -34,6 +34,36 @@ typedef struct {
   uint8_t second;  /*!< 0–59  */
 } bsp_rtc_time_t;
 
+#define BSP_UTIL_RTOS_MONITOR_MAX_TASKS 10U
+#define BSP_UTIL_RTOS_TASK_NAME_LEN     10U
+
+#define BSP_UTIL_RTOS_FLAG_CPU_HIGH        (1UL << 0)
+#define BSP_UTIL_RTOS_FLAG_HEAP_LOW        (1UL << 1)
+#define BSP_UTIL_RTOS_FLAG_STACK_LOW       (1UL << 2)
+#define BSP_UTIL_RTOS_FLAG_TASK_TRUNCATED  (1UL << 3)
+#define BSP_UTIL_RTOS_FLAG_CPU_UNAVAILABLE (1UL << 4)
+
+typedef struct {
+  uint32_t task_id;
+  uint32_t cpu_permille;
+  uint32_t stack_min_free_bytes;
+  char     name[BSP_UTIL_RTOS_TASK_NAME_LEN];
+} bsp_util_rtos_task_stat_t;
+
+typedef struct {
+  bsp_util_rtos_task_stat_t tasks[BSP_UTIL_RTOS_MONITOR_MAX_TASKS];
+  uint32_t task_count;
+  uint32_t task_count_total;
+  uint32_t sample_window_ms;
+  uint32_t cpu_busy_permille;
+  uint32_t heap_free_bytes;
+  uint32_t heap_min_ever_free_bytes;
+  uint32_t min_stack_free_bytes;
+  uint32_t min_stack_task_id;
+  uint32_t health_flags;
+  bool     valid;
+} bsp_util_rtos_snapshot_t;
+
 /* ===================================================================== */
 /*                         FUNCTION DECLARATIONS                         */
 /* ===================================================================== */
@@ -106,7 +136,7 @@ uint32_t          bsp_util_get_serial_number(void);
 bsp_util_status_t bsp_util_device_reset(void);
 bsp_util_status_t bsp_util_enter_bootloader(void);
 uint32_t          getRunTimeCounterValue(void);
-void              bsp_util_print_cpu_stats(void);
-void              bsp_util_print_mem_stats(void);
+void              bsp_util_rtos_monitor_update(void);
+const bsp_util_rtos_snapshot_t *bsp_util_rtos_monitor_get(void);
 
 #endif /* BSP_UTIL_H */

@@ -44,8 +44,9 @@
 typedef struct {
 #if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
     mahalanobis_prefilter_t prefilter;
+#else
+    char dummy;
 #endif
-    distance_smoother_t smoother;
 } filter_state_t;
 
 /* Private variables -------------------------------------------------- */
@@ -143,12 +144,6 @@ static void init_filters(void)
 #endif
 #endif
 
-    /* Keep smoother initialized but disabled by default. Call/apply it explicitly
-     * from the owner path when smoothing is wanted. */
-    mw_filter_distance_smoother_init(&s_filters.smoother,
-                                     false,
-                                     SMOOTHER_ALPHA,
-                                     SMOOTHER_JUMP_LIMIT_M);
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 #if (ENABLE_SYS_FUSION_LOG && !ENABLE_SYS_FUSION)
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
