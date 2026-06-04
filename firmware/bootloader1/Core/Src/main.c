@@ -29,6 +29,7 @@
 #include "network_core.h"
 #include "network_cmd.h"
 #include "sys_logger_bl.h"
+#include "dma.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -66,19 +67,19 @@ static void bl_led_tick(void)
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
 
-static void bl_log_stub_task(void)
-{
-  static uint32_t s_last_log_ms = 0u;
-  uint32_t now = HAL_GetTick();
-
-  if ((now - s_last_log_ms) >= 500u) {
-    s_last_log_ms = now;
-    (void)sys_logger_write_record(INFO_LOG,
-                    OBJECT_CODE,
-                    "BL stub log tick=%lu",
-                    (unsigned long)now);
-  }
-}
+//static void bl_log_stub_task(void)
+//{
+//  static uint32_t s_last_log_ms = 0u;
+//  uint32_t now = HAL_GetTick();
+//
+//  if ((now - s_last_log_ms) >= 500u) {
+//    s_last_log_ms = now;
+//    (void)sys_logger_write_record(INFO_LOG,
+//                    OBJECT_CODE,
+//                    "BL stub log tick=%lu",
+//                    (unsigned long)now);
+//  }
+//}
 /* USER CODE END 0 */
 
 /**
@@ -105,10 +106,12 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* USER CODE END SysInitbsp_rtc_get_timestamp_ms */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USB_DEVICE_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
@@ -125,7 +128,7 @@ int main(void)
   RLOG_D(OBJECT_CODE, "=================================================");
   /* Initialize protocol stack */
   serial_init();
-  network_core_init(&s_net_core, protobuf_device_addr_t_PACKET_ADDR_TAG, s_net_rx_buf, sizeof(s_net_rx_buf));
+  network_core_init(&s_net_core, protobuf_PACKET_ADDR_MCU, s_net_rx_buf, sizeof(s_net_rx_buf));
   network_cmd_init(&s_net_core);
   bl_fota_init(&s_net_core);
 

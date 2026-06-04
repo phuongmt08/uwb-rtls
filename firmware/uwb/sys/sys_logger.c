@@ -20,6 +20,8 @@
 #include "config.h"
 #include "bsp_util.h"
 #include "config.h"
+#include "cmsis_os.h"
+#include "app_rtos_handles.h"
 
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
 #include "sys_flash_storage.h"
@@ -290,31 +292,31 @@ static void logger_init(void)
   initialized = true;
 }
 
-static void logger_test_stub(void)
-{
-  static uint8_t  tick_init = 0u;
-  static uint32_t last_tick_ms = 0u;
-  static uint32_t seq = 0u;
-  uint32_t now_ms = HAL_GetTick();
-
-  if (tick_init == 0u)
-  {
-    last_tick_ms = now_ms;
-    tick_init = 1u;
-    return;
-  }
-
-  uint32_t elapsed_ms = (uint32_t)(now_ms - last_tick_ms);
-  if (elapsed_ms < LOGGER_STUB_PERIOD_MS)
-    return;
-
-  last_tick_ms = now_ms;
-  (void)RLOG_I(LOG_OBJECT_CODE_TASK,
-               "stub-log seq=%lu dt=%lums",
-               (unsigned long)seq,
-               (unsigned long)elapsed_ms);
-  seq++;
-}
+//static void logger_test_stub(void)
+//{
+//  static uint8_t  tick_init = 0u;
+//  static uint32_t last_tick_ms = 0u;
+//  static uint32_t seq = 0u;
+//  uint32_t now_ms = HAL_GetTick();
+//
+//  if (tick_init == 0u)
+//  {
+//    last_tick_ms = now_ms;
+//    tick_init = 1u;
+//    return;
+//  }
+//
+//  uint32_t elapsed_ms = (uint32_t)(now_ms - last_tick_ms);
+//  if (elapsed_ms < LOGGER_STUB_PERIOD_MS)
+//    return;
+//
+//  last_tick_ms = now_ms;
+//  (void)RLOG_I(LOG_OBJECT_CODE_TASK,
+//               "stub-log seq=%lu dt=%lums",
+//               (unsigned long)seq,
+//               (unsigned long)elapsed_ms);
+//  seq++;
+//}
 
 /* Public implementations --------------------------------------------------- */
 void sys_logger_init(void)
@@ -352,13 +354,6 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len)
   if (!initialized)
     return 0u;
   return logger_read_linear(out, max_len);
-}
-
-void sys_logger_consume(uint16_t len)
-{
-  if (!initialized)
-    return;
-  logger_pop_data(len);
 }
 
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
@@ -456,7 +451,7 @@ uint32_t sys_logger_flash_read_chunk(uint8_t *out, uint16_t max_len)
   return sys_flash_log_read(out, g_flash_log_read_pos, n);
 }
 
-uint32_t sys_logger_flash_read_packet(uint8_t *out, uint16_t max_len)
+uint32_t sys_logger_flash_peek_packet(uint8_t *out, uint16_t max_len)
 {
   if (!out || max_len < (FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN))
     return 0u;
@@ -571,6 +566,51 @@ void sys_logger_flash_consume(uint32_t length)
   (void)sys_flash_log_update_read_pos(g_flash_log_read_pos);
 }
 
+#else
+
+uint16_t sys_logger_ram_peek_packet(uint8_t *out, uint16_t max_len)
+{
+  if (!initialized || !out || max_len < (FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN))
+    return 0u;
+
+  uint16_t available = logger_data_count();
+  uint16_t copied = 0u;
+  uint16_t offset = 0u;
+
+  while ((copied + FLASH_LOG_LEN_FIELD + LOG_HEADER_LEN) <= max_len)
+  {
+    if ((offset + FLASH_LOG_LEN_FIELD) > available)
+      break;
+
+    uint16_t rec_len = (uint16_t)logger_peek_at(offset) |
+                       (uint16_t)((uint16_t)logger_peek_at(offset + 1) << 8u);
+
+    if (rec_len == 0u || rec_len > RLOG_MAX_RECORD_SIZE)
+      break;
+
+    uint16_t entry_padded = (uint16_t)((FLASH_LOG_LEN_FIELD + rec_len + 3u) & ~3u);
+    if ((copied + entry_padded) > max_len || (offset + entry_padded) > available)
+      break;
+
+    /* Copy record-aligned chunk from circular buffer */
+    for (uint16_t i = 0; i < entry_padded; i++) {
+        out[copied + i] = logger_peek_at(offset + i);
+    }
+
+    copied += entry_padded;
+    offset += entry_padded;
+  }
+
+  return copied;
+}
+
+void sys_logger_ram_consume(uint16_t len)
+{
+  if (!initialized)
+    return;
+  logger_pop_data(len);
+}
+
 #endif /* defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG) */
 
 bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const char *format, ...)
@@ -580,6 +620,12 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
   if (!initialized)
   {
     logger_init();
+  }
+
+  /* Protect vsnprintf + circular buffer from concurrent task writes */
+  if (g_logger_mutexHandle != NULL)
+  {
+    osMutexAcquire(g_logger_mutexHandle, osWaitForever);
   }
 
   // Format message using vsnprintf
@@ -629,6 +675,8 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
   CHECK(padded_len < SYS_LOGGER_BUF_SIZE, false);
 
   // Make space if needed by removing oldest entries
+  bool result = false;
+
   for (uint16_t retry = 0; retry < 10; retry++)
   {
     if (logger_space_count() >= padded_len)
@@ -638,13 +686,14 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
       len_hdr[1] = (uint8_t)((record_len >> 8u) & 0xFFu);
       logger_write_data(len_hdr, FLASH_LOG_LEN_FIELD);
       logger_write_data(record, record_len);
-
       uint16_t pad = (uint16_t)(padded_len - entry_len);
       for (uint16_t i = 0u; i < pad; i++)
       {
         logger_write_byte(0u);
       }
-      return true;
+      result = true;
+      break;
+
     }
 
     if (!logger_drop_oldest_entry())
@@ -653,7 +702,14 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
     }
   }
 
-  return false;
+  if (g_logger_mutexHandle != NULL)
+  {
+    osMutexRelease(g_logger_mutexHandle);
+  }
+
+  /* g_logger_sem release removed: USB CDC drain no longer used.
+   * Logs persist to internal flash via FlashStorage task (every 10s). */
+  return result;
 }
 
 void sys_logger_task(void)
@@ -661,15 +717,12 @@ void sys_logger_task(void)
   if (!initialized)
     return;
 
-  logger_test_stub();
-
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
   uint32_t now_ms = HAL_GetTick();
   if ((uint32_t)(now_ms - g_flash_sync_last_ms) >= LOGGER_FLASH_SYNC_PERIOD_MS) {
     (void)sys_logger_flash_persist();
     g_flash_sync_last_ms = now_ms;
   }
-
 #endif
 }
 

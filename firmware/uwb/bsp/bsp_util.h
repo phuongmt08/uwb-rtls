@@ -39,6 +39,11 @@ typedef struct {
 /* ===================================================================== */
 
 /* Init --------------------------------------------------------------- */
+/**
+ * @brief  Prepare utility helpers.
+ * @note   Does not own or configure a hardware timer. TIM9 remains the HAL
+ *         timebase; app delays use DWT for spin waits and RTOS sleep when safe.
+ */
 bsp_util_status_t bsp_util_init(void);
 
 /* CRC ---------------------------------------------------------------- */
@@ -100,5 +105,8 @@ void              bsp_delay_ms(uint32_t ms);
 uint32_t          bsp_util_get_serial_number(void);
 bsp_util_status_t bsp_util_device_reset(void);
 bsp_util_status_t bsp_util_enter_bootloader(void);
+uint32_t          getRunTimeCounterValue(void);
+void              bsp_util_print_cpu_stats(void);
+void              bsp_util_print_mem_stats(void);
 
 #endif /* BSP_UTIL_H */

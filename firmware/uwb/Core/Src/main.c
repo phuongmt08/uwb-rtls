@@ -10,21 +10,22 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "cmsis_os.h"
+#include "adc.h"
 #include "crc.h"
-#include "gpio.h"
+#include "dma.h"
 #include "i2c.h"
 #include "rtc.h"
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
 #include "usb_device.h"
+#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_anchor.h"
 #include "app_tag.h"
-#include "ble/sys_ble_peripheral.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -37,9 +38,12 @@
 #include "sys_config.h"
 #include "sys_flash_storage.h"
 #include "sys_logger.h"
-#include "sys_task.h"
+//#include "sys_task.h" /* Deprecated */
+#include "sys_pm.h"
+#include "app_rtos_handles.h"
 
 #include <string.h>
+#include "bsp_imu.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -75,16 +79,11 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+extern network_core_t g_network_core;
+extern uint8_t g_network_rx_buf[512];
 
 /* USER CODE BEGIN PV */
-static bool s_ranging_enabled = true;
-
-static network_core_t s_network_core;
-static uint8_t        s_network_rx_buf[512];
-
-#ifdef HAVE_BLE_PERIPHERAL
-static void ble_peripheral_process_task(void *arg);
-#endif
+extern bool g_ranging_enabled;
 
 #if TEST_SEND_POS
 static float    s_test_x              = TEST_POS_START_X;
@@ -95,6 +94,7 @@ static uint32_t s_last_test_send_tick = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 /* USER CODE END PFP */
 
@@ -148,47 +148,6 @@ static void test_send_pos_task(void *arg)
 }
 #endif
 
-static void ranging_process_task(void *arg)
-{
-#if TEST_SEND_POS && TEST_DISABLE_RANGING
-  /* Ranging disabled in test mode */
-#else
-  if (s_ranging_enabled)
-  {
-    sys_config_t *cfg_curr = sys_config_get();
-    if (cfg_curr->uwb.role == DEVICE_ROLE_TAG)
-    {
-      app_tag_process();
-    }
-    else
-    {
-      app_anchor_process(NULL);
-    }
-  }
-#endif
-}
-
-static void logger_process_task(void *arg)
-{
-  sys_logger_task();
-}
-
-static void network_core_process_task(void *arg)
-{
-  network_core_process(&s_network_core);
-}
-
-static void network_cmd_process_task(void *arg)
-{
-  network_cmd_process();
-}
-
-static void ble_peripheral_process_task(void *arg)
-{
-  (void)arg;
-  sys_ble_peripheral_process();
-}
-
 void app_reset_config(void)
 {
   __disable_irq();
@@ -211,11 +170,12 @@ void app_reset_config(void)
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
   app_reset_config();
   /* USER CODE END 1 */
@@ -238,23 +198,21 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
-  MX_USB_DEVICE_Init();
   MX_TIM11_Init();
+  MX_TIM2_Init();
   MX_CRC_Init();
   MX_RTC_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-
   int flash_storage_init_status = sys_flash_storage_init();
 
   sys_logger_init();
-  RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
-  RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=               APPLICATION STARTED             =");
-  RLOG_D(LOG_OBJECT_CODE_APPLICATION, "=================================================");
   if (flash_storage_init_status != 0)
   {
     RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Flash storage init failed; log persistence may be degraded");
@@ -278,20 +236,23 @@ int main(void)
   sys_config_t *cfg = sys_config_get();
 
   serial_init();
-  protobuf_device_addr_t local_addr = (cfg->uwb.role == DEVICE_ROLE_TAG) ? 
-                                      protobuf_PACKET_ADDR_TAG : protobuf_PACKET_ADDR_ANCHOR;
-
-  if (!network_core_init(&s_network_core, local_addr, s_network_rx_buf, sizeof(s_network_rx_buf)))
+  if (!network_core_init(&g_network_core, protobuf_PACKET_ADDR_MCU, g_network_rx_buf, sizeof(g_network_rx_buf)))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_core_init failed");
   }
-  else if (!network_cmd_init(&s_network_core))
+  else if (!network_cmd_init(&g_network_core))
   {
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "network_cmd_init failed");
   }
   else
   {
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+  }
+
+  bsp_util_init();
+  if (bsp_imu_init() != BSP_IMU_OK)
+  {
+    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
   }
 
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
@@ -324,50 +285,10 @@ int main(void)
   bsp_io_init();
   bsp_io_led_off();
 
-  sys_task_init();
-  bsp_battery_err_t bat_init_ret = bsp_battery_init();
-  if (bat_init_ret == BSP_BATTERY_OK)
-  {
-    int bat_task_id = sys_task_add((sys_task_cb_t)bsp_battery_task, NULL, SYS_TASK_TYPE_PERIODIC, 1000, 0);
-    if (bat_task_id >= 0)
-    {
-      sys_task_start(bat_task_id);
-    }
-  }
-  else
-  {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION,
-           "Battery init failed (%d), battery task disabled",
-           (int)bat_init_ret);
-  }
+  /* sys_task scheduler removed — tasks are managed by FreeRTOS */
+  bsp_battery_init(); /* Still init hardware; task runs in power_manage_entry */
+  sys_pm_init();
 
-  int rng_task_id = sys_task_add((sys_task_cb_t)ranging_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (rng_task_id >= 0) sys_task_start(rng_task_id);
-
-  int log_task_id = sys_task_add((sys_task_cb_t)logger_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (log_task_id >= 0) sys_task_start(log_task_id);
-
-  int net_core_task_id = sys_task_add((sys_task_cb_t)network_core_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (net_core_task_id >= 0) sys_task_start(net_core_task_id);
-
-  int net_cmd_task_id = sys_task_add((sys_task_cb_t)network_cmd_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (net_cmd_task_id >= 0) sys_task_start(net_cmd_task_id);
-
-  /* BLE Peripheral Init */
-  if (sys_ble_peripheral_init(&s_network_core))
-  {
-      sys_ble_peripheral_set_config();
-      sys_ble_peripheral_enable(true);
-      
-      int ble_task_id = sys_task_add((sys_task_cb_t)ble_peripheral_process_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-      if (ble_task_id >= 0) sys_task_start(ble_task_id);
-  }
-
-#if TEST_SEND_POS
-  int test_pos_task_id = sys_task_add((sys_task_cb_t)test_send_pos_task, NULL, SYS_TASK_TYPE_FREERUN, 0, 0);
-  if (test_pos_task_id >= 0) sys_task_start(test_pos_task_id);
-#endif
-  
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
   /* Read DIP switch - ALWAYS OVERRIDES saved config */
   uint8_t dip_value = bsp_io_dip_read();
@@ -395,86 +316,29 @@ int main(void)
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
 #endif
-  /* USER CODE END 2 */
+#ifdef DEVELOPER_MODE
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "DEVELOPER MODE ENABLED: Verbose");
+  // Configure SystemView here; recording starts after the scheduler is running.
+  SYSVIEW_INIT();
+  #pragma message("Developer mode: SystemView enabled")
+#endif
+/* Init scheduler */
+osKernelInitialize();  /* Call init function for freertos objects (in cmsis_os2.c) */
+MX_FREERTOS_Init();
+
+/* Start scheduler */
+osKernelStart();
+
+/* We should never get here as control is now taken by the scheduler */
+/* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    bsp_io_button_event_t btn_event = bsp_io_button_event();
-
-#if ENABLE_ANCHOR_AUTO_CALIB
-    /* In calibration build, anchor button events handled differently */
-    if (cfg->uwb.role == DEVICE_ROLE_ANCHOR && btn_event != BSP_IO_EVENT_NONE)
-    {
-      app_anchor_on_button(btn_event);
-      btn_event = BSP_IO_EVENT_NONE; /* Prevent normal button handling */
-    }
-#endif
-
-#if ENABLE_TAG_AUTO_CALIB
-    /* In calibration build, tag button events handled differently */
-    if (cfg->uwb.role == DEVICE_ROLE_TAG && btn_event != BSP_IO_EVENT_NONE)
-    {
-      app_tag_on_button(btn_event);
-      btn_event = BSP_IO_EVENT_NONE;
-    }
-#endif
-
-    switch (btn_event)
-    {
-#if !ENABLE_ANCHOR_AUTO_CALIB
-    case BSP_IO_EVENT_HOLD:
-      /* Toggle TAG/ANCHOR role and save to flash */
-      {
-        sys_config_t *cfg_curr = sys_config_get();
-        device_role_t new_role =
-          (cfg_curr->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_ROLE_ANCHOR : DEVICE_ROLE_TAG;
-
-        sys_config_set_role(new_role);
-        sys_config_save();
-
-        /* Quick LED blink to indicate save */
-        for (uint8_t i = 0; i < 3; i++)
-        {
-          bsp_io_led_on();
-          bsp_delay_ms(50);
-          bsp_io_led_off();
-          bsp_delay_ms(50);
-        }
-
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Role changed to: %s",
-               new_role == DEVICE_ROLE_TAG ? "TAG" : "ANCHOR");
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "System will restart...");
-        bsp_delay_ms(100);
-        HAL_NVIC_SystemReset();
-      }
-      break;
-#endif
-
-    case BSP_IO_EVENT_DOUBLE_CLICK:
-      /* Stop ranging */
-      if (s_ranging_enabled)
-      {
-        s_ranging_enabled = false;
-        bsp_uwb_idle();
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped - DW1000 idle");
-      }
-      break;
-
-    case BSP_IO_EVENT_CLICK:
-      /* Start ranging */
-      if (!s_ranging_enabled)
-      {
-        s_ranging_enabled = true;
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
-      }
-      break;
-
-    default: break;
-    }
-
-    sys_task_process();
+    /* Should never reach here. Button events and ranging control
+     * are now handled inside IO task (io_entry) and UwbRanging task. */
+    osDelay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -483,45 +347,45 @@ int main(void)
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-   */
+  */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-   * in the RCC_OscInitTypeDef structure.
-   */
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState       = RCC_HSE_ON;
-  RCC_OscInitStruct.PLL.PLLState   = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource  = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM       = 6;
-  RCC_OscInitStruct.PLL.PLLN       = 168;
-  RCC_OscInitStruct.PLL.PLLP       = RCC_PLLP_DIV4;
-  RCC_OscInitStruct.PLL.PLLQ       = 7;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 6;
+  RCC_OscInitStruct.PLL.PLLN = 96;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-   */
-  RCC_ClkInitStruct.ClockType =
-    RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -531,28 +395,49 @@ void SystemClock_Config(void)
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM9 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM9)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   __disable_irq();
   while (1)
   {
-    bsp_io_led_toggle();
-    HAL_Delay(100);
+
   }
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

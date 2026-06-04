@@ -15,20 +15,22 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "main.h"
+
 /* Public defines ----------------------------------------------------- */
 /* LED PC13 */
-#define BSP_IO_LED_PORT        GPIOC
-#define BSP_IO_LED_PIN         GPIO_PIN_13
+#define BSP_IO_LED_PORT        LED_USR_GPIO_Port
+#define BSP_IO_LED_PIN         LED_USR_Pin
 
 /* Button PA0 */
-#define BSP_IO_BUTTON_PORT     GPIOA
-#define BSP_IO_BUTTON_PIN      GPIO_PIN_0
+#define BSP_IO_BUTTON_PORT     BTN_USR_GPIO_Port
+#define BSP_IO_BUTTON_PIN      BTN_USR_Pin
 
 /* DIP Switch 3-bit: PB5, PB6, PB7 */
-#define BSP_IO_DIP_PORT        GPIOB
-#define BSP_IO_DIP_PIN_0       GPIO_PIN_5  /* LSB */
-#define BSP_IO_DIP_PIN_1       GPIO_PIN_6
-#define BSP_IO_DIP_PIN_2       GPIO_PIN_7  /* MSB */
+#define BSP_IO_DIP_PORT        DIP1_GPIO_Port
+#define BSP_IO_DIP_PIN_0       DIP1_Pin  /* LSB */
+#define BSP_IO_DIP_PIN_1       DIP2_Pin
+#define BSP_IO_DIP_PIN_2       DIP3_Pin  /* MSB */
 
 /* Button timing constants (ms) */
 #define BSP_IO_DEBOUNCE_MS     25 
@@ -40,7 +42,8 @@
 /**
  * @brief Button event types
  */
-typedef enum {
+typedef enum
+{
   BSP_IO_EVENT_NONE = 0,
   BSP_IO_EVENT_CLICK,
   BSP_IO_EVENT_DOUBLE_CLICK,
@@ -51,7 +54,8 @@ typedef enum {
 /**
  * @brief Button state machine states
  */
-typedef enum {
+typedef enum
+{
   BSP_IO_BUTTON_IDLE = 0,
   BSP_IO_BUTTON_DEBOUNCE,
   BSP_IO_BUTTON_PRESSED,
@@ -83,6 +87,19 @@ void bsp_io_led_off(void);
  * @brief Toggle LED state
  */
 void bsp_io_led_toggle(void);
+
+/**
+ * @brief Blink LED in non-blocking mode.
+ * @param duration_ms LED ON duration in milliseconds.
+ * @note Call bsp_io_task() periodically from main loop to complete blink timing.
+ */
+void bsp_io_led_blink(uint32_t duration_ms);
+
+/**
+ * @brief Periodic BSP IO task (non-blocking).
+ * @note Handles LED blink timeout and future time-based IO tasks.
+ */
+void bsp_io_task(void);
 
 /* Button control ----------------------------------------------------- */
 /**
@@ -120,12 +137,24 @@ bool bsp_io_dip_changed(void);
  * @param x X coordinate in meters
  * @param y Y coordinate in meters
  * @param z Z coordinate in meters
+ * @param distance Per-anchor distances in meters (array size NUM_ANCHORS), can be NULL
  * @param error Error estimate in meters (from trilateration)
+ * @param distance Pointer to anchor distance array (NUM_ANCHORS elements), pass NULL if unavailable
  * @return BSP_OK on success, BSP_ERR on failure
- * @note Frame format: SOF(1) + X(4) + Y(4) + Z(4) + ERROR(4) + LENGTH(1) = 18 bytes
- *       SOF = 0xAA, LENGTH = 16 (payload size)
+ * @note Frame format: SOF(1) + LEN(1) + X(4) + Y(4) + Z(4) + DISTANCES(4*NUM_ANCHORS) + ERROR(4)
+ *       LEN is payload bytes after LEN field.
  */
-bsp_err_t bsp_io_uart_send_position(float x, float y, float z, float error);
+bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error);
+
+bsp_err_t bsp_io_uart_send_fusion_log_data(
+  uint8_t mask, uint32_t err_frame_count, 
+  float ax, float ay, float gz, float px, float py, const float *distance, 
+  const double *fp_amp_norm, const double *fp_snr, 
+  float dt);
+
+#if ENABLE_SYS_FUSION
+bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);
+#endif
 
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

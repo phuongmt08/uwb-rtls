@@ -23,3 +23,17 @@ _build/
 *.swp
 *.swo
 *~
+
+# Data and Logs
+*.csv
+logs_data/
+# Data logs
+software/simulation/**/*_log_data.csv
+software/simulation/**/*_sim.html
+software/simulation/**/*.txt
+software/simulation/**/*_log_data.html
+software/simulation/simulation_dashboard.html
+
+# Programmer builds
+software/uwb_rtls_programmer/execution/*.exe
+software/uwb_rtls_programmer/execution/*.spec

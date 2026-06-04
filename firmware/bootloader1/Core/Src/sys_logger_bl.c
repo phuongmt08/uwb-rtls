@@ -230,7 +230,45 @@ uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len)
     return buf_read(out, max_len);
 }
 
-void sys_logger_consume(uint16_t len)
+uint16_t sys_logger_ram_peek_packet(uint8_t *out, uint16_t max_len)
+{
+    if (!s_inited || !out || max_len < (BL_LOG_LEN_FIELD + LOG_HEADER_LEN)) {
+        return 0u;
+    }
+
+    uint16_t available = buf_used();
+    uint16_t copied = 0u;
+    uint16_t offset = 0u;
+
+    while ((copied + BL_LOG_LEN_FIELD + LOG_HEADER_LEN) <= max_len) {
+        if ((offset + BL_LOG_LEN_FIELD) > available) {
+            break;
+        }
+
+        uint16_t rec_len = (uint16_t)buf_peek_at(offset) |
+                           (uint16_t)((uint16_t)buf_peek_at(offset + 1u) << 8u);
+
+        if (rec_len == 0u || rec_len > RLOG_MAX_RECORD_SIZE) {
+            break;
+        }
+
+        uint16_t entry_padded = (uint16_t)((BL_LOG_LEN_FIELD + rec_len + 3u) & ~3u);
+        if ((copied + entry_padded) > max_len || (offset + entry_padded) > available) {
+            break;
+        }
+
+        for (uint16_t i = 0u; i < entry_padded; i++) {
+            out[copied + i] = buf_peek_at((uint16_t)(offset + i));
+        }
+
+        copied += entry_padded;
+        offset += entry_padded;
+    }
+
+    return copied;
+}
+
+void sys_logger_ram_consume(uint16_t len)
 {
     buf_pop(len);
 }

@@ -19,11 +19,15 @@
  */
 #define ENABLE_FORCE_DEFAULT_ANT_DLY    0
 
-#define TAG_FACTORY_TX_ANT_DLY      16618
+#define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16611
-#define ANCHOR_DEFAULT_RX_ANT_DLY   16436
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16187
+#define ANCHOR_DEFAULT_RX_ANT_DLY   16187
+
+/* Legacy fixed RX delay used by older calibration paths. V1 A2A summary
+ * solver only logs candidate delays and does not apply this value. */
+#define CALIB_FIXED_RX_ANT_DLY      16436
 
 /* ===================================================================
  * HEIGHT CONFIGURATION
@@ -32,12 +36,12 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.24f)
+#define TAG_HEIGHT_M            (0.45f)
 
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (0.415f)
+#define ANCHOR_HEIGHT_M         (0.895f)
 
 /**
  * @brief Height offset between Anchor and Tag (meters)
@@ -48,26 +52,71 @@
  * ANCHOR/TAG AUTO-CALIBRATION
  * =================================================================== */
 
+/* 0 = normal ranging mode
+ * 1 = mutual anchor-to-anchor calibration summary mode (A2A V1)             */
 #define ENABLE_ANCHOR_AUTO_CALIB    0
-#define ENABLE_TAG_AUTO_CALIB       0
 
-#define CALIB_REF_DISTANCE_XY_M   7.32f   /* Horizontal distance Tag-Anchor (m) */
-#define CALIB_TAG_HEIGHT_M        TAG_HEIGHT_M
-#define CALIB_ANCHOR_HEIGHT_M     ANCHOR_HEIGHT_M
-#define CALIB_ANCHOR_ID           1       /* Anchor used for tag calibration */
+/* ------------------------------------------------------------------
+ * A2A (Anchor-to-Anchor) Mutual Calibration V1
+ *
+ * Mutual-only V1: each anchor ranges with every other anchor, collects
+ * CALIB_ANCHOR_SAMPLES per pair, and sends CALIB_PAIR_SUMMARY to A4.
+ * A4 runs the full-matrix solver and logs candidate delays only.
+ * ------------------------------------------------------------------ */
 
-#define CALIB_SAMPLES             30      /* Number of samples to collect */
-#define CALIB_ERROR_THRESHOLD_M   0.02f   /* Stop if error < 2cm */
-#define CALIB_MIN_DELTA_STEP      3       /* Stop if step < 3 */
-#define CALIB_MAX_ROUNDS          12      /* Max 10 rounds */
-#define CALIB_MAX_STD_M           0.05f   /* Max allowed std deviation (m) */
-#define DW1000_M_PER_DLY_UNIT     0.004691764f  /* DW1000 time unit = ~4.69mm */
+/* Samples collected per anchor pair per calibration epoch.
+ * 20 is a good balance: enough to average out multipath,
+ * fast enough for in-field calibration.                               */
+#define CALIB_ANCHOR_SAMPLES     20
+
+/* Reject a batch if std deviation exceeds this threshold.
+ * Batch is discarded and re-collected automatically.                  */
+#define CALIB_ANCHOR_MAX_STD_M   0.08f
+
+/* DW1000: TWR combined delay -> distance.
+ * 1 DW unit in combined (TX+RX) = c × 15.65ps / 2 ≈ 2.345 mm.
+ * V1 uses this only to log candidate delay deltas.                    */
+#define CALIB_A2A_M_TO_DW_UNITS  213.0f
+
+/* Legacy gradient damping kept for compatibility with mw_calibration. */
+#define CALIB_A2A_DAMPING        0.4f
+
+/* Reject a calibration batch when per-pair residuals disagree by more
+ * than this. A single antenna-delay scalar cannot fix link/angle bias. */
+#define CALIB_A2A_MAX_PAIR_ERROR_SPREAD_M  0.20f
+
+/* Reject a pair when too many TDMA rounds missed that peer while collecting.
+ * timeout_rate = timeout_count / (valid_count + timeout_count). */
+#define CALIB_A2A_MAX_TIMEOUT_RATE         0.25f
+
+/* Final success gate. A calibration run is successful only when every
+ * usable pair's absolute residual is below this value. */
+#define CALIB_A2A_CONVERGENCE_MAX_ABS_M    0.05f
+
+/* Combined delay clamp range.
+ * Default DW1000 combined ≈ 32872 (2 × 16436).
+ * Allow ±~4% headroom around factory default.                        */
+#define CALIB_A2A_ANT_MIN        30000U
+#define CALIB_A2A_ANT_MAX        36000U
+
+/* Legacy gradient iteration count kept for compatibility. V1 summary
+ * calibration completes after one mutual collection epoch.            */
+#define CALIB_A2A_ITERATIONS     3U
+
+/* DW1000 physical constant.
+ * 1 DW unit = 1/(499.2e6 × 128) ≈ 15.65 ps one-way.
+ * TWR round-trip: 1 unit in combined (TX+RX) delay
+ * → distance error = c × 15.65ps / 2 ≈ 2.345 mm.
+ * Inverse is used when converting solved bias to logged candidate
+ * delay deltas.                                                       */
+#define DW1000_M_PER_DLY_UNIT    0.002345f   /* meters per DW unit (TWR) */
 
 /* ===================================================================
  * ANCHOR LAYOUT
  * =================================================================== */
 
-#define NUM_ANCHORS  4
+#define MAX_ANCHORS_SUPPORTED  8
+#define NUM_ANCHORS            4
 
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
@@ -76,10 +125,10 @@
 #define ANCHOR_2_Y   0.0f
 
 #define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   14.64f
+#define ANCHOR_3_Y   9.76f
 
 #define ANCHOR_4_X   9.76f
-#define ANCHOR_4_Y   14.64f
+#define ANCHOR_4_Y   9.76f
 
 #ifndef ANCHOR_1_Z
 #define ANCHOR_1_Z ANCHOR_HEIGHT_M
@@ -105,21 +154,91 @@
  * FILTER ENABLE/DISABLE CONTROL
  * =================================================================== */
 
-
-#ifndef MW_FILTER_ENABLE_DES
-#define MW_FILTER_ENABLE_DES        0
-#endif
-
-#ifndef MW_FILTER_ENABLE_AKF
-#define MW_FILTER_ENABLE_AKF        1
+/**
+ * @brief Enable/Disable the mw_filter Mahalanobis pre-filter.
+ *        0 = bypass Mahalanobis gate
+ *        1 = apply Mahalanobis gate before anchor selection
+ */
+#ifndef ENABLE_MAHALANOBIS_PREFILTER
+#define ENABLE_MAHALANOBIS_PREFILTER  0
 #endif
 
 /**
- * @brief Legacy macro for backward compatibility
- *        Maps to AKF enable/disable
+ * @brief Mahalanobis pre-filter parameters.
+ *
+ * The firmware prefilter state lives in mw_filter. It keeps a clean per-anchor
+ * rejected/accepted state. d2 is computed from the current sensor-fusion
+ * predicted range to the anchor; T2_REJECT enters rejected state, and
+ * T2_RECOVER exits that state. Rescue is a separate frame-level policy
+ * controlled by RESCUE_MIN_ANCHORS.
  */
-#ifndef MW_FILTER_ENABLE_KALMAN_2D
-#define MW_FILTER_ENABLE_KALMAN_2D  MW_FILTER_ENABLE_AKF
+#ifndef MAHALANOBIS_PREFILTER_D2_RECOVER
+#define MAHALANOBIS_PREFILTER_D2_RECOVER           5.0f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_D2_REJECT
+#define MAHALANOBIS_PREFILTER_D2_REJECT            7.5f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_R_BASE
+#define MAHALANOBIS_PREFILTER_R_BASE               0.05f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_R_GATE
+#define MAHALANOBIS_PREFILTER_R_GATE               0.10f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   1U
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
+#define MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN 4.0f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_MAX
+#define MAHALANOBIS_PREFILTER_RESCUE_NOISE_MAX     0.25f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT
+#define MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT      0.5f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_MIN_COVARIANCE
+#define MAHALANOBIS_PREFILTER_MIN_COVARIANCE       1.0e-6f
+#endif
+
+/* Keep downstream D2 scoring tied to the same Mahalanobis thresholds. */
+#ifndef MW_TRIL_D2_RECOVER
+#define MW_TRIL_D2_RECOVER                         MAHALANOBIS_PREFILTER_D2_RECOVER
+#endif
+
+#ifndef MW_TRIL_D2_REJECT
+#define MW_TRIL_D2_REJECT                          MAHALANOBIS_PREFILTER_D2_REJECT
+#endif
+
+#ifndef MW_TRIL_RESIDUAL_SCALE_M
+#define MW_TRIL_RESIDUAL_SCALE_M                   0.30
+#endif
+
+#ifndef MW_TRIL_FP_AMP_GOOD
+#define MW_TRIL_FP_AMP_GOOD                        40.0
+#endif
+
+#ifndef MW_TRIL_WEIGHT_D2
+#define MW_TRIL_WEIGHT_D2                          0.35
+#endif
+
+#ifndef MW_TRIL_WEIGHT_FP_AMP
+#define MW_TRIL_WEIGHT_FP_AMP                      0.15
+#endif
+
+#ifndef MW_TRIL_WEIGHT_GDOP
+#define MW_TRIL_WEIGHT_GDOP                        0.20
+#endif
+
+#ifndef MW_TRIL_WEIGHT_RESIDUAL
+#define MW_TRIL_WEIGHT_RESIDUAL                    0.30
 #endif
 
 /**
@@ -128,165 +247,68 @@
  *        1 = Reject results with error > MAX_ACCEPTABLE_ERROR_M
  */
 #ifndef ENABLE_QUALITY_GATING
-#define ENABLE_QUALITY_GATING       1
+#define ENABLE_QUALITY_GATING       0
 #endif
 
-/* ===================================================================
- * FILTER PRESETS
- * =================================================================== */
+/* Quality gating parameter */
+#ifndef MAX_ACCEPTABLE_ERROR_M
+#define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
+#endif
 
-/* Uncomment ONE preset or use MANUAL tuning below */
+#ifndef ENABLE_SYS_FUSION
+#define ENABLE_SYS_FUSION  0
+#endif
 
-#undef PRESET_WORST_CASE
-#define PRESET_BEST_CASE
-/* #define PRESET_MANUAL */
-
-/* ===================================================================
- * DES (DOUBLE EXPONENTIAL SMOOTHING) PARAMETERS
- * =================================================================== */
-
-#ifdef PRESET_WORST_CASE
-    /* Heavy smoothing for noisy environments */
-    #define DES_ALPHA_BASE              0.15f   /* Base smoothing factor (0-1) */
-    #define DES_BETA                    0.10f   /* Trend smoothing factor (0-1) */
-    #define DES_MOTION_THRESHOLD        0.05f    /* Motion detection threshold (m) */
-    #define DES_CHANGE_ALPHA            0.3f    /* Change EMA smoothing (0-1) */
-    #define DES_MOTION_SCALE_HIGH       1.5f    /* Alpha multiplier for high motion */
-    #define DES_MOTION_SCALE_LOW        0.7f    /* Alpha multiplier for low motion */
-    #define DES_ALPHA_MIN               0.1f    /* Minimum alpha value */
-    #define DES_ALPHA_MAX               0.7f    /* Maximum alpha value */
-
-#elif defined(PRESET_BEST_CASE)
-    /* Light smoothing for clean environments */
-    #define DES_ALPHA_BASE              0.35f   /* Base smoothing factor (0-1) */
-    #define DES_BETA                    0.15f   /* Trend smoothing factor (0-1) */
-    #define DES_MOTION_THRESHOLD        0.05f    /* Motion detection threshold (m) */
-    #define DES_CHANGE_ALPHA            0.3f    /* Change EMA smoothing (0-1) */
-    #define DES_MOTION_SCALE_HIGH       1.5f    /* Alpha multiplier for high motion */
-    #define DES_MOTION_SCALE_LOW        0.7f    /* Alpha multiplier for low motion */
-    #define DES_ALPHA_MIN               0.1f    /* Minimum alpha value */
-    #define DES_ALPHA_MAX               0.7f    /* Maximum alpha value */
-
+#if ENABLE_SYS_FUSION
+#ifdef ENABLE_SYS_FUSION_LOG
+#undef ENABLE_SYS_FUSION_LOG
+#endif
+#define ENABLE_SYS_FUSION_LOG  0
 #else
-    /* Manual tuning - adjust these values as needed */
-    #ifndef DES_ALPHA_BASE
-    #define DES_ALPHA_BASE              0.30f   /* Base smoothing factor (0-1) */
-    #endif
-    #ifndef DES_BETA
-    #define DES_BETA                    0.15f   /* Trend smoothing factor (0-1) */
-    #endif
-    #ifndef DES_MOTION_THRESHOLD
-    #define DES_MOTION_THRESHOLD        0.05f    /* Motion detection threshold (m) */
-    #endif
-    #ifndef DES_CHANGE_ALPHA
-    #define DES_CHANGE_ALPHA            0.3f    /* Change EMA smoothing (0-1) */
-    #endif
-    #ifndef DES_MOTION_SCALE_HIGH
-    #define DES_MOTION_SCALE_HIGH       1.5f    /* Alpha multiplier for high motion */
-    #endif
-    #ifndef DES_MOTION_SCALE_LOW
-    #define DES_MOTION_SCALE_LOW        0.7f    /* Alpha multiplier for low motion */
-    #endif
-    #ifndef DES_ALPHA_MIN
-    #define DES_ALPHA_MIN               0.1f    /* Minimum alpha value */
-    #endif
-    #ifndef DES_ALPHA_MAX
-    #define DES_ALPHA_MAX               0.7f    /* Maximum alpha value */
-    #endif
+#ifndef ENABLE_SYS_FUSION_LOG
+#define ENABLE_SYS_FUSION_LOG  1
+#endif
 #endif
 
-/* ===================================================================
- * AKF (ADAPTIVE KALMAN FILTER) PARAMETERS
- * =================================================================== */
-
-#ifdef PRESET_WORST_CASE
-    #define AKF_PROCESS_NOISE           0.01f   /* Process noise Q (acceleration variance) */
-    #define AKF_R_BASE                  0.5f    /* Base measurement noise R */
-    #define AKF_INNOVATION_ALPHA        0.2f    /* Innovation variance EMA (0-1) */
-    #define AKF_R_SCALE_MIN             0.5f    /* Min R scale (trust measurements more) */
-    #define AKF_R_SCALE_MAX             5.0f    /* Max R scale (trust model more) */
-    
-    /* Motion detection thresholds */
-    #define AKF_STOP_THRESHOLD          0.1f    /* Velocity threshold for "stopped" (m/s) */
-    #define AKF_STOP_VELOCITY_DAMPING   0.5f    /* Velocity damping factor when stopped */
-    #define AKF_STOP_GAIN_REDUCTION     0.3f    /* Kalman gain reduction when stopped */
-    
-    /* Process noise scaling */
-    #define AKF_Q_SCALE_STOPPED         0.3f    /* Q scale when stopped */
-    #define AKF_Q_SCALE_VELOCITY_K      0.1f    /* Q velocity coefficient */
-    
-    /* Quality gating */
-    #define MAX_ACCEPTABLE_ERROR_M      2.0f    /* Max trilateration error (m) */
-
-#elif defined(PRESET_BEST_CASE)
-    #define AKF_PROCESS_NOISE           0.05f  /* Process noise Q (acceleration variance) */
-    #define AKF_R_BASE                  0.08f   /* Base measurement noise R */
-    #define AKF_INNOVATION_ALPHA        0.6f    /* Innovation variance EMA (0-1) */
-    #define AKF_R_SCALE_MIN             0.05f    /* Min R scale (trust measurements more) */
-    #define AKF_R_SCALE_MAX             2.0f    /* Max R scale (trust model more) */
-    
-    /* Motion detection thresholds */
-    #define AKF_STOP_THRESHOLD          0.10f    /* Velocity threshold for "stopped" (m/s) */
-    #define AKF_STOP_VELOCITY_DAMPING   0.2f    /* Velocity damping factor when stopped */
-    #define AKF_STOP_GAIN_REDUCTION     0.2f    /* Kalman gain reduction when stopped */
-    
-    /* Process noise scaling */
-    #define AKF_Q_SCALE_STOPPED         0.15f    /* Q scale when stopped */
-    #define AKF_Q_SCALE_VELOCITY_K      0.1f    /* Q velocity coefficient */
-    
-    /* Quality gating */
-    #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
-
-#else
-    /* Manual tuning - adjust these values as needed */
-    
-    #ifndef AKF_PROCESS_NOISE
-    #define AKF_PROCESS_NOISE           0.003f  /* Process noise Q (acceleration variance) */
-    #endif
-    
-    #ifndef AKF_R_BASE
-    #define AKF_R_BASE                  0.06f   /* Base measurement noise R */
-    #endif
-    
-    #ifndef AKF_INNOVATION_ALPHA
-    #define AKF_INNOVATION_ALPHA        0.7f    /* Innovation variance EMA (0-1) */
-    #endif
-    
-    #ifndef AKF_R_SCALE_MIN
-    #define AKF_R_SCALE_MIN             0.05f    /* Min R scale (trust measurements more) */
-    #endif
-    
-    #ifndef AKF_R_SCALE_MAX
-    #define AKF_R_SCALE_MAX             2.0f    /* Max R scale (trust model more) */
-    #endif
-    
-    /* Motion detection thresholds */
-    #ifndef AKF_STOP_THRESHOLD
-    #define AKF_STOP_THRESHOLD          0.1f    /* Velocity threshold for "stopped" (m/s) */
-    #endif
-    
-    #ifndef AKF_STOP_VELOCITY_DAMPING
-    #define AKF_STOP_VELOCITY_DAMPING   0.5f    /* Velocity damping factor when stopped */
-    #endif
-    
-    #ifndef AKF_STOP_GAIN_REDUCTION
-    #define AKF_STOP_GAIN_REDUCTION     0.3f    /* Kalman gain reduction when stopped */
-    #endif
-    
-    /* Process noise scaling */
-    #ifndef AKF_Q_SCALE_STOPPED
-    #define AKF_Q_SCALE_STOPPED         0.3f    /* Q scale when stopped */
-    #endif
-    
-    #ifndef AKF_Q_SCALE_VELOCITY_K
-    #define AKF_Q_SCALE_VELOCITY_K      0.1f    /* Q velocity coefficient */
-    #endif
-    
-    /* Quality gating */
-    #ifndef MAX_ACCEPTABLE_ERROR_M
-    #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
-    #endif
+#ifndef SYS_FUSION_PREFILTER_ENABLED
+#define SYS_FUSION_PREFILTER_ENABLED (ENABLE_SYS_FUSION && ENABLE_MAHALANOBIS_PREFILTER)
 #endif
+
+#ifndef SYS_FUSION_USE_PLANAR_RANGES
+#define SYS_FUSION_USE_PLANAR_RANGES 1
+#endif
+
+#ifndef SYS_FUSION_UKF_ALPHA
+#define SYS_FUSION_UKF_ALPHA   0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_KAPPA
+#define SYS_FUSION_UKF_KAPPA   0.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_BETA
+#define SYS_FUSION_UKF_BETA    2.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_QA
+#define SYS_FUSION_UKF_QA      0.25f
+#endif
+
+#ifndef SYS_FUSION_UKF_QG
+#define SYS_FUSION_UKF_QG      1.0e-6f
+#endif
+
+#ifndef SYS_FUSION_UKF_R_UWB
+#define SYS_FUSION_UKF_R_UWB   0.05f
+#endif
+
+/**
+ * @brief Distance Smoother (EMA Filter) parameters
+ *        ALPHA: 0.0 to 1.0 (lower = smoother/more lag, higher = jumpier/less lag)
+ *        JUMP_LIMIT: Max allowed delta between consecutive samples (meters)
+ */
+#define SMOOTHER_ALPHA              0.25f
+#define SMOOTHER_JUMP_LIMIT_M       0.30f
 
 /* ===================================================================
  * ERROR HANDLING
@@ -299,60 +321,9 @@
  * =================================================================== */
 
 /*
- * DES PARAMETERS GUIDE:
- * ---------------------
- * DES_ALPHA_BASE: Controls smoothing vs responsiveness
- *   - Lower (0.1-0.2): Heavier smoothing, slower response to changes
- *   - Higher (0.3-0.5): Less smoothing, faster response
- *   - Typical range: 0.15 - 0.35
- *
- * DES_BETA: Controls trend tracking
- *   - Lower (0.05-0.1): Slower trend adaptation
- *   - Higher (0.15-0.25): Faster trend adaptation
- *   - Typical range: 0.1 - 0.2
- *
- * DES_MOTION_THRESHOLD: Velocity threshold for motion detection
- *   - Lower: More sensitive to motion (switches to high-motion mode earlier)
- *   - Higher: Less sensitive (stays in smooth mode longer)
- *   - Typical range: 0.05 - 0.2 m
- *
- * AKF PARAMETERS GUIDE:
- * ---------------------
- * AKF_PROCESS_NOISE (Q): Expected acceleration variance
- *   - Lower (0.001-0.005): Assumes smooth motion, slower adaptation
- *   - Higher (0.01-0.05): Assumes erratic motion, faster adaptation
- *   - Typical range: 0.003 - 0.01
- *
- * AKF_R_BASE: Base measurement noise covariance
- *   - Lower (0.03-0.08): Trusts measurements more (faster tracking)
- *   - Higher (0.3-0.8): Trusts model more (heavier smoothing)
- *   - Typical range: 0.05 - 0.5
- *
- * AKF_INNOVATION_ALPHA: How fast to adapt to changing measurement quality
- *   - Lower (0.1-0.3): Slower adaptation (stable but slow to react)
- *   - Higher (0.5-0.8): Faster adaptation (reactive but may oscillate)
- *   - Typical range: 0.3 - 0.7
- *
- * AKF_R_SCALE_MIN/MAX: Measurement trust adjustment range
- *   - Smaller range (0.5-2.0): Conservative adaptation
- *   - Larger range (0.2-5.0): Aggressive adaptation
- *   - MIN controls max trust in measurements
- *   - MAX controls max trust in model
- *
- * AKF_STOP_THRESHOLD: Velocity below which tag is considered stopped
- *   - Lower (0.05): More sensitive, enters stop mode earlier
- *   - Higher (0.2): Less sensitive, stays in motion mode longer
- *   - Typical range: 0.08 - 0.15 m/s
- *
  * TUNING WORKFLOW:
  * ----------------
- * 1. Start with a preset (BEST_CASE or WORST_CASE)
- * 2. Test with stationary tag - should have minimal jitter
- * 3. Test with moving tag - should track smoothly without lag
- * 4. Adjust DES_ALPHA_BASE if too smooth/laggy or too noisy
- * 5. Adjust AKF_R_BASE for overall smoothness vs responsiveness
- * 6. Adjust AKF_INNOVATION_ALPHA for measurement quality adaptation speed
- * 7. Fine-tune stop detection with AKF_STOP_THRESHOLD
+ * - Tuning details for filters to be updated upon adding UKF/IMU integration.
  */
 
 #endif /* __POSITIONING_CONFIG_H */

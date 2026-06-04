@@ -26,7 +26,7 @@
 /*
  * CRATE register — datasheet p.13
  * Signed 16-bit, 1 LSb = 0.208 %/hr
- * Avoid float: work in milli-%/hr, multiply by 208 then divide by 1000
+ * Avoid float: work in %/hr, multiply by 208 then divide by 1000
  * Use int32_t before multiply: max 32767 * 208 = 6,815,536
  */
 #define CRATE_LSB_X1000   208
@@ -188,7 +188,7 @@ void max17048_default_config(max17048_config_t *config)
   config->valrt_min_mv        = 0;      /* 0x00 * 20mV — alert disabled */
   config->vreset_mv           = 3000;   /* 3.0V reset threshold         */
   config->en_soc_change_alert = false;
-  config->en_vreset_alert     = false;
+  config->en_vreset_alert     = true;   /* Alert on voltage reset by default, can be disabled if not needed */
   config->dis_hibernate_comp  = false;
 }
 
@@ -202,8 +202,8 @@ bool max17048_is_present(max17048_dev_t *dev)
   if (s_read_reg(dev, MAX17048_REG_VERSION, &version) != MAX17048_OK)
     return false;
 
-  /* Datasheet p.11: VERSION register always returns 0x0011 */
-  return (version == 0x0011);
+  /* Datasheet p.11: VERSION register returns 0x0011 for MAX17048, 0x0012 for MAX17049 */
+  return (version == 0x0011 || version == 0x0012);
 }
 
 max17048_err_t max17048_init(max17048_dev_t *dev, const max17048_config_t *config)
@@ -311,9 +311,9 @@ max17048_err_t max17048_read_soc_full(max17048_dev_t *dev, uint8_t *soc_pct, uin
   return MAX17048_OK;
 }
 
-max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_mphph)
+max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_phr)
 {
-  if (!dev || !crate_mphph)
+  if (!dev || !crate_phr)
     return MAX17048_ERR_PARAM;
 
   uint16_t raw = 0;
@@ -327,7 +327,7 @@ max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_mphph)
    * (int16_t)raw       — reinterpret bits as signed
    * (int32_t)(int16_t) — widen BEFORE multiplying to avoid overflow
    */
-  *crate_mphph = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000 / 1000);
+  *crate_phr = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000 / 1000);
 
   return MAX17048_OK;
 }
@@ -367,7 +367,7 @@ max17048_err_t max17048_read_all(max17048_dev_t *dev, max17048_data_t *data)
   if (err != MAX17048_OK)
     return err;
 
-  err = max17048_read_crate(dev, &data->crate_mphph);
+  err = max17048_read_crate(dev, &data->crate_phr);
   if (err != MAX17048_OK)
     return err;
 

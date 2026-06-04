@@ -24,8 +24,38 @@
 
 /* USER CODE END 0 */
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim10;
 TIM_HandleTypeDef htim11;
+
+/* TIM2 init function */
+void MX_TIM2_Init(void)
+{
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 9599;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 99;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
 
 /* TIM10 init function */
 void MX_TIM10_Init(void)
@@ -49,7 +79,13 @@ void MX_TIM10_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM10_Init 2 */
-
+  /* Re-initialize TIM10 with Prescaler = 959 to run at exactly 100 kHz (1 tick = 10us) for FreeRTOS run time stats. */
+  htim10.Init.Prescaler = 959;
+  if (HAL_TIM_Base_Init(&htim10) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  HAL_TIM_Base_Start(&htim10);
   /* USER CODE END TIM10_Init 2 */
 
 }
@@ -65,7 +101,7 @@ void MX_TIM11_Init(void)
 
   /* USER CODE END TIM11_Init 1 */
   htim11.Instance = TIM11;
-  htim11.Init.Prescaler = 47;
+  htim11.Init.Prescaler = 95;
   htim11.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim11.Init.Period = 999;
   htim11.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -83,7 +119,12 @@ void MX_TIM11_Init(void)
 void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
 {
 
-  if(tim_baseHandle->Instance==TIM10)
+  if(tim_baseHandle->Instance==TIM2)
+  {
+    /* TIM2 clock enable */
+    __HAL_RCC_TIM2_CLK_ENABLE();
+  }
+  else if(tim_baseHandle->Instance==TIM10)
   {
   /* USER CODE BEGIN TIM10_MspInit 0 */
 
@@ -103,7 +144,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
     __HAL_RCC_TIM11_CLK_ENABLE();
 
     /* TIM11 interrupt Init */
-    HAL_NVIC_SetPriority(TIM1_TRG_COM_TIM11_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(TIM1_TRG_COM_TIM11_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(TIM1_TRG_COM_TIM11_IRQn);
   /* USER CODE BEGIN TIM11_MspInit 1 */
 
@@ -114,7 +155,12 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
 void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
 {
 
-  if(tim_baseHandle->Instance==TIM10)
+  if(tim_baseHandle->Instance==TIM2)
+  {
+    /* Peripheral clock disable */
+    __HAL_RCC_TIM2_CLK_DISABLE();
+  }
+  else if(tim_baseHandle->Instance==TIM10)
   {
   /* USER CODE BEGIN TIM10_MspDeInit 0 */
 

@@ -191,9 +191,11 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
     const uint8_t *data    = pkt->params.flash_write.data.bytes;
     uint32_t       length  = pkt->params.flash_write.data.size;
 
+    uint32_t end = address + length;
     if (length == 0u ||
         address < MEM_APP_START ||
-        address + length > MEM_APP_END) {
+        end < address ||
+        end > MEM_APP_END) {
         RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
                "BL: bad write addr=0x%08lX len=%lu",
                (unsigned long)address, (unsigned long)length);
@@ -220,9 +222,6 @@ static void bl_on_flash_verify(const protobuf_packet_t *pkt)
         network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
         return;
     }
-
-    s_fota.state = protobuf_FOTA_STATE_VERIFYING;
-    bl_send_fota_state(pkt, s_fota.state);
 
     uint32_t image_len = 0u;
     uint32_t expected_crc = 0u;

@@ -122,9 +122,9 @@ static void ble_poll_status(void)
    if (!network_send_ble_status_get(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL)) {
        RLOG_W(OBJECT_CODE, "ble_status_get send failed");
    }
-   // Send the message stub to check the transmission from MCU to HOST via BLE
-   RLOG_I(OBJECT_CODE, "send testing BLE transmittion log to HOST");
-   test_send_log_data_to_host();
+//    // Send the message stub to check the transmission from MCU to HOST via BLE
+//    RLOG_I(OBJECT_CODE, "send testing BLE transmittion log to HOST");
+//    test_send_log_data_to_host();
 }
 
 /* ─────────────────────────────────────────────

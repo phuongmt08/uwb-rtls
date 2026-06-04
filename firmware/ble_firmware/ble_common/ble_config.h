@@ -41,12 +41,12 @@ extern "C" {
 /** 
  * @brief Minimum acceptable connection interval.
  */
-#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(100, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(7.5, UNIT_1_25_MS)
 
 /** 
  * @brief Maximum acceptable connection interval.
  */
-#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(200, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(15, UNIT_1_25_MS)
 
 /** 
  * @brief Slave latency.

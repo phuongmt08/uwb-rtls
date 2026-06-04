@@ -45,7 +45,8 @@ void     sys_logger_task(void);
 uint16_t sys_logger_space_count(void);
 uint16_t sys_logger_data_count(void);
 uint16_t sys_logger_peek(uint8_t *out, uint16_t max_len);
-void     sys_logger_consume(uint16_t len);
+uint16_t sys_logger_ram_peek_packet(uint8_t *out, uint16_t max_len);
+void     sys_logger_ram_consume(uint16_t len);
 
 #ifdef __cplusplus
 }
