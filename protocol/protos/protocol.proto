@@ -24,7 +24,7 @@ package protobuf;
 
 enum common_constant_t {
     UNSPECIFIED  = 0;
-    PROTOCOL_REV = 121;
+    PROTOCOL_REV = 122;
 }
 
 enum packet_ack_response_t {
@@ -208,6 +208,12 @@ message uwb_cfg_t {
     uint32 tx_power             = 11;
     bytes anchor_list           = 12;
     anchor_power_mode_t power_mode = 13;
+    uint32 uwb_preamble_len     = 14;
+    uint32 uwb_rx_pac           = 15;
+    uint32 uwb_ns_sfd           = 16;
+    uint32 uwb_phr_mode         = 17;
+    bool smart_tx_power         = 18;
+    uint32 pg_delay             = 19;
 }
 
 message sys_config_get_t {
@@ -584,6 +590,48 @@ message calib_status_resp_t {
 
 /* Status / diagnostics ----------------------------------------------------- */
 
+/*
+ * Compact RTOS health snapshot. This is intentionally pull-only and contains
+ * no per-task array so it can coexist with log and ranging streams.
+ *
+ * health_flags:
+ *   bit 0: CPU busy above threshold
+ *   bit 1: free heap below threshold
+ *   bit 2: minimum task stack below threshold
+ *   bit 3: task snapshot truncated
+ *   bit 4: CPU/task statistics unavailable
+ */
+message rtos_resource_get_t {
+    uint32 dummy = 1;
+}
+
+message rtos_resource_resp_t {
+    uint32 sample_window_ms          = 1;
+    uint32 cpu_busy_permille         = 2; /* 1000 = 100% */
+    uint32 heap_free_bytes           = 3;
+    uint32 heap_min_ever_free_bytes  = 4;
+    uint32 min_stack_free_bytes      = 5;
+    uint32 min_stack_task_id         = 6;
+    uint32 task_count                = 7;
+    uint32 health_flags              = 8;
+}
+
+/* Per-task details for the current bounded task set. */
+message rtos_task_stats_get_t {
+    uint32 dummy = 1;
+}
+
+message rtos_task_stat_t {
+    uint32 task_id              = 1; /* Valid for the current boot only */
+    uint32 cpu_permille         = 2; /* 1000 = 100% */
+    uint32 stack_min_free_bytes = 3;
+    string name                 = 4;
+}
+
+message rtos_task_stats_resp_t {
+    repeated rtos_task_stat_t tasks = 1;
+}
+
 message ranging_status_get_t {
     uint32 dummy = 1;
 }
@@ -626,9 +674,9 @@ message battery_info_resp_t {
 
     /* Hardware telemetry fields */
     float  mcu_temp_c       = 5;  /* MCU internal temperature in degrees Celsius */
-    uint32 vdda_mv          = 6;  /* Actual VDDA voltage in mV after calibration */
+    uint32 mcu_voltage_mv          = 6;  /* Actual MCU voltage in mV */
     float  uwb_temp_c       = 7;  /* DW1000 chip internal temperature in degrees Celsius */
-    uint32 uwb_vbat_mv      = 8;  /* DW1000 VBAT supply voltage in mV */
+    uint32 uwb_voltage_mv      = 8;  /* DW1000 supply voltage in mV */
     float  imu_temp_c       = 9;  /* IMU sensor internal temperature in degrees Celsius */
     
     uint32 error_mask      = 10; /* Bitmask of breached thresholds */
@@ -651,6 +699,7 @@ message factory_otp_write_t {
 message end_session_t {
     session_end_reason_t reason = 1;
 }
+
 /* Packet ------------------------------------------------------------------- */
 
 message packet_t {
@@ -768,6 +817,12 @@ message packet_t {
 
         /* Factory OTP provisioning */
         factory_otp_write_t       factory_otp_write       = 66;
+
+        /* RTOS resource diagnostics */
+        rtos_resource_get_t       rtos_resource_get       = 71;
+        rtos_resource_resp_t      rtos_resource_resp      = 72;
+        rtos_task_stats_get_t     rtos_task_stats_get     = 73;
+        rtos_task_stats_resp_t    rtos_task_stats_resp    = 74;
     }
 }
 

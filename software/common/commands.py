@@ -397,9 +397,9 @@ class CommandFactory:
         pkt.battery_info_resp.remaining_min = 120
         pkt.battery_info_resp.is_charging = False
         pkt.battery_info_resp.mcu_temp_c = 25.0
-        pkt.battery_info_resp.vdda_mv = 3300
+        pkt.battery_info_resp.mcu_voltage_mv = 3300
         pkt.battery_info_resp.uwb_temp_c = 25.0
-        pkt.battery_info_resp.uwb_vbat_mv = 3300
+        pkt.battery_info_resp.uwb_voltage_mv = 3300
         pkt.battery_info_resp.imu_temp_c = 25.0
         pkt.battery_info_resp.error_mask = 0
         return pkt
