@@ -17,63 +17,6 @@
  * UWB Mahalanobis Pre-Filter
  * ==================================================================== */
 
-static void mahal_history_push(mahalanobis_anchor_state_t *state, float value)
-{
-    state->history[state->index] = value;
-    state->index = (uint8_t)((state->index + 1U) % MW_FILTER_MAHAL_HISTORY_WINDOW);
-    if (state->count < MW_FILTER_MAHAL_HISTORY_WINDOW) {
-        state->count++;
-    }
-}
-
-static float mahal_history_median(const mahalanobis_anchor_state_t *state)
-{
-    float sorted[MW_FILTER_MAHAL_HISTORY_WINDOW];
-    for (uint8_t i = 0; i < state->count; i++) {
-        sorted[i] = state->history[i];
-    }
-
-    for (uint8_t i = 1; i < state->count; i++) {
-        float key = sorted[i];
-        int j = i - 1;
-        while (j >= 0 && sorted[j] > key) {
-            sorted[j + 1] = sorted[j];
-            j--;
-        }
-        sorted[j + 1] = key;
-    }
-
-    if (state->count == 0U) {
-        return 0.0f;
-    }
-    if ((state->count & 1U) != 0U) {
-        return sorted[state->count / 2U];
-    }
-
-    uint8_t mid = state->count / 2U;
-    return 0.5f * (sorted[mid - 1U] + sorted[mid]);
-}
-
-static float mahal_history_variance(const mahalanobis_anchor_state_t *state)
-{
-    if (state->count == 0U) {
-        return 0.0f;
-    }
-
-    float mean = 0.0f;
-    for (uint8_t i = 0; i < state->count; i++) {
-        mean += state->history[i];
-    }
-    mean /= (float)state->count;
-
-    float variance = 0.0f;
-    for (uint8_t i = 0; i < state->count; i++) {
-        float err = state->history[i] - mean;
-        variance += err * err;
-    }
-    return variance / (float)state->count;
-}
-
 float mw_filter_median_update(median_filter_1d_t *med, float new_val)
 {
     med->history[med->index] = new_val;
@@ -108,12 +51,7 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
 {
     if (!ctx) return;
     for (uint8_t i = 0; i < 8; i++) {
-        ctx->anchors[i].count = 0;
-        ctx->anchors[i].index = 0;
         ctx->anchors[i].rejected = false;
-        for (uint8_t j = 0; j < MW_FILTER_MAHAL_HISTORY_WINDOW; j++) {
-            ctx->anchors[i].history[j] = 0.0f;
-        }
     }
     ctx->T1 = T1;
     ctx->T2 = T2;
@@ -130,31 +68,38 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
 {
     if (!ctx || !ctx->initialized || anchor_id >= 8) return false;
 
-    (void)px;
-    (void)py;
-    (void)pz;
-    (void)ax;
-    (void)ay;
-    (void)az;
-
     mahalanobis_anchor_state_t *state = &ctx->anchors[anchor_id];
 
-    /* Cold-start: seed clean history with valid raw readings before gating. */
-    if (state->count < MW_FILTER_MAHAL_COLD_START) {
-        mahal_history_push(state, d_raw);
+    if (!isfinite(d_raw) ||
+        !isfinite(px) || !isfinite(py) || !isfinite(pz) ||
+        !isfinite(ax) || !isfinite(ay) || !isfinite(az)) {
         if (d_out) *d_out = d_raw;
-        if (d2_score) *d2_score = 0.0f;
+        if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
-        return true;
+        state->rejected = true;
+        return false;
     }
 
-    float d_pred = mahal_history_median(state);
-    float variance = mahal_history_variance(state);
+    float dx = px - ax;
+    float dy = py - ay;
+#if SYS_FUSION_USE_PLANAR_RANGES
+    float d_pred = sqrtf((dx * dx) + (dy * dy));
+#else
+    float dz = pz - az;
+    float d_pred = sqrtf((dx * dx) + (dy * dy) + (dz * dz));
+#endif
     float vel_mag = sqrtf(vx * vx + vy * vy + vz * vz);
-    const float k_vel = 0.5f;
-    float S = fmaxf(variance, ctx->R_base) + (k_vel * vel_mag);
-    if (S < 1.0e-6f) {
-        S = 1.0e-6f;
+    const float k_vel = MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
+    float S = MAHALANOBIS_PREFILTER_R_GATE + (k_vel * vel_mag);
+    if (!isfinite(d_pred) || !isfinite(S)) {
+        if (d_out) *d_out = d_raw;
+        if (d2_score) *d2_score = INFINITY;
+        if (R_adaptive) *R_adaptive = ctx->R_base;
+        state->rejected = true;
+        return false;
+    }
+    if (S < MAHALANOBIS_PREFILTER_MIN_COVARIANCE) {
+        S = MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
     }
 
     float r = d_raw - d_pred;
@@ -178,8 +123,6 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     if (!accepted) {
         return false;
     }
-
-    mahal_history_push(state, d_raw);
 
     if (R_adaptive) {
         float scale = 1.0f;
@@ -242,4 +185,136 @@ float mw_filter_distance_smoother_apply(distance_smoother_t *ctx,
 
     flt->filtered_m += ctx->alpha * (bounded_measurement - flt->filtered_m);
     return flt->filtered_m;
+}
+
+/* ====================================================================
+ * UKF Initialization Filter (Median over N samples)
+ * ==================================================================== */
+
+void mw_filter_ukf_init_reset(ukf_init_filter_t *ctx)
+{
+    if (!ctx) return;
+    ctx->count = 0;
+    for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+        ctx->x_history[i] = 0.0f;
+        ctx->y_history[i] = 0.0f;
+    }
+}
+
+static void insertion_sort(float arr[], uint8_t n)
+{
+    for (uint8_t i = 1; i < n; i++) {
+        float key = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = key;
+    }
+}
+
+bool mw_filter_ukf_init_add(ukf_init_filter_t *ctx, float x, float y, float *out_x, float *out_y)
+{
+    if (!ctx) return false;
+
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
+        if (ctx->count >= UKF_INIT_DISCARD_SAMPLES) {
+            ctx->x_history[ctx->count - UKF_INIT_DISCARD_SAMPLES] = x;
+            ctx->y_history[ctx->count - UKF_INIT_DISCARD_SAMPLES] = y;
+        }
+        ctx->count++;
+    }
+
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
+        return false;
+    }
+
+    /* Compute Median */
+    float sorted_x[UKF_INIT_SAMPLES];
+    float sorted_y[UKF_INIT_SAMPLES];
+    
+    for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+        sorted_x[i] = ctx->x_history[i];
+        sorted_y[i] = ctx->y_history[i];
+    }
+
+    insertion_sort(sorted_x, UKF_INIT_SAMPLES);
+    insertion_sort(sorted_y, UKF_INIT_SAMPLES);
+
+    if (out_x) {
+        if (UKF_INIT_SAMPLES % 2 == 1) {
+            *out_x = sorted_x[UKF_INIT_SAMPLES / 2];
+        } else {
+            *out_x = 0.5f * (sorted_x[UKF_INIT_SAMPLES / 2 - 1] + sorted_x[UKF_INIT_SAMPLES / 2]);
+        }
+    }
+    
+    if (out_y) {
+        if (UKF_INIT_SAMPLES % 2 == 1) {
+            *out_y = sorted_y[UKF_INIT_SAMPLES / 2];
+        } else {
+            *out_y = 0.5f * (sorted_y[UKF_INIT_SAMPLES / 2 - 1] + sorted_y[UKF_INIT_SAMPLES / 2]);
+        }
+    }
+
+    return true; /* Filter completed */
+}
+
+void mw_filter_ukf_init_distance_reset(ukf_init_distance_filter_t *ctx)
+{
+    if (!ctx) return;
+    ctx->count = 0;
+    for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+        ctx->d_history[0][i] = 0.0f;
+        ctx->d_history[1][i] = 0.0f;
+        ctx->d_history[2][i] = 0.0f;
+    }
+}
+
+bool mw_filter_ukf_init_distance_add(ukf_init_distance_filter_t *ctx, float d0, float d1, float d2, float *out_d0, float *out_d1, float *out_d2)
+{
+    if (!ctx) return false;
+
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
+        if (ctx->count >= UKF_INIT_DISCARD_SAMPLES) {
+            ctx->d_history[0][ctx->count - UKF_INIT_DISCARD_SAMPLES] = d0;
+            ctx->d_history[1][ctx->count - UKF_INIT_DISCARD_SAMPLES] = d1;
+            ctx->d_history[2][ctx->count - UKF_INIT_DISCARD_SAMPLES] = d2;
+        }
+        ctx->count++;
+    }
+
+    if (ctx->count < UKF_INIT_DISCARD_SAMPLES + UKF_INIT_SAMPLES) {
+        return false;
+    }
+
+    /* Compute Median */
+    if (out_d0 && out_d1 && out_d2) {
+        float sorted_d0[UKF_INIT_SAMPLES];
+        float sorted_d1[UKF_INIT_SAMPLES];
+        float sorted_d2[UKF_INIT_SAMPLES];
+
+        for (int i = 0; i < UKF_INIT_SAMPLES; i++) {
+            sorted_d0[i] = ctx->d_history[0][i];
+            sorted_d1[i] = ctx->d_history[1][i];
+            sorted_d2[i] = ctx->d_history[2][i];
+        }
+
+        insertion_sort(sorted_d0, UKF_INIT_SAMPLES);
+        insertion_sort(sorted_d1, UKF_INIT_SAMPLES);
+        insertion_sort(sorted_d2, UKF_INIT_SAMPLES);
+
+        if (UKF_INIT_SAMPLES % 2 == 1) {
+            *out_d0 = sorted_d0[UKF_INIT_SAMPLES / 2];
+            *out_d1 = sorted_d1[UKF_INIT_SAMPLES / 2];
+            *out_d2 = sorted_d2[UKF_INIT_SAMPLES / 2];
+        } else {
+            *out_d0 = 0.5f * (sorted_d0[UKF_INIT_SAMPLES / 2 - 1] + sorted_d0[UKF_INIT_SAMPLES / 2]);
+            *out_d1 = 0.5f * (sorted_d1[UKF_INIT_SAMPLES / 2 - 1] + sorted_d1[UKF_INIT_SAMPLES / 2]);
+            *out_d2 = 0.5f * (sorted_d2[UKF_INIT_SAMPLES / 2 - 1] + sorted_d2[UKF_INIT_SAMPLES / 2]);
+        }
+    }
+
+    return true; /* Filter completed */
 }

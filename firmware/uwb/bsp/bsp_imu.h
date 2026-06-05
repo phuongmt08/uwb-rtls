@@ -42,12 +42,12 @@
  * ============================================================================= */
 /** Gyroscope full-scale range.  See icm42688_gyro_fs_t in icm42688.h. */
 #ifndef BSP_IMU_GYRO_FS
-	#define BSP_IMU_GYRO_FS         ICM42688_GYRO_FS_2000DPS
+	#define BSP_IMU_GYRO_FS         ICM42688_GYRO_FS_250DPS
 #endif
 
 /** Accelerometer full-scale range.  See icm42688_accel_fs_t. */
 #ifndef BSP_IMU_ACCEL_FS
-	#define BSP_IMU_ACCEL_FS        ICM42688_ACCEL_FS_16G
+	#define BSP_IMU_ACCEL_FS        ICM42688_ACCEL_FS_4G
 #endif
 
 /** Gyroscope output data rate.  See icm42688_odr_t. */
@@ -99,7 +99,7 @@
 #endif
 
 #ifndef BSP_IMU_CALIB_DATA
-	#define BSP_IMU_CALIB_DATA  (true)
+	#define BSP_IMU_CALIB_DATA  (false)
 #endif
 
 #ifndef BSP_IMU_ENABLE_GYRO_FILTER
@@ -157,6 +157,19 @@ bsp_imu_err_t bsp_imu_clear_interrupt();
 bsp_imu_err_t bsp_imu_irq_handler();
 
 bool bsp_imu_is_data_ready();
+
+/**
+ * @brief Read internal temperature of ICM-42688 IMU chip.
+ * @param[out] temp  Pointer to float to store temperature in C.
+ * @return BSP_IMU_OK on success, BSP_IMU_ERR on failure.
+ */
+bsp_imu_err_t bsp_imu_get_temp(float *temp);
+
+/**
+ * @brief  Check if IMU driver was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_imu_is_initialized(void);
 
 #endif /* __BSP_IMU_H */
 

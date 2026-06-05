@@ -8,3 +8,4 @@ pyserial>=3.5                # Serial/USB communication
 pyqtgraph>=0.13.7            # High-performance scientific graphs/plots
 numpy>=2.0.0                 # Numerical computing (position data)
 PyInstaller>=5.9.0           # Build executable (.exe)
+psutil>=5.9.0

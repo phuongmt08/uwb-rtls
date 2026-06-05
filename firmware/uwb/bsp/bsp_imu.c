@@ -11,6 +11,7 @@
 
 /* Includes ----------------------------------------------------------- */
 #include "bsp_imu.h"
+#include "app_rtos_handles.h"
 #include "bsp_util.h"
 #include "err.h"
 #include <math.h>
@@ -24,6 +25,8 @@ extern SPI_HandleTypeDef BSP_IMU_SPI_HANDLE;
 icm42688_dev_t bsp_imu;
 
 /* Private variables -------------------------------------------------- */
+static bool s_spi1_cs_mutex_locked = false;
+
 static const icm42688_config_t s_default_cfg =
 {
 	.gyro_fs             	= BSP_IMU_GYRO_FS,
@@ -49,20 +52,30 @@ static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length);
 
 /* Private function prototypes ---------------------------------------- */
 /* Function definitions ----------------------------------------------- */
+static bool s_initialized = false;
+
 bsp_imu_err_t bsp_imu_init(void)
 {
-
 	bsp_imu.bus.set_cs       = bsp_cs_set;
 	bsp_imu.bus.spi_transfer = bsp_spi_transfer;
 	bsp_imu.bus.delay_us     = bsp_delay_us;
 	bsp_imu.bus.delay_ms     = bsp_delay_ms;
 
-	return icm42688_init(&bsp_imu, &s_default_cfg);
+	bsp_imu_err_t ret = icm42688_init(&bsp_imu, &s_default_cfg);
+	if (ret == BSP_IMU_OK)
+	{
+		s_initialized = true;
+	}
+	else
+	{
+		s_initialized = false;
+	}
+	return ret;
 }
 
 bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data)
 {
-	CHECK_ERR(!p_imu_data, BSP_IMU_ERR);
+	CHECK_ERR(p_imu_data != NULL, BSP_IMU_ERR);
 
 	icm42688_sensor_data_t raw_data;
 
@@ -77,7 +90,7 @@ bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data)
 
 bsp_imu_err_t bsp_imu_get_bias_data(bsp_imu_bias_t *p_bias)
 {
-	CHECK_ERR(!p_bias, BSP_IMU_ERR);
+	CHECK_ERR(p_bias != NULL, BSP_IMU_ERR);
 
 	icm42688_calibration_t calib_data;
 
@@ -92,16 +105,19 @@ bsp_imu_err_t bsp_imu_get_bias_data(bsp_imu_bias_t *p_bias)
 
 bsp_imu_err_t bsp_imu_setup_interrupt()
 {
+	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
 	return icm42688_setup_interrupt(&bsp_imu);
 }
 
 bsp_imu_err_t bsp_imu_clear_interrupt()
 {
+	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
 	return icm42688_clear_interrupt(&bsp_imu);
 }
 
 bsp_imu_err_t bsp_imu_irq_handler()
 {
+	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
 	icm42688_irq_handler(&bsp_imu);
 
 	return BSP_IMU_OK;
@@ -109,6 +125,10 @@ bsp_imu_err_t bsp_imu_irq_handler()
 
 bool bsp_imu_is_data_ready()
 {
+	if (!s_initialized)
+	{
+		return false;
+	}
 	/* Atomically read and clear the flag set by bsp_imu_irq_handler() */
 	bool ready = bsp_imu.data_ready;
 
@@ -122,29 +142,67 @@ bool bsp_imu_is_data_ready()
 
 bsp_imu_err_t bsp_imu_soft_reset()
 {
+	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
 	return icm42688_soft_reset(&bsp_imu);
 }
 
 bsp_imu_err_t bsp_imu_self_test()
 {
+	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
 	return icm42688_self_test(&bsp_imu);
 }
 
 /* Private definitions ------------------------------------------------ */
+static bool bsp_spi1_mutex_is_available(void)
+{
+	osKernelState_t state = osKernelGetState();
+	return (g_spi1_mutexHandle != NULL) &&
+	       ((state == osKernelRunning) || (state == osKernelLocked));
+}
+
+static bool bsp_spi1_mutex_acquire(void)
+{
+	if (!bsp_spi1_mutex_is_available())
+	{
+		return true;
+	}
+
+	return (osMutexAcquire(g_spi1_mutexHandle, osWaitForever) == osOK);
+}
+
+static void bsp_spi1_mutex_release(void)
+{
+	if (bsp_spi1_mutex_is_available())
+	{
+		(void)osMutexRelease(g_spi1_mutexHandle);
+	}
+}
+
 static void bsp_cs_set(bool select)
 {
 	if (select)
 	{
+		if (!bsp_spi1_mutex_acquire())
+		{
+			return;
+		}
+		s_spi1_cs_mutex_locked = true;
 		HAL_GPIO_WritePin(BSP_IMU_CS_GPIO_PORT, BSP_IMU_CS_GPIO_PIN, GPIO_PIN_RESET);
 	}
 	else
 	{
 		HAL_GPIO_WritePin(BSP_IMU_CS_GPIO_PORT, BSP_IMU_CS_GPIO_PIN, GPIO_PIN_SET);
+		if (s_spi1_cs_mutex_locked)
+		{
+			s_spi1_cs_mutex_locked = false;
+			bsp_spi1_mutex_release();
+		}
 	}
 }
 
 static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 {
+	HAL_StatusTypeDef status;
 
 	/* Temporary buffers for the NULL side of the transaction */
 	uint8_t tx_dummy[64] = {0};
@@ -159,13 +217,33 @@ static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 		return false;
 	}
 
-	CHECK_ERR((HAL_SPI_TransmitReceive(&BSP_IMU_SPI_HANDLE,
+	status = HAL_SPI_TransmitReceive(&BSP_IMU_SPI_HANDLE,
 			(uint8_t *)tx_ptr,
 			rx_ptr,
 			length,
-			BSP_IMU_SPI_TIMEOUT_MS) == HAL_OK), false);
+			BSP_IMU_SPI_TIMEOUT_MS);
+
+	CHECK_ERR((status == HAL_OK), false);
 
 	return true;
+}
+
+bsp_imu_err_t bsp_imu_get_temp(float *temp)
+{
+	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(!temp, BSP_IMU_ERR);
+	icm42688_sensor_data_t raw_data;
+
+	// Burst read raw sensor data (including temperature) from ICM-42688
+	CHECK_ERR(icm42688_get_raw_data(&bsp_imu, &raw_data) == ICM42688_OK, BSP_IMU_ERR);
+
+	*temp = raw_data.temp;
+	return BSP_IMU_OK;
+}
+
+bool bsp_imu_is_initialized(void)
+{
+	return s_initialized;
 }
 
 /* End of file -------------------------------------------------------- */

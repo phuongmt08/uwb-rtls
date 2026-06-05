@@ -14,9 +14,14 @@
 #define ENABLE_DEBUG_LOGGING
 #define HAVE_BLE_PERIPHERAL
 
-/* Experimental features */
-#define UWB_EVENT_DRIVEN
+/* Developer diagnostics */
+#define DEVELOPER_MODE
 
-#define USE_DIP_SWITCH   /* Define this if your hardware has a physical DIP switch for ID selection */
+/*
+ * Force this firmware image to run as a TAG even when flash config storage
+ * cannot be erased/written or contains an invalid role.
+ */
+#define FORCE_DEVICE_TAG_MODE 0
+
 
 #endif /* __CONFIG_H */

@@ -1,4 +1,126 @@
 let ruleCounter = 0;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 5;
+
+function cloneAnchors(source) {
+    return source.map(a => ({
+        id: a.id,
+        x: Number(a.x),
+        y: Number(a.y),
+        z: Number(a.z)
+    }));
+}
+
+function initAnchorEditor(anchorList) {
+    const container = document.getElementById('anchor_editor');
+    if (!container) return;
+
+    container.innerHTML = anchorList.map(a => `
+        <div class="anchor-row" data-anchor-id="${a.id}">
+            <strong>A${a.id}</strong>
+            <label for="anchor_${a.id}_x">X</label>
+            <input id="anchor_${a.id}_x" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="x" type="number" step="0.001" value="${a.x}" oninput="updateAnchorsFromInputs()">
+            <label for="anchor_${a.id}_y">Y</label>
+            <input id="anchor_${a.id}_y" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="y" type="number" step="0.001" value="${a.y}" oninput="updateAnchorsFromInputs()">
+            <label for="anchor_${a.id}_z">Z</label>
+            <input id="anchor_${a.id}_z" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="z" type="number" step="0.001" value="${a.z}" oninput="updateAnchorsFromInputs()">
+        </div>
+    `).join('');
+}
+
+function readAnchorsFromInputs() {
+    const next = cloneAnchors(anchors);
+    document.querySelectorAll('.anchor-pos').forEach(input => {
+        const idx = parseInt(input.dataset.anchorIndex);
+        const axis = input.dataset.axis;
+        const value = parseFloat(input.value);
+        if (next[idx] && Number.isFinite(value)) {
+            next[idx][axis] = value;
+        }
+    });
+    return next;
+}
+
+function setAnchorInputs(anchorList) {
+    anchorList.forEach((a, idx) => {
+        ['x', 'y', 'z'].forEach(axis => {
+            const input = document.querySelector(`.anchor-pos[data-anchor-index="${idx}"][data-axis="${axis}"]`);
+            if (input) input.value = a[axis];
+        });
+    });
+}
+
+function updateAnchorPlot(anchorList) {
+    const plot = document.getElementById('trajectory');
+    if (!plot || !plot.data) return;
+    Plotly.restyle('trajectory', {
+        x: [anchorList.map(a => a.x)],
+        y: [anchorList.map(a => a.y)],
+        text: [anchorList.map(a => 'A' + a.id)]
+    }, [0]);
+}
+
+function updateAnchorsFromInputs() {
+    anchors = readAnchorsFromInputs();
+    updateAnchorPlot(anchors);
+    if (typeof update === 'function') update();
+}
+
+function resetAnchorsToDefault() {
+    anchors = cloneAnchors(SIM_CONFIG.ENV.ANCHORS);
+    setAnchorInputs(anchors);
+    updateAnchorPlot(anchors);
+    if (typeof update === 'function') update();
+}
+
+function normalizeGroundTruth(track) {
+    if (!track) return { id: 'empty', name: 'Empty', x: [], y: [], segments: [] };
+    if (Array.isArray(track.segments) && track.segments.length > 0) return track;
+
+    const segments = [];
+    const xs = track.x || [];
+    const ys = track.y || [];
+    for (let i = 0; i < Math.min(xs.length, ys.length) - 1; i++) {
+        if ([xs[i], ys[i], xs[i + 1], ys[i + 1]].every(Number.isFinite)) {
+            segments.push([xs[i], ys[i], xs[i + 1], ys[i + 1]]);
+        }
+    }
+    return Object.assign({}, track, { segments });
+}
+
+function initGroundTruthSelector() {
+    const select = document.getElementById('groundtruth_select');
+    if (!select) return;
+
+    select.innerHTML = groundTruths.map((gt, idx) => {
+        const id = gt.id || `gt_${idx}`;
+        return `<option value="${id}">Ground Truth: ${gt.name || id}</option>`;
+    }).join('');
+
+    const saved = localStorage.getItem('uwb_sim_groundtruth');
+    if (saved && groundTruths.some(gt => gt.id === saved)) {
+        select.value = saved;
+    }
+    activeGroundTruth = normalizeGroundTruth(groundTruths.find(gt => gt.id === select.value) || groundTruths[0]);
+}
+
+function updateGroundTruthPlot(track) {
+    const plot = document.getElementById('trajectory');
+    if (!plot || !plot.data) return;
+    Plotly.restyle('trajectory', {
+        x: [track.x],
+        y: [track.y],
+        name: [`Ground Truth (${track.name || track.id})`]
+    }, [1]);
+}
+
+function onGroundTruthChanged() {
+    const select = document.getElementById('groundtruth_select');
+    const selected = select ? select.value : null;
+    activeGroundTruth = normalizeGroundTruth(groundTruths.find(gt => gt.id === selected) || groundTruths[0]);
+    if (selected) localStorage.setItem('uwb_sim_groundtruth', selected);
+    updateGroundTruthPlot(activeGroundTruth);
+    if (typeof update === 'function') update();
+}
 
 function decodeMask(mask) {
     let a = [];
@@ -18,13 +140,13 @@ function addRule(start, end, activeAnchors) {
     const div = document.createElement('div');
     div.id = 'rule_' + id;
     div.style.display = 'flex';
-    div.style.gap = '10px';
+    div.style.gap = '8px';
     div.style.alignItems = 'center';
     div.style.background = '#f8fafc';
-    div.style.padding = '8px 12px';
+    div.style.padding = '6px 10px';
     div.style.borderRadius = '6px';
     div.style.border = '1px solid #e2e8f0';
-    div.style.fontSize = '0.85rem';
+    div.style.fontSize = '0.8rem';
 
     let checksHTML = '';
     for (let i = 0; i < 4; i++) {
@@ -35,14 +157,14 @@ function addRule(start, end, activeAnchors) {
     div.innerHTML = `
         <div style="display:flex; align-items:center; gap:5px;">
             <span style="font-weight:bold; color:#64748b;">Range:</span>
-            <input type="number" class="rule-start" value="${start}" style="width: 70px; padding: 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
+            <input type="number" class="rule-start" value="${start}" style="width: 60px; padding: 3px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
             <span>-</span>
-            <input type="number" class="rule-end" value="${end}" style="width: 70px; padding: 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
+            <input type="number" class="rule-end" value="${end}" style="width: 60px; padding: 3px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
         </div>
-        <div style="display:flex; gap: 12px; margin-left: 15px; flex-grow: 1;">
+        <div style="display:flex; gap: 8px; margin-left: 10px; flex-grow: 1;">
             ${checksHTML}
         </div>
-        <button onclick="removeRule(${id})" style="cursor:pointer; color: #ef4444; border:none; background:none; font-weight:bold; font-size:1.2rem; padding:0 5px;" title="Remove Rule">&times;</button>
+        <button onclick="removeRule(${id})" style="cursor:pointer; color: #ef4444; border:none; background:none; font-weight:bold; font-size:1rem; padding:0 4px;" title="Remove Rule">&times;</button>
     `;
 
     document.getElementById('rules_container').appendChild(div);
@@ -91,14 +213,25 @@ function exportTrajectoryCsv() {
         let px = entry.px_fw;
         let py = entry.py_fw;
 
-        if (entry.type === 'Update') {
-            const nextPx = path.x ? path.x[updateIdx] : null;
-            const nextPy = path.y ? path.y[updateIdx] : null;
+        if (selected === 'ukf' || selected === 'ukf_lpf') {
+            // UKF has a position for EVERY log entry (20Hz)
+            const nextPx = path.x ? path.x[index] : null;
+            const nextPy = path.y ? path.y[index] : null;
             if (Number.isFinite(nextPx) && Number.isFinite(nextPy)) {
                 px = nextPx;
                 py = nextPy;
             }
-            updateIdx++;
+        } else {
+            // Other paths are only aligned with Update events (6Hz)
+            if (entry.type === 'Update') {
+                const nextPx = path.x ? path.x[updateIdx] : null;
+                const nextPy = path.y ? path.y[updateIdx] : null;
+                if (Number.isFinite(nextPx) && Number.isFinite(nextPy)) {
+                    px = nextPx;
+                    py = nextPy;
+                }
+                updateIdx++;
+            }
         }
 
         const sourceLine = entry.raw_line || formatFallbackLogLine(entry, entry.px_fw, entry.py_fw, index + 1);
@@ -127,6 +260,28 @@ function countValidPositions(path) {
     return count;
 }
 
+function getRateStatsFromDt(entries, types) {
+    const allowedTypes = new Set(types);
+    let count = 0;
+    let dtSum = 0;
+
+    entries.forEach(entry => {
+        const dt = Number(entry.dt);
+        if (allowedTypes.has(entry.type) && Number.isFinite(dt) && dt > 0) {
+            count++;
+            dtSum += dt;
+        }
+    });
+
+    const meanDt = count > 0 ? dtSum / count : 0;
+    return {
+        count,
+        dtSum,
+        meanDt,
+        hz: meanDt > 0 ? 1 / meanDt : 0
+    };
+}
+
 function updatePositionRateDisplay(totalTimeOverride) {
     if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
     const select = document.getElementById('export_path_select');
@@ -134,15 +289,24 @@ function updatePositionRateDisplay(totalTimeOverride) {
     const path = latestTrajectoryPaths[selected] || latestTrajectoryPaths.firmware;
     const validCount = countValidPositions(path);
     const totalCount = path && path.x ? path.x.length : 0;
-    const hz = latestTotalTime > 0 ? validCount / latestTotalTime : 0;
+    const processedCount = latestSimulationResult && latestSimulationResult.simPathUKF_allTimes
+        ? latestSimulationResult.simPathUKF_allTimes.length
+        : rawData.all_entries.length;
+    const entriesForRate = rawData.all_entries.slice(0, processedCount);
+    const predictRate = getRateStatsFromDt(entriesForRate, ['Predict']);
+    const updateRate = getRateStatsFromDt(entriesForRate, ['Update']);
+    const allRate = getRateStatsFromDt(entriesForRate, ['Predict', 'Update']);
+    const exportRate = selected === 'firmware' || selected === 'rules' || selected === 'wls' || selected === 'triplet'
+        ? updateRate
+        : allRate;
     const label = select ? select.options[select.selectedIndex].text : 'Trajectory';
     const elem = document.getElementById('position_rate_info');
     if (elem) {
-        elem.textContent = `${label}: ${hz.toFixed(2)} Hz (${validCount}/${totalCount} points, ${latestTotalTime.toFixed(2)}s)`;
+        elem.textContent = `${label}: ${exportRate.hz.toFixed(2)} Hz (${validCount}/${totalCount} points) | Predict: ${predictRate.hz.toFixed(2)} Hz | Update: ${updateRate.hz.toFixed(2)} Hz`;
     }
 }
 
-function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength, samples) {
+function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, rescueIdx, ambiguityEvents, xAxisLength, samples) {
     const elem = document.getElementById('d2_distance_stats');
     if (!elem) return;
 
@@ -153,10 +317,11 @@ function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength, samp
         }
     });
 
-    elem.innerHTML = [0, 1, 2, 3].map(i => {
+    const anchorStats = [0, 1, 2, 3].map(i => {
         const d2 = meanFinite(d2Scores[i]);
         const gatedCount = gatedDist[i].filter(v => Number.isFinite(v)).length;
         const rejectCount = rejectIdx[i].length;
+        const rescueCount = rescueIdx && rescueIdx[i] ? rescueIdx[i].length : 0;
         const meanText = d2.mean === null ? '--' : d2.mean.toFixed(3);
         return `
             <div class="stat-box">
@@ -165,10 +330,19 @@ function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, xAxisLength, samp
                 <div class="stat-row"><span>D2 Count</span><span>${d2.count}</span></div>
                 <div class="stat-row"><span>Raw Dist</span><span>${rawCounts[i]}</span></div>
                 <div class="stat-row"><span>Gated Dist</span><span>${gatedCount}</span></div>
+                <div class="stat-row"><span>Rescued</span><span>${rescueCount}</span></div>
                 <div class="stat-row"><span>Rejected</span><span>${rejectCount}</span></div>
             </div>
         `;
     }).join('');
+
+    const ambiguityCount = Array.isArray(ambiguityEvents) ? ambiguityEvents.length : 0;
+    elem.innerHTML = anchorStats + `
+        <div class="stat-box">
+            <strong>Raw Geometry</strong>
+            <div class="stat-row"><span>Ambiguous</span><span>${ambiguityCount}</span></div>
+        </div>
+    `;
 }
 
 function syncInput(rangeId, inputId) {
@@ -184,14 +358,35 @@ function syncInput(rangeId, inputId) {
 
 function saveDefaults() {
     const config = {
+        schema_version: UWB_SIM_DEFAULTS_SCHEMA_VERSION,
         t2_high: document.getElementById('t2_high_input').value,
         t2_low: document.getElementById('t2_low_input').value,
-        r_base: document.getElementById('r_input').value,
+        rescue_noise_max: document.getElementById('r_input').value,
+        rescue_min_anchors: document.getElementById('win_input').value,
         zupt_acc: document.getElementById('zupt_acc_input').value,
         zupt_gyr: document.getElementById('zupt_gyr_input').value,
         max_samples: document.getElementById('max_samples_input').value,
         enable_smoother: document.getElementById('enable_smoother').checked,
-        rules: []
+        enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
+        enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
+        imu_lpf_cutoff_hz: document.getElementById('imu_lpf_cutoff_input').value,
+        groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
+        anchors: readAnchorsFromInputs(),
+        rules: [],
+        tag_height: document.getElementById('tag_height_input').value,
+
+        // Save UKF parameters
+        ukf_alpha: document.getElementById('ukf_alpha_input').value,
+        ukf_beta: document.getElementById('ukf_beta_input').value,
+        ukf_kappa: document.getElementById('ukf_kappa_input').value,
+        q_a: document.getElementById('ukf_qa_input').value,
+        q_g: document.getElementById('ukf_qg_input').value,
+        r_uwb: document.getElementById('ukf_ruwb_input').value,
+        r_gate: document.getElementById('ukf_rgate_input').value,
+        triplet_w_d2: document.getElementById('triplet_w_d2_input').value,
+        triplet_w_fp: document.getElementById('triplet_w_fp_input').value,
+        triplet_w_gdop: document.getElementById('triplet_w_gdop_input').value,
+        triplet_w_resid: document.getElementById('triplet_w_resid_input').value
     };
     const ruleDivs = document.getElementById('rules_container').children;
     for (let i = 0; i < ruleDivs.length; i++) {
@@ -203,6 +398,7 @@ function saveDefaults() {
         });
     }
     localStorage.setItem('uwb_sim_defaults', JSON.stringify(config));
+    if (config.groundtruth) localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
     alert('Defaults saved!');
 }
 
@@ -216,41 +412,133 @@ function loadDefaults() {
     if (saved) {
         try {
             const config = JSON.parse(saved);
-            if (config.t2_high) {
+            const loadTuning = config.schema_version === UWB_SIM_DEFAULTS_SCHEMA_VERSION;
+            if (!loadTuning) {
+                console.warn('Ignoring stale simulation tuning defaults. Ground truth and anchors are still restored.');
+            }
+
+            if (loadTuning && config.t2_high) {
                 document.getElementById('t2_high_input').value = config.t2_high;
                 document.getElementById('t2_high_range').value = config.t2_high;
                 document.getElementById('t2_high_val').innerText = config.t2_high;
             }
-            if (config.t2_low) {
+            if (loadTuning && config.t2_low) {
                 document.getElementById('t2_low_input').value = config.t2_low;
                 document.getElementById('t2_low_range').value = config.t2_low;
                 document.getElementById('t2_low_val').innerText = config.t2_low;
             }
-            if (config.r_base) {
-                document.getElementById('r_input').value = config.r_base;
-                document.getElementById('r_range').value = config.r_base;
-                document.getElementById('r_val').innerText = config.r_base;
+            if (loadTuning && config.rescue_noise_max) {
+                const rescueNoiseMax = Math.min(5.0, Math.max(0.01, parseFloat(config.rescue_noise_max)));
+                document.getElementById('r_input').value = rescueNoiseMax;
+                document.getElementById('r_range').value = rescueNoiseMax;
+                document.getElementById('r_val').innerText = rescueNoiseMax;
             }
-            if (config.zupt_acc) {
+            if (loadTuning && config.rescue_min_anchors) {
+                document.getElementById('win_input').value = config.rescue_min_anchors;
+                document.getElementById('win_range').value = config.rescue_min_anchors;
+                document.getElementById('win_val').innerText = config.rescue_min_anchors;
+            }
+            if (loadTuning && config.zupt_acc) {
                 document.getElementById('zupt_acc_input').value = config.zupt_acc;
                 document.getElementById('zupt_acc_range').value = config.zupt_acc;
                 document.getElementById('zupt_acc_val').innerText = config.zupt_acc;
             }
-            if (config.zupt_gyr) {
+            if (loadTuning && config.zupt_gyr) {
                 document.getElementById('zupt_gyr_input').value = config.zupt_gyr;
                 document.getElementById('zupt_gyr_range').value = config.zupt_gyr;
                 document.getElementById('zupt_gyr_val').innerText = config.zupt_gyr;
             }
-            if (config.max_samples) {
+            if (loadTuning && config.max_samples) {
                 document.getElementById('max_samples_input').value = config.max_samples;
                 document.getElementById('max_samples_range').value = config.max_samples;
                 document.getElementById('max_samples_val').innerText = config.max_samples;
             }
-            if (config.enable_smoother !== undefined) {
+            if (loadTuning && config.enable_smoother !== undefined) {
                 document.getElementById('enable_smoother').checked = config.enable_smoother;
             }
+            if (loadTuning && config.enable_mahalanobis !== undefined) {
+                document.getElementById('enable_mahalanobis').checked = config.enable_mahalanobis;
+            }
+            if (loadTuning && config.enable_imu_lpf !== undefined) {
+                document.getElementById('enable_imu_lpf').checked = config.enable_imu_lpf;
+            }
+            if (loadTuning && config.imu_lpf_cutoff_hz) {
+                document.getElementById('imu_lpf_cutoff_input').value = config.imu_lpf_cutoff_hz;
+                document.getElementById('imu_lpf_cutoff_range').value = config.imu_lpf_cutoff_hz;
+                document.getElementById('imu_lpf_cutoff_val').innerText = parseFloat(config.imu_lpf_cutoff_hz).toFixed(2);
+            }
+            if (loadTuning && config.tag_height) {
+                document.getElementById('tag_height_input').value = config.tag_height;
+                document.getElementById('tag_height_range').value = config.tag_height;
+                document.getElementById('tag_height_val').innerText = config.tag_height;
+                tagHeight = parseFloat(config.tag_height);
+            }
+            if (config.groundtruth) {
+                localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
+            }
+            if (Array.isArray(config.anchors) && config.anchors.length === anchors.length) {
+                anchors = cloneAnchors(config.anchors);
+                setAnchorInputs(anchors);
+            }
             
-            if (config.rules && config.rules.length > 0) {
+            // Load UKF parameters
+            if (loadTuning && config.ukf_alpha) {
+                document.getElementById('ukf_alpha_input').value = config.ukf_alpha;
+                document.getElementById('ukf_alpha_range').value = config.ukf_alpha;
+                document.getElementById('ukf_alpha_val').innerText = config.ukf_alpha;
+            }
+            if (loadTuning && config.ukf_beta) {
+                document.getElementById('ukf_beta_input').value = config.ukf_beta;
+                document.getElementById('ukf_beta_range').value = config.ukf_beta;
+                document.getElementById('ukf_beta_val').innerText = config.ukf_beta;
+            }
+            if (loadTuning && config.ukf_kappa) {
+                document.getElementById('ukf_kappa_input').value = config.ukf_kappa;
+                document.getElementById('ukf_kappa_range').value = config.ukf_kappa;
+                document.getElementById('ukf_kappa_val').innerText = config.ukf_kappa;
+            }
+            if (loadTuning && config.q_a) {
+                document.getElementById('ukf_qa_input').value = config.q_a;
+                document.getElementById('ukf_qa_range').value = config.q_a;
+                document.getElementById('ukf_qa_val').innerText = config.q_a;
+            }
+            if (loadTuning && config.q_g) {
+                document.getElementById('ukf_qg_input').value = config.q_g;
+                document.getElementById('ukf_qg_range').value = config.q_g;
+                document.getElementById('ukf_qg_val').innerText = parseFloat(config.q_g).toExponential(3);
+            }
+            if (loadTuning && config.r_uwb) {
+                document.getElementById('ukf_ruwb_input').value = config.r_uwb;
+                document.getElementById('ukf_ruwb_range').value = config.r_uwb;
+                document.getElementById('ukf_ruwb_val').innerText = config.r_uwb;
+            }
+            if (loadTuning && config.r_gate) {
+                document.getElementById('ukf_rgate_input').value = config.r_gate;
+                document.getElementById('ukf_rgate_range').value = config.r_gate;
+                document.getElementById('ukf_rgate_val').innerText = config.r_gate;
+            }
+            if (loadTuning && config.triplet_w_d2 !== undefined) {
+                document.getElementById('triplet_w_d2_input').value = config.triplet_w_d2;
+                document.getElementById('triplet_w_d2_range').value = config.triplet_w_d2;
+                document.getElementById('triplet_w_d2_val').innerText = config.triplet_w_d2;
+            }
+            if (loadTuning && config.triplet_w_fp !== undefined) {
+                document.getElementById('triplet_w_fp_input').value = config.triplet_w_fp;
+                document.getElementById('triplet_w_fp_range').value = config.triplet_w_fp;
+                document.getElementById('triplet_w_fp_val').innerText = config.triplet_w_fp;
+            }
+            if (loadTuning && config.triplet_w_gdop !== undefined) {
+                document.getElementById('triplet_w_gdop_input').value = config.triplet_w_gdop;
+                document.getElementById('triplet_w_gdop_range').value = config.triplet_w_gdop;
+                document.getElementById('triplet_w_gdop_val').innerText = config.triplet_w_gdop;
+            }
+            if (loadTuning && config.triplet_w_resid !== undefined) {
+                document.getElementById('triplet_w_resid_input').value = config.triplet_w_resid;
+                document.getElementById('triplet_w_resid_range').value = config.triplet_w_resid;
+                document.getElementById('triplet_w_resid_val').innerText = config.triplet_w_resid;
+            }
+
+            if (loadTuning && config.rules && config.rules.length > 0) {
                 document.getElementById('rules_container').innerHTML = '';
                 config.rules.forEach(r => {
                     addRule(r.start, r.end, r.anchors);

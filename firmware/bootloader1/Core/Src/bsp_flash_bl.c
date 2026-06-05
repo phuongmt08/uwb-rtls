@@ -46,17 +46,25 @@ static bsp_fl_status_t erase_sector(uint32_t hal_sector)
 
 static bsp_fl_status_t write_words(uint32_t addr, const uint8_t *data, uint32_t length)
 {
-    const uint32_t *words = (const uint32_t *)data;
-    uint32_t        count = length / 4u;
+    uint32_t count = length / 4u;
 
     HAL_FLASH_Unlock();
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | 
                            FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
 
     for (uint32_t i = 0; i < count; i++) {
+        uint32_t target = addr + i * 4u;
+        uint32_t word = 0xFFFFFFFFu;
+        memcpy(&word, data + i * 4u, sizeof(word));
+
+        if ((*(const uint32_t *)target & word) != word) {
+            HAL_FLASH_Lock();
+            return BSP_FL_ERR_PROGRAM;
+        }
+
         if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD,
-                              addr + i * 4u,
-                              words[i]) != HAL_OK) {
+                              target,
+                              word) != HAL_OK) {
             HAL_FLASH_Lock();
             return BSP_FL_ERR_PROGRAM;
         }
@@ -66,30 +74,30 @@ static bsp_fl_status_t write_words(uint32_t addr, const uint8_t *data, uint32_t 
     return BSP_FL_OK;
 }
 
-static uint32_t crc32_hw(const uint8_t *data, uint32_t length)
-{
-    /* Use STM32 hardware CRC32 peripheral (polynomial 0x04C11DB7) */
-    __HAL_RCC_CRC_CLK_ENABLE();
+// static uint32_t crc32_hw(const uint8_t *data, uint32_t length)
+// {
+//     /* Use STM32 hardware CRC32 peripheral (polynomial 0x04C11DB7) */
+//     __HAL_RCC_CRC_CLK_ENABLE();
 
-    CRC->CR = CRC_CR_RESET;
+//     CRC->CR = CRC_CR_RESET;
 
-    const uint32_t *words     = (const uint32_t *)data;
-    uint32_t        word_count = length / 4u;
+//     const uint32_t *words     = (const uint32_t *)data;
+//     uint32_t        word_count = length / 4u;
 
-    for (uint32_t i = 0; i < word_count; i++) {
-        CRC->DR = words[i];
-    }
+//     for (uint32_t i = 0; i < word_count; i++) {
+//         CRC->DR = words[i];
+//     }
 
-    /* Handle remaining bytes (< 4) by padding with 0xFF */
-    uint32_t remainder = length % 4u;
-    if (remainder > 0u) {
-        uint32_t tail = 0xFFFFFFFFu;
-        memcpy(&tail, data + word_count * 4u, remainder);
-        CRC->DR = tail;
-    }
+//     /* Handle remaining bytes (< 4) by padding with 0xFF */
+//     uint32_t remainder = length % 4u;
+//     if (remainder > 0u) {
+//         uint32_t tail = 0xFFFFFFFFu;
+//         memcpy(&tail, data + word_count * 4u, remainder);
+//         CRC->DR = tail;
+//     }
 
-    return CRC->DR;
-}
+//     return CRC->DR;
+// }
 
 static uint32_t crc32_hw_with_zero_word(const uint8_t *data,
                                         uint32_t length,
@@ -151,7 +159,11 @@ bsp_fl_status_t bsp_fl_app_write(uint32_t dst_addr, const uint8_t *data, uint32_
     if ((dst_addr & 3u) != 0u)             return BSP_FL_ERR_INVALID_ARG;
     if ((length   & 3u) != 0u)             return BSP_FL_ERR_INVALID_ARG;
     if (dst_addr < MEM_APP_START)          return BSP_FL_ERR_INVALID_ARG;
-    if (dst_addr + length > MEM_APP_END)   return BSP_FL_ERR_INVALID_ARG;
+
+    uint32_t end = dst_addr + length;
+    if (end < dst_addr || end > MEM_APP_END) {
+        return BSP_FL_ERR_INVALID_ARG;
+    }
 
     return write_words(dst_addr, data, length);
 }
@@ -219,9 +231,12 @@ uint16_t DFU_Erase_AppSectors(void)
 
 uint32_t DFU_GetSectorFromAddress(uint32_t address)
 {
+    if (address < MEM_APP_START || address >= MEM_APP_END) {
+        return 0xFFFFFFFFUL;
+    }
+
     if (address < 0x08010000UL) return FLASH_SECTOR_3;   /* 0x0800C000-0x0800FFFF 16 KB */
     if (address < 0x08020000UL) return FLASH_SECTOR_4;   /* 0x08010000-0x0801FFFF 64 KB */
     if (address < 0x08040000UL) return FLASH_SECTOR_5;   /* 0x08020000-0x0803FFFF 128 KB */
-    if (address < 0x08060000UL) return FLASH_SECTOR_6;   /* data storage */
-    return FLASH_SECTOR_7;
+    return 0xFFFFFFFFUL;
 }

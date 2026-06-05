@@ -12,9 +12,9 @@
  */
 
 #include "deca_sleep.h"
+#include "bsp_util.h"
 
 void deca_sleep(unsigned int time_ms)
 {
-    /* Use STM32 HAL delay function */
-    HAL_Delay(time_ms);
+    bsp_delay_ms(time_ms);
 }

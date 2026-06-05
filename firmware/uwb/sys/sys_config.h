@@ -15,6 +15,7 @@
 /* Includes ----------------------------------------------------------------- */
 #include "bsp_util.h"
 #include "config.h"
+#include "otp/otp.h"
 #include "positioning_config.h"
 #include "protos/protocol.pb.h"
 
@@ -70,14 +71,14 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            15   /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            22     /* bump → forces flash reset on upgrade */
 
-#define DEFAULT_DEVICE_ROLE       DEVICE_ROLE_ANCHOR
+#define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_HOST_TRANSPORT    HOST_TRANSPORT_USB
 #define DEFAULT_DEVICE_ID         0x01
-#define DEFAULT_RANGING_PERIOD_MS 80
-#define DEFAULT_RX_TIMEOUT_MS     75
+#define DEFAULT_RANGING_PERIOD_MS 75
+#define DEFAULT_RX_TIMEOUT_MS     60
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
 #define DEFAULT_UWB_DATA_RATE     2 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
@@ -111,6 +112,7 @@ int                    sys_config_set_calib(const sys_calib_cfg_t *calib);
 void                   sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);
 int                    sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count);
 int sys_config_set_power_mode(anchor_power_mode_t mode);
+otp_err_t sys_config_factory_otp_write(const protobuf_factory_otp_write_t *req);
 
 
 /* Storage */

@@ -1,4 +1,5 @@
 import os
+import time
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from views.dfu_tab import DfuTab
@@ -13,6 +14,49 @@ from models.consts import APP_START, APP_END
 def _is_pipe_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return "pipe error" in text or "errno 32" in text
+
+def kill_competing_processes(log_cb):
+    try:
+        import psutil
+    except ModuleNotFoundError:
+        if not getattr(kill_competing_processes, "_missing_psutil_logged", False):
+            log_cb("[WARN] psutil not installed; auto-kill disabled.")
+            kill_competing_processes._missing_psutil_logged = True
+        return
+
+    try:
+        current_pid = os.getpid()
+        killed = 0
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+            try:
+                pid = proc.info['pid']
+                if pid == current_pid:
+                    continue
+                name = (proc.info['name'] or '').lower()
+                cmdline = proc.info['cmdline'] or []
+                cwd = (proc.info['cwd'] or '').lower()
+
+                # Check if it's a python process running in our workspace
+                is_competing = False
+                if "python" in name:
+                    if "final_project" in cwd or "uwb-rtls" in cwd:
+                        is_competing = True
+                    for arg in cmdline:
+                        arg_low = arg.lower()
+                        if "uwb-rtls" in arg_low or "simulate" in arg_low:
+                            is_competing = True
+
+                if is_competing:
+                    log_cb(f"[FORCE] Terminating competing process PID {pid} ({name})...")
+                    proc.terminate()
+                    proc.wait(timeout=1.0)
+                    killed += 1
+            except Exception:
+                pass
+        if killed > 0:
+            time.sleep(0.5)
+    except Exception as e:
+        log_cb(f"[WARN] Could not check/kill competing processes: {e}")
 
 class DfuController(QObject):
     def __init__(self, view: DfuTab, signals: WorkerSignals, config: ConfigService, main_ctrl):
@@ -109,20 +153,42 @@ class DfuController(QObject):
         from common.commands import CommandFactory
         import time
 
+        # Automatically kill any other python processes running in the workspace
+        # to release locks on COM ports before we send enter_to_bootloader!
+        try:
+            kill_competing_processes(self.signals.log.emit)
+        except Exception:
+            pass
+
         ports = list(list_ports.comports())
         tried_reboot = False
         for p in ports:
             if p.vid == 0x0483 and p.pid == 0x5740:
                 self.signals.log.emit(f"Found STM VCP {p.device} (0483:5740), sending enter_to_bootloader...")
                 try:
-                    with DongleSession(p.device, baud=115200, debug=False) as session:
-                        factory = CommandFactory()
-                        seq = session.proto.next_seq()
-                        pkt = factory.enter_to_bootloader(int(VvAddress.HOST), int(VvAddress.MCU), seq)
-                        session.send_packet(pkt)
-                        tried_reboot = True
-                        # Wait briefly for device to process and start rebooting
-                        time.sleep(0.5)
+                    session = None
+                    for attempt in range(5):
+                        try:
+                            session = DongleSession(p.device, baud=115200, debug=False)
+                            session.__enter__()
+                            break
+                        except Exception as open_err:
+                            if attempt == 4:
+                                raise open_err
+                            self.signals.log.emit(f"Port {p.device} is busy (attempt {attempt+1}/5), retrying in 0.3s...")
+                            time.sleep(0.3)
+                    
+                    if session:
+                        try:
+                            factory = CommandFactory()
+                            seq = session.proto.next_seq()
+                            pkt = factory.enter_to_bootloader(int(VvAddress.HOST), int(VvAddress.MCU), seq)
+                            session.send_packet(pkt)
+                            tried_reboot = True
+                            # Wait briefly for device to process and start rebooting
+                            time.sleep(0.5)
+                        finally:
+                            session.__exit__(None, None, None)
                 except Exception as e:
                     self.signals.log.emit(f"Could not send to {p.device}: {e}")
         
@@ -132,6 +198,8 @@ class DfuController(QObject):
             time.sleep(1.0)
 
     def on_scan(self):
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
         def job():
             self._force_app_to_dfu_mode()
             vid_filter, pid_filter = self._parse_scan_filters()
@@ -163,6 +231,8 @@ class DfuController(QObject):
         self.main_ctrl.run_task(job)
 
     def on_connect(self):
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
         def job():
             vid = int(self.view.vid_edit.text().strip(), 16)
             pid = int(self.view.pid_edit.text().strip(), 16)
@@ -170,11 +240,20 @@ class DfuController(QObject):
         self.main_ctrl.run_task(job)
 
     def on_auto_connect(self):
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
         def job():
             self._force_app_to_dfu_mode()
             self.scanned_devices = [] # Force fresh scan after potential reboot
             vid_filter, pid_filter = self._parse_scan_filters()
-            self.scanned_devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
+            
+            # Retry scanning multiple times to wait for USB re-enumeration
+            for attempt in range(8):
+                self.scanned_devices = DfuDevice.list_dfu_devices(vid_filter=vid_filter, pid_filter=pid_filter)
+                if self.scanned_devices:
+                    break
+                self.signals.log.emit(f"Scanning for DFU device (attempt {attempt+1}/8)...")
+                time.sleep(0.75)
             
             self.view.combo_devices.clear()
             if not self.scanned_devices:
@@ -252,12 +331,20 @@ class DfuController(QObject):
             self.signals.log.emit("Connected, but DFU ping did not complete")
 
     def on_erase_app(self):
+        if not self.dfu.dev:
+            self.signals.log.emit("[DFU] ERROR: No device connected. Please click Connect first.")
+            QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
+            return
+
         selected = []
         for r in range(self.view.table_sectors.rowCount()):
             item = self.view.table_sectors.item(r, 0)
             if item and item.checkState() == Qt.Checked:
                 selected.append(int(item.data(Qt.UserRole)))
         
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
+
         def job():
             if not selected: raise DfuError("No sector selected.")
             self.signals.log.emit("Erasing selected sectors...")
@@ -268,6 +355,14 @@ class DfuController(QObject):
         self.main_ctrl.run_task(job)
 
     def on_mass_erase(self):
+        if not self.dfu.dev:
+            self.signals.log.emit("[DFU] ERROR: No device connected. Please click Connect first.")
+            QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
+            return
+
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
+
         def job():
             self.signals.log.emit("Mass erase...")
             self.dfu.mass_erase()
@@ -300,6 +395,14 @@ class DfuController(QObject):
             )
 
     def on_flash(self):
+        if not self.dfu.dev:
+            self.signals.log.emit("[DFU] ERROR: No device connected. Please click Connect first.")
+            QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
+            return
+
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
+
         def job():
             self._ensure_hex_loaded()
             payload = self.current_hex.data
@@ -315,6 +418,14 @@ class DfuController(QObject):
         self.main_ctrl.run_task(job)
 
     def on_verify(self):
+        if not self.dfu.dev:
+            self.signals.log.emit("[DFU] ERROR: No device connected. Please click Connect first.")
+            QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
+            return
+
+        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
+            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
+
         def job():
             self._ensure_hex_loaded()
             payload = self.current_hex.data

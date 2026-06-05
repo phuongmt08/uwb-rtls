@@ -87,6 +87,15 @@ PB_BIND(protobuf_sensor_fusion_cfg_set_t, protobuf_sensor_fusion_cfg_set_t, AUTO
 PB_BIND(protobuf_sensor_fusion_cfg_resp_t, protobuf_sensor_fusion_cfg_resp_t, AUTO)
 
 
+PB_BIND(protobuf_sensor_fusion_result_t, protobuf_sensor_fusion_result_t, AUTO)
+
+
+PB_BIND(protobuf_imu_reset_t, protobuf_imu_reset_t, AUTO)
+
+
+PB_BIND(protobuf_imu_calib_retry_t, protobuf_imu_calib_retry_t, AUTO)
+
+
 PB_BIND(protobuf_device_reset_t, protobuf_device_reset_t, AUTO)
 
 
@@ -159,12 +168,6 @@ PB_BIND(protobuf_ble_connect_t, protobuf_ble_connect_t, AUTO)
 PB_BIND(protobuf_ble_adv_status_t, protobuf_ble_adv_status_t, AUTO)
 
 
-PB_BIND(protobuf_anchor_distance_t, protobuf_anchor_distance_t, AUTO)
-
-
-PB_BIND(protobuf_tag_position_t, protobuf_tag_position_t, AUTO)
-
-
 PB_BIND(protobuf_log_data_t, protobuf_log_data_t, AUTO)
 
 
@@ -217,6 +220,9 @@ PB_BIND(protobuf_battery_info_resp_t, protobuf_battery_info_resp_t, AUTO)
 
 
 PB_BIND(protobuf_battery_info_get_t, protobuf_battery_info_get_t, AUTO)
+
+
+PB_BIND(protobuf_factory_otp_write_t, protobuf_factory_otp_write_t, AUTO)
 
 
 PB_BIND(protobuf_end_session_t, protobuf_end_session_t, AUTO)

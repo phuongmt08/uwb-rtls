@@ -14,6 +14,15 @@ class MainController(QObject):
         self.view = view
         self.signals = WorkerSignals()
         self.config = ConfigService()
+
+        self._error_re = re.compile(
+            r"(^\s*ERROR:|^\s*\[ERROR\]|\berror\b|\bfail(?:ed|ure)?\b|\bfatal\b|\[FAIL\])",
+            re.IGNORECASE,
+        )
+        self._warn_re = re.compile(
+            r"(^\s*WARNING:|^\s*\[WARN\]|^\s*\[WARNING\]|\bwarning\b|\bwarn\b|\[WARN\])",
+            re.IGNORECASE,
+        )
         
         self.signals.log.connect(self.on_log)
         self.signals.progress.connect(self.view.progress.setValue)
@@ -27,6 +36,10 @@ class MainController(QObject):
 
     def on_log(self, text: str):
         self.view.append_log(text)
+        problem = self._extract_problem(text)
+        if problem:
+            severity, message = problem
+            self.view.add_problem(severity, message)
         
         # Regex for size output
         # text    data     bss     dec     hex filename
@@ -59,6 +72,53 @@ class MainController(QObject):
             self.current_build_meta['fota_len'] = l
             self.current_build_meta['fota_crc'] = c
             self.view.lbl_fota.setText(f"Header Patched:\nLen: {l}\nCRC: {c}")
+
+    def _extract_problem(self, text: str):
+        if not text:
+            return None
+
+        line = self._first_log_line(text)
+        if self._error_re.search(line):
+            severity = "Error"
+        elif self._warn_re.search(line):
+            severity = "Warning"
+        else:
+            return None
+
+        message = self._strip_problem_prefix(line)
+        return severity, message
+
+    @staticmethod
+    def _first_log_line(text: str) -> str:
+        for line in text.splitlines():
+            line = line.strip()
+            if line:
+                return line
+        return text.strip()
+
+    @staticmethod
+    def _strip_problem_prefix(text: str) -> str:
+        msg = text.strip()
+        prefixes = [
+            "ERROR:", "WARNING:", "WARN:",
+            "[ERROR]", "[WARN]", "[WARNING]", "[FAIL]",
+        ]
+
+        upper = msg.upper()
+        for p in prefixes:
+            if upper.startswith(p):
+                msg = msg[len(p):].strip()
+                break
+
+        # Remove leading module tags like [FOTA], [DFU], [BUILD]
+        while True:
+            new_msg = re.sub(r"^\[[A-Z0-9 _-]+\]\s*", "", msg)
+            if new_msg == msg:
+                break
+            msg = new_msg.strip()
+
+        msg = re.sub(r"\s+", " ", msg).strip()
+        return msg
 
     def run_task(self, task_func):
         self._set_busy(True)

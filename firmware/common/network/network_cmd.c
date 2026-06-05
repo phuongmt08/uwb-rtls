@@ -14,6 +14,7 @@
     #include "sys_config.h"
     #include "bsp_battery.h"
     #include "sys_logger.h"
+    #include "sys_pm.h"
 #else
     #include "sys_logger_bl.h"
 
@@ -26,6 +27,7 @@
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
+#define SENSOR_FUSION_STREAM_PERIOD_MS  50u
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);
 
@@ -76,12 +78,15 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
 
 static void network_cmd_sys_ranging_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt);
+static void network_cmd_ranging_start(const protobuf_packet_t *pkt);
+static void network_cmd_ranging_stop(const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt);
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt);
+static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
 static void network_cmd_end_session(const protobuf_packet_t *pkt);
 
@@ -115,6 +120,7 @@ static network_log_tracker_t s_log_tracker = {
 
 static bool    s_log_stream_enabled = false;
 static uint8_t s_log_stream_dst     = protobuf_PACKET_ADDR_HOST;
+static uint32_t s_last_sensor_fusion_stream_tick = 0u;
 
 /* ---- Command dispatch table ----
  * Sparse, indexed by protobuf tag via CMD_INFO.
@@ -146,8 +152,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 13 */
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_set_tag,       network_cmd_sys_ranging_cfg_set,         "rng_cfg_set"),        /* 14 */
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,      network_cmd_unimplemented,               "rng_cfg_resp"),       /* 15 */
-    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_unimplemented,               "rng_start"),          /* 16 */
-    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_unimplemented,               "rng_stop"),           /* 17 */
+    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_ranging_start,               "rng_start"),          /* 16 */
+    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_ranging_stop,                "rng_stop"),           /* 17 */
     /* TODO: Need to implement */
     CMD_INFO(protobuf_packet_t_ranging_result_tag,            network_cmd_unimplemented,               "rng_result"),         /* 18 */
     CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 19 */
@@ -221,6 +227,9 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 63 */
     CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 64 */
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 66 */
+#endif
     //      +=================================================+=======================================+========================+
 };
 
@@ -428,7 +437,6 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 
     sys_config_t *cfg = sys_config_get();
     cfg->uwb = *new_cfg;
-    cfg->device_type = (cfg->uwb.role == DEVICE_ROLE_TAG) ? DEVICE_TYPE_TAG : DEVICE_TYPE_ANCHOR;
 
     network_cmd_config_save("sys_config");
 }
@@ -459,6 +467,22 @@ static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt)
     cfg->uwb.ranging_period_ms  = pkt->params.sys_ranging_cfg_set.config.ranging_period_ms;
 
     network_cmd_config_save("ranging_cfg");
+}
+
+static void network_cmd_ranging_start(const protobuf_packet_t *pkt)
+{
+    (void)pkt;
+    if (!network_cmd_set_ranging_enabled(true)) {
+        RLOG_W(OBJECT_CODE, "ranging_start rejected by platform");
+    }
+}
+
+static void network_cmd_ranging_stop(const protobuf_packet_t *pkt)
+{
+    (void)pkt;
+    if (!network_cmd_set_ranging_enabled(false)) {
+        RLOG_W(OBJECT_CODE, "ranging_stop rejected by platform");
+    }
 }
 
 #endif /* !BOOTLOADER */
@@ -605,22 +629,49 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
     network_cmd_config_save("anchor layout");
 }
 
+static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    const protobuf_factory_otp_write_t *req = &pkt->params.factory_otp_write;
+    otp_err_t err = sys_config_factory_otp_write(req);
+
+    if (err == OTP_OK) {
+        RLOG_W(OBJECT_CODE, "Factory OTP write accepted type=0x%02lX", (unsigned long)req->otp_type);
+        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+    } else {
+        RLOG_W(OBJECT_CODE, "Factory OTP write rejected type=0x%02lX status=%d",
+               (unsigned long)req->otp_type, (int)err);
+        network_core_send_ack(s_network_cmd.stream, pkt,
+                              err == OTP_ERR_INVALID_ARG ?
+                              protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE :
+                              protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+    }
+}
+
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
 
-    bsp_battery_info_t battery_info;
-    if (bsp_battery_get_info(&battery_info) != BSP_BATTERY_OK) {
-        RLOG_W(OBJECT_CODE, "Failed to get battery info");
-        return;
-    }
+    sys_pm_status_t pm_status;
+    sys_pm_get_status(&pm_status);
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_battery_info_resp_tag);
-    resp.hdr                             = pkt->hdr;
-    resp.params.battery_info_resp.bat_voltage_mv   = battery_info.voltage_mv;
-    resp.params.battery_info_resp.bat_soc_percent  = battery_info.soc_pct;
-    resp.params.battery_info_resp.remaining_min    = battery_info.remaining_min;
-    resp.params.battery_info_resp.is_charging      = battery_info.is_charging;
+    resp.params.battery_info_resp.bat_voltage_mv   = (uint32_t)pm_status.bat_voltage_mv;
+    resp.params.battery_info_resp.bat_soc_percent  = (uint32_t)pm_status.soc;
+    resp.params.battery_info_resp.remaining_min    = pm_status.remaining_min;
+    resp.params.battery_info_resp.is_charging      = pm_status.is_charging;
+    
+    // Hardware telemetry fields
+    resp.params.battery_info_resp.mcu_temp_c       = pm_status.temp_degc;
+    resp.params.battery_info_resp.vdda_mv          = (uint32_t)pm_status.vdda_mv;
+    resp.params.battery_info_resp.uwb_temp_c       = pm_status.uwb_temp_c;
+    resp.params.battery_info_resp.uwb_vbat_mv      = (uint32_t)pm_status.uwb_vbat_mv;
+    resp.params.battery_info_resp.imu_temp_c       = pm_status.imu_temp_c;
+    
+    // Alert flags
+    resp.params.battery_info_resp.error_mask       = pm_status.error_mask;
+
     network_cmd_send_packet(&resp);
 }
 
@@ -891,8 +942,25 @@ bool network_cmd_init(network_core_t *stream)
     s_network_cmd.stream  = stream;
     s_network_cmd.enabled = true;
 
-    
+
     return network_core_register_packet_handler(stream, network_cmd_packet_handler);
+}
+
+bool network_cmd_is_ble_host_active(void)
+{
+    CHECK(s_network_cmd.stream, false);
+    return s_network_cmd.stream->ble_connection_active;
+}
+
+bool network_cmd_set_ranging_enabled(bool enabled)
+{
+    g_ranging_enabled = enabled;
+    return false;
+}
+
+bool network_cmd_is_ranging_enabled(void)
+{
+    return g_ranging_enabled;
 }
 
 void network_cmd_process(void)
@@ -954,6 +1022,28 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
  * These functions wrap packet construction and transmission for outgoing commands
  * to specific destinations (dst).
  * -------------------------------- */
+
+bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
+{
+    CHECK(stream && data, false);
+    CHECK(network_cmd_is_ranging_enabled(), false);
+//    CHECK(network_cmd_is_ble_host_active(), false);
+
+    uint32_t now = bsp_util_get_ticks();
+    CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+
+    protobuf_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.which_params = protobuf_packet_t_sensor_fusion_result_tag;
+    pkt.params.sensor_fusion_result = *data;
+
+    if (network_core_send_packet(stream, dst, &pkt)) {
+        s_last_sensor_fusion_stream_tick = now;
+        return true;
+    }
+
+    return false;
+}
 
 #ifdef HAVE_BLE_PERIPHERAL
 

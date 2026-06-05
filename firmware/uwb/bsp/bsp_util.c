@@ -8,11 +8,13 @@
 /* Includes ----------------------------------------------------------- */
 #include "bsp_util.h"
 
+#include "cmsis_os.h"
 #include "memorylayout.h"
 #ifndef BSP_TICK_SOURCE_RTC
   #include "stm32f4xx_ll_rtc.h"
 #endif
 #include <string.h>
+#include <stdio.h>
 
 /* External peripherals from CubeMX */
 extern CRC_HandleTypeDef hcrc;
@@ -24,9 +26,6 @@ extern RTC_HandleTypeDef hrtc;
 #define EPOCH_2000_OFFSET_S  (946684800UL) /* Unix epoch of 2000-01-01 */
 
 /* Private variables -------------------------------------------------- */
-static TIM_HandleTypeDef htim_delay;
-static bool              util_initialized = false;
-
 static bool    rtc_time_synced       = false;
 static int32_t rtc_timezone_offset_s = 0;
 
@@ -34,6 +33,10 @@ static int32_t rtc_timezone_offset_s = 0;
 static bool     is_leap_year(uint16_t year);
 static uint32_t date_to_days(uint8_t year, uint8_t month, uint8_t day);
 static void     epoch_s_to_rtc_time(uint32_t epoch_s, bsp_rtc_time_t *t);
+static bool     delay_can_yield_to_os(void);
+static bool     delay_dwt_enable(void);
+static uint32_t delay_cycles_per_us(void);
+static void     delay_spin_us(uint32_t us);
 
 /* ===================================================================== */
 /*                         INITIALIZATION                                */
@@ -41,30 +44,7 @@ static void     epoch_s_to_rtc_time(uint32_t epoch_s, bsp_rtc_time_t *t);
 
 bsp_util_status_t bsp_util_init(void)
 {
-  if (util_initialized)
-  {
-    return BSP_UTIL_OK;
-  }
-
-  __HAL_RCC_TIM9_CLK_ENABLE();
-
-  htim_delay.Instance               = TIM9;
-  htim_delay.Init.Prescaler         = (SystemCoreClock / 1000000UL) - 1;
-  htim_delay.Init.CounterMode       = TIM_COUNTERMODE_UP;
-  htim_delay.Init.Period            = 0xFFFF;
-  htim_delay.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
-  htim_delay.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-
-  if (HAL_TIM_Base_Init(&htim_delay) != HAL_OK)
-  {
-    return BSP_UTIL_ERR;
-  }
-  if (HAL_TIM_Base_Start(&htim_delay) != HAL_OK)
-  {
-    return BSP_UTIL_ERR;
-  }
-
-  util_initialized = true;
+  (void)delay_dwt_enable();
   return BSP_UTIL_OK;
 }
 
@@ -260,23 +240,105 @@ void bsp_rtc_timezone_restore(int32_t offset_s)
 
 void bsp_delay_us(uint32_t us)
 {
-  if (!util_initialized)
-  {
-    HAL_Delay((us + 999) / 1000);
-    return;
-  }
-  uint16_t start = __HAL_TIM_GET_COUNTER(&htim_delay);
-  while ((uint16_t) (__HAL_TIM_GET_COUNTER(&htim_delay) - start) < us)
-  {
-    __NOP();
-  }
+  delay_spin_us(us);
 }
 
 void bsp_delay_ms(uint32_t ms)
 {
+  if (ms == 0U)
+  {
+    return;
+  }
+
+  if (delay_can_yield_to_os() && (osDelay(ms) == osOK))
+  {
+    return;
+  }
+
   while (ms--)
   {
     bsp_delay_us(1000);
+  }
+}
+
+void HAL_Delay(uint32_t Delay)
+{
+  bsp_delay_ms(Delay);
+}
+
+static bool delay_can_yield_to_os(void)
+{
+  return (osKernelGetState() == osKernelRunning) &&
+         (__get_IPSR() == 0U) &&
+         (__get_PRIMASK() == 0U) &&
+         (__get_BASEPRI() == 0U) &&
+         (__get_FAULTMASK() == 0U);
+}
+
+static bool delay_dwt_enable(void)
+{
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+  return ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) != 0U);
+}
+
+static uint32_t delay_cycles_per_us(void)
+{
+  uint32_t cycles_per_us = SystemCoreClock / 1000000UL;
+  if (cycles_per_us == 0U)
+  {
+    cycles_per_us = 1U;
+  }
+  return cycles_per_us;
+}
+
+static void delay_spin_us(uint32_t us)
+{
+  if (us == 0U)
+  {
+    return;
+  }
+
+  uint32_t cycles_per_us = delay_cycles_per_us();
+
+  if (!delay_dwt_enable())
+  {
+    while (us > 0U)
+    {
+      uint32_t chunk_us     = us;
+      uint32_t max_chunk_us = 0xFFFFFFFFUL / cycles_per_us;
+      if (chunk_us > max_chunk_us)
+      {
+        chunk_us = max_chunk_us;
+      }
+
+      volatile uint32_t loops = cycles_per_us * chunk_us;
+      while (loops-- > 0U)
+      {
+        __NOP();
+      }
+      us -= chunk_us;
+    }
+    return;
+  }
+
+  while (us > 0U)
+  {
+    uint32_t chunk_us     = us;
+
+    uint32_t max_chunk_us = 0xFFFFFFFFUL / cycles_per_us;
+    if (chunk_us > max_chunk_us)
+    {
+      chunk_us = max_chunk_us;
+    }
+
+    uint32_t cycles = chunk_us * cycles_per_us;
+    uint32_t start = DWT->CYCCNT;
+    while ((uint32_t)(DWT->CYCCNT - start) < cycles)
+    {
+      __NOP();
+    }
+    us -= chunk_us;
   }
 }
 /* System functions -------------------------------------------------- */
@@ -367,6 +429,177 @@ static void epoch_s_to_rtc_time(uint32_t epoch_s, bsp_rtc_time_t *t)
   t->year  = (uint8_t) (year - 2000u);
   t->month = month;
   t->day   = (uint8_t) (epoch_s + 1u);
+}
+
+/* ===================================================================== */
+/*                   RTOS SYSTEM HELPERS & HOOKS                         */
+/* ===================================================================== */
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "sys_logger.h"
+#include "err.h"
+
+/* For configGENERATE_RUN_TIME_STATS */
+/* Note: Reads high-speed hardware timer TIM10 (running at 100 kHz)
+   and handles 16-bit register overflows to form a 32-bit counter value. */
+uint32_t getRunTimeCounterValue(void)
+{
+  extern TIM_HandleTypeDef htim10;
+  static uint32_t s_runtime_counter_high = 0;
+  static uint16_t s_last_timer_val = 0;
+  
+  if (htim10.Instance == NULL || (htim10.Instance->CR1 & TIM_CR1_CEN) == 0)
+  {
+    return HAL_GetTick(); /* Safe fallback before timer is started */
+  }
+  
+  uint16_t now = (uint16_t)__HAL_TIM_GET_COUNTER(&htim10);
+  if (now < s_last_timer_val)
+  {
+    s_runtime_counter_high++;
+  }
+  s_last_timer_val = now;
+  return ((s_runtime_counter_high << 16) | now);
+}
+
+volatile char g_overflowed_task_name[16] = {0};
+
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
+{
+   if (pcTaskName != NULL)
+   {
+       for (int i = 0; i < 15; i++)
+       {
+           g_overflowed_task_name[i] = (char)pcTaskName[i];
+           if (pcTaskName[i] == '\0') break;
+       }
+       g_overflowed_task_name[15] = '\0';
+   }
+   
+   /* Halt system and log error */
+   __disable_irq();
+   while(1)
+   {
+   }
+}
+
+void vApplicationMallocFailedHook(void)
+{
+  RLOG_E(LOG_OBJECT_CODE_TASK, ERR_SYSTEM, "FreeRTOS heap exhausted");
+  __disable_irq();
+  while (1)
+  {
+  }
+}
+
+void bsp_util_print_cpu_stats(void)
+{
+#if (configGENERATE_RUN_TIME_STATS == 1) && (configUSE_TRACE_FACILITY == 1)
+  static TaskStatus_t s_task_status[16];
+  static char s_stats_buf[256];
+  
+  uint32_t total_runtime = 0;
+  UBaseType_t task_count = uxTaskGetSystemState(s_task_status, 16, &total_runtime);
+
+  if (task_count > 0 && total_runtime > 0)
+  {
+    int len = snprintf(s_stats_buf, sizeof(s_stats_buf), "CPU: ");
+    for (UBaseType_t i = 0; i < task_count; i++)
+    {
+      uint32_t pct = (uint32_t)((uint64_t)s_task_status[i].ulRunTimeCounter * 100 / total_runtime);
+      int ret = snprintf(s_stats_buf + len, sizeof(s_stats_buf) - len, "%s:%lu%% | ",
+                         s_task_status[i].pcTaskName, (unsigned long)pct);
+      if (ret > 0)
+      {
+        len += ret;
+      }
+    }
+    if (len > 7)
+    {
+      s_stats_buf[len - 3] = '\0'; /* Trim the trailing " | " */
+    }
+    RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stats_buf);
+  }
+#endif
+}
+
+extern osThreadId_t UwbRangingHandle;
+extern osThreadId_t SensorFusionHandle;
+extern osThreadId_t NetworkHandle;
+extern osThreadId_t LoggerHandle;
+extern osThreadId_t FlashStorageHandle;
+extern osThreadId_t IOHandle;
+extern osThreadId_t PMHandle;
+
+extern const osThreadAttr_t UwbRanging_attributes;
+extern const osThreadAttr_t SensorFusion_attributes;
+extern const osThreadAttr_t Network_attributes;
+extern const osThreadAttr_t Logger_attributes;
+extern const osThreadAttr_t FlashStorage_attributes;
+extern const osThreadAttr_t IO_attributes;
+extern const osThreadAttr_t PM_attributes;
+
+typedef struct {
+    osThreadId_t          handle;
+    const osThreadAttr_t *attr;
+} task_mem_info_t;
+
+void bsp_util_print_mem_stats(void)
+{
+  uint32_t total_heap    = configTOTAL_HEAP_SIZE;
+  uint32_t free_heap     = xPortGetFreeHeapSize();
+  uint32_t min_free_heap = xPortGetMinimumEverFreeHeapSize();
+  
+  uint32_t current_heap_used_pct = ((total_heap - free_heap) * 100) / total_heap;
+  uint32_t peak_heap_used_pct    = ((total_heap - min_free_heap) * 100) / total_heap;
+  
+  RLOG_D(LOG_OBJECT_CODE_TASK, "HEAP: Current Used %lu%% (%lu/%lu B) | Peak Used %lu%%", 
+         (unsigned long)current_heap_used_pct, 
+         (unsigned long)(total_heap - free_heap), 
+         (unsigned long)total_heap, 
+         (unsigned long)peak_heap_used_pct);
+
+  const task_mem_info_t tasks[] = {
+      { (osThreadId_t)UwbRangingHandle,    &UwbRanging_attributes   },
+      { (osThreadId_t)SensorFusionHandle,  &SensorFusion_attributes },
+      { (osThreadId_t)NetworkHandle,       &Network_attributes      },
+      { (osThreadId_t)LoggerHandle,        &Logger_attributes       },
+      { (osThreadId_t)FlashStorageHandle,  &FlashStorage_attributes },
+      { (osThreadId_t)IOHandle,            &IO_attributes           },
+      { (osThreadId_t)PMHandle,            &PM_attributes           }
+  };
+  
+  static char s_stack_buf[256];
+  int len = snprintf(s_stack_buf, sizeof(s_stack_buf), "STACK: ");
+  
+  for (size_t i = 0; i < sizeof(tasks)/sizeof(tasks[0]); i++)
+  {
+      if (tasks[i].handle != NULL && tasks[i].attr != NULL && tasks[i].attr->stack_size > 0U)
+      {
+          TaskHandle_t xTask = (TaskHandle_t)tasks[i].handle; 
+          uint32_t high_water_mark_bytes = (uint32_t)uxTaskGetStackHighWaterMark(xTask) *
+                                           (uint32_t)sizeof(StackType_t);
+          uint32_t stack_size_bytes = tasks[i].attr->stack_size;
+          uint32_t stack_used_bytes = (high_water_mark_bytes < stack_size_bytes)
+                                      ? (stack_size_bytes - high_water_mark_bytes)
+                                      : 0U;
+          uint32_t stack_used_pct   = (stack_used_bytes * 100U) / stack_size_bytes;
+          
+          int ret = snprintf(s_stack_buf + len, sizeof(s_stack_buf) - len, "%s:%lu%% | ",
+                             tasks[i].attr->name, (unsigned long)stack_used_pct);
+          if (ret > 0)
+          {
+              len += ret;
+          }
+      }
+  }
+  
+  if (len > 7)
+  {
+      s_stack_buf[len - 3] = '\0'; /* Trim trailing " | " */
+  }
+  RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stack_buf);
 }
 
 /* End of file -------------------------------------------------------- */

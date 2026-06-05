@@ -17,6 +17,7 @@
 #include "spi.h"
 #include "sys_logger.h"
 #include "config.h"
+#include "app_rtos_handles.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -50,14 +51,12 @@ static bsp_uwb_rx_quality_t s_last_rx_quality = {0};
 static uint16_t s_tx_antenna_delay  = 0;    /* Cached TX antenna delay */
 static uint16_t s_rx_antenna_delay  = 0;    /* Cached RX antenna delay */
 
-static volatile uint8_t s_irq_event_pending = 0;
 /* RX error counters — incremented in bsp_uwb_rx(), read via bsp_uwb_get_rx_error_counts(). */
 static uint32_t s_rx_timeout_count  = 0;
 static uint32_t s_rx_crc_err_count  = 0;
 static uint32_t s_rx_phr_err_count  = 0;
 static uint32_t s_rx_sync_err_count = 0;
 
-#ifdef UWB_EVENT_DRIVEN
 /* Keep enough room for TX_DONE plus all RESP/RESULT frames in one TDMA phase.
  * Ring-buffer capacity is size-1, so 32 stores up to 31 events. */
 #define UWB_EVENT_QUEUE_SIZE    32
@@ -102,8 +101,6 @@ void bsp_uwb_clear_event(void)
     s_ev_head = s_ev_tail; /* drop all queued events */
     __enable_irq();
 }
-#endif
-
 /* Public variables --------------------------------------------------- */
 extern SPI_HandleTypeDef hspi1;
 
@@ -178,9 +175,9 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
 static void reset_DW1000(void)
 {
   HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
-  HAL_Delay(2);
+  bsp_delay_ms(2);
   HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
-  HAL_Delay(2);
+  bsp_delay_ms(2);
 }
 
 static void port_set_dw1000_slowrate(void)
@@ -212,26 +209,28 @@ static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
 
 static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
 {
-  dwt_rxdiag_t diag;
-  memset(&diag, 0, sizeof(diag));
   memset(out_quality, 0, sizeof(*out_quality));
 
-  dwt_readdignostics(&diag);
+  /* Directly query DW1000 registers to bypass compiler strict-aliasing optimization bugs on block-reads */
+  uint16_t max_noise      = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_THRESH_OFFSET);
+  uint16_t fp_amp1        = dwt_read16bitoffsetreg(RX_TIME_ID, 0x7);
+  uint16_t std_noise      = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x0);
+  uint16_t fp_amp2        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x2);
+  uint16_t fp_amp3        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x4);
+  uint16_t rx_pream_count = (uint16_t)((dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXPACC_MASK) >> RX_FINFO_RXPACC_SHIFT);
 
-  out_quality->fp_amp1        = diag.firstPathAmp1;
-  out_quality->fp_amp2        = diag.firstPathAmp2;
-  out_quality->fp_amp3        = diag.firstPathAmp3;
-  out_quality->std_noise      = diag.stdNoise;
-  out_quality->max_noise      = diag.maxNoise;
-  out_quality->rx_pream_count = diag.rxPreamCount;
+  out_quality->fp_amp1        = fp_amp1;
+  out_quality->fp_amp2        = fp_amp2;
+  out_quality->fp_amp3        = fp_amp3;
+  out_quality->std_noise      = std_noise;
+  out_quality->max_noise      = max_noise;
+  out_quality->rx_pream_count = rx_pream_count;
 
-  if (diag.rxPreamCount > 0U &&
-      (diag.firstPathAmp1 != 0U || diag.firstPathAmp2 != 0U || diag.firstPathAmp3 != 0U))
+  if (rx_pream_count > 0U && (fp_amp1 != 0U || fp_amp2 != 0U || fp_amp3 != 0U))
   {
-    uint32_t fp_sum = (uint32_t)diag.firstPathAmp1 + (uint32_t)diag.firstPathAmp2
-                      + (uint32_t)diag.firstPathAmp3;
-    uint32_t fp_norm_q8 = (fp_sum << 8) / (uint32_t)diag.rxPreamCount;
-    uint32_t fp_snr_q8  = (fp_sum << 8) / ((uint32_t)diag.stdNoise + 1U);
+    uint32_t fp_sum = (uint32_t)fp_amp1 + (uint32_t)fp_amp2 + (uint32_t)fp_amp3;
+    uint32_t fp_norm_q8 = (fp_sum << 8) / (uint32_t)rx_pream_count;
+    uint32_t fp_snr_q8  = (fp_sum << 8) / ((uint32_t)std_noise + 1U);
 
     out_quality->fp_amp_norm_q8 = (fp_norm_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_norm_q8;
     out_quality->fp_snr_q8      = (fp_snr_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_snr_q8;
@@ -266,16 +265,14 @@ bsp_err_t bsp_uwb_init(void)
   port_set_dw1000_fastrate();
   dwt_setleds(1);
 
-#ifdef UWB_EVENT_DRIVEN
   /* Register UWB callbacks for foreground event processing */
   dwt_setcallbacks(uwb_tx_cb, uwb_rx_cb);
   /* Event-driven state machine only queues TX_DONE and RX_OK events.
    * RX error IRQs are still enabled so the driver can clear/reset/re-arm RX
    * inside a multi-anchor window; they are not queued or logged as events. */
-  dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_RXPTO |
-                   DWT_INT_RXOVRR | DWT_INT_RFCE | DWT_INT_SFDT |
+  dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_RFTO |
+                   DWT_INT_RXPTO | DWT_INT_RXOVRR | DWT_INT_RFCE | DWT_INT_SFDT |
                    DWT_INT_RPHE | DWT_INT_RFSL, 1);
-#endif
 
   s_initialized = true;
   return BSP_OK;
@@ -324,28 +321,23 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
   s_rx_antenna_delay = cfg->rx_antenna_delay;
 
     /* Configure interrupt mask.
-     * In UWB_EVENT_DRIVEN mode we also need DWT_INT_TFRS (TX frame sent) so that
+     * Event-driven TDMA needs DWT_INT_TFRS (TX frame sent) so that
      * uwb_tx_cb fires and TX_DONE events reach the queue.
      * bsp_uwb_configure() is called AFTER bsp_uwb_init() which already set the
-     * event-driven mask, but dwt_configure() resets the chip config so we must
+     * interrupt mask, but dwt_configure() resets the chip config so we must
      * re-apply it here. */
-#ifdef UWB_EVENT_DRIVEN
     dwt_setinterrupt((uint32)(DWT_INT_TFRS |   /* TX frame sent      */
                               DWT_INT_RFCG |   /* RX good frame      */
+                              DWT_INT_RFTO |   /* RX frame timeout   */
                               DWT_INT_RXPTO |  /* Preamble timeout   */
                               DWT_INT_RXOVRR | /* RX buffer overrun  */
                               DWT_INT_RFCE |   /* RX CRC error       */
                               DWT_INT_RPHE |   /* RX PHR error       */
                               DWT_INT_RFSL |   /* RX sync loss       */
                               DWT_INT_SFDT), 1); /* RX SFD timeout   */
-#else
-    dwt_setinterrupt((uint32)(DWT_INT_RFCG | DWT_INT_RFTO | DWT_INT_RXPTO |
-                              DWT_INT_RFCE | DWT_INT_RPHE | DWT_INT_RFSL), 1);
-#endif
 
     dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
     dwt_forcetrxoff();
-    s_irq_event_pending = 0;
 
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)",
            cfg->tx_antenna_delay, cfg->rx_antenna_delay);
@@ -370,38 +362,7 @@ bsp_err_t bsp_uwb_tx(const void *data, uint16_t length)
     return BSP_ERR;
   }
 
-#ifdef UWB_EVENT_DRIVEN
   return BSP_OK;
-#else
-  /* Wait TX complete (Blocking) */
-  /* NOTE: Consider using interrupts or OS semaphores in future */
-  uint32_t timeout = HAL_GetTick() + 10;
-  uint32_t status  = 0;
-
-  while (!(status & SYS_STATUS_TXFRS))
-  {
-    status = dwt_read32bitreg(SYS_STATUS_ID);
-
-    if (status & SYS_STATUS_CLKPLL_LL)
-    {
-      return BSP_ERR;
-    }
-
-    if (HAL_GetTick() > timeout)
-    {
-      return BSP_ERR;
-    }
-  }
-
-  /* Cache TX timestamp */
-  uint8_t ts_buf[5];
-  dwt_readtxtimestamp(ts_buf);
-  s_last_tx_timestamp = dw_read_timestamp(ts_buf);
-
-  dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
-
-  return BSP_OK;
-#endif
 }
 
 bsp_err_t bsp_uwb_rx(void *data, uint16_t length, uint16_t *out_len)
@@ -577,9 +538,6 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
     dwt_setrxtimeout(0);
   }
 
-  /* Clear SW IRQ latch before enabling RX to avoid stale event. */
-  s_irq_event_pending = 0;
-
   /* Enable RX */
   if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS)
   {
@@ -606,9 +564,6 @@ bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_m
   {
     dwt_setrxtimeout(0);
   }
-
-  /* Clear SW IRQ latch before enabling RX to avoid stale event. */
-  s_irq_event_pending = 0;
 
   uint8_t sys_time_buf[5];
   dwt_readsystime(sys_time_buf);
@@ -772,44 +727,7 @@ bsp_err_t bsp_uwb_tx_delayed(const void *data, uint16_t length, uint64_t tx_time
       return BSP_ERR;
   }
 
-#ifdef UWB_EVENT_DRIVEN
   return BSP_OK;
-#else
-  /* Wait for TX complete */
-  uint32_t timeout_ms = 100;
-  uint32_t start      = HAL_GetTick();
-  status              = 0;
-
-  while ((HAL_GetTick() - start) < timeout_ms)
-  {
-    status = dwt_read32bitreg(SYS_STATUS_ID);
-
-    if (status & SYS_STATUS_TXFRS)
-    {
-      uint8_t ts_buf[5];
-      dwt_readtxtimestamp(ts_buf);
-      s_last_tx_timestamp = dw_read_timestamp(ts_buf);
-
-      dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
-      return BSP_OK;
-    }
-
-    /* HPDWARN: Half Period Warning - Chip rejected time because it's too late */
-    if (status & SYS_STATUS_HPDWARN)
-    {
-      RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[TX_DELAY] HPDWARN (Late TX)");
-      dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_HPDWARN);
-      dwt_forcetrxoff();
-      return BSP_ERR;
-    }
-  }
-
-  RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_TIMESTAMP, "[TX_DELAY] TXFRS timeout (status=0x%08lX)",
-         (unsigned long) status);
-
-  dwt_forcetrxoff();
-  return BSP_ERR;
-#endif
 }
 
 bool bsp_uwb_is_rx_ready(void)
@@ -880,13 +798,24 @@ uint16_t bsp_uwb_get_tx_antenna_delay(void)
 }
 void bsp_uwb_on_irq(void)
 {
-#ifdef UWB_EVENT_DRIVEN
+  /* RTOS Hybrid Event-Driven: ISR only signals semaphore.
+   * All SPI transactions (dwt_isr, read status/rx_data/tx_ts)
+   * are performed in UwbRanging task context under SPI mutex. */
+  if (g_uwb_isr_semHandle != NULL) {
+    osSemaphoreRelease(g_uwb_isr_semHandle);
+  }
+}
+
+void bsp_uwb_dwt_isr(void)
+{
+  /* Called from UwbRanging task under g_spi1_mutexHandle.
+   * Processes all pending DW1000 interrupts via multi-pass loop. */
   const uint32_t useful_irq_mask = SYS_STATUS_TXFRS | SYS_STATUS_RXFCG;
-  const uint32_t recovery_irq_mask = SYS_STATUS_RXPTO | SYS_STATUS_RXOVRR |
+  const uint32_t recovery_irq_mask = SYS_STATUS_RXRFTO | SYS_STATUS_RXPTO | SYS_STATUS_RXOVRR |
                                      SYS_STATUS_RXFCE | SYS_STATUS_RXPHE |
                                      SYS_STATUS_RXRFSL | SYS_STATUS_RXSFDTO;
   const uint32_t irq_mask = useful_irq_mask | recovery_irq_mask;
-  for (uint8_t pass = 0; pass < 8U; pass++)
+  for (uint8_t pass = 0; pass < 16U; pass++)
   {
     uint32_t status = dwt_read32bitreg(SYS_STATUS_ID);
     if ((status & irq_mask) == 0U)
@@ -899,17 +828,13 @@ void bsp_uwb_on_irq(void)
     }
     dwt_isr();
     status = dwt_read32bitreg(SYS_STATUS_ID);
-    if ((status & useful_irq_mask) == 0U)
+    if ((status & irq_mask) == 0U)
     {
       break;
     }
   }
-#else
-  s_irq_event_pending = 1;
-#endif
 }
 
-#ifdef UWB_EVENT_DRIVEN
 static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
 {
   (void)cb_data;
@@ -986,13 +911,12 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
           s_event_stats.rx_rearm_fail++;
       }
   }
-}
 
-#endif
+}
 
 void bsp_uwb_clear_irq_event(void)
 {
-  s_irq_event_pending = 0;
+  /* Kept for legacy blocking wait helpers; EXTI wakeup uses g_uwb_isr_semHandle. */
 }
 
 bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
@@ -1000,11 +924,6 @@ bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms)
   uint32_t start_tick = HAL_GetTick();
 
   while ((HAL_GetTick() - start_tick) < timeout_ms) {
-    if (s_irq_event_pending) {
-      s_irq_event_pending = 0;
-      return true;
-    }
-
     /* Fallback path: if EXTI edge was missed, poll DW1000 status bits. */
     if (bsp_uwb_is_rx_ready()) {
       return true;
@@ -1029,21 +948,28 @@ void bsp_uwb_reset_rx_error_counts(void)
   s_rx_phr_err_count  = 0;
   s_rx_sync_err_count = 0;
 }
-// bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat)
-// {
-//     CHECK_PARAM(temp && vbat, BSP_ERR_PARAM);
-//     if (!s_initialized) return BSP_ERR;
+bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat)
+{
+    CHECK_PARAM(temp && vbat, BSP_ERR_PARAM);
+    if (!s_initialized) return BSP_ERR;
 
-//     uint16_t raw_val = dwt_readtempvbat(1);
+    // Read raw values from the SAR ADC register of the DW1000 with fastSPI = 1
+    uint16_t raw_val = dwt_readtempvbat(1);
 
-//     uint8_t raw_vbat = (uint8_t)(raw_val & 0xFF);
-//     uint8_t raw_temp = (uint8_t)((raw_val >> 8) & 0xFF);
+    uint8_t raw_vbat = (uint8_t)(raw_val & 0xFF);
+    uint8_t raw_temp = (uint8_t)((raw_val >> 8) & 0xFF);
 
-//     *vbat = (raw_vbat / 173.0f) + 3.3f;
-//     *temp = (raw_temp * 1.13f) - 113.0f;
+    // Calculate real temperature and VBAT based on Decawave Datasheet formulas
+    *vbat = (raw_vbat * 0.0057f) + 2.3f;
+    *temp = (raw_temp * 1.13f) - 113.0f;
 
-//     return BSP_OK;
-// }
+    return BSP_OK;
+}
+
+bool bsp_uwb_is_initialized(void)
+{
+    return s_initialized;
+}
 
 // float bsp_uwb_compensate_distance_error(float raw_dist_m, float temp_c, float vbat_v)
 // {

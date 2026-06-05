@@ -25,6 +25,14 @@
 //clang-format off
 #define FLASH_ERASED_VALUE 0xFFFFFFFFu
 
+#if defined(FLASH_FLAG_RDERR)
+#define FLASH_PENDING_FLAGS \
+  (FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR | FLASH_FLAG_RDERR)
+#else
+#define FLASH_PENDING_FLAGS \
+  (FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR)
+#endif
+
 /* Sector layout: [Metadata 16KB][Data region (rest)] */
 #define METADATA_START     0u
 #define DATA_START         BSP_FLASH_METADATA_SIZE
@@ -37,6 +45,19 @@
 
 /** @brief Convert flash address to STM32F4 sector number */
 static int addr_to_sector(uint32_t base_addr);
+
+/** @brief Convert any flash address to the containing STM32F4 sector number */
+static int addr_to_containing_sector(uint32_t addr);
+
+/** @brief Clear stale FLASH status flags before a new erase/program operation */
+static void flash_clear_pending_flags(void);
+
+/** @brief Log HAL FLASH failure details */
+static void flash_log_hal_failure(const char    *op,
+                                  uint32_t       addr,
+                                  int            sector,
+                                  HAL_StatusTypeDef hal_status,
+                                  uint32_t       sector_error);
 
 /** @brief Erase flash sector by base address */
 static bsp_flash_status_t flash_erase_sector(uint32_t base);
@@ -365,6 +386,45 @@ static int addr_to_sector(uint32_t base_addr)
   }
 }
 
+static int addr_to_containing_sector(uint32_t addr)
+{
+  if (addr < 0x08000000u || addr >= 0x08080000u)
+    return -1;
+  if (addr < 0x08004000u)
+    return FLASH_SECTOR_0;
+  if (addr < 0x08008000u)
+    return FLASH_SECTOR_1;
+  if (addr < 0x0800C000u)
+    return FLASH_SECTOR_2;
+  if (addr < 0x08010000u)
+    return FLASH_SECTOR_3;
+  if (addr < 0x08020000u)
+    return FLASH_SECTOR_4;
+  if (addr < 0x08040000u)
+    return FLASH_SECTOR_5;
+  if (addr < 0x08060000u)
+    return FLASH_SECTOR_6;
+  return FLASH_SECTOR_7;
+}
+
+static void flash_clear_pending_flags(void)
+{
+  __HAL_FLASH_CLEAR_FLAG(FLASH_PENDING_FLAGS);
+}
+
+static void flash_log_hal_failure(const char    *op,
+                                  uint32_t       addr,
+                                  int            sector,
+                                  HAL_StatusTypeDef hal_status,
+                                  uint32_t       sector_error)
+{
+  RLOG_E(LOG_OBJECT_CODE_FLASH, ERR_HAL,
+         "[FLASH] %s failed: addr=0x%08lX sector=%d hal=%d hal_err=0x%08lX sector_err=0x%08lX SR=0x%08lX CR=0x%08lX OPTCR=0x%08lX",
+         op, (unsigned long) addr, sector, (int) hal_status, (unsigned long) HAL_FLASH_GetError(),
+         (unsigned long) sector_error, (unsigned long) FLASH->SR, (unsigned long) FLASH->CR,
+         (unsigned long) FLASH->OPTCR);
+}
+
 static bsp_flash_status_t flash_erase_sector(uint32_t base)
 {
   int sector = addr_to_sector(base);
@@ -372,15 +432,18 @@ static bsp_flash_status_t flash_erase_sector(uint32_t base)
     return BSP_FLASH_ERR_INVALID_ARG;
 
   FLASH_EraseInitTypeDef erase        = { 0 };
-  uint32_t               sector_error = 0;
+  uint32_t               sector_error = 0xFFFFFFFFu;
 
   HAL_FLASH_Unlock();
+  flash_clear_pending_flags();
   erase.TypeErase    = FLASH_TYPEERASE_SECTORS;
   erase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
   erase.Sector       = (uint32_t) sector;
   erase.NbSectors    = 1;
-  if (HAL_FLASHEx_Erase(&erase, &sector_error) != HAL_OK)
+  HAL_StatusTypeDef hal_status = HAL_FLASHEx_Erase(&erase, &sector_error);
+  if (hal_status != HAL_OK)
   {
+    flash_log_hal_failure("erase", base, sector, hal_status, sector_error);
     HAL_FLASH_Lock();
     return BSP_FLASH_ERR_ERASE;
   }
@@ -392,7 +455,14 @@ static int flash_write_word(uint32_t addr, uint32_t w)
 {
   if ((addr & 3u) != 0u)
     return -1;
-  return (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, w) == HAL_OK) ? 0 : -1;
+  flash_clear_pending_flags();
+  HAL_StatusTypeDef hal_status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, w);
+  if (hal_status != HAL_OK)
+  {
+    flash_log_hal_failure("program", addr, addr_to_containing_sector(addr), hal_status, 0xFFFFFFFFu);
+    return -1;
+  }
+  return 0;
 }
 
 static bsp_flash_status_t flash_write_block(uint32_t addr, const void *data, uint32_t size)

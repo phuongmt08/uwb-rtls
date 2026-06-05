@@ -16,26 +16,6 @@
 /* Private defines ---------------------------------------------------- */
 #define MAXZERO  (0.001)
 
-#ifndef MW_TRIL_D2_RECOVER
-#define MW_TRIL_D2_RECOVER 4.0
-#endif
-
-#ifndef MW_TRIL_D2_REJECT
-#define MW_TRIL_D2_REJECT 9.0
-#endif
-
-#ifndef MW_TRIL_RESIDUAL_SCALE_M
-#define MW_TRIL_RESIDUAL_SCALE_M 0.30
-#endif
-
-#ifndef MW_TRIL_FP_NORM_GOOD
-#define MW_TRIL_FP_NORM_GOOD 8.0
-#endif
-
-#ifndef MW_TRIL_FP_SNR_GOOD
-#define MW_TRIL_FP_SNR_GOOD 12.0
-#endif
-
 /* Private function prototypes ---------------------------------------- */
 static inline vec3d_t vec_diff(vec3d_t v1, vec3d_t v2);
 static inline vec3d_t vec_sum(vec3d_t v1, vec3d_t v2);
@@ -49,6 +29,45 @@ static int trilaterate_3sphere(vec3d_t *sol1, vec3d_t *sol2,
                                vec3d_t p1, double r1,
                                vec3d_t p2, double r2,
                                vec3d_t p3, double r3);
+
+static inline vec3d_t vec_diff(vec3d_t v1, vec3d_t v2)
+{
+    return (vec3d_t){v1.x - v2.x, v1.y - v2.y, v1.z - v2.z};
+}
+
+static inline vec3d_t vec_sum(vec3d_t v1, vec3d_t v2)
+{
+    return (vec3d_t){v1.x + v2.x, v1.y + v2.y, v1.z + v2.z};
+}
+
+static inline vec3d_t vec_mul(vec3d_t v, double s)
+{
+    return (vec3d_t){v.x * s, v.y * s, v.z * s};
+}
+
+static inline vec3d_t vec_div(vec3d_t v, double s)
+{
+    return (vec3d_t){v.x / s, v.y / s, v.z / s};
+}
+
+static inline double vec_norm(vec3d_t v)
+{
+    return sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
+}
+
+static inline vec3d_t vec_cross(vec3d_t v1, vec3d_t v2)
+{
+    return (vec3d_t){
+        (v1.y * v2.z) - (v1.z * v2.y),
+        (v1.z * v2.x) - (v1.x * v2.z),
+        (v1.x * v2.y) - (v1.y * v2.x)
+    };
+}
+
+static inline double vec_dot(vec3d_t v1, vec3d_t v2)
+{
+    return (v1.x * v2.x) + (v1.y * v2.y) + (v1.z * v2.z);
+}
 
 static double clamp01(double value)
 {
@@ -214,7 +233,6 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
     double  best_residual = 0.0;
     double  best_gdop_penalty = 0.0;
     double  best_fp_penalty = 0.0;
-    double  best_fp_snr_penalty = 0.0;
 
     for (uint8_t i = 0; i < valid_count - 2; i++) {
         for (uint8_t j = i + 1; j < valid_count - 1; j++) {
@@ -241,17 +259,14 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                                        + anchor_d2_penalty(valid_anchors[j].d2_score)
                                        + anchor_d2_penalty(valid_anchors[k].d2_score)) / 3.0;
                 double avg_fp_penalty =
-                    ((valid_anchors[i].quality_valid ? fp_quality_penalty(valid_anchors[i].fp_amp_norm, MW_TRIL_FP_NORM_GOOD) : 1.0)
-                   + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_amp_norm, MW_TRIL_FP_NORM_GOOD) : 1.0)
-                   + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_amp_norm, MW_TRIL_FP_NORM_GOOD) : 1.0)) / 3.0;
-                double avg_fp_snr_penalty =
-                    ((valid_anchors[i].quality_valid ? fp_quality_penalty(valid_anchors[i].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)
-                   + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)
-                   + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_snr, MW_TRIL_FP_SNR_GOOD) : 1.0)) / 3.0;
+                    ((valid_anchors[i].quality_valid ? fp_quality_penalty(valid_anchors[i].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)
+                   + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)
+                   + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)) / 3.0;
 
-                double score = (0.35 * avg_d2_penalty) + (0.15 * avg_fp_penalty)
-                             + (0.10 * avg_fp_snr_penalty) + (0.20 * gdop_penalty)
-                             + (0.20 * residual_penalty);
+                double score = (MW_TRIL_WEIGHT_D2 * avg_d2_penalty)
+                             + (MW_TRIL_WEIGHT_FP_AMP * avg_fp_penalty)
+                             + (MW_TRIL_WEIGHT_GDOP * gdop_penalty)
+                             + (MW_TRIL_WEIGHT_RESIDUAL * residual_penalty);
 
                 if (score < best_score) {
                     best_score = score;
@@ -261,7 +276,6 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                     best_residual = residual;
                     best_gdop_penalty = gdop_penalty;
                     best_fp_penalty = avg_fp_penalty;
-                    best_fp_snr_penalty = avg_fp_snr_penalty;
                 }
             }
         }
@@ -280,7 +294,6 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
         best_out[i].residual_rms = best_residual;
         best_out[i].gdop_penalty = best_gdop_penalty;
         best_out[i].fp_penalty = best_fp_penalty;
-        best_out[i].fp_snr_penalty = best_fp_snr_penalty;
     }
 
 #ifdef ENABLE_DEBUG_LOGGING

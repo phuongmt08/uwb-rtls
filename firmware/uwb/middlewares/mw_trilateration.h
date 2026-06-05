@@ -49,7 +49,6 @@ typedef struct {
     double residual_rms;
     double gdop_penalty;
     double fp_penalty;
-    double fp_snr_penalty;
 } mw_tril_anchor_t;
 
 /**

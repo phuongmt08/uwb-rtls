@@ -6,12 +6,13 @@ import threading
 from pathlib import Path
 from datetime import datetime
 
-# Add the parent directory to sys.path so we can import modules from vv_testings
+# Add the parent directories to sys.path so we can import vv_testings and common.
 sys.path.append(str(Path(__file__).resolve().parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-from vv_commands import CommandFactory
+from common.commands import CommandFactory
+from common import protocol_pb2 as pb
 from vv_test_session import VvTestSession
-import protocol_pb2 as pb
 
 # Global variables for the Live Dashboard
 running = True
@@ -204,7 +205,7 @@ def print_help():
     print("  disconnect      : Ngắt kết nối thiết bị hiện tại")
     print("  get             : Đọc Connection Params hiện tại (get_params)")
     print("  set             : Ghi Connection Params mới (min=30, max=60)")
-    print("  stub [tag|anchor]: Gửi 'device_information_get' để test đường truyền")
+    print("  stub [mcu|peri]   : Gửi 'device_information_get' để test đường truyền")
     print("  debug on/off    : Bật/tắt log packet RX từ central")
     print("  help            : Hiển thị bảng lệnh này")
     print("  exit            : Thoát")
@@ -315,15 +316,15 @@ def run_interactive(session: VvTestSession, src: int, dst: int):
                 session.send_packet(pkt)
 
             elif cmd == "stub":
-                target_name = cmd_line[1].lower() if len(cmd_line) > 1 else "tag"
-                if target_name == "anchor":
-                    target_dst = pb.PACKET_ADDR_ANCHOR
-                    target_label = "ANCHOR"
-                elif target_name == "tag":
-                    target_dst = pb.PACKET_ADDR_TAG
-                    target_label = "TAG"
+                target_name = cmd_line[1].lower() if len(cmd_line) > 1 else "mcu"
+                if target_name in ("mcu", "tag", "anchor"):
+                    target_dst = pb.PACKET_ADDR_MCU
+                    target_label = "MCU"
+                elif target_name in ("peri", "peripheral"):
+                    target_dst = pb.PACKET_ADDR_PERIPHERAL
+                    target_label = "PERIPHERAL"
                 else:
-                    print("[!] Sử dụng: stub [tag|anchor]")
+                    print("[!] Sử dụng: stub [mcu|peri]")
                     continue
 
                 print(f"[+] Gửi stub (device_information_get) tới {target_label} (0x{target_dst:02X}) ...")
@@ -367,8 +368,6 @@ def auto_detect_com_port():
 def main():
     import sys
     import argparse
-    from vv_test_session import VvTestSession
-    import protocol_pb2 as pb
     
     parser = argparse.ArgumentParser(description="Live BLE Central Dashboard")
     parser.add_argument("--port", type=str, default=None, help="COM port, example COM21")
