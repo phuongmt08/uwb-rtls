@@ -31,6 +31,7 @@ PASSIVE_REQUESTS = {
     "ranging_result",
     "ranging_status_resp",
     "sensor_fusion_cfg_resp",
+    "sensor_fusion_result",
     "flash_data",
     "ble_status_resp",
     "ble_adv_status",

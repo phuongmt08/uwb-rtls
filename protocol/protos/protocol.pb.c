@@ -87,6 +87,15 @@ PB_BIND(protobuf_sensor_fusion_cfg_set_t, protobuf_sensor_fusion_cfg_set_t, AUTO
 PB_BIND(protobuf_sensor_fusion_cfg_resp_t, protobuf_sensor_fusion_cfg_resp_t, AUTO)
 
 
+PB_BIND(protobuf_sensor_fusion_result_t, protobuf_sensor_fusion_result_t, AUTO)
+
+
+PB_BIND(protobuf_imu_reset_t, protobuf_imu_reset_t, AUTO)
+
+
+PB_BIND(protobuf_imu_calib_retry_t, protobuf_imu_calib_retry_t, AUTO)
+
+
 PB_BIND(protobuf_device_reset_t, protobuf_device_reset_t, AUTO)
 
 

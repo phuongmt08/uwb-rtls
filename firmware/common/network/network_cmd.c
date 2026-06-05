@@ -27,6 +27,7 @@
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
+#define SENSOR_FUSION_STREAM_PERIOD_MS  50u
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);
 
@@ -77,6 +78,8 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
 
 static void network_cmd_sys_ranging_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt);
+static void network_cmd_ranging_start(const protobuf_packet_t *pkt);
+static void network_cmd_ranging_stop(const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
@@ -117,6 +120,7 @@ static network_log_tracker_t s_log_tracker = {
 
 static bool    s_log_stream_enabled = false;
 static uint8_t s_log_stream_dst     = protobuf_PACKET_ADDR_HOST;
+static uint32_t s_last_sensor_fusion_stream_tick = 0u;
 
 /* ---- Command dispatch table ----
  * Sparse, indexed by protobuf tag via CMD_INFO.
@@ -148,8 +152,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 13 */
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_set_tag,       network_cmd_sys_ranging_cfg_set,         "rng_cfg_set"),        /* 14 */
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_resp_tag,      network_cmd_unimplemented,               "rng_cfg_resp"),       /* 15 */
-    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_unimplemented,               "rng_start"),          /* 16 */
-    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_unimplemented,               "rng_stop"),           /* 17 */
+    CMD_INFO(protobuf_packet_t_ranging_start_tag,             network_cmd_ranging_start,               "rng_start"),          /* 16 */
+    CMD_INFO(protobuf_packet_t_ranging_stop_tag,              network_cmd_ranging_stop,                "rng_stop"),           /* 17 */
     /* TODO: Need to implement */
     CMD_INFO(protobuf_packet_t_ranging_result_tag,            network_cmd_unimplemented,               "rng_result"),         /* 18 */
     CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 19 */
@@ -463,6 +467,22 @@ static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt)
     cfg->uwb.ranging_period_ms  = pkt->params.sys_ranging_cfg_set.config.ranging_period_ms;
 
     network_cmd_config_save("ranging_cfg");
+}
+
+static void network_cmd_ranging_start(const protobuf_packet_t *pkt)
+{
+    (void)pkt;
+    if (!network_cmd_set_ranging_enabled(true)) {
+        RLOG_W(OBJECT_CODE, "ranging_start rejected by platform");
+    }
+}
+
+static void network_cmd_ranging_stop(const protobuf_packet_t *pkt)
+{
+    (void)pkt;
+    if (!network_cmd_set_ranging_enabled(false)) {
+        RLOG_W(OBJECT_CODE, "ranging_stop rejected by platform");
+    }
 }
 
 #endif /* !BOOTLOADER */
@@ -922,8 +942,25 @@ bool network_cmd_init(network_core_t *stream)
     s_network_cmd.stream  = stream;
     s_network_cmd.enabled = true;
 
-    
+
     return network_core_register_packet_handler(stream, network_cmd_packet_handler);
+}
+
+bool network_cmd_is_ble_host_active(void)
+{
+    CHECK(s_network_cmd.stream, false);
+    return s_network_cmd.stream->ble_connection_active;
+}
+
+bool network_cmd_set_ranging_enabled(bool enabled)
+{
+    g_ranging_enabled = enabled;
+    return false;
+}
+
+bool network_cmd_is_ranging_enabled(void)
+{
+    return g_ranging_enabled;
 }
 
 void network_cmd_process(void)
@@ -985,6 +1022,28 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
  * These functions wrap packet construction and transmission for outgoing commands
  * to specific destinations (dst).
  * -------------------------------- */
+
+bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
+{
+    CHECK(stream && data, false);
+    CHECK(network_cmd_is_ranging_enabled(), false);
+//    CHECK(network_cmd_is_ble_host_active(), false);
+
+    uint32_t now = bsp_util_get_ticks();
+    CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+
+    protobuf_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.which_params = protobuf_packet_t_sensor_fusion_result_tag;
+    pkt.params.sensor_fusion_result = *data;
+
+    if (network_core_send_packet(stream, dst, &pkt)) {
+        s_last_sensor_fusion_stream_tick = now;
+        return true;
+    }
+
+    return false;
+}
 
 #ifdef HAVE_BLE_PERIPHERAL
 

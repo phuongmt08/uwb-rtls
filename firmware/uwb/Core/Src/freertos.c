@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "app_rtos_handles.h"
 #include "app_anchor.h"
 #include "app_tag.h"
@@ -71,7 +72,7 @@
 
 osMessageQueueId_t g_uwb_distance_queue;
 
-bool g_ranging_enabled = true;
+bool g_ranging_enabled = false;
 bool g_pm_ranging_blocked = false;
 
 /* Network objects — non-static so main.c can init via extern */
@@ -79,6 +80,8 @@ network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
 
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#define UKF_BLE_STREAM_TEST_ENABLE 1U
+
 static uint32_t s_fusion_last_tick = 0U;
 static bool     s_fusion_first_run = true;
 #if ENABLE_SYS_FUSION_LOG
@@ -377,6 +380,29 @@ void sensor_fusion_entry(void *argument)
     osThreadExit();
   }
 
+#if UKF_BLE_STREAM_TEST_ENABLE
+  uint32_t sample_idx = 0U;
+  for (;;)
+  {
+    uint32_t now_ms = HAL_GetTick();
+    float step = (float)sample_idx;
+    protobuf_sensor_fusion_result_t stream_data;
+    memset(&stream_data, 0, sizeof(stream_data));
+    stream_data.ukf_x_m = 1.0f + 0.05f * step;
+    stream_data.ukf_y_m = 2.0f + 0.03f * step;
+    stream_data.ukf_yaw_deg = 15.0f + 0.5f * step;
+    stream_data.tril_x_m = 0.9f + 0.05f * step;
+    stream_data.tril_y_m = 1.9f + 0.03f * step;
+    stream_data.yaw_deg = 14.5f + 0.5f * step;
+    stream_data.ranging_error_count = sample_idx;
+    stream_data.timestamp_ms = now_ms;
+
+    if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data)) {
+      sample_idx++;
+    }
+    osDelay(20);
+  }
+#else
   /* Khởi tạo bộ lọc định vị và prefilter */
   mw_filter_mahalanobis_init(&s_prefilter,
                              MAHALANOBIS_PREFILTER_D2_RECOVER,
@@ -705,9 +731,26 @@ void sensor_fusion_entry(void *argument)
 
       app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
       bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
+
+      if (s_ukf_initialized) {
+        uint32_t now_ms = HAL_GetTick();
+        protobuf_sensor_fusion_result_t stream_data;
+        memset(&stream_data, 0, sizeof(stream_data));
+        stream_data.ukf_x_m = (float)ukf_data.px;
+        stream_data.ukf_y_m = (float)ukf_data.py;
+        stream_data.ukf_yaw_deg = ukf_yaw;
+        stream_data.tril_x_m = tril_x;
+        stream_data.tril_y_m = tril_y;
+        stream_data.yaw_deg = yaw;
+        stream_data.ranging_error_count = err_count;
+        stream_data.timestamp_ms = now_ms;
+        (void)network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data);
+      }
     }
 #endif
   }
+#endif
+
 #else
   osThreadExit();
 #endif
@@ -728,7 +771,7 @@ void network_entry(void *argument)
   {
     network_core_process(&g_network_core);
     network_cmd_process();
-    osDelay(5);
+    osDelay(2);
   }
   /* USER CODE END network_entry */
 }
