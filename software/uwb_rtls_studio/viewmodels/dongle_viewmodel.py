@@ -21,6 +21,7 @@ class DongleViewModel(QObject):
     # Signals cho View
     status_changed = pyqtSignal(str)
     port_info_changed = pyqtSignal(str)
+    port_probing_changed = pyqtSignal(str)
     dongle_detected = pyqtSignal(str)
     dongle_ready = pyqtSignal(dict)
     dongle_error = pyqtSignal(str)
@@ -33,6 +34,7 @@ class DongleViewModel(QObject):
         
         # Lắng nghe tín hiệu từ Model, format lại thành giao diện
         self.model.ports_scanned.connect(self._on_ports_scanned)
+        self.model.port_probing.connect(self._on_port_probing)
         self.model.dongle_found.connect(self._on_dongle_found)
         self.model.dongle_verified.connect(self._on_dongle_verified)
         self.model.search_timeout.connect(self._on_timeout)
@@ -52,7 +54,11 @@ class DongleViewModel(QObject):
 
     # ── Presentation Logic (Model -> View) ───────────────────────────
     def _on_ports_scanned(self, count: int) -> None:
-        self.port_info_changed.emit(f"Scanned {count} COM port(s)")
+        self.port_info_changed.emit(f"Found {count} COM port(s) to probe")
+
+    def _on_port_probing(self, port: str) -> None:
+        self.port_probing_changed.emit(port)
+        self.status_changed.emit(f"Probing {port}...")
 
     def _on_dongle_found(self, info: DongleInfo) -> None:
         self.dongle_detected.emit(info.port)

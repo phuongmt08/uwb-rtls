@@ -84,7 +84,7 @@ UWB RTLS Studio là ứng dụng desktop cho phép:
 
 ## 🧵 Threading & Concurrency Architecture
 
-Để đảm bảo ứng dụng không bị đơ (freeze), giật lag (stutter), hay tràn bộ nhớ (memory leak) khi phải nhận/gửi dữ liệu liên tục từ UWB/BLE ở tốc độ cao (ví dụ 10Hz - 30Hz), ứng dụng sử dụng mô hình đa luồng (Multi-threading) với **PySide6 QThread** và cơ chế đồng bộ luồng nghiêm ngặt.
+Để đảm bảo ứng dụng không bị đơ (freeze), giật lag (stutter), hay tràn bộ nhớ (memory leak) khi phải nhận/gửi dữ liệu liên tục từ UWB/BLE ở tốc độ cao (ví dụ 10Hz - 30Hz), ứng dụng sử dụng mô hình đa luồng (Multi-threading) với **PyQt6 QThread** và cơ chế đồng bộ luồng nghiêm ngặt.
 
 ### 1. Phân chia luồng (Thread Separation)
 
@@ -94,12 +94,45 @@ UWB RTLS Studio là ứng dụng desktop cho phép:
     *   Chạy vòng lặp sự kiện chính của Qt (`QApplication.exec()`).
     *   **Nhiệm vụ:** Render giao diện (Views), cập nhật bản đồ 2D tracking, xử lý logic (ViewModels), và quản lý trạng thái dữ liệu (Models).
     *   **Quy tắc:** Tuyệt đối KHÔNG chạy các tác vụ I/O (đọc/ghi file lớn, đọc/ghi Serial, network, delay/sleep) trên luồng này để tránh làm treo giao diện.
+    *   Các `QTimer` (periodic poll battery, BLE status) cũng chạy trên Main Thread — chúng chỉ emit signal gọi `ProtocolService.send_command()` nên không blocking.
 
 *   **Background Threads (Workers):**
     *   Chạy độc lập với UI, chuyên xử lý các tác vụ I/O hoặc blocking.
     *   `SerialReadWorker` (QThread): Chạy vòng lặp vô hạn `serial.read()`. Liên tục lắng nghe byte thô từ phần cứng mà không làm nghẽn UI.
     *   `DongleDetectWorker` (QThread): Gọi `serial.tools.list_ports` (hàm này rất chậm trên Windows, làm khựng app nếu chạy ở UI thread) để quét tìm thiết bị.
     *   `PeriodicPollWorker` (QThread): Chạy ngầm, dùng sleep/timer để định kỳ gửi lệnh hỏi (poll) pin, trạng thái hệ thống mỗi N giây.
+    *   Tại bất kỳ thời điểm nào, chỉ có **TỐI ĐA 1 background thread** chiếm dụng cổng COM.
+
+#### Vòng đời Thread & COM Port Ownership
+
+Quan trọng: Trên Windows, một cổng COM chỉ cho phép **DUY NHẤT MỘT** process/object mở nó tại một thời điểm (Exclusive Access). Kiến trúc thread được thiết kế để đảm bảo điều này:
+
+```
+  Giai đoạn 1 (Detect)            Giai đoạn 2 (Runtime)
+  ──────────────────────           ──────────────────────
+  Main Thread (UI)                 Main Thread (UI)
+  DongleDetectWorker (QThread)     SerialService._read_loop (threading.Thread)
+     ↕ mở/đóng COM tạm thời          ↕ ĐỘC CHIẾM COM port
+     ↕ (probe xong → đóng ngay)      ↕ (chạy suốt đến khi close)
+     ↕ thread TỰ KẾT THÚC           
+```
+
+*   **`DongleDetectWorker` (QThread) — Thread lâm thời:**
+    *   Chạy khi app khởi động, dò tìm dongle bằng protobuf handshake.
+    *   Mở COM port tạm thời (< 0.5s) để gửi `device_information_get` → chờ ACK → **đóng ngay lập tức**.
+    *   Khi tìm thấy dongle → emit signal → **thread tự chết**.
+    *   Không bao giờ tồn tại đồng thời với Serial Reader Thread.
+
+*   **`SerialService._read_loop` (threading.Thread) — Thread thường trú:**
+    *   Chỉ được tạo SAU KHI DongleDetectWorker đã kết thúc.
+    *   `SerialService.open(port)` tạo thread này — **ĐỘC CHIẾM COM port** xuyên suốt vòng đời app.
+    *   Chạy vòng lặp vô hạn `serial.read()` để hứng dữ liệu từ phần cứng.
+    *   Mọi tác vụ ghi (TX) đều đi qua `SerialService.write()` với `threading.Lock` bảo vệ.
+
+*   **`PeriodicPollWorker` — KHÔNG phải OS Thread:**
+    *   Chỉ là các `QTimer` chạy trên Main Thread.
+    *   Định kỳ gọi `ProtocolService.send_command()` (battery, BLE status, etc.).
+    *   Không tạo thread mới, không mở COM port riêng.
 
 ### 2. Cơ chế đồng bộ và giao tiếp (Communication Mechanism)
 
@@ -230,7 +263,7 @@ uwb_rtls_studio/
 │   ├── __init__.py
 │   ├── serial_service.py            #     USB/Serial port management
 │   ├── protocol_service.py          #     HDLC + Protobuf encode/decode
-│   ├── dongle_detect_service.py     #     Auto-detect dongle via VID/PID
+│   ├── dongle_detect_service.py     #     Auto-detect dongle via protobuf probe
 │   └── data_export_service.py       #     Manual export (ad-hoc CSV/JSON)
 │
 ├── repository/                      # 💾 PERSISTENCE LAYER (NEW)
@@ -240,13 +273,13 @@ uwb_rtls_studio/
 │
 ├── workers/                         # ⚡ BACKGROUND THREADS
 │   ├── __init__.py
-│   ├── serial_read_worker.py        #     Continuous serial reading
-│   ├── dongle_detect_worker.py      #     COM port scanning
-│   └── periodic_poll_worker.py      #     Periodic battery/status polling
+│   ├── serial_read_worker.py        #     (DEPRECATED — merged into SerialService)
+│   ├── dongle_detect_worker.py      #     Protobuf probe + port-change monitor + check all COMx 
+│   └── periodic_poll_worker.py      #     (Placeholder — dùng QTimer trên Main Thread)
 │
 ├── utils/                           # 🛠 UTILITIES
 │   ├── __init__.py
-│   ├── constants.py                 #     VID/PID, baud rate, timeouts, UI sizes
+│   ├── constants.py                 #     Probe config, baud rate, timeouts, UI sizes
 │   ├── theme.py                     #     Dark theme (QSS stylesheet + colors)
 │   └── helpers.py                   #     Format functions, conversions
 │
@@ -276,17 +309,59 @@ uwb_rtls_studio/
 
 ### Flow 1: Dongle Detection (Startup)
 
+App tự động detect dongle bằng **protobuf handshake** — không dùng VID/PID.
 ```
-App Start → DonglePopup opens
-         → DongleDetectWorker scans COM ports
-         → Match VID:0x1915 (Nordic) ?
-            ├─ YES → "Detected Dongle Central NRF52840" popup
-            │      → Open serial port (115200 baud)
-            │      → Send device_information_get (tag=4)
-            │      → Receive device_information_resp (tag=5)
-            │      → ✅ "Connected!" → Close popup → Open ScanPopup
-            └─ NO  → ❌ "Dongle not found" → [Retry] / [Cancel]
+App Start → DonglePopup opens → DongleDetectWorker start (background thread)
+
+  ┌─── Phase 1: Initial Scan ────────────────────────────────────────────┐
+  │                                                                       │
+  │  1. Liệt kê TẤT CẢ COM ports hiện có (serial.tools.list_ports)      │
+  │  2. Sắp xếp theo priority score:                                     │
+  │     - STM VCP (0483:5740) → score cao nhất                          │
+  │     - USB Serial / Virtual COM → score trung bình                    │
+  │     - Bluetooth Serial → score âm (skip ưu tiên)                    │
+  │  3. Với mỗi port (theo thứ tự priority):                            │
+  │     a. Mở serial tạm thời (115200 baud, timeout 0.05s)              │
+  │     b. Gửi protobuf: device_information_get (HDLC wrapped)          │
+  │     c. Chờ response trong 0.5s                                       │
+  │     d. Nhận ACK hoặc device_information_resp?                        │
+  │        ├─ YES → Đây là dongle! → emit dongle_found → Phase 3        │
+  │        └─ NO  → Retry (tối đa 3 lần) → không ACK → skip port       │
+  │     e. ĐÓNG serial port ngay lập tức (giải phóng COM)               │
+  │                                                                       │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  ┌─── Phase 2: Monitor Port Changes (nếu Phase 1 không tìm thấy) ──────┐
+  │                                                                       │
+  │  1. Lưu danh sách ports hiện tại: known_ports = {COM1, COM2, ...}         │
+  │  2. Mỗi 800ms, so sánh port list hiện tại với known_ports            │
+  │     (chỉ gọi list_ports — KHÔNG mở COM port, rất nhẹ)               │
+  │  3. Có port MỚI xuất hiện (dongle vừa cắm vào)?                     │
+  │     ├─ YES → Đợi 500ms cho driver enumerate → Quay lại Phase 1      │
+  │     └─ NO  → Tiếp tục monitor                                       │
+  │  4. Hết timeout (30s) → emit timeout → hiện lỗi [Retry] / [Cancel]  │
+  │                                                                       │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  ┌─── Phase 3: Open & Verify ───────────────────────────────────────────┐
+  │                                                                       │
+  │  1. DongleDetectWorker thread TỰ KẾT THÚC (end session)                 │
+  │  2. DongleModel nhận signal dongle_found(DongleInfo)                 │
+  │  3. Mở serial CHÍNH THỨC qua SerialService.open(port)               │
+  │     → Tạo SerialReader thread (ĐỘC CHIẾM COM port từ đây)          │
+  │  4. Gửi device_information_get qua ProtocolService                   │
+  │  5. Nhận device_information_resp?                                     │
+  │     ├─ YES → Lấy fw_version, serial, role → ✅ dongle_verified      │
+  │     └─ TIMEOUT (3s) → ⚠️ Proceed unverified                        │
+  │  6. DonglePopup auto-close → Mở ScanPopup                           │
+  │                                                                       │
+  └───────────────────────────────────────────────────────────────────────┘
 ```
+
+**Tại sao không dùng VID/PID?**
+- VID/PID phụ thuộc vào USB chip cụ thể (Nordic, STM, etc.) — dễ sai.
+- Protobuf handshake xác nhận được firmware thật sự đang chạy trên device.
+- Có khả năng bị trùng với VID/PID khác của các device khác nhau.
 
 ### Flow 2: BLE Scanning (Scan Popup)
 
@@ -442,7 +517,7 @@ Device → BLE → Dongle → USB → SerialService.read()
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| PySide6 | ≥ 6.5 | Qt GUI framework |
+| PyQt6 | ≥ 6.5 | Qt GUI framework |
 | pyserial | ≥ 3.5 | Serial/USB communication |
 | protobuf | ≥ 4.0 | Protocol buffer runtime |
 
@@ -453,13 +528,16 @@ Device → BLE → Dongle → USB → SerialService.read()
 - [x] Project layout (MVVM + Repository structure)
 - [x] File scaffolding with documentation
 - [x] Session persistence design (Repository layer)
-- [ ] Models implementation (dataclasses)
+- [x] Models implementation (dataclasses)
+- [x] Services implementation (serial, protocol, dongle detect)
+- [x] Workers implementation (DongleDetectWorker — protobuf probe)
+- [x] ViewModels implementation (dongle, scan, device info, tracking)
+- [x] Views implementation (PyQt6 UI — popups, tabs, main window)
+- [x] Theme & styling (dark theme, glassmorphism)
+- [x] Dongle auto-detection (protobuf handshake, event-based)
 - [ ] Repository implementation (session save/load)
-- [ ] Services implementation (serial, protocol)
-- [ ] Workers implementation (QThread)
-- [ ] ViewModels implementation (business logic)
-- [ ] Views implementation (PySide6 UI)
-- [ ] Theme & styling
+- [ ] PeriodicPollWorker (battery, BLE status)
+- [ ] Calibration tab (Developer mode)
 - [ ] Icon assets
 - [ ] Testing
 - [ ] Build & packaging

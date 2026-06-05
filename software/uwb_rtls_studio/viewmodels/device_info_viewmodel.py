@@ -13,6 +13,11 @@
     - battery_info_get_t / _resp_t        (61, 60)
     - ble_status_get_t / _resp_t          (34, 35)
     - ble_conn_params_get_t / _resp_t     (47, 49)
+
+  Background Polling:
+    - A background QTimer fires every 2s.
+    - It always sends GET commands to retrieve the full device info.
+    - No manual Refresh button needed.
 ===============================================================================
 """
 import logging
@@ -27,15 +32,12 @@ log = logging.getLogger(__name__)
 _TABLE_REBUILD_INTERVAL_MS = 2000
 # Delay after ble_scan_stop before sending ble_connect (ms)
 _STOP_TO_CONNECT_DELAY_MS = 400
-# Delay after ble_connect before restarting scan (ms)
-_CONNECT_TO_SCAN_DELAY_MS = 5000
-# Telemetry poll interval (ms)
-_TELEMETRY_POLL_MS = 10000
+# Background telemetry polling interval (ms) — always running
+_TELEMETRY_POLL_MS = 2000
 
 
 class DeviceInfoViewModel(QObject):
     device_info_updated = pyqtSignal(dict)
-    dongle_info_updated = pyqtSignal(dict)
     ble_info_updated = pyqtSignal(dict)
     telemetry_updated = pyqtSignal(dict)
     advertising_devices_updated = pyqtSignal(list, bool)  # list of dicts, is_scanning
@@ -59,9 +61,9 @@ class DeviceInfoViewModel(QObject):
         self._prune_timer = QTimer(self)
         self._prune_timer.timeout.connect(self._prune_devices)
 
-        # --- Telemetry refresh timer ---
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self.refresh_telemetry)
+        # --- Background telemetry polling timer (always running, every 2s) ---
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_device_info)
 
         # --- Table rebuild throttle ---
         self._table_dirty = False
@@ -79,8 +81,6 @@ class DeviceInfoViewModel(QObject):
 
     def _delayed_init(self):
         """Called once after MainWindow has wired all signals."""
-        self.refresh_dongle_info()
-        
         # NOTE: If we are already connected (from ScanPopup), DO NOT start background scan
         # because ble_scan_start command causes the Dongle to disconnect the current device!
         if self._connected_mac:
@@ -92,40 +92,53 @@ class DeviceInfoViewModel(QObject):
         else:
             self.start_background_scan()
             
-        # Start telemetry polling (first poll after 2s, then every N seconds)
-        QTimer.singleShot(2000, self._start_telemetry_polling)
+        # Start background polling immediately (always running)
+        self._start_background_polling()
 
-    def _start_telemetry_polling(self):
-        self.refresh_telemetry()
-        self._refresh_timer.start(_TELEMETRY_POLL_MS)
+    # ── Background Polling (replaces Refresh Telemetry button) ───────
+    def _start_background_polling(self):
+        """Start the background timer that polls device info every 2s."""
+        # Do a first poll immediately
+        self._poll_device_info()
+        self._poll_timer.start(_TELEMETRY_POLL_MS)
+        log.info("Background telemetry polling started (every %d ms)", _TELEMETRY_POLL_MS)
 
-    # ── Dongle Info ──────────────────────────────────────────────────
-    def refresh_dongle_info(self):
-        if self.dongle_model and hasattr(self.dongle_model, '_current_info') and self.dongle_model._current_info:
-            info = self.dongle_model._current_info
-            self.dongle_info_updated.emit({
-                "Port": info.port,
-                "VID / PID": f"{info.vid:04X} / {info.pid:04X}",
-                "Serial": info.serial_number or info.description,
-                "Status": "Connected"
-            })
+    def _stop_background_polling(self):
+        """Stop the background polling timer."""
+        self._poll_timer.stop()
+        log.info("Background telemetry polling stopped")
 
+    def _poll_device_info(self):
+        """
+        Background thread-safe polling: sends GET commands to retrieve
+        all device info fields currently displayed on the Device Info tab.
+        
+        Runs every 2s automatically.
+        """
+        try:
+            # Always query the dongle's own BLE status (central side)
+            self.protocol.send_command("ble_status_get", dst_addr=VvAddress.CENTRAL)
+            
+            # Only query the peripheral if we have a connected device
+            if self._connected_mac:
+                self.protocol.send_command("device_information_get", dst_addr=VvAddress.PERIPHERAL)
+                self.protocol.send_command("battery_info_get", dst_addr=VvAddress.PERIPHERAL)
+        except Exception as e:
+            log.warning("Background poll failed: %s", e)
+
+    # ── Connection Lifecycle ─────────────────────────────────────────
     def _on_connection_lost(self):
         log.warning("Dongle physically disconnected! Starting auto-detect loop...")
         self._connected_mac = ""
         self._connected_name = ""
         
+        # Stop polling since there's no connection
+        self._stop_background_polling()
+        
         # Emit disconnected status for the Device
         self.device_info_updated.emit({
             "Device Name": "-",
             "MAC Address": "-",
-            "Status": "Disconnected"
-        })
-        # Emit disconnected status for the Dongle
-        self.dongle_info_updated.emit({
-            "Port": "-",
-            "VID / PID": "-",
-            "Serial": "-",
             "Status": "Disconnected"
         })
         
@@ -136,9 +149,10 @@ class DeviceInfoViewModel(QObject):
     def _on_dongle_reconnected(self, info_dict: dict):
         log.info("Dongle auto-reconnected and verified.")
         if info_dict.get("verified"):
-            self.refresh_dongle_info()
             # Immediately restart scanning for BLE devices
             self.start_background_scan()
+            # Resume background polling
+            self._start_background_polling()
 
     # ── Connected device (from ScanPopup result) ─────────────────────
     def set_connected_device(self, name: str, mac: str):
@@ -169,19 +183,6 @@ class DeviceInfoViewModel(QObject):
             self.protocol.send_command("ble_scan_stop")
             self._is_scanning = False
             self._prune_timer.stop()
-
-    # ── Telemetry ────────────────────────────────────────────────────
-    def refresh_telemetry(self):
-        try:
-            # Only query the peripheral if we have a connected device
-            if self._connected_mac:
-                self.protocol.send_command("device_information_get", dst_addr=VvAddress.PERIPHERAL)
-                self.protocol.send_command("battery_info_get", dst_addr=VvAddress.PERIPHERAL)
-            
-            # Always query the dongle's own BLE status
-            self.protocol.send_command("ble_status_get", dst_addr=VvAddress.CENTRAL)
-        except Exception as e:
-            log.warning("refresh_telemetry failed: %s", e)
 
     # ── Connect / Switch ─────────────────────────────────────────────
     def connect_device(self, mac_hex: str):
@@ -271,7 +272,7 @@ class DeviceInfoViewModel(QObject):
             
             # If the dongle just confirmed the connection, proceed to ask for device info
             if resp.state == self.protocol.pb.BLE_STATE_CONNECTED and self._connected_mac:
-                log.info("Dongle confirmed BLE_STATE_CONNECTED. Fetching telemetry from Peripheral.")
+                log.info("Dongle confirmed BLE_STATE_CONNECTED. Background polling will handle telemetry.")
                 
                 # Signal the UI that we are officially connected
                 self.device_info_updated.emit({
@@ -280,9 +281,6 @@ class DeviceInfoViewModel(QObject):
                     "Status": "Connected",
                     "SwitchToLogTab": True
                 })
-                
-                # Fetch dev_info_get etc. right away
-                self.refresh_telemetry()
                 
             elif resp.state == self.protocol.pb.BLE_STATE_IDLE and self._connected_mac:
                 # BLE_STATE_IDLE when we had a connected device means the device disconnected

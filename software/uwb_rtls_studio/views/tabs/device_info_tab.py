@@ -1,11 +1,17 @@
 """
 UWB RTLS Studio — Device Info Tab (Frontend Only)
 Tab 1: Hiển thị thông tin device đã connected.
+
+Layout: Split-screen
+  - LEFT column:  Connected Device + BLE Connection + Battery + Temperature + Voltage
+  - RIGHT column: Other Advertising Devices (with Connect buttons per row)
+
+Background polling: ViewModel tự động gửi GET commands mỗi 2s (không cần nút Refresh).
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QGridLayout, QProgressBar, QFrame, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea
+    QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -20,12 +26,9 @@ class DeviceInfoTab(QWidget):
     def set_viewmodel(self, vm):
         self._vm = vm
         self._vm.device_info_updated.connect(self._on_device_info)
-        self._vm.dongle_info_updated.connect(self._on_dongle_info)
         self._vm.ble_info_updated.connect(self._on_ble_info)
         self._vm.telemetry_updated.connect(self._on_telemetry_updated)
         self._vm.advertising_devices_updated.connect(self._on_advertising_devices)
-        
-        self._btn_refresh.clicked.connect(self._vm.refresh_telemetry)
 
     def _build_ui(self):
         scroll = QScrollArea(self)
@@ -35,18 +38,19 @@ class DeviceInfoTab(QWidget):
 
         container = QWidget()
         container.setStyleSheet("QWidget { background: transparent; }")
-        main = QVBoxLayout(container)
-        main.setSpacing(16)
-        main.setContentsMargins(16, 16, 16, 16)
 
-        top_hbox = QHBoxLayout()
-        top_hbox.setSpacing(16)
+        # ═══ MAIN SPLIT: Left + Right ═══
+        main_hbox = QHBoxLayout(container)
+        main_hbox.setSpacing(16)
+        main_hbox.setContentsMargins(16, 16, 16, 16)
 
-        # ═══ LEFT COLUMN: Device + Dongle Info ═══
+        # ═══════════════════════════════════════════════════════════════
+        #  LEFT COLUMN: Device Info + BLE + Battery + Temperature + Voltage
+        # ═══════════════════════════════════════════════════════════════
         left = QVBoxLayout()
         left.setSpacing(14)
 
-        # Device Info Card
+        # ── Connected Device Card ──
         dev_group = QGroupBox("📱 Connected Device")
         dev_grid = QGridLayout(dev_group)
         dev_grid.setSpacing(10)
@@ -74,32 +78,7 @@ class DeviceInfoTab(QWidget):
             self._dev_values[label] = val
         left.addWidget(dev_group)
 
-        # Dongle Info Card
-        dongle_group = QGroupBox("🔌 USB Dongle (Central)")
-        d_grid = QGridLayout(dongle_group)
-        d_grid.setSpacing(10)
-        dongle_labels = [
-            ("Port:", "-"),
-            ("VID / PID:", "-"),
-            ("Firmware:", "-"),
-            ("Serial:", "-"),
-            ("Status:", "-"),
-        ]
-        self._dongle_values = {}
-        for i, (label, value) in enumerate(dongle_labels):
-            lbl = QLabel(label)
-            lbl.setStyleSheet("color: #94A3B8; font-weight: bold;")
-            val = QLabel(value)
-            if label == "Status:":
-                val.setStyleSheet("color: #10B981; font-weight: bold;")
-            else:
-                val.setStyleSheet("color: #F8FAFC;")
-            d_grid.addWidget(lbl, i, 0)
-            d_grid.addWidget(val, i, 1)
-            self._dongle_values[label] = val
-        left.addWidget(dongle_group)
-
-        # BLE Connection Params
+        # ── BLE Connection Params ──
         ble_group = QGroupBox("📶 BLE Connection")
         ble_grid = QGridLayout(ble_group)
         ble_grid.setSpacing(10)
@@ -110,6 +89,7 @@ class DeviceInfoTab(QWidget):
             ("Sup. Timeout:", "-"),
             ("PHY:", "-"),
         ]
+        self._ble_values = {}
         for i, (label, value) in enumerate(ble_labels):
             lbl = QLabel(label)
             lbl.setStyleSheet("color: #94A3B8; font-weight: bold;")
@@ -117,21 +97,15 @@ class DeviceInfoTab(QWidget):
             val.setStyleSheet("color: #F8FAFC;")
             ble_grid.addWidget(lbl, i, 0)
             ble_grid.addWidget(val, i, 1)
+            self._ble_values[label] = val
         left.addWidget(ble_group)
 
-        left.addStretch()
-        top_hbox.addLayout(left, 1)
-
-        # ═══ RIGHT COLUMN: Telemetry ═══
-        right = QVBoxLayout()
-        right.setSpacing(14)
-
-        # Battery
+        # ── Battery ──
         bat_group = QGroupBox("🔋 Battery")
         bat_layout = QVBoxLayout(bat_group)
 
         self._bat_pct = QLabel("- %")
-        self._bat_pct.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold))
+        self._bat_pct.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
         self._bat_pct.setStyleSheet("color: #94A3B8; background: transparent;")
         self._bat_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bat_layout.addWidget(self._bat_pct)
@@ -160,29 +134,29 @@ class DeviceInfoTab(QWidget):
             bat_details.addWidget(val, i, 1)
             self._bat_info_labels[l] = val
         bat_layout.addLayout(bat_details)
-        right.addWidget(bat_group)
+        left.addWidget(bat_group)
 
-        # Temperature
+        # ── Temperature ──
         temp_group = QGroupBox("🌡 Temperature")
         temp_grid = QGridLayout(temp_group)
         temp_grid.setSpacing(10)
         self._temp_labels = {}
         temp_data = [
-            ("MCU:", "-", "#94A3B8"),
-            ("UWB Chip:", "-", "#94A3B8"),
-            ("IMU:", "-", "#94A3B8"),
+            ("MCU:", "-"),
+            ("UWB Chip:", "-"),
+            ("IMU:", "-"),
         ]
-        for i, (label, value, color) in enumerate(temp_data):
+        for i, (label, value) in enumerate(temp_data):
             lbl = QLabel(label)
             lbl.setStyleSheet("color: #94A3B8; font-weight: bold;")
             val = QLabel(value)
-            val.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 15px;")
+            val.setStyleSheet("color: #94A3B8; font-weight: bold; font-size: 15px;")
             temp_grid.addWidget(lbl, i, 0)
             temp_grid.addWidget(val, i, 1)
             self._temp_labels[label] = val
-        right.addWidget(temp_group)
+        left.addWidget(temp_group)
 
-        # Voltage
+        # ── Voltage ──
         volt_group = QGroupBox("⚡ Voltage")
         volt_grid = QGridLayout(volt_group)
         self._volt_labels = {}
@@ -195,62 +169,82 @@ class DeviceInfoTab(QWidget):
             volt_grid.addWidget(lbl, i, 0)
             volt_grid.addWidget(val, i, 1)
             self._volt_labels[l] = val
-        right.addWidget(volt_group)
+        left.addWidget(volt_group)
 
-        # Refresh button
-        self._btn_refresh = QPushButton("🔄 Refresh Telemetry")
-        self._btn_refresh.setFixedHeight(38)
-        self._btn_refresh.setStyleSheet("""
-            QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE;
-                border-radius: 8px; font-weight: bold; }
-            QPushButton:hover { background: #22D3EE; color: #0F172A; }
-        """)
-        right.addWidget(self._btn_refresh)
+        # ── System Resources ──
+        sys_group = QGroupBox("💻 System Resources")
+        sys_grid = QGridLayout(sys_group)
+        sys_grid.setSpacing(10)
+        sys_data = [("HEAP:", "-"), ("STACK:", "-"), ("CPU:", "-")]
+        self._sys_labels = {}
+        for i, (l, v) in enumerate(sys_data):
+            lbl = QLabel(l)
+            lbl.setStyleSheet("color: #94A3B8; font-weight: bold;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            val = QLabel(v)
+            val.setStyleSheet("color: #F8FAFC;")
+            val.setWordWrap(True)
+            sys_grid.addWidget(lbl, i, 0)
+            sys_grid.addWidget(val, i, 1)
+            self._sys_labels[l] = val
+        sys_grid.setColumnStretch(1, 1)
+        left.addWidget(sys_group)
 
-        right.addStretch()
-        top_hbox.addLayout(right, 1)
+        left.addStretch(1)
+        main_hbox.addLayout(left, 1)
 
-        main.addLayout(top_hbox)
+        # ═══════════════════════════════════════════════════════════════
+        #  RIGHT COLUMN: Other Advertising Devices
+        # ═══════════════════════════════════════════════════════════════
+        right = QVBoxLayout()
+        right.setSpacing(14)
 
-        # ═══ BOTTOM: Other Advertising Devices ═══
-        adv_group = QGroupBox("📡 Other Advertising Devices ")
+        adv_group = QGroupBox("📡 Other Advertising Devices")
         adv_layout = QVBoxLayout(adv_group)
 
-        self._adv_table = QTableWidget(0, 4)
-        self._adv_table.setHorizontalHeaderLabels(["Name", "MAC", "RSSI", "Action"])
-        self._adv_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self._adv_table.verticalHeader().setDefaultSectionSize(40)
+        self._adv_table = QTableWidget(0, 3)
+        self._adv_table.setHorizontalHeaderLabels(["Name", "MAC", "RSSI"])
+        header = self._adv_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._adv_table.verticalHeader().setDefaultSectionSize(44)
         self._adv_table.verticalHeader().setVisible(False)
         self._adv_table.setStyleSheet("background: #0F172A; color: #F8FAFC; gridline-color: #334155;")
         self._adv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._adv_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._adv_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._adv_table.setFixedHeight(60) # Initial empty height
+        self._adv_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         adv_layout.addWidget(self._adv_table)
-        
-        main.addWidget(adv_group)
-        main.addStretch(1)
-        
+
+        # Scanning status indicator
+        self._scan_status = QLabel("⏳ Scanning...")
+        self._scan_status.setStyleSheet("color: #94A3B8; font-style: italic; padding: 4px;")
+        self._scan_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        adv_layout.addWidget(self._scan_status)
+
+        adv_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        right.addWidget(adv_group)
+        right.addStretch(1)
+
+        main_hbox.addLayout(right, 1)
+
         scroll.setWidget(container)
         base_layout = QVBoxLayout(self)
         base_layout.setContentsMargins(0, 0, 0, 0)
         base_layout.addWidget(scroll)
 
-    # --- View Updaters ---
+    # ── View Updaters ────────────────────────────────────────────────
     def _on_device_info(self, info: dict):
         for k, v in info.items():
             lbl = f"{k}:"
             if lbl in self._dev_values:
                 self._dev_values[lbl].setText(str(v))
 
-    def _on_dongle_info(self, info: dict):
-        for k, v in info.items():
-            lbl = f"{k}:"
-            if lbl in self._dongle_values:
-                self._dongle_values[lbl].setText(str(v))
-
     def _on_ble_info(self, info: dict):
-        pass
+        rssi = info.get("rssi_dbm")
+        if rssi is not None:
+            self._ble_values["RSSI:"].setText(f"{rssi} dBm")
 
     def _on_telemetry_updated(self, data: dict):
         pct = data.get("bat_soc_percent", 0)
@@ -270,36 +264,47 @@ class DeviceInfoTab(QWidget):
         self._volt_labels["VDDA:"].setText(f"{data.get('vdda_mv', 0) / 1000.0:.2f}V")
         self._volt_labels["UWB VBAT:"].setText(f"{data.get('uwb_vbat_mv', 0) / 1000.0:.2f}V")
 
+        self._sys_labels["HEAP:"].setText(data.get("heap_usage", "-"))
+        self._sys_labels["STACK:"].setText(data.get("stack_usage", "-"))
+        self._sys_labels["CPU:"].setText(data.get("cpu_usage", "-"))
+
     def _on_advertising_devices(self, devices: list, is_scanning: bool):
+        # Update scanning status
+        self._scan_status.setText("⏳ Scanning..." if is_scanning else "⏸ Scan stopped")
+
         self._adv_table.setRowCount(len(devices))
-        from PyQt6.QtWidgets import QWidget, QHBoxLayout
-        from PyQt6.QtCore import Qt
         for i, dev in enumerate(devices):
             self._adv_table.setItem(i, 0, QTableWidgetItem(dev["name"]))
             self._adv_table.setItem(i, 1, QTableWidgetItem(dev["mac"]))
-            self._adv_table.setItem(i, 2, QTableWidgetItem(f"{dev['rssi']} dBm"))
             
+            # Combine RSSI text and Connect button in column 2
             widget = QWidget()
             layout = QHBoxLayout(widget)
             layout.setContentsMargins(8, 2, 8, 2)
-            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            lbl_rssi = QLabel(f"{dev['rssi']} dBm")
+            lbl_rssi.setStyleSheet("color: #F8FAFC; background: transparent;")
+            layout.addWidget(lbl_rssi)
+            
+            layout.addStretch()
             
             btn_connect = QPushButton("Connect")
-            btn_connect.setFixedSize(100, 24)
+            btn_connect.setFixedSize(80, 24)
             btn_connect.setStyleSheet("""
-                QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; }
+                QPushButton { background: #059669; color: white; border-radius: 4px;
+                    font-weight: bold; font-size: 11px; }
                 QPushButton:hover { background: #10B981; }
             """)
             btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_connect.clicked.connect(lambda checked, m=dev["mac"]: self._vm.connect_device(m))
-            
             layout.addWidget(btn_connect)
-            self._adv_table.setCellWidget(i, 3, widget)
+            
+            self._adv_table.setCellWidget(i, 2, widget)
 
-        # Dynamic height adjustment
+        # Dynamic height adjustment so the groupbox scales with the content
         header_height = self._adv_table.horizontalHeader().height()
         if header_height == 0:
             header_height = 30 # fallback
-        row_height = 40
+        row_height = 44
         total_height = header_height + (len(devices) * row_height) + 2 # +2 for borders
         self._adv_table.setFixedHeight(max(total_height, 60))

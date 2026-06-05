@@ -132,7 +132,7 @@ class DonglePopup(QDialog):
         layout.addWidget(title)
 
         # Subtitle
-        self._subtitle = QLabel("Scanning USB ports for NRF52840 Central Dongle...")
+        self._subtitle = QLabel("Scanning USB ports for UWB-RTLS Dongle ...")
         self._subtitle.setStyleSheet("color: #94A3B8; font-size: 13px; background: transparent;")
         self._subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._subtitle.setWordWrap(True)
@@ -177,7 +177,7 @@ class DonglePopup(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
 
-        self._btn_retry = QPushButton("🔄 Retry")
+        self._btn_retry = QPushButton("Retry")
         self._btn_retry.setFixedHeight(38)
         self._btn_retry.setVisible(False)
         self._btn_retry.setStyleSheet("""
@@ -208,6 +208,7 @@ class DonglePopup(QDialog):
         """Connect ViewModel signals → View slots."""
         self._vm.status_changed.connect(self._on_status)
         self._vm.port_info_changed.connect(self._port_info.setText)
+        self._vm.port_probing_changed.connect(self._on_port_probing)
         self._vm.dongle_detected.connect(self._on_detected)
         self._vm.dongle_ready.connect(self._on_ready)
         self._vm.dongle_error.connect(self._on_error)
@@ -231,6 +232,9 @@ class DonglePopup(QDialog):
         self._pulse.set_color(QColor("#10B981"))
         self._pulse.set_icon("✓")
         self._subtitle.setText(f"Dongle found on {port}, verifying...")
+
+    def _on_port_probing(self, port: str):
+        self._subtitle.setText(f"Probing {port}...")
 
     def _on_ready(self, info: dict):
         self._subtitle.setText("Dongle ready! Opening scanner...")

@@ -1,180 +1,468 @@
 """
-UWB RTLS Studio — Live Tracking Tab (Frontend Only)
-Tab 2: Bản đồ 2D tracking realtime với anchors + tag + trajectory.
+UWB RTLS Studio — Live Tracking Tab
+Tab 2: Real-time 2D position tracking matching dashboard.py design.
+
+Layout (mirroring dashboard.py):
+  - LEFT:  Canvas header ("Real-time Position Tracking" + OUT OF ZONE warning)
+           + ModernPositionCanvas + Start/Stop/Clear controls
+  - RIGHT: Scrollable panel with CollapsibleCards:
+           • Live Position  (COORDINATES, MOTION, RANGING, QUALITY)
+           • Statistics      (Frames, FPS, Uptime)
 """
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
-    QGridLayout, QPushButton, QFrame, QSlider, QProgressBar
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QFrame, QScrollArea, QGridLayout
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
+from PyQt6.QtCore import Qt, QTimer, QPointF
 from PyQt6.QtGui import (
     QFont, QPainter, QColor, QPen, QBrush, QLinearGradient,
     QRadialGradient, QPainterPath
 )
+import time
 import math
-import random
 
 
-class TrackingCanvas(QWidget):
-    """Custom 2D map widget with anchors, tag, trajectory, and grid."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumSize(15000, 15000)
-        self._anchors = [
-            {"id": "A1", "x": 0.0, "y": 0.0},
-            {"id": "A2", "x": 9.76, "y": 0.0},
-            {"id": "A3", "x": 0.0, "y": 9.76},
-            {"id": "A4", "x": 9.76, "y": 9.76},
+# ═══════════════════════════════════════════════════════════════════════
+#  ModernPositionCanvas — ported from dashboard.py (PyQt5 → PyQt6)
+# ═══════════════════════════════════════════════════════════════════════
+class ModernPositionCanvas(QWidget):
+    """Modern 2D position canvas with zoom/pan/auto-fit.
+    Features:
+      - Mouse wheel zoom (centered on cursor)
+      - Left-click drag to pan
+      - Right-click drag rectangle to zoom into area
+      - Double-click to auto-fit / reset view
+      - Auto-fit when anchor layout changes
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(400, 300)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        self.position = {'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'error': 0}
+        self.anchors = [
+            {'x': 0.0, 'y': 0.0, 'label': 'A0'},
+            {'x': 9.76, 'y': 0.0, 'label': 'A1'},
+            {'x': 9.76, 'y': 9.76, 'label': 'A2'},
+            {'x': 0.0, 'y': 9.76, 'label': 'A3'},
         ]
-        self._tag_pos = QPointF(2.5, 2.0)
-        self._trajectory = []
-        self._grid_spacing = 1.0  # meters
-        self._world_margin = 0.8  # extra margin in meters
-        self._t = 0.0
+        self.history = []
+        self.max_history = 30
 
-    def set_tag_position(self, x, y):
-        self._trajectory.append(QPointF(self._tag_pos))
-        if len(self._trajectory) > 200:
-            self._trajectory = self._trajectory[-200:]
-        self._tag_pos = QPointF(x, y)
+        # Throttle updates
+        self.last_update_time = 0
+        self.update_interval = 0.05
+
+        # ── View transform state ──
+        self._view_cx = 4.88    # World center X
+        self._view_cy = 4.88    # World center Y
+        self._view_range = 14.0 # Visible world range (meters across the smaller axis)
+        self._margin = 50       # Pixel margin for axis labels
+
+        # ── Interaction state ──
+        self._dragging = False
+        self._drag_start = None     # Screen coords at drag start
+        self._drag_view_cx = 0.0
+        self._drag_view_cy = 0.0
+        self._rect_zoom = False     # Right-click rectangle zoom
+        self._rect_start = None
+        self._rect_end = None
+
+        # Auto-fit on first show
+        QTimer.singleShot(50, self.auto_fit)
+
+    # ── Public API ───────────────────────────────────────────────────
+    def update_position(self, position):
+        current_time = time.time()
+        if current_time - self.last_update_time < self.update_interval:
+            return
+        self.last_update_time = current_time
+        self.position = position
+        self.history.append((position['x'], position['y']))
+        if len(self.history) > self.max_history:
+            self.history.pop(0)
         self.update()
 
-    def _world_to_screen(self, wx, wy):
-        """Convert world coordinates (meters) to widget pixels."""
-        w, h = self.width(), self.height()
-        margin = 60
-        x_min = min(a["x"] for a in self._anchors) - self._world_margin
-        x_max = max(a["x"] for a in self._anchors) + self._world_margin
-        y_min = min(a["y"] for a in self._anchors) - self._world_margin
-        y_max = max(a["y"] for a in self._anchors) + self._world_margin
-        sx = margin + (wx - x_min) / (x_max - x_min) * (w - 2 * margin)
-        sy = h - margin - (wy - y_min) / (y_max - y_min) * (h - 2 * margin)
-        return sx, sy
+    def set_anchors(self, anchors):
+        self.anchors = anchors
+        self.auto_fit()
 
+    def clear_trail(self):
+        self.history.clear()
+        self.update()
+
+    def auto_fit(self):
+        """Auto-fit view so origin (0,0) sits at the bottom-left corner with 1m padding."""
+        pts_x = [a['x'] for a in self.anchors] + [self.position['x']]
+        pts_y = [a['y'] for a in self.anchors] + [self.position['y']]
+        if not pts_x:
+            return
+
+        max_x = max(pts_x)
+        max_y = max(pts_y)
+        padding = 1.0  # 1m breathing room
+
+        # Determine how much world space we need to show
+        need_x = max_x + 2 * padding  # from -padding to max_x + padding
+        need_y = max_y + 2 * padding
+
+        m = self._margin
+        w = max(self.width() - 2 * m, 1)
+        h = max(self.height() - 2 * m, 1)
+
+        # _view_range maps to min(w,h) pixels, so figure out
+        # how much _view_range is needed to fit both axes
+        self._view_range = max(need_x * min(w, h) / w,
+                               need_y * min(w, h) / h,
+                               2.0)
+
+        # Place center so that the left/bottom visible edge = -padding
+        scale = min(w, h) / self._view_range
+        self._view_cx = -padding + (w / scale) / 2.0
+        self._view_cy = -padding + (h / scale) / 2.0
+        self.update()
+
+    # ── Coordinate transforms ────────────────────────────────────────
+    def _world_to_screen(self, wx, wy):
+        m = self._margin
+        w = self.width() - 2 * m
+        h = self.height() - 2 * m
+        half = self._view_range / 2.0
+        # Aspect-ratio-correct scale
+        scale = min(w, h) / self._view_range if self._view_range > 0 else 50
+        sx = m + (w / 2.0) + (wx - self._view_cx) * scale
+        sy = m + (h / 2.0) - (wy - self._view_cy) * scale
+        return int(sx), int(sy)
+
+    def _screen_to_world(self, sx, sy):
+        m = self._margin
+        w = self.width() - 2 * m
+        h = self.height() - 2 * m
+        scale = min(w, h) / self._view_range if self._view_range > 0 else 50
+        wx = self._view_cx + (sx - m - w / 2.0) / scale
+        wy = self._view_cy - (sy - m - h / 2.0) / scale
+        return wx, wy
+
+    # ── Mouse events ─────────────────────────────────────────────────
+    def wheelEvent(self, event):
+        """Zoom in/out centered on cursor."""
+        delta = event.angleDelta().y()
+        factor = 0.85 if delta > 0 else 1.18
+        # Zoom toward cursor position
+        pos = event.position()
+        wx, wy = self._screen_to_world(pos.x(), pos.y())
+        self._view_range *= factor
+        self._view_range = max(0.5, min(self._view_range, 200.0))
+        # Adjust center so cursor stays at same world point
+        wx2, wy2 = self._screen_to_world(pos.x(), pos.y())
+        self._view_cx -= (wx2 - wx)
+        self._view_cy -= (wy2 - wy)
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self._drag_start = event.position()
+            self._drag_view_cx = self._view_cx
+            self._drag_view_cy = self._view_cy
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._rect_zoom = True
+            self._rect_start = event.position()
+            self._rect_end = event.position()
+
+    def mouseMoveEvent(self, event):
+        if self._dragging and self._drag_start:
+            pos = event.position()
+            dx = pos.x() - self._drag_start.x()
+            dy = pos.y() - self._drag_start.y()
+            m = self._margin
+            w = self.width() - 2 * m
+            h = self.height() - 2 * m
+            scale = min(w, h) / self._view_range if self._view_range > 0 else 50
+            self._view_cx = self._drag_view_cx - dx / scale
+            self._view_cy = self._drag_view_cy + dy / scale
+            self.update()
+        elif self._rect_zoom and self._rect_start:
+            self._rect_end = event.position()
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif event.button() == Qt.MouseButton.RightButton and self._rect_zoom:
+            self._rect_zoom = False
+            if self._rect_start and self._rect_end:
+                x1, y1 = self._rect_start.x(), self._rect_start.y()
+                x2, y2 = self._rect_end.x(), self._rect_end.y()
+                if abs(x2 - x1) > 10 and abs(y2 - y1) > 10:
+                    w1x, w1y = self._screen_to_world(min(x1, x2), max(y1, y2))
+                    w2x, w2y = self._screen_to_world(max(x1, x2), min(y1, y2))
+                    self._view_cx = (w1x + w2x) / 2.0
+                    self._view_cy = (w1y + w2y) / 2.0
+                    self._view_range = max(w2x - w1x, w2y - w1y) * 1.1
+            self._rect_start = self._rect_end = None
+            self.update()
+
+    def mouseDoubleClickEvent(self, event):
+        """Double-click to reset/auto-fit view."""
+        self.auto_fit()
+
+    def resizeEvent(self, event):
+        """Keep view correct when widget resizes. Re-aligns origin to bottom-left."""
+        super().resizeEvent(event)
+        
+        # When the window resizes, we recalculate the view bounds so that the
+        # origin (0,0) remains exactly pinned near the bottom-left corner, 
+        # instead of letting the extra width push it into the negatives.
+        if not self._dragging and not self._rect_zoom:
+            self.auto_fit()
+        self.update()
+
+    # ── Paint ────────────────────────────────────────────────────────
     def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
         # Background
-        bg_grad = QLinearGradient(0, 0, 0, h)
-        bg_grad.setColorAt(0, QColor("#0A0F1E"))
-        bg_grad.setColorAt(1, QColor("#0F172A"))
-        p.fillRect(0, 0, w, h, bg_grad)
+        painter.fillRect(self.rect(), QColor(30, 41, 59))
 
-        # Grid
-        p.setPen(QPen(QColor(51, 65, 85, 40), 1, Qt.PenStyle.DotLine))
-        x_min = min(a["x"] for a in self._anchors) - self._world_margin
-        x_max = max(a["x"] for a in self._anchors) + self._world_margin
-        y_min = min(a["y"] for a in self._anchors) - self._world_margin
-        y_max = max(a["y"] for a in self._anchors) + self._world_margin
+        m = self._margin
+        w = self.width() - 2 * m
+        h = self.height() - 2 * m
+        if w <= 0 or h <= 0:
+            return
 
-        gx = math.floor(x_min)
-        while gx <= math.ceil(x_max):
-            sx, _ = self._world_to_screen(gx, 0)
-            p.drawLine(int(sx), 0, int(sx), h)
-            gx += self._grid_spacing
-        gy = math.floor(y_min)
-        while gy <= math.ceil(y_max):
-            _, sy = self._world_to_screen(0, gy)
-            p.drawLine(0, int(sy), w, int(sy))
-            gy += self._grid_spacing
+        to = self._world_to_screen  # alias
 
-        # Axis labels
-        p.setPen(QColor("#475569"))
-        p.setFont(QFont("Segoe UI", 9))
-        gx = math.ceil(x_min)
-        while gx <= math.floor(x_max):
-            sx, sy0 = self._world_to_screen(gx, y_min)
-            p.drawText(int(sx) - 10, int(sy0) + 16, f"{gx:.0f}m")
-            gx += 1
-        gy = math.ceil(y_min)
-        while gy <= math.floor(y_max):
-            sx0, sy = self._world_to_screen(x_min, gy)
-            p.drawText(int(sx0) - 5, int(sy) + 4, f"{gy:.0f}m")
-            gy += 1
+        # Visible world bounds
+        vx1, vy1 = self._screen_to_world(m, self.height() - m)  # bottom-left
+        vx2, vy2 = self._screen_to_world(m + w, m)              # top-right
 
-        # Trajectory trail (fading)
-        for i in range(1, len(self._trajectory)):
-            alpha = int(30 + 150 * i / len(self._trajectory))
-            trail_c = QColor(34, 211, 238, alpha)
-            p.setPen(QPen(trail_c, 2))
-            x1, y1 = self._world_to_screen(self._trajectory[i-1].x(), self._trajectory[i-1].y())
-            x2, y2 = self._world_to_screen(self._trajectory[i].x(), self._trajectory[i].y())
-            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+        # ── Grid ──
+        painter.setPen(QPen(QColor(51, 65, 85, 80), 1, Qt.PenStyle.DotLine))
+        # Choose grid step dynamically
+        raw_step = (vx2 - vx1) / 10.0
+        step = max(1.0, round(raw_step))
+        if raw_step < 0.5:
+            step = 0.5
 
-        # Trail dots
-        for i, pt in enumerate(self._trajectory[-30:]):
-            alpha = int(50 + 180 * i / 30)
-            size = 2 + 3 * i / 30
-            sx, sy = self._world_to_screen(pt.x(), pt.y())
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(34, 211, 238, alpha))
-            p.drawEllipse(QPointF(sx, sy), size, size)
+        gx = math.floor(vx1 / step) * step
+        while gx <= vx2:
+            sx, _ = to(gx, 0)
+            painter.drawLine(sx, m, sx, self.height() - m)
+            gx += step
+        gy = math.floor(vy1 / step) * step
+        while gy <= vy2:
+            _, sy = to(0, gy)
+            painter.drawLine(m, sy, m + w, sy)
+            gy += step
 
-        # Anchors
-        for anchor in self._anchors:
-            ax, ay = self._world_to_screen(anchor["x"], anchor["y"])
+        # ── Axis labels ──
+        painter.setFont(QFont('Segoe UI', 9))
+        painter.setPen(QColor(148, 163, 184))
+        gx = math.floor(vx1 / step) * step
+        while gx <= vx2:
+            sx, _ = to(gx, 0)
+            painter.drawText(sx - 12, self.height() - m + 16, f"{gx:.0f}m")
+            gx += step
+        gy = math.floor(vy1 / step) * step
+        while gy <= vy2:
+            _, sy = to(0, gy)
+            painter.drawText(4, sy + 4, f"{gy:.0f}m")
+            gy += step
 
-            # Anchor glow
-            glow = QRadialGradient(ax, ay, 25)
-            glow.setColorAt(0, QColor(245, 158, 11, 60))
-            glow.setColorAt(1, QColor(245, 158, 11, 0))
-            p.setBrush(glow)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(ax, ay), 25, 25)
+        # ── History trail ──
+        if len(self.history) > 1:
+            painter.setPen(QPen(QColor(96, 165, 250, 120), 2))
+            for i in range(len(self.history) - 1):
+                x1, y1 = to(self.history[i][0], self.history[i][1])
+                x2, y2 = to(self.history[i + 1][0], self.history[i + 1][1])
+                painter.drawLine(x1, y1, x2, y2)
 
-            # Anchor diamond
-            p.setBrush(QColor("#F59E0B"))
-            p.setPen(QPen(QColor("#FCD34D"), 2))
-            path = QPainterPath()
-            s = 10
-            path.moveTo(ax, ay - s)
-            path.lineTo(ax + s, ay)
-            path.lineTo(ax, ay + s)
-            path.lineTo(ax - s, ay)
-            path.closeSubpath()
-            p.drawPath(path)
+        # ── Connection lines ──
+        px, py = to(self.position['x'], self.position['y'])
+        for anchor in self.anchors:
+            ax, ay = to(anchor['x'], anchor['y'])
+            painter.setPen(QPen(QColor(99, 102, 241, 40), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(px, py, ax, ay)
 
-            # Anchor label
-            p.setPen(QColor("#FCD34D"))
-            p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-            p.drawText(int(ax) - 10, int(ay) - 18, anchor["id"])
+        # ── Anchors ──
+        painter.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+        for anchor in self.anchors:
+            cx, cy = to(anchor['x'], anchor['y'])
+            painter.setPen(QPen(QColor(99, 102, 241), 2))
+            painter.setBrush(QColor(30, 41, 59))
+            painter.drawEllipse(cx - 10, cy - 10, 20, 20)
+            painter.setBrush(QColor(99, 102, 241))
+            painter.drawEllipse(cx - 4, cy - 4, 8, 8)
 
-        # Tag position
-        tx, ty = self._world_to_screen(self._tag_pos.x(), self._tag_pos.y())
+            label = anchor.get('label', anchor.get('id', '?'))
+            painter.setPen(QColor(226, 232, 240))
+            painter.drawText(cx + 16, cy - 10, label)
+            painter.setFont(QFont('Segoe UI', 8))
+            painter.setPen(QColor(148, 163, 184))
+            painter.drawText(cx + 16, cy + 4, f"({anchor['x']:.1f}, {anchor['y']:.1f})")
+            painter.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
 
-        # Tag outer glow
-        tag_glow = QRadialGradient(tx, ty, 35)
-        tag_glow.setColorAt(0, QColor(34, 211, 238, 80))
-        tag_glow.setColorAt(0.5, QColor(34, 211, 238, 20))
-        tag_glow.setColorAt(1, QColor(34, 211, 238, 0))
-        p.setBrush(tag_glow)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QPointF(tx, ty), 35, 35)
+        # ── Error circle ──
+        scale_px = min(w, h) / self._view_range if self._view_range > 0 else 50
+        if self.position.get('error', 0) > 0:
+            er = int(self.position['error'] * scale_px)
+            painter.setPen(QPen(QColor(239, 68, 68, 60), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(239, 68, 68, 20))
+            painter.drawEllipse(px - er, py - er, er * 2, er * 2)
 
-        # Tag dot
-        p.setBrush(QColor("#22D3EE"))
-        p.setPen(QPen(QColor("#67E8F9"), 2))
-        p.drawEllipse(QPointF(tx, ty), 8, 8)
+        # ── Directional arrow (yaw) ──
+        painter.save()
+        painter.translate(px, py)
+        painter.rotate(-self.position.get('yaw', 0))
+        painter.setPen(QPen(QColor(37, 99, 235), 2, Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        grad = QLinearGradient(0, -12, 0, 10)
+        grad.setColorAt(0, QColor(96, 165, 250))
+        grad.setColorAt(1, QColor(37, 99, 235))
+        painter.setBrush(grad)
+        path = QPainterPath()
+        path.moveTo(14, 0)
+        path.lineTo(-10, -9)
+        path.lineTo(-4, 0)
+        path.lineTo(-10, 9)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.setBrush(QColor(248, 113, 113, 150))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(-10, -3, 4, 6)
+        painter.restore()
 
-        # Tag label
-        p.setPen(QColor("#22D3EE"))
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        p.drawText(int(tx) + 14, int(ty) - 8, "TAG")
-        p.setFont(QFont("Segoe UI", 8))
-        p.setPen(QColor("#94A3B8"))
-        p.drawText(int(tx) + 14, int(ty) + 6,
-                   f"({self._tag_pos.x():.2f}, {self._tag_pos.y():.2f})")
+        # ── Glow ──
+        glow_grad = QRadialGradient(px, py, 18)
+        glow_grad.setColorAt(0, QColor(96, 165, 250, 60))
+        glow_grad.setColorAt(1, QColor(96, 165, 250, 0))
+        painter.setBrush(glow_grad)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(px - 18, py - 18, 36, 36)
 
-        p.end()
+        # ── Coordinate label ──
+        coord_text = f"{self.position['x']:.2f}, {self.position['y']:.2f}"
+        painter.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        tr = painter.fontMetrics().boundingRect(coord_text)
+        tr.translate(px + 15, py + 15)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(15, 23, 42, 180))
+        painter.drawRoundedRect(tr.adjusted(-4, -2, 4, 2), 4, 4)
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(px + 15, py + 15 + tr.height() - 4, coord_text)
+
+        # ── Rectangle zoom overlay ──
+        if self._rect_zoom and self._rect_start and self._rect_end:
+            rx = min(self._rect_start.x(), self._rect_end.x())
+            ry = min(self._rect_start.y(), self._rect_end.y())
+            rw = abs(self._rect_end.x() - self._rect_start.x())
+            rh = abs(self._rect_end.y() - self._rect_start.y())
+            painter.setPen(QPen(QColor(99, 102, 241), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(99, 102, 241, 30))
+            painter.drawRect(int(rx), int(ry), int(rw), int(rh))
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  CollapsibleCard — ported from dashboard.py
+# ═══════════════════════════════════════════════════════════════════════
+class CollapsibleCard(QFrame):
+    """Collapsible card widget matching dashboard.py design."""
+    def __init__(self, title="", parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("""
+            CollapsibleCard {
+                background-color: #1e293b;
+                border-radius: 10px;
+                border: 1px solid #334155;
+            }
+        """)
+
+        self.is_collapsed = False
+
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+
+        # Title bar with toggle button
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(8)
+
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet("""
+            color: #f1f5f9;
+            font-size: 14px;
+            font-weight: bold;
+            background-color: transparent;
+        """)
+        title_layout.addWidget(self.title_label)
+
+        self.toggle_btn = QPushButton("▼")
+        self.toggle_btn.setFixedSize(30, 26)
+        self.toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #e2e8f0;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                padding: 0px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #475569;
+            }
+        """)
+        self.toggle_btn.clicked.connect(self.toggle_collapse)
+        title_layout.addWidget(self.toggle_btn)
+
+        main_layout.addLayout(title_layout)
+
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet("background-color: #334155; max-height: 2px;")
+        main_layout.addWidget(separator)
+
+        # Content area
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_widget.setLayout(self.content_layout)
+        main_layout.addWidget(self.content_widget)
+
+        self.setLayout(main_layout)
+
+    def toggle_collapse(self):
+        """Toggle collapsed state."""
+        self.is_collapsed = not self.is_collapsed
+        self.content_widget.setVisible(not self.is_collapsed)
+        self.toggle_btn.setText("►" if self.is_collapsed else "▼")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LiveTrackingTab — main tab widget
+# ═══════════════════════════════════════════════════════════════════════
 class LiveTrackingTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._vm = None
+        self._frame_count = 0
+        self._start_time = time.time()
+        self._is_ranging = False
         self._build_ui()
+
+        # FPS / stats timer
+        self._stats_timer = QTimer(self)
+        self._stats_timer.timeout.connect(self._update_stats)
+        self._stats_timer.start(1000)
 
     def set_viewmodel(self, vm):
         self._vm = vm
@@ -184,20 +472,55 @@ class LiveTrackingTab(QWidget):
         self._vm.position_updated.connect(self._on_position_updated)
         self._vm.anchor_distances_updated.connect(self._on_anchor_distances)
 
-
+    # ── Build UI ─────────────────────────────────────────────────────
     def _build_ui(self):
-        main = QHBoxLayout(self)
-        main.setSpacing(14)
-        main.setContentsMargins(12, 12, 12, 12)
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # ═══ LEFT: Canvas (65%) ═══
-        left = QVBoxLayout()
-        self._canvas = TrackingCanvas()
-        self._canvas.setStyleSheet("border: 1px solid #334155; border-radius: 8px;")
-        left.addWidget(self._canvas)
+        # ═══ LEFT PANEL: Canvas + header + controls ═══
+        left_panel = QVBoxLayout()
+        left_panel.setSpacing(6)
+        left_panel.setContentsMargins(0, 0, 0, 0)
+
+        # Canvas header
+        header_layout = QHBoxLayout()
+
+        canvas_header = QLabel("Real-time Position Tracking")
+        canvas_header.setStyleSheet("""
+            color: #f1f5f9;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 0px 0px 8px 0px;
+            background-color: transparent;
+        """)
+        canvas_header.setFixedHeight(30)
+        header_layout.addWidget(canvas_header)
+
+        self._warning_label = QLabel("⚠️ OUT OF ZONE")
+        self._warning_label.setStyleSheet("""
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            background-color: #ef4444;
+            padding: 2px 10px;
+            border-radius: 4px;
+        """)
+        self._warning_label.setFixedHeight(25)
+        self._warning_label.setVisible(False)
+
+        header_layout.addStretch()
+        header_layout.addWidget(self._warning_label)
+
+        left_panel.addLayout(header_layout)
+
+        # Canvas
+        self._canvas = ModernPositionCanvas()
+        left_panel.addWidget(self._canvas, 1)
 
         # Controls under canvas
         ctrl_row = QHBoxLayout()
+
         self._btn_start = QPushButton("▶  Start Ranging")
         self._btn_start.setFixedHeight(40)
         self._btn_start.setStyleSheet("""
@@ -222,77 +545,151 @@ class LiveTrackingTab(QWidget):
         ctrl_row.addWidget(self._btn_stop)
         ctrl_row.addStretch()
         ctrl_row.addWidget(self._btn_clear)
-        left.addLayout(ctrl_row)
+        left_panel.addLayout(ctrl_row)
 
         self._btn_start.clicked.connect(self._start_ranging)
         self._btn_stop.clicked.connect(self._stop_ranging)
-        self._btn_clear.clicked.connect(lambda: setattr(self._canvas, '_trajectory', []))
+        self._btn_clear.clicked.connect(self._canvas.clear_trail)
 
-        main.addLayout(left, 65)
+        main_layout.addLayout(left_panel, 1)  # Stretch factor 1
 
-        # ═══ RIGHT: Telemetry panel (35%) ═══
-        right = QVBoxLayout()
-        right.setSpacing(12)
+        # ═══ RIGHT PANEL: Scrollable telemetry cards (fixed width) ═══
+        right_widget = QWidget()
+        right_widget.setFixedWidth(380)
 
-        # Position
-        pos_group = QGroupBox("📍 Live Position")
-        pos_layout = QVBoxLayout(pos_group)
-        self._lbl_x = QLabel("X: 2.50 m")
-        self._lbl_y = QLabel("Y: 2.00 m")
-        self._lbl_z = QLabel("Z: 0.00 m")
-        for lbl, color in [(self._lbl_x, "#22D3EE"), (self._lbl_y, "#10B981"), (self._lbl_z, "#F59E0B")]:
-            lbl.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
-            lbl.setStyleSheet(f"color: {color}; background: transparent;")
-            pos_layout.addWidget(lbl)
-        right.addWidget(pos_group)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: #0f172a;
+            }
+            QScrollBar:vertical {
+                background-color: #0f172a;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #475569;
+                border-radius: 5px;
+                min-height: 30px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #64748b;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                background: none;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
 
-        # Quality
-        qual_group = QGroupBox("📊 Quality Metrics")
-        qual_grid = QGridLayout(qual_group)
-        qual_data = [
-            ("RMS Error:", "0.045 m", "#10B981"),
-            ("Update Rate:", "10.2 Hz", "#22D3EE"),
-            ("Success Rate:", "98.5%", "#10B981"),
-            ("Avg RSSI:", "-45 dBm", "#F59E0B"),
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: #0f172a;")
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(8)
+        right_panel.setContentsMargins(0, 0, 0, 0)
+        scroll_content.setLayout(right_panel)
+
+        scroll_area.setWidget(scroll_content)
+
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(scroll_area)
+        right_widget.setLayout(right_layout)
+
+        # ── Live Position Card ──
+        pos_card = CollapsibleCard("Live Position")
+        pos_layout = QGridLayout()
+        pos_layout.setSpacing(15)
+
+        groups = [
+            ("COORDINATES", [
+                ("X:", "x_label", "#60a5fa", "m"),
+                ("Y:", "y_label", "#60a5fa", "m"),
+                ("Z:", "z_label", "#60a5fa", "m"),
+            ]),
+            ("MOTION", [
+                ("VX:", "vx_label", "#2dd4bf", "m/s"),
+                ("VY:", "vy_label", "#2dd4bf", "m/s"),
+                ("Yaw:", "yaw_label", "#f472b6", "°"),
+            ]),
+            ("RANGING", [
+                ("D1:", "d1_label", "#a78bfa", "m"),
+                ("D2:", "d2_label", "#a78bfa", "m"),
+                ("D3:", "d3_label", "#a78bfa", "m"),
+                ("D4:", "d4_label", "#a78bfa", "m"),
+            ]),
+            ("QUALITY", [
+                ("Error:", "error_label", "#f59e0b", "m"),
+                ("Err Frames:", "err_cnt_label", "#f87171", "packets"),
+            ]),
         ]
-        self._qual_values = {}
-        for i, (label, value, color) in enumerate(qual_data):
-            lbl = QLabel(label)
-            lbl.setStyleSheet("color: #94A3B8; font-weight: bold;")
-            val = QLabel(value)
-            val.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 14px;")
-            qual_grid.addWidget(lbl, i, 0)
-            qual_grid.addWidget(val, i, 1)
-            self._qual_values[label] = val
-        right.addWidget(qual_group)
 
-        # Anchor Distances
-        dist_group = QGroupBox("📏 Anchor Distances")
-        dist_grid = QGridLayout(dist_group)
-        self._dist_values = {}
-        anchors = ["A1", "A2", "A3", "A4"]
-        for i, aid in enumerate(anchors):
-            lbl = QLabel(f"{aid}:")
-            lbl.setStyleSheet("color: #F59E0B; font-weight: bold;")
-            val = QLabel("— cm")
-            val.setStyleSheet("color: #F8FAFC;")
-            bar = QProgressBar()
-            bar.setRange(0, 500)
-            bar.setFixedHeight(8)
-            bar.setTextVisible(False)
-            bar.setStyleSheet("""
-                QProgressBar { background: #0A0F1E; border: none; border-radius: 4px; }
-                QProgressBar::chunk { background: #22D3EE; border-radius: 4px; }
-            """)
-            dist_grid.addWidget(lbl, i, 0)
-            dist_grid.addWidget(val, i, 1)
-            dist_grid.addWidget(bar, i, 2)
-            self._dist_values[aid] = (val, bar)
-        right.addWidget(dist_group)
+        current_row = 0
+        for group_name, items in groups:
+            group_label = QLabel(group_name)
+            group_label.setStyleSheet(
+                "font-size: 11px; font-weight: bold; color: #64748b; margin-top: 5px;"
+                "background-color: transparent;"
+            )
+            pos_layout.addWidget(group_label, current_row, 0, 1, 2)
+            current_row += 1
 
-        right.addStretch()
-        main.addLayout(right, 35)
+            for text, attr, color, unit in items:
+                lbl = QLabel(text)
+                lbl.setStyleSheet("font-size: 13px; color: #94a3b8; background-color: transparent;")
+                pos_layout.addWidget(lbl, current_row, 0)
 
+                value_label = QLabel(f"0.000 {unit}")
+                value_label.setStyleSheet(
+                    f"font-family: 'Consolas', monospace; font-size: 15px;"
+                    f"font-weight: bold; color: {color}; background-color: transparent;"
+                )
+                pos_layout.addWidget(value_label, current_row, 1)
+                setattr(self, f"_{attr}", value_label)
+                current_row += 1
+
+        pos_card.content_layout.addLayout(pos_layout)
+        right_panel.addWidget(pos_card)
+
+        # ── Statistics Card ──
+        stats_card = CollapsibleCard("Statistics")
+        stats_layout = QGridLayout()
+        stats_layout.setSpacing(10)
+
+        stats = [
+            ("Frames:", "frames_label"),
+            ("FPS:", "fps_label"),
+            ("Uptime:", "uptime_label"),
+        ]
+
+        for i, (text, attr) in enumerate(stats):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-size: 13px; color: #94a3b8; background-color: transparent;")
+            stats_layout.addWidget(lbl, i, 0)
+
+            value_label = QLabel("0")
+            value_label.setStyleSheet(
+                "font-size: 15px; font-weight: bold; color: #60a5fa;"
+                "background-color: transparent;"
+            )
+            stats_layout.addWidget(value_label, i, 1)
+            setattr(self, f"_{attr}", value_label)
+
+        stats_card.content_layout.addLayout(stats_layout)
+        right_panel.addWidget(stats_card)
+
+        right_panel.addStretch()
+
+        main_layout.addWidget(right_widget)
+
+    # ── Actions ──────────────────────────────────────────────────────
     def _start_ranging(self):
         if self._vm:
             self._vm.start_ranging()
@@ -301,26 +698,72 @@ class LiveTrackingTab(QWidget):
         if self._vm:
             self._vm.stop_ranging()
 
+    # ── Slots ────────────────────────────────────────────────────────
     def _on_ranging_started(self):
         self._btn_start.setEnabled(False)
         self._btn_stop.setEnabled(True)
+        self._is_ranging = True
+        self._frame_count = 0
+        self._start_time = time.time()
 
     def _on_ranging_stopped(self):
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
+        self._is_ranging = False
 
     def _on_position_updated(self, x, y, z, rms):
-        self._canvas.set_tag_position(x, y)
-        self._lbl_x.setText(f"X: {x:.2f} m")
-        self._lbl_y.setText(f"Y: {y:.2f} m")
-        self._lbl_z.setText(f"Z: {z:.2f} m")
-        self._qual_values["RMS Error:"].setText(f"{rms:.3f} m")
+        self._frame_count += 1
+
+        # Update canvas
+        position = {
+            'x': x, 'y': y, 'z': z,
+            'error': rms,
+            'yaw': 0,  # Will be updated if available
+        }
+        self._canvas.update_position(position)
+
+        # Update labels
+        self._x_label.setText(f"{x:.3f} m")
+        self._y_label.setText(f"{y:.3f} m")
+        self._z_label.setText(f"{z:.3f} m")
+        self._error_label.setText(f"{rms:.3f} m")
+
+        # Out-of-zone warning
+        if self._canvas.anchors:
+            anchors = self._canvas.anchors
+            min_x = min(a['x'] for a in anchors)
+            max_x = max(a['x'] for a in anchors)
+            min_y = min(a['y'] for a in anchors)
+            max_y = max(a['y'] for a in anchors)
+            out_of_zone = not (min_x <= x <= max_x and min_y <= y <= max_y)
+            self._warning_label.setVisible(out_of_zone)
+        else:
+            self._warning_label.setVisible(False)
 
     def _on_anchor_distances(self, anchors):
+        """Update ranging distance labels (D1–D4)."""
         for anchor in anchors:
-            aid = anchor["id"]
-            if aid in self._dist_values:
-                val, bar = self._dist_values[aid]
-                d_cm = anchor["distance_cm"]
-                val.setText(f"{d_cm:.1f} cm")
-                bar.setValue(min(int(d_cm), 500))
+            aid = anchor.get("id", "")
+            # Map A1→D1, A2→D2, etc.
+            idx = aid.replace("A", "")
+            attr = f"_d{idx}_label"
+            if hasattr(self, attr):
+                d_m = anchor.get("distance_cm", 0) / 100.0
+                getattr(self, attr).setText(f"{d_m:.3f} m")
+
+    def _update_stats(self):
+        """Update statistics labels every second."""
+        if not self._is_ranging:
+            return
+
+        self._frames_label.setText(str(self._frame_count))
+
+        uptime = int(time.time() - self._start_time)
+        fps = self._frame_count / uptime if uptime > 0 else 0
+        self._fps_label.setText(f"{fps:.1f}")
+        self._uptime_label.setText(f"{uptime}s")
+
+    # ── Public API ───────────────────────────────────────────────────
+    def set_anchors(self, anchors):
+        """Called externally (e.g. from Config tab) to set anchor layout."""
+        self._canvas.set_anchors(anchors)

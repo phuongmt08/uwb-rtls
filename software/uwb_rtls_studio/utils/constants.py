@@ -15,11 +15,12 @@
 """
 
 # ── USB Dongle Detection ───────────────────────────────────────────
-# Nordic Semiconductor NRF52840 Dongle
-DONGLE_VID = 0x1915             # Nordic Semiconductor ASA
-DONGLE_PID = 0x520F             # NRF52840 USB CDC ACM (cần verify PID thực tế)
-DONGLE_DETECT_TIMEOUT_S = 15    # Timeout cho auto-detect
-DONGLE_DETECT_POLL_MS = 500     # Polling interval khi scan COM ports
+# Detect bằng protobuf probe (gửi device_information_get, chờ ACK)
+# Không dùng VID/PID — hoàn toàn dựa trên firmware response
+DONGLE_DETECT_TIMEOUT_S = 30    # Timeout cho toàn bộ quá trình detect
+PROBE_READ_TIMEOUT_S = 0.05     # Serial read timeout cho mỗi lần đọc
+PROBE_RESPONSE_TIMEOUT_S = 0.5  # Thời gian chờ response mỗi lần probe
+MAX_PROBE_RETRIES = 3           # Số lần retry probe mỗi port
 
 # ── Serial Communication ──────────────────────────────────────────
 SERIAL_BAUD_RATE = 115200

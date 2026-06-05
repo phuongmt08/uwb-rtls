@@ -7,6 +7,14 @@
                 - Quản lý luồng quét USB (DongleDetectWorker).
                 - Giao tiếp với SerialService để mở cổng.
                 - Giao tiếp với ProtocolService để gửi/nhận lệnh verify.
+
+  Logic mới (event-based + protobuf probe):
+    1. Worker probe tất cả COM ports bằng protobuf handshake
+    2. Khi tìm thấy dongle (nhận ACK) → Worker emit dongle_found
+    3. Model mở serial port chính thức qua SerialService
+    4. Gửi device_information_get để lấy thêm device info (verify)
+    5. Nếu nhận device_information_resp → emit dongle_verified
+    6. Nếu timeout → vẫn accept (unverified) -> (need to handle it)
 ===============================================================================
 """
 from __future__ import annotations
@@ -29,6 +37,7 @@ class DongleModel(QObject):
     error_occurred = pyqtSignal(str)
     search_timeout = pyqtSignal()
     ports_scanned = pyqtSignal(int)
+    port_probing = pyqtSignal(str)          # Port đang probe
 
     def __init__(self, serial_service: SerialService, protocol_service: ProtocolService, parent=None):
         super().__init__(parent)
@@ -48,6 +57,7 @@ class DongleModel(QObject):
         self._worker = DongleDetectWorker()
         self._worker.dongle_found.connect(self._on_dongle_found)
         self._worker.port_scanned.connect(self.ports_scanned.emit)
+        self._worker.port_probing.connect(self.port_probing.emit)
         self._worker.timeout.connect(self.search_timeout.emit)
         self._worker.start()
 
@@ -59,6 +69,7 @@ class DongleModel(QObject):
         self._verify_timer.stop()
 
     def _on_dongle_found(self, info: DongleInfo) -> None:
+        """Worker đã probe thành công (nhận ACK) → mở serial chính thức."""
         self._current_info = info
         self.dongle_found.emit(info)
         try:
@@ -67,6 +78,7 @@ class DongleModel(QObject):
             self.error_occurred.emit(f"Cannot open {info.port}: {e}")
             return
             
+        # Gửi device_information_get để lấy chi tiết (fw_version, serial, etc.)
         self._protocol.send_command("device_information_get")
         self._verify_timer.start(_VERIFY_TIMEOUT_MS)
 
