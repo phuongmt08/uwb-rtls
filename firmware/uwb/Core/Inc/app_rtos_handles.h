@@ -48,9 +48,7 @@ extern osMessageQueueId_t g_uwb_distance_queue;
 
 /* ── Shared state ───────────────────────────────────────────────────────── */
 
-/** Set false via IO task DOUBLE_CLICK; set true via IO task CLICK */
-extern bool g_ranging_enabled;
-/** Set true while PM wants ranging paused; independent from manual stop/start. */
-extern bool g_pm_ranging_blocked;
+void app_rtos_set_ranging_enabled(bool enabled);
+bool app_rtos_is_ranging_enabled(void);
 
 #endif /* APP_RTOS_HANDLES_H */

@@ -83,8 +83,6 @@ extern network_core_t g_network_core;
 extern uint8_t g_network_rx_buf[512];
 
 /* USER CODE BEGIN PV */
-extern bool g_ranging_enabled;
-
 #if TEST_SEND_POS
 static float    s_test_x              = TEST_POS_START_X;
 static float    s_test_y              = TEST_POS_START_Y;
