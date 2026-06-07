@@ -443,7 +443,9 @@ void sensor_fusion_entry(void *argument)
         dt = (float)dt_ms / 1000.0f;
       }
 
+      SYSVIEW_START(SYSVIEW_MARK_FUSION_PREDICT);
       sys_sensor_fusion_predict(&ukf_data, dt);
+      SYSVIEW_STOP(SYSVIEW_MARK_FUSION_PREDICT);
 
 #if ENABLE_SYS_FUSION_LOG
       {
@@ -638,9 +640,10 @@ void sensor_fusion_entry(void *argument)
                 }
 
                 vec2d_t tril_position = {0.0f, 0.0f};
+                SYSVIEW_START(SYSVIEW_MARK_FUSION_TRILATERATION);
                 mw_tril_result_t tril_result = {0};
                 mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
-
+                SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
                 if (err == MW_TRIL_OK) {
                     s_latest_tril_x = (float)tril_position.x;
                     s_latest_tril_y = (float)tril_position.y;
@@ -685,7 +688,9 @@ void sensor_fusion_entry(void *argument)
                             s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
                         }
 
+                        SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, s_last_selected_anchors_mask);
+                        SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                         s_error_count = 0;
 
                         /* Update app_tag mailboxes passively */
@@ -721,7 +726,23 @@ void sensor_fusion_entry(void *argument)
       float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
       float yaw = sys_sensor_fusion_get_yaw_deg();
 
-      bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask, ukf_data.px, ukf_data.py, ukf_yaw, s_latest_tril_x, s_latest_tril_y, yaw, s_error_count);
+      if(s_ukf_initialized) 
+      {
+        uint32_t now_ms = HAL_GetTick();
+        protobuf_sensor_fusion_result_t stream_data;
+        memset(&stream_data, 0, sizeof(stream_data));
+        stream_data.ukf_x_m = (float)ukf_data.px;
+        stream_data.ukf_y_m = (float)ukf_data.py;
+        stream_data.ukf_yaw_deg = ukf_yaw;
+        stream_data.tril_x_m = s_latest_tril_x;
+        stream_data.tril_y_m = s_latest_tril_y;
+        stream_data.yaw_deg = yaw;
+        stream_data.ranging_error_count = s_error_count;
+        stream_data.timestamp_ms = now_ms;
+        (void)network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data);
+
+        bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask, ukf_data.px, ukf_data.py, ukf_yaw, s_latest_tril_x, s_latest_tril_y, yaw, s_error_count);
+      }
     }
 #endif
   }

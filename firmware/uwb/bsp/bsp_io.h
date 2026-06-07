@@ -153,7 +153,7 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
   float dt);
 
 #if ENABLE_SYS_FUSION
-bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);
+bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);
 #endif
 
 #endif /* __BSP_IO_H */
