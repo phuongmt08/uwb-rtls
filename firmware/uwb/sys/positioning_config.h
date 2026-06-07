@@ -256,7 +256,7 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  0
+#define ENABLE_SYS_FUSION  1
 #endif
 
 #if ENABLE_SYS_FUSION
@@ -279,7 +279,7 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_ALPHA
-#define SYS_FUSION_UKF_ALPHA   0.1f
+#define SYS_FUSION_UKF_ALPHA   1.0f
 #endif
 
 #ifndef SYS_FUSION_UKF_KAPPA
