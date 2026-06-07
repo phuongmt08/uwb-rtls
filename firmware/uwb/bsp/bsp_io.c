@@ -37,7 +37,7 @@ typedef struct
   float   error;                 /* Error estimate in meters */
 } __attribute__((packed)) uart_position_frame_t;
 
-#if ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 typedef struct
 {
   uint8_t sof;                   /* Start of frame: 0xAA */
@@ -88,7 +88,7 @@ static uint32_t              s_led_blink_off_tick = 0;
 static uart_position_frame_t s_frame;
 static volatile uint8_t      s_tx_busy = 0;
 
-#if ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 uart_fusion_log_frame_t   	s_fusion_log_frame = {0};
 #endif
 
@@ -355,7 +355,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   }
 }
 
-#if ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_log_data(
   uint8_t mask, uint32_t err_frame_count, 
   float ax, float ay, float gz, float px, float py, const float *distance, 
@@ -401,14 +401,6 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
     }
   }
 
-  if (distance != NULL)
-  {
-    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
-    {
-    	s_fusion_log_frame.distance[id] = distance[id];
-    }
-  }
-  
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_log_frame, sizeof(s_fusion_log_frame)) != HAL_OK)
   {
     return BSP_ERR;

@@ -146,11 +146,13 @@ bool bsp_io_dip_changed(void);
  */
 bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error);
 
+#if !ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_log_data(
   uint8_t mask, uint32_t err_frame_count, 
   float ax, float ay, float gz, float px, float py, const float *distance, 
   const double *fp_amp_norm, const double *fp_snr, 
   float dt);
+#endif
 
 #if ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);

@@ -87,7 +87,8 @@ typedef enum {
 uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors, 
                                      uint8_t total_anchors, 
                                      mw_tril_anchor_t *best_out, 
-                                     uint8_t max_out);
+                                     uint8_t max_out,
+                                     uint8_t prev_mask);
 
 /**
  * @brief Calculate 3D position (Mathematical core)
