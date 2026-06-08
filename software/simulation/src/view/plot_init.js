@@ -71,6 +71,7 @@ function attachAllTimeAxisZoomSync() {
 
 function initPlots(anchors, gt_square, rawData, samples) {
     const colors = SIM_CONFIG.VIEW.COLORS;
+    const isPathCsv = rawData.log_format === 'path_csv';
     // 1. Trajectory
     Plotly.newPlot('trajectory', [
         { x: anchors.map(a => a.x), y: anchors.map(a => a.y), mode: 'markers+text',
@@ -78,18 +79,21 @@ function initPlots(anchors, gt_square, rawData, samples) {
           marker: { color: '#1e293b', size: 10, symbol: 'triangle-up' } },
         { x: gt_square.x, y: gt_square.y, mode: 'lines', name: `Ground Truth (${gt_square.name || 'Original Square'})`,
           line: { color: '#f87171', dash: 'dot', width: 1 } },
-        { x: samples.map(e => e.px_fw), y: samples.map(e => e.py_fw), mode: 'lines+markers',
-          name: 'Firmware Path', type: 'scattergl', marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
-        { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Rules)',
+        { x: isPathCsv ? samples.map(e => e.tril_x) : samples.map(e => e.px_fw),
+          y: isPathCsv ? samples.map(e => e.tril_y) : samples.map(e => e.py_fw), mode: 'lines+markers',
+          name: isPathCsv ? 'Trilateration Path' : 'Firmware Path', type: 'scattergl',
+          marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
+        { x: isPathCsv ? samples.map(e => e.ukf_x) : [], y: isPathCsv ? samples.map(e => e.ukf_y) : [],
+          mode: 'lines+markers', name: isPathCsv ? 'UKF Path' : 'Simulated Path (Rules)',
            type: 'scattergl', marker: { size: 3 }, line: { color: '#2563eb', width: 2 } },
         { x: [], y: [], mode: 'lines', name: 'Simulated Path (Multilateration)',
-           type: 'scattergl', line: { color: '#d97706', width: 2, dash: 'dash' } },
+           visible: isPathCsv ? false : true, type: 'scattergl', line: { color: '#d97706', width: 2, dash: 'dash' } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (Best Triplet)',
-           type: 'scattergl', marker: { size: 3 }, line: { color: '#059669', width: 2 } },
+           visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#059669', width: 2 } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion)',
-           type: 'scattergl', marker: { size: 3 }, line: { color: '#8b5cf6', width: 2 } },
+           visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#8b5cf6', width: 2 } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion + IMU LPF)',
-           type: 'scattergl', marker: { size: 3 }, line: { color: '#0ea5e9', width: 2 } }
+           visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#0ea5e9', width: 2 } }
     ], {
         margin: { t: 40, b: 100, l: 50, r: 50 },
         xaxis: { title: 'X (m)', gridcolor: '#f1f5f9' },
@@ -215,9 +219,9 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 6. Yaw
     Plotly.newPlot('yaw_plot', [
-        { x: [], y: [], name: 'Gyro Z', mode: 'lines', type: 'scatter', line: { color: '#94a3b8', width: 1 }, yaxis: 'y2',
+        { x: [], y: [], name: 'Gyro Z', mode: 'lines', type: 'scatter', visible: isPathCsv ? false : true, line: { color: '#94a3b8', width: 1 }, yaxis: 'y2',
           hovertemplate: 'Gz: %{y:.4f} rad/s<extra></extra>' },
-        { x: [], y: [], name: 'Gyro Z LPF', mode: 'lines', type: 'scatter', line: { color: '#38bdf8', dash: 'dash', width: 1.5 }, yaxis: 'y2',
+        { x: [], y: [], name: 'Gyro Z LPF', mode: 'lines', type: 'scatter', visible: isPathCsv ? false : true, line: { color: '#38bdf8', dash: 'dash', width: 1.5 }, yaxis: 'y2',
           hovertemplate: 'Gz LPF: %{y:.4f} rad/s<extra></extra>' },
         { x: [], y: [], name: 'Yaw Angle', mode: 'lines', type: 'scatter', line: { color: '#7c3aed', width: 2 },
           hovertemplate: 'Yaw: %{y:.2f} deg<extra></extra>' },
@@ -270,12 +274,12 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 9. Error Frame
     Plotly.newPlot('error_frame', [
-        { x: [], y: [], name: 'Log Error Frames', mode: 'lines', type: 'scatter', line: { color: '#475569', width: 1 }, fill: 'tozeroy' },
+        { x: [], y: [], name: isPathCsv ? 'error_cnt' : 'Log Error Frames', mode: 'lines', type: 'scatter', line: { color: '#475569', width: 1 }, fill: 'tozeroy' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
         margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
-        yaxis: { title: 'Frame Count' }, hovermode: 'x unified'
+        yaxis: { title: isPathCsv ? 'error_cnt' : 'Frame Count' }, hovermode: 'x unified'
     });
 
     attachAllTimeAxisZoomSync();
