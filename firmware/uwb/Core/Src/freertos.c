@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "app_rtos_handles.h"
 #include "app_anchor.h"
 #include "app_tag.h"
@@ -34,6 +35,7 @@
 #include "bsp_imu.h"
 #include "bsp_uwb.h"
 #include "bsp_util.h"
+#include "common.h"
 #include "network/network_core.h"
 #include "network/network_cmd.h"
 #include "sys_config.h"
@@ -43,7 +45,7 @@
 #include "positioning_config.h"
 #include "bsp_io.h"
 #include <math.h>
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
 #include "mw_filter.h"
 #include "mw_trilateration.h"
@@ -70,19 +72,16 @@
 
 osMessageQueueId_t g_uwb_distance_queue;
 
-bool g_ranging_enabled = true;
+bool g_ranging_enabled = false;
 bool g_pm_ranging_blocked = false;
 
 /* Network objects — non-static so main.c can init via extern */
 network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 static uint32_t s_fusion_last_tick = 0U;
 static bool     s_fusion_first_run = true;
-#if ENABLE_SYS_FUSION_LOG
-static uint32_t s_last_fusion_log_seq = 0U;
-#endif
 
 /* Owner variables for decoupled active Sensor Fusion */
 sys_sensor_fusion_data_t ukf_data;
@@ -97,7 +96,7 @@ static double s_latest_fp_snr[NUM_ANCHORS] = {0.0};
 static float s_latest_ranging_dt = 0.0f;
 static uint32_t s_fusion_log_seq = 0U;
 static uint32_t s_last_fusion_log_tick = 0U;
-static uint32_t s_error_count = 0U;
+static uint32_t s_fusion_error_count = 0U;
 static uint8_t s_last_selected_anchors_mask = 0U;
 static float s_latest_tril_x = 0.0f;
 static float s_latest_tril_y = 0.0f;
@@ -122,7 +121,7 @@ const osThreadAttr_t SensorFusion_attributes = {
 osThreadId_t NetworkHandle;
 const osThreadAttr_t Network_attributes = {
   .name = "Network",
-  .stack_size = 512 * 4,
+  .stack_size = 768 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for Logger */
@@ -136,21 +135,21 @@ const osThreadAttr_t Logger_attributes = {
 osThreadId_t FlashStorageHandle;
 const osThreadAttr_t FlashStorage_attributes = {
   .name = "FlashStorage",
-  .stack_size = 512 * 4,
+  .stack_size = 384 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for IO */
 osThreadId_t IOHandle;
 const osThreadAttr_t IO_attributes = {
   .name = "IO",
-  .stack_size = 512 * 4,
+  .stack_size = 384 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for PM */
 osThreadId_t PMHandle;
 const osThreadAttr_t PM_attributes = {
   .name = "PM",
-  .stack_size = 1024 * 4,
+  .stack_size = 640 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for g_spi1_mutex */
@@ -181,9 +180,10 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+static void send_latest_fusion_frame(void);
 void sys_sensor_fusion_reset(void);
 #endif
 /* USER CODE END FunctionPrototypes */
@@ -289,6 +289,9 @@ void uwb_ranging_entry(void *argument)
   /* USER CODE BEGIN uwb_ranging_entry */
   sys_config_t *cfg = sys_config_get();
   static bool was_ranging_active = false;
+  SYSVIEW_RECORD_START();
+  SYSVIEW_PRINTF("SystemView started after scheduler");
+  SYSVIEW_PRINTF(SYSVIEW_MARKERS_DESC);
 
   for (;;)
   {
@@ -325,6 +328,7 @@ void uwb_ranging_entry(void *argument)
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[UWB] EXTI Missed! Stuck IRQ detected (PA4=HIGH), running auto-recovery...");
 
         osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+        SYSVIEW_START(SYSVIEW_MARK_UWB_ISR_DISPATCH);
         bsp_uwb_dwt_isr();
         if (cfg->uwb.role == DEVICE_ROLE_TAG)
         {
@@ -334,6 +338,7 @@ void uwb_ranging_entry(void *argument)
         {
           app_anchor_process(NULL);
         }
+        SYSVIEW_STOP(SYSVIEW_MARK_UWB_ISR_DISPATCH);
         osMutexRelease(g_spi1_mutexHandle);
         
         continue; 
@@ -341,6 +346,7 @@ void uwb_ranging_entry(void *argument)
     }
 
     osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+    SYSVIEW_START(SYSVIEW_MARK_UWB_ISR_DISPATCH);
     bsp_uwb_dwt_isr();
     if (cfg->uwb.role == DEVICE_ROLE_TAG)
     {
@@ -350,6 +356,7 @@ void uwb_ranging_entry(void *argument)
     {
       app_anchor_process(NULL);
     }
+    SYSVIEW_STOP(SYSVIEW_MARK_UWB_ISR_DISPATCH);
     osMutexRelease(g_spi1_mutexHandle);
   }
   /* USER CODE END uwb_ranging_entry */
@@ -365,12 +372,35 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
   }
 
+#if UKF_BLE_STREAM_TEST_ENABLE
+  uint32_t sample_idx = 0U;
+  for (;;)
+  {
+    uint32_t now_ms = HAL_GetTick();
+    float step = (float)sample_idx;
+    protobuf_sensor_fusion_result_t stream_data;
+    memset(&stream_data, 0, sizeof(stream_data));
+    stream_data.ukf_x_m = 1.0f + 0.05f * step;
+    stream_data.ukf_y_m = 2.0f + 0.03f * step;
+    stream_data.ukf_yaw_deg = 15.0f + 0.5f * step;
+    stream_data.tril_x_m = 0.9f + 0.05f * step;
+    stream_data.tril_y_m = 1.9f + 0.03f * step;
+    stream_data.yaw_deg = 14.5f + 0.5f * step;
+    stream_data.ranging_error_count = sample_idx;
+    stream_data.timestamp_ms = now_ms;
+
+    if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data)) {
+      sample_idx++;
+    }
+    osDelay(20);
+  }
+#else
   /* Khởi tạo bộ lọc định vị và prefilter */
   mw_filter_mahalanobis_init(&s_prefilter,
                              MAHALANOBIS_PREFILTER_D2_RECOVER,
@@ -384,13 +414,28 @@ void sensor_fusion_entry(void *argument)
   } else {
       RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
   }
-
   for (;;)
   {
     osDelay(20);
 
     if (sys_sensor_fusion_check_predict_flag())
+    if (sys_sensor_fusion_check_predict_flag())
     {
+      float dt = 0.01f;
+      if (s_fusion_first_run)
+      {
+        s_fusion_last_tick = HAL_GetTick();
+        s_fusion_first_run = false;
+      }
+      else
+      {
+        uint32_t now = HAL_GetTick();
+        uint32_t dt_ms = now - s_fusion_last_tick;
+        s_fusion_last_tick = now;
+        if (dt_ms > 100U) dt_ms = 100U;
+        if (dt_ms < 1U) dt_ms = 1U;
+        dt = (float)dt_ms / 1000.0f;
+      }
       float dt = 0.01f;
       if (s_fusion_first_run)
       {
@@ -593,7 +638,7 @@ void sensor_fusion_entry(void *argument)
             }
 
             mw_tril_anchor_t best_3_anchors[3];
-            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3);
+            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3, s_last_selected_anchors_mask);
 
             if (best_count >= 3) {
                 s_last_selected_anchors_mask = 0;
@@ -602,10 +647,14 @@ void sensor_fusion_entry(void *argument)
                 }
 
                 vec2d_t tril_position = {0.0f, 0.0f};
+                SYSVIEW_START(SYSVIEW_MARK_FUSION_TRILATERATION);
                 mw_tril_result_t tril_result = {0};
                 mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
-
+                SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
                 if (err == MW_TRIL_OK) {
+                    s_latest_tril_x = (float)tril_position.x;
+                    s_latest_tril_y = (float)tril_position.y;
+
                     s_latest_tril_x = (float)tril_position.x;
                     s_latest_tril_y = (float)tril_position.y;
 
@@ -632,10 +681,11 @@ void sensor_fusion_entry(void *argument)
 
                             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
                             sys_sensor_fusion_set_predict_flag();
-                            s_error_count = 0;
+                            s_fusion_error_count = 0;
 
-                            /* Update app_tag mailboxes passively */
-                            app_tag_set_latest_fusion_data(init_x, init_y, true, s_error_count);
+                            s_latest_tril_x = (float)tril_position.x;
+                            s_latest_tril_y = (float)tril_position.y;
+                            s_latest_tril_valid = true;
                         }
                     } else {
                         /* Normal UKF Update */
@@ -649,19 +699,26 @@ void sensor_fusion_entry(void *argument)
                             s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
                         }
 
+                        SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, s_last_selected_anchors_mask);
-                        s_error_count = 0;
+                        SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
+                        s_fusion_error_count = 0;
 
-                        /* Update app_tag mailboxes passively */
-                        app_tag_set_latest_fusion_data(ukf_data.px, ukf_data.py, true, s_error_count);
+                        s_latest_tril_x = (float)tril_position.x;
+                        s_latest_tril_y = (float)tril_position.y;
+                        s_latest_tril_valid = true;
                     }
                 } else {
-                    s_error_count++;
-                    app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+                    s_fusion_error_count++;
+                    s_latest_tril_x = 0.0f;
+                    s_latest_tril_y = 0.0f;
+                    s_latest_tril_valid = false;
                 }
             } else {
-                s_error_count++;
-                app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+                s_fusion_error_count++;
+                s_latest_tril_x = 0.0f;
+                s_latest_tril_y = 0.0f;
+                s_latest_tril_valid = false;
             }
         } else {
             s_error_count++;
@@ -688,7 +745,7 @@ void sensor_fusion_entry(void *argument)
       bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask, ukf_data.px, ukf_data.py, ukf_yaw, s_latest_tril_x, s_latest_tril_y, yaw, s_error_count);
     }
 #endif
-  }
+
 #else
   osThreadExit();
 #endif
@@ -709,7 +766,7 @@ void network_entry(void *argument)
   {
     network_core_process(&g_network_core);
     network_cmd_process();
-    osDelay(5);
+    osDelay(2);
   }
   /* USER CODE END network_entry */
 }
@@ -724,11 +781,11 @@ void network_entry(void *argument)
 void logger_entry(void *argument)
 {
   /* USER CODE BEGIN logger_entry */
+  bsp_util_rtos_monitor_update();
   for (;;)
   {
     osDelay(30000); /* 30 seconds */
-    bsp_util_print_mem_stats();
-    bsp_util_print_cpu_stats();
+    bsp_util_rtos_monitor_update();
   }
   /* USER CODE END logger_entry */
 }
@@ -870,7 +927,29 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
+static void send_latest_fusion_frame(void)
+{
+    if (!s_ukf_initialized) {
+        return;
+    }
+
+    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+    float yaw = sys_sensor_fusion_get_yaw_deg();
+    float tril_x = s_latest_tril_valid ? s_latest_tril_x : 0.0f;
+    float tril_y = s_latest_tril_valid ? s_latest_tril_y : 0.0f;
+    uint32_t ranging_error_count = app_tag_get_ranging_error_count();
+
+    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+                                       (float)ukf_data.px,
+                                       (float)ukf_data.py,
+                                       ukf_yaw,
+                                       tril_x,
+                                       tril_y,
+                                       yaw,
+                                       ranging_error_count);
+}
+
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
     if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
@@ -910,7 +989,7 @@ void sys_sensor_fusion_reset(void)
     s_ukf_initialized = false;
     s_fusion_first_run = true;
     s_fusion_last_tick = 0U;
-    s_error_count = 0U;
+    s_fusion_error_count = 0U;
     s_last_selected_anchors_mask = 0U;
     s_latest_tril_x = 0.0f;
     s_latest_tril_y = 0.0f;

@@ -89,7 +89,8 @@ class BuildService:
             raise DfuError(f"Missing Makefile: {makefile_path}")
 
         make_cmd = BuildService.resolve_make_command()
-        cmd = [make_cmd, "-f", "Makefile", f'OPTFLAGS="{opt_flag} -g3"', target]
+        num_jobs = os.cpu_count() or 1
+        cmd = [make_cmd, f"-j{num_jobs}", "-f", "Makefile", f'OPTFLAGS="{opt_flag} -g3"', target]
 
         log_callback(f"Running build command: {' '.join(cmd)}")
         cmd_str = " ".join(cmd)

@@ -160,7 +160,7 @@
  *        1 = apply Mahalanobis gate before anchor selection
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
-#define ENABLE_MAHALANOBIS_PREFILTER  0
+#define ENABLE_MAHALANOBIS_PREFILTER  1
 #endif
 
 /**
@@ -241,6 +241,18 @@
 #define MW_TRIL_WEIGHT_RESIDUAL                    0.30
 #endif
 
+#ifndef MW_TRIL_WEIGHT_DIST
+#define MW_TRIL_WEIGHT_DIST                        0.25
+#endif
+
+#ifndef MW_TRIL_SWITCH_MARGIN
+#define MW_TRIL_SWITCH_MARGIN                      0.12
+#endif
+
+#ifndef MW_TRIL_SWITCH_SCORE_EPS
+#define MW_TRIL_SWITCH_SCORE_EPS                  0.02
+#endif
+
 /**
  * @brief Enable/Disable quality gating based on trilateration error
  *        0 = Accept all trilateration results
@@ -257,17 +269,6 @@
 
 #ifndef ENABLE_SYS_FUSION
 #define ENABLE_SYS_FUSION  1
-#endif
-
-#if ENABLE_SYS_FUSION
-#ifdef ENABLE_SYS_FUSION_LOG
-#undef ENABLE_SYS_FUSION_LOG
-#endif
-#define ENABLE_SYS_FUSION_LOG  1
-#else
-#ifndef ENABLE_SYS_FUSION_LOG
-#define ENABLE_SYS_FUSION_LOG  1
-#endif
 #endif
 
 #ifndef SYS_FUSION_PREFILTER_ENABLED
@@ -302,13 +303,7 @@
 #define SYS_FUSION_UKF_R_UWB   0.01f
 #endif
 
-/**
- * @brief Distance Smoother (EMA Filter) parameters
- *        ALPHA: 0.0 to 1.0 (lower = smoother/more lag, higher = jumpier/less lag)
- *        JUMP_LIMIT: Max allowed delta between consecutive samples (meters)
- */
-#define SMOOTHER_ALPHA              0.25f
-#define SMOOTHER_JUMP_LIMIT_M       0.30f
+
 
 /* ===================================================================
  * ERROR HANDLING

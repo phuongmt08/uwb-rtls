@@ -16,18 +16,69 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "FreeRTOS.h"
+#include "task.h"
+#include "sys_logger.h"
+#include "err.h"
+
 /* External peripherals from CubeMX */
 extern CRC_HandleTypeDef hcrc;
 extern RTC_HandleTypeDef hrtc;
+
+/* Extern Thread Handles and Attributes from main.c */
+extern osThreadId_t UwbRangingHandle;
+extern osThreadId_t SensorFusionHandle;
+extern osThreadId_t NetworkHandle;
+extern osThreadId_t LoggerHandle;
+extern osThreadId_t FlashStorageHandle;
+extern osThreadId_t IOHandle;
+extern osThreadId_t PMHandle;
+
+extern const osThreadAttr_t UwbRanging_attributes;
+extern const osThreadAttr_t SensorFusion_attributes;
+extern const osThreadAttr_t Network_attributes;
+extern const osThreadAttr_t Logger_attributes;
+extern const osThreadAttr_t FlashStorage_attributes;
+extern const osThreadAttr_t IO_attributes;
+extern const osThreadAttr_t PM_attributes;
 
 /* Private defines ---------------------------------------------------- */
 #define DAYS_IN_MONTH_NORMAL { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
 #define DAYS_IN_MONTH_LEAP   { 0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
 #define EPOCH_2000_OFFSET_S  (946684800UL) /* Unix epoch of 2000-01-01 */
 
+#define RTOS_MONITOR_CPU_WARN_PERMILLE 900U
+#define RTOS_MONITOR_HEAP_WARN_BYTES   2048U
+#define RTOS_MONITOR_STACK_WARN_BYTES  256U
+
+/* Private typedefs --------------------------------------------------- */
+typedef struct {
+  uint32_t task_id;
+  uint32_t runtime_counter;
+} rtos_prev_task_t;
+
+typedef struct {
+    osThreadId_t          handle;
+    const osThreadAttr_t *attr;
+} task_mem_info_t;
+
+/* Global variables --------------------------------------------------- */
+volatile char g_overflowed_task_name[16] = {0};
+
 /* Private variables -------------------------------------------------- */
 static bool    rtc_time_synced       = false;
 static int32_t rtc_timezone_offset_s = 0;
+
+static bsp_util_rtos_snapshot_t s_rtos_snapshots[2];
+static volatile uint32_t        s_rtos_active_snapshot;
+
+#if (configUSE_TRACE_FACILITY == 1)
+static TaskStatus_t     s_rtos_task_status[BSP_UTIL_RTOS_MONITOR_MAX_TASKS];
+static rtos_prev_task_t s_rtos_prev_tasks[BSP_UTIL_RTOS_MONITOR_MAX_TASKS];
+static uint32_t         s_rtos_prev_task_count;
+static uint32_t         s_rtos_prev_total_runtime;
+static uint32_t         s_rtos_prev_tick;
+#endif
 
 /* Private prototypes ------------------------------------------------- */
 static bool     is_leap_year(uint16_t year);
@@ -37,6 +88,10 @@ static bool     delay_can_yield_to_os(void);
 static bool     delay_dwt_enable(void);
 static uint32_t delay_cycles_per_us(void);
 static void     delay_spin_us(uint32_t us);
+
+#if (configUSE_TRACE_FACILITY == 1)
+static uint32_t rtos_prev_runtime(uint32_t task_id);
+#endif
 
 /* ===================================================================== */
 /*                         INITIALIZATION                                */
@@ -435,11 +490,6 @@ static void epoch_s_to_rtc_time(uint32_t epoch_s, bsp_rtc_time_t *t)
 /*                   RTOS SYSTEM HELPERS & HOOKS                         */
 /* ===================================================================== */
 
-#include "FreeRTOS.h"
-#include "task.h"
-#include "sys_logger.h"
-#include "err.h"
-
 /* For configGENERATE_RUN_TIME_STATS */
 /* Note: Reads high-speed hardware timer TIM10 (running at 100 kHz)
    and handles 16-bit register overflows to form a 32-bit counter value. */
@@ -462,8 +512,6 @@ uint32_t getRunTimeCounterValue(void)
   s_last_timer_val = now;
   return ((s_runtime_counter_high << 16) | now);
 }
-
-volatile char g_overflowed_task_name[16] = {0};
 
 void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
 {
@@ -493,103 +541,132 @@ void vApplicationMallocFailedHook(void)
   }
 }
 
-void bsp_util_print_cpu_stats(void)
+#if (configUSE_TRACE_FACILITY == 1)
+static uint32_t rtos_prev_runtime(uint32_t task_id)
 {
-#if (configGENERATE_RUN_TIME_STATS == 1) && (configUSE_TRACE_FACILITY == 1)
-  static TaskStatus_t s_task_status[16];
-  static char s_stats_buf[256];
-  
-  uint32_t total_runtime = 0;
-  UBaseType_t task_count = uxTaskGetSystemState(s_task_status, 16, &total_runtime);
-
-  if (task_count > 0 && total_runtime > 0)
+  for (uint32_t i = 0U; i < s_rtos_prev_task_count; i++)
   {
-    int len = snprintf(s_stats_buf, sizeof(s_stats_buf), "CPU: ");
-    for (UBaseType_t i = 0; i < task_count; i++)
+    if (s_rtos_prev_tasks[i].task_id == task_id)
     {
-      uint32_t pct = (uint32_t)((uint64_t)s_task_status[i].ulRunTimeCounter * 100 / total_runtime);
-      int ret = snprintf(s_stats_buf + len, sizeof(s_stats_buf) - len, "%s:%lu%% | ",
-                         s_task_status[i].pcTaskName, (unsigned long)pct);
-      if (ret > 0)
+      return s_rtos_prev_tasks[i].runtime_counter;
+    }
+  }
+  return 0U;
+}
+#endif
+
+__attribute__((optimize("Os"))) void bsp_util_rtos_monitor_update(void)
+{
+  uint32_t next_index = s_rtos_active_snapshot ^ 1U;
+  bsp_util_rtos_snapshot_t *snapshot = &s_rtos_snapshots[next_index];
+  memset(snapshot, 0, sizeof(*snapshot));
+
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
+  snapshot->heap_free_bytes          = (uint32_t)xPortGetFreeHeapSize();
+  snapshot->heap_min_ever_free_bytes = (uint32_t)xPortGetMinimumEverFreeHeapSize();
+#endif
+
+  snapshot->task_count_total = (uint32_t)uxTaskGetNumberOfTasks();
+
+#if (configUSE_TRACE_FACILITY == 1)
+  if (snapshot->task_count_total <= BSP_UTIL_RTOS_MONITOR_MAX_TASKS)
+  {
+    uint32_t total_runtime = 0U;
+    UBaseType_t count = uxTaskGetSystemState(s_rtos_task_status,
+                                             BSP_UTIL_RTOS_MONITOR_MAX_TASKS,
+                                             &total_runtime);
+    uint32_t now = bsp_util_get_ticks();
+    uint32_t total_delta = total_runtime - s_rtos_prev_total_runtime;
+    uint32_t idle_delta = 0U;
+    bool cpu_valid = (s_rtos_prev_total_runtime != 0U) && (total_delta != 0U);
+
+    snapshot->task_count = (uint32_t)count;
+    snapshot->sample_window_ms = (s_rtos_prev_tick == 0U) ? 0U : (now - s_rtos_prev_tick);
+    snapshot->min_stack_free_bytes = UINT32_MAX;
+
+    for (uint32_t i = 0U; i < (uint32_t)count; i++)
+    {
+      const TaskStatus_t *status = &s_rtos_task_status[i];
+      bsp_util_rtos_task_stat_t *task = &snapshot->tasks[i];
+      uint32_t runtime = (uint32_t)status->ulRunTimeCounter;
+      uint32_t runtime_delta = runtime - rtos_prev_runtime((uint32_t)status->xTaskNumber);
+
+      task->task_id = (uint32_t)status->xTaskNumber;
+      task->stack_min_free_bytes = (uint32_t)status->usStackHighWaterMark *
+                                   (uint32_t)sizeof(StackType_t);
+      if (cpu_valid)
       {
-        len += ret;
+        task->cpu_permille = (uint32_t)(((uint64_t)runtime_delta * 1000U) / total_delta);
       }
+      strncpy(task->name, status->pcTaskName, sizeof(task->name) - 1U);
+
+      if (task->stack_min_free_bytes < snapshot->min_stack_free_bytes)
+      {
+        snapshot->min_stack_free_bytes = task->stack_min_free_bytes;
+        snapshot->min_stack_task_id = task->task_id;
+      }
+      if (strncmp(status->pcTaskName, "IDLE", 4U) == 0)
+      {
+        idle_delta += runtime_delta;
+      }
+
+      s_rtos_prev_tasks[i].task_id = task->task_id;
+      s_rtos_prev_tasks[i].runtime_counter = runtime;
     }
-    if (len > 7)
+
+    if (snapshot->min_stack_free_bytes == UINT32_MAX)
     {
-      s_stats_buf[len - 3] = '\0'; /* Trim the trailing " | " */
+      snapshot->min_stack_free_bytes = 0U;
     }
-    RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stats_buf);
+    if (cpu_valid)
+    {
+      uint32_t idle_permille = (uint32_t)(((uint64_t)idle_delta * 1000U) / total_delta);
+      snapshot->cpu_busy_permille = (idle_permille >= 1000U) ? 0U : (1000U - idle_permille);
+    }
+    else
+    {
+      snapshot->health_flags |= BSP_UTIL_RTOS_FLAG_CPU_UNAVAILABLE;
+    }
+
+    s_rtos_prev_task_count = (uint32_t)count;
+    s_rtos_prev_total_runtime = total_runtime;
+    s_rtos_prev_tick = now;
+  }
+  else
+  {
+    snapshot->health_flags |= BSP_UTIL_RTOS_FLAG_TASK_TRUNCATED |
+                              BSP_UTIL_RTOS_FLAG_CPU_UNAVAILABLE;
+  }
+#else
+  snapshot->health_flags |= BSP_UTIL_RTOS_FLAG_CPU_UNAVAILABLE;
+#endif
+
+  if (snapshot->cpu_busy_permille >= RTOS_MONITOR_CPU_WARN_PERMILLE)
+  {
+    snapshot->health_flags |= BSP_UTIL_RTOS_FLAG_CPU_HIGH;
+  }
+#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
+  if (snapshot->heap_free_bytes <= RTOS_MONITOR_HEAP_WARN_BYTES)
+  {
+    snapshot->health_flags |= BSP_UTIL_RTOS_FLAG_HEAP_LOW;
   }
 #endif
+  if ((snapshot->min_stack_free_bytes != 0U) &&
+      (snapshot->min_stack_free_bytes <= RTOS_MONITOR_STACK_WARN_BYTES))
+  {
+    snapshot->health_flags |= BSP_UTIL_RTOS_FLAG_STACK_LOW;
+  }
+
+  snapshot->valid = true;
+  __DMB();
+  s_rtos_active_snapshot = next_index;
 }
 
-extern osThreadId_t UwbRangingHandle;
-extern osThreadId_t SensorFusionHandle;
-extern osThreadId_t NetworkHandle;
-extern osThreadId_t LoggerHandle;
-extern osThreadId_t FlashStorageHandle;
-extern osThreadId_t IOHandle;
-extern osThreadId_t PMHandle;
-
-typedef struct {
-    osThreadId_t handle;
-    const char  *name;
-    uint32_t     stack_size_words;
-} task_mem_info_t;
-
-void bsp_util_print_mem_stats(void)
+const bsp_util_rtos_snapshot_t *bsp_util_rtos_monitor_get(void)
 {
-  uint32_t total_heap    = configTOTAL_HEAP_SIZE;
-  uint32_t free_heap     = xPortGetFreeHeapSize();
-  uint32_t min_free_heap = xPortGetMinimumEverFreeHeapSize();
-  
-  uint32_t current_heap_used_pct = ((total_heap - free_heap) * 100) / total_heap;
-  uint32_t peak_heap_used_pct    = ((total_heap - min_free_heap) * 100) / total_heap;
-  
-  RLOG_D(LOG_OBJECT_CODE_TASK, "HEAP: Current Used %lu%% (%lu/%lu B) | Peak Used %lu%%", 
-         (unsigned long)current_heap_used_pct, 
-         (unsigned long)(total_heap - free_heap), 
-         (unsigned long)total_heap, 
-         (unsigned long)peak_heap_used_pct);
-
-  const task_mem_info_t tasks[] = {
-      { (osThreadId_t)UwbRangingHandle,    "UwbRanging",   1536 },
-      { (osThreadId_t)SensorFusionHandle,  "SensorFusion", 1024 },
-      { (osThreadId_t)NetworkHandle,       "Network",      512  },
-      { (osThreadId_t)LoggerHandle,        "Logger",       512  },
-      { (osThreadId_t)FlashStorageHandle,  "FlashStorage", 512  },
-      { (osThreadId_t)IOHandle,            "IO",           512  },
-      { (osThreadId_t)PMHandle,            "PM",           1024 }
-  };
-  
-  static char s_stack_buf[256];
-  int len = snprintf(s_stack_buf, sizeof(s_stack_buf), "STACK: ");
-  
-  for (size_t i = 0; i < sizeof(tasks)/sizeof(tasks[0]); i++)
-  {
-      if (tasks[i].handle != NULL)
-      {
-          TaskHandle_t xTask = (TaskHandle_t)tasks[i].handle; 
-          UBaseType_t high_water_mark_words = uxTaskGetStackHighWaterMark(xTask);
-          
-          uint32_t stack_used_words = tasks[i].stack_size_words - high_water_mark_words;
-          uint32_t stack_used_pct   = (stack_used_words * 100) / tasks[i].stack_size_words;
-          
-          int ret = snprintf(s_stack_buf + len, sizeof(s_stack_buf) - len, "%s:%lu%% | ",
-                             tasks[i].name, (unsigned long)stack_used_pct);
-          if (ret > 0)
-          {
-              len += ret;
-          }
-      }
-  }
-  
-  if (len > 7)
-  {
-      s_stack_buf[len - 3] = '\0'; /* Trim trailing " | " */
-  }
-  RLOG_D(LOG_OBJECT_CODE_TASK, "%s", s_stack_buf);
+  uint32_t active_index = s_rtos_active_snapshot;
+  __DMB();
+  return s_rtos_snapshots[active_index].valid ? &s_rtos_snapshots[active_index] : NULL;
 }
 
 /* End of file -------------------------------------------------------- */

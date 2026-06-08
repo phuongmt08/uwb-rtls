@@ -24,7 +24,7 @@ package protobuf;
 
 enum common_constant_t {
     UNSPECIFIED  = 0;
-    PROTOCOL_REV = 121;
+    PROTOCOL_REV = 122;
 }
 
 enum packet_ack_response_t {
@@ -208,6 +208,12 @@ message uwb_cfg_t {
     uint32 tx_power             = 11;
     bytes anchor_list           = 12;
     anchor_power_mode_t power_mode = 13;
+    uint32 uwb_preamble_len     = 14;
+    uint32 uwb_rx_pac           = 15;
+    uint32 uwb_ns_sfd           = 16;
+    uint32 uwb_phr_mode         = 17;
+    bool smart_tx_power         = 18;
+    uint32 pg_delay             = 19;
 }
 
 message sys_config_get_t {
@@ -296,11 +302,17 @@ message sensor_fusion_cfg_set_t {
 message sensor_fusion_cfg_resp_t {
     sensor_fusion_cfg_t config = 1;
 }
-/* TODO: Implement the sensor fusion result including IMU heading data and diagnostics
+
 message sensor_fusion_result_t {
-    uint32 dummy = 1;
+    float ukf_x_m       = 1;
+    float ukf_y_m       = 2;
+    float ukf_yaw_deg   = 3;
+    float tril_x_m      = 4;
+    float tril_y_m      = 5;
+    float yaw_deg       = 6;
+    uint32 ranging_error_count  = 7;
+    uint32 timestamp_ms = 8;
 }
-*/
 
 /* IMU / ICM configuration -------------------------------------------------- */
 message imu_reset_t {
@@ -584,6 +596,48 @@ message calib_status_resp_t {
 
 /* Status / diagnostics ----------------------------------------------------- */
 
+/*
+ * Compact RTOS health snapshot. This is intentionally pull-only and contains
+ * no per-task array so it can coexist with log and ranging streams.
+ *
+ * health_flags:
+ *   bit 0: CPU busy above threshold
+ *   bit 1: free heap below threshold
+ *   bit 2: minimum task stack below threshold
+ *   bit 3: task snapshot truncated
+ *   bit 4: CPU/task statistics unavailable
+ */
+message rtos_resource_get_t {
+    uint32 dummy = 1;
+}
+
+message rtos_resource_resp_t {
+    uint32 sample_window_ms          = 1;
+    uint32 cpu_busy_permille         = 2; /* 1000 = 100% */
+    uint32 heap_free_bytes           = 3;
+    uint32 heap_min_ever_free_bytes  = 4;
+    uint32 min_stack_free_bytes      = 5;
+    uint32 min_stack_task_id         = 6;
+    uint32 task_count                = 7;
+    uint32 health_flags              = 8;
+}
+
+/* Per-task details for the current bounded task set. */
+message rtos_task_stats_get_t {
+    uint32 dummy = 1;
+}
+
+message rtos_task_stat_t {
+    uint32 task_id              = 1; /* Valid for the current boot only */
+    uint32 cpu_permille         = 2; /* 1000 = 100% */
+    uint32 stack_min_free_bytes = 3;
+    string name                 = 4;
+}
+
+message rtos_task_stats_resp_t {
+    repeated rtos_task_stat_t tasks = 1;
+}
+
 message ranging_status_get_t {
     uint32 dummy = 1;
 }
@@ -626,9 +680,9 @@ message battery_info_resp_t {
 
     /* Hardware telemetry fields */
     float  mcu_temp_c       = 5;  /* MCU internal temperature in degrees Celsius */
-    uint32 vdda_mv          = 6;  /* Actual VDDA voltage in mV after calibration */
+    uint32 mcu_voltage_mv          = 6;  /* Actual MCU voltage in mV */
     float  uwb_temp_c       = 7;  /* DW1000 chip internal temperature in degrees Celsius */
-    uint32 uwb_vbat_mv      = 8;  /* DW1000 VBAT supply voltage in mV */
+    uint32 uwb_voltage_mv      = 8;  /* DW1000 supply voltage in mV */
     float  imu_temp_c       = 9;  /* IMU sensor internal temperature in degrees Celsius */
     
     uint32 error_mask      = 10; /* Bitmask of breached thresholds */
@@ -651,6 +705,7 @@ message factory_otp_write_t {
 message end_session_t {
     session_end_reason_t reason = 1;
 }
+
 /* Packet ------------------------------------------------------------------- */
 
 message packet_t {
@@ -692,82 +747,90 @@ message packet_t {
         sensor_fusion_cfg_get_t   sensor_fusion_cfg_get   = 21;
         sensor_fusion_cfg_set_t   sensor_fusion_cfg_set   = 22;
         sensor_fusion_cfg_resp_t  sensor_fusion_cfg_resp  = 23;
+        sensor_fusion_result_t    sensor_fusion_result    = 24;
 
         /* IMU operations */
-        imu_reset_t               imu_reset               = 69;
-        imu_calib_retry_t         imu_calib_start         = 70;
+        imu_reset_t               imu_reset               = 25;
+        imu_calib_retry_t         imu_calib_start         = 26;
 
         /* System commands */
-        device_reset_t            device_reset            = 24;
-        uwb_reset_t               uwb_reset               = 25;
-        factory_config_reset_t    factory_config_reset    = 26;
-        device_type_set_t         device_type_set         = 27;
-        device_type_get_t         device_type_get         = 28;
+        device_reset_t            device_reset            = 30;
+        uwb_reset_t               uwb_reset               = 31;
+        factory_config_reset_t    factory_config_reset    = 32;
+        device_type_set_t         device_type_set         = 33;
+        device_type_get_t         device_type_get         = 34;
 
         /* Flash */
-        flash_erase_t             flash_erase             = 29;
-        flash_read_t              flash_read              = 30;
-        flash_data_t              flash_data              = 31;
-        flash_write_t             flash_write             = 32;
+        flash_erase_t             flash_erase             = 35;
+        flash_read_t              flash_read              = 36;
+        flash_data_t              flash_data              = 37;
+        flash_write_t             flash_write             = 38;
 
         /* BLE control — STM32 ↔ nRF52832 */
-        ble_adv_config_t          ble_adv_config_set      = 33;
-        ble_status_get_t          ble_status_get          = 34;
-        ble_status_resp_t         ble_status_resp         = 35;
+        ble_adv_config_t          ble_adv_config_set      = 39;
+        ble_status_get_t          ble_status_get          = 40;
+        ble_status_resp_t         ble_status_resp         = 41;
 
         /* BLE data — STM32 → nRF52832 for broadcasting to host */
-        ble_adv_status_t          ble_adv_status          = 36;
+        ble_adv_status_t          ble_adv_status          = 42;
 
         /* Log */
-        log_data_t                log_data                = 37;
-        log_clear_t               log_clear               = 38;
+        log_data_t                log_data                = 43;
+        log_clear_t               log_clear               = 44;
 
         /* Host transport control */
-        host_transport_set_t      host_transport_set      = 39;
+        host_transport_set_t      host_transport_set      = 45;
 
         /* Calibration config */
-        pos_calib_cfg_get_t       pos_calib_cfg_get       = 40;
-        pos_calib_cfg_set_t       pos_calib_cfg_set       = 41;
-        pos_calib_cfg_resp_t      pos_calib_cfg_resp      = 42;
+        pos_calib_cfg_get_t       pos_calib_cfg_get       = 46;
+        pos_calib_cfg_set_t       pos_calib_cfg_set       = 47;
+        pos_calib_cfg_resp_t      pos_calib_cfg_resp      = 48;
 
         /* Anchor layout */
-        anchor_layout_get_t       anchor_layout_get       = 43;
-        anchor_layout_set_t       anchor_layout_set       = 44;
-        anchor_layout_resp_t      anchor_layout_resp      = 45;
+        anchor_layout_get_t       anchor_layout_get       = 49;
+        anchor_layout_set_t       anchor_layout_set       = 50;
+        anchor_layout_resp_t      anchor_layout_resp      = 51;
 
         /* FOTA Verification */
-        flash_verify_t            flash_verify            = 46;
+        flash_verify_t            flash_verify            = 52;
 
         /* BLE Central messages */
-        ble_conn_params_get_t     ble_conn_params_get     = 47;
-        ble_conn_params_set_t     ble_conn_params_set     = 48;
-        ble_conn_params_resp_t    ble_conn_params_resp    = 49;
-        ble_disconnect_t          ble_disconnect          = 50;
-        ble_scan_start_t          ble_scan_start          = 51;
-        ble_scan_stop_t           ble_scan_stop           = 52;
-        ble_connect_t             ble_connect             = 53;
-        ble_scan_result_t         ble_scan_result         = 54;
+        ble_conn_params_get_t     ble_conn_params_get     = 53;
+        ble_conn_params_set_t     ble_conn_params_set     = 54;
+        ble_conn_params_resp_t    ble_conn_params_resp    = 55;
+        ble_disconnect_t          ble_disconnect          = 56;
+        ble_scan_start_t          ble_scan_start          = 57;
+        ble_scan_stop_t           ble_scan_stop           = 58;
+        ble_connect_t             ble_connect             = 59;
+        ble_scan_result_t         ble_scan_result         = 60;
 
         /* Data samples */
-//        anchor_distance_t         anchor_distance         = 55; //deprecated
-//        tag_position_t            tag_position            = 56; //deprecated
+//        anchor_distance_t         anchor_distance         = 61; //deprecated
+//        tag_position_t            tag_position            = 62; //deprecated
 
         /* FOTA State */
-        fota_state_resp_t         fota_state_resp         = 57;
+        fota_state_resp_t         fota_state_resp         = 61;
 
         /* Battery */
-        battery_info_resp_t       battery_info_resp       = 60;
-        battery_info_get_t        battery_info_get        = 61;
+        battery_info_resp_t       battery_info_resp       = 62;
+        battery_info_get_t        battery_info_get        = 63;
 
-        enter_to_bootloader_t     enter_to_bootloader     = 62;
+        enter_to_bootloader_t     enter_to_bootloader     = 64;
 
-        calib_status_get_t        calib_status_get        = 63;
-        calib_status_resp_t       calib_status_resp       = 64;
+        calib_status_get_t        calib_status_get        = 65;
+        calib_status_resp_t       calib_status_resp       = 66;
         
-        end_session_t             end_session             = 65;
+        end_session_t             end_session             = 67;
 
         /* Factory OTP provisioning */
-        factory_otp_write_t       factory_otp_write       = 66;
+        factory_otp_write_t       factory_otp_write       = 68;
+
+        /* RTOS resource diagnostics */
+        rtos_resource_get_t       rtos_resource_get       = 71;
+        rtos_resource_resp_t      rtos_resource_resp      = 72;
+        rtos_task_stats_get_t     rtos_task_stats_get     = 73;
+        rtos_task_stats_resp_t    rtos_task_stats_resp    = 74;
+
     }
 }
 

@@ -121,7 +121,7 @@ class CommandFactory:
 
     def ranging_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.ranging_start.reset_filter_state = True
+        pkt.ranging_start.dummy = 0
         return pkt
 
     def ranging_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -172,6 +172,18 @@ class CommandFactory:
         pkt = self._base(src, dst, seq)
         cfg = pkt.sensor_fusion_cfg_resp.config
         cfg.mode = pb.FILTER_MODE_KALMAN
+        return pkt
+
+    def sensor_fusion_result(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.sensor_fusion_result.ukf_x_m = 0.0
+        pkt.sensor_fusion_result.ukf_y_m = 0.0
+        pkt.sensor_fusion_result.ukf_yaw_deg = 0.0
+        pkt.sensor_fusion_result.tril_x_m = 0.0
+        pkt.sensor_fusion_result.tril_y_m = 0.0
+        pkt.sensor_fusion_result.yaw_deg = 0.0
+        pkt.sensor_fusion_result.error_count = 0
+        pkt.sensor_fusion_result.timestamp_ms = 0
         return pkt
 
     def end_session(self, src: int, dst: int, seq: int, reason: int = 0) -> pb.packet_t:
@@ -397,9 +409,9 @@ class CommandFactory:
         pkt.battery_info_resp.remaining_min = 120
         pkt.battery_info_resp.is_charging = False
         pkt.battery_info_resp.mcu_temp_c = 25.0
-        pkt.battery_info_resp.vdda_mv = 3300
+        pkt.battery_info_resp.mcu_voltage_mv = 3300
         pkt.battery_info_resp.uwb_temp_c = 25.0
-        pkt.battery_info_resp.uwb_vbat_mv = 3300
+        pkt.battery_info_resp.uwb_voltage_mv = 3300
         pkt.battery_info_resp.imu_temp_c = 25.0
         pkt.battery_info_resp.error_mask = 0
         return pkt
@@ -416,58 +428,59 @@ class CommandCatalog:
             CommandSpec(6, "time_sync_get", self.factory.time_sync_get),
             CommandSpec(7, "time_sync_set", self.factory.time_sync_set),
             CommandSpec(8, "time_sync_resp", self.factory.time_sync_resp),
-            CommandSpec(9, "sys_config_get", self.factory.sys_config_get),
-            CommandSpec(10, "sys_config_set", self.factory.sys_config_set),
-            CommandSpec(11, "sys_config_resp", self.factory.sys_config_resp),
-            CommandSpec(12, "sys_ranging_cfg_get", self.factory.sys_ranging_cfg_get),
-            CommandSpec(13, "sys_ranging_cfg_set", self.factory.sys_ranging_cfg_set),
-            CommandSpec(14, "sys_ranging_cfg_resp", self.factory.sys_ranging_cfg_resp),
-            CommandSpec(15, "ranging_start", self.factory.ranging_start),
-            CommandSpec(16, "ranging_stop", self.factory.ranging_stop),
-            CommandSpec(17, "ranging_result", self.factory.ranging_result),
-            CommandSpec(18, "ranging_status_get", self.factory.ranging_status_get),
-            CommandSpec(19, "ranging_status_resp", self.factory.ranging_status_resp),
-            CommandSpec(20, "sensor_fusion_cfg_get", self.factory.sensor_fusion_cfg_get),
-            CommandSpec(21, "sensor_fusion_cfg_set", self.factory.sensor_fusion_cfg_set),
-            CommandSpec(22, "sensor_fusion_cfg_resp", self.factory.sensor_fusion_cfg_resp),
-            CommandSpec(23, "device_reset", self.factory.device_reset),
-            CommandSpec(24, "uwb_reset", self.factory.uwb_reset),
-            CommandSpec(25, "factory_config_reset", self.factory.factory_config_reset),
-            CommandSpec(26, "device_type_set", self.factory.device_type_set),
-            CommandSpec(27, "device_type_get", self.factory.device_type_get),
-            CommandSpec(28, "flash_erase", self.factory.flash_erase),
-            CommandSpec(29, "flash_read", self.factory.flash_read),
-            CommandSpec(30, "flash_data", self.factory.flash_data),
-            CommandSpec(31, "flash_write", self.factory.flash_write),
-            CommandSpec(32, "ble_enable", self.factory.ble_enable),
-            CommandSpec(33, "ble_status_get", self.factory.ble_status_get),
-            CommandSpec(34, "ble_status_resp", self.factory.ble_status_resp),
-            CommandSpec(35, "ble_adv_status", self.factory.ble_adv_status),
-            CommandSpec(36, "log_data", self.factory.log_data),
-            CommandSpec(37, "log_clear", self.factory.log_clear),
-            CommandSpec(38, "host_transport_set", self.factory.host_transport_set),
-            CommandSpec(39, "pos_calib_cfg_get", self.factory.pos_calib_cfg_get),
-            CommandSpec(40, "pos_calib_cfg_set", self.factory.pos_calib_cfg_set),
-            CommandSpec(41, "pos_calib_cfg_resp", self.factory.pos_calib_cfg_resp),
-            CommandSpec(42, "anchor_layout_get", self.factory.anchor_layout_get),
-            CommandSpec(43, "anchor_layout_set", self.factory.anchor_layout_set),
-            CommandSpec(44, "anchor_layout_resp", self.factory.anchor_layout_resp),
-            CommandSpec(47, "ble_conn_params_get", self.factory.ble_conn_params_get),
-            CommandSpec(48, "ble_conn_params_set", self.factory.ble_conn_params_set),
-            CommandSpec(49, "ble_conn_params_resp", self.factory.ble_conn_params_resp),
-            CommandSpec(50, "ble_disconnect", self.factory.ble_disconnect),
-            CommandSpec(51, "ble_scan_start", self.factory.ble_scan_start),
-            CommandSpec(52, "ble_scan_stop", self.factory.ble_scan_stop),
-            CommandSpec(53, "ble_connect", self.factory.ble_connect),
-            CommandSpec(54, "ble_scan_result", self.factory.ble_scan_result),            
+            CommandSpec(10, "sys_config_get", self.factory.sys_config_get),
+            CommandSpec(11, "sys_config_set", self.factory.sys_config_set),
+            CommandSpec(12, "sys_config_resp", self.factory.sys_config_resp),
+            CommandSpec(13, "sys_ranging_cfg_get", self.factory.sys_ranging_cfg_get),
+            CommandSpec(14, "sys_ranging_cfg_set", self.factory.sys_ranging_cfg_set),
+            CommandSpec(15, "sys_ranging_cfg_resp", self.factory.sys_ranging_cfg_resp),
+            CommandSpec(16, "ranging_start", self.factory.ranging_start),
+            CommandSpec(17, "ranging_stop", self.factory.ranging_stop),
+            CommandSpec(18, "ranging_result", self.factory.ranging_result),
+            CommandSpec(19, "ranging_status_get", self.factory.ranging_status_get),
+            CommandSpec(20, "ranging_status_resp", self.factory.ranging_status_resp),
+            CommandSpec(21, "sensor_fusion_cfg_get", self.factory.sensor_fusion_cfg_get),
+            CommandSpec(22, "sensor_fusion_cfg_set", self.factory.sensor_fusion_cfg_set),
+            CommandSpec(23, "sensor_fusion_cfg_resp", self.factory.sensor_fusion_cfg_resp),
+            CommandSpec(24, "sensor_fusion_result", self.factory.sensor_fusion_result),
+            CommandSpec(30, "device_reset", self.factory.device_reset),
+            CommandSpec(31, "uwb_reset", self.factory.uwb_reset),
+            CommandSpec(32, "factory_config_reset", self.factory.factory_config_reset),
+            CommandSpec(33, "device_type_set", self.factory.device_type_set),
+            CommandSpec(34, "device_type_get", self.factory.device_type_get),
+            CommandSpec(35, "flash_erase", self.factory.flash_erase),
+            CommandSpec(36, "flash_read", self.factory.flash_read),
+            CommandSpec(37, "flash_data", self.factory.flash_data),
+            CommandSpec(38, "flash_write", self.factory.flash_write),
+            CommandSpec(39, "ble_enable", self.factory.ble_enable),
+            CommandSpec(40, "ble_status_get", self.factory.ble_status_get),
+            CommandSpec(41, "ble_status_resp", self.factory.ble_status_resp),
+            CommandSpec(42, "ble_adv_status", self.factory.ble_adv_status),
+            CommandSpec(43, "log_data", self.factory.log_data),
+            CommandSpec(44, "log_clear", self.factory.log_clear),
+            CommandSpec(45, "host_transport_set", self.factory.host_transport_set),
+            CommandSpec(46, "pos_calib_cfg_get", self.factory.pos_calib_cfg_get),
+            CommandSpec(47, "pos_calib_cfg_set", self.factory.pos_calib_cfg_set),
+            CommandSpec(48, "pos_calib_cfg_resp", self.factory.pos_calib_cfg_resp),
+            CommandSpec(49, "anchor_layout_get", self.factory.anchor_layout_get),
+            CommandSpec(50, "anchor_layout_set", self.factory.anchor_layout_set),
+            CommandSpec(51, "anchor_layout_resp", self.factory.anchor_layout_resp),
+            CommandSpec(53, "ble_conn_params_get", self.factory.ble_conn_params_get),
+            CommandSpec(54, "ble_conn_params_set", self.factory.ble_conn_params_set),
+            CommandSpec(55, "ble_conn_params_resp", self.factory.ble_conn_params_resp),
+            CommandSpec(56, "ble_disconnect", self.factory.ble_disconnect),
+            CommandSpec(57, "ble_scan_start", self.factory.ble_scan_start),
+            CommandSpec(58, "ble_scan_stop", self.factory.ble_scan_stop),
+            CommandSpec(59, "ble_connect", self.factory.ble_connect),
+            CommandSpec(60, "ble_scan_result", self.factory.ble_scan_result),
             # FOTA
-            CommandSpec(62, "enter_to_bootloader", self.factory.enter_to_bootloader),
-            CommandSpec(46, "flash_verify", self.factory.flash_verify),
-            CommandSpec(57, "fota_state_resp", self.factory.fota_state_resp),
-            CommandSpec(65, "end_session", self.factory.end_session),
+            CommandSpec(64, "enter_to_bootloader", self.factory.enter_to_bootloader),
+            CommandSpec(52, "flash_verify", self.factory.flash_verify),
+            CommandSpec(61, "fota_state_resp", self.factory.fota_state_resp),
+            CommandSpec(67, "end_session", self.factory.end_session),
             # Power Management
-            CommandSpec(60, "battery_info_resp", self.factory.battery_info_resp),
-            CommandSpec(61, "battery_info_get", self.factory.battery_info_get),
+            CommandSpec(62, "battery_info_resp", self.factory.battery_info_resp),
+            CommandSpec(63, "battery_info_get", self.factory.battery_info_get),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

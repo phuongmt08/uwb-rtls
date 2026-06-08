@@ -15,13 +15,13 @@
 #define HAVE_BLE_PERIPHERAL
 
 /* Developer diagnostics */
-// #define DEVELOPER_MODE
+#define DEVELOPER_MODE
 
 /*
  * Force this firmware image to run as a TAG even when flash config storage
  * cannot be erased/written or contains an invalid role.
  */
-#define FORCE_DEVICE_TAG_MODE 1
+#define FORCE_DEVICE_TAG_MODE 0
 
 
 #endif /* __CONFIG_H */

@@ -52,7 +52,10 @@ def parse_uart_fusion_frame(data_bytes):
         unpacked = struct.unpack(FUSION_FRAME_FORMAT, data_bytes[:FUSION_FRAME_SIZE])
         if unpacked[0] != UART_SOF:
             return None
-        if unpacked[1] != FUSION_FRAME_PAYLOAD_LEN:
+        # Firmware stores payload length as sizeof(uart_fusion_frame_t) - 2.
+        # Some older senders used the full frame size, so keep that accepted
+        # while parsing the new packed fusion frame layout.
+        if unpacked[1] not in (FUSION_FRAME_PAYLOAD_LEN, FUSION_FRAME_SIZE):
             return None
         return {
             'sof': unpacked[0],
@@ -66,6 +69,7 @@ def parse_uart_fusion_frame(data_bytes):
             'tril_y': unpacked[8],
             'yaw': unpacked[9],
             'err_cnt': unpacked[10],
+            'error_frame_cnt': unpacked[10],
         }
     except struct.error:
         return None

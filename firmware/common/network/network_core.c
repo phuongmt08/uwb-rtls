@@ -12,7 +12,8 @@
 
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
-    protobuf_packet_t_ble_adv_status_tag
+    protobuf_packet_t_ble_adv_status_tag,
+    protobuf_packet_t_sensor_fusion_result_tag
     // protobuf_packet_t_log_erase_tag,
 //    protobuf_packet_t_anchor_distance_tag,
 //    protobuf_packet_t_tag_position_tag,

@@ -87,6 +87,15 @@ PB_BIND(protobuf_sensor_fusion_cfg_set_t, protobuf_sensor_fusion_cfg_set_t, AUTO
 PB_BIND(protobuf_sensor_fusion_cfg_resp_t, protobuf_sensor_fusion_cfg_resp_t, AUTO)
 
 
+PB_BIND(protobuf_sensor_fusion_result_t, protobuf_sensor_fusion_result_t, AUTO)
+
+
+PB_BIND(protobuf_imu_reset_t, protobuf_imu_reset_t, AUTO)
+
+
+PB_BIND(protobuf_imu_calib_retry_t, protobuf_imu_calib_retry_t, AUTO)
+
+
 PB_BIND(protobuf_device_reset_t, protobuf_device_reset_t, AUTO)
 
 
@@ -196,6 +205,21 @@ PB_BIND(protobuf_calib_status_get_t, protobuf_calib_status_get_t, AUTO)
 
 
 PB_BIND(protobuf_calib_status_resp_t, protobuf_calib_status_resp_t, AUTO)
+
+
+PB_BIND(protobuf_rtos_resource_get_t, protobuf_rtos_resource_get_t, AUTO)
+
+
+PB_BIND(protobuf_rtos_resource_resp_t, protobuf_rtos_resource_resp_t, AUTO)
+
+
+PB_BIND(protobuf_rtos_task_stats_get_t, protobuf_rtos_task_stats_get_t, AUTO)
+
+
+PB_BIND(protobuf_rtos_task_stat_t, protobuf_rtos_task_stat_t, AUTO)
+
+
+PB_BIND(protobuf_rtos_task_stats_resp_t, protobuf_rtos_task_stats_resp_t, AUTO)
 
 
 PB_BIND(protobuf_ranging_status_get_t, protobuf_ranging_status_get_t, AUTO)

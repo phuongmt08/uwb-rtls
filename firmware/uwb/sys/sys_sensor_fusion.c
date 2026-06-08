@@ -176,6 +176,14 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 	bsp_imu_get_raw_data(&ukf.imu_current);
 
+	/* On the first frame imu_old is still zero-initialized; pair it with the
+	 * current sample so the trapezoidal integration below does not integrate
+	 * against a bogus zero (which corrupts the very first yaw/motion step). */
+	if (ukf.is_first_frame)
+	{
+		ukf.imu_old = ukf.imu_current;
+	}
+
 	yaw += (0.5f * (ukf.imu_old.gz + ukf.imu_current.gz) - b_gz_t) * dt;
 
 	if (ukf.is_first_frame)

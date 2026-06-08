@@ -23,10 +23,12 @@ static uint8_t s_rx_buf[DEBUG_RX_BUF_SIZE];
 static volatile uint32_t s_rx_head = 0u;
 static volatile uint32_t s_rx_tail = 0u;
 
+#ifndef BOOTLOADER
 static uint8_t s_dma_rx_buf[DEBUG_DMA_BUF_SIZE];
 static uint32_t s_last_dma_ptr = 0;
 
 extern DMA_HandleTypeDef hdma_usart1_rx;
+#endif
 
 static inline bool debug_rx_pop(uint8_t *out)
 {
@@ -42,6 +44,7 @@ static inline bool debug_rx_pop(uint8_t *out)
 /**
  * Called from ISR (IDLE or RxCplt) to process new DMA data from UART1.
  */
+#ifndef BOOTLOADER
 void debug_serial_uart_rx_check(void)
 {
     uint32_t curr_dma_ptr = DEBUG_DMA_BUF_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
@@ -58,17 +61,20 @@ void debug_serial_uart_rx_check(void)
         s_last_dma_ptr = curr_dma_ptr;
     }
 }
+#endif
 
 void debug_serial_init(void)
 {
     hdlc_parser_init(&s_parser_host);
     s_rx_head = 0u;
     s_rx_tail = 0u;
-    s_last_dma_ptr = 0u;
 
+#ifndef BOOTLOADER
+    s_last_dma_ptr = 0u;
     /* Start DMA circular receive for Console/Network UART */
     __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
     HAL_UART_Receive_DMA(&huart1, s_dma_rx_buf, DEBUG_DMA_BUF_SIZE);
+#endif
 }
 
 void debug_serial_set_tx_handler(serial_func_t handler)

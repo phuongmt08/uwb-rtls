@@ -45,28 +45,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   float ax, float ay, float az,
                                   float *d_out, float *d2_score, float *R_adaptive);
 
-typedef struct {
-    bool initialized;
-    float filtered_m;
-} anchor_distance_smoother_t;
 
-typedef struct {
-    anchor_distance_smoother_t anchors[8];
-    float alpha;
-    float jump_limit_m;
-    bool enabled;
-} distance_smoother_t;
-
-void mw_filter_distance_smoother_init(distance_smoother_t *ctx,
-                                      bool enabled,
-                                      float alpha,
-                                      float jump_limit_m);
-
-void mw_filter_distance_smoother_reset(distance_smoother_t *ctx);
-
-float mw_filter_distance_smoother_apply(distance_smoother_t *ctx,
-                                        uint8_t anchor_index,
-                                        float raw_distance_m);
 
 typedef struct {
     float x_history[UKF_INIT_SAMPLES];
