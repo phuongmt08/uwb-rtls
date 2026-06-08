@@ -624,6 +624,10 @@ message fota_state_resp_t {
 
 /* Battery information -----------------------------------------------------------*/
 
+message battery_info_get_t {
+    uint32 dummy = 1;
+}
+
 message battery_info_resp_t {
     uint32 bat_voltage_mv  = 1;
     uint32 bat_soc_percent = 2;
@@ -637,10 +641,7 @@ message battery_info_resp_t {
     uint32 uwb_vbat_mv      = 8;  /* DW1000 VBAT supply voltage in mV */
     float  imu_temp_c       = 9;  /* IMU sensor internal temperature in degrees Celsius */
     
-    uint32 error_mask      = 10; /* Bitmask of breached thresholds */
-}
-message battery_info_get_t {
-    uint32 dummy = 1;
+    uint32 error_mask       = 10; /* Bitmask of breached thresholds */
 }
 
 /* Factory OTP provisioning -------------------------------------------------- */

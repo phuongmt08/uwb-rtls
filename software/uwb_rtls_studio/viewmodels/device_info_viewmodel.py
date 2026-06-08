@@ -21,6 +21,7 @@
 ===============================================================================
 """
 import logging
+import re
 import time
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from services.protocol_service import ProtocolService
@@ -35,6 +36,14 @@ _STOP_TO_CONNECT_DELAY_MS = 400
 # Background telemetry polling interval (ms) — always running
 _TELEMETRY_POLL_MS = 2000
 
+_DEVICE_TYPE_LABELS = {
+    0: "UNSPECIFIED",
+    1: "TAG",
+    2: "ANCHOR",
+    3: "GATEWAY",
+    4: "DEBUG_TOOL",
+}
+
 
 class DeviceInfoViewModel(QObject):
     device_info_updated = pyqtSignal(dict)
@@ -48,8 +57,9 @@ class DeviceInfoViewModel(QObject):
         self.dongle_model = dongle_model
         self.protocol.packet_received.connect(self._on_packet)
 
-        # Advertising devices dict: mac_hex -> {name, mac, rssi, last_seen}
+        # Advertising devices dict: mac_hex -> scan fields + ble_adv_status fields.
         self._adv_devices = {}
+        self._adv_status_by_device_id = {}
         self._is_scanning = False
         # Connected device tracking
         self._connected_mac = ""
@@ -169,6 +179,7 @@ class DeviceInfoViewModel(QObject):
     # ── Background Scan ──────────────────────────────────────────────
     def start_background_scan(self):
         self._adv_devices.clear()
+        self._adv_status_by_device_id.clear()
         self.protocol.send_command(
             "ble_scan_start",
             duration_ms=0, interval_ms=160, window_ms=80, active_scanning=True
@@ -190,6 +201,9 @@ class DeviceInfoViewModel(QObject):
         Connect to a device from the advertising list.
         Flow: stop_scan → (delay) → ble_disconnect old → ble_connect new
         """
+        if not mac_hex:
+            return
+
         log.info("Connect request: %s", mac_hex)
         name = self._adv_devices.get(mac_hex, {}).get("name", "Unknown")
 
@@ -261,6 +275,7 @@ class DeviceInfoViewModel(QObject):
                 "uwb_temp_c": resp.uwb_temp_c,
                 "uwb_vbat_mv": resp.uwb_vbat_mv,
                 "imu_temp_c": resp.imu_temp_c,
+                "error_mask": resp.error_mask,
             })
 
         elif param_name == "ble_status_resp":
@@ -299,13 +314,29 @@ class DeviceInfoViewModel(QObject):
         elif param_name == "ble_scan_result":
             res = pkt.ble_scan_result
             mac_hex = ":".join(f"{b:02X}" for b in res.mac_address)
-            self._adv_devices[mac_hex] = {
+            if mac_hex not in self._adv_devices:
+                self._adv_devices[mac_hex] = {}
+            self._adv_devices[mac_hex].update({
                 "name": res.name or f"UWB-{mac_hex[-5:]}",
                 "mac": mac_hex,
                 "rssi": res.rssi_dbm,
+                "serial_number": res.serial_number,
+                "last_seen": time.monotonic()
+            })
+            self._mark_table_dirty()
+
+        elif param_name == "ble_adv_status":
+            res = pkt.ble_adv_status
+            self._adv_status_by_device_id[res.device_id] = {
+                "device_type": res.device,
+                "device_id": res.device_id,
+                "bat_soc_percent": res.bat_soc_percent,
+                "local_timestamp_ms": res.local_timestamp_ms,
+                "status_flags": res.status_flags,
+                "warning_count": res.warning_count,
+                "error_count": res.error_count,
                 "last_seen": time.monotonic()
             }
-            # Don't rebuild table every single packet — just mark dirty
             self._mark_table_dirty()
 
     # ── Throttled Table Update ───────────────────────────────────────
@@ -317,15 +348,29 @@ class DeviceInfoViewModel(QObject):
         if not self._table_dirty:
             return
         self._table_dirty = False
+        
+        merged_list = []
+        for d in self._adv_devices.values():
+            sn = d.get("serial_number")
+            adv_status = self._adv_status_by_device_id.get(sn, {}) if sn else {}
+            item = d.copy()
+            item.update(adv_status)
+            merged_list.append(item)
+            
         # Sort by MAC (stable order) instead of RSSI to prevent row jumps
-        sorted_list = sorted(self._adv_devices.values(), key=lambda d: d["mac"])
-        self.advertising_devices_updated.emit(sorted_list, self._is_scanning)
+        merged_list.sort(key=lambda x: x["mac"])
+        self.advertising_devices_updated.emit(merged_list, self._is_scanning)
 
     # ── Prune stale devices ──────────────────────────────────────────
     def _prune_devices(self):
         now = time.monotonic()
-        stale = [mac for mac, d in self._adv_devices.items() if now - d["last_seen"] > 15.0]
-        for mac in stale:
+        stale_macs = [mac for mac, d in self._adv_devices.items() if now - d.get("last_seen", 0) > 15.0]
+        for mac in stale_macs:
             del self._adv_devices[mac]
-        if stale:
+            
+        stale_ids = [did for did, d in self._adv_status_by_device_id.items() if now - d.get("last_seen", 0) > 15.0]
+        for did in stale_ids:
+            del self._adv_status_by_device_id[did]
+            
+        if stale_macs or stale_ids:
             self._mark_table_dirty()

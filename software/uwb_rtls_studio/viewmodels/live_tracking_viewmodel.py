@@ -25,12 +25,12 @@
     │  │  ← Pan/Zoom enabled, trajectory trail shown →       │ │
     │  └─────────────────────────────────────────────────────┘ │
     │  ┌─ Position Data ────────────────────────────────────┐ │
-    │  │  X: 1.234 m  |  Y: 2.567 m  |  Z: 0.000 m         │ │
-    │  │  RMS Error: 0.045 m  |  Update Rate: 10.2 Hz        │ │
+    │  │  X: x.xx (m)  |  Y: x.xx (m)  |  Z: x.xx (m)         │ │
+    │  │  RMS Error: x.xx (m)  |  Update Rate: x.xx Hz        │ │
     │  └────────────────────────────────────────────────────┘ │
     │  ┌─ Anchor Distances ─────────────────────────────────┐ │
-    │  │  Anchor 1: 1.200cm (FP: 500) | Anchor 2: 2.340cm     │ │
-    │  │  Anchor 3: 1.890cm (FP: 480) | Anchor 4: 3.100cm     │ │
+    │  │  Anchor 1: x.xx (m) (FP: 500) | Anchor 2: x.xx (m)     │ │
+    │  │  Anchor 3: x.xx (m) (FP: 480) | Anchor 4: x.xx (m)     │ │
     │  └────────────────────────────────────────────────────┘ │
     │  [▶ Start Ranging]  [■ Stop Ranging]                    │
     └─────────────────────────────────────────────────────────┘

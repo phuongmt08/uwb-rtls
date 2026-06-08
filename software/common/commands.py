@@ -187,18 +187,25 @@ class CommandFactory:
     def sensor_fusion_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         cfg = pkt.sensor_fusion_cfg_set.config
-        cfg.mode = pb.FILTER_MODE_KALMAN
-        cfg.q_process_noise = 0.1
-        cfg.r_base = 0.1
-        cfg.innovation_alpha = 0.3
-        cfg.r_scale_min = 0.8
-        cfg.r_scale_max = 1.2
+        cfg.alpha = 1e-3
+        cfg.kappa = 0.0
+        cfg.beta = 2.0
+        cfg.q_a = 0.1
+        cfg.q_g = 0.01
+        cfg.r_uwb = 0.1
+        cfg.init_p_px = 1.0
+        cfg.init_p_py = 1.0
+        cfg.init_p_vx = 0.1
+        cfg.init_p_vy = 0.1
+        cfg.init_p_theta = 0.1
+        cfg.init_p_bias_ax = 0.01
+        cfg.init_p_bias_ay = 0.01
+        cfg.init_p_bias_gz = 0.01
         return pkt
 
     def sensor_fusion_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        cfg = pkt.sensor_fusion_cfg_resp.config
-        cfg.mode = pb.FILTER_MODE_KALMAN
+        pkt.sensor_fusion_cfg_resp.config.alpha = 1e-3
         return pkt
 
     def sensor_fusion_result(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -209,8 +216,18 @@ class CommandFactory:
         pkt.sensor_fusion_result.tril_x_m = 0.0
         pkt.sensor_fusion_result.tril_y_m = 0.0
         pkt.sensor_fusion_result.yaw_deg = 0.0
-        pkt.sensor_fusion_result.error_count = 0
+        pkt.sensor_fusion_result.ranging_error_count = 0
         pkt.sensor_fusion_result.timestamp_ms = 0
+        return pkt
+
+    def imu_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.imu_reset.dummy = 0
+        return pkt
+
+    def imu_calib_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.imu_calib_start.dummy = 0
         return pkt
 
     def end_session(self, src: int, dst: int, seq: int, reason: int = 0) -> pb.packet_t:
@@ -268,7 +285,7 @@ class CommandFactory:
 
     def ble_adv_config_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.ble_enable.enable = True
+        pkt.ble_adv_config_set.enable = True
         return pkt
 
     def ble_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -452,6 +469,16 @@ class CommandFactory:
         pkt.battery_info_resp.error_mask = 0
         return pkt
 
+    def factory_otp_write(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.factory_otp_write.confirm_magic = 0x4F545057
+        return pkt
+
+    def calib_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.calib_status_get.dummy = 0
+        return pkt
+
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -479,6 +506,10 @@ class CommandCatalog:
             CommandSpec(22, "sensor_fusion_cfg_set", self.factory.sensor_fusion_cfg_set),
             CommandSpec(23, "sensor_fusion_cfg_resp", self.factory.sensor_fusion_cfg_resp),
             CommandSpec(24, "sensor_fusion_result", self.factory.sensor_fusion_result),
+            # IMU
+            CommandSpec(25, "imu_reset", self.factory.imu_reset),
+            CommandSpec(26, "imu_calib_start", self.factory.imu_calib_start),
+            # System commands
             CommandSpec(30, "device_reset", self.factory.device_reset),
             CommandSpec(31, "uwb_reset", self.factory.uwb_reset),
             CommandSpec(32, "factory_config_reset", self.factory.factory_config_reset),
@@ -488,19 +519,23 @@ class CommandCatalog:
             CommandSpec(36, "flash_read", self.factory.flash_read),
             CommandSpec(37, "flash_data", self.factory.flash_data),
             CommandSpec(38, "flash_write", self.factory.flash_write),
-            CommandSpec(39, "ble_enable", self.factory.ble_enable),
+            # BLE
+            CommandSpec(39, "ble_adv_config_set", self.factory.ble_adv_config_set),
             CommandSpec(40, "ble_status_get", self.factory.ble_status_get),
             CommandSpec(41, "ble_status_resp", self.factory.ble_status_resp),
             CommandSpec(42, "ble_adv_status", self.factory.ble_adv_status),
             CommandSpec(43, "log_data", self.factory.log_data),
             CommandSpec(44, "log_clear", self.factory.log_clear),
             CommandSpec(45, "host_transport_set", self.factory.host_transport_set),
+            # Calibration
             CommandSpec(46, "pos_calib_cfg_get", self.factory.pos_calib_cfg_get),
             CommandSpec(47, "pos_calib_cfg_set", self.factory.pos_calib_cfg_set),
             CommandSpec(48, "pos_calib_cfg_resp", self.factory.pos_calib_cfg_resp),
             CommandSpec(49, "anchor_layout_get", self.factory.anchor_layout_get),
             CommandSpec(50, "anchor_layout_set", self.factory.anchor_layout_set),
             CommandSpec(51, "anchor_layout_resp", self.factory.anchor_layout_resp),
+            CommandSpec(52, "flash_verify", self.factory.flash_verify),
+            # BLE Central
             CommandSpec(53, "ble_conn_params_get", self.factory.ble_conn_params_get),
             CommandSpec(54, "ble_conn_params_set", self.factory.ble_conn_params_set),
             CommandSpec(55, "ble_conn_params_resp", self.factory.ble_conn_params_resp),
@@ -510,13 +545,16 @@ class CommandCatalog:
             CommandSpec(59, "ble_connect", self.factory.ble_connect),
             CommandSpec(60, "ble_scan_result", self.factory.ble_scan_result),
             # FOTA
-            CommandSpec(64, "enter_to_bootloader", self.factory.enter_to_bootloader),
-            CommandSpec(52, "flash_verify", self.factory.flash_verify),
             CommandSpec(61, "fota_state_resp", self.factory.fota_state_resp),
-            CommandSpec(67, "end_session", self.factory.end_session),
-            # Power Management
+            # Battery
             CommandSpec(62, "battery_info_resp", self.factory.battery_info_resp),
             CommandSpec(63, "battery_info_get", self.factory.battery_info_get),
+            CommandSpec(64, "enter_to_bootloader", self.factory.enter_to_bootloader),
+            # Calib status
+            CommandSpec(65, "calib_status_get", self.factory.calib_status_get),
+            CommandSpec(67, "end_session", self.factory.end_session),
+            # Factory OTP
+            CommandSpec(68, "factory_otp_write", self.factory.factory_otp_write),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

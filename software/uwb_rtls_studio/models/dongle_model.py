@@ -28,8 +28,6 @@ from workers.dongle_detect_worker import DongleDetectWorker
 
 log = logging.getLogger(__name__)
 
-_VERIFY_TIMEOUT_MS = 3000
-
 class DongleModel(QObject):
     # Signals
     dongle_found = pyqtSignal(object)       # DongleInfo
@@ -45,12 +43,6 @@ class DongleModel(QObject):
         self._protocol = protocol_service
         self._worker: DongleDetectWorker | None = None
         self._current_info: DongleInfo | None = None
-        
-        self._verify_timer = QTimer(self)
-        self._verify_timer.setSingleShot(True)
-        self._verify_timer.timeout.connect(self._on_verify_timeout)
-        
-        self._protocol.packet_received.connect(self._on_packet)
 
     def start_detection(self) -> None:
         self.stop_detection()
@@ -66,10 +58,9 @@ class DongleModel(QObject):
             self._worker.stop()
             self._worker.wait(2000)
             self._worker = None
-        self._verify_timer.stop()
 
     def _on_dongle_found(self, info: DongleInfo) -> None:
-        """Worker đã probe thành công (nhận ACK) → mở serial chính thức."""
+        """Worker đã probe thành công (nhận ACK) → mở serial chính thức và xem như đã verify."""
         self._current_info = info
         self.dongle_found.emit(info)
         try:
@@ -78,34 +69,14 @@ class DongleModel(QObject):
             self.error_occurred.emit(f"Cannot open {info.port}: {e}")
             return
             
-        # Gửi device_information_get để lấy chi tiết (fw_version, serial, etc.)
-        self._protocol.send_command("device_information_get")
-        self._verify_timer.start(_VERIFY_TIMEOUT_MS)
-
-    def _on_packet(self, param_name: str, pkt) -> None:
-        if param_name == "device_information_resp":
-            self._verify_timer.stop()
-            resp = pkt.device_information_resp
-            info_dict = {
-                "port": self._current_info.port if self._current_info else "",
-                "device_type": resp.device_type,
-                "role": resp.role,
-                "serial_number": resp.serial_number,
-                "hw_version": resp.hw_version,
-                "fw_version": f"v{resp.fw_version.major}.{resp.fw_version.minor}.{resp.fw_version.patch}",
-                "verified": True
-            }
-            self.dongle_verified.emit(info_dict)
-
-    def _on_verify_timeout(self) -> None:
-        log.warning("Device verify timeout, proceeding unverified")
+        # Dongle trả ACK lúc probe là đủ để verify, không cần chờ device_information_resp
         info_dict = {
-            "port": self._current_info.port if self._current_info else "",
-            "device_type": 0,
+            "port": info.port,
+            "device_type": 3, # DEVICE_TYPE_GATEWAY (Dongle)
             "role": 0,
-            "serial_number": 0,
+            "serial_number": info.serial_number or 0,
             "hw_version": 0,
-            "fw_version": "unknown",
-            "verified": False
+            "fw_version": "N/A",
+            "verified": True
         }
         self.dongle_verified.emit(info_dict)

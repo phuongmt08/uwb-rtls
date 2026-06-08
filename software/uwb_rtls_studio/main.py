@@ -76,33 +76,10 @@ def main():
     from viewmodels.scan_viewmodel import ScanViewModel
     from views.popups.scan_popup import ScanPopup
 
-    while True:
-        dongle_model = DongleModel(serial_service, protocol_service)
-        dongle_vm = DongleViewModel(dongle_model)
-        dongle_popup = DonglePopup(dongle_vm)
-
-        result = dongle_popup.exec()
-        if result != DonglePopup.DialogCode.Accepted:
-            logging.info("Dongle detection cancelled. Exiting.")
-            serial_service.close()
-            sys.exit(0)
-
-        scan_model = ScanModel(protocol_service, serial_service)
-        scan_vm = ScanViewModel(scan_model)
-        scan_popup = ScanPopup(scan_vm)
-
-        result = scan_popup.exec()
-        if result == ScanPopup.DialogCode.Accepted:
-            break
-        elif result == 2:
-            # Dongle disconnected during scan, go back to dongle detection
-            logging.warning("Dongle disconnected, restarting detection.")
-            serial_service.close()
-            continue
-        else:
-            logging.info("BLE scan cancelled. Exiting.")
-            serial_service.close()
-            sys.exit(0)
+    # === BYPASS POPUPS FOR UI TESTING ===
+    dongle_model = DongleModel(serial_service, protocol_service)
+    scan_model = ScanModel(protocol_service, serial_service)
+    # ====================================
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 4: Main Window
@@ -116,9 +93,8 @@ def main():
     connected_name = ""
     connected_mac = ""
     if scan_model._devices:
-        # The last connected device is the one user selected
-        # scan_popup._selected_mac has it
-        sel_mac = getattr(scan_popup, '_selected_mac', '')
+        # scan_popup is bypassed, just pick the first device if any
+        sel_mac = list(scan_model._devices.keys())[0] if scan_model._devices else ''
         if sel_mac and sel_mac in scan_model._devices:
             dev = scan_model._devices[sel_mac]
             connected_name = dev.get("name", "")

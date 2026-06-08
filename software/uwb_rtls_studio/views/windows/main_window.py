@@ -1,7 +1,11 @@
 """
-UWB RTLS Studio — Main Window (Frontend Only)
+UWB RTLS Studio — Main Window (UI loaded from .ui file)
 Cửa sổ chính với Tab bar, Status bar, End Session button, User/Dev toggle.
+
+FE: Loaded from views/ui/main_window.ui (editable in Qt Designer)
+BE: Signal/slot connections + ViewModel bindings (this file)
 """
+import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTabWidget, QStatusBar, QComboBox, QFrame,
@@ -9,12 +13,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QFont, QIcon, QAction
+from PyQt6 import uic
 
-from views.tabs.device_info_tab import DeviceInfoTab
-from views.tabs.live_tracking_tab import LiveTrackingTab
-from views.tabs.config_tab import ConfigTab
-from views.tabs.calibration_tab import CalibrationTab
-from views.tabs.log_tab import LogTab
+# Tab imports are handled dynamically by uic.loadUi based on <customwidgets> in the .ui file
+
+# Path to .ui file
+UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'main_window.ui')
 
 
 class MainWindow(QMainWindow):
@@ -22,121 +26,54 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self._live_tracking_vm = live_tracking_vm
         self._device_info_vm = device_info_vm
-        self.setWindowTitle("🔵 UWB RTLS Studio v0.1.0")
-        self.setMinimumSize(1280, 820)
         self._is_developer = False
         self._session_active = False
         self._session_seconds = 0
-        self._build_ui()
-        self._build_statusbar()
-        
+
+        # ── Load UI from .ui file ──
+        uic.loadUi(UI_FILE, self)
+
+        # ── Setup tabs (replace placeholder) ──
+        self._setup_tabs()
+
+        # ── Setup status bar ──
+        self._setup_statusbar()
+
+        # ── Connect signals ──
+        self._connect_signals()
+
         # Init session timer but do not start it yet
         self._session_timer = QTimer(self)
         self._session_timer.timeout.connect(self._tick_session)
 
-    def _build_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+    def _setup_tabs(self):
+        """Setup viewmodels for pre-loaded tabs from .ui"""
+        # Set up variables to map to UI widgets created by uic.loadUi
+        self._tab_device = self.tab_device
+        self._tab_tracking = self.tab_tracking
+        self._tab_config = self.tab_config
+        self._tab_calibration = self.tab_calibration
+        self._tab_log = self.tab_log
 
-        # ═══ TITLE BAR ═══
-        title_bar = QFrame()
-        title_bar.setFixedHeight(52)
-        title_bar.setStyleSheet("""
-            QFrame { background: #1E293B; border-bottom: 1px solid #334155; }
-        """)
-        tb_layout = QHBoxLayout(title_bar)
-        tb_layout.setContentsMargins(20, 0, 20, 0)
-
-        # App title
-        app_title = QLabel("🔵 UWB RTLS Studio")
-        app_title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        app_title.setStyleSheet("color: #22D3EE; background: transparent;")
-        tb_layout.addWidget(app_title)
-
-        # Connected device badge
-        self._device_badge = QLabel("● -")
-        self._device_badge.setStyleSheet("""
-            color: #10B981; background: rgba(16,185,129,0.1);
-            border: 1px solid rgba(16,185,129,0.3); border-radius: 12px;
-            padding: 4px 14px; font-weight: bold;
-        """)
-        tb_layout.addWidget(self._device_badge)
-
-        tb_layout.addStretch()
-
-        # Mode toggle
-        mode_label = QLabel("Mode:")
-        mode_label.setStyleSheet("color: #94A3B8; background: transparent; font-weight: bold;")
-        tb_layout.addWidget(mode_label)
-
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItems(["👤 User", "🔧 Developer"])
-        self._mode_combo.setFixedWidth(150)
-        self._mode_combo.setStyleSheet("""
-            QComboBox { background: #0A0F1E; color: #22D3EE; border: 1px solid #334155;
-                border-radius: 8px; padding: 6px 12px; font-weight: bold; }
-            QComboBox:hover { border-color: #22D3EE; }
-            QComboBox QAbstractItemView { background: #1E293B; color: #F8FAFC;
-                border: 1px solid #334155; selection-background-color: #0E7490; }
-        """)
-        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        tb_layout.addWidget(self._mode_combo)
-
-        # End Session button
-        self._btn_end_session = QPushButton("🔴 End Session")
-        self._btn_end_session.setFixedSize(140, 36)
-        self._btn_end_session.setStyleSheet("""
-            QPushButton { background: rgba(239,68,68,0.12); color: #EF4444;
-                border: 1px solid #EF4444; border-radius: 8px; font-weight: bold;
-                font-size: 13px; }
-            QPushButton:hover { background: #EF4444; color: #F8FAFC; }
-        """)
-        self._btn_end_session.clicked.connect(self._on_end_session)
-        tb_layout.addWidget(self._btn_end_session)
-
-        main_layout.addWidget(title_bar)
-
-        # ═══ TAB WIDGET ═══
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet("""
-            QTabWidget::pane { border: none; background: #0F172A; }
-        """)
-
-        # Create tabs
-        self._tab_device = DeviceInfoTab()
         if self._device_info_vm:
             self._tab_device.set_viewmodel(self._device_info_vm)
             self._device_info_vm.device_info_updated.connect(self._on_device_changed)
-            
-        self._tab_tracking = LiveTrackingTab()
+
         if self._live_tracking_vm:
             self._tab_tracking.set_viewmodel(self._live_tracking_vm)
-            
-        self._tab_config = ConfigTab(is_developer=False)
-        self._tab_calibration = CalibrationTab()
-        self._tab_log = LogTab(is_developer=False)
 
-        self._tabs.addTab(self._tab_device, "📱 Device Info")
-        self._tabs.addTab(self._tab_tracking, "📍 Live Tracking")
-        self._tabs.addTab(self._tab_config, "⚙ Config")
-        self._calib_tab_index = self._tabs.addTab(self._tab_calibration, "🔧 Calibration")
-        self._tabs.addTab(self._tab_log, "📋 Log & History")
+        self._tab_config.set_developer_mode(False)
+        self._tab_log.set_developer_mode(False)
+
+        # Get index for calibration tab
+        self._calib_tab_index = self.tabs.indexOf(self._tab_calibration)
 
         # Hide calibration tab in User mode
-        self._tabs.setTabVisible(self._calib_tab_index, False)
+        self.tabs.setTabVisible(self._calib_tab_index, False)
 
-        main_layout.addWidget(self._tabs)
-
-    def _build_statusbar(self):
-        status = QStatusBar()
-        status.setStyleSheet("""
-            QStatusBar { background: #1E293B; color: #94A3B8; border-top: 1px solid #334155;
-                font-size: 12px; padding: 4px 12px; }
-            QStatusBar QLabel { background: transparent; }
-        """)
+    def _setup_statusbar(self):
+        """Add status bar widgets — the QStatusBar itself is loaded from .ui."""
+        status = self.statusbar
 
         # Connection status
         self._status_conn = QLabel("🔴 Disconnected")
@@ -180,19 +117,21 @@ class MainWindow(QMainWindow):
         self._status_mode.setStyleSheet("color: #22D3EE; font-weight: bold;")
         status.addPermanentWidget(self._status_mode)
 
-        self.setStatusBar(status)
-        
         # Connect signals for status bar updates
         if self._device_info_vm:
-            # We already connect device_info_updated to _on_device_changed in _build_ui, 
-            # but let's make sure it handles statusbar too.
             self._device_info_vm.telemetry_updated.connect(self._on_telemetry_status)
             self._device_info_vm.ble_info_updated.connect(self._on_ble_info_status)
         if self._live_tracking_vm:
             self._live_tracking_vm.position_updated.connect(self._on_position_status)
 
-    # Removed _on_device_connected_status, logic moved to _on_device_changed
-            
+    def _connect_signals(self):
+        """Connect UI signals from .ui widgets to backend logic."""
+        # mode_combo and btn_end_session are loaded from .ui
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.btn_end_session.clicked.connect(self._on_end_session)
+
+    # ── Status bar update slots ──────────────────────────────────────
+
     def _on_telemetry_status(self, data: dict):
         soc = data.get("bat_soc_percent")
         if soc is not None:
@@ -210,15 +149,15 @@ class MainWindow(QMainWindow):
     def _on_device_changed(self, info: dict):
         name = info.get("Device Name")
         status_text = info.get("Status", "Connected")
-        
+
         if name and name != "Unknown" and name != "-":
-            self._device_badge.setText(f"● {name}")
-            
+            self.device_badge.setText(f"● {name}")
+
             if status_text == "Connecting":
                 self._status_conn.setText(f"⏳ Connecting: {name}")
                 self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
                 self._status_rate.setText("🔄 ---")
-                
+
                 # Stop session timer while connecting
                 self._session_active = False
                 self._session_timer.stop()
@@ -227,15 +166,15 @@ class MainWindow(QMainWindow):
             else:
                 self._status_conn.setText(f"🟢 Connected: {name}")
                 self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
-                self._status_rate.setText("🔄 30 FPS") # Target FPS
-                
+                self._status_rate.setText("🔄 30 FPS")  # Target FPS
+
                 # Start session timer if not active
                 if not self._session_active:
                     self._session_active = True
                     self._session_seconds = 0
                     self._session_timer.start(1000)
         else:
-            self._device_badge.setText("● -")
+            self.device_badge.setText("● -")
             self._status_conn.setText("🔴 Disconnected")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
             self._status_bat.setText("🔋 ---")
@@ -243,7 +182,7 @@ class MainWindow(QMainWindow):
             self._status_rssi.setText("📡 RSSI: ---")
             self._status_rms.setText("📊 RMS: ---")
             self._status_rate.setText("🔄 ---")
-            
+
             # Stop session timer
             self._session_active = False
             self._session_timer.stop()
@@ -259,7 +198,7 @@ class MainWindow(QMainWindow):
         self._is_developer = (index == 1)
 
         # Toggle calibration tab visibility
-        self._tabs.setTabVisible(self._calib_tab_index, self._is_developer)
+        self.tabs.setTabVisible(self._calib_tab_index, self._is_developer)
 
         # Update config and log tabs
         self._tab_config.set_developer_mode(self._is_developer)
@@ -335,6 +274,6 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-        
+
         self._safe_shutdown()
         event.accept()

@@ -1,14 +1,18 @@
 """
-UWB RTLS Studio — Live Tracking Tab
+UWB RTLS Studio — Live Tracking Tab (UI loaded from .ui file)
 Tab 2: Real-time 2D position tracking matching dashboard.py design.
+
+FE: Loaded from views/ui/live_tracking_tab.ui (editable in Qt Designer)
+BE: Canvas (custom widget) + ViewModel bindings (this file)
 
 Layout (mirroring dashboard.py):
   - LEFT:  Canvas header ("Real-time Position Tracking" + OUT OF ZONE warning)
            + ModernPositionCanvas + Start/Stop/Clear controls
-  - RIGHT: Scrollable panel with CollapsibleCards:
+  - RIGHT: Scrollable panel with collapsible cards:
            • Live Position  (COORDINATES, MOTION, RANGING, QUALITY)
            • Statistics      (Frames, FPS, Uptime)
 """
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QScrollArea, QGridLayout
@@ -18,8 +22,13 @@ from PyQt6.QtGui import (
     QFont, QPainter, QColor, QPen, QBrush, QLinearGradient,
     QRadialGradient, QPainterPath
 )
+from PyQt6 import uic
 import time
 import math
+
+
+# Path to .ui file
+UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'live_tracking_tab.ui')
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -370,85 +379,7 @@ class ModernPositionCanvas(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  CollapsibleCard — ported from dashboard.py
-# ═══════════════════════════════════════════════════════════════════════
-class CollapsibleCard(QFrame):
-    """Collapsible card widget matching dashboard.py design."""
-    def __init__(self, title="", parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("""
-            CollapsibleCard {
-                background-color: #1e293b;
-                border-radius: 10px;
-                border: 1px solid #334155;
-            }
-        """)
-
-        self.is_collapsed = False
-
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(8)
-
-        # Title bar with toggle button
-        title_layout = QHBoxLayout()
-        title_layout.setSpacing(8)
-
-        self.title_label = QLabel(title)
-        self.title_label.setStyleSheet("""
-            color: #f1f5f9;
-            font-size: 14px;
-            font-weight: bold;
-            background-color: transparent;
-        """)
-        title_layout.addWidget(self.title_label)
-
-        self.toggle_btn = QPushButton("▼")
-        self.toggle_btn.setFixedSize(30, 26)
-        self.toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #334155;
-                color: #e2e8f0;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-                padding: 0px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #475569;
-            }
-        """)
-        self.toggle_btn.clicked.connect(self.toggle_collapse)
-        title_layout.addWidget(self.toggle_btn)
-
-        main_layout.addLayout(title_layout)
-
-        # Separator
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("background-color: #334155; max-height: 2px;")
-        main_layout.addWidget(separator)
-
-        # Content area
-        self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout()
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_widget.setLayout(self.content_layout)
-        main_layout.addWidget(self.content_widget)
-
-        self.setLayout(main_layout)
-
-    def toggle_collapse(self):
-        """Toggle collapsed state."""
-        self.is_collapsed = not self.is_collapsed
-        self.content_widget.setVisible(not self.is_collapsed)
-        self.toggle_btn.setText("►" if self.is_collapsed else "▼")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  LiveTrackingTab — main tab widget
+#  LiveTrackingTab — main tab widget (loads from .ui)
 # ═══════════════════════════════════════════════════════════════════════
 class LiveTrackingTab(QWidget):
     def __init__(self, parent=None):
@@ -457,12 +388,46 @@ class LiveTrackingTab(QWidget):
         self._frame_count = 0
         self._start_time = time.time()
         self._is_ranging = False
-        self._build_ui()
+
+        # ── Load UI from .ui file ──
+        uic.loadUi(UI_FILE, self)
+
+        # ── Replace canvas placeholder with real ModernPositionCanvas ──
+        self._canvas = ModernPositionCanvas()
+        # Find the placeholder in the left panel layout and replace it
+        self.left_panel.replaceWidget(self.canvas_placeholder, self._canvas)
+        self.canvas_placeholder.deleteLater()
+        # Set stretch factor so canvas takes all available space
+        self.left_panel.setStretchFactor(self._canvas, 1)
+
+        # ── Hide warning label initially ──
+        self.warning_label.setVisible(False)
+
+        # ── Setup collapsible toggles ──
+        self._setup_collapse_toggles()
+
+        # ── Connect button signals ──
+        self.btn_start.clicked.connect(self._start_ranging)
+        self.btn_stop.clicked.connect(self._stop_ranging)
+        self.btn_clear.clicked.connect(self._canvas.clear_trail)
 
         # FPS / stats timer
         self._stats_timer = QTimer(self)
         self._stats_timer.timeout.connect(self._update_stats)
         self._stats_timer.start(1000)
+
+    def _setup_collapse_toggles(self):
+        """Setup collapse/expand behavior for cards."""
+        self.pos_toggle_btn.clicked.connect(lambda: self._toggle_card(
+            self.pos_content, self.pos_toggle_btn))
+        self.stats_toggle_btn.clicked.connect(lambda: self._toggle_card(
+            self.stats_content, self.stats_toggle_btn))
+
+    def _toggle_card(self, content_widget, toggle_btn):
+        """Toggle visibility of a card's content."""
+        visible = content_widget.isVisible()
+        content_widget.setVisible(not visible)
+        toggle_btn.setText("►" if visible else "▼")
 
     def set_viewmodel(self, vm):
         self._vm = vm
@@ -471,223 +436,6 @@ class LiveTrackingTab(QWidget):
         self._vm.ranging_stopped.connect(self._on_ranging_stopped)
         self._vm.position_updated.connect(self._on_position_updated)
         self._vm.anchor_distances_updated.connect(self._on_anchor_distances)
-
-    # ── Build UI ─────────────────────────────────────────────────────
-    def _build_ui(self):
-        main_layout = QHBoxLayout(self)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-
-        # ═══ LEFT PANEL: Canvas + header + controls ═══
-        left_panel = QVBoxLayout()
-        left_panel.setSpacing(6)
-        left_panel.setContentsMargins(0, 0, 0, 0)
-
-        # Canvas header
-        header_layout = QHBoxLayout()
-
-        canvas_header = QLabel("Real-time Position Tracking")
-        canvas_header.setStyleSheet("""
-            color: #f1f5f9;
-            font-size: 16px;
-            font-weight: bold;
-            padding: 0px 0px 8px 0px;
-            background-color: transparent;
-        """)
-        canvas_header.setFixedHeight(30)
-        header_layout.addWidget(canvas_header)
-
-        self._warning_label = QLabel("⚠️ OUT OF ZONE")
-        self._warning_label.setStyleSheet("""
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
-            background-color: #ef4444;
-            padding: 2px 10px;
-            border-radius: 4px;
-        """)
-        self._warning_label.setFixedHeight(25)
-        self._warning_label.setVisible(False)
-
-        header_layout.addStretch()
-        header_layout.addWidget(self._warning_label)
-
-        left_panel.addLayout(header_layout)
-
-        # Canvas
-        self._canvas = ModernPositionCanvas()
-        left_panel.addWidget(self._canvas, 1)
-
-        # Controls under canvas
-        ctrl_row = QHBoxLayout()
-
-        self._btn_start = QPushButton("▶  Start Ranging")
-        self._btn_start.setFixedHeight(40)
-        self._btn_start.setStyleSheet("""
-            QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981;
-                border-radius: 8px; font-weight: bold; font-size: 14px; padding: 0 24px; }
-            QPushButton:hover { background: #10B981; }
-        """)
-        self._btn_stop = QPushButton("■  Stop Ranging")
-        self._btn_stop.setFixedHeight(40)
-        self._btn_stop.setEnabled(False)
-        self._btn_stop.setStyleSheet("""
-            QPushButton { background: rgba(239,68,68,0.15); color: #EF4444;
-                border: 1px solid #EF4444; border-radius: 8px; font-weight: bold;
-                font-size: 14px; padding: 0 24px; }
-            QPushButton:hover { background: #EF4444; color: #F8FAFC; }
-            QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }
-        """)
-        self._btn_clear = QPushButton("🗑 Clear Trail")
-        self._btn_clear.setFixedHeight(40)
-
-        ctrl_row.addWidget(self._btn_start)
-        ctrl_row.addWidget(self._btn_stop)
-        ctrl_row.addStretch()
-        ctrl_row.addWidget(self._btn_clear)
-        left_panel.addLayout(ctrl_row)
-
-        self._btn_start.clicked.connect(self._start_ranging)
-        self._btn_stop.clicked.connect(self._stop_ranging)
-        self._btn_clear.clicked.connect(self._canvas.clear_trail)
-
-        main_layout.addLayout(left_panel, 1)  # Stretch factor 1
-
-        # ═══ RIGHT PANEL: Scrollable telemetry cards (fixed width) ═══
-        right_widget = QWidget()
-        right_widget.setFixedWidth(380)
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: #0f172a;
-            }
-            QScrollBar:vertical {
-                background-color: #0f172a;
-                width: 10px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #475569;
-                border-radius: 5px;
-                min-height: 30px;
-                margin: 2px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #64748b;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-                background: none;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """)
-
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet("background-color: #0f172a;")
-        right_panel = QVBoxLayout()
-        right_panel.setSpacing(8)
-        right_panel.setContentsMargins(0, 0, 0, 0)
-        scroll_content.setLayout(right_panel)
-
-        scroll_area.setWidget(scroll_content)
-
-        right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(scroll_area)
-        right_widget.setLayout(right_layout)
-
-        # ── Live Position Card ──
-        pos_card = CollapsibleCard("Live Position")
-        pos_layout = QGridLayout()
-        pos_layout.setSpacing(15)
-
-        groups = [
-            ("COORDINATES", [
-                ("X:", "x_label", "#60a5fa", "m"),
-                ("Y:", "y_label", "#60a5fa", "m"),
-                ("Z:", "z_label", "#60a5fa", "m"),
-            ]),
-            ("MOTION", [
-                ("VX:", "vx_label", "#2dd4bf", "m/s"),
-                ("VY:", "vy_label", "#2dd4bf", "m/s"),
-                ("Yaw:", "yaw_label", "#f472b6", "°"),
-            ]),
-            ("RANGING", [
-                ("D1:", "d1_label", "#a78bfa", "m"),
-                ("D2:", "d2_label", "#a78bfa", "m"),
-                ("D3:", "d3_label", "#a78bfa", "m"),
-                ("D4:", "d4_label", "#a78bfa", "m"),
-            ]),
-            ("QUALITY", [
-                ("Error:", "error_label", "#f59e0b", "m"),
-                ("Err Frames:", "err_cnt_label", "#f87171", "packets"),
-            ]),
-        ]
-
-        current_row = 0
-        for group_name, items in groups:
-            group_label = QLabel(group_name)
-            group_label.setStyleSheet(
-                "font-size: 11px; font-weight: bold; color: #64748b; margin-top: 5px;"
-                "background-color: transparent;"
-            )
-            pos_layout.addWidget(group_label, current_row, 0, 1, 2)
-            current_row += 1
-
-            for text, attr, color, unit in items:
-                lbl = QLabel(text)
-                lbl.setStyleSheet("font-size: 13px; color: #94a3b8; background-color: transparent;")
-                pos_layout.addWidget(lbl, current_row, 0)
-
-                value_label = QLabel(f"0.000 {unit}")
-                value_label.setStyleSheet(
-                    f"font-family: 'Consolas', monospace; font-size: 15px;"
-                    f"font-weight: bold; color: {color}; background-color: transparent;"
-                )
-                pos_layout.addWidget(value_label, current_row, 1)
-                setattr(self, f"_{attr}", value_label)
-                current_row += 1
-
-        pos_card.content_layout.addLayout(pos_layout)
-        right_panel.addWidget(pos_card)
-
-        # ── Statistics Card ──
-        stats_card = CollapsibleCard("Statistics")
-        stats_layout = QGridLayout()
-        stats_layout.setSpacing(10)
-
-        stats = [
-            ("Frames:", "frames_label"),
-            ("FPS:", "fps_label"),
-            ("Uptime:", "uptime_label"),
-        ]
-
-        for i, (text, attr) in enumerate(stats):
-            lbl = QLabel(text)
-            lbl.setStyleSheet("font-size: 13px; color: #94a3b8; background-color: transparent;")
-            stats_layout.addWidget(lbl, i, 0)
-
-            value_label = QLabel("0")
-            value_label.setStyleSheet(
-                "font-size: 15px; font-weight: bold; color: #60a5fa;"
-                "background-color: transparent;"
-            )
-            stats_layout.addWidget(value_label, i, 1)
-            setattr(self, f"_{attr}", value_label)
-
-        stats_card.content_layout.addLayout(stats_layout)
-        right_panel.addWidget(stats_card)
-
-        right_panel.addStretch()
-
-        main_layout.addWidget(right_widget)
 
     # ── Actions ──────────────────────────────────────────────────────
     def _start_ranging(self):
@@ -700,15 +448,15 @@ class LiveTrackingTab(QWidget):
 
     # ── Slots ────────────────────────────────────────────────────────
     def _on_ranging_started(self):
-        self._btn_start.setEnabled(False)
-        self._btn_stop.setEnabled(True)
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
         self._is_ranging = True
         self._frame_count = 0
         self._start_time = time.time()
 
     def _on_ranging_stopped(self):
-        self._btn_start.setEnabled(True)
-        self._btn_stop.setEnabled(False)
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
         self._is_ranging = False
 
     def _on_position_updated(self, x, y, z, rms):
@@ -722,11 +470,11 @@ class LiveTrackingTab(QWidget):
         }
         self._canvas.update_position(position)
 
-        # Update labels
-        self._x_label.setText(f"{x:.3f} m")
-        self._y_label.setText(f"{y:.3f} m")
-        self._z_label.setText(f"{z:.3f} m")
-        self._error_label.setText(f"{rms:.3f} m")
+        # Update labels (from .ui widgets)
+        self.x_label.setText(f"{x:.3f} m")
+        self.y_label.setText(f"{y:.3f} m")
+        self.z_label.setText(f"{z:.3f} m")
+        self.error_label.setText(f"{rms:.3f} m")
 
         # Out-of-zone warning
         if self._canvas.anchors:
@@ -736,9 +484,9 @@ class LiveTrackingTab(QWidget):
             min_y = min(a['y'] for a in anchors)
             max_y = max(a['y'] for a in anchors)
             out_of_zone = not (min_x <= x <= max_x and min_y <= y <= max_y)
-            self._warning_label.setVisible(out_of_zone)
+            self.warning_label.setVisible(out_of_zone)
         else:
-            self._warning_label.setVisible(False)
+            self.warning_label.setVisible(False)
 
     def _on_anchor_distances(self, anchors):
         """Update ranging distance labels (D1–D4)."""
@@ -746,22 +494,23 @@ class LiveTrackingTab(QWidget):
             aid = anchor.get("id", "")
             # Map A1→D1, A2→D2, etc.
             idx = aid.replace("A", "")
-            attr = f"_d{idx}_label"
-            if hasattr(self, attr):
+            label_name = f"d{idx}_label"
+            label_widget = getattr(self, label_name, None)
+            if label_widget:
                 d_m = anchor.get("distance_cm", 0) / 100.0
-                getattr(self, attr).setText(f"{d_m:.3f} m")
+                label_widget.setText(f"{d_m:.3f} m")
 
     def _update_stats(self):
         """Update statistics labels every second."""
         if not self._is_ranging:
             return
 
-        self._frames_label.setText(str(self._frame_count))
+        self.frames_label.setText(str(self._frame_count))
 
         uptime = int(time.time() - self._start_time)
         fps = self._frame_count / uptime if uptime > 0 else 0
-        self._fps_label.setText(f"{fps:.1f}")
-        self._uptime_label.setText(f"{uptime}s")
+        self.fps_label.setText(f"{fps:.1f}")
+        self.uptime_label.setText(f"{uptime}s")
 
     # ── Public API ───────────────────────────────────────────────────
     def set_anchors(self, anchors):
