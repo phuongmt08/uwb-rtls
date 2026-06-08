@@ -200,7 +200,7 @@ class BleLogTester:
         pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.session.proto.next_seq()
-        pkt.host_transport_set.transport = int(HostTransport.USB)
+        pkt.host_transport_set.transport = int(HostTransport.UART)
         return pkt
 
     def _build_log_data_get(self) -> pb.packet_t:
@@ -242,6 +242,16 @@ class BleLogTester:
         pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
         pkt.log_clear.offset = 0
         pkt.log_clear.length = 0xFFFFFFFF
+        return pkt
+
+    def _build_log_clear(self, length: int) -> pb.packet_t:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.session.proto.next_seq()
+        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
+        pkt.log_clear.offset = 0
+        pkt.log_clear.length = length
         return pkt
 
     def send_end_session(self, reason: int) -> None:
@@ -309,6 +319,9 @@ class BleLogTester:
 
             ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
             self._send_packet(ack_pkt)
+            if payload:
+                time.sleep(0.15)  # Add a small delay to prevent BLE dongle/transport buffer overflow
+                self._send_packet(self._build_log_clear(len(payload)))
             return
 
         if name == "ble_status_resp":
@@ -489,6 +502,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clear-first", action="store_true", help="Clear flash log backlog before streaming")
     parser.add_argument("--calibration", action="store_true", help="Save logs to a calibration file")
     parser.add_argument("--record", choices=["uwb"], help="Record specific UWB data to a CSV file")
+    parser.add_argument("--scan-timeout", type=float, default=6.0, help="BLE scan duration in seconds")
     parser.add_argument("--src", type=int, default=int(VvAddress.HOST), help="Source address (default: HOST=5)")
     parser.add_argument("--dst", type=int, default=int(VvAddress.MCU), help="MCU Destination address (default: MCU=1)")
     parser.add_argument("--central-dst", type=int, default=int(VvAddress.CENTRAL), help="Central Destination address (default: CENTRAL=3)")
@@ -545,6 +559,7 @@ def main() -> int:
                 factory=factory,
                 src=src_addr,
                 central_dst=central_dst,
+                scan_timeout_s=args.scan_timeout,
                 expected_mac=expected_mac,
                 target_name_filter=args.name
             )

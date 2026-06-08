@@ -55,5 +55,7 @@ void bb_cmd_notify_scan_result(const uint8_t * mac, int8_t rssi, const char * na
 void bb_cmd_notify_ble_status(uint8_t state,
                               int32_t rssi_dbm,
                               uint32_t disconnect_reason);
+ret_code_t bb_cmd_request_ble_adv_config(void);
+void bb_cmd_ble_adv_config_request_process(void);
 
 #endif // BB_CMD_HDL_H

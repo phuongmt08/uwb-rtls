@@ -132,6 +132,9 @@ PB_BIND(protobuf_flash_verify_t, protobuf_flash_verify_t, AUTO)
 PB_BIND(protobuf_ble_adv_config_t, protobuf_ble_adv_config_t, AUTO)
 
 
+PB_BIND(protobuf_ble_adv_config_request_t, protobuf_ble_adv_config_request_t, AUTO)
+
+
 PB_BIND(protobuf_ble_status_get_t, protobuf_ble_status_get_t, AUTO)
 
 

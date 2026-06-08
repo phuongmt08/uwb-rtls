@@ -83,9 +83,22 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
         int n = _read(in_stream, (char*)core->rx_packet, (int)core->rx_buffer_size, 0);
         CHECK(n > 0, false);
         core->rx_packet_len = (uint32_t)n;
+
+        if (in_stream == STREAM_BLE_RX) {
+            RLOG_I(OBJECT_CODE, "rx BLE frame payload_len=%lu first=%02X %02X %02X %02X",
+                   (unsigned long)core->rx_packet_len,
+                   (core->rx_packet_len > 0u) ? core->rx_packet[0] : 0u,
+                   (core->rx_packet_len > 1u) ? core->rx_packet[1] : 0u,
+                   (core->rx_packet_len > 2u) ? core->rx_packet[2] : 0u,
+                   (core->rx_packet_len > 3u) ? core->rx_packet[3] : 0u);
+        }
     }
 
     if (!network_core_decode_packet(core->rx_packet, core->rx_packet_len, out_pkt)) {
+        if (in_stream == STREAM_BLE_RX) {
+            RLOG_W(OBJECT_CODE, "rx BLE protobuf decode failed len=%lu",
+                   (unsigned long)core->rx_packet_len);
+        }
         core->rx_packet_len = 0;
         return false;
     }
@@ -219,6 +232,23 @@ static bool network_core_process_one_stream(network_core_t *core, stream_type_t 
 
     /* ---- Routing decision based on dst ---- */
     bool for_us = network_core_is_for_us(core, &packet);
+
+    if (in_stream == STREAM_BLE_RX) {
+        uint32_t src = 0xFFu;
+        uint32_t dst = 0xFFu;
+        uint32_t seq = 0xFFFFFFFFu;
+        if (packet.has_hdr && packet.hdr.has_addr) {
+            src = packet.hdr.addr.src;
+            dst = packet.hdr.addr.dst;
+            seq = packet.hdr.seq;
+        }
+        RLOG_I(OBJECT_CODE, "rx BLE decoded tag=%lu src=%lu dst=%lu seq=%lu for_us=%u",
+               (unsigned long)packet.which_params,
+               (unsigned long)src,
+               (unsigned long)dst,
+               (unsigned long)seq,
+               (unsigned)for_us);
+    }
 
     if (for_us) {
         /* Let the application layer handle it */

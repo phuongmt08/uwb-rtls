@@ -203,6 +203,16 @@ class LogRealtimeTester:
         pkt.log_clear.length = 0xFFFFFFFF
         return pkt
 
+    def _build_log_clear(self, length: int) -> pb.packet_t:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.proto.next_seq()
+        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
+        pkt.log_clear.offset = 0
+        pkt.log_clear.length = length
+        return pkt
+
     def send_end_session(self, reason: int) -> None:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
@@ -269,6 +279,8 @@ class LogRealtimeTester:
 
             ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
             self._send_packet(ack_pkt)
+            if payload:
+                self._send_packet(self._build_log_clear(len(payload)))
             return
 
         if self.verbose:

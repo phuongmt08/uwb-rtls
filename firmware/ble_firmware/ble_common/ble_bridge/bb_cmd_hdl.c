@@ -22,9 +22,11 @@
 #include "../../../protocol/protos/protocol.pb.h"
 #include "nrf_log.h"
 #include "bb_transport.h"
+#include "app_timer.h"
 
 /* Private defines ---------------------------------------------------- */
 #define PKT_INIT protobuf_packet_t_init_zero
+#define BLE_ADV_CONFIG_REQUEST_PERIOD_TICKS APP_TIMER_TICKS(1000)
 #ifdef BLE_PERIPHERAL
 #define PACKET_ADDR protobuf_PACKET_ADDR_PERIPHERAL
 #elif defined(BLE_CENTRAL)
@@ -109,13 +111,72 @@ typedef enum {
 } bb_cmd_hdl_state_t;
 
 static bb_cmd_hdl_state_t m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+#if defined(BLE_PERIPHERAL)
+static bool m_ble_adv_config_received = false;
+static uint32_t m_last_ble_adv_config_request_tick = 0;
+#endif
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_cmd_hdl_init(void)
 {
     // Cấu hình các flag ban đầu nếu có.
     m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+#if defined(BLE_PERIPHERAL)
+    m_ble_adv_config_received = false;
+    m_last_ble_adv_config_request_tick = 0;
+#endif
     return NRF_SUCCESS;
+}
+
+ret_code_t bb_cmd_request_ble_adv_config(void)
+{
+#if defined(BLE_PERIPHERAL)
+    protobuf_packet_t pkt = protobuf_packet_t_init_zero;
+    pkt.has_hdr = true;
+    pkt.hdr.has_addr = true;
+    pkt.hdr.addr.src = protobuf_PACKET_ADDR_PERIPHERAL;
+    pkt.hdr.addr.dst = protobuf_PACKET_ADDR_MCU;
+    pkt.hdr.seq = 0;
+
+    pkt.which_params = protobuf_packet_t_ble_adv_config_request_tag;
+    pkt.params.ble_adv_config_request.dummy = 1;
+
+    uint8_t buffer[64];
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+    if (!pb_encode(&stream, protobuf_packet_t_fields, &pkt))
+    {
+        NRF_LOG_ERROR("ble_adv_config_request encode failed: %s", PB_GET_ERROR(&stream));
+        return NRF_ERROR_INTERNAL;
+    }
+
+    NRF_LOG_INFO("Requesting BLE advertising config from MCU");
+    m_last_ble_adv_config_request_tick = app_timer_cnt_get();
+    return bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
+#else
+    return NRF_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+void bb_cmd_ble_adv_config_request_process(void)
+{
+#if defined(BLE_PERIPHERAL)
+    if (m_ble_adv_config_received)
+    {
+        return;
+    }
+
+    uint32_t now = app_timer_cnt_get();
+    if ((uint32_t)(now - m_last_ble_adv_config_request_tick) < BLE_ADV_CONFIG_REQUEST_PERIOD_TICKS)
+    {
+        return;
+    }
+
+    ret_code_t err_code = bb_cmd_request_ble_adv_config();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("ble_adv_config_request retry failed: 0x%08X", err_code);
+    }
+#endif
 }
 
 bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_t max_len)
@@ -201,6 +262,8 @@ static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_p
     const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
     
     ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
+    m_ble_adv_config_received = true;
+    NRF_LOG_INFO("BLE advertising config received from MCU");
 
     *p_action = BB_CMD_ACTION_NONE; 
 }

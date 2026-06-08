@@ -38,6 +38,9 @@
 #include "sys_config.h"
 #include "sys_flash_storage.h"
 #include "sys_logger.h"
+#ifdef HAVE_BLE_PERIPHERAL
+#include "ble/sys_ble_peripheral.h"
+#endif
 //#include "sys_task.h" /* Deprecated */
 #include "sys_pm.h"
 #include "app_rtos_handles.h"
@@ -245,6 +248,20 @@ int main(void)
   else
   {
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+#ifdef HAVE_BLE_PERIPHERAL
+    if (!sys_ble_peripheral_init(&g_network_core))
+    {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "sys_ble_peripheral_init failed");
+    }
+    else
+    {
+      sys_ble_peripheral_set_config();
+      if (!sys_ble_peripheral_enable(true))
+      {
+        RLOG_W(LOG_OBJECT_CODE_APPLICATION, "BLE peripheral enable request failed");
+      }
+    }
+#endif
   }
 
   bsp_util_init();

@@ -373,6 +373,10 @@ typedef struct _protobuf_ble_adv_config_t {
     char device_name[32];
 } protobuf_ble_adv_config_t;
 
+typedef struct _protobuf_ble_adv_config_request_t {
+    uint32_t dummy;
+} protobuf_ble_adv_config_request_t;
+
 /* STM32 → nRF : poll current BLE state
  nRF  → STM32 : response, also pushed unsolicited on state change */
 typedef struct _protobuf_ble_status_get_t {
@@ -697,6 +701,7 @@ typedef struct _protobuf_packet_t {
         protobuf_end_session_t end_session;
         /* Factory OTP provisioning */
         protobuf_factory_otp_write_t factory_otp_write;
+        protobuf_ble_adv_config_request_t ble_adv_config_request;
     } params;
 } protobuf_packet_t;
 
@@ -879,6 +884,7 @@ extern "C" {
 
 
 
+
 #define protobuf_ble_status_resp_t_state_ENUMTYPE protobuf_ble_state_t
 
 
@@ -964,6 +970,7 @@ extern "C" {
 #define protobuf_flash_write_t_init_default      {0, {0, {0}}}
 #define protobuf_flash_verify_t_init_default     {0}
 #define protobuf_ble_adv_config_t_init_default   {0, 0, ""}
+#define protobuf_ble_adv_config_request_t_init_default {0}
 #define protobuf_ble_status_get_t_init_default   {0}
 #define protobuf_ble_status_resp_t_init_default  {_protobuf_ble_state_t_MIN, 0, false, 0}
 #define protobuf_ble_scan_result_t_init_default  {{0, {0}}, 0, "", 0}
@@ -1039,6 +1046,7 @@ extern "C" {
 #define protobuf_flash_write_t_init_zero         {0, {0, {0}}}
 #define protobuf_flash_verify_t_init_zero        {0}
 #define protobuf_ble_adv_config_t_init_zero      {0, 0, ""}
+#define protobuf_ble_adv_config_request_t_init_zero {0}
 #define protobuf_ble_status_get_t_init_zero      {0}
 #define protobuf_ble_status_resp_t_init_zero     {_protobuf_ble_state_t_MIN, 0, false, 0}
 #define protobuf_ble_scan_result_t_init_zero     {{0, {0}}, 0, "", 0}
@@ -1179,6 +1187,7 @@ extern "C" {
 #define protobuf_ble_adv_config_t_enable_tag     1
 #define protobuf_ble_adv_config_t_serial_number_tag 2
 #define protobuf_ble_adv_config_t_device_name_tag 3
+#define protobuf_ble_adv_config_request_t_dummy_tag 1
 #define protobuf_ble_status_get_t_dummy_tag      1
 #define protobuf_ble_status_resp_t_state_tag     1
 #define protobuf_ble_status_resp_t_rssi_dbm_tag  2
@@ -1355,6 +1364,7 @@ extern "C" {
 #define protobuf_packet_t_calib_status_resp_tag  66
 #define protobuf_packet_t_end_session_tag        67
 #define protobuf_packet_t_factory_otp_write_tag  68
+#define protobuf_packet_t_ble_adv_config_request_tag 69
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1638,6 +1648,11 @@ X(a, STATIC,   SINGULAR, UINT32,   serial_number,     2) \
 X(a, STATIC,   SINGULAR, STRING,   device_name,       3)
 #define protobuf_ble_adv_config_t_CALLBACK NULL
 #define protobuf_ble_adv_config_t_DEFAULT NULL
+
+#define protobuf_ble_adv_config_request_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_ble_adv_config_request_t_CALLBACK NULL
+#define protobuf_ble_adv_config_request_t_DEFAULT NULL
 
 #define protobuf_ble_status_get_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
@@ -1949,7 +1964,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_b
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_get,params.calib_status_get),  65) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_resp,params.calib_status_resp),  66) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,end_session,params.end_session),  67) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_write),  68)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_write),  68) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,ble_adv_config_request,params.ble_adv_config_request),  69)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -2017,6 +2033,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_
 #define protobuf_packet_t_params_calib_status_resp_MSGTYPE protobuf_calib_status_resp_t
 #define protobuf_packet_t_params_end_session_MSGTYPE protobuf_end_session_t
 #define protobuf_packet_t_params_factory_otp_write_MSGTYPE protobuf_factory_otp_write_t
+#define protobuf_packet_t_params_ble_adv_config_request_MSGTYPE protobuf_ble_adv_config_request_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -2060,6 +2077,7 @@ extern const pb_msgdesc_t protobuf_flash_data_t_msg;
 extern const pb_msgdesc_t protobuf_flash_write_t_msg;
 extern const pb_msgdesc_t protobuf_flash_verify_t_msg;
 extern const pb_msgdesc_t protobuf_ble_adv_config_t_msg;
+extern const pb_msgdesc_t protobuf_ble_adv_config_request_t_msg;
 extern const pb_msgdesc_t protobuf_ble_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ble_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_ble_scan_result_t_msg;
@@ -2137,6 +2155,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_flash_write_t_fields &protobuf_flash_write_t_msg
 #define protobuf_flash_verify_t_fields &protobuf_flash_verify_t_msg
 #define protobuf_ble_adv_config_t_fields &protobuf_ble_adv_config_t_msg
+#define protobuf_ble_adv_config_request_t_fields &protobuf_ble_adv_config_request_t_msg
 #define protobuf_ble_status_get_t_fields &protobuf_ble_status_get_t_msg
 #define protobuf_ble_status_resp_t_fields &protobuf_ble_status_resp_t_msg
 #define protobuf_ble_scan_result_t_fields &protobuf_ble_scan_result_t_msg
@@ -2182,6 +2201,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_ranging_t_size           18
 #define protobuf_battery_info_get_t_size         6
 #define protobuf_battery_info_resp_t_size        58
+#define protobuf_ble_adv_config_request_t_size   6
 #define protobuf_ble_adv_config_t_size           41
 #define protobuf_ble_adv_status_t_size           38
 #define protobuf_ble_conn_params_get_t_size      6

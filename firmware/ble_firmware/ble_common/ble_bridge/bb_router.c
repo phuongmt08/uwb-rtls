@@ -59,7 +59,7 @@ ret_code_t bb_router_init(void)
         return err_code;
     }
 
-    return NRF_SUCCESS;
+    return bb_cmd_hdl_init();
 }
 
 void bb_router_process(void)

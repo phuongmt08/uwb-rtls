@@ -385,6 +385,10 @@ message ble_adv_config_t {
     string device_name   = 3;
 }
 
+message ble_adv_config_request_t {
+    uint32 dummy = 1;
+}
+
 /*
  * STM32 → nRF : poll current BLE state
  * nRF  → STM32 : response, also pushed unsolicited on state change
@@ -775,6 +779,8 @@ message packet_t {
 
         /* Factory OTP provisioning */
         factory_otp_write_t       factory_otp_write       = 68;
+
+        ble_adv_config_request_t  ble_adv_config_request  = 69;
 
     }
 }

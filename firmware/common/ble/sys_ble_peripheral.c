@@ -28,9 +28,6 @@
 #define OBJECT_CODE             LOG_OBJECT_CODE_BLE
 #define BLE_WATCHDOG_PERIOD_MS  10000u
 
-#define CHECK(_cond, _ret)  do { if (!(_cond)) return (_ret); } while (0)
-#define CHECK_VOID(_cond)   do { if (!(_cond)) return; } while (0)
-
 /* ─────────────────────────────────────────────
 * Internal helpers
 * ───────────────────────────────────────────── */
@@ -165,7 +162,7 @@ void sys_ble_peripheral_set_config(void)
 #endif
 
     s_ble_peri.serial_number = sn;
-    strncpy(s_ble_peri.device_name, name, sizeof(s_ble_peri.device_name) - 1);
+    snprintf(s_ble_peri.device_name, sizeof(s_ble_peri.device_name), "%s", name);
     
     if (s_ble_peri.stream) {
         network_send_ble_adv_config_set(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL, 
