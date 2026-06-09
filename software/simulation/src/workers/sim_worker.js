@@ -116,35 +116,198 @@ self.onmessage = function(e) {
         ax_lpf: [],
         ay_lpf: []
     };
+
+    if (rawData.log_format === 'path_csv') {
+        const entriesToProcess = rawData.all_entries.slice(0, max_samples);
+        const x_axis = entriesToProcess.map((_, i) => i);
+        let total_time = 0;
+
+        entriesToProcess.forEach((entry) => {
+            if (entry.dt > 0) total_time += entry.dt;
+
+            simPath.x.push(null);
+            simPath.y.push(null);
+            simPathRuled.x.push(null);
+            simPathRuled.y.push(null);
+            simPathTriplet.x.push(null);
+            simPathTriplet.y.push(null);
+
+            simPathWLS.x.push(Number.isFinite(entry.tril_x) ? entry.tril_x : null);
+            simPathWLS.y.push(Number.isFinite(entry.tril_y) ? entry.tril_y : null);
+            wlsInfo.push('CSV trilateration');
+            bestTripletInfo.push('N/A');
+
+            const ukfX = Number.isFinite(entry.ukf_x) ? entry.ukf_x : entry.px_fw;
+            const ukfY = Number.isFinite(entry.ukf_y) ? entry.ukf_y : entry.py_fw;
+            simPathUKF.x.push(ukfX);
+            simPathUKF.y.push(ukfY);
+            simPathUKF_lpf.x.push(ukfX);
+            simPathUKF_lpf.y.push(ukfY);
+            simPathUKF_plot.x.push(ukfX);
+            simPathUKF_plot.y.push(ukfY);
+            simPathUKF_lpf_plot.x.push(ukfX);
+            simPathUKF_lpf_plot.y.push(ukfY);
+            simPathUKF_modes.push(1);
+            simPathUKF_lpf_modes.push(1);
+            simPathUKF_allModes.push(1);
+            simPathUKF_allTimes.push(total_time);
+
+            const yawDeg = Number.isFinite(entry.yaw) ? entry.yaw * 180 / Math.PI : 0;
+            const ukfYawDeg = Number.isFinite(entry.ukf_yaw) ? entry.ukf_yaw * 180 / Math.PI : yawDeg;
+            plotData.vx_raw.push(0);
+            plotData.vy_raw.push(0);
+            plotData.vx.push(0);
+            plotData.vy.push(0);
+            plotData.vx_lpf.push(0);
+            plotData.vy_lpf.push(0);
+            plotData.zupt.push(0);
+            plotData.ax.push(0);
+            plotData.ay.push(0);
+            plotData.gz.push(0);
+            plotData.ax_lpf.push(0);
+            plotData.ay_lpf.push(0);
+            plotData.gz_lpf.push(0);
+            plotData.yaw.push(yawDeg);
+            plotData.ukf_yaw.push(ukfYawDeg);
+            plotData.times.push(total_time);
+        });
+
+        const blankErrors = x_axis.map(() => null);
+        plotData.accelSpectrum = {
+            ax: { freq: [], mag: [] },
+            ay: { freq: [], mag: [] },
+            ax_lpf: { freq: [], mag: [] },
+            ay_lpf: { freq: [], mag: [] }
+        };
+
+        self.postMessage({
+            simPath, simPathRuled, simPathWLS, simPathTriplet,
+            simPathUKF, simPathUKF_plot, simPathUKF_lpf, simPathUKF_lpf_plot,
+            simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes,
+            wlsInfo, bestTripletInfo,
+            plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist, ambiguityEvents,
+            pos_errors_fw: blankErrors, pos_errors: blankErrors, pos_errors_wls: blankErrors,
+            pos_errors_triplet: blankErrors, pos_errors_ukf: blankErrors, pos_errors_ukf_lpf: blankErrors,
+            x_axis, total_time
+        });
+        return;
+    }
+
     let sampleIdx = 0, total_time = 0;
     let last_ax = 0, last_ay = 0, last_gz = 0;
     let last_ax_lpf = 0, last_ay_lpf = 0, last_gz_lpf = 0;
-    let lpfInitialized = false;
+    let imuFilterInitialized = false;
+
+    const makeButterworthFilter = () => ({
+        first: { x1: 0, y1: 0 },
+        biquads: []
+    });
+    const butterFilters = {
+        ax: makeButterworthFilter(),
+        ay: makeButterworthFilter(),
+        gz: makeButterworthFilter()
+    };
+
+    const resetButterworthFilter = (filter, value) => {
+        filter.first.x1 = value;
+        filter.first.y1 = value;
+        filter.biquads = Array.from({ length: 3 }, () => ({
+            x1: value, x2: value, y1: value, y2: value
+        }));
+    };
+
+    const butterworthSectionQs = (order) => {
+        const qs = [];
+        const pairs = Math.floor(order / 2);
+        for (let i = 1; i <= pairs; i++) {
+            const angle = order % 2 === 0
+                ? ((2 * i - 1) * Math.PI) / (2 * order)
+                : (i * Math.PI) / order;
+            qs.push(1 / (2 * Math.cos(angle)));
+        }
+        return qs;
+    };
+
+    const applyFirstOrderLowpass = (state, x, cutoff, fs) => {
+        const k = Math.tan(Math.PI * cutoff / fs);
+        const norm = 1 / (1 + k);
+        const b0 = k * norm;
+        const b1 = b0;
+        const a1 = (k - 1) * norm;
+        const y = b0 * x + b1 * state.x1 - a1 * state.y1;
+        state.x1 = x;
+        state.y1 = y;
+        return y;
+    };
+
+    const applyBiquadLowpass = (state, x, cutoff, fs, q) => {
+        const omega = 2 * Math.PI * cutoff / fs;
+        const sinOmega = Math.sin(omega);
+        const cosOmega = Math.cos(omega);
+        const alpha = sinOmega / (2 * q);
+        const a0 = 1 + alpha;
+        const b0 = ((1 - cosOmega) / 2) / a0;
+        const b1 = (1 - cosOmega) / a0;
+        const b2 = b0;
+        const a1 = (-2 * cosOmega) / a0;
+        const a2 = (1 - alpha) / a0;
+        const y = b0 * x + b1 * state.x1 + b2 * state.x2 - a1 * state.y1 - a2 * state.y2;
+        state.x2 = state.x1;
+        state.x1 = x;
+        state.y2 = state.y1;
+        state.y1 = y;
+        return y;
+    };
+
+    const applyButterworthLowpass = (filter, x, dt) => {
+        const fs = Number.isFinite(dt) && dt > 0 ? 1 / dt : params.imu_sample_rate_hz;
+        if (!Number.isFinite(fs) || fs <= 0) return x;
+
+        const nyquist = fs / 2;
+        const maxCutoff = Math.max(0.01, nyquist * SIM_CONFIG.IMU.CUTOFF_NYQUIST_MARGIN);
+        const cutoff = Math.min(
+            Math.max(0.01, params.imu_lpf_cutoff_hz || SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ),
+            maxCutoff
+        );
+        const order = Math.min(
+            SIM_CONFIG.IMU.MAX_FILTER_ORDER,
+            Math.max(SIM_CONFIG.IMU.MIN_FILTER_ORDER, params.imu_filter_order || SIM_CONFIG.IMU.DEFAULT_FILTER_ORDER)
+        );
+
+        let y = x;
+        if (order % 2 === 1) {
+            y = applyFirstOrderLowpass(filter.first, y, cutoff, fs);
+        }
+        const qs = butterworthSectionQs(order);
+        for (let i = 0; i < qs.length; i++) {
+            y = applyBiquadLowpass(filter.biquads[i], y, cutoff, fs, qs[i]);
+        }
+        return y;
+    };
 
     const applyImuLpf = (entry) => {
         if (!params.enable_imu_lpf) {
             last_ax_lpf = entry.ax;
             last_ay_lpf = entry.ay;
             last_gz_lpf = entry.gz;
-            lpfInitialized = true;
+            imuFilterInitialized = true;
             return { ax: entry.ax, ay: entry.ay, gz: entry.gz };
         }
 
-        if (!lpfInitialized) {
+        if (!imuFilterInitialized) {
             last_ax_lpf = entry.ax;
             last_ay_lpf = entry.ay;
             last_gz_lpf = entry.gz;
-            lpfInitialized = true;
+            resetButterworthFilter(butterFilters.ax, entry.ax);
+            resetButterworthFilter(butterFilters.ay, entry.ay);
+            resetButterworthFilter(butterFilters.gz, entry.gz);
+            imuFilterInitialized = true;
             return { ax: last_ax_lpf, ay: last_ay_lpf, gz: last_gz_lpf };
         }
 
-        const cutoff = Math.max(0.01, params.imu_lpf_cutoff_hz || SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ);
-        const dt = Number.isFinite(entry.dt) && entry.dt > 0 ? entry.dt : 0;
-        const tau = 1 / (2 * Math.PI * cutoff);
-        const alpha = dt > 0 ? dt / (tau + dt) : 1;
-        last_ax_lpf += alpha * (entry.ax - last_ax_lpf);
-        last_ay_lpf += alpha * (entry.ay - last_ay_lpf);
-        last_gz_lpf += alpha * (entry.gz - last_gz_lpf);
+        last_ax_lpf = applyButterworthLowpass(butterFilters.ax, entry.ax, entry.dt);
+        last_ay_lpf = applyButterworthLowpass(butterFilters.ay, entry.ay, entry.dt);
+        last_gz_lpf = applyButterworthLowpass(butterFilters.gz, entry.gz, entry.dt);
         return { ax: last_ax_lpf, ay: last_ay_lpf, gz: last_gz_lpf };
     };
 

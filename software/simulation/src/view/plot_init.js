@@ -92,7 +92,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
            visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#059669', width: 2 } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion)',
            visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#8b5cf6', width: 2 } },
-        { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion + IMU LPF)',
+        { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion + IMU Butterworth)',
            visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#0ea5e9', width: 2 } }
     ], {
         margin: { t: 40, b: 100, l: 50, r: 50 },
@@ -163,14 +163,14 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 4. Accel
     Plotly.newPlot('accel', [
-        { x: [], y: [], name: 'Ax', mode: 'lines', type: 'scatter', line: { color: '#2563eb' },
+        { x: [], y: [], name: 'Ax', mode: 'lines', type: 'scatter', line: { color: '#2564eb8f' },
           hovertemplate: 'Ax: %{y:.3f} m/s²<extra></extra>' },
-        { x: [], y: [], name: 'Ay', mode: 'lines', type: 'scatter', line: { color: '#16a34a' },
+        { x: [], y: [], name: 'Ay', mode: 'lines', type: 'scatter', line: { color: '#53b577ba' },
           hovertemplate: 'Ay: %{y:.3f} m/s²<extra></extra>' },
-        { x: [], y: [], name: 'Ax LPF', mode: 'lines', type: 'scatter', line: { color: '#60a5fa', dash: 'dash', width: 2 },
-          hovertemplate: 'Ax LPF: %{y:.3f} m/s^2<extra></extra>' },
-        { x: [], y: [], name: 'Ay LPF', mode: 'lines', type: 'scatter', line: { color: '#86efac', dash: 'dash', width: 2 },
-          hovertemplate: 'Ay LPF: %{y:.3f} m/s^2<extra></extra>' },
+        { x: [], y: [], name: 'Ax Butterworth', mode: 'lines', type: 'scatter', line: { color: '#eb0808', dash: 'dash', width: 2 },
+          hovertemplate: 'Ax Butterworth: %{y:.3f} m/s^2<extra></extra>' },
+        { x: [], y: [], name: 'Ay Butterworth', mode: 'lines', type: 'scatter', line: { color: '#e30bff', dash: 'dash', width: 2 },
+          hovertemplate: 'Ay Butterworth: %{y:.3f} m/s^2<extra></extra>' },
         { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', yaxis: 'y2', mode: 'lines', line: { color: '#cbd5e1', width: 0 }, opacity: 0.3, hovertemplate: 'ZUPT Active<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
@@ -182,15 +182,15 @@ function initPlots(anchors, gt_square, rawData, samples) {
     });
 
     Plotly.newPlot('accel_spectrum', [
-        { x: [], y: [], name: 'Ax Spectrum', mode: 'lines', type: 'scatter', line: { color: '#2563eb', width: 2 },
+        { x: [], y: [], name: 'Ax Spectrum', mode: 'lines', type: 'scatter', line: { color: '#2564eb6c', width: 2 },
           hovertemplate: 'Ax %{x:.3f} Hz: %{y:.6f}<extra></extra>' },
-        { x: [], y: [], name: 'Ay Spectrum', mode: 'lines', type: 'scatter', line: { color: '#16a34a', width: 2 },
+        { x: [], y: [], name: 'Ay Spectrum', mode: 'lines', type: 'scatter', line: { color: '#16a34a6c', width: 2 },
           hovertemplate: 'Ay %{x:.3f} Hz: %{y:.6f}<extra></extra>' },
-        { x: [], y: [], name: 'Ax LPF Spectrum', mode: 'lines', type: 'scatter', line: { color: '#60a5fa', dash: 'dash', width: 2 },
-          hovertemplate: 'Ax LPF %{x:.3f} Hz: %{y:.6f}<extra></extra>' },
-        { x: [], y: [], name: 'Ay LPF Spectrum', mode: 'lines', type: 'scatter', line: { color: '#86efac', dash: 'dash', width: 2 },
-          hovertemplate: 'Ay LPF %{x:.3f} Hz: %{y:.6f}<extra></extra>' },
-        { x: [], y: [], name: 'LPF Cutoff', mode: 'lines', type: 'scatter', line: { color: '#ef4444', dash: 'dot', width: 2 },
+        { x: [], y: [], name: 'Ax Butterworth Spectrum', mode: 'lines', type: 'scatter', line: { color: 'rgb(234, 9, 159)', dash: 'dash', width: 2 },
+          hovertemplate: 'Ax Butterworth %{x:.3f} Hz: %{y:.6f}<extra></extra>' },
+        { x: [], y: [], name: 'Ay Butterworth Spectrum', mode: 'lines', type: 'scatter', line: { color: 'rgb(226, 11, 11)6c', dash: 'dash', width: 2 },
+          hovertemplate: 'Ay Butterworth %{x:.3f} Hz: %{y:.6f}<extra></extra>' },
+        { x: [], y: [], name: 'Butterworth Cutoff', mode: 'lines', type: 'scatter', line: { color: '#ef4444', dash: 'dot', width: 2 },
           hovertemplate: 'Cutoff: %{x:.3f} Hz<extra></extra>' }
     ], {
         margin: { t: 40, b: 40, l: 60, r: 40 },
@@ -205,8 +205,8 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], name: 'Vy Raw', mode: 'lines', type: 'scatter', line: { color: '#f87171', dash: 'dot', width: 1 }, visible: 'legendonly', hovertemplate: 'Vy Raw: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'Vx Clean', mode: 'lines', type: 'scatter', line: { color: '#2563eb', width: 2 }, hovertemplate: 'Vx: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'Vy Clean', mode: 'lines', type: 'scatter', line: { color: '#16a34a', width: 2 }, hovertemplate: 'Vy: %{y:.3f} m/s<extra></extra>' },
-        { x: [], y: [], name: 'Vx LPF', mode: 'lines', type: 'scatter', line: { color: '#60a5fa', dash: 'dash', width: 2 }, hovertemplate: 'Vx LPF: %{y:.3f} m/s<extra></extra>' },
-        { x: [], y: [], name: 'Vy LPF', mode: 'lines', type: 'scatter', line: { color: '#86efac', dash: 'dash', width: 2 }, hovertemplate: 'Vy LPF: %{y:.3f} m/s<extra></extra>' },
+        { x: [], y: [], name: 'Vx Butterworth', mode: 'lines', type: 'scatter', line: { color: '#60a5fa', dash: 'dash', width: 2 }, hovertemplate: 'Vx Butterworth: %{y:.3f} m/s<extra></extra>' },
+        { x: [], y: [], name: 'Vy Butterworth', mode: 'lines', type: 'scatter', line: { color: '#86efac', dash: 'dash', width: 2 }, hovertemplate: 'Vy Butterworth: %{y:.3f} m/s<extra></extra>' },
         { x: [], y: [], name: 'ZUPT Active', fill: 'tozeroy', yaxis: 'y2', mode: 'lines', line: { color: '#cbd5e1', width: 0 }, opacity: 0.3, hovertemplate: 'ZUPT Active<extra></extra>' },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ], {
@@ -221,8 +221,8 @@ function initPlots(anchors, gt_square, rawData, samples) {
     Plotly.newPlot('yaw_plot', [
         { x: [], y: [], name: 'Gyro Z', mode: 'lines', type: 'scatter', visible: isPathCsv ? false : true, line: { color: '#94a3b8', width: 1 }, yaxis: 'y2',
           hovertemplate: 'Gz: %{y:.4f} rad/s<extra></extra>' },
-        { x: [], y: [], name: 'Gyro Z LPF', mode: 'lines', type: 'scatter', visible: isPathCsv ? false : true, line: { color: '#38bdf8', dash: 'dash', width: 1.5 }, yaxis: 'y2',
-          hovertemplate: 'Gz LPF: %{y:.4f} rad/s<extra></extra>' },
+        { x: [], y: [], name: 'Gyro Z Butterworth', mode: 'lines', type: 'scatter', visible: isPathCsv ? false : true, line: { color: '#38bdf8', dash: 'dash', width: 1.5 }, yaxis: 'y2',
+          hovertemplate: 'Gz Butterworth: %{y:.4f} rad/s<extra></extra>' },
         { x: [], y: [], name: 'Yaw Angle', mode: 'lines', type: 'scatter', line: { color: '#7c3aed', width: 2 },
           hovertemplate: 'Yaw: %{y:.2f} deg<extra></extra>' },
         { x: [], y: [], name: 'UKF Yaw', mode: 'lines', type: 'scatter', line: { color: '#10b981', width: 2 },
@@ -263,7 +263,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], name: 'Pos Error (Multilateration)', mode: 'lines', type: 'scatter', line: { color: '#d97706', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Best Triplet)', mode: 'lines', type: 'scatter', line: { color: '#059669', width: 2 } },
         { x: [], y: [], name: 'Pos Error (UKF Fusion)', mode: 'lines', type: 'scatter', line: { color: '#8b5cf6', width: 2 } },
-        { x: [], y: [], name: 'Pos Error (UKF Fusion + IMU LPF)', mode: 'lines', type: 'scatter', line: { color: '#0ea5e9', width: 2 } },
+        { x: [], y: [], name: 'Pos Error (UKF Fusion + IMU Butterworth)', mode: 'lines', type: 'scatter', line: { color: '#0ea5e9', width: 2 } },
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ];
     Plotly.newPlot('pos_error', errTraces, {

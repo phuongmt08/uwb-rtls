@@ -44,6 +44,15 @@ function runSimulation() {
     if (!simWorker) return;
     anchors = readAnchorsFromInputs();
     const rescueNoiseMax = Math.min(5.0, Math.max(0.01, parseFloat(document.getElementById('r_range').value)));
+    const imuTiming = estimateImuTiming(rawData.all_entries);
+    const cutoffLimit = Math.max(0.05, imuTiming.nyquist_hz * SIM_CONFIG.IMU.CUTOFF_NYQUIST_MARGIN);
+    const cutoffInputValue = parseFloat(document.getElementById('imu_lpf_cutoff_range').value);
+    const requestedCutoff = Number.isFinite(cutoffInputValue) ? cutoffInputValue : SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ;
+    const imuCutoffHz = Math.min(Math.max(0.05, requestedCutoff), cutoffLimit);
+    const imuFilterOrder = Math.min(
+        SIM_CONFIG.IMU.MAX_FILTER_ORDER,
+        Math.max(SIM_CONFIG.IMU.MIN_FILTER_ORDER, parseInt(document.getElementById('imu_filter_order_range').value) || SIM_CONFIG.IMU.DEFAULT_FILTER_ORDER)
+    );
 
     const params = {
         T2_high: parseFloat(document.getElementById('t2_high_range').value),
@@ -55,7 +64,10 @@ function runSimulation() {
         enable_smoother: document.getElementById('enable_smoother').checked,
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
         enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
-        imu_lpf_cutoff_hz: parseFloat(document.getElementById('imu_lpf_cutoff_range').value),
+        imu_lpf_cutoff_hz: imuCutoffHz,
+        imu_filter_order: imuFilterOrder,
+        imu_sample_rate_hz: imuTiming.sample_rate_hz,
+        imu_nyquist_hz: imuTiming.nyquist_hz,
 
         // Add UKF Parameters
         ukf_alpha: parseFloat(document.getElementById('ukf_alpha_range').value),
@@ -84,6 +96,14 @@ function runSimulation() {
     document.getElementById('zupt_acc_val').innerText = params.zupt_acc;
     document.getElementById('zupt_gyr_val').innerText = params.zupt_gyr;
     document.getElementById('imu_lpf_cutoff_val').innerText = params.imu_lpf_cutoff_hz.toFixed(2);
+    document.getElementById('imu_filter_order_val').innerText = params.imu_filter_order;
+    document.getElementById('imu_filter_nyquist_val').innerText = Number.isFinite(params.imu_nyquist_hz) ? params.imu_nyquist_hz.toFixed(2) : '--';
+    document.getElementById('imu_lpf_cutoff_range').max = cutoffLimit.toFixed(2);
+    document.getElementById('imu_lpf_cutoff_input').max = cutoffLimit.toFixed(2);
+    if (requestedCutoff !== imuCutoffHz) {
+        document.getElementById('imu_lpf_cutoff_range').value = imuCutoffHz;
+        document.getElementById('imu_lpf_cutoff_input').value = imuCutoffHz.toFixed(2);
+    }
 
     // Update UKF value labels
     document.getElementById('ukf_alpha_val').innerText = params.ukf_alpha;
@@ -129,6 +149,7 @@ function openReplayPage() {
     }
     const imuLpfCutoffInput = document.getElementById('imu_lpf_cutoff_range');
     const enableImuLpfInput = document.getElementById('enable_imu_lpf');
+    const imuFilterOrderInput = document.getElementById('imu_filter_order_range');
 
     // Package data for replay
     const replayData = {
@@ -146,7 +167,9 @@ function openReplayPage() {
         ukfTimes20Hz: latestSimulationResult.simPathUKF_allTimes, // 20Hz timestamps
         imuLpfConfig: {
             enabled: enableImuLpfInput ? enableImuLpfInput.checked : true,
-            cutoff_hz: imuLpfCutoffInput ? parseFloat(imuLpfCutoffInput.value) : null
+            cutoff_hz: imuLpfCutoffInput ? parseFloat(imuLpfCutoffInput.value) : null,
+            order: imuFilterOrderInput ? parseInt(imuFilterOrderInput.value) : SIM_CONFIG.IMU.DEFAULT_FILTER_ORDER,
+            type: 'butterworth'
         },
         tripletPath: latestTrajectoryPaths.triplet,
         wlsPath: latestTrajectoryPaths.wls,
@@ -162,3 +185,23 @@ function openReplayPage() {
 
 // Override global update for compatibility with existing UI attributes (onchange="update()")
 window.update = requestUpdate;
+
+function estimateImuTiming(entries) {
+    const dts = [];
+    (entries || []).forEach(entry => {
+        if (entry && entry.type === 'Predict' && Number.isFinite(entry.dt) && entry.dt > 0) {
+            dts.push(entry.dt);
+        }
+    });
+    if (!dts.length) {
+        const fallbackFs = 2 * (SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ / SIM_CONFIG.IMU.CUTOFF_NYQUIST_MARGIN);
+        return { sample_rate_hz: fallbackFs, nyquist_hz: fallbackFs / 2 };
+    }
+    dts.sort((a, b) => a - b);
+    const medianDt = dts[Math.floor(dts.length / 2)];
+    const sampleRateHz = medianDt > 0 ? 1 / medianDt : 0;
+    return {
+        sample_rate_hz: sampleRateHz,
+        nyquist_hz: sampleRateHz / 2
+    };
+}

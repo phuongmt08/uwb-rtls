@@ -39,7 +39,11 @@ const SIM_CONFIG = {
         DEFAULT_ZUPT_ACC: 0.15,
         DEFAULT_ZUPT_GYR: 0.05,
         DEFAULT_ENABLE_LPF: true,
-        DEFAULT_LPF_CUTOFF_HZ: 2.0
+        DEFAULT_LPF_CUTOFF_HZ: 2.0,
+        DEFAULT_FILTER_ORDER: 2,
+        MIN_FILTER_ORDER: 1,
+        MAX_FILTER_ORDER: 6,
+        CUTOFF_NYQUIST_MARGIN: 0.95
     },
 
     // --- Visualization ---

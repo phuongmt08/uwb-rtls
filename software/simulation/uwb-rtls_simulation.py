@@ -157,7 +157,7 @@ def load_ground_truths():
 def parse_log(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         first_line = f.readline().strip()
-    if 'ukf_x' in first_line and 'tril_x' in first_line:
+    if first_line.startswith('sof,') and 'ukf_x' in first_line and 'tril_x' in first_line:
         return parse_path_csv_log(filepath)
 
     data = []
@@ -242,9 +242,7 @@ def parse_path_csv_log(filepath):
             reader = csv.DictReader(f)
             for line_no, row in enumerate(reader, 2):
                 frame = safe_int(row.get('tx_frame_cnt'), len(data))
-                if row.get('dt') not in (None, ''):
-                    dt = safe_float(row.get('dt'))
-                elif prev_frame is None:
+                if prev_frame is None:
                     dt = 0.0
                 else:
                     frame_delta = max(1, frame - prev_frame)
@@ -273,7 +271,7 @@ def parse_path_csv_log(filepath):
                     'fp_snr': [0, 0, 0, 0],
                     'mask': safe_int(row.get('anchor_mask'), 15),
                     'distances': [0.0, 0.0, 0.0, 0.0],
-                    'err': safe_int(row.get('error_cnt'), safe_int(row.get('error_frame_cnt'), 0))
+                    'err': safe_int(row.get('error_frame_cnt'), 0)
                 })
     except Exception:
         pass

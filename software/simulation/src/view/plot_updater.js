@@ -40,7 +40,7 @@ function updatePlots(res, samples, rawData) {
                 simPathWLS.x.map((_, i) => 'Idx: ' + i + '<br>Multilateration: ' + wlsInfo[i]),
                 simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i]),
                 simPathUKF.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion'),
-                simPathUKF_lpf.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion + IMU LPF')
+            simPathUKF_lpf.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion + IMU Butterworth')
             ]
         }, [2, 3, 4, 5, 6, 7]);
     }
@@ -138,7 +138,7 @@ function updatePlots(res, samples, rawData) {
                 `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
                 `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,
                 `Pos Error (UKF Fusion) Mean: ${meanErr(pos_errors_ukf)}m`,
-                `Pos Error (UKF Fusion + IMU LPF) Mean: ${meanErr(pos_errors_ukf_lpf)}m`
+            `Pos Error (UKF Fusion + IMU Butterworth) Mean: ${meanErr(pos_errors_ukf_lpf)}m`
             ],
             customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
         }, [0, 1, 2, 3, 4, 5]);
