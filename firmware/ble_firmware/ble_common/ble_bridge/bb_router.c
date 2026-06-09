@@ -43,7 +43,6 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length);
 static void bb_router_state_check_dst_handle(void);
 static void bb_router_state_process_cmd_handle(void);
 static void bb_router_state_forward_handle(void);
-static void bb_router_log_forward_packet(void);
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_router_init(void)
@@ -64,28 +63,31 @@ ret_code_t bb_router_init(void)
 
 void bb_router_process(void)
 {
-    switch (m_state) 
+    /* ---- Collapse state machine: process all ready states in one call ---- */
+
+    if (m_state == BB_ROUTER_STATE_IDLE)
     {
-        case BB_ROUTER_STATE_IDLE:
-            bb_transport_process();
-            break;
+        bb_transport_process();
+    }
 
-        case BB_ROUTER_STATE_CHECK_DST:
-            bb_router_state_check_dst_handle();
-            break;
+    if (m_state == BB_ROUTER_STATE_CHECK_DST)
+    {
+        bb_router_state_check_dst_handle();
+    }
 
-        case BB_ROUTER_STATE_PROCESS_CMD:
-            bb_router_state_process_cmd_handle();
-            break;
+    if (m_state == BB_ROUTER_STATE_PROCESS_CMD)
+    {
+        bb_router_state_process_cmd_handle();
+        /* BB_CMD_ACTION_BUSY keeps state at PROCESS_CMD, so we stop here */
+        if (m_state == BB_ROUTER_STATE_PROCESS_CMD)
+        {
+            return;
+        }
+    }
 
-        case BB_ROUTER_STATE_FORWARD:
-            bb_router_state_forward_handle();
-            break;
-
-        default:
-            m_state = BB_ROUTER_STATE_IDLE;
-            bb_transport_clear_packet_ready();
-            break;
+    if (m_state == BB_ROUTER_STATE_FORWARD)
+    {
+        bb_router_state_forward_handle();
     }
 }
 
@@ -135,45 +137,11 @@ static void bb_router_state_process_cmd_handle(void)
 
 static void bb_router_state_forward_handle(void)
 {
-    // Forward raw payload (Hoặc gói response đã được cmd handler đè lên payload buf nếu cần)
-    bb_router_log_forward_packet();
+    // Forward raw payload — skip expensive pb_decode log for throughput
     bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
 
     m_state = BB_ROUTER_STATE_IDLE;
     bb_transport_clear_packet_ready();
-}
-
-static void bb_router_log_forward_packet(void)
-{
-    protobuf_packet_t pkt = protobuf_packet_t_init_zero;
-    pb_istream_t stream = pb_istream_from_buffer(protobuf_buffer, protobuf_buffer_len);
-
-    if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
-    {
-        uint32_t src = 0xFFu;
-        uint32_t dst = 0xFFu;
-        uint32_t seq = 0xFFFFFFFFu;
-
-        if (pkt.has_hdr && pkt.hdr.has_addr)
-        {
-            src = pkt.hdr.addr.src;
-            dst = pkt.hdr.addr.dst;
-            seq = pkt.hdr.seq;
-        }
-
-        NRF_LOG_INFO("forward packet: msg_idx=%u src=%u dst=%u seq=%u target=%u len=%u",
-                     (unsigned)pkt.which_params,
-                     (unsigned)src,
-                     (unsigned)dst,
-                     (unsigned)seq,
-                     (unsigned)m_target_source,
-                     (unsigned)protobuf_buffer_len);
-        return;
-    }
-
-    NRF_LOG_WARNING("forward packet: decode failed target=%u len=%u",
-                    (unsigned)m_target_source,
-                    (unsigned)protobuf_buffer_len);
 }
 
 static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)

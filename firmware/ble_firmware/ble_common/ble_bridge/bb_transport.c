@@ -36,6 +36,71 @@ static bb_transport_state_transition_cb_t m_rx_cb = NULL;
 
 static hdlc_parser_t m_hdlc_parser;
 
+#define RX_RING_BUFFER_SIZE 512
+static volatile uint16_t m_rx_ring_head = 0;
+static volatile uint16_t m_rx_ring_tail = 0;
+static uint8_t m_rx_ring_buf[RX_RING_BUFFER_SIZE];
+
+static void rx_ring_push(uint8_t byte)
+{
+    uint16_t next = (m_rx_ring_head + 1) % RX_RING_BUFFER_SIZE;
+    if (next != m_rx_ring_tail)
+    {
+        m_rx_ring_buf[m_rx_ring_head] = byte;
+        m_rx_ring_head = next;
+    }
+}
+
+static bool rx_ring_pop(uint8_t *p_byte)
+{
+    uint16_t tail = m_rx_ring_tail;
+    if (m_rx_ring_head == tail)
+    {
+        return false;
+    }
+    *p_byte = m_rx_ring_buf[tail];
+    m_rx_ring_tail = (tail + 1) % RX_RING_BUFFER_SIZE;
+    return true;
+}
+
+/* ---- BLE Packet Queue (for raw protobuf packets received via BLE) ---- */
+#define BLE_PKT_QUEUE_SIZE  4
+#define BLE_PKT_MAX_LEN     256
+
+typedef struct {
+    uint8_t data[BLE_PKT_MAX_LEN];
+    uint16_t len;
+} ble_pkt_t;
+
+static ble_pkt_t m_ble_pkt_queue[BLE_PKT_QUEUE_SIZE];
+static volatile uint8_t m_ble_pkt_head = 0;
+static volatile uint8_t m_ble_pkt_tail = 0;
+
+static bool ble_pkt_push(uint8_t const * p_data, uint16_t length)
+{
+    uint8_t next = (m_ble_pkt_head + 1) % BLE_PKT_QUEUE_SIZE;
+    if (next == m_ble_pkt_tail)
+    {
+        return false; // Queue full
+    }
+    memcpy(m_ble_pkt_queue[m_ble_pkt_head].data, p_data, length);
+    m_ble_pkt_queue[m_ble_pkt_head].len = length;
+    m_ble_pkt_head = next;
+    return true;
+}
+
+static bool ble_pkt_pop(uint8_t * p_data, uint16_t * p_length)
+{
+    if (m_ble_pkt_head == m_ble_pkt_tail)
+    {
+        return false; // Queue empty
+    }
+    *p_length = m_ble_pkt_queue[m_ble_pkt_tail].len;
+    memcpy(p_data, m_ble_pkt_queue[m_ble_pkt_tail].data, *p_length);
+    m_ble_pkt_tail = (m_ble_pkt_tail + 1) % BLE_PKT_QUEUE_SIZE;
+    return true;
+}
+
 /* Private function prototypes ---------------------------------------- */
 // static void on_rx_byte(uint8_t byte);
 static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t length);
@@ -53,6 +118,12 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     
     m_rx_cb = cb;
     m_is_packet_ready = false;
+    
+    m_rx_ring_head = 0;
+    m_rx_ring_tail = 0;
+    
+    m_ble_pkt_head = 0;
+    m_ble_pkt_tail = 0;
     
     // Khởi tạo state machine HDLC
     hdlc_parser_init(&m_hdlc_parser);
@@ -78,11 +149,51 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 void bb_transport_process(void)
 {
     #if defined(BLE_PERIPHERAL)
-    // Cỗ máy trạng thái giờ đây chạy tự động dựa vào event callback (on_rx_byte)
-    // được ngắt từ UART (APP_UART_DATA_READY) gọi lên.
-    // Nên hàm này có thể bỏ trống, hoặc có thể dùng xử lý các tác vụ delay timeout nếu cần sau này.
     bsp_uart_read_byte();
     #endif
+
+    /* 1. Drain serial ring buffer (UART/USB HDLC bytes) */
+    uint8_t byte;
+    while (!m_is_packet_ready && rx_ring_pop(&byte))
+    {
+        if (p_protobuf_buffer != NULL && p_protobuf_len != NULL)
+        {
+            hdlc_data_chunk_t rx_chunk;
+            if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk))
+            {
+                if (rx_chunk.len <= m_max_payload_len)
+                {
+                    *p_protobuf_len = rx_chunk.len;
+                    if (rx_chunk.len > 0)
+                    {
+                        memcpy(p_protobuf_buffer, rx_chunk.data, rx_chunk.len);
+                    }
+                    m_is_packet_ready = true;
+
+                    if (m_rx_cb != NULL)
+                    {
+                        m_rx_cb();
+                    }
+                }
+            }
+        }
+    }
+
+    /* 2. Drain BLE packet queue (raw protobuf packets from BLE link) */
+    if (!m_is_packet_ready && p_protobuf_buffer != NULL && p_protobuf_len != NULL)
+    {
+        uint16_t pkt_len;
+        if (ble_pkt_pop(p_protobuf_buffer, &pkt_len))
+        {
+            *p_protobuf_len = pkt_len;
+            m_is_packet_ready = true;
+
+            if (m_rx_cb != NULL)
+            {
+                m_rx_cb();
+            }
+        }
+    }
 }
 
 bool bb_transport_is_packet_ready(void)
@@ -163,60 +274,26 @@ static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
 uint32_t count_data = 0;
 void on_rx_byte(uint8_t byte)
 {
-    // Nếu buffer hiện tại chưa được Router xử lý xong thì drop byte mới
-    // để đảm bảo không bị ghi đè dữ liệu (nguyên tắc Zero-Copy)
-    if (m_is_packet_ready || p_protobuf_buffer == NULL || p_protobuf_len == NULL) {
-        return;
-    }
-
-    hdlc_data_chunk_t rx_chunk;
-    // NRF_LOG_INFO("Received byte: 0x%02X, count=%u\n", byte, ++count_data);
-
-    if (hdlc_parse_byte(&m_hdlc_parser, byte, &rx_chunk)) 
-
-    {   
-        // Copy data payload sang buffer do Router truyền xuống
-        if (rx_chunk.len <= m_max_payload_len) 
-        {
-            *p_protobuf_len = rx_chunk.len;
-            if (rx_chunk.len > 0) 
-            {
-                memcpy(p_protobuf_buffer, rx_chunk.data, rx_chunk.len);
-            }
-            m_is_packet_ready = true;
-
-            // Gọi callback chuyển đổi State cho bb_router
-            if (m_rx_cb != NULL) 
-            {
-                m_rx_cb(); 
-            }
-        }
-    }
+    rx_ring_push(byte);
 }
 
+/**
+ * @brief Hàm callback được gọi khi nhận raw protobuf packet từ BLE link.
+ *        Đẩy vào BLE packet queue thay vì copy thẳng vào protobuf_buffer
+ *        để tránh drop gói khi m_is_packet_ready == true.
+ */
 static void on_rx_ble(uint8_t const * p_data, uint16_t length)
 {
-    if (p_data == NULL || length == 0 || length > m_max_payload_len) 
+    if (p_data == NULL || length == 0 || length > BLE_PKT_MAX_LEN) 
     {
         return;
     }
 
-    if (m_is_packet_ready)
+    if (!ble_pkt_push(p_data, length))
     {
-        return;
-    }
-
-    if (p_protobuf_buffer != NULL && p_protobuf_len != NULL) 
-    {
-        memcpy(p_protobuf_buffer, p_data, length);
-        *p_protobuf_len = length;
-        m_is_packet_ready = true;
-
-        if (m_rx_cb != NULL) 
-        {
-            m_rx_cb(); 
-        }
+        NRF_LOG_WARNING("BLE RX queue full, dropping packet len=%u", length);
     }
 }
 
 /* End of file -------------------------------------------------------- */
+

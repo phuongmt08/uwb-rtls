@@ -25,8 +25,8 @@
 #define OBJECT_CODE                     LOG_OBJECT_CODE_NETWORK
 #define RESP_RETRY_MAX                  2
 #define RESP_RETRY_DELAY_MS             200
-#define WAIT_TIME_TO_RESEND_ACK_MS      1500u
-#define WAIT_TIME_TO_CLEAR_LOG_MS       2000u
+#define WAIT_TIME_TO_RESEND_ACK_MS      30000u
+#define WAIT_TIME_TO_CLEAR_LOG_MS       30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
 #define SENSOR_FUSION_STREAM_PERIOD_MS  50u
 
@@ -754,6 +754,13 @@ static void network_cmd_log_data_get(const protobuf_packet_t *pkt)
 
     s_log_stream_enabled = true;
     s_log_stream_dst     = (uint8_t)pkt->hdr.addr.src;
+
+    if (s_log_tracker.waiting_ack) {
+        s_log_tracker.waiting_ack = false;
+        s_log_tracker.waiting_clear = false;
+        s_log_tracker.log_len = 0u;
+        s_log_tracker.sent_tick = 0u;
+    }
 
     protobuf_packet_t sample;
     uint16_t max_payload = (uint16_t)sizeof(sample.params.log_data.data.bytes);

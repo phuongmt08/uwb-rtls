@@ -38,6 +38,7 @@
 #include "nrf_drv_gpiote.h"
 #include "app_timer.h"
 #include "app_button.h"
+#include "nrf_delay.h"
 #include "app_util.h"
 
 #include "bsp_led.h"
@@ -1050,11 +1051,22 @@ uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length)
             send_len = current_payload_mtu;
         }
 
-        ret_code_t err_code = ble_nus_c_string_send(&m_ble_nus_c, (uint8_t *)(p_data + offset), send_len);
+        ret_code_t err_code;
+        uint32_t retries = 0;
+        do
+        {
+            err_code = ble_nus_c_string_send(&m_ble_nus_c, (uint8_t *)(p_data + offset), send_len);
+            if (err_code == NRF_ERROR_RESOURCES)
+            {
+                // Spin wait instead of blocking delay to prevent freezing main loop
+                nrf_delay_ms(2);
+                retries++;
+            }
+        } while (err_code == NRF_ERROR_RESOURCES && retries < 50);
 
         if (err_code == NRF_ERROR_RESOURCES)
         {
-            NRF_LOG_WARNING("BLE Central TX buffer full, dropping remaining: %u", length - offset);
+            NRF_LOG_WARNING("BLE Central TX buffer full after retries, dropping remaining: %u", length - offset);
             return err_code;
         }
         else if (err_code != NRF_SUCCESS)

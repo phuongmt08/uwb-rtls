@@ -23,6 +23,8 @@
 #include "nrf_log.h"
 #include "ble_nus.h"
 #include "../ble_common/ble_config.h"
+#include "nrf_delay.h"
+
 
 #define DEVICE_NAME                     SYSTEM_CONFIG_DEVICE_PREFIX "01"
 
@@ -473,13 +475,22 @@ uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
             send_len = current_payload_mtu;
         }
 
-        ret_code_t err_code = ble_nus_data_send(&m_nus, (uint8_t *)(p_data + offset), &send_len, m_conn_handle);
+        ret_code_t err_code;
+        uint32_t retries = 0;
+        do
+        {
+            err_code = ble_nus_data_send(&m_nus, (uint8_t *)(p_data + offset), &send_len, m_conn_handle);
+            if (err_code == NRF_ERROR_RESOURCES)
+            {
+                // Spin wait instead of blocking delay to prevent freezing main loop
+                nrf_delay_ms(2);
+                retries++;
+            }
+        } while (err_code == NRF_ERROR_RESOURCES && retries < 50);
         
         if (err_code == NRF_ERROR_RESOURCES)
         {
-            // Tràn bộ đệm TX Notification của SoftDevice, thoát ra chờ nhịp sau hoặc loop chờ.
-            // Phải chú ý vì đây có thể gọi từ UART IRQ, nên không delay.
-            NRF_LOG_WARNING("BLE TX buffer full, dropping remaining byte: %u", length - offset);
+            NRF_LOG_WARNING("BLE TX buffer full after retries, dropping remaining byte: %u", length - offset);
             return err_code;
         }
         else if (err_code != NRF_SUCCESS)
