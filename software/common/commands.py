@@ -361,13 +361,15 @@ class CommandFactory:
         pkt.anchor_layout_get.dummy = 0
         return pkt
 
-    def anchor_layout_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def anchor_layout_set(self, src: int, dst: int, seq: int, anchors: list | None = None) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        anchor = pkt.anchor_layout_set.anchors.add()
-        anchor.anchor_id = 1
-        anchor.x_m = 0.0
-        anchor.y_m = 0.0
-        anchor.z_m = 2.5
+        if anchors:
+            for a in anchors:
+                anchor = pkt.anchor_layout_set.anchors.add()
+                anchor.anchor_id = int(a.get("anchor_id", 0))
+                anchor.x_m = float(a.get("x_m", 0.0))
+                anchor.y_m = float(a.get("y_m", 0.0))
+                anchor.z_m = float(a.get("z_m", 0.0))
         return pkt
 
     def anchor_layout_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:

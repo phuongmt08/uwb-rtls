@@ -44,6 +44,10 @@ class ConfigTab(QWidget):
         # Apply initial mode
         self.set_developer_mode(self._is_developer)
 
+        # Track the active device identity to refine layout read/write behavior
+        self._current_role = 1  # Default: Tag
+        self._current_device_id = 0
+
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
         self._dev_widgets = [
@@ -107,29 +111,108 @@ class ConfigTab(QWidget):
         
         # Connect UI buttons to viewmodel actions
         self.btn_read_anchor.clicked.connect(self._vm.read_anchor_layout)
+        self.btn_write_anchor.clicked.connect(self._write_anchor_layout)
         self.btn_rng_read.clicked.connect(self._vm.read_ranging_config)
         self.btn_device_reset.clicked.connect(self._vm.device_reset)
         self.btn_uwb_reset.clicked.connect(self._vm.uwb_reset)
         self.btn_factory.clicked.connect(self._vm.factory_reset)
 
+    def _write_anchor_layout(self):
+        anchors = []
+        for row in range(self.anchor_table.rowCount()):
+            id_item = self.anchor_table.item(row, 0)
+            x_item = self.anchor_table.item(row, 1)
+            y_item = self.anchor_table.item(row, 2)
+            z_item = self.anchor_table.item(row, 3)
+            
+            if not id_item or not x_item or not y_item or not z_item:
+                continue
+                
+            try:
+                # Strip prefix 'A' or 'a' if present (e.g. 'A0' -> 0)
+                anchor_id_str = id_item.text().strip()
+                if anchor_id_str.startswith('A') or anchor_id_str.startswith('a'):
+                    anchor_id = int(anchor_id_str[1:])
+                else:
+                    anchor_id = int(anchor_id_str)
+                    
+                x_m = float(x_item.text().strip())
+                y_m = float(y_item.text().strip())
+                z_m = float(z_item.text().strip())
+                
+                anchors.append({
+                    "anchor_id": anchor_id,
+                    "x_m": x_m,
+                    "y_m": y_m,
+                    "z_m": z_m
+                })
+            except ValueError:
+                # Ignore invalid rows
+                pass
+        
+        if self._vm:
+            self._vm.write_anchor_layout(anchors)
+
     def _on_anchor_layout_loaded(self, anchors):
-        self.anchor_table.setRowCount(0)
-        for a in anchors:
-            row = self.anchor_table.rowCount()
-            self.anchor_table.insertRow(row)
-            self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{a['anchor_id']}"))
-            self.anchor_table.setItem(row, 1, QTableWidgetItem(f"{a['x_m']:.2f}"))
-            self.anchor_table.setItem(row, 2, QTableWidgetItem(f"{a['y_m']:.2f}"))
-            self.anchor_table.setItem(row, 3, QTableWidgetItem(f"{a['z_m']:.2f}"))
+        if self._current_role == 2:  # Anchor
+            # Only update the row matching our current connected Anchor device ID
+            target_anchor = None
+            for a in anchors:
+                if a.get("anchor_id") == self._current_device_id:
+                    target_anchor = a
+                    break
+            # Fallback to first anchor if none matches but list is non-empty
+            if not target_anchor and anchors:
+                target_anchor = anchors[0]
+            
+            if target_anchor:
+                self._update_single_anchor_in_table(
+                    target_anchor.get("anchor_id", self._current_device_id),
+                    target_anchor.get("x_m", 0.0),
+                    target_anchor.get("y_m", 0.0),
+                    target_anchor.get("z_m", 0.0)
+                )
+        else:  # Tag or Gateway (role 1 or 3): has full room layout, update all rows
+            self.anchor_table.setRowCount(0)
+            for a in anchors:
+                row = self.anchor_table.rowCount()
+                self.anchor_table.insertRow(row)
+                self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{a['anchor_id']}"))
+                self.anchor_table.setItem(row, 1, QTableWidgetItem(f"{a['x_m']:.2f}"))
+                self.anchor_table.setItem(row, 2, QTableWidgetItem(f"{a['y_m']:.2f}"))
+                self.anchor_table.setItem(row, 3, QTableWidgetItem(f"{a['z_m']:.2f}"))
+
+    def _update_single_anchor_in_table(self, anchor_id, x_m, y_m, z_m):
+        target_row = -1
+        for row in range(self.anchor_table.rowCount()):
+            item = self.anchor_table.item(row, 0)
+            if item:
+                text = item.text().strip()
+                if text == f"A{anchor_id}" or text == f"a{anchor_id}" or text == str(anchor_id):
+                    target_row = row
+                    break
+        
+        if target_row == -1:
+            target_row = self.anchor_table.rowCount()
+            self.anchor_table.insertRow(target_row)
+            self.anchor_table.setItem(target_row, 0, QTableWidgetItem(f"A{anchor_id}"))
+            
+        self.anchor_table.setItem(target_row, 1, QTableWidgetItem(f"{x_m:.2f}"))
+        self.anchor_table.setItem(target_row, 2, QTableWidgetItem(f"{y_m:.2f}"))
+        self.anchor_table.setItem(target_row, 3, QTableWidgetItem(f"{z_m:.2f}"))
 
     def _on_sys_config_loaded(self, cfg):
+        # Save active device role and ID
+        self._current_role = cfg.get("role", 1)
+        self._current_device_id = cfg.get("device_id", 0)
+
         # Map channel
         chan = str(cfg.get("uwb_channel", 5))
         self.val_channel.setCurrentText(chan)
         
         # Map role (1 = Tag, 2 = Anchor, 3 = Gateway)
         role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}
-        role = role_map.get(cfg.get("role", 1), "Tag")
+        role = role_map.get(self._current_role, "Tag")
         self.val_role.setCurrentText(role)
         
         # Map data rate (1 = 110kbps, 2 = 850kbps, 3 = 6.8Mbps)

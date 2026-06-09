@@ -95,8 +95,8 @@ class VvProtocol(_VvProtocol):
         return self._commands.pos_calib_cfg_resp(src, dst, seq)
     def build_anchor_layout_get(self, src: int, dst: int, seq: int):
         return self._commands.anchor_layout_get(src, dst, seq)
-    def build_anchor_layout_set(self, src: int, dst: int, seq: int):
-        return self._commands.anchor_layout_set(src, dst, seq)
+    def build_anchor_layout_set(self, src: int, dst: int, seq: int, anchors: list | None = None):
+        return self._commands.anchor_layout_set(src, dst, seq, anchors)
     def build_anchor_layout_resp(self, src: int, dst: int, seq: int):
         return self._commands.anchor_layout_resp(src, dst, seq)
     def build_flash_verify(self, src: int, dst: int, seq: int):

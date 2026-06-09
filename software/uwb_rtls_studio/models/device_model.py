@@ -62,7 +62,6 @@ class DeviceModel(QObject):
     time_sync_result = pyqtSignal(dict)       # {dev_time_ms, host_time_ms, tz_offset_sec, time_diff_ms, is_synced, was_corrected}
     scan_data_updated = pyqtSignal(list)      # merged advertising device list
     connection_state_changed = pyqtSignal(dict)  # {name, mac, status}
-    anchor_layout_parsed = pyqtSignal(list)
     sys_config_parsed = pyqtSignal(dict)
     sys_ranging_cfg_parsed = pyqtSignal(dict)
     sensor_fusion_cfg_parsed = pyqtSignal(dict)
@@ -295,8 +294,6 @@ class DeviceModel(QObject):
             self._handle_adv_status(pkt.ble_adv_status)
         elif param_name == "ble_conn_params_resp":
             self._handle_ble_conn_params(pkt.ble_conn_params_resp)
-        elif param_name == "anchor_layout_resp":
-            self._handle_anchor_layout(pkt.anchor_layout_resp)
         elif param_name == "sys_config_resp":
             self._handle_sys_config(pkt.sys_config_resp)
         elif param_name == "sys_ranging_cfg_resp":
@@ -424,17 +421,6 @@ class DeviceModel(QObject):
             "is_synced": is_synced,
             "was_corrected": was_corrected,
         })
-
-    def _handle_anchor_layout(self, resp):
-        anchors = []
-        for a in resp.anchors:
-            anchors.append({
-                "anchor_id": a.anchor_id,
-                "x_m": a.x_m,
-                "y_m": a.y_m,
-                "z_m": a.z_m,
-            })
-        self.anchor_layout_parsed.emit(anchors)
 
     def _handle_sys_config(self, resp):
         cfg = resp.config

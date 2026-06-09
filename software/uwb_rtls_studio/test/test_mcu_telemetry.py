@@ -153,21 +153,35 @@ def main():
                                 
                                 # In các trường dữ liệu chi tiết trong packet
                                 param_val = getattr(pkt, param_name)
-                                for field, value in param_val.ListFields():
-                                    if field.name == "mac_address" and isinstance(value, bytes):
-                                        mac_str = ":".join(f"{b:02X}" for b in value)
-                                        print(f"      - {field.name}: {mac_str}")
-                                    elif field.name == "state" and param_name == "ble_status_resp":
-                                        ble_state = value
-                                        state_name = pb.ble_state_t.Name(value)
-                                        print(f"      - state: {state_name} ({value})")
-                                    elif field.name == "device" and param_name == "ble_adv_status":
-                                        dev_type_name = pb.device_type_t.Name(value)
-                                        print(f"      - device_type: {dev_type_name} ({value})")
-                                    elif field.name == "status_flags" and param_name == "ble_adv_status":
-                                        print(f"      - status_flags: 0b{value:08b} (0x{value:02X})")
-                                    else:
-                                        print(f"      - {field.name}: {value}")
+                                from google.protobuf.message import Message
+                                def print_protobuf_message(msg, indent=6):
+                                    for field, value in msg.ListFields():
+                                        if field.name == "mac_address" and isinstance(value, bytes):
+                                            mac_str = ":".join(f"{b:02X}" for b in value)
+                                            print(f"{' ' * indent}- {field.name}: {mac_str}")
+                                        elif isinstance(value, Message):
+                                            print(f"{' ' * indent}- {field.name} (message):")
+                                            print_protobuf_message(value, indent + 3)
+                                        elif "Repeated" in str(type(value)) or isinstance(value, (list, tuple)):
+                                            print(f"{' ' * indent}- {field.name} (list):")
+                                            for item in value:
+                                                if isinstance(item, Message):
+                                                    print(f"{' ' * (indent + 3)}- Item:")
+                                                    print_protobuf_message(item, indent + 6)
+                                                else:
+                                                    print(f"{' ' * (indent + 3)}- {item}")
+                                        else:
+                                            if field.type == field.TYPE_ENUM:
+                                                try:
+                                                    enum_desc = field.enum_type
+                                                    enum_name = enum_desc.values_by_number[value].name
+                                                    print(f"{' ' * indent}- {field.name}: {enum_name} ({value})")
+                                                except Exception:
+                                                    print(f"{' ' * indent}- {field.name}: {value}")
+                                            else:
+                                                print(f"{' ' * indent}- {field.name}: {value}")
+
+                                print_protobuf_message(param_val)
                                         
                         except Exception as e:
                             if script_state == "TELEMETRY":
@@ -271,12 +285,29 @@ def main():
     print("  Bấm Ctrl + C để dừng kiểm tra.                              ")
     print("==============================================================")
     
+    # Gửi thử nghiệm ghi tọa độ anchor layout một lần khi bắt đầu chế độ telemetry
+    print("\n--- [TESTING ANCHOR LAYOUT SET] ---")
+    dummy_anchors = [
+        {"anchor_id": 0, "x_m": 0.0, "y_m": 0.0, "z_m": 1.2},
+        {"anchor_id": 1, "x_m": 5.0, "y_m": 0.0, "z_m": 1.5},
+        {"anchor_id": 2, "x_m": 0.0, "y_m": 4.0, "z_m": 1.5},
+        {"anchor_id": 3, "x_m": 5.0, "y_m": 4.0, "z_m": 1.8},
+    ]
+    send_packet("anchor_layout_set", dst_addr=pb.PACKET_ADDR_MCU, anchors=dummy_anchors)
+    time.sleep(1.0)
+    
     try:
         while is_running:
             # Gửi các gói tin yêu cầu lấy dữ liệu từ MCU (Host -> MCU)
             print("\n--- [START QUERY PERIOD] ---")
             send_packet("device_information_get", dst_addr=pb.PACKET_ADDR_MCU)
             send_packet("battery_info_get", dst_addr=pb.PACKET_ADDR_MCU)
+            send_packet("time_sync_get", dst_addr=pb.PACKET_ADDR_MCU)
+            send_packet("anchor_layout_get", dst_addr=pb.PACKET_ADDR_MCU)
+            send_packet("sys_config_get", dst_addr=pb.PACKET_ADDR_MCU)
+            send_packet("sys_ranging_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
+            send_packet("sensor_fusion_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
+            send_packet("pos_calib_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
             
             # Gửi yêu cầu lấy trạng thái/tham số kết nối từ Central (Host -> Central)
             send_packet("ble_status_get", dst_addr=pb.PACKET_ADDR_CENTRAL)

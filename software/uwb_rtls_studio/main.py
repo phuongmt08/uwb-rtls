@@ -130,7 +130,7 @@ def main():
     device_info_vm = DeviceInfoViewModel(device_model, dongle_model)
     
     from viewmodels.config_viewmodel import ConfigViewModel
-    config_vm = ConfigViewModel(device_model)
+    config_vm = ConfigViewModel(device_model, ranging_model)
 
     # Seed the connected device info so the tab shows it immediately
     if connected_name and connected_mac:

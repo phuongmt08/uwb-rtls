@@ -134,13 +134,14 @@ class ConfigViewModel(QObject):
     sensor_fusion_cfg_updated = pyqtSignal(dict)
     pos_calib_cfg_updated = pyqtSignal(dict)
 
-    def __init__(self, device_model, parent=None):
+    def __init__(self, device_model, ranging_model, parent=None):
         super().__init__(parent)
         self.model = device_model
+        self.ranging_model = ranging_model
         self.protocol = device_model._protocol
 
         # Bind Model parsed signals to ViewModel update signals
-        self.model.anchor_layout_parsed.connect(self.anchor_layout_updated.emit)
+        self.ranging_model.anchor_layout_updated.connect(self.anchor_layout_updated.emit)
         self.model.sys_config_parsed.connect(self.sys_config_updated.emit)
         self.model.sys_ranging_cfg_parsed.connect(self.sys_ranging_cfg_updated.emit)
         self.model.sensor_fusion_cfg_parsed.connect(self.sensor_fusion_cfg_updated.emit)
@@ -151,6 +152,10 @@ class ConfigViewModel(QObject):
     def read_anchor_layout(self):
         log.info("Requesting anchor layout from MCU...")
         self.protocol.send_command("anchor_layout_get", dst_addr=VvAddress.MCU)
+
+    def write_anchor_layout(self, anchors: list):
+        log.info("Sending anchor layout set command to MCU: %s", anchors)
+        self.protocol.send_command("anchor_layout_set", dst_addr=VvAddress.MCU, anchors=anchors)
 
     def read_ranging_config(self):
         log.info("Requesting system ranging config from MCU...")
