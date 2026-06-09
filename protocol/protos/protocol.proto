@@ -88,12 +88,13 @@ enum flash_addr_region_t {
 }
 
 enum ble_state_t {
-    BLE_STATE_UNSPECIFIED = 0;
-    BLE_STATE_IDLE        = 1;
-    BLE_STATE_SCANNING    = 2;
-    BLE_STATE_ADVERTISING = 3;
-    BLE_STATE_CONNECTING  = 4;
-    BLE_STATE_CONNECTED   = 5;
+    BLE_STATE_UNSPECIFIED   = 0;
+    BLE_STATE_IDLE          = 1;
+    BLE_STATE_SCANNING      = 2;
+    BLE_STATE_ADVERTISING   = 3;
+    BLE_STATE_CONNECTING    = 4;
+    BLE_STATE_CONNECTED     = 5;
+    BLE_STATE_DISCONNECTED  = 6;
 }
 
 enum host_transport_t {
@@ -396,7 +397,7 @@ message ble_status_get_t {
 message ble_status_resp_t {
     ble_state_t state        = 1;
     int32 rssi_dbm           = 2;  /* valid only when connected */
-    optional uint32 disconnect_reason = 3;  
+    uint32 disconnect_reason = 3;  
 }
 
 message ble_scan_result_t {

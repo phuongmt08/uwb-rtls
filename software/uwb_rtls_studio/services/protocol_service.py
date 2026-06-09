@@ -3,25 +3,31 @@
   UWB RTLS Studio — Protocol Service
 ===============================================================================
   File        : services/protocol_service.py
-  Description : Encode/decode protobuf packets qua HDLC framing.
-                Wraps common/transport.py + common/commands.py.
-                Central dispatcher: route decoded packets → subscribers.
+  Description : Encapsulates Protobuf packet serialization/deserialization wrapped in HDLC.
+                Acts as the central dispatcher routing parsed packets to subscriber models.
 
-  MVVM Role   : SERVICE — protocol layer.
-
+  MVVM Role   : SERVICE — Protocol serialization and routing.
   Giải thích flow:
-    RX (nhận):
-      SerialService.data_received → on_serial_data()
-        → HdlcCodec.feed() → decode protobuf → emit packet_received
-    TX (gửi):
-      send_command(packet_t) → HDLC wrap → SerialService.write()
+        RX (nhận):
+        SerialService.data_received → on_serial_data()
+            → HdlcCodec.feed() → decode protobuf → emit packet_received
+        TX (gửi):
+        send_command(packet_t) → HDLC wrap → SerialService.write()
+  Thread Model:
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ 🧵 Thread Contexts:                                                     │
+    │ 1. Main GUI Thread:                                                     │
+    │    - `send_command()` and `send_packet()` run on this thread.          │
+    │    - `on_serial_data()` is executed here: raw bytes emitted from the    │
+    │      background thread are marshalled to the Main GUI Thread via Qt's  │
+    │      thread-safe Event Loop (Queued Connection).                        │
+    │    - Decoded packet signals are emitted on the Main GUI Thread.         │
+    └────────────────────────────────────────────────────────────────────────┘
 
   Signals:
-    - packet_received(str, object)  → (param_name, packet_t)
-    - ack_received(int, int)        → (ack_seq, response_code)
-    - decode_error(str)             → lỗi decode
-
-  Dependencies: common.transport, common.commands
+    - packet_received(str, object)  : (param_name, packet_t) dispatched to Models.
+    - ack_received(int, int)        : (ack_seq, response_code) for transactions.
+    - decode_error(str)             : Decapsulation or parsing failure alert.
 ===============================================================================
 """
 from __future__ import annotations

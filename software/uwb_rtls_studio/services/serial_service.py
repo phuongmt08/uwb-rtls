@@ -3,8 +3,8 @@
   UWB RTLS Studio — Serial Service
 ===============================================================================
   File        : services/serial_service.py
-  Description : Singleton quản lý kết nối Serial/USB giữa PC và Dongle.
-                Chạy read thread riêng biệt, gửi data qua signal.
+  Description : Manages serial/USB connection between PC and the NRF52840 Dongle.
+                Spawns a dedicated background thread for non-blocking raw reads.
 
   MVVM Role   : SERVICE — I/O layer.
 

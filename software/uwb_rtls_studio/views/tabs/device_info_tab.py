@@ -91,6 +91,10 @@ class DeviceInfoTab(QWidget):
         self._bat_pct = self.bat_pct
         self._bat_bar = self.bat_bar
 
+        # Time labels
+        self._time_local = self.val_time_local
+        self._time_status = self.val_time_sync_status
+
         # Scan status removed by user
 
         # Advertising table
@@ -105,12 +109,15 @@ class DeviceInfoTab(QWidget):
         self._adv_table.setColumnWidth(4,100)
         self._adv_table.setColumnWidth(5,110)
         self._adv_table.setColumnWidth(6,110)
+        self._adv_table.setColumnWidth(7,90)
     def set_viewmodel(self, vm):
         self._vm = vm
         self._vm.device_info_updated.connect(self._on_device_info)
         self._vm.ble_info_updated.connect(self._on_ble_info)
         self._vm.telemetry_updated.connect(self._on_telemetry_updated)
         self._vm.advertising_devices_updated.connect(self._on_advertising_devices)
+        if hasattr(self._vm, 'time_sync_updated'):
+            self._vm.time_sync_updated.connect(self._on_time_sync_updated)
 
     # ── View Updaters ────────────────────────────────────────────────
     def _on_device_info(self, info: dict):
@@ -123,6 +130,18 @@ class DeviceInfoTab(QWidget):
         rssi = info.get("rssi_dbm")
         if rssi is not None:
             self._ble_values["RSSI:"].setText(f"{rssi} dBm")
+        
+        conn_interval = info.get("conn_interval")
+        if conn_interval is not None:
+            self._ble_values["Conn Interval:"].setText(conn_interval)
+            
+        slave_latency = info.get("slave_latency")
+        if slave_latency is not None:
+            self._ble_values["Slave Latency:"].setText(str(slave_latency))
+            
+        sup_timeout = info.get("supervision_timeout")
+        if sup_timeout is not None:
+            self._ble_values["Sup. Timeout:"].setText(f"{sup_timeout} ms")
 
     def _on_telemetry_updated(self, data: dict):
         pct = data.get("bat_soc_percent", 0)
@@ -131,20 +150,32 @@ class DeviceInfoTab(QWidget):
         color = "#10B981" if pct > 30 else "#EF4444"
         self._bat_pct.setStyleSheet(f"color: {color}; background: transparent;")
 
-        self._bat_info_labels["Voltage:"].setText(f"{data.get('bat_voltage_mv', 0) / 1000.0:.2f}V")
-        self._bat_info_labels["Remaining:"].setText(f"{data.get('remaining_min', 0)} min")
-        self._bat_info_labels["Charging:"].setText("Yes" if data.get("is_charging") else "No")
+        self._bat_info_labels["Voltage:"].setText(data.get("bat_voltage_str", "-"))
+        self._bat_info_labels["Remaining:"].setText(data.get("remaining_str", "-"))
+        self._bat_info_labels["Charging:"].setText(data.get("charging_str", "-"))
 
-        self._temp_labels["MCU:"].setText(f"{data.get('mcu_temp_c', 0):.1f} °C")
-        self._temp_labels["UWB Chip:"].setText(f"{data.get('uwb_temp_c', 0):.1f} °C")
-        self._temp_labels["IMU:"].setText(f"{data.get('imu_temp_c', 0):.1f} °C")
+        self._temp_labels["MCU:"].setText(data.get("mcu_temp_str", "-"))
+        self._temp_labels["UWB Chip:"].setText(data.get("uwb_temp_str", "-"))
+        self._temp_labels["IMU:"].setText(data.get("imu_temp_str", "-"))
 
-        self._volt_labels["VDDA:"].setText(f"{data.get('vdda_mv', 0) / 1000.0:.2f}V")
-        self._volt_labels["UWB VBAT:"].setText(f"{data.get('uwb_vbat_mv', 0) / 1000.0:.2f}V")
+        self._volt_labels["VDDA:"].setText(data.get("vdda_str", "-"))
+        self._volt_labels["UWB VBAT:"].setText(data.get("uwb_vbat_str", "-"))
 
         self._sys_labels["HEAP:"].setText(data.get("heap_usage", "-"))
         self._sys_labels["STACK:"].setText(data.get("stack_usage", "-"))
         self._sys_labels["CPU:"].setText(data.get("cpu_usage", "-"))
+
+    def _on_time_sync_updated(self, local_time: str, is_synced: bool, is_syncing: bool):
+        self._time_local.setText(local_time)
+        if is_syncing:
+            self._time_status.setText("Syncing time...")
+            self._time_status.setStyleSheet("color: #EAB308; background: transparent; font-size: 12px; font-weight: bold;")
+        elif is_synced:
+            self._time_status.setText("Sync Status: OK")
+            self._time_status.setStyleSheet("color: #10B981; background: transparent; font-size: 12px; font-weight: bold;")
+        else:
+            self._time_status.setText("Warning: Out of Sync")
+            self._time_status.setStyleSheet("color: #EF4444; background: transparent; font-size: 12px; font-weight: bold;")
 
     def _on_advertising_devices(self, devices: list, is_scanning: bool):
         # Scan status removed by user
@@ -179,19 +210,17 @@ class DeviceInfoTab(QWidget):
             err_cnt = dev.get("error_count")
             self._adv_table.setItem(i, 6, QTableWidgetItem(str(err_cnt) if err_cnt is not None else "-"))
 
+            # Load custom row widget from UI Designer file
+            row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
             widget = QWidget()
-            layout = QHBoxLayout(widget)
-            layout.setContentsMargins(4, 2, 4, 2)
-            btn_connect = QPushButton("Connect")
-            btn_connect.setFixedSize(65, 22)
-            btn_connect.setStyleSheet("""
-                QPushButton { background: #059669; color: white; border-radius: 4px;
-                    font-weight: bold; font-size: 11px; }
-                QPushButton:hover { background: #10B981; }
-            """)
-            btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_connect.clicked.connect(lambda checked, m=dev["mac"]: self._vm.connect_device(m))
-            layout.addWidget(btn_connect)
+            uic.loadUi(row_ui_path, widget)
+            widget.btn_connect.clicked.connect(lambda checked, m=dev["mac"]: self._vm.connect_device(m))
+            
+            # Disable connect button if we are currently connecting to this device
+            if self._vm.model._pending_connect_mac == dev["mac"]:
+                widget.btn_connect.setText("Connecting...")
+                widget.btn_connect.setEnabled(False)
+            
             self._adv_table.setCellWidget(i, 7, widget)
 
         # Dynamic height adjustment so the groupbox scales with the content

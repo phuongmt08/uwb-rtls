@@ -1,16 +1,17 @@
 """
-UWB RTLS Studio — Live Tracking Tab (UI loaded from .ui file)
-Tab 2: Real-time 2D position tracking matching dashboard.py design.
+==============================================================================
+  UWB RTLS Studio — Live Tracking Tab View
+==============================================================================
+  File        : live_tracking_tab.py
+  Description : View for 2D position tracking and live anchor distances (Tab 2).
+                Loaded from live_tracking_tab.ui. Integrates the 2D Canvas.
 
-FE: Loaded from views/ui/live_tracking_tab.ui (editable in Qt Designer)
-BE: Canvas (custom widget) + ViewModel bindings (this file)
+  MVVM Role   : VIEW — Pure presentation.
 
-Layout (mirroring dashboard.py):
-  - LEFT:  Canvas header ("Real-time Position Tracking" + OUT OF ZONE warning)
-           + ModernPositionCanvas + Start/Stop/Clear controls
-  - RIGHT: Scrollable panel with collapsible cards:
-           • Live Position  (COORDINATES, MOTION, RANGING, QUALITY)
-           • Statistics      (Frames, FPS, Uptime)
+  Thread Model:
+    - Main GUI Thread: Handles QPainter-based drawing and UI interactions strictly
+      on this thread.
+==============================================================================
 """
 import os
 from PyQt6.QtWidgets import (
@@ -436,6 +437,17 @@ class LiveTrackingTab(QWidget):
         self._vm.ranging_stopped.connect(self._on_ranging_stopped)
         self._vm.position_updated.connect(self._on_position_updated)
         self._vm.anchor_distances_updated.connect(self._on_anchor_distances)
+        self._vm.anchor_layout_updated.connect(self._on_anchor_layout_updated)
+
+    def _on_anchor_layout_updated(self, anchors_list):
+        formatted = []
+        for a in anchors_list:
+            formatted.append({
+                'x': a['x_m'],
+                'y': a['y_m'],
+                'label': f"A{a['anchor_id']}"
+            })
+        self.set_anchors(formatted)
 
     # ── Actions ──────────────────────────────────────────────────────
     def _start_ranging(self):

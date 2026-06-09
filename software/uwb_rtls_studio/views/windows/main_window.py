@@ -1,9 +1,17 @@
 """
-UWB RTLS Studio — Main Window (UI loaded from .ui file)
-Cửa sổ chính với Tab bar, Status bar, End Session button, User/Dev toggle.
+==============================================================================
+  UWB RTLS Studio — Main Window View
+==============================================================================
+  File        : main_window.py
+  Description : MainWindow controller loaded from main_window.ui.
+                Coordinates the tab switching, developer modes, and end session flow.
 
-FE: Loaded from views/ui/main_window.ui (editable in Qt Designer)
-BE: Signal/slot connections + ViewModel bindings (this file)
+  MVVM Role   : VIEW — MainWindow controller.
+
+  Thread Model:
+    - Main GUI Thread: Manages primary user actions, child popup triggers, and
+      overall window event dispatching strictly on this thread.
+==============================================================================
 """
 import os
 from PyQt6.QtWidgets import (
@@ -22,10 +30,13 @@ UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'main_window.ui')
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, live_tracking_vm=None, device_info_vm=None, parent=None):
+    def __init__(self, live_tracking_vm=None, device_info_vm=None, config_vm=None, dongle_vm=None, serial_service=None, parent=None):
         super().__init__(parent)
         self._live_tracking_vm = live_tracking_vm
         self._device_info_vm = device_info_vm
+        self._config_vm = config_vm
+        self._dongle_vm = dongle_vm
+        self._serial_service = serial_service
         self._is_developer = False
         self._session_active = False
         self._session_seconds = 0
@@ -61,6 +72,9 @@ class MainWindow(QMainWindow):
 
         if self._live_tracking_vm:
             self._tab_tracking.set_viewmodel(self._live_tracking_vm)
+
+        if self._config_vm:
+            self._tab_config.set_viewmodel(self._config_vm)
 
         self._tab_config.set_developer_mode(False)
         self._tab_log.set_developer_mode(False)
@@ -130,6 +144,10 @@ class MainWindow(QMainWindow):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.btn_end_session.clicked.connect(self._on_end_session)
 
+        # Connect serial connection lost signal
+        if self._serial_service:
+            self._serial_service.connection_lost.connect(self._on_dongle_disconnected)
+
     # ── Status bar update slots ──────────────────────────────────────
 
     def _on_telemetry_status(self, data: dict):
@@ -163,6 +181,18 @@ class MainWindow(QMainWindow):
                 self._session_timer.stop()
                 self._status_session.setText("⏱ Session: 00:00:00")
                 self._status_session.setStyleSheet("color: #94A3B8;")
+            elif status_text == "Disconnecting":
+                self._status_conn.setText(f"🛑 Disconnecting: {name}")
+                self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
+                self._status_rate.setText("🔄 ---")
+                self._session_active = False
+                self._session_timer.stop()
+            elif status_text == "Disconnected":
+                self._status_conn.setText(f"🔴 Disconnected: {name}")
+                self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
+                self._status_rate.setText("🔄 ---")
+                self._session_active = False
+                self._session_timer.stop()
             else:
                 self._status_conn.setText(f"🟢 Connected: {name}")
                 self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
@@ -229,17 +259,17 @@ class MainWindow(QMainWindow):
             self._status_session.setText("⏱ Session: Ended")
             self._status_session.setStyleSheet("color: #F59E0B;")
             # Just send end_session command for "End Session" button
-            if self._device_info_vm and self._device_info_vm.protocol:
+            if self._device_info_vm and self._device_info_vm.model._protocol:
                 try:
-                    self._device_info_vm.protocol.send_command("end_session", reason=0)
+                    self._device_info_vm.model._protocol.send_command("end_session", reason=0)
                 except Exception:
                     pass
 
     def _safe_shutdown(self):
-        if self._device_info_vm and self._device_info_vm.protocol:
+        if self._device_info_vm and self._device_info_vm.model._protocol:
             try:
-                self._device_info_vm.protocol.send_command("ble_disconnect")
-                self._device_info_vm.protocol.send_command("end_session", reason=0)
+                self._device_info_vm.model._protocol.send_command("ble_disconnect")
+                self._device_info_vm.model._protocol.send_command("end_session", reason=0)
                 import time
                 time.sleep(0.5)
             except Exception:
@@ -260,6 +290,42 @@ class MainWindow(QMainWindow):
             s = self._session_seconds % 60
             self._status_session.setText(f"⏱ Session: {h:02d}:{m:02d}:{s:02d}")
             self._status_session.setStyleSheet("color: #10B981;")
+
+    def _on_dongle_disconnected(self):
+        """Handle dongle physical disconnection."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("MainWindow: Dongle disconnected!")
+
+        # Show warning notification popup
+        QMessageBox.warning(
+            self,
+            "Dongle Disconnected",
+            "Dongle was disconnected! Please check the USB connection.",
+            QMessageBox.StandardButton.Ok
+        )
+
+        # Pop dongle detect popup
+        from views.popups.dongle_popup import DonglePopup
+        if self._dongle_vm:
+            # Temporarily disconnect to avoid multiple popups
+            try:
+                self._serial_service.connection_lost.disconnect(self._on_dongle_disconnected)
+            except Exception:
+                pass
+
+            dongle_popup = DonglePopup(self._dongle_vm, parent=self)
+            res = dongle_popup.exec()
+
+            # Reconnect signal after popup closes
+            try:
+                self._serial_service.connection_lost.connect(self._on_dongle_disconnected)
+            except Exception:
+                pass
+
+            if res != 1:
+                # User cancelled -> Close main window / exit app
+                self.close()
 
     def closeEvent(self, event):
         """Handle app close — would auto end session."""

@@ -6,7 +6,7 @@
   Description : QThread tự động detect dongle bằng protobuf probe.
                 Tham khảo logic từ uwb_rtls_programmer/utils/dongle_session.py
 
-  Logic (giống programmer auto_probe):
+  Logic:
     1. Worker start → probe tất cả COM ports hiện tại (initial scan)
     2. Nếu tìm thấy → emit dongle_found → stop
     3. Nếu chưa tìm thấy → monitor port changes (so sánh port list)

@@ -1,14 +1,18 @@
 """
-===============================================================================
+==============================================================================
   UWB RTLS Studio — Live Tracking ViewModel
-===============================================================================
+==============================================================================
   File        : viewmodels/live_tracking_viewmodel.py
-  Description : ViewModel cho tab "Live Tracking" (Tab 2).
-                Quản lý realtime position data, vẽ trajectory,
-                và hiển thị anchor-tag distances.
+  Description : ViewModel for the "Live Tracking" tab.
+                Handles real-time position data conversion and relays start/stop
+                ranging commands to RangingModel.
 
-  MVVM Role   : VIEWMODEL
+  MVVM Role   : VIEWMODEL — Presentation logic.
 
+  Thread Model:
+    - Main GUI Thread: Processes ranging coordinates and anchor metrics updates
+      synchronously on the Main GUI Thread.
+  
   Tab này hiển thị (User-Facing):
     ┌─────────────────────────────────────────────────────────┐
     │  LIVE TRACKING TAB                                      │
@@ -62,6 +66,7 @@ class LiveTrackingViewModel(QObject):
     position_updated = pyqtSignal(float, float, float, float)
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
+    anchor_layout_updated = pyqtSignal(list)
 
     def __init__(self, model: RangingModel, protocol_service: ProtocolService, parent=None):
         super().__init__(parent)
@@ -71,6 +76,7 @@ class LiveTrackingViewModel(QObject):
         self.model.position_updated.connect(self.position_updated.emit)
         self.model.anchor_distances_updated.connect(self.anchor_distances_updated.emit)
         self.model.stats_updated.connect(self.stats_updated.emit)
+        self.model.anchor_layout_updated.connect(self.anchor_layout_updated.emit)
 
     def start_ranging(self) -> None:
         # Gọi command tới BE từ ViewModel

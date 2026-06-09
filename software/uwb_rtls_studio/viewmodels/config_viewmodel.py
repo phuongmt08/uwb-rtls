@@ -1,13 +1,13 @@
 """
-===============================================================================
+==============================================================================
   UWB RTLS Studio — Config ViewModel
-===============================================================================
+==============================================================================
   File        : viewmodels/config_viewmodel.py
-  Description : ViewModel cho tab "Config Parameters" (Tab 3).
-                Quản lý đọc/ghi tất cả configuration parameters
-                của device (UWB, Ranging, Sensor Fusion, BLE).
+  Description : ViewModel for the "Config Parameters" tab.
+                Bridges configuration updates and reset command triggers between
+                the View and the DeviceModel.
 
-  MVVM Role   : VIEWMODEL
+ MVVM Role   : VIEWMODEL
 
   ═══════════════════════════════════════════════════════════════════════
   USER vs DEVELOPER — Config Sections Visibility
@@ -119,4 +119,51 @@
     - device_reset_t (24), uwb_reset_t (25), factory_config_reset_t (26)
 ===============================================================================
 """
-pass
+import logging
+from PyQt6.QtCore import QObject, pyqtSignal
+from common.transport import VvAddress
+
+log = logging.getLogger(__name__)
+
+
+class ConfigViewModel(QObject):
+    # Signals for View updates
+    anchor_layout_updated = pyqtSignal(list)
+    sys_config_updated = pyqtSignal(dict)
+    sys_ranging_cfg_updated = pyqtSignal(dict)
+    sensor_fusion_cfg_updated = pyqtSignal(dict)
+    pos_calib_cfg_updated = pyqtSignal(dict)
+
+    def __init__(self, device_model, parent=None):
+        super().__init__(parent)
+        self.model = device_model
+        self.protocol = device_model._protocol
+
+        # Bind Model parsed signals to ViewModel update signals
+        self.model.anchor_layout_parsed.connect(self.anchor_layout_updated.emit)
+        self.model.sys_config_parsed.connect(self.sys_config_updated.emit)
+        self.model.sys_ranging_cfg_parsed.connect(self.sys_ranging_cfg_updated.emit)
+        self.model.sensor_fusion_cfg_parsed.connect(self.sensor_fusion_cfg_updated.emit)
+        self.model.pos_calib_cfg_parsed.connect(self.pos_calib_cfg_updated.emit)
+
+    # ── Command Triggers (called by View) ───────────────────────────
+
+    def read_anchor_layout(self):
+        log.info("Requesting anchor layout from MCU...")
+        self.protocol.send_command("anchor_layout_get", dst_addr=VvAddress.MCU)
+
+    def read_ranging_config(self):
+        log.info("Requesting system ranging config from MCU...")
+        self.protocol.send_command("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
+
+    def device_reset(self):
+        log.warning("Sending device_reset command to MCU...")
+        self.protocol.send_command("device_reset", dst_addr=VvAddress.MCU)
+
+    def uwb_reset(self):
+        log.warning("Sending uwb_reset command to MCU...")
+        self.protocol.send_command("uwb_reset", dst_addr=VvAddress.MCU)
+
+    def factory_reset(self):
+        log.warning("Sending factory_config_reset command to MCU...")
+        self.protocol.send_command("factory_config_reset", dst_addr=VvAddress.MCU)

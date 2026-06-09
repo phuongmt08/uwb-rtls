@@ -1,5 +1,5 @@
 """
-===============================================================================
+==============================================================================
   UWB RTLS Studio — Ranging Model
 ===============================================================================
   File        : models/ranging_model.py
@@ -72,33 +72,127 @@
 ===============================================================================
 """
 import logging
+import time
+from collections import deque
 from PyQt6.QtCore import QObject, pyqtSignal
 from services.protocol_service import ProtocolService
 
 log = logging.getLogger(__name__)
 
+# Maximum number of position samples to keep in history
+_MAX_HISTORY_SIZE = 100000
+
+
 class RangingModel(QObject):
     position_updated = pyqtSignal(float, float, float, float) # x, y, z, rms
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
+    anchor_layout_updated = pyqtSignal(list)
 
     def __init__(self, protocol_service: ProtocolService, parent=None):
         super().__init__(parent)
         self._protocol = protocol_service
         self._protocol.packet_received.connect(self._on_packet)
+
+        # ── State ────────────────────────────────────────────────────
         self.is_ranging = False
-        
+
+        # Position history buffer (bounded deque to prevent memory leak)
+        self._position_history = deque(maxlen=_MAX_HISTORY_SIZE)
+
+        # Anchor layout (fixed positions)
+        self._anchor_layout = []   # list of {anchor_id, x_m, y_m, z_m}
+
+        # Ranging statistics
+        self._stats = {
+            "total_count": 0,
+            "success_count": 0,
+            "last_rms_error_m": 0.0,
+            "update_rate_hz": 0.0,
+        }
+        self._last_result_time = 0.0
+
+    # ── Public properties ────────────────────────────────────────────
+
+    @property
+    def position_history(self):
+        return list(self._position_history)
+
+    @property
+    def anchor_layout(self):
+        return self._anchor_layout
+
+    def set_anchor_layout(self, anchors: list):
+        """Set anchor positions. Called by ConfigViewModel."""
+        self._anchor_layout = anchors
+
+    def clear_history(self):
+        """Clear position history buffer."""
+        self._position_history.clear()
+        self._stats = {
+            "total_count": 0,
+            "success_count": 0,
+            "last_rms_error_m": 0.0,
+            "update_rate_hz": 0.0,
+        }
+        self._last_result_time = 0.0
+
+    # ── Packet handler ───────────────────────────────────────────────
+
     def _on_packet(self, param_name: str, pkt) -> None:
         if param_name == "ranging_result":
-            res = pkt.ranging_result
-            self.position_updated.emit(res.x_m, res.y_m, res.z_m, res.rms_error_m)
-            
-            # Extract anchor distances if available
-            anchors = []
-            for a in res.anchor_distances:
-                anchors.append({
-                    "id": f"A{a.anchor_id}",
-                    "distance_cm": a.distance_mm / 10.0
-                })
-            if anchors:
-                self.anchor_distances_updated.emit(anchors)
+            self._handle_ranging_result(pkt.ranging_result)
+        elif param_name == "anchor_layout_resp":
+            self._handle_anchor_layout(pkt.anchor_layout_resp)
+
+    def _handle_ranging_result(self, res):
+        now = time.time()
+
+        # Store in history buffer
+        sample = {
+            "x_m": res.x_m,
+            "y_m": res.y_m,
+            "z_m": res.z_m,
+            "rms_error_m": res.rms_error_m,
+            "received_at": now,
+        }
+        self._position_history.append(sample)
+
+        # Update statistics
+        self._stats["total_count"] += 1
+        self._stats["success_count"] += 1
+        self._stats["last_rms_error_m"] = res.rms_error_m
+        if self._last_result_time > 0:
+            dt = now - self._last_result_time
+            if dt > 0:
+                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
+        self._last_result_time = now
+
+        # Emit position
+        self.position_updated.emit(res.x_m, res.y_m, res.z_m, res.rms_error_m)
+
+        # Extract anchor distances if available
+        anchors = []
+        for a in res.anchor_distances:
+            anchors.append({
+                "id": f"A{a.anchor_id}",
+                "distance_cm": a.distance_mm / 10.0
+            })
+        if anchors:
+            self.anchor_distances_updated.emit(anchors)
+
+        # Emit updated stats
+        self.stats_updated.emit(self._stats.copy())
+
+    def _handle_anchor_layout(self, resp):
+        """Parse anchor_layout_resp and store."""
+        self._anchor_layout = []
+        for a in resp.anchors:
+            self._anchor_layout.append({
+                "anchor_id": a.anchor_id,
+                "x_m": a.x_m,
+                "y_m": a.y_m,
+                "z_m": a.z_m,
+            })
+        log.info("Anchor layout received: %d anchors", len(self._anchor_layout))
+        self.anchor_layout_updated.emit(self._anchor_layout)

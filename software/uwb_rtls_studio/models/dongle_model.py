@@ -1,7 +1,7 @@
 """
-===============================================================================
+==============================================================================
   UWB RTLS Studio — Dongle Model
-===============================================================================
+==============================================================================
   File        : models/dongle_model.py
   Description : Lớp Model quản lý dữ liệu và logic kết nối Dongle.
                 - Quản lý luồng quét USB (DongleDetectWorker).
@@ -43,6 +43,14 @@ class DongleModel(QObject):
         self._protocol = protocol_service
         self._worker: DongleDetectWorker | None = None
         self._current_info: DongleInfo | None = None
+        
+        # Listen to physical disconnects to trigger auto-reconnect
+        self._serial.connection_lost.connect(self._on_connection_lost)
+
+    def _on_connection_lost(self):
+        """Dongle physically disconnected. Restart detection loop."""
+        log.warning("Dongle physically disconnected! Starting auto-detect loop...")
+        self.start_detection()
 
     def start_detection(self) -> None:
         self.stop_detection()

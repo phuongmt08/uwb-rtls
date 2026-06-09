@@ -3,13 +3,12 @@
   UWB RTLS Studio — Dongle Detect Service
 ===============================================================================
   File        : services/dongle_detect_service.py
-  Description : Auto-detect NRF52840 dongle bằng protobuf handshake.
-                Gửi device_information_get tới mỗi COM port, chờ ACK.
-                Cổng nào trả ACK → đó là dongle.
+  Description : Hardware-level auto-detection helper for NRF52840 dongles.
+                Sends a probe handshake over serial to locate active ports.
 
   MVVM Role   : SERVICE — stateless hardware detection helper.
 
-  Logic detect (tham khảo uwb_rtls_programmer/utils/dongle_session.py):
+  Logic detect:
     1. Liệt kê tất cả COM ports hiện có
     2. Với mỗi port: mở serial → gửi device_information_get → chờ ACK
     3. Retry tối đa MAX_PROBE_RETRIES lần nếu không nhận ACK

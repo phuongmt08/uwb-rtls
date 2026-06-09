@@ -1,7 +1,7 @@
 """
-===============================================================================
+==============================================================================
   UWB RTLS Studio — Application Entry Point
-===============================================================================
+==============================================================================
   File        : main.py
   Author      : Trung Quan
   Description : Entry point — khởi chạy toàn bộ app.
@@ -76,29 +76,45 @@ def main():
     from viewmodels.scan_viewmodel import ScanViewModel
     from views.popups.scan_popup import ScanPopup
 
-    # === BYPASS POPUPS FOR UI TESTING ===
     dongle_model = DongleModel(serial_service, protocol_service)
-    scan_model = ScanModel(protocol_service, serial_service)
-    # ====================================
+    dongle_vm = DongleViewModel(dongle_model)
+
+    # Vòng lặp cho Connection Flow
+    while True:
+        dongle_popup = DonglePopup(dongle_vm)
+        if dongle_popup.exec() != 1:  # 1 = QDialog.DialogCode.Accepted
+            sys.exit(0)
+
+        # Dongle ok -> Scan popup
+        scan_model = ScanModel(protocol_service, serial_service)
+        scan_vm = ScanViewModel(scan_model)
+        scan_popup = ScanPopup(scan_vm)
+
+        res = scan_popup.exec()
+        if res == 1:
+            break
+        elif res == 2:
+            # Dongle bị mất kết nối khi đang scan -> comeback popup dongle và quét lại từ đầu
+            continue
+        else:
+            sys.exit(0)
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 4: Main Window
     # ═══════════════════════════════════════════════════════════════
     from views.windows.main_window import MainWindow
     from models.ranging_model import RangingModel
+    from models.device_model import DeviceModel
     from viewmodels.live_tracking_viewmodel import LiveTrackingViewModel
     from viewmodels.device_info_viewmodel import DeviceInfoViewModel
 
     # Extract connected device info from scan_model before cleanup
     connected_name = ""
-    connected_mac = ""
-    if scan_model._devices:
-        # scan_popup is bypassed, just pick the first device if any
-        sel_mac = list(scan_model._devices.keys())[0] if scan_model._devices else ''
-        if sel_mac and sel_mac in scan_model._devices:
-            dev = scan_model._devices[sel_mac]
-            connected_name = dev.get("name", "")
-            connected_mac = dev.get("mac", sel_mac)
+    connected_mac = scan_model.connected_mac
+    
+    if connected_mac and connected_mac in scan_model._devices:
+        dev = scan_model._devices[connected_mac]
+        connected_name = dev.get("name", "")
 
     # Disconnect scan_model from protocol to avoid duplicate handlers
     scan_model.cleanup()
@@ -109,7 +125,12 @@ def main():
 
     ranging_model = RangingModel(protocol_service)
     live_tracking_vm = LiveTrackingViewModel(ranging_model, protocol_service)
-    device_info_vm = DeviceInfoViewModel(protocol_service, dongle_model)
+    
+    device_model = DeviceModel(protocol_service)
+    device_info_vm = DeviceInfoViewModel(device_model, dongle_model)
+    
+    from viewmodels.config_viewmodel import ConfigViewModel
+    config_vm = ConfigViewModel(device_model)
 
     # Seed the connected device info so the tab shows it immediately
     if connected_name and connected_mac:
@@ -117,7 +138,10 @@ def main():
 
     window = MainWindow(
         live_tracking_vm=live_tracking_vm,
-        device_info_vm=device_info_vm
+        device_info_vm=device_info_vm,
+        config_vm=config_vm,
+        dongle_vm=dongle_vm,
+        serial_service=serial_service
     )
     window.show()
 
