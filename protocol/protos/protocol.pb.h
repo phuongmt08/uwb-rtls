@@ -448,7 +448,7 @@ typedef struct _protobuf_ble_adv_status_t {
     uint32_t status_flags;
     uint32_t warning_count;
     uint32_t error_count;
-    uint32_t local_timestamp_ms;
+    uint32_t local_timestamp_s;
 } protobuf_ble_adv_status_t;
 
 typedef PB_BYTES_ARRAY_T(192) protobuf_log_data_t_data_t;
@@ -1280,7 +1280,7 @@ extern "C" {
 #define protobuf_ble_adv_status_t_status_flags_tag 4
 #define protobuf_ble_adv_status_t_warning_count_tag 5
 #define protobuf_ble_adv_status_t_error_count_tag 6
-#define protobuf_ble_adv_status_t_local_timestamp_ms_tag 7
+#define protobuf_ble_adv_status_t_local_timestamp_s_tag 7
 #define protobuf_log_data_t_type_tag             1
 #define protobuf_log_data_t_data_tag             2
 #define protobuf_log_clear_t_type_tag            1
@@ -1812,7 +1812,7 @@ X(a, STATIC,   SINGULAR, UINT32,   bat_soc_percent,   3) \
 X(a, STATIC,   SINGULAR, UINT32,   status_flags,      4) \
 X(a, STATIC,   SINGULAR, UINT32,   warning_count,     5) \
 X(a, STATIC,   SINGULAR, UINT32,   error_count,       6) \
-X(a, STATIC,   SINGULAR, UINT32,   local_timestamp_ms,   7)
+X(a, STATIC,   SINGULAR, UINT32,   local_timestamp_s,   7)
 #define protobuf_ble_adv_status_t_CALLBACK NULL
 #define protobuf_ble_adv_status_t_DEFAULT NULL
 

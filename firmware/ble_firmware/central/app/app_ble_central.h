@@ -87,6 +87,7 @@ uint8_t app_ble_central_status_get(void);
 int32_t app_ble_central_rssi_dbm_get(void);
 uint32_t app_ble_central_disconnect_reason_get(void);
 uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length);
+uint32_t app_ble_central_broadcast_send(uint8_t const *p_data, uint16_t length);
 
 #ifdef __cplusplus
 }

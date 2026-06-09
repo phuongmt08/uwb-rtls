@@ -32,6 +32,8 @@ bool sys_ble_peripheral_enable(bool enable);
 
 void sys_ble_peripheral_on_status_resp(const protobuf_packet_t *pkt);
 
+void sys_ble_peripheral_send_adv_status(void);
+
 void sys_ble_peripheral_process(void);
 
 bool sys_ble_peripheral_is_connected(void);

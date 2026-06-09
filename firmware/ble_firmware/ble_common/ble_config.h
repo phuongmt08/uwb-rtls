@@ -111,8 +111,37 @@ extern "C" {
  */
 #define SYSTEM_CONFIG_PREFERRED_PHY       BLE_GAP_PHY_1MBPS
 
+// =============================================================================
+// 5. BROADCAST CONFIGURATION
+// =============================================================================
+
+/**
+ * @brief Enable BLE 5.0 Extended Advertising for broadcast.
+ *        When enabled and payload <= 251 bytes, broadcast uses a single
+ *        Extended ADV packet instead of application-layer fragmentation.
+ *        Larger packets must be rejected or fragmented above this layer.
+ *
+ * Requirements:
+ *   - nRF52832: SoftDevice S132 v6.x+ (Extended ADV on 1M PHY only)
+ *   - nRF52840: SoftDevice S140 v6.x+ (Full Extended ADV support)
+ */
+#define BLE_BROADCAST_USE_EXTENDED      1
+
+/**
+ * @brief Broadcast advertising interval (units of 0.625 ms).
+ *        20 ms = 32 units. Faster than connection ADV for quick burst.
+ */
+#define SYSTEM_CONFIG_BCAST_ADV_INTERVAL   32
+
+/**
+ * @brief Number of ADV events per broadcast burst.
+ *        Higher = more reliable reception, but longer air time.
+ */
+#define SYSTEM_CONFIG_BCAST_ADV_EVENTS     5
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif // BLE_CONFIG_H__
+

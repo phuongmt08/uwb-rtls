@@ -457,7 +457,7 @@ message ble_adv_status_t {
     uint32 status_flags       = 4;
     uint32 warning_count      = 5;
     uint32 error_count        = 6;
-    uint32 local_timestamp_ms = 7;
+    uint32 local_timestamp_s = 7;
 }
 
 /*
