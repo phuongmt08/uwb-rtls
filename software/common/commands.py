@@ -126,10 +126,10 @@ class CommandFactory:
         pkt.sys_ranging_cfg_get.dummy = 0
         return pkt
 
-    def sys_ranging_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def sys_ranging_cfg_set(self, src: int, dst: int, seq: int, period_ms: int | None = None, timeout_ms: int | None = None) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.sys_ranging_cfg_set.config.rx_timeout_ms = 120
-        pkt.sys_ranging_cfg_set.config.ranging_period_ms = 300
+        pkt.sys_ranging_cfg_set.config.rx_timeout_ms = timeout_ms if timeout_ms is not None else 120
+        pkt.sys_ranging_cfg_set.config.ranging_period_ms = period_ms if period_ms is not None else 300
         return pkt
 
     def sys_ranging_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:

@@ -33,14 +33,9 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), ".."
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont
 
-from utils.theme import DARK_STYLESHEET
-
 # ── Logging setup ────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
+from utils.logging_config import setup_logging
+setup_logging()
 
 
 def main():
@@ -52,9 +47,6 @@ def main():
     # Apply global font
     font = QFont("Segoe UI", 13)
     app.setFont(font)
-
-    # Apply dark theme
-    app.setStyleSheet(DARK_STYLESHEET)
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 1: Create Services (singleton, shared)
@@ -75,7 +67,6 @@ def main():
     from models.scan_model import ScanModel
     from viewmodels.scan_viewmodel import ScanViewModel
     from views.popups.scan_popup import ScanPopup
-
     dongle_model = DongleModel(serial_service, protocol_service)
     dongle_vm = DongleViewModel(dongle_model)
 

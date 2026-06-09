@@ -184,7 +184,10 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
     <item>
      <widget class="QTabWidget" name="tabs">
       <property name="styleSheet">
-       <string notr="true">QTabWidget::pane { border: none; background: #0F172A; }</string>
+       <string notr="true">QTabWidget::pane { border: none; background: #0F172A; }
+QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 10px 20px; margin-right: 2px; font-weight: bold; min-width: 120px; }
+QTabBar::tab:selected { background: #0F172A; color: #22D3EE; border-bottom: 3px solid #22D3EE; }
+QTabBar::tab:hover:!selected { background: #253346; color: #F8FAFC; }</string>
       </property>
       <property name="currentIndex">
        <number>0</number>

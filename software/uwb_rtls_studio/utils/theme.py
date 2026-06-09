@@ -100,7 +100,7 @@ QPushButton {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 8px 18px;
+    padding: 4px 8px;
     font-weight: bold;
     min-height: 20px;
 }}
@@ -146,7 +146,7 @@ QLineEdit {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 8px 12px;
+    padding: 0px;
     selection-background-color: {COLOR_ACCENT_DIM};
 }}
 QLineEdit:focus {{
@@ -167,12 +167,6 @@ QSpinBox, QDoubleSpinBox {{
 }}
 QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {COLOR_ACCENT};
-}}
-QSpinBox::up-button, QSpinBox::down-button,
-QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-    background-color: {COLOR_SURFACE};
-    border: none;
-    width: 20px;
 }}
 
 /* ═══════════════════ COMBO BOX ════════════════ */

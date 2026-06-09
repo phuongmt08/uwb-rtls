@@ -161,6 +161,10 @@ class ConfigViewModel(QObject):
         log.info("Requesting system ranging config from MCU...")
         self.protocol.send_command("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
 
+    def write_ranging_config(self, period_ms: int, timeout_ms: int):
+        log.info("Sending ranging config set command to MCU: period=%d ms, timeout=%d ms", period_ms, timeout_ms)
+        self.protocol.send_command("sys_ranging_cfg_set", dst_addr=VvAddress.MCU, period_ms=period_ms, timeout_ms=timeout_ms)
+
     def device_reset(self):
         log.warning("Sending device_reset command to MCU...")
         self.protocol.send_command("device_reset", dst_addr=VvAddress.MCU)
@@ -172,3 +176,7 @@ class ConfigViewModel(QObject):
     def factory_reset(self):
         log.warning("Sending factory_config_reset command to MCU...")
         self.protocol.send_command("factory_config_reset", dst_addr=VvAddress.MCU)
+
+    def enter_bootloader(self):
+        log.warning("Sending enter_to_bootloader command to MCU...")
+        self.protocol.send_command("enter_to_bootloader", dst_addr=VvAddress.MCU)

@@ -5,6 +5,95 @@
   <property name="geometry">
    <rect><x>0</x><y>0</y><width>1300</width><height>800</height></rect>
   </property>
+  <property name="styleSheet">
+   <string>QSpinBox, QDoubleSpinBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 8px;
+    padding-right: 20px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #22D3EE;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    height: 13px;
+    border-left: 1px solid #334155;
+    border-bottom: 1px solid #334155;
+    border-top-right-radius: 5px;
+    background-color: #1E293B;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {
+    background-color: #253346;
+}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 5 L4 2.5 L6.5 5' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    width: 8px;
+    height: 8px;
+}
+QSpinBox::up-arrow:hover, QDoubleSpinBox::up-arrow:hover {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 5 L4 2.5 L6.5 5' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    height: 13px;
+    border-left: 1px solid #334155;
+    border-bottom-right-radius: 5px;
+    background-color: #1E293B;
+}
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background-color: #253346;
+}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 3 L4 5.5 L6.5 3' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    width: 8px;
+    height: 8px;
+}
+QSpinBox::down-arrow:hover, QDoubleSpinBox::down-arrow:hover {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 3 L4 5.5 L6.5 3' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+}
+
+QComboBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 100px;
+}
+QComboBox:focus {
+    border-color: #22D3EE;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+}
+QComboBox::down-arrow {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'&gt;&lt;path d='M1.5 1.5 L5 4.5 L8.5 1.5' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    width: 10px;
+    height: 6px;
+}
+QComboBox::down-arrow:hover {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'&gt;&lt;path d='M1.5 1.5 L5 4.5 L8.5 1.5' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+}
+QComboBox QAbstractItemView {
+    background-color: #1E293B;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    selection-background-color: #0E7490;
+    selection-color: #F8FAFC;
+}</string>
+  </property>
   <layout class="QVBoxLayout" name="outer_layout">
    <property name="leftMargin"><number>0</number></property>
    <property name="topMargin"><number>0</number></property>

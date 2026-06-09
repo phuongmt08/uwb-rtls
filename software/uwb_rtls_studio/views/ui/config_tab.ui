@@ -10,6 +10,154 @@
     <height>800</height>
    </rect>
   </property>
+  <property name="styleSheet">
+   <string>QWidget#ConfigTab {
+    background-color: #0F172A;
+    color: #F8FAFC;
+    font-family: 'Segoe UI';
+    font-size: 13px;
+}
+QGroupBox {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    margin-top: 14px;
+    padding: 16px 12px 12px 12px;
+    font-weight: bold;
+    font-size: 13px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 2px 8px;
+    color: #22D3EE;
+    background-color: #1E293B;
+    border-radius: 4px;
+}
+QPushButton {
+    background-color: #1E293B;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-weight: bold;
+    min-height: 20px;
+}
+QPushButton:hover {
+    background-color: #253346;
+    border-color: #22D3EE;
+}
+QPushButton:disabled {
+    background-color: #0A0F1E;
+    color: #64748B;
+    border-color: #334155;
+}
+QTableWidget {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    gridline-color: #334155;
+    selection-background-color: rgba(34, 211, 238, 0.15);
+    selection-color: #22D3EE;
+    alternate-background-color: #1E293B;
+}
+QHeaderView::section {
+    background-color: #1E293B;
+    color: #22D3EE;
+    border: 1px solid #334155;
+    padding: 8px;
+    font-weight: bold;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 8px;
+    padding-right: 20px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #22D3EE;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    height: 13px;
+    border-left: 1px solid #334155;
+    border-bottom: 1px solid #334155;
+    border-top-right-radius: 5px;
+    background-color: #1E293B;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {
+    background-color: #253346;
+}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 5 L4 2.5 L6.5 5' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    width: 8px;
+    height: 8px;
+}
+QSpinBox::up-arrow:hover, QDoubleSpinBox::up-arrow:hover {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 5 L4 2.5 L6.5 5' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    height: 13px;
+    border-left: 1px solid #334155;
+    border-bottom-right-radius: 5px;
+    background-color: #1E293B;
+}
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background-color: #253346;
+}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 3 L4 5.5 L6.5 3' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    width: 8px;
+    height: 8px;
+}
+QSpinBox::down-arrow:hover, QDoubleSpinBox::down-arrow:hover {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 3 L4 5.5 L6.5 3' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+}
+
+QComboBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 100px;
+}
+QComboBox:focus {
+    border-color: #22D3EE;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+}
+QComboBox::down-arrow {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'&gt;&lt;path d='M1.5 1.5 L5 4.5 L8.5 1.5' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    width: 10px;
+    height: 6px;
+}
+QComboBox::down-arrow:hover {
+    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'&gt;&lt;path d='M1.5 1.5 L5 4.5 L8.5 1.5' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+}
+QComboBox QAbstractItemView {
+    background-color: #1E293B;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    selection-background-color: #0E7490;
+    selection-color: #F8FAFC;
+}</string>
+  </property>
   <layout class="QGridLayout" name="main_layout">
    <property name="leftMargin">
     <number>16</number>
@@ -71,28 +219,6 @@
           </property>
           <property name="value">
            <number>70</number>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="rng_btns">
-        <item>
-         <widget class="QPushButton" name="btn_rng_read">
-          <property name="text">
-           <string>📥 Read</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="btn_rng_write">
-          <property name="styleSheet">
-           <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; }
-QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
-          </property>
-          <property name="text">
-           <string>📤 Write</string>
           </property>
          </widget>
         </item>
@@ -202,7 +328,51 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
      </layout>
     </widget>
    </item>
-   <item row="2" column="0" colspan="4">
+   <item row="2" column="0" colspan="2">
+    <widget class="QGroupBox" name="device_operations_group">
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>100</height>
+      </size>
+     </property>
+     <property name="title">
+      <string>⚡ Device Operations</string>
+     </property>
+     <layout class="QHBoxLayout" name="device_ops_layout">
+      <item>
+       <widget class="QPushButton" name="btn_read_device">
+        <property name="text">
+         <string>📥 Read from Device</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_write_device">
+        <property name="styleSheet">
+         <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+        </property>
+        <property name="text">
+         <string>📤 Write to Device</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_write_all">
+        <property name="styleSheet">
+         <string>QPushButton { background: rgba(30, 41, 59, 0.5); color: #94A3B8; border: 1px solid #334155; border-radius: 6px; font-weight: bold; }
+QPushButton:hover { background: #334155; color: #F8FAFC; }</string>
+        </property>
+        <property name="text">
+         <string>✨ Write All Devices</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="2" column="2" colspan="2">
     <widget class="QGroupBox" name="sys_group">
      <property name="maximumSize">
       <size>
@@ -222,20 +392,13 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="btn_uwb_reset">
-        <property name="text">
-         <string>📡 UWB Reset</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="btn_factory">
+       <widget class="QPushButton" name="btn_bootloader">
         <property name="styleSheet">
-         <string>QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 6px; font-weight: bold; }
-QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
+         <string>QPushButton { background: rgba(249,115,22,0.15); color: #F97316; border: 1px solid #F97316; border-radius: 6px; font-weight: bold; }
+QPushButton:hover { background: #F97316; color: #F8FAFC; }</string>
         </property>
         <property name="text">
-         <string>⚠ Factory Reset</string>
+         <string>⚡ Enter Bootloader</string>
         </property>
        </widget>
       </item>
@@ -430,7 +593,43 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="QComboBox" name="val_channel"/>
+       <widget class="QComboBox" name="val_channel">
+        <item>
+         <property name="text">
+          <string>---</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>1</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>2</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>3</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>4</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>5</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>7</string>
+         </property>
+        </item>
+       </widget>
       </item>
       <item row="1" column="0">
        <widget class="QLabel" name="lbl_role">
@@ -443,7 +642,23 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="QComboBox" name="val_role"/>
+       <widget class="QComboBox" name="val_role">
+        <item>
+         <property name="text">
+          <string>Tag</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Anchor</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Gateway</string>
+         </property>
+        </item>
+       </widget>
       </item>
       <item row="2" column="0">
        <widget class="QLabel" name="lbl_datarate">
@@ -456,7 +671,23 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
        </widget>
       </item>
       <item row="2" column="1">
-       <widget class="QComboBox" name="val_datarate"/>
+       <widget class="QComboBox" name="val_datarate">
+        <item>
+         <property name="text">
+          <string>110 kbps</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>850 kbps</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>6.8 Mbps</string>
+         </property>
+        </item>
+       </widget>
       </item>
       <item row="3" column="0">
        <widget class="QLabel" name="lbl_prf">
@@ -469,7 +700,18 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
        </widget>
       </item>
       <item row="3" column="1">
-       <widget class="QComboBox" name="val_prf"/>
+       <widget class="QComboBox" name="val_prf">
+        <item>
+         <property name="text">
+          <string>16 MHz</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>64 MHz</string>
+         </property>
+        </item>
+       </widget>
       </item>
       <item row="4" column="0">
        <widget class="QLabel" name="lbl_deviceid">
@@ -482,7 +724,31 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
        </widget>
       </item>
       <item row="4" column="1">
-       <widget class="QComboBox" name="val_deviceid"/>
+       <widget class="QComboBox" name="val_deviceid">
+        <property name="editable">
+         <bool>true</bool>
+        </property>
+        <item>
+         <property name="text">
+          <string>0x0001</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>0x0002</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>0x0003</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>0x0004</string>
+         </property>
+        </item>
+       </widget>
       </item>
      </layout>
     </widget>
@@ -500,144 +766,9 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
      </property>
      <layout class="QVBoxLayout" name="anchor_layout">
       <item>
-       <widget class="QTableWidget" name="anchor_table">
-        <property name="columnCount">
-         <number>4</number>
-        </property>
-        <attribute name="horizontalHeaderStretchLastSection">
-         <bool>true</bool>
-        </attribute>
-        <attribute name="verticalHeaderVisible">
-         <bool>false</bool>
-        </attribute>
-        <row/>
-        <row/>
-        <row/>
-        <row/>
-        <column>
-         <property name="text">
-          <string>Anchor ID</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>X (m)</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>Y (m)</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>Z (m)</string>
-         </property>
-        </column>
-        <item row="0" column="0">
-         <property name="text">
-          <string>A0</string>
-         </property>
-        </item>
-        <item row="0" column="1">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="0" column="2">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="0" column="3">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="1" column="0">
-         <property name="text">
-          <string>A1</string>
-         </property>
-        </item>
-        <item row="1" column="1">
-         <property name="text">
-          <string>5.00</string>
-         </property>
-        </item>
-        <item row="1" column="2">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="1" column="3">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="2" column="0">
-         <property name="text">
-          <string>A2</string>
-         </property>
-        </item>
-        <item row="2" column="1">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="2" column="2">
-         <property name="text">
-          <string>4.00</string>
-         </property>
-        </item>
-        <item row="2" column="3">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-        <item row="3" column="0">
-         <property name="text">
-          <string>A3</string>
-         </property>
-        </item>
-        <item row="3" column="1">
-         <property name="text">
-          <string>5.00</string>
-         </property>
-        </item>
-        <item row="3" column="2">
-         <property name="text">
-          <string>4.00</string>
-         </property>
-        </item>
-        <item row="3" column="3">
-         <property name="text">
-          <string>0.00</string>
-         </property>
-        </item>
-       </widget>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="anchor_btns">
+       <layout class="QHBoxLayout" name="anchor_header_layout">
         <item>
-         <widget class="QPushButton" name="btn_read_anchor">
-          <property name="text">
-           <string>📥 Read Layout</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="btn_write_anchor">
-          <property name="styleSheet">
-           <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; }
-QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
-          </property>
-          <property name="text">
-           <string>📤 Write Layout</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <spacer name="anchor_spacer">
+         <spacer name="anchor_header_spacer">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
           </property>
@@ -650,38 +781,237 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
          </spacer>
         </item>
         <item>
-         <widget class="QPushButton" name="btn_add_anchor">
-          <property name="maximumSize">
-           <size>
-            <width>30</width>
-            <height>16777215</height>
-           </size>
+         <layout class="QHBoxLayout" name="view_segmented_layout">
+          <property name="spacing">
+           <number>0</number>
           </property>
-          <property name="text">
-           <string>+</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="btn_remove_anchor">
-          <property name="maximumSize">
-           <size>
-            <width>30</width>
-            <height>16777215</height>
-           </size>
-          </property>
-          <property name="text">
-           <string>-</string>
-          </property>
-         </widget>
+          <item>
+           <widget class="QPushButton" name="btn_view_table">
+            <property name="styleSheet">
+             <string>QPushButton#btn_view_table { background: #0F172A; color: #94A3B8; border: 1px solid #334155; border-top-left-radius: 6px; border-bottom-left-radius: 6px; border-top-right-radius: 0px; border-bottom-right-radius: 0px; padding: 4px 12px; font-weight: bold; }
+QPushButton#btn_view_table:hover { background: #1E293B; }
+QPushButton#btn_view_table[active="true"] { background: #1E293B; color: #F8FAFC; }</string>
+            </property>
+            <property name="text">
+             <string>📋 Table</string>
+            </property>
+            <property name="active" stdset="0">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_view_visual">
+            <property name="styleSheet">
+             <string>QPushButton#btn_view_visual { background: #0F172A; color: #94A3B8; border: 1px solid #334155; border-top-left-radius: 0px; border-bottom-left-radius: 0px; border-top-right-radius: 6px; border-bottom-right-radius: 6px; padding: 4px 12px; font-weight: bold; }
+QPushButton#btn_view_visual:hover { background: #1E293B; }
+QPushButton#btn_view_visual[active="true"] { background: #1E293B; color: #F8FAFC; }</string>
+            </property>
+            <property name="text">
+             <string>🗺️ Visual Map</string>
+            </property>
+            <property name="active" stdset="0">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </item>
        </layout>
+      </item>
+      <item>
+       <widget class="QStackedWidget" name="anchor_stack">
+        <widget class="QWidget" name="page_table">
+         <layout class="QVBoxLayout" name="page_table_layout">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QTableWidget" name="anchor_table">
+            <property name="columnCount">
+             <number>4</number>
+            </property>
+            <attribute name="horizontalHeaderStretchLastSection">
+             <bool>true</bool>
+            </attribute>
+            <attribute name="verticalHeaderVisible">
+             <bool>false</bool>
+            </attribute>
+            <row/>
+            <row/>
+            <row/>
+            <row/>
+            <column>
+             <property name="text">
+              <string>Anchor ID</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>X (m)</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Y (m)</string>
+             </property>
+            </column>
+            <column>
+             <property name="text">
+              <string>Z (m)</string>
+             </property>
+            </column>
+            <item row="0" column="0">
+             <property name="text">
+              <string>A0</string>
+             </property>
+            </item>
+            <item row="0" column="1">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="0" column="2">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="0" column="3">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="1" column="0">
+             <property name="text">
+              <string>A1</string>
+             </property>
+            </item>
+            <item row="1" column="1">
+             <property name="text">
+              <string>5</string>
+             </property>
+            </item>
+            <item row="1" column="2">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="1" column="3">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="2" column="0">
+             <property name="text">
+              <string>A2</string>
+             </property>
+            </item>
+            <item row="2" column="1">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="2" column="2">
+             <property name="text">
+              <string>4</string>
+             </property>
+            </item>
+            <item row="2" column="3">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+            <item row="3" column="0">
+             <property name="text">
+              <string>A3</string>
+             </property>
+            </item>
+            <item row="3" column="1">
+             <property name="text">
+              <string>5</string>
+             </property>
+            </item>
+            <item row="3" column="2">
+             <property name="text">
+              <string>4</string>
+             </property>
+            </item>
+            <item row="3" column="3">
+             <property name="text">
+              <string>0</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="anchor_btns">
+            <item>
+             <spacer name="anchor_spacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_add_anchor">
+              <property name="maximumSize">
+               <size>
+                <width>30</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>+</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_remove_anchor">
+              <property name="maximumSize">
+               <size>
+                <width>30</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+        <widget class="AnchorVisualWidget" name="visual_widget"/>
+       </widget>
       </item>
      </layout>
     </widget>
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>AnchorVisualWidget</class>
+   <extends>QWidget</extends>
+   <header>views.tabs.anchor_visual_widget</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

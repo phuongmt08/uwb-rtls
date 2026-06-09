@@ -14,18 +14,25 @@
 ==============================================================================
 """
 import os
+import math
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QGridLayout, QPushButton, QScrollArea, QLineEdit,
     QSpinBox, QDoubleSpinBox, QComboBox, QTableWidget,
-    QTableWidgetItem, QHeaderView, QFrame, QCheckBox
+    QTableWidgetItem, QHeaderView, QFrame, QCheckBox,
+    QStackedWidget
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 from PyQt6 import uic
 
 # Path to .ui file
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'config_tab.ui')
+
+from utils.helpers import format_coord
+from views.tabs.anchor_visual_widget import AnchorVisualWidget
+
+
+
 
 
 class ConfigTab(QWidget):
@@ -39,7 +46,7 @@ class ConfigTab(QWidget):
         # ── Post-load setup ──
         self._setup_dev_widgets()
         self._setup_anchor_table()
-        self._setup_comboboxes()
+        self._setup_view_toggle()
 
         # Apply initial mode
         self.set_developer_mode(self._is_developer)
@@ -61,38 +68,20 @@ class ConfigTab(QWidget):
 
         self.btn_add_anchor.clicked.connect(self._add_anchor)
         self.btn_remove_anchor.clicked.connect(self._remove_anchor)
+        self.anchor_table.itemChanged.connect(self._on_table_item_changed)
 
     def _add_anchor(self):
         row = self.anchor_table.rowCount()
         self.anchor_table.insertRow(row)
         self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{row}"))
-        self.anchor_table.setItem(row, 1, QTableWidgetItem("0.00"))
-        self.anchor_table.setItem(row, 2, QTableWidgetItem("0.00"))
-        self.anchor_table.setItem(row, 3, QTableWidgetItem("0.00"))
+        self.anchor_table.setItem(row, 1, QTableWidgetItem("0"))
+        self.anchor_table.setItem(row, 2, QTableWidgetItem("0"))
+        self.anchor_table.setItem(row, 3, QTableWidgetItem("0"))
 
     def _remove_anchor(self):
         row = self.anchor_table.rowCount()
         if row > 0:
             self.anchor_table.removeRow(row - 1)
-
-    def _setup_comboboxes(self):
-        """Configure QComboBoxes with default items."""
-        self.val_channel.addItems(["1", "2", "3", "4", "5", "7"])
-        self.val_channel.setCurrentText("---")
-
-        self.val_role.addItems(["Tag", "Anchor", "Gateway"])
-        self.val_role.setCurrentText("Tag")
-
-        self.val_datarate.addItems(["110 kbps", "850 kbps", "6.8 Mbps"])
-        self.val_datarate.setCurrentText("6.8 Mbps")
-
-        self.val_prf.addItems(["16 MHz", "64 MHz"])
-        self.val_prf.setCurrentText("64 MHz")
-
-        # Allow user to type custom device id or select predefined
-        self.val_deviceid.addItems(["0x0001", "0x0002", "0x0003", "0x0004"])
-        self.val_deviceid.setEditable(True)
-        self.val_deviceid.setCurrentText("0x0001")
 
     def set_developer_mode(self, enabled: bool):
         self._is_developer = enabled
@@ -110,14 +99,43 @@ class ConfigTab(QWidget):
         self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
         
         # Connect UI buttons to viewmodel actions
-        self.btn_read_anchor.clicked.connect(self._vm.read_anchor_layout)
-        self.btn_write_anchor.clicked.connect(self._write_anchor_layout)
-        self.btn_rng_read.clicked.connect(self._vm.read_ranging_config)
+        self.btn_read_device.clicked.connect(self._read_device_config)
+        self.btn_write_device.clicked.connect(self._write_device_config)
+        self.btn_write_all.clicked.connect(self._write_all_devices)
         self.btn_device_reset.clicked.connect(self._vm.device_reset)
-        self.btn_uwb_reset.clicked.connect(self._vm.uwb_reset)
-        self.btn_factory.clicked.connect(self._vm.factory_reset)
+        self.btn_bootloader.clicked.connect(self._vm.enter_bootloader)
 
-    def _write_anchor_layout(self):
+    def _setup_view_toggle(self):
+        self.btn_view_table.clicked.connect(self._show_table_view)
+        self.btn_view_visual.clicked.connect(self._show_visual_view)
+        self.anchor_stack.setCurrentIndex(0)
+        self._update_segmented_style()
+
+    def _show_table_view(self):
+        self.anchor_stack.setCurrentIndex(0)
+        self._update_segmented_style()
+
+    def _show_visual_view(self):
+        anchors = self._get_anchors_from_table()
+        self.visual_widget.set_anchors(anchors)
+        self.anchor_stack.setCurrentIndex(1)
+        self._update_segmented_style()
+
+    def _update_segmented_style(self):
+        idx = self.anchor_stack.currentIndex()
+        self.btn_view_table.setProperty("active", idx == 0)
+        self.btn_view_visual.setProperty("active", idx == 1)
+        self.btn_view_table.style().unpolish(self.btn_view_table)
+        self.btn_view_table.style().polish(self.btn_view_table)
+        self.btn_view_visual.style().unpolish(self.btn_view_visual)
+        self.btn_view_visual.style().polish(self.btn_view_visual)
+
+    def _on_table_item_changed(self, item):
+        if self.anchor_stack.currentIndex() == 1:
+            anchors = self._get_anchors_from_table()
+            self.visual_widget.set_anchors(anchors)
+
+    def _get_anchors_from_table(self):
         anchors = []
         for row in range(self.anchor_table.rowCount()):
             id_item = self.anchor_table.item(row, 0)
@@ -129,7 +147,6 @@ class ConfigTab(QWidget):
                 continue
                 
             try:
-                # Strip prefix 'A' or 'a' if present (e.g. 'A0' -> 0)
                 anchor_id_str = id_item.text().strip()
                 if anchor_id_str.startswith('A') or anchor_id_str.startswith('a'):
                     anchor_id = int(anchor_id_str[1:])
@@ -147,13 +164,31 @@ class ConfigTab(QWidget):
                     "z_m": z_m
                 })
             except ValueError:
-                # Ignore invalid rows
                 pass
-        
+        return anchors
+
+    def _read_device_config(self):
         if self._vm:
-            self._vm.write_anchor_layout(anchors)
+            self._vm.read_anchor_layout()
+            self._vm.read_ranging_config()
+
+    def _write_device_config(self):
+        if not self._vm:
+            return
+        anchors = self._get_anchors_from_table()
+        self._vm.write_anchor_layout(anchors)
+        period = self.rng_period_spin.value()
+        timeout = self.rx_timeout_spin.value()
+        self._vm.write_ranging_config(period, timeout)
+
+    def _write_all_devices(self):
+        # UI only (Backend defined later)
+        import logging
+        logging.getLogger(__name__).info("Write All Devices clicked (UI Only - Backend not implemented)")
 
     def _on_anchor_layout_loaded(self, anchors):
+        # Temporarily block itemChanged signal to prevent layout refresh loops during load
+        self.anchor_table.blockSignals(True)
         if self._current_role == 2:  # Anchor
             # Only update the row matching our current connected Anchor device ID
             target_anchor = None
@@ -178,9 +213,14 @@ class ConfigTab(QWidget):
                 row = self.anchor_table.rowCount()
                 self.anchor_table.insertRow(row)
                 self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{a['anchor_id']}"))
-                self.anchor_table.setItem(row, 1, QTableWidgetItem(f"{a['x_m']:.2f}"))
-                self.anchor_table.setItem(row, 2, QTableWidgetItem(f"{a['y_m']:.2f}"))
-                self.anchor_table.setItem(row, 3, QTableWidgetItem(f"{a['z_m']:.2f}"))
+                self.anchor_table.setItem(row, 1, QTableWidgetItem(format_coord(a['x_m'])))
+                self.anchor_table.setItem(row, 2, QTableWidgetItem(format_coord(a['y_m'])))
+                self.anchor_table.setItem(row, 3, QTableWidgetItem(format_coord(a['z_m'])))
+        self.anchor_table.blockSignals(False)
+        
+        # Update the visual widget representation with parsed coordinates
+        current_anchors = self._get_anchors_from_table()
+        self.visual_widget.set_anchors(current_anchors)
 
     def _update_single_anchor_in_table(self, anchor_id, x_m, y_m, z_m):
         target_row = -1
@@ -197,9 +237,9 @@ class ConfigTab(QWidget):
             self.anchor_table.insertRow(target_row)
             self.anchor_table.setItem(target_row, 0, QTableWidgetItem(f"A{anchor_id}"))
             
-        self.anchor_table.setItem(target_row, 1, QTableWidgetItem(f"{x_m:.2f}"))
-        self.anchor_table.setItem(target_row, 2, QTableWidgetItem(f"{y_m:.2f}"))
-        self.anchor_table.setItem(target_row, 3, QTableWidgetItem(f"{z_m:.2f}"))
+        self.anchor_table.setItem(target_row, 1, QTableWidgetItem(format_coord(x_m)))
+        self.anchor_table.setItem(target_row, 2, QTableWidgetItem(format_coord(y_m)))
+        self.anchor_table.setItem(target_row, 3, QTableWidgetItem(format_coord(z_m)))
 
     def _on_sys_config_loaded(self, cfg):
         # Save active device role and ID
