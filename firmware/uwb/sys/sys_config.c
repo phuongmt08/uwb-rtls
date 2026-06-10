@@ -486,6 +486,43 @@ int sys_config_load(void)
         temp_storage.config.uwb.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
     }
 
+    if (temp_storage.config.uwb.uwb_preamble_len != 0x04 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x14 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x24 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x34 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x08 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x18 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x28 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x0C) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid preamble length in flash, forcing DWT_PLEN_512");
+        temp_storage.config.uwb.uwb_preamble_len = DEFAULT_UWB_PREAMBLE_LEN;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.uwb_rx_pac > 3) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx PAC in flash, forcing DWT_PAC16");
+        temp_storage.config.uwb.uwb_rx_pac = DEFAULT_UWB_RX_PAC;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.uwb_ns_sfd > 1) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid nsSFD in flash, forcing 1");
+        temp_storage.config.uwb.uwb_ns_sfd = DEFAULT_UWB_NS_SFD;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.uwb_phr_mode > 1) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid PHR mode in flash, forcing DWT_PHRMODE_STD");
+        temp_storage.config.uwb.uwb_phr_mode = DEFAULT_UWB_PHR_MODE;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.pg_delay == 0) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid PG delay in flash, forcing 0xC2");
+        temp_storage.config.uwb.pg_delay = DEFAULT_PG_DELAY;
+        normalize_and_save = true;
+    }
+
     memcpy(&g_storage, &temp_storage, sizeof(sys_config_storage_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
 
@@ -576,8 +613,14 @@ void sys_config_reset_to_defaults(void)
        ---------- */
     g_storage.config.uwb.ranging_period_ms                  =           DEFAULT_RANGING_PERIOD_MS;
     g_storage.config.uwb.rx_timeout_ms                      =           DEFAULT_RX_TIMEOUT_MS;
-     g_storage.config.uwb.power_mode                        =           DEFAULT_ANCHOR_POWER_MODE;
+    g_storage.config.uwb.power_mode                        =           DEFAULT_ANCHOR_POWER_MODE;
     g_storage.config.uwb.anchor_list.size                   =           0;
+    g_storage.config.uwb.uwb_preamble_len                   =           DEFAULT_UWB_PREAMBLE_LEN;
+    g_storage.config.uwb.uwb_rx_pac                         =           DEFAULT_UWB_RX_PAC;
+    g_storage.config.uwb.uwb_ns_sfd                         =           DEFAULT_UWB_NS_SFD;
+    g_storage.config.uwb.uwb_phr_mode                       =           DEFAULT_UWB_PHR_MODE;
+    g_storage.config.uwb.smart_tx_power                     =           DEFAULT_SMART_TX_POWER;
+    g_storage.config.uwb.pg_delay                           =           DEFAULT_PG_DELAY;
     
     /* Calibration Configuration
        ---------- */
@@ -734,6 +777,15 @@ int sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t co
     memcpy(g_storage.config.anchor_layout, anchors, (size_t)count * sizeof(sys_anchor_layout_t));
     g_storage.config.anchor_count = count;
     return 0;
+}
+
+uint8_t sys_config_get_hw_rev(void)
+{
+    sys_config_otp_device_info_t info;
+    if (sys_config_otp_get_device_info(&info) == OTP_OK) {
+        return info.hw_rev;
+    }
+    return 0u;
 }
 
 /* End of file -------------------------------------------------------- */

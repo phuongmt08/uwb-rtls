@@ -38,14 +38,14 @@ TEST_UKF_Q_R_Params = False
 ANCHOR_1_X = 0.0
 ANCHOR_1_Y = 0.0
 
-ANCHOR_2_X = 9.76
+ANCHOR_2_X = 10.76
 ANCHOR_2_Y = 0.0
 
 ANCHOR_3_X = 0.0
-ANCHOR_3_Y = 12.2
+ANCHOR_3_Y = 13.2
 
-ANCHOR_4_X = 9.76
-ANCHOR_4_Y = 12.2
+ANCHOR_4_X = 10.76
+ANCHOR_4_Y = 13.2
 
 # Anchor positions in the room (three corners)
 ANCHOR_POSITIONS = np.array([

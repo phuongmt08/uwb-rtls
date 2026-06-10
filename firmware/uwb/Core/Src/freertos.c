@@ -45,7 +45,7 @@
 #include "positioning_config.h"
 #include "bsp_io.h"
 #include <math.h>
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
 #include "mw_filter.h"
 #include "mw_trilateration.h"
@@ -79,14 +79,9 @@ bool g_pm_ranging_blocked = false;
 network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
-#define UKF_BLE_STREAM_TEST_ENABLE 1U
-
+#if ENABLE_SYS_FUSION
 static uint32_t s_fusion_last_tick = 0U;
 static bool     s_fusion_first_run = true;
-#if ENABLE_SYS_FUSION_LOG
-static uint32_t s_last_fusion_log_seq = 0U;
-#endif
 
 /* Owner variables for decoupled active Sensor Fusion */
 sys_sensor_fusion_data_t ukf_data;
@@ -101,8 +96,11 @@ static double s_latest_fp_snr[NUM_ANCHORS] = {0.0};
 static float s_latest_ranging_dt = 0.0f;
 static uint32_t s_fusion_log_seq = 0U;
 static uint32_t s_last_fusion_log_tick = 0U;
-static uint32_t s_error_count = 0U;
+static uint32_t s_fusion_error_count = 0U;
 static uint8_t s_last_selected_anchors_mask = 0U;
+static float s_latest_tril_x = 0.0f;
+static float s_latest_tril_y = 0.0f;
+static bool s_latest_tril_valid = false;
 #endif
 
 /* USER CODE END Variables */
@@ -183,9 +181,10 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+static void send_latest_fusion_frame(void);
 void sys_sensor_fusion_reset(void);
 #endif
 /* USER CODE END FunctionPrototypes */
@@ -374,7 +373,7 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
@@ -416,74 +415,38 @@ void sensor_fusion_entry(void *argument)
   } else {
       RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
   }
-
   for (;;)
   {
     osDelay(20);
 
-    /* Gate ONLY the predict step on the flag (set once the UKF is initialized
-     * on the first fix). Do NOT gate queue draining on it — otherwise the queue
-     * is never consumed, the UKF never initializes, and the flag can never be
-     * set: a bootstrap deadlock that kills the whole fusion pipeline. */
     if (sys_sensor_fusion_check_predict_flag())
     {
-    float dt = 0.01f;
-    if (s_fusion_first_run)
-    {
-      s_fusion_last_tick = HAL_GetTick();
-      s_fusion_first_run = false;
-    }
-    else
-    {
-      uint32_t now = HAL_GetTick();
-      uint32_t dt_ms = now - s_fusion_last_tick;
-      s_fusion_last_tick = now;
-      if (dt_ms > 100U) dt_ms = 100U;
-      if (dt_ms < 1U) dt_ms = 1U;
-      dt = (float)dt_ms / 1000.0f;
-    }
-
-    SYSVIEW_START(SYSVIEW_MARK_FUSION_PREDICT);
-    sys_sensor_fusion_predict(&ukf_data, dt);
-    SYSVIEW_STOP(SYSVIEW_MARK_FUSION_PREDICT);
-
-#if ENABLE_SYS_FUSION_LOG
-    {
-      app_tag_fusion_log_data_t log_data;
-      bsp_imu_data_t imu_data = {0};
-
-      if (app_tag_get_latest_fusion_log_data(&log_data))
+      float dt = 0.01f;
+      if (s_fusion_first_run)
       {
-        float log_dt = dt;
-        if (log_data.seq != s_last_fusion_log_seq)
-        {
-          s_last_fusion_log_seq = log_data.seq;
-          log_dt = log_data.ranging_dt;
-        }
-
-        (void)bsp_imu_get_raw_data(&imu_data);
-        bsp_io_uart_send_fusion_log_data(log_data.mask,
-                                         log_data.err_count,
-                                         imu_data.ax,
-                                         imu_data.ay,
-                                         imu_data.gz,
-                                         log_data.tril_x,
-                                         log_data.tril_y,
-                                         log_data.distances,
-                                         log_data.fp_amp_norm,
-                                         log_data.fp_snr,
-                                         log_dt);
+        s_fusion_last_tick = HAL_GetTick();
+        s_fusion_first_run = false;
       }
-    }
-#endif
+      else
+      {
+        uint32_t now = HAL_GetTick();
+        uint32_t dt_ms = now - s_fusion_last_tick;
+        s_fusion_last_tick = now;
+        if (dt_ms > 100U) dt_ms = 100U;
+        if (dt_ms < 1U) dt_ms = 1U;
+        dt = (float)dt_ms / 1000.0f;
+      }
+
+      SYSVIEW_START(SYSVIEW_MARK_FUSION_PREDICT);
+      sys_sensor_fusion_predict(&ukf_data, dt);
+      SYSVIEW_STOP(SYSVIEW_MARK_FUSION_PREDICT);
+      send_latest_fusion_frame();
+
     } /* end predict-flag gate; queue draining below runs every loop */
 
-#if ENABLE_SYS_FUSION
     {
       uwb_distance_msg_t msg;
-      /* Drain ALL queued ranging messages: absorbs bursts and makes the UKF
-       * init (which sets the predict flag) reachable on the very first message. */
-      while (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+      if (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
       {
         /* 1. Calculate dynamic dt for ranging if needed, and update logs */
         uint32_t now_log = HAL_GetTick();
@@ -633,7 +596,7 @@ void sensor_fusion_entry(void *argument)
             }
 
             mw_tril_anchor_t best_3_anchors[3];
-            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3);
+            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3, s_last_selected_anchors_mask);
 
             if (best_count >= 3) {
                 s_last_selected_anchors_mask = 0;
@@ -646,8 +609,10 @@ void sensor_fusion_entry(void *argument)
                 mw_tril_result_t tril_result = {0};
                 mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
                 SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
-
                 if (err == MW_TRIL_OK) {
+                    s_latest_tril_x = (float)tril_position.x;
+                    s_latest_tril_y = (float)tril_position.y;
+
                     if (!s_ukf_initialized) {
                         /* UKF initialization */
                         float init_x, init_y;
@@ -671,10 +636,11 @@ void sensor_fusion_entry(void *argument)
 
                             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
                             sys_sensor_fusion_set_predict_flag();
-                            s_error_count = 0;
+                            s_fusion_error_count = 0;
 
-                            /* Update app_tag mailboxes passively */
-                            app_tag_set_latest_fusion_data(init_x, init_y, true, s_error_count);
+                            s_latest_tril_x = (float)tril_position.x;
+                            s_latest_tril_y = (float)tril_position.y;
+                            s_latest_tril_valid = true;
                         }
                     } else {
                         /* Normal UKF Update */
@@ -691,63 +657,34 @@ void sensor_fusion_entry(void *argument)
                         SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                         sys_sensor_fusion_update(&ukf_data, best_3_anchors[0].distance, best_3_anchors[1].distance, best_3_anchors[2].distance, s_last_selected_anchors_mask);
                         SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
-                        s_error_count = 0;
+                        s_fusion_error_count = 0;
 
-                        /* Update app_tag mailboxes passively */
-                        app_tag_set_latest_fusion_data(ukf_data.px, ukf_data.py, true, s_error_count);
+                        s_latest_tril_x = (float)tril_position.x;
+                        s_latest_tril_y = (float)tril_position.y;
+                        s_latest_tril_valid = true;
                     }
                 } else {
-                    s_error_count++;
-                    app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+                    s_fusion_error_count++;
+                    s_latest_tril_x = 0.0f;
+                    s_latest_tril_y = 0.0f;
+                    s_latest_tril_valid = false;
                 }
             } else {
-                s_error_count++;
-                app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+                s_fusion_error_count++;
+                s_latest_tril_x = 0.0f;
+                s_latest_tril_y = 0.0f;
+                s_latest_tril_valid = false;
             }
         } else {
-            s_error_count++;
-            app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+            s_fusion_error_count++;
+            s_latest_tril_x = 0.0f;
+            s_latest_tril_y = 0.0f;
+            s_latest_tril_valid = false;
         }
 
-        /* Update logging metrics mailbox passively when in Sensor Fusion mode */
-#if ENABLE_SYS_FUSION_LOG
-        app_tag_set_latest_fusion_log_data(s_last_selected_anchors_mask,
-                                           s_fusion_log_seq,
-                                           s_latest_ranging_dt,
-                                           (float)ukf_data.px,
-                                           (float)ukf_data.py,
-                                           s_latest_distances,
-                                           s_latest_fp_amp_norm,
-                                           s_latest_fp_snr);
-#endif
       }
 
-      /* 4. Output the fusion position and logs directly */
-      float tril_x = 0.0f;
-      float tril_y = 0.0f;
-      uint32_t err_count = 0U;
-      float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
-      float yaw = sys_sensor_fusion_get_yaw_deg();
-
-      app_tag_get_latest_fusion_data(&tril_x, &tril_y, &err_count);
-      bsp_io_uart_send_fusion_data(ukf_data.px, ukf_data.py, ukf_yaw, tril_x, tril_y, yaw, err_count);
-
-      if (s_ukf_initialized) {
-        uint32_t now_ms = HAL_GetTick();
-        protobuf_sensor_fusion_result_t stream_data;
-        memset(&stream_data, 0, sizeof(stream_data));
-        stream_data.ukf_x_m = (float)ukf_data.px;
-        stream_data.ukf_y_m = (float)ukf_data.py;
-        stream_data.ukf_yaw_deg = ukf_yaw;
-        stream_data.tril_x_m = tril_x;
-        stream_data.tril_y_m = tril_y;
-        stream_data.yaw_deg = yaw;
-        stream_data.ranging_error_count = err_count;
-        stream_data.timestamp_ms = now_ms;
-        (void)network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data);
-      }
     }
-#endif
   }
 #endif
 
@@ -786,11 +723,11 @@ void network_entry(void *argument)
 void logger_entry(void *argument)
 {
   /* USER CODE BEGIN logger_entry */
+  bsp_util_rtos_monitor_update();
   for (;;)
   {
     osDelay(30000); /* 30 seconds */
-    bsp_util_print_mem_stats();
-    bsp_util_print_cpu_stats();
+    bsp_util_rtos_monitor_update();
   }
   /* USER CODE END logger_entry */
 }
@@ -932,7 +869,29 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if ENABLE_SYS_FUSION
+static void send_latest_fusion_frame(void)
+{
+    if (!s_ukf_initialized) {
+        return;
+    }
+
+    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+    float yaw = sys_sensor_fusion_get_yaw_deg();
+    float tril_x = s_latest_tril_valid ? s_latest_tril_x : 0.0f;
+    float tril_y = s_latest_tril_valid ? s_latest_tril_y : 0.0f;
+    uint32_t ranging_error_count = app_tag_get_ranging_error_count();
+
+    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+                                       (float)ukf_data.px,
+                                       (float)ukf_data.py,
+                                       ukf_yaw,
+                                       tril_x,
+                                       tril_y,
+                                       yaw,
+                                       ranging_error_count);
+}
+
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
     if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
@@ -972,7 +931,7 @@ void sys_sensor_fusion_reset(void)
     s_ukf_initialized = false;
     s_fusion_first_run = true;
     s_fusion_last_tick = 0U;
-    s_error_count = 0U;
+    s_fusion_error_count = 0U;
     s_last_selected_anchors_mask = 0U;
     
     mw_filter_ukf_init_reset(&s_ukf_init_filter);

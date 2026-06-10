@@ -12,7 +12,7 @@
 /* Enum definitions */
 typedef enum _protobuf_common_constant_t {
     protobuf_UNSPECIFIED = 0,
-    protobuf_PROTOCOL_REV = 121
+    protobuf_PROTOCOL_REV = 122
 } protobuf_common_constant_t;
 
 typedef enum _protobuf_packet_ack_response_t {
@@ -205,6 +205,12 @@ typedef struct _protobuf_uwb_cfg_t {
     uint32_t tx_power;
     protobuf_uwb_cfg_t_anchor_list_t anchor_list;
     protobuf_anchor_power_mode_t power_mode;
+    uint32_t uwb_preamble_len;
+    uint32_t uwb_rx_pac;
+    uint32_t uwb_ns_sfd;
+    uint32_t uwb_phr_mode;
+    bool smart_tx_power;
+    uint32_t pg_delay;
 } protobuf_uwb_cfg_t;
 
 typedef struct _protobuf_sys_config_get_t {
@@ -553,6 +559,47 @@ typedef struct _protobuf_calib_status_resp_t {
     float last_pair_error_mean_abs_m;
 } protobuf_calib_status_resp_t;
 
+/* Compact RTOS health snapshot. This is intentionally pull-only and contains
+ no per-task array so it can coexist with log and ranging streams.
+
+ health_flags:
+   bit 0: CPU busy above threshold
+   bit 1: free heap below threshold
+   bit 2: minimum task stack below threshold
+   bit 3: task snapshot truncated
+   bit 4: CPU/task statistics unavailable */
+typedef struct _protobuf_rtos_resource_get_t {
+    uint32_t dummy;
+} protobuf_rtos_resource_get_t;
+
+typedef struct _protobuf_rtos_resource_resp_t {
+    uint32_t sample_window_ms;
+    uint32_t cpu_busy_permille; /* 1000 = 100% */
+    uint32_t heap_free_bytes;
+    uint32_t heap_min_ever_free_bytes;
+    uint32_t min_stack_free_bytes;
+    uint32_t min_stack_task_id;
+    uint32_t task_count;
+    uint32_t health_flags;
+} protobuf_rtos_resource_resp_t;
+
+/* Per-task details for the current bounded task set. */
+typedef struct _protobuf_rtos_task_stats_get_t {
+    uint32_t dummy;
+} protobuf_rtos_task_stats_get_t;
+
+typedef struct _protobuf_rtos_task_stat_t {
+    uint32_t task_id; /* Valid for the current boot only */
+    uint32_t cpu_permille; /* 1000 = 100% */
+    uint32_t stack_min_free_bytes;
+    char name[10];
+} protobuf_rtos_task_stat_t;
+
+typedef struct _protobuf_rtos_task_stats_resp_t {
+    pb_size_t tasks_count;
+    protobuf_rtos_task_stat_t tasks[10];
+} protobuf_rtos_task_stats_resp_t;
+
 typedef struct _protobuf_ranging_status_get_t {
     uint32_t dummy;
 } protobuf_ranging_status_get_t;
@@ -580,9 +627,9 @@ typedef struct _protobuf_battery_info_resp_t {
     bool is_charging;
     /* Hardware telemetry fields */
     float mcu_temp_c; /* MCU internal temperature in degrees Celsius */
-    uint32_t vdda_mv; /* Actual VDDA voltage in mV after calibration */
+    uint32_t mcu_voltage_mv; /* Actual MCU voltage in mV */
     float uwb_temp_c; /* DW1000 chip internal temperature in degrees Celsius */
-    uint32_t uwb_vbat_mv; /* DW1000 VBAT supply voltage in mV */
+    uint32_t uwb_voltage_mv; /* DW1000 supply voltage in mV */
     float imu_temp_c; /* IMU sensor internal temperature in degrees Celsius */
     uint32_t error_mask; /* Bitmask of breached thresholds */
 } protobuf_battery_info_resp_t;
@@ -697,6 +744,11 @@ typedef struct _protobuf_packet_t {
         protobuf_end_session_t end_session;
         /* Factory OTP provisioning */
         protobuf_factory_otp_write_t factory_otp_write;
+        /* RTOS resource diagnostics */
+        protobuf_rtos_resource_get_t rtos_resource_get;
+        protobuf_rtos_resource_resp_t rtos_resource_resp;
+        protobuf_rtos_task_stats_get_t rtos_task_stats_get;
+        protobuf_rtos_task_stats_resp_t rtos_task_stats_resp;
     } params;
 } protobuf_packet_t;
 
@@ -911,6 +963,11 @@ extern "C" {
 
 
 
+
+
+
+
+
 #define protobuf_fota_state_resp_t_state_ENUMTYPE protobuf_fota_state_index_t
 
 
@@ -933,7 +990,7 @@ extern "C" {
 #define protobuf_time_sync_set_t_init_default    {0, 0}
 #define protobuf_time_sync_resp_t_init_default   {0, 0}
 #define protobuf_time_sync_adv_set_t_init_default {_protobuf_device_type_t_MIN, 0, 0, 0}
-#define protobuf_uwb_cfg_t_init_default          {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN}
+#define protobuf_uwb_cfg_t_init_default          {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN, 0, 0, 0, 0, 0, 0}
 #define protobuf_sys_config_get_t_init_default   {0}
 #define protobuf_sys_config_set_t_init_default   {false, protobuf_uwb_cfg_t_init_default}
 #define protobuf_sys_config_resp_t_init_default  {false, protobuf_uwb_cfg_t_init_default}
@@ -989,6 +1046,11 @@ extern "C" {
 #define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_calib_status_get_t_init_default {0}
 #define protobuf_calib_status_resp_t_init_default {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_rtos_resource_get_t_init_default {0}
+#define protobuf_rtos_resource_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_rtos_task_stats_get_t_init_default {0}
+#define protobuf_rtos_task_stat_t_init_default   {0, 0, 0, ""}
+#define protobuf_rtos_task_stats_resp_t_init_default {0, {protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default, protobuf_rtos_task_stat_t_init_default}}
 #define protobuf_ranging_status_get_t_init_default {0}
 #define protobuf_ranging_status_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_default  {_protobuf_fota_state_index_t_MIN}
@@ -1008,7 +1070,7 @@ extern "C" {
 #define protobuf_time_sync_set_t_init_zero       {0, 0}
 #define protobuf_time_sync_resp_t_init_zero      {0, 0}
 #define protobuf_time_sync_adv_set_t_init_zero   {_protobuf_device_type_t_MIN, 0, 0, 0}
-#define protobuf_uwb_cfg_t_init_zero             {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN}
+#define protobuf_uwb_cfg_t_init_zero             {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN, 0, 0, 0, 0, 0, 0}
 #define protobuf_sys_config_get_t_init_zero      {0}
 #define protobuf_sys_config_set_t_init_zero      {false, protobuf_uwb_cfg_t_init_zero}
 #define protobuf_sys_config_resp_t_init_zero     {false, protobuf_uwb_cfg_t_init_zero}
@@ -1064,6 +1126,11 @@ extern "C" {
 #define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_calib_status_get_t_init_zero    {0}
 #define protobuf_calib_status_resp_t_init_zero   {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_rtos_resource_get_t_init_zero   {0}
+#define protobuf_rtos_resource_resp_t_init_zero  {0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_rtos_task_stats_get_t_init_zero {0}
+#define protobuf_rtos_task_stat_t_init_zero      {0, 0, 0, ""}
+#define protobuf_rtos_task_stats_resp_t_init_zero {0, {protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero, protobuf_rtos_task_stat_t_init_zero}}
 #define protobuf_ranging_status_get_t_init_zero  {0}
 #define protobuf_ranging_status_resp_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_fota_state_resp_t_init_zero     {_protobuf_fota_state_index_t_MIN}
@@ -1116,6 +1183,12 @@ extern "C" {
 #define protobuf_uwb_cfg_t_tx_power_tag          11
 #define protobuf_uwb_cfg_t_anchor_list_tag       12
 #define protobuf_uwb_cfg_t_power_mode_tag        13
+#define protobuf_uwb_cfg_t_uwb_preamble_len_tag  14
+#define protobuf_uwb_cfg_t_uwb_rx_pac_tag        15
+#define protobuf_uwb_cfg_t_uwb_ns_sfd_tag        16
+#define protobuf_uwb_cfg_t_uwb_phr_mode_tag      17
+#define protobuf_uwb_cfg_t_smart_tx_power_tag    18
+#define protobuf_uwb_cfg_t_pg_delay_tag          19
 #define protobuf_sys_config_get_t_dummy_tag      1
 #define protobuf_sys_config_set_t_config_tag     1
 #define protobuf_sys_config_resp_t_config_tag    1
@@ -1260,6 +1333,21 @@ extern "C" {
 #define protobuf_calib_status_resp_t_last_pair_error_rms_m_tag 10
 #define protobuf_calib_status_resp_t_last_pair_error_max_abs_m_tag 11
 #define protobuf_calib_status_resp_t_last_pair_error_mean_abs_m_tag 12
+#define protobuf_rtos_resource_get_t_dummy_tag   1
+#define protobuf_rtos_resource_resp_t_sample_window_ms_tag 1
+#define protobuf_rtos_resource_resp_t_cpu_busy_permille_tag 2
+#define protobuf_rtos_resource_resp_t_heap_free_bytes_tag 3
+#define protobuf_rtos_resource_resp_t_heap_min_ever_free_bytes_tag 4
+#define protobuf_rtos_resource_resp_t_min_stack_free_bytes_tag 5
+#define protobuf_rtos_resource_resp_t_min_stack_task_id_tag 6
+#define protobuf_rtos_resource_resp_t_task_count_tag 7
+#define protobuf_rtos_resource_resp_t_health_flags_tag 8
+#define protobuf_rtos_task_stats_get_t_dummy_tag 1
+#define protobuf_rtos_task_stat_t_task_id_tag    1
+#define protobuf_rtos_task_stat_t_cpu_permille_tag 2
+#define protobuf_rtos_task_stat_t_stack_min_free_bytes_tag 3
+#define protobuf_rtos_task_stat_t_name_tag       4
+#define protobuf_rtos_task_stats_resp_t_tasks_tag 1
 #define protobuf_ranging_status_get_t_dummy_tag  1
 #define protobuf_ranging_status_resp_t_ranging_period_ms_tag 1
 #define protobuf_ranging_status_resp_t_ranging_total_count_tag 2
@@ -1276,9 +1364,9 @@ extern "C" {
 #define protobuf_battery_info_resp_t_remaining_min_tag 3
 #define protobuf_battery_info_resp_t_is_charging_tag 4
 #define protobuf_battery_info_resp_t_mcu_temp_c_tag 5
-#define protobuf_battery_info_resp_t_vdda_mv_tag 6
+#define protobuf_battery_info_resp_t_mcu_voltage_mv_tag 6
 #define protobuf_battery_info_resp_t_uwb_temp_c_tag 7
-#define protobuf_battery_info_resp_t_uwb_vbat_mv_tag 8
+#define protobuf_battery_info_resp_t_uwb_voltage_mv_tag 8
 #define protobuf_battery_info_resp_t_imu_temp_c_tag 9
 #define protobuf_battery_info_resp_t_error_mask_tag 10
 #define protobuf_battery_info_get_t_dummy_tag    1
@@ -1355,6 +1443,10 @@ extern "C" {
 #define protobuf_packet_t_calib_status_resp_tag  66
 #define protobuf_packet_t_end_session_tag        67
 #define protobuf_packet_t_factory_otp_write_tag  68
+#define protobuf_packet_t_rtos_resource_get_tag  71
+#define protobuf_packet_t_rtos_resource_resp_tag 72
+#define protobuf_packet_t_rtos_task_stats_get_tag 73
+#define protobuf_packet_t_rtos_task_stats_resp_tag 74
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1445,7 +1537,13 @@ X(a, STATIC,   SINGULAR, UINT32,   tx_antenna_delay,   9) \
 X(a, STATIC,   SINGULAR, UINT32,   rx_antenna_delay,  10) \
 X(a, STATIC,   SINGULAR, UINT32,   tx_power,         11) \
 X(a, STATIC,   SINGULAR, BYTES,    anchor_list,      12) \
-X(a, STATIC,   SINGULAR, UENUM,    power_mode,       13)
+X(a, STATIC,   SINGULAR, UENUM,    power_mode,       13) \
+X(a, STATIC,   SINGULAR, UINT32,   uwb_preamble_len,  14) \
+X(a, STATIC,   SINGULAR, UINT32,   uwb_rx_pac,       15) \
+X(a, STATIC,   SINGULAR, UINT32,   uwb_ns_sfd,       16) \
+X(a, STATIC,   SINGULAR, UINT32,   uwb_phr_mode,     17) \
+X(a, STATIC,   SINGULAR, BOOL,     smart_tx_power,   18) \
+X(a, STATIC,   SINGULAR, UINT32,   pg_delay,         19)
 #define protobuf_uwb_cfg_t_CALLBACK NULL
 #define protobuf_uwb_cfg_t_DEFAULT NULL
 
@@ -1826,6 +1924,42 @@ X(a, STATIC,   SINGULAR, FLOAT,    last_pair_error_mean_abs_m,  12)
 #define protobuf_calib_status_resp_t_CALLBACK NULL
 #define protobuf_calib_status_resp_t_DEFAULT NULL
 
+#define protobuf_rtos_resource_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_rtos_resource_get_t_CALLBACK NULL
+#define protobuf_rtos_resource_get_t_DEFAULT NULL
+
+#define protobuf_rtos_resource_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   sample_window_ms,   1) \
+X(a, STATIC,   SINGULAR, UINT32,   cpu_busy_permille,   2) \
+X(a, STATIC,   SINGULAR, UINT32,   heap_free_bytes,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   heap_min_ever_free_bytes,   4) \
+X(a, STATIC,   SINGULAR, UINT32,   min_stack_free_bytes,   5) \
+X(a, STATIC,   SINGULAR, UINT32,   min_stack_task_id,   6) \
+X(a, STATIC,   SINGULAR, UINT32,   task_count,        7) \
+X(a, STATIC,   SINGULAR, UINT32,   health_flags,      8)
+#define protobuf_rtos_resource_resp_t_CALLBACK NULL
+#define protobuf_rtos_resource_resp_t_DEFAULT NULL
+
+#define protobuf_rtos_task_stats_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_rtos_task_stats_get_t_CALLBACK NULL
+#define protobuf_rtos_task_stats_get_t_DEFAULT NULL
+
+#define protobuf_rtos_task_stat_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   task_id,           1) \
+X(a, STATIC,   SINGULAR, UINT32,   cpu_permille,      2) \
+X(a, STATIC,   SINGULAR, UINT32,   stack_min_free_bytes,   3) \
+X(a, STATIC,   SINGULAR, STRING,   name,              4)
+#define protobuf_rtos_task_stat_t_CALLBACK NULL
+#define protobuf_rtos_task_stat_t_DEFAULT NULL
+
+#define protobuf_rtos_task_stats_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   REPEATED, MESSAGE,  tasks,             1)
+#define protobuf_rtos_task_stats_resp_t_CALLBACK NULL
+#define protobuf_rtos_task_stats_resp_t_DEFAULT NULL
+#define protobuf_rtos_task_stats_resp_t_tasks_MSGTYPE protobuf_rtos_task_stat_t
+
 #define protobuf_ranging_status_get_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 #define protobuf_ranging_status_get_t_CALLBACK NULL
@@ -1855,9 +1989,9 @@ X(a, STATIC,   SINGULAR, UINT32,   bat_soc_percent,   2) \
 X(a, STATIC,   SINGULAR, INT32,    remaining_min,     3) \
 X(a, STATIC,   SINGULAR, BOOL,     is_charging,       4) \
 X(a, STATIC,   SINGULAR, FLOAT,    mcu_temp_c,        5) \
-X(a, STATIC,   SINGULAR, UINT32,   vdda_mv,           6) \
+X(a, STATIC,   SINGULAR, UINT32,   mcu_voltage_mv,    6) \
 X(a, STATIC,   SINGULAR, FLOAT,    uwb_temp_c,        7) \
-X(a, STATIC,   SINGULAR, UINT32,   uwb_vbat_mv,       8) \
+X(a, STATIC,   SINGULAR, UINT32,   uwb_voltage_mv,    8) \
 X(a, STATIC,   SINGULAR, FLOAT,    imu_temp_c,        9) \
 X(a, STATIC,   SINGULAR, UINT32,   error_mask,       10)
 #define protobuf_battery_info_resp_t_CALLBACK NULL
@@ -1949,7 +2083,11 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,enter_to_bootloader,params.enter_to_b
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_get,params.calib_status_get),  65) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_status_resp,params.calib_status_resp),  66) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,end_session,params.end_session),  67) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_write),  68)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_write),  68) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_resource_get,params.rtos_resource_get),  71) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_resource_resp,params.rtos_resource_resp),  72) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_task_stats_get,params.rtos_task_stats_get),  73) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_task_stats_resp,params.rtos_task_stats_resp),  74)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -2017,6 +2155,10 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_
 #define protobuf_packet_t_params_calib_status_resp_MSGTYPE protobuf_calib_status_resp_t
 #define protobuf_packet_t_params_end_session_MSGTYPE protobuf_end_session_t
 #define protobuf_packet_t_params_factory_otp_write_MSGTYPE protobuf_factory_otp_write_t
+#define protobuf_packet_t_params_rtos_resource_get_MSGTYPE protobuf_rtos_resource_get_t
+#define protobuf_packet_t_params_rtos_resource_resp_MSGTYPE protobuf_rtos_resource_resp_t
+#define protobuf_packet_t_params_rtos_task_stats_get_MSGTYPE protobuf_rtos_task_stats_get_t
+#define protobuf_packet_t_params_rtos_task_stats_resp_MSGTYPE protobuf_rtos_task_stats_resp_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -2085,6 +2227,11 @@ extern const pb_msgdesc_t protobuf_anchor_layout_set_t_msg;
 extern const pb_msgdesc_t protobuf_anchor_layout_resp_t_msg;
 extern const pb_msgdesc_t protobuf_calib_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_calib_status_resp_t_msg;
+extern const pb_msgdesc_t protobuf_rtos_resource_get_t_msg;
+extern const pb_msgdesc_t protobuf_rtos_resource_resp_t_msg;
+extern const pb_msgdesc_t protobuf_rtos_task_stats_get_t_msg;
+extern const pb_msgdesc_t protobuf_rtos_task_stat_t_msg;
+extern const pb_msgdesc_t protobuf_rtos_task_stats_resp_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_get_t_msg;
 extern const pb_msgdesc_t protobuf_ranging_status_resp_t_msg;
 extern const pb_msgdesc_t protobuf_fota_state_resp_t_msg;
@@ -2162,6 +2309,11 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_resp_t_fields &protobuf_anchor_layout_resp_t_msg
 #define protobuf_calib_status_get_t_fields &protobuf_calib_status_get_t_msg
 #define protobuf_calib_status_resp_t_fields &protobuf_calib_status_resp_t_msg
+#define protobuf_rtos_resource_get_t_fields &protobuf_rtos_resource_get_t_msg
+#define protobuf_rtos_resource_resp_t_fields &protobuf_rtos_resource_resp_t_msg
+#define protobuf_rtos_task_stats_get_t_fields &protobuf_rtos_task_stats_get_t_msg
+#define protobuf_rtos_task_stat_t_fields &protobuf_rtos_task_stat_t_msg
+#define protobuf_rtos_task_stats_resp_t_fields &protobuf_rtos_task_stats_resp_t_msg
 #define protobuf_ranging_status_get_t_fields &protobuf_ranging_status_get_t_msg
 #define protobuf_ranging_status_resp_t_fields &protobuf_ranging_status_resp_t_msg
 #define protobuf_fota_state_resp_t_fields &protobuf_fota_state_resp_t_msg
@@ -2219,7 +2371,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_log_clear_t_size                14
 #define protobuf_log_data_t_size                 197
 #define protobuf_none_t_size                     6
-#define protobuf_packet_t_size                   233
+#define protobuf_packet_t_size                   334
 #define protobuf_pos_calib_cfg_get_t_size        6
 #define protobuf_pos_calib_cfg_resp_t_size       128
 #define protobuf_pos_calib_cfg_set_t_size        128
@@ -2229,14 +2381,19 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ranging_status_get_t_size       6
 #define protobuf_ranging_status_resp_t_size      58
 #define protobuf_ranging_stop_t_size             6
+#define protobuf_rtos_resource_get_t_size        6
+#define protobuf_rtos_resource_resp_t_size       48
+#define protobuf_rtos_task_stat_t_size           29
+#define protobuf_rtos_task_stats_get_t_size      6
+#define protobuf_rtos_task_stats_resp_t_size     310
 #define protobuf_sensor_fusion_cfg_get_t_size    6
 #define protobuf_sensor_fusion_cfg_resp_t_size   72
 #define protobuf_sensor_fusion_cfg_set_t_size    72
 #define protobuf_sensor_fusion_cfg_t_size        70
 #define protobuf_sensor_fusion_result_t_size     42
 #define protobuf_sys_config_get_t_size           6
-#define protobuf_sys_config_resp_t_size          76
-#define protobuf_sys_config_set_t_size           76
+#define protobuf_sys_config_resp_t_size          112
+#define protobuf_sys_config_set_t_size           112
 #define protobuf_sys_ranging_cfg_get_t_size      6
 #define protobuf_sys_ranging_cfg_resp_t_size     14
 #define protobuf_sys_ranging_cfg_set_t_size      14
@@ -2245,7 +2402,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_time_sync_get_t_size            6
 #define protobuf_time_sync_resp_t_size           22
 #define protobuf_time_sync_set_t_size            22
-#define protobuf_uwb_cfg_t_size                  74
+#define protobuf_uwb_cfg_t_size                  110
 #define protobuf_uwb_reset_t_size                6
 #define protobuf_version_t_size                  35
 

@@ -37,7 +37,7 @@ typedef struct
   float   error;                 /* Error estimate in meters */
 } __attribute__((packed)) uart_position_frame_t;
 
-#if ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 typedef struct
 {
   uint8_t sof;                   /* Start of frame: 0xAA */
@@ -88,7 +88,7 @@ static uint32_t              s_led_blink_off_tick = 0;
 static uart_position_frame_t s_frame;
 static volatile uint8_t      s_tx_busy = 0;
 
-#if ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 uart_fusion_log_frame_t   	s_fusion_log_frame = {0};
 #endif
 
@@ -355,7 +355,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   }
 }
 
-#if ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_log_data(
   uint8_t mask, uint32_t err_frame_count, 
   float ax, float ay, float gz, float px, float py, const float *distance, 
@@ -401,14 +401,6 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
     }
   }
 
-  if (distance != NULL)
-  {
-    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
-    {
-    	s_fusion_log_frame.distance[id] = distance[id];
-    }
-  }
-  
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_log_frame, sizeof(s_fusion_log_frame)) != HAL_OK)
   {
     return BSP_ERR;
@@ -418,13 +410,14 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 #endif
 
 #if ENABLE_SYS_FUSION
-bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count)
+bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count)
 {
   if (s_tx_busy)
-    return BSP_ERR;  // hoặc queue lại
+    return BSP_ERR;  // UART transmission already in progress
 
   s_fusion_frame.sof             = UART_SOF;
   s_fusion_frame.length          = UART_FUSION_PAYLOAD_LEN_BYTES;
+  s_fusion_frame.anchor_mask     = anchor_mask;
   s_fusion_frame.tx_frame_cnt++;
   s_fusion_frame.ukf_x              = ukf_x;
   s_fusion_frame.ukf_y              = ukf_y;
@@ -434,10 +427,14 @@ bsp_err_t bsp_io_uart_send_fusion_data(float ukf_x, float ukf_y, float ukf_yaw, 
   s_fusion_frame.yaw            = yaw;
   s_fusion_frame.error_frame_cnt = err_frame_count;
 
+  /* Mark as busy before starting transmission */
+  s_tx_busy = 1;
+  
+  // if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
-
-  // if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK) // note
+  
   {
+    s_tx_busy = 0;  /* Clear busy flag on transmission failure */
     return BSP_ERR;
   }
   return BSP_OK;

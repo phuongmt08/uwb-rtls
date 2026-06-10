@@ -15,6 +15,7 @@
     #include "bsp_battery.h"
     #include "sys_logger.h"
     #include "sys_pm.h"
+    #include "otp/otp.h"
 #else
     #include "sys_logger_bl.h"
 
@@ -342,6 +343,14 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
         resp.params.device_information_resp.role        = cfg->uwb.role;
     }
 
+    uint32_t hw_version = 0;
+    uint8_t otp_buf[5];
+    uint8_t otp_len = 0;
+    if (otp_get(OTP_TYPE_DEVICE_INFO, otp_buf, sizeof(otp_buf), &otp_len) == OTP_OK && otp_len == 5) {
+        hw_version = otp_buf[4];
+    }
+    resp.params.device_information_resp.hw_version = hw_version;
+
     bsp_app_image_header_t app_hdr;
     memset(&app_hdr, 0, sizeof(app_hdr));
     if (bsp_flash_read_app_header(&app_hdr, sizeof(app_hdr))) {
@@ -432,6 +441,38 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 
     if (new_cfg->uwb_channel < 1u || new_cfg->uwb_channel > 7u) {
         RLOG_W(OBJECT_CODE, "Invalid UWB channel in sys_config_set: %u", (unsigned)new_cfg->uwb_channel);
+        return;
+    }
+
+    if (new_cfg->uwb_preamble_len != 0x04 &&
+        new_cfg->uwb_preamble_len != 0x14 &&
+        new_cfg->uwb_preamble_len != 0x24 &&
+        new_cfg->uwb_preamble_len != 0x34 &&
+        new_cfg->uwb_preamble_len != 0x08 &&
+        new_cfg->uwb_preamble_len != 0x18 &&
+        new_cfg->uwb_preamble_len != 0x28 &&
+        new_cfg->uwb_preamble_len != 0x0C) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB preamble length in sys_config_set: 0x%02X", (unsigned)new_cfg->uwb_preamble_len);
+        return;
+    }
+
+    if (new_cfg->uwb_rx_pac > 3u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB rx PAC in sys_config_set: %u", (unsigned)new_cfg->uwb_rx_pac);
+        return;
+    }
+
+    if (new_cfg->uwb_ns_sfd > 1u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB nsSFD in sys_config_set: %u", (unsigned)new_cfg->uwb_ns_sfd);
+        return;
+    }
+
+    if (new_cfg->uwb_phr_mode > 1u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB PHR mode in sys_config_set: %u", (unsigned)new_cfg->uwb_phr_mode);
+        return;
+    }
+
+    if (new_cfg->pg_delay == 0u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB PG delay in sys_config_set: %u", (unsigned)new_cfg->pg_delay);
         return;
     }
 
@@ -664,9 +705,9 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
     
     // Hardware telemetry fields
     resp.params.battery_info_resp.mcu_temp_c       = pm_status.temp_degc;
-    resp.params.battery_info_resp.vdda_mv          = (uint32_t)pm_status.vdda_mv;
+    resp.params.battery_info_resp.mcu_voltage_mv   = (uint32_t)pm_status.vdda_mv;
     resp.params.battery_info_resp.uwb_temp_c       = pm_status.uwb_temp_c;
-    resp.params.battery_info_resp.uwb_vbat_mv      = (uint32_t)pm_status.uwb_vbat_mv;
+    resp.params.battery_info_resp.uwb_voltage_mv   = (uint32_t)pm_status.uwb_vbat_mv;
     resp.params.battery_info_resp.imu_temp_c       = pm_status.imu_temp_c;
     
     // Alert flags

@@ -3,6 +3,7 @@ import re
 import json
 import math
 import sys
+import csv
 import datetime
 import http.server
 import socketserver
@@ -16,6 +17,59 @@ GT_SQUARE = {
     'x': [2.44, 7.32, 7.32, 2.44, 2.44],
     'y': [2.44, 2.44, 7.32, 7.32, 2.44]
 }
+DEFAULT_ANCHORS = [
+    {'id': 1, 'x': 0.0,  'y': 0.0,  'z': 0.895},
+    {'id': 2, 'x': 9.76, 'y': 0.0,  'z': 0.895},
+    {'id': 3, 'x': 0.0,  'y': 9.76, 'z': 0.895},
+    {'id': 4, 'x': 9.76, 'y': 9.76, 'z': 0.895},
+]
+GROUND_TRUTH_PARAMS = {
+    'custom_track': {
+        # world: ground truth is fixed in room/world coordinates and does not follow A1.
+        # anchor_relative: ground truth coordinates are relative to the selected anchor.
+        'coordinate_frame': 'world',
+        'anchor_id': 1,
+        'offset_x': 0.5,
+        'offset_y': 0.5,
+    }
+}
+
+def _anchor_origin(anchor_id):
+    for anchor in DEFAULT_ANCHORS:
+        if anchor['id'] == anchor_id:
+            return anchor['x'], anchor['y']
+    return 0.0, 0.0
+
+def apply_groundtruth_params(track):
+    if not track:
+        return None
+
+    params = GROUND_TRUTH_PARAMS.get(track.get('id'), {})
+    frame = params.get('coordinate_frame', 'world')
+    offset_x = float(params.get('offset_x', 0.0) or 0.0)
+    offset_y = float(params.get('offset_y', 0.0) or 0.0)
+
+    if frame == 'anchor_relative':
+        ax, ay = _anchor_origin(int(params.get('anchor_id', 1) or 1))
+        offset_x += ax
+        offset_y += ay
+
+    def shift_x(v):
+        return None if v is None else v + offset_x
+
+    def shift_y(v):
+        return None if v is None else v + offset_y
+
+    transformed = dict(track)
+    transformed['x'] = [shift_x(v) for v in track.get('x', [])]
+    transformed['y'] = [shift_y(v) for v in track.get('y', [])]
+    transformed['segments'] = [
+        [seg[0] + offset_x, seg[1] + offset_y, seg[2] + offset_x, seg[3] + offset_y, *seg[4:]]
+        for seg in track.get('segments', [])
+    ]
+    transformed['coordinate_frame'] = frame
+    transformed['groundtruth_offset'] = {'x': offset_x, 'y': offset_y}
+    return transformed
 
 def parse_graphml_groundtruth(filepath):
     if not os.path.exists(filepath):
@@ -96,11 +150,16 @@ def load_ground_truths():
 
     custom = parse_graphml_groundtruth(os.path.join(BASE_DIR, 'custom_track_modified.xml'))
     if custom:
-        tracks.append(custom)
+        tracks.append(apply_groundtruth_params(custom))
 
     return tracks
 
 def parse_log(filepath):
+    with open(filepath, 'r', encoding='utf-8') as f:
+        first_line = f.readline().strip()
+    if first_line.startswith('sof,') and 'ukf_x' in first_line and 'tril_x' in first_line:
+        return parse_path_csv_log(filepath)
+
     data = []
     pattern = re.compile(r"""
         (?P<type>Update|Init|Predict)          # Loại log
@@ -162,11 +221,69 @@ def parse_log(filepath):
     except: pass
     return data
 
+def safe_float(value, default=0.0):
+    try:
+        v = float(value)
+        return v if math.isfinite(v) else default
+    except (TypeError, ValueError):
+        return default
+
+def safe_int(value, default=0):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+def parse_path_csv_log(filepath):
+    data = []
+    prev_frame = None
+    try:
+        with open(filepath, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            for line_no, row in enumerate(reader, 2):
+                frame = safe_int(row.get('tx_frame_cnt'), len(data))
+                if prev_frame is None:
+                    dt = 0.0
+                else:
+                    frame_delta = max(1, frame - prev_frame)
+                    dt = frame_delta / 100.0
+                prev_frame = frame
+
+                ukf_x = safe_float(row.get('ukf_x'))
+                ukf_y = safe_float(row.get('ukf_y'))
+                tril_x = safe_float(row.get('tril_x'), ukf_x)
+                tril_y = safe_float(row.get('tril_y'), ukf_y)
+                yaw = safe_float(row.get('yaw'), safe_float(row.get('ukf_yaw')))
+
+                data.append({
+                    'line_no': line_no,
+                    'raw_line': ','.join(row.get(k, '') for k in (reader.fieldnames or [])),
+                    'type': 'Update',
+                    'source_format': 'path_csv',
+                    'tx_frame_cnt': frame,
+                    'ax': 0.0, 'ay': 0.0, 'gz': 0.0,
+                    'px_fw': ukf_x, 'py_fw': ukf_y, 'dt': dt,
+                    'ukf_x': ukf_x, 'ukf_y': ukf_y,
+                    'tril_x': tril_x, 'tril_y': tril_y,
+                    'yaw': yaw,
+                    'ukf_yaw': safe_float(row.get('ukf_yaw'), yaw),
+                    'fp_amp_norm': [0, 0, 0, 0],
+                    'fp_snr': [0, 0, 0, 0],
+                    'mask': safe_int(row.get('anchor_mask'), 15),
+                    'distances': [0.0, 0.0, 0.0, 0.0],
+                    'err': safe_int(row.get('error_frame_cnt'), 0)
+                })
+    except Exception:
+        pass
+    return data
+
 def run_gen(log_file):
     log_data = parse_log(log_file)
     if not log_data: return None
+    log_format = log_data[0].get('source_format', 'ukf_log')
     bias = {'ax': 0.0, 'ay': 0.0, 'gz': 0.0}
     fw_path = {'x': [], 'y': [], 'mask': []}
+    tril_path = {'x': [], 'y': []}
     fp_logs = {'amp': [[], [], [], []], 'snr': [[], [], [], []]}
     for entry in log_data:
         if entry['type'] == 'Init':
@@ -175,6 +292,9 @@ def run_gen(log_file):
             fw_path['x'].append(entry['px_fw'])
             fw_path['y'].append(entry['py_fw'])
             fw_path['mask'].append(entry.get('mask', 15))
+            if log_format == 'path_csv':
+                tril_path['x'].append(entry.get('tril_x'))
+                tril_path['y'].append(entry.get('tril_y'))
             for i in range(4):
                 val_amp = entry['fp_amp_norm'][i] if len(entry.get('fp_amp_norm', [])) > i else 0
                 val_snr = entry['fp_snr'][i] if len(entry.get('fp_snr', [])) > i else 0
@@ -216,7 +336,9 @@ def run_gen(log_file):
         """
     
     payload = {
+        'log_format': log_format,
         'fw_path': fw_path,
+        'tril_path': tril_path,
         'fp_logs': fp_logs,
         'all_entries': log_data,
         'biases': bias,
@@ -267,6 +389,8 @@ def load_worker_js_bundle():
 def get_report_source_mtime():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     paths = [
+        'uwb-rtls_simulation.py',
+        'custom_track_modified.xml',
         'template_ukf_prefilter.html',
         'src/core/config.js',
         'src/core/math_utils.js',
@@ -295,11 +419,17 @@ def render_template(template_content, filename, payload, ground_truths, app_js_b
     return html
 
 def main():
+    logs_data_dir = os.path.abspath(os.path.join(BASE_DIR, '..', 'logs_data'))
+    search_dirs = [BASE_DIR]
+    if os.path.isdir(logs_data_dir):
+        search_dirs.append(logs_data_dir)
+
     logs = [
         os.path.join(root, f)
-        for root, _, files in os.walk(BASE_DIR)
+        for search_dir in search_dirs
+        for root, _, files in os.walk(search_dir)
         for f in files
-        if f.endswith('.csv') and 'ukf_log' in f
+        if f.endswith('.csv') and ('ukf_log' in f or f.startswith('uwb_data_'))
     ]
     logs.sort(reverse=True)
     if not logs: return
@@ -317,7 +447,10 @@ def main():
         try:
             fn  = os.path.basename(lp)
             rn  = fn.replace('.csv', '_sim.html')
-            rp  = os.path.join(os.path.dirname(lp), rn)
+            if os.path.abspath(lp).startswith(os.path.abspath(BASE_DIR)):
+                rp = os.path.join(os.path.dirname(lp), rn)
+            else:
+                rp = os.path.join(BASE_DIR, 'logs_data_reports', rn)
             
             # Check if we need to regenerate
             log_mtime = os.path.getmtime(lp)
@@ -330,6 +463,7 @@ def main():
             if not p: continue
             
             if needs_gen:
+                os.makedirs(os.path.dirname(rp), exist_ok=True)
                 with open(rp, 'w', encoding='utf-8') as f:
                     f.write(render_template(template_content, fn, p, ground_truths, app_js_bundle, worker_js_bundle))
                 files_generated += 1
