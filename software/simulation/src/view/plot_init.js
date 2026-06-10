@@ -81,7 +81,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
           line: { color: '#f87171', dash: 'dot', width: 1 } },
         { x: isPathCsv ? samples.map(e => e.tril_x) : samples.map(e => e.px_fw),
           y: isPathCsv ? samples.map(e => e.tril_y) : samples.map(e => e.py_fw), mode: 'lines+markers',
-          name: isPathCsv ? 'Trilateration Path' : 'Firmware Path', type: 'scattergl',
+          name: 'Trilateration Path', type: 'scattergl',
           marker: { size: 2 }, line: { color: '#94a3b8', width: 1 } },
         { x: isPathCsv ? samples.map(e => e.ukf_x) : [], y: isPathCsv ? samples.map(e => e.ukf_y) : [],
           mode: 'lines+markers', name: isPathCsv ? 'UKF Path' : 'Simulated Path (Rules)',
@@ -258,7 +258,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 8. Pos Error
     const errTraces = [
-        { x: [], y: [], name: 'Pos Error (Firmware)', mode: 'lines', type: 'scatter', line: { color: '#64748b', width: 1.5 } },
+        { x: [], y: [], name: 'Pos Error (Trilateration)', mode: 'lines', type: 'scatter', line: { color: '#64748b', width: 1.5 } },
         { x: [], y: [], name: 'Pos Error (Rules)', mode: 'lines', type: 'scatter', line: { color: '#ef4444', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Multilateration)', mode: 'lines', type: 'scatter', line: { color: '#d97706', width: 2 } },
         { x: [], y: [], name: 'Pos Error (Best Triplet)', mode: 'lines', type: 'scatter', line: { color: '#059669', width: 2 } },

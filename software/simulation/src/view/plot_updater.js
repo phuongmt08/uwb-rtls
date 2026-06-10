@@ -133,7 +133,7 @@ function updatePlots(res, samples, rawData) {
             x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
             y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf],
             name: [
-                `Pos Error (Firmware) Mean: ${meanErr(pos_errors_fw)}m`,
+                `Pos Error (Trilateration) Mean: ${meanErr(pos_errors_fw)}m`,
                 `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
                 `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
                 `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,

@@ -282,27 +282,46 @@ function getRateStatsFromDt(entries, types) {
     };
 }
 
+function countTrilaterationUpdates(entries, isPathCsv) {
+    let count = 0;
+    let prevX = null;
+    let prevY = null;
+    
+    entries.forEach(entry => {
+        if (entry.type === 'Update') {
+            const x = isPathCsv ? entry.tril_x : entry.px_fw;
+            const y = isPathCsv ? entry.tril_y : entry.py_fw;
+            if (x !== undefined && y !== undefined && (x !== prevX || y !== prevY)) {
+                count++;
+                prevX = x;
+                prevY = y;
+            }
+        }
+    });
+    return count;
+}
+
 function updatePositionRateDisplay(totalTimeOverride) {
     if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
-    const select = document.getElementById('export_path_select');
-    const selected = select ? select.value : 'rules';
-    const path = latestTrajectoryPaths[selected] || latestTrajectoryPaths.firmware;
-    const validCount = countValidPositions(path);
-    const totalCount = path && path.x ? path.x.length : 0;
+    const isPathCsv = rawData.log_format === 'path_csv';
     const processedCount = latestSimulationResult && latestSimulationResult.simPathUKF_allTimes
         ? latestSimulationResult.simPathUKF_allTimes.length
         : rawData.all_entries.length;
-    const entriesForRate = rawData.all_entries.slice(0, processedCount);
-    const predictRate = getRateStatsFromDt(entriesForRate, ['Predict']);
-    const updateRate = getRateStatsFromDt(entriesForRate, ['Update']);
-    const allRate = getRateStatsFromDt(entriesForRate, ['Predict', 'Update']);
-    const exportRate = selected === 'firmware' || selected === 'rules' || selected === 'wls' || selected === 'triplet'
-        ? updateRate
-        : allRate;
-    const label = select ? select.options[select.selectedIndex].text : 'Trajectory';
+        
+    const duration = Number.isFinite(totalTimeOverride) ? totalTimeOverride : latestTotalTime;
+    const entries = rawData.all_entries.slice(0, processedCount);
+    
+    const trilUpdates = countTrilaterationUpdates(entries, isPathCsv);
+    const predictCount = entries.filter(e => e.type === 'Predict').length;
+    const updateCount = entries.filter(e => e.type === 'Update').length;
+    
+    const trilHz = duration > 0 ? (trilUpdates / duration).toFixed(2) : "0.00";
+    const predictHz = duration > 0 ? (predictCount / duration).toFixed(2) : "0.00";
+    const updateHz = duration > 0 ? (updateCount / duration).toFixed(2) : "0.00";
+    
     const elem = document.getElementById('position_rate_info');
     if (elem) {
-        elem.textContent = `${label}: ${exportRate.hz.toFixed(2)} Hz (${validCount}/${totalCount} points) | Predict: ${predictRate.hz.toFixed(2)} Hz | Update: ${updateRate.hz.toFixed(2)} Hz`;
+        elem.textContent = `Duration: ${duration.toFixed(2)}s | Trilateration: ${trilUpdates} (${trilHz} Hz) | Predict: ${predictCount} (${predictHz} Hz) | Update: ${updateCount} (${updateHz} Hz)`;
     }
 }
 

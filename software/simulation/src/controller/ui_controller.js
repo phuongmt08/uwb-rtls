@@ -15,12 +15,17 @@ function initSimulation() {
         simWorker.onmessage = function(e) {
             const res = e.data;
             latestSimulationResult = res;
+            const isPathCsv = rawData.log_format === 'path_csv';
             latestTrajectoryPaths = {
-                firmware: { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) },
+                firmware: isPathCsv
+                    ? { x: rawData.tril_path.x.slice(0, res.x_axis.length), y: rawData.tril_path.y.slice(0, res.x_axis.length) }
+                    : { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) },
                 rules: res.simPathRuled,
                 wls: res.simPathWLS,
                 triplet: res.simPathTriplet,
-                ukf: res.simPathUKF,
+                ukf: isPathCsv
+                    ? { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) }
+                    : res.simPathUKF,
                 ukf_lpf: res.simPathUKF_lpf
             };
             latestTotalTime = res.total_time;
@@ -150,18 +155,19 @@ function openReplayPage() {
     const imuLpfCutoffInput = document.getElementById('imu_lpf_cutoff_range');
     const enableImuLpfInput = document.getElementById('enable_imu_lpf');
     const imuFilterOrderInput = document.getElementById('imu_filter_order_range');
+    const isPathCsv = rawData.log_format === 'path_csv';
 
     // Package data for replay
     const replayData = {
         anchors: anchors,
         groundTruth: activeGroundTruth,
         firmwarePath: latestTrajectoryPaths.firmware,
-        ukfPath: latestSimulationResult.simPathUKF_plot, // 6Hz aligned
+        ukfPath: isPathCsv ? latestTrajectoryPaths.ukf : latestSimulationResult.simPathUKF_plot, // 6Hz aligned
         ukfLpfPath: latestSimulationResult.simPathUKF_lpf_plot,
         ukfModes: latestSimulationResult.simPathUKF_modes, // 6Hz predict vs update modes
         ukfLpfModes: latestSimulationResult.simPathUKF_lpf_modes,
         // 20Hz UKF data for predict/update breadcrumb visualization
-        ukfPath20Hz: latestSimulationResult.simPathUKF, // 20Hz full resolution
+        ukfPath20Hz: isPathCsv ? latestTrajectoryPaths.ukf : latestSimulationResult.simPathUKF, // 20Hz full resolution
         ukfLpfPath20Hz: latestSimulationResult.simPathUKF_lpf,
         ukfModes20Hz: latestSimulationResult.simPathUKF_allModes, // 20Hz: 0=Predict, 1=Update
         ukfTimes20Hz: latestSimulationResult.simPathUKF_allTimes, // 20Hz timestamps

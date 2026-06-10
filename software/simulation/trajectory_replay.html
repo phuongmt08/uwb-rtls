@@ -618,7 +618,7 @@
                 <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
                     <input type="checkbox" id="chk_ukf" checked onchange="drawFrame()">
                     <span class="dot-color color-ukf"></span>
-                    <span style="font-weight: 500;">UKF Fusion Path (20Hz)</span>
+                    <span style="font-weight: 500;">UKF Fusion Path</span>
                 </label>
                 <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
                     <input type="checkbox" id="chk_ukf_lpf" checked onchange="drawFrame()">
@@ -628,7 +628,7 @@
                 <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
                     <input type="checkbox" id="chk_fw" checked onchange="drawFrame()">
                     <span class="dot-color color-fw"></span>
-                    <span style="font-weight: 500;">Firmware Path</span>
+                    <span style="font-weight: 500;">Trilateration Path</span>
                 </label>
                 <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
                     <input type="checkbox" id="chk_triplet" checked onchange="drawFrame()">
@@ -656,7 +656,7 @@
                     <span class="dig-val" id="telemetry_ukf_lpf" style="color:#a78bfa; font-size: 0.9rem;">X: --, Y: --</span>
                 </div>
                 <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
-                    <span class="dig-lbl">FW Position</span>
+                    <span class="dig-lbl">Trilateration Position</span>
                     <span class="dig-val" style="color:var(--text-muted); font-size: 0.9rem;" id="telemetry_fw">X: --, Y: --</span>
                 </div>
             </div>
@@ -1043,7 +1043,7 @@
                 scanPath('Triplet', data.tripletPath, times, currentIndex, '#10b981');
             }
             if (document.getElementById('chk_fw').checked) {
-                scanPath('Firmware', data.firmwarePath, times, currentIndex, '#94a3b8');
+                scanPath('Trilateration', data.firmwarePath, times, currentIndex, '#94a3b8');
             }
             if (document.getElementById('chk_ukf').checked) {
                 const has20Hz = data.ukfPath20Hz && data.ukfTimes20Hz && data.ukfModes20Hz;
