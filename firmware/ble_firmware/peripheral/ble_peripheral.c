@@ -53,7 +53,8 @@ static uint8_t m_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
 static uint8_t m_enc_advdata_1[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static uint8_t m_enc_advdata_2[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static bool m_adv_buffer_toggle = false; // false -> buffer 1, true -> buffer 2
-static uint8_t m_enc_scan_response_data[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
+static uint8_t m_enc_scan_response_data_1[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
+static uint8_t m_enc_scan_response_data_2[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static uint32_t m_pending_tx_chunks = 0;
 #if BLE_BROADCAST_USE_EXTENDED
 static uint8_t m_bcast_advdata[BLE_GAP_ADV_SET_DATA_SIZE_EXTENDED_MAX_SUPPORTED];
@@ -67,6 +68,7 @@ static uint8_t m_bcast_frag_index = 0;
 static uint8_t m_bcast_frag_count = 0;
 static bool m_bcast_active = false;
 static bool m_bcast_restore_advertising = false;
+static bool m_bcast_pending_start = false;
 
 static ble_peripheral_rx_cb_t m_ble_rx_cb = NULL;
 
@@ -79,7 +81,7 @@ static ble_gap_adv_data_t m_adv_data =
     },
     .scan_rsp_data =
     {
-        .p_data = m_enc_scan_response_data,
+        .p_data = m_enc_scan_response_data_1,
         .len    = BLE_GAP_ADV_SET_DATA_SIZE_MAX
     }
 };
@@ -181,10 +183,14 @@ static ret_code_t advertising_configure_current(void)
 static ret_code_t bcast_start_current_fragment(void)
 {
 #if BLE_BROADCAST_USE_EXTENDED
+    uint8_t manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + BLE_BROADCAST_MAX_PACKET_SIZE];
+    manuf_payload[0] = BLE_BROADCAST_TYPE_EXT_PACKET;
+    memcpy(&manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE], m_bcast_packet, m_bcast_packet_len);
+
     ble_advdata_manuf_data_t manuf_data;
     manuf_data.company_identifier = BLE_BROADCAST_COMPANY_ID;
-    manuf_data.data.p_data        = (uint8_t *)m_bcast_packet;
-    manuf_data.data.size          = m_bcast_packet_len;
+    manuf_data.data.p_data        = manuf_payload;
+    manuf_data.data.size          = (uint16_t)(BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + m_bcast_packet_len);
 
     ble_advdata_t advdata;
     memset(&advdata, 0, sizeof(advdata));
@@ -293,11 +299,7 @@ static void bcast_restore_advertising(void)
     bool restore = m_bcast_restore_advertising;
     m_bcast_active = false;
     m_bcast_restore_advertising = false;
-
-    if (!restore || m_conn_handle != BLE_CONN_HANDLE_INVALID)
-    {
-        return;
-    }
+    m_bcast_pending_start = false;
 
     ret_code_t err_code = advertising_configure_current();
     if (err_code != NRF_SUCCESS)
@@ -306,7 +308,10 @@ static void bcast_restore_advertising(void)
         return;
     }
 
-    ble_peripheral_advertising_start();
+    if (restore && m_conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        ble_peripheral_advertising_start();
+    }
 }
 
 static void bcast_advance_fragment(void)
@@ -354,11 +359,18 @@ static void advertising_init(void)
     m_adv_data.adv_data.len = BLE_GAP_ADV_SET_DATA_SIZE_MAX;
     m_adv_data.scan_rsp_data.len = BLE_GAP_ADV_SET_DATA_SIZE_MAX;
 
+    // Initially point to buffer 1
+    m_adv_data.adv_data.p_data = m_enc_advdata_1;
+    m_adv_data.scan_rsp_data.p_data = m_enc_scan_response_data_1;
+
     err_code = ble_advdata_encode(&advdata, m_adv_data.adv_data.p_data, &m_adv_data.adv_data.len);
     APP_ERROR_CHECK(err_code);
 
     err_code = ble_advdata_encode(&srdata, m_adv_data.scan_rsp_data.p_data, &m_adv_data.scan_rsp_data.len);
     APP_ERROR_CHECK(err_code);
+
+    // Copy the same scan response data to buffer 2 to keep them identical
+    memcpy(m_enc_scan_response_data_2, m_enc_scan_response_data_1, m_adv_data.scan_rsp_data.len);
 
     err_code = advertising_configure_current();
     APP_ERROR_CHECK(err_code);
@@ -572,10 +584,22 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         } break;
 
         case BLE_GAP_EVT_ADV_SET_TERMINATED:
-            if (m_bcast_active &&
-                p_ble_evt->evt.gap_evt.params.adv_set_terminated.adv_handle == m_adv_handle)
+            if (p_ble_evt->evt.gap_evt.params.adv_set_terminated.adv_handle == m_adv_handle)
             {
-                bcast_advance_fragment();
+                if (m_bcast_pending_start)
+                {
+                    m_bcast_pending_start = false;
+                    ret_code_t err_code = bcast_start_current_fragment();
+                    if (err_code != NRF_SUCCESS)
+                    {
+                        NRF_LOG_WARNING("BLE BCAST start failed from event: 0x%x", err_code);
+                        bcast_restore_advertising();
+                    }
+                }
+                else if (m_bcast_active)
+                {
+                    bcast_advance_fragment();
+                }
             }
             break;
 
@@ -671,7 +695,7 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
     NRF_LOG_INFO("MCU Requested BLE ADV Status Update: Bat=%d%%, Errs=%d", 
                  (int)status->bat_soc_percent, (int)status->error_count);
 
-    if (m_bcast_active)
+    if (m_bcast_active || m_bcast_pending_start)
     {
         NRF_LOG_WARNING("BLE ADV status update skipped during BCAST burst");
         return;
@@ -693,10 +717,14 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
     packed_status.error_count     = (uint8_t)status->error_count;
     packed_status.timestamp_s     = status->local_timestamp_s;
 
+    uint8_t manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + sizeof(packed_status)];
+    manuf_payload[0] = BLE_BROADCAST_TYPE_ADV_STATUS;
+    memcpy(&manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE], &packed_status, sizeof(packed_status));
+
     ble_advdata_manuf_data_t manuf_data;
-    manuf_data.company_identifier = 0xFFFF; // Test/internal Company ID
-    manuf_data.data.p_data        = (uint8_t *)&packed_status;
-    manuf_data.data.size          = sizeof(packed_status);
+    manuf_data.company_identifier = BLE_BROADCAST_COMPANY_ID;
+    manuf_data.data.p_data        = manuf_payload;
+    manuf_data.data.size          = sizeof(manuf_payload);
 
     ble_advdata_t advdata;
     memset(&advdata, 0, sizeof(advdata));
@@ -706,6 +734,7 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
     advdata.p_manuf_specific_data = &manuf_data;
 
     uint8_t * p_new_buffer = m_adv_buffer_toggle ? m_enc_advdata_1 : m_enc_advdata_2;
+    uint8_t * p_new_sr_buffer = m_adv_buffer_toggle ? m_enc_scan_response_data_1 : m_enc_scan_response_data_2;
     uint16_t encoded_len = BLE_GAP_ADV_SET_DATA_SIZE_MAX;
 
     ret_code_t err_code = ble_advdata_encode(&advdata, p_new_buffer, &encoded_len);
@@ -717,6 +746,7 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
 
     m_adv_data.adv_data.p_data = p_new_buffer;
     m_adv_data.adv_data.len    = encoded_len;
+    m_adv_data.scan_rsp_data.p_data = p_new_sr_buffer;
 
     err_code = sd_ble_gap_adv_set_configure(&m_adv_handle, &m_adv_data, NULL);
     if (err_code != NRF_SUCCESS)
@@ -768,22 +798,42 @@ uint32_t ble_peripheral_broadcast_send(uint8_t const * p_data, uint16_t length)
 
     if (m_is_advertising)
     {
+        m_bcast_pending_start = true;
         ret_code_t err_code = sd_ble_gap_adv_stop(m_adv_handle);
-        if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
+        if (err_code == NRF_ERROR_INVALID_STATE)
+        {
+            m_bcast_pending_start = false;
+            m_bcast_active = true;
+            err_code = bcast_start_current_fragment();
+            if (err_code != NRF_SUCCESS)
+            {
+                NRF_LOG_WARNING("BLE BCAST start failed: 0x%x", err_code);
+                bcast_restore_advertising();
+                return err_code;
+            }
+        }
+        else if (err_code != NRF_SUCCESS)
         {
             m_bcast_restore_advertising = false;
+            m_bcast_pending_start = false;
             return err_code;
         }
-        m_is_advertising = false;
+        else
+        {
+            m_is_advertising = false;
+            m_bcast_active = true;
+        }
     }
-
-    m_bcast_active = true;
-    ret_code_t err_code = bcast_start_current_fragment();
-    if (err_code != NRF_SUCCESS)
+    else
     {
-        NRF_LOG_WARNING("BLE BCAST start failed: 0x%x", err_code);
-        bcast_restore_advertising();
-        return err_code;
+        m_bcast_active = true;
+        ret_code_t err_code = bcast_start_current_fragment();
+        if (err_code != NRF_SUCCESS)
+        {
+            NRF_LOG_WARNING("BLE BCAST start failed: 0x%x", err_code);
+            bcast_restore_advertising();
+            return err_code;
+        }
     }
 
     return NRF_SUCCESS;

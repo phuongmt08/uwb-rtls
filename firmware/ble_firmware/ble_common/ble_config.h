@@ -117,7 +117,8 @@ extern "C" {
 
 /**
  * @brief Enable BLE 5.0 Extended Advertising for broadcast.
- *        When enabled and payload <= 251 bytes, broadcast uses a single
+ *        When enabled and payload <= BLE_BROADCAST_MAX_PACKET_SIZE bytes,
+ *        broadcast uses a single typed manufacturer payload inside one
  *        Extended ADV packet instead of application-layer fragmentation.
  *        Larger packets must be rejected or fragmented above this layer.
  *

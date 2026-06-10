@@ -82,6 +82,19 @@ typedef struct
     ble_broadcast_reassembly_t reassembly;
 } bcast_rx_slot_t;
 
+#pragma pack(push, 1)
+typedef struct
+{
+    uint8_t  device_type;
+    uint8_t  device_id;
+    uint8_t  bat_soc_percent;
+    uint16_t status_flags;
+    uint8_t  warning_count;
+    uint8_t  error_count;
+    uint32_t timestamp_s;
+} ble_adv_status_packed_t;
+#pragma pack(pop)
+
 /* Private instances ------------------------------------------------------- */
 NRF_BLE_SCAN_DEF(m_scan);         /**< Scanning module instance.     */
 BLE_LBS_C_DEF(m_ble_lbs_c);       /**< LBS client module instance.   */
@@ -156,6 +169,7 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
 static void ble_state_update(protobuf_ble_state_t new_state);
 static void scan_publish_timeout_handler(void *p_context);
 static void central_bcast_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report);
+static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report);
 static ret_code_t central_bcast_start_current_fragment(void);
 static void central_bcast_advance_fragment(void);
 static void central_bcast_restore_scan(void);
@@ -231,6 +245,58 @@ static bcast_rx_slot_t *central_bcast_rx_slot_get(ble_gap_addr_t const *addr)
     return slot;
 }
 
+static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report)
+{
+    uint16_t pos = 0;
+
+    while (pos < p_adv_report->data.len)
+    {
+        uint8_t field_len = p_adv_report->data.p_data[pos++];
+        if (field_len == 0u)
+        {
+            break;
+        }
+        if ((uint16_t)(pos + field_len) > p_adv_report->data.len)
+        {
+            return;
+        }
+
+        uint8_t ad_type = p_adv_report->data.p_data[pos];
+        const uint8_t *field_data = &p_adv_report->data.p_data[pos + 1u];
+        uint8_t field_data_len = (uint8_t)(field_len - 1u);
+
+        if (ad_type == BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA &&
+            field_data_len == (uint8_t)(2u + BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + sizeof(ble_adv_status_packed_t)))
+        {
+            uint16_t company_id = (uint16_t)field_data[0] | ((uint16_t)field_data[1] << 8);
+            if (company_id == BLE_BROADCAST_COMPANY_ID &&
+                field_data[2] == BLE_BROADCAST_TYPE_ADV_STATUS)
+            {
+                ble_adv_status_packed_t packed;
+                memcpy(&packed, &field_data[2u + BLE_BROADCAST_EXT_MANUF_TYPE_SIZE], sizeof(packed));
+
+                protobuf_ble_adv_status_t status = protobuf_ble_adv_status_t_init_zero;
+                status.device = (protobuf_device_type_t)packed.device_type;
+                status.device_id = packed.device_id;
+                status.bat_soc_percent = packed.bat_soc_percent;
+                status.status_flags = packed.status_flags;
+                status.warning_count = packed.warning_count;
+                status.error_count = packed.error_count;
+                status.local_timestamp_s = packed.timestamp_s;
+
+                NRF_LOG_INFO("BLE ADV status RX device=%u id=%u bat=%u",
+                             (unsigned)status.device,
+                             (unsigned)status.device_id,
+                             (unsigned)status.bat_soc_percent);
+                bb_cmd_notify_adv_status(&status);
+                return;
+            }
+        }
+
+        pos = (uint16_t)(pos + field_len);
+    }
+}
+
 static void central_bcast_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report)
 {
 #if BLE_BROADCAST_USE_EXTENDED
@@ -258,10 +324,12 @@ static void central_bcast_scan_report_handle(ble_gap_evt_adv_report_t const *p_a
             if (ad_type == 0xFFu && field_data_len >= 2u)
             {
                 uint16_t company_id = (uint16_t)field_data[0] | ((uint16_t)field_data[1] << 8);
-                if (company_id == BLE_BROADCAST_COMPANY_ID)
+                if (company_id == BLE_BROADCAST_COMPANY_ID &&
+                    (field_data_len - 2u) > BLE_BROADCAST_EXT_MANUF_TYPE_SIZE &&
+                    field_data[2] == BLE_BROADCAST_TYPE_EXT_PACKET)
                 {
-                    p_payload = &field_data[2];
-                    payload_len = field_data_len - 2;
+                    p_payload = &field_data[2u + BLE_BROADCAST_EXT_MANUF_TYPE_SIZE];
+                    payload_len = (uint16_t)(field_data_len - 2u - BLE_BROADCAST_EXT_MANUF_TYPE_SIZE);
                     break;
                 }
             }
@@ -314,10 +382,14 @@ static void central_bcast_scan_report_handle(ble_gap_evt_adv_report_t const *p_a
 static ret_code_t central_bcast_start_current_fragment(void)
 {
 #if BLE_BROADCAST_USE_EXTENDED
+    uint8_t manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + BLE_BROADCAST_MAX_PACKET_SIZE];
+    manuf_payload[0] = BLE_BROADCAST_TYPE_EXT_PACKET;
+    memcpy(&manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE], m_bcast_packet, m_bcast_packet_len);
+
     ble_advdata_manuf_data_t manuf_data;
     manuf_data.company_identifier = BLE_BROADCAST_COMPANY_ID;
-    manuf_data.data.p_data        = (uint8_t *)m_bcast_packet;
-    manuf_data.data.size          = m_bcast_packet_len;
+    manuf_data.data.p_data        = manuf_payload;
+    manuf_data.data.size          = (uint16_t)(BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + m_bcast_packet_len);
 
     ble_advdata_t advdata;
     memset(&advdata, 0, sizeof(advdata));
@@ -525,6 +597,7 @@ void app_ble_central_scan_stop(void)
 static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool matched)
 {
     central_bcast_scan_report_handle(p_adv_report);
+    central_adv_status_scan_report_handle(p_adv_report);
 
     /* ----- Extract device name ----------------------------------------- */
     char     dev_name[NRF_BLE_SCAN_NAME_MAX_LEN + 1] = "<no_name>";

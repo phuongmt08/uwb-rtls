@@ -46,13 +46,16 @@ typedef struct {
     [_cmd_id] = { .cmd_id = _cmd_id, .cmd_hdl = _cmd_hdl, .name = _name }
 
 /* Private function prototypes ---------------------------------------- */
-/* Common handlers Peripheral*/
+/* Common handlers */
+static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+static void handle_ble_ack(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+
 #if defined(BLE_PERIPHERAL)
 static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
-static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #endif
-static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #if defined(BLE_CENTRAL)
 static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
@@ -63,21 +66,20 @@ static void handle_ble_conn_params_resp(const protobuf_packet_t * p_in, protobuf
 static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #endif
-static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 
 /* Private variables -------------------------------------------------- */
 // Only list commands handled locally by the nRF52832.
 // Unlisted payload tags fall through to the undefined/unimplemented path.
 static const bb_cmd_entry_t m_cmd_table[] = {
-#if defined(BLE_PERIPHERAL)
     CMD_INFO(protobuf_packet_t_ble_status_get_tag,                handle_ble_status_get,            "ble_status_get"),
+    CMD_INFO(protobuf_packet_t_ack_tag,                           handle_ble_ack,                   "ack"),
+#if defined(BLE_PERIPHERAL)
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_adv_status,            "ble_adv_status"),
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_adv_config_set,        "ble_adv_config_set"),
 #else
-    CMD_INFO(protobuf_packet_t_ble_status_get_tag,                handle_ble_unimplemented,         "ble_status_get"),
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_unimplemented,         "ble_adv_status"),
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_unimplemented,         "ble_adv_config_set"),
-#endif /* !BLE_PERIPHERAL */
+#endif /* !BLE_PERIPHERAL */    
 #if defined(BLE_CENTRAL)
     CMD_INFO(protobuf_packet_t_ble_disconnect_tag,                handle_ble_disconnect,            "ble_disconnect"),
     CMD_INFO(protobuf_packet_t_ble_connect_tag,                   handle_ble_connect,               "ble_connect"),
@@ -191,27 +193,9 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
 }
 
 /* Private definitions ------------------------------------------------ */
-/*================BLE_PERIPHERAL=================== */
-#if defined(BLE_PERIPHERAL)
-/**
- * @brief Handles STM32 advertising configuration requests for the nRF52.
- * No response is required after applying the configuration.
- */
-static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
-{
-    const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
-    
-    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
 
-    *p_action = BB_CMD_ACTION_NONE; 
-}
-
-/**
- * @brief Handles STM32 BLE status requests and returns ble_status_resp.
- */
 static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("MCU Requested BLE Status");
 
     // Fill the output packet.
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
@@ -241,6 +225,29 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
 
     // Tell the router to send this response back over serial.
     *p_action = BB_CMD_ACTION_SEND_SERIAL; 
+}
+
+static void handle_ble_ack(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
+{
+    UNUSED_PARAMETER(p_in);
+    UNUSED_PARAMETER(p_out);
+    // ACKs from the MCU do not require any processing or response from the BLE module
+    *p_action = BB_CMD_ACTION_NONE;
+}
+
+/*================BLE_PERIPHERAL=================== */
+#if defined(BLE_PERIPHERAL)
+/**
+ * @brief Handles STM32 advertising configuration requests for the nRF52.
+ * No response is required after applying the configuration.
+ */
+static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
+{
+    const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
+    
+    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
+
+    *p_action = BB_CMD_ACTION_NONE; 
 }
 
 /**
@@ -406,6 +413,31 @@ void bb_cmd_notify_scan_result(const uint8_t * mac, int8_t rssi, const char * na
     uint8_t buffer[128];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
     if (pb_encode(&stream, protobuf_packet_t_fields, &pkt)) {
+        bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
+    }
+}
+
+void bb_cmd_notify_adv_status(const protobuf_ble_adv_status_t * status)
+{
+    if (status == NULL)
+    {
+        return;
+    }
+
+    protobuf_packet_t pkt = protobuf_packet_t_init_zero;
+
+    pkt.has_hdr = true;
+    pkt.hdr.has_addr = true;
+    pkt.hdr.addr.src = protobuf_PACKET_ADDR_CENTRAL;
+    pkt.hdr.addr.dst = protobuf_PACKET_ADDR_HOST;
+
+    pkt.which_params = protobuf_packet_t_ble_adv_status_tag;
+    pkt.params.ble_adv_status = *status;
+
+    uint8_t buffer[96];
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+    if (pb_encode(&stream, protobuf_packet_t_fields, &pkt))
+    {
         bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
     }
 }
