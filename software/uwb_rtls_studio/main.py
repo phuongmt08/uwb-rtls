@@ -57,6 +57,15 @@ def main():
     serial_service = SerialService()
     protocol_service = ProtocolService(serial_service)
 
+    # Initialize global query manager in shared app state
+    from utils.app_state import shared_app_state
+    shared_app_state.init_query_manager(
+        send_packet_fn=lambda cmd, dst, **kwargs: protocol_service.send_command(cmd, dst_addr=dst, **kwargs)
+    )
+    # Register the SerialService background reader thread in the registry
+    if hasattr(serial_service, "_reader_thread") and serial_service._reader_thread:
+        shared_app_state.threads.register("SerialReader", serial_service._reader_thread)
+
     # ═══════════════════════════════════════════════════════════════
     # STEP 2 & 3: Connection Flow
     # ═══════════════════════════════════════════════════════════════
@@ -70,25 +79,48 @@ def main():
     dongle_model = DongleModel(serial_service, protocol_service)
     dongle_vm = DongleViewModel(dongle_model)
 
+    # Macro to bypass the connection flow popups (set to True to go straight to MainWindow)
+    BYPASS_POPUPS = 1
+
     # Vòng lặp cho Connection Flow
-    while True:
-        dongle_popup = DonglePopup(dongle_vm)
-        if dongle_popup.exec() != 1:  # 1 = QDialog.DialogCode.Accepted
-            sys.exit(0)
+    connected_name = ""
+    connected_mac = ""
 
-        # Dongle ok -> Scan popup
-        scan_model = ScanModel(protocol_service, serial_service)
-        scan_vm = ScanViewModel(scan_model)
-        scan_popup = ScanPopup(scan_vm)
+    if not BYPASS_POPUPS:
+        while True:
+            dongle_popup = DonglePopup(dongle_vm)
+            if dongle_popup.exec() != 1:  # 1 = QDialog.DialogCode.Accepted
+                sys.exit(0)
 
-        res = scan_popup.exec()
-        if res == 1:
-            break
-        elif res == 2:
-            # Dongle bị mất kết nối khi đang scan -> comeback popup dongle và quét lại từ đầu
-            continue
-        else:
-            sys.exit(0)
+            # Dongle ok -> Scan popup
+            scan_model = ScanModel(protocol_service, serial_service)
+            scan_vm = ScanViewModel(scan_model)
+            scan_popup = ScanPopup(scan_vm)
+
+            res = scan_popup.exec()
+            if res == 1:
+                # Extract connected device info from scan_model before cleanup
+                connected_mac = scan_model.connected_mac
+                if connected_mac and connected_mac in scan_model._devices:
+                    dev = scan_model._devices[connected_mac]
+                    connected_name = dev.get("name", "")
+
+                # Disconnect scan_model from protocol to avoid duplicate handlers
+                scan_model.cleanup()
+                try:
+                    protocol_service.packet_received.disconnect(scan_model._on_packet)
+                except TypeError:
+                    pass
+                break
+            elif res == 2:
+                # Dongle bị mất kết nối khi đang scan -> comeback popup dongle và quét lại từ đầu
+                continue
+            else:
+                sys.exit(0)
+    else:
+        # Default fallback values for development/testing when popups are bypassed
+        connected_name = "Mock Device"
+        connected_mac = "00:11:22:33:44:55"
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 4: Main Window
@@ -98,21 +130,6 @@ def main():
     from models.device_model import DeviceModel
     from viewmodels.live_tracking_viewmodel import LiveTrackingViewModel
     from viewmodels.device_info_viewmodel import DeviceInfoViewModel
-
-    # Extract connected device info from scan_model before cleanup
-    connected_name = ""
-    connected_mac = scan_model.connected_mac
-    
-    if connected_mac and connected_mac in scan_model._devices:
-        dev = scan_model._devices[connected_mac]
-        connected_name = dev.get("name", "")
-
-    # Disconnect scan_model from protocol to avoid duplicate handlers
-    scan_model.cleanup()
-    try:
-        protocol_service.packet_received.disconnect(scan_model._on_packet)
-    except TypeError:
-        pass
 
     ranging_model = RangingModel(protocol_service)
     live_tracking_vm = LiveTrackingViewModel(ranging_model, protocol_service)

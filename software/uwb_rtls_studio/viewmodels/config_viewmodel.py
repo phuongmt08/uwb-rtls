@@ -150,16 +150,18 @@ class ConfigViewModel(QObject):
     # ── Command Triggers (called by View) ───────────────────────────
 
     def read_anchor_layout(self):
-        log.info("Requesting anchor layout from MCU...")
-        self.protocol.send_command("anchor_layout_get", dst_addr=VvAddress.MCU)
+        log.info("Requesting anchor layout from MCU via global query queue...")
+        from utils.app_state import shared_app_state
+        shared_app_state.enqueue_query("anchor_layout_get", dst_addr=VvAddress.MCU)
 
     def write_anchor_layout(self, anchors: list):
         log.info("Sending anchor layout set command to MCU: %s", anchors)
         self.protocol.send_command("anchor_layout_set", dst_addr=VvAddress.MCU, anchors=anchors)
 
     def read_ranging_config(self):
-        log.info("Requesting system ranging config from MCU...")
-        self.protocol.send_command("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
+        log.info("Requesting system ranging config from MCU via global query queue...")
+        from utils.app_state import shared_app_state
+        shared_app_state.enqueue_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
 
     def write_ranging_config(self, period_ms: int, timeout_ms: int):
         log.info("Sending ranging config set command to MCU: period=%d ms, timeout=%d ms", period_ms, timeout_ms)

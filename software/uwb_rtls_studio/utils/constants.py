@@ -52,3 +52,25 @@ POLL_CALIB_STATUS_MS = 2000     # 2s (khi calibrating)
 MAX_POSITION_HISTORY = 100000     # Max trajectory samples
 MAX_LOG_ENTRIES = 50000          # Max log entries in memory
 MAX_SCAN_DEVICES = 10           # Max BLE devices in scan list
+
+# ── Device & Ranging Configs ──────────────────────────────────────
+DEVICE_TIMEOUT_S = 5.0              # Timeout for stale advertising devices (seconds)
+STOP_TO_CONNECT_DELAY_MS = 400      # Delay after ble_scan_stop before sending ble_connect (ms)
+TIME_SYNC_THRESHOLD_MS = 5000       # Time sync drift threshold (ms) — auto-correct if exceeded
+
+# Device Role/Type Labels
+DEVICE_TYPE_LABELS = {
+    0: "UNSPECIFIED",
+    1: "TAG",
+    2: "ANCHOR",
+    3: "GATEWAY",
+    4: "DEBUG_TOOL",
+}
+
+DEVICE_TYPE_LABELS_SHORT = {
+    0: "-",
+    1: "TAG",
+    2: "ANCHOR",
+    3: "GATEWAY",
+    4: "DEBUG",
+}

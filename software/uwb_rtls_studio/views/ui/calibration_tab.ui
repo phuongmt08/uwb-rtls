@@ -6,7 +6,36 @@
    <rect><x>0</x><y>0</y><width>1300</width><height>800</height></rect>
   </property>
   <property name="styleSheet">
-   <string>QSpinBox, QDoubleSpinBox {
+   <string>QWidget#CalibrationTab {
+    background-color: #0F172A;
+    color: #F8FAFC;
+    font-family: 'Segoe UI';
+    font-size: 13px;
+}
+QGroupBox {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    margin-top: 18px;
+    padding: 20px 12px 12px 12px;
+    font-weight: bold;
+    font-size: 13px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 4px 10px;
+    color: #22D3EE;
+    background-color: rgba(34, 211, 238, 0.10);
+    border-left: 3px solid #22D3EE;
+    border-bottom: 1px solid rgba(34, 211, 238, 0.45);
+    border-radius: 4px;
+    font-family: 'Segoe UI';
+    font-size: 14px;
+    font-weight: bold;
+}
+QSpinBox, QDoubleSpinBox {
     background-color: #0A0F1E;
     color: #F8FAFC;
     border: 1px solid #334155;

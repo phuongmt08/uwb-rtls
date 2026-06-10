@@ -174,10 +174,10 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
          <number>0</number>
         </property>
         <item>
-         <widget class="QLabel" name="lbl_ctrl_header">
-          <property name="styleSheet">
-           <string notr="true">color: #22D3EE; font-size: 14px; font-weight: bold; padding-bottom: 4px; border-bottom: 2px solid #334155;</string>
-          </property>
+          <widget class="QLabel" name="lbl_ctrl_header">
+           <property name="styleSheet">
+            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+           </property>
           <property name="text">
            <string>Telemetry Controls</string>
           </property>
@@ -249,10 +249,10 @@ QPushButton:hover { background: #475569; }</string>
          </widget>
         </item>
         <item>
-         <widget class="QLabel" name="lbl_pos_header">
-          <property name="styleSheet">
-           <string notr="true">color: #22D3EE; font-size: 14px; font-weight: bold; padding-bottom: 4px; border-bottom: 2px solid #334155;</string>
-          </property>
+          <widget class="QLabel" name="lbl_pos_header">
+           <property name="styleSheet">
+            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+           </property>
           <property name="text">
            <string>Live Position</string>
           </property>
@@ -313,10 +313,10 @@ QPushButton:hover { background: #475569; }</string>
          </widget>
         </item>
         <item>
-         <widget class="QLabel" name="lbl_stats_header">
-          <property name="styleSheet">
-           <string notr="true">color: #22D3EE; font-size: 14px; font-weight: bold; padding-bottom: 4px; border-bottom: 2px solid #334155;</string>
-          </property>
+          <widget class="QLabel" name="lbl_stats_header">
+           <property name="styleSheet">
+            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+           </property>
           <property name="text">
            <string>Statistics</string>
           </property>

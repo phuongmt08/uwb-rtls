@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6 import uic
+from utils.constants import DEVICE_TYPE_LABELS_SHORT
 
 # Path to .ui file
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'device_info_tab.ui')
@@ -181,10 +182,9 @@ class DeviceInfoTab(QWidget):
         # Scan status removed by user
 
         self._adv_table.setRowCount(len(devices))
-        _DEVICE_TYPE_LABELS = {0: "-", 1: "TAG", 2: "ANCHOR", 3: "GATEWAY", 4: "DEBUG"}
         for i, dev in enumerate(devices):
             d_type = dev.get("device_type", 0)
-            d_type_label = _DEVICE_TYPE_LABELS.get(d_type, str(d_type))
+            d_type_label = DEVICE_TYPE_LABELS_SHORT.get(d_type, str(d_type))
             d_id = dev.get("device_id")
 
             if d_id is not None:

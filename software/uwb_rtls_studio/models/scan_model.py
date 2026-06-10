@@ -22,11 +22,12 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from services.protocol_service import ProtocolService
 from services.serial_service import SerialService
 from common import protocol_pb2 as pb
+from utils.constants import DEVICE_TIMEOUT_S, STOP_TO_CONNECT_DELAY_MS
 
 log = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT_MS = 10000
-_DEVICE_TIMEOUT_S = 5.0
+
 
 class ScanModel(QObject):
     # Signals
@@ -56,12 +57,13 @@ class ScanModel(QObject):
     def start_scan(self) -> None:
         self._devices.clear()
         self.device_list_changed.emit([])
-        self._protocol.send_command(
-            "ble_scan_start",
-            src_addr=self._protocol.pb.PACKET_ADDR_HOST,
-            dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
-        )
-        self.is_scanning = True
+        if not self.is_scanning:
+            self._protocol.send_command(
+                "ble_scan_start",
+                src_addr=self._protocol.pb.PACKET_ADDR_HOST,
+                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
+            )
+            self.is_scanning = True
         self._prune_timer.start(5000)
 
     def stop_scan(self) -> None:
@@ -84,7 +86,7 @@ class ScanModel(QObject):
         # We MUST add a delay here! The dongle needs time to process ble_scan_stop 
         # before it can accept ble_connect. Without this delay, the first connect command 
         # is ignored by the firmware, requiring a second click.
-        QTimer.singleShot(400, lambda: self._do_connect(mac_hex))
+        QTimer.singleShot(STOP_TO_CONNECT_DELAY_MS, lambda: self._do_connect(mac_hex))
         return True
 
     def _do_connect(self, mac_hex: str) -> None:
@@ -136,7 +138,7 @@ class ScanModel(QObject):
 
     def _prune_stale_devices(self) -> None:
         now = time.monotonic()
-        stale = [mac for mac, d in self._devices.items() if now - d["last_seen"] > _DEVICE_TIMEOUT_S]
+        stale = [mac for mac, d in self._devices.items() if now - d["last_seen"] > DEVICE_TIMEOUT_S]
         if stale:
             for mac in stale:
                 del self._devices[mac]

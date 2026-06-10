@@ -3,7 +3,12 @@
  <class>LogTab</class>
  <widget class="QWidget" name="LogTab">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>1300</width><height>800</height></rect>
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1300</width>
+    <height>800</height>
+   </rect>
   </property>
   <property name="styleSheet">
    <string notr="true">QWidget#LogTab { background: #0F172A; color: #F8FAFC; font-family: 'Segoe UI'; font-size: 13px; }
@@ -15,233 +20,546 @@ QLineEdit:focus, QComboBox:focus { border-color: #22D3EE; }
 QComboBox::drop-down { border: none; width: 28px; }
 QComboBox QAbstractItemView { background-color: #1E293B; color: #F8FAFC; border: 1px solid #334155; selection-background-color: #0E7490; selection-color: #F8FAFC; }
 QTableWidget { background-color: #0A0F1E; color: #F8FAFC; border: 1px solid #334155; border-radius: 6px; gridline-color: #334155; selection-background-color: rgba(34, 211, 238, 0.15); selection-color: #22D3EE; alternate-background-color: #1E293B; }
-QHeaderView::section { background-color: #1E293B; color: #22D3EE; border: 1px solid #334155; padding: 8px; font-weight: bold; }</string>
+QHeaderView::section { background-color: #1E293B; color: #22D3EE; border: 1px solid #334155; padding: 8px; font-weight: bold; }
+QSplitter::handle { background-color: #0F172A; }</string>
   </property>
   <layout class="QVBoxLayout" name="main_outer_layout">
-   <property name="spacing"><number>0</number></property>
-   <property name="leftMargin"><number>0</number></property>
-   <property name="topMargin"><number>0</number></property>
-   <property name="rightMargin"><number>0</number></property>
-   <property name="bottomMargin"><number>0</number></property>
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
    <item>
     <widget class="QSplitter" name="splitter">
-     <property name="orientation"><enum>Qt::Horizontal</enum></property>
-     <property name="childrenCollapsible"><bool>false</bool></property>
-     <!-- ═══ TOP: Live Log ═══ -->
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="childrenCollapsible">
+      <bool>false</bool>
+     </property>
      <widget class="QWidget" name="log_widget">
       <layout class="QVBoxLayout" name="log_layout">
-       <property name="spacing"><number>8</number></property>
-       <property name="leftMargin"><number>12</number></property>
-       <property name="topMargin"><number>12</number></property>
-       <property name="rightMargin"><number>8</number></property>
-       <property name="bottomMargin"><number>12</number></property>
-       <!-- Log header -->
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <property name="leftMargin">
+        <number>12</number>
+       </property>
+       <property name="topMargin">
+        <number>12</number>
+       </property>
+       <property name="rightMargin">
+        <number>8</number>
+       </property>
+       <property name="bottomMargin">
+        <number>12</number>
+       </property>
        <item>
         <layout class="QHBoxLayout" name="log_header">
-         <property name="spacing"><number>8</number></property>
+         <property name="spacing">
+          <number>8</number>
+         </property>
          <item>
           <widget class="QLabel" name="log_title">
-           <property name="font"><font><family>Segoe UI</family><pointsize>14</pointsize><bold>true</bold></font></property>
-           <property name="minimumSize"><size><width>0</width><height>32</height></size></property>
-           <property name="maximumSize"><size><width>16777215</width><height>32</height></size></property>
-           <property name="styleSheet"><string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px;</string></property>
-           <property name="text"><string>📋 Live Log</string></property>
-           <property name="alignment"><set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set></property>
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>32</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>32</height>
+            </size>
+           </property>
+           <property name="font">
+            <font>
+             <family>Segoe UI</family>
+             <pointsize>14</pointsize>
+             <weight>75</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px;</string>
+           </property>
+           <property name="text">
+            <string>📋 Live Log</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+           </property>
           </widget>
          </item>
          <item>
           <spacer name="header_spacer">
-           <property name="orientation"><enum>Qt::Horizontal</enum></property>
-           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
           </spacer>
          </item>
         </layout>
        </item>
        <item>
         <layout class="QHBoxLayout" name="log_filters">
-         <property name="spacing"><number>8</number></property>
-         <item><widget class="QLabel" name="lbl_level"><property name="text"><string>Level:</string></property></widget></item>
+         <property name="spacing">
+          <number>8</number>
+         </property>
          <item>
-          <widget class="QComboBox" name="filter_level">
-           <property name="minimumSize"><size><width>86</width><height>0</height></size></property>
-           <property name="maximumSize"><size><width>92</width><height>16777215</height></size></property>
-           <item><property name="text"><string>ALL</string></property></item>
-           <item><property name="text"><string>INFO</string></property></item>
-           <item><property name="text"><string>WARN</string></property></item>
-           <item><property name="text"><string>ERROR</string></property></item>
-           <item><property name="text"><string>DEBUG</string></property></item>
+          <widget class="QLabel" name="lbl_level">
+           <property name="text">
+            <string>Level:</string>
+           </property>
           </widget>
          </item>
-         <item><widget class="QLabel" name="lbl_source"><property name="text"><string>Filter:</string></property></widget></item>
+         <item>
+          <widget class="QComboBox" name="filter_level">
+           <property name="minimumSize">
+            <size>
+             <width>86</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>92</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <item>
+            <property name="text">
+             <string>ALL</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>INFO</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>WARN</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>ERROR</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>DEBUG</string>
+            </property>
+           </item>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="lbl_source">
+           <property name="text">
+            <string>Filter:</string>
+           </property>
+          </widget>
+         </item>
          <item>
           <widget class="QComboBox" name="filter_source">
-           <property name="minimumSize"><size><width>160</width><height>0</height></size></property>
-           <property name="maximumSize"><size><width>190</width><height>16777215</height></size></property>
-           <property name="toolTip"><string>Filter by log object code</string></property>
-           <item><property name="text"><string>ALL</string></property></item>
+           <property name="minimumSize">
+            <size>
+             <width>160</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>190</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string>Filter by log object code</string>
+           </property>
+           <item>
+            <property name="text">
+             <string>ALL</string>
+            </property>
+           </item>
           </widget>
          </item>
          <item>
           <widget class="QLineEdit" name="search_edit">
-           <property name="minimumSize"><size><width>170</width><height>0</height></size></property>
-           <property name="placeholderText"><string>🔍 Search logs...</string></property>
+           <property name="minimumSize">
+            <size>
+             <width>170</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="placeholderText">
+            <string>🔍 Search logs...</string>
+           </property>
           </widget>
          </item>
         </layout>
        </item>
-       <!-- Log text area -->
        <item>
         <widget class="QTextEdit" name="log_text">
-         <property name="readOnly"><bool>true</bool></property>
-         <property name="font"><font><family>Cascadia Code</family><pointsize>11</pointsize></font></property>
-         <property name="styleSheet"><string notr="true">QTextEdit { background-color: #020617; color: #10B981; border: 1px solid #334155; border-radius: 8px; padding: 8px; }</string></property>
+         <property name="font">
+          <font>
+           <family>Cascadia Code</family>
+           <pointsize>11</pointsize>
+          </font>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">QTextEdit { background-color: #020617; color: #10B981; border: 1px solid #334155; border-radius: 8px; padding: 8px; }</string>
+         </property>
+         <property name="readOnly">
+          <bool>true</bool>
+         </property>
         </widget>
        </item>
-       <!-- Log buttons -->
        <item>
         <layout class="QHBoxLayout" name="log_btns">
-         <property name="spacing"><number>8</number></property>
+         <property name="spacing">
+          <number>8</number>
+         </property>
          <item>
           <widget class="QLabel" name="log_count">
-           <property name="styleSheet"><string notr="true">color: #64748B;</string></property>
-           <property name="text"><string>0 entries</string></property>
+           <property name="styleSheet">
+            <string notr="true">color: #64748B;</string>
+           </property>
+           <property name="text">
+            <string>0 entries</string>
+           </property>
           </widget>
          </item>
          <item>
           <spacer name="btns_spacer">
-           <property name="orientation"><enum>Qt::Horizontal</enum></property>
-           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
           </spacer>
          </item>
         </layout>
        </item>
       </layout>
      </widget>
-     <!-- ═══ BOTTOM: Session History Browser ═══ -->
      <widget class="QWidget" name="history_widget">
       <layout class="QVBoxLayout" name="history_layout">
-       <property name="spacing"><number>8</number></property>
-       <property name="leftMargin"><number>8</number></property>
-       <property name="topMargin"><number>12</number></property>
-       <property name="rightMargin"><number>12</number></property>
-       <property name="bottomMargin"><number>12</number></property>
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <property name="leftMargin">
+        <number>8</number>
+       </property>
+       <property name="topMargin">
+        <number>12</number>
+       </property>
+       <property name="rightMargin">
+        <number>12</number>
+       </property>
+       <property name="bottomMargin">
+        <number>12</number>
+       </property>
        <item>
         <layout class="QHBoxLayout" name="hist_header">
-         <property name="spacing"><number>8</number></property>
+         <property name="spacing">
+          <number>8</number>
+         </property>
          <item>
           <widget class="QLabel" name="hist_title">
-           <property name="font"><font><family>Segoe UI</family><pointsize>14</pointsize><bold>true</bold></font></property>
-           <property name="minimumSize"><size><width>0</width><height>32</height></size></property>
-           <property name="maximumSize"><size><width>16777215</width><height>32</height></size></property>
-           <property name="styleSheet"><string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px;</string></property>
-           <property name="text"><string>📂 Session History</string></property>
-           <property name="alignment"><set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set></property>
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>32</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>32</height>
+            </size>
+           </property>
+           <property name="font">
+            <font>
+             <family>Segoe UI</family>
+             <pointsize>14</pointsize>
+             <weight>75</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px;</string>
+           </property>
+           <property name="text">
+            <string>📂 Session History</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+           </property>
           </widget>
          </item>
          <item>
           <spacer name="hist_spacer">
-           <property name="orientation"><enum>Qt::Horizontal</enum></property>
-           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
           </spacer>
          </item>
         </layout>
        </item>
        <item>
-       <widget class="QTableWidget" name="session_table">
-         <property name="maximumSize"><size><width>16777215</width><height>380</height></size></property>
-         <property name="columnCount"><number>5</number></property>
-         <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
-         <property name="alternatingRowColors"><bool>true</bool></property>
-         <attribute name="verticalHeaderVisible"><bool>false</bool></attribute>
-         <attribute name="horizontalHeaderStretchLastSection"><bool>true</bool></attribute>
-         <column><property name="text"><string>Session</string></property></column>
-         <column><property name="text"><string>Started</string></property></column>
-         <column><property name="text"><string>Elapsed</string></property></column>
-         <column><property name="text"><string>Ranging Runs</string></property></column>
-         <column><property name="text"><string>Log Files</string></property></column>
+        <widget class="QTableWidget" name="session_table">
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>380</height>
+          </size>
+         </property>
+         <property name="alternatingRowColors">
+          <bool>true</bool>
+         </property>
+         <property name="selectionBehavior">
+          <enum>QAbstractItemView::SelectRows</enum>
+         </property>
+         <property name="columnCount">
+          <number>5</number>
+         </property>
+         <attribute name="horizontalHeaderStretchLastSection">
+          <bool>true</bool>
+         </attribute>
+         <attribute name="verticalHeaderVisible">
+          <bool>false</bool>
+         </attribute>
+         <column>
+          <property name="text">
+           <string>Session</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Started</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Elapsed</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Ranging Runs</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Log Files</string>
+          </property>
+         </column>
         </widget>
        </item>
        <item>
         <layout class="QHBoxLayout" name="detail_header">
-         <property name="spacing"><number>8</number></property>
+         <property name="spacing">
+          <number>8</number>
+         </property>
          <item>
           <widget class="QLabel" name="detail_title">
-           <property name="font"><font><family>Segoe UI</family><pointsize>11</pointsize><bold>true</bold></font></property>
-           <property name="styleSheet"><string notr="true">color: #22D3EE; padding: 2px 4px;</string></property>
-           <property name="text"><string>Session Details</string></property>
+           <property name="font">
+            <font>
+             <family>Segoe UI</family>
+             <pointsize>11</pointsize>
+             <weight>75</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color: #22D3EE; padding: 2px 4px;</string>
+           </property>
+           <property name="text">
+            <string>Session Details</string>
+           </property>
           </widget>
          </item>
          <item>
+          <spacer name="detail_header_spacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
           <widget class="QFrame" name="detail_mode_switch">
-           <property name="minimumSize"><size><width>0</width><height>30</height></size></property>
-           <property name="maximumSize"><size><width>250</width><height>30</height></size></property>
-           <property name="styleSheet"><string notr="true">QFrame#detail_mode_switch { background: #E2E8F0; border: 1px solid #CBD5E1; border-radius: 6px; }
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>30</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>250</width>
+             <height>30</height>
+            </size>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">QFrame#detail_mode_switch { background: #E2E8F0; border: 1px solid #CBD5E1; border-radius: 6px; }
 QFrame#detail_mode_switch QPushButton { background: transparent; border: none; border-radius: 4px; color: #475569; font-weight: 600; padding: 3px 9px; }
 QFrame#detail_mode_switch QPushButton:checked { background: #22D3EE; color: #0F172A; }
-QFrame#detail_mode_switch QPushButton:hover { color: #0F172A; }</string></property>
-           <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+QFrame#detail_mode_switch QPushButton:hover { color: #0F172A; }</string>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::NoFrame</enum>
+           </property>
            <layout class="QHBoxLayout" name="detail_mode_layout">
-            <property name="spacing"><number>0</number></property>
-            <property name="leftMargin"><number>2</number></property>
-            <property name="topMargin"><number>2</number></property>
-            <property name="rightMargin"><number>2</number></property>
-            <property name="bottomMargin"><number>2</number></property>
+            <property name="spacing">
+             <number>0</number>
+            </property>
+            <property name="leftMargin">
+             <number>2</number>
+            </property>
+            <property name="topMargin">
+             <number>2</number>
+            </property>
+            <property name="rightMargin">
+             <number>2</number>
+            </property>
+            <property name="bottomMargin">
+             <number>2</number>
+            </property>
             <item>
              <widget class="QPushButton" name="btn_detail_ranging">
-              <property name="text"><string>Ranging</string></property>
-              <property name="checkable"><bool>true</bool></property>
-              <property name="checked"><bool>true</bool></property>
-              <property name="flat"><bool>true</bool></property>
+              <property name="text">
+               <string>Ranging</string>
+              </property>
+              <property name="checkable">
+               <bool>true</bool>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+              <property name="flat">
+               <bool>true</bool>
+              </property>
              </widget>
             </item>
             <item>
              <widget class="QPushButton" name="btn_detail_logs">
-              <property name="text"><string>Logs</string></property>
-              <property name="checkable"><bool>true</bool></property>
-              <property name="flat"><bool>true</bool></property>
+              <property name="text">
+               <string>Logs</string>
+              </property>
+              <property name="checkable">
+               <bool>true</bool>
+              </property>
+              <property name="flat">
+               <bool>true</bool>
+              </property>
              </widget>
             </item>
            </layout>
           </widget>
          </item>
-         <item>
-          <spacer name="detail_header_spacer">
-           <property name="orientation"><enum>Qt::Horizontal</enum></property>
-           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
-          </spacer>
-         </item>
         </layout>
        </item>
        <item>
         <widget class="QTableWidget" name="detail_table">
-         <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
-         <property name="alternatingRowColors"><bool>true</bool></property>
-         <attribute name="verticalHeaderVisible"><bool>false</bool></attribute>
-         <attribute name="horizontalHeaderStretchLastSection"><bool>true</bool></attribute>
+         <property name="alternatingRowColors">
+          <bool>true</bool>
+         </property>
+         <property name="selectionBehavior">
+          <enum>QAbstractItemView::SelectRows</enum>
+         </property>
+         <attribute name="horizontalHeaderStretchLastSection">
+          <bool>true</bool>
+         </attribute>
+         <attribute name="verticalHeaderVisible">
+          <bool>false</bool>
+         </attribute>
         </widget>
        </item>
        <item>
         <layout class="QHBoxLayout" name="detail_action_row">
-         <property name="spacing"><number>8</number></property>
+         <property name="spacing">
+          <number>8</number>
+         </property>
          <item>
           <widget class="QLabel" name="detail_selection_label">
-           <property name="styleSheet"><string notr="true">color: #64748B;</string></property>
-           <property name="text"><string>No file selected</string></property>
+           <property name="styleSheet">
+            <string notr="true">color: #64748B;</string>
+           </property>
+           <property name="text">
+            <string>No file selected</string>
+           </property>
           </widget>
          </item>
          <item>
           <spacer name="detail_action_spacer">
-           <property name="orientation"><enum>Qt::Horizontal</enum></property>
-           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
           </spacer>
          </item>
-         <item><widget class="QPushButton" name="btn_detail_open"><property name="text"><string>Open</string></property></widget></item>
-         <item><widget class="QPushButton" name="btn_detail_browse"><property name="text"><string>Browse</string></property></widget></item>
+         <item>
+          <widget class="QPushButton" name="btn_detail_open">
+           <property name="text">
+            <string>Open</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_detail_browse">
+           <property name="text">
+            <string>Browse</string>
+           </property>
+          </widget>
+         </item>
          <item>
           <widget class="QPushButton" name="btn_detail_remove">
-           <property name="styleSheet"><string notr="true">QPushButton { color: #F87171; border: 1px solid #EF4444; border-radius: 5px; padding: 2px 8px; }
-QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string></property>
-           <property name="text"><string>Remove</string></property>
+           <property name="styleSheet">
+            <string notr="true">QPushButton { color: #F87171; border: 1px solid #EF4444; border-radius: 5px; padding: 2px 8px; }
+QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
+           </property>
+           <property name="text">
+            <string>Remove</string>
+           </property>
           </widget>
          </item>
         </layout>

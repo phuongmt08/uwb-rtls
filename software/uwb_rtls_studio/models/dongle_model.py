@@ -60,12 +60,22 @@ class DongleModel(QObject):
         self._worker.port_probing.connect(self.port_probing.emit)
         self._worker.timeout.connect(self.search_timeout.emit)
         self._worker.start()
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.threads.register("DongleDetectWorker", self._worker)
+        except Exception as e:
+            log.error("Failed to register DongleDetectWorker: %s", e)
 
     def stop_detection(self) -> None:
         if self._worker:
             self._worker.stop()
             self._worker.wait(2000)
             self._worker = None
+            try:
+                from utils.app_state import shared_app_state
+                shared_app_state.threads.unregister("DongleDetectWorker")
+            except Exception as e:
+                pass
 
     def _on_dongle_found(self, info: DongleInfo) -> None:
         """Worker đã probe thành công (nhận ACK) → mở serial chính thức và xem như đã verify."""

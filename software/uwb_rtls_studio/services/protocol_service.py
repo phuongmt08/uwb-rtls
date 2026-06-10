@@ -103,6 +103,13 @@ class ProtocolService(QObject):
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
                 continue
 
+            # Route to global query manager in shared app state
+            try:
+                from utils.app_state import shared_app_state
+                shared_app_state.handle_incoming_packet(param, pkt)
+            except Exception as e:
+                log.error("Failed to forward packet to shared_app_state: %s", e)
+
             self.packet_received.emit(param, pkt)
             log.debug("RX: %s seq=%d", param, pkt.hdr.seq)
 

@@ -57,6 +57,7 @@ import logging
 from PyQt6.QtCore import QObject, pyqtSignal
 from models.ranging_model import RangingModel
 from services.protocol_service import ProtocolService
+from utils.app_state import shared_app_state, JobState
 
 log = logging.getLogger(__name__)
 
@@ -82,9 +83,13 @@ class LiveTrackingViewModel(QObject):
         # Gọi command tới BE từ ViewModel
         self.protocol.send_command("ranging_start")
         self.model.is_ranging = True
+        shared_app_state.ranging_active = True
+        shared_app_state.update_job("ranging_session", JobState.RUNNING)
         self.ranging_started.emit()
 
     def stop_ranging(self) -> None:
         self.protocol.send_command("ranging_stop")
         self.model.is_ranging = False
+        shared_app_state.ranging_active = False
+        shared_app_state.update_job("ranging_session", JobState.IDLE)
         self.ranging_stopped.emit()

@@ -64,8 +64,6 @@ class DeviceInfoViewModel(QObject):
         if self.dongle_model:
             self.dongle_model.dongle_verified.connect(self._on_dongle_reconnected)
 
-        # Delayed init: give the main window time to wire signals
-        QTimer.singleShot(300, self._delayed_init)
 
     # ═══════════════════════════════════════════════════════════════════
     #  INITIALIZATION

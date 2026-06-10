@@ -35,6 +35,7 @@ from services.dongle_detect_service import DongleDetectService
 from common.transport import VvProtocol, VvAddress
 from common.commands import CommandFactory
 from common import protocol_pb2 as pb
+from common.query_state_machine import QueryQueueManager
 
 # Tắt bớt log debug của các service khác để tránh loãng màn hình console
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -45,6 +46,7 @@ is_running = True
 ble_state = None
 scanned_devices = {}
 script_state = "DETECTING"  # DETECTING -> SCANNING -> CONNECTING -> TELEMETRY
+query_mgr = None
 
 def get_next_seq():
     global seq_counter
@@ -52,7 +54,7 @@ def get_next_seq():
     return seq_counter
 
 def main():
-    global is_running, ble_state, scanned_devices, script_state
+    global is_running, ble_state, scanned_devices, script_state, query_mgr
     
     print("==================================================================")
     print("   UWB RTLS STUDIO - MCU & CENTRAL TELEMETRY TEST SCRIPT          ")
@@ -97,7 +99,7 @@ def main():
     # 3. Luồng đọc dữ liệu phản hồi trong nền
     def rx_thread_func():
         decoder = type(proto.hdlc)()
-        global is_running, ble_state, scanned_devices, script_state
+        global is_running, ble_state, scanned_devices, script_state, query_mgr
         
         while is_running:
             try:
@@ -137,6 +139,10 @@ def main():
                             
                             # ── STATE: TELEMETRY (Hiển thị chi tiết gói tin khi đã kết nối thành công)
                             elif script_state == "TELEMETRY":
+                                # Pass response to query manager
+                                if query_mgr:
+                                    query_mgr.handle_response(param_name, pkt)
+                                    
                                 # Log header của gói tin nhận được
                                 print(f"\n[RX] '{param_name}' from {src_name} to {dst_name} (seq={pkt.hdr.seq})")
                                 
@@ -295,24 +301,56 @@ def main():
     ]
     send_packet("anchor_layout_set", dst_addr=pb.PACKET_ADDR_MCU, anchors=dummy_anchors)
     time.sleep(1.0)
-    
+
+    def q_send_fn(cmd_name, dst_addr, **kwargs):
+        send_packet(cmd_name, dst_addr=dst_addr, **kwargs)
+
+    def print_query_results(results):
+        print("\n========================================")
+        print("  SEQUENTIAL QUERY TRANSACTION REPORT")
+        print("========================================")
+        success_count = 0
+        for idx, q in enumerate(results, 1):
+            status = q["status"]
+            retries = q["retries"]
+            if status == "SUCCESS":
+                success_count += 1
+                print(f" [{idx}] {q['command_name']:<25} -> SUCCESS (retries: {retries})")
+            else:
+                print(f" [{idx}] {q['command_name']:<25} -> \033[91m{status}\033[0m (retries: {retries})")
+        print("========================================")
+        print(f"  Summary: {success_count}/{len(results)} queries succeeded.")
+        print("========================================\n")
+
     try:
         while is_running:
             # Gửi các gói tin yêu cầu lấy dữ liệu từ MCU (Host -> MCU)
-            print("\n--- [START QUERY PERIOD] ---")
-            send_packet("device_information_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("battery_info_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("time_sync_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("anchor_layout_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("sys_config_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("sys_ranging_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("sensor_fusion_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
-            send_packet("pos_calib_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
+            print("\n--- [START QUERY PERIOD via State Machine] ---")
+            query_mgr = QueryQueueManager(
+                send_packet_fn=q_send_fn,
+                timeout_s=0.25, # 250ms per query
+                max_retries=3,
+                on_complete_fn=print_query_results
+            )
+            query_mgr.add_query("device_information_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("battery_info_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("time_sync_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("anchor_layout_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("sys_config_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("sys_ranging_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("sensor_fusion_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
+            query_mgr.add_query("pos_calib_cfg_get", dst_addr=pb.PACKET_ADDR_MCU)
             
             # Gửi yêu cầu lấy trạng thái/tham số kết nối từ Central (Host -> Central)
-            send_packet("ble_status_get", dst_addr=pb.PACKET_ADDR_CENTRAL)
-            send_packet("ble_conn_params_get", dst_addr=pb.PACKET_ADDR_CENTRAL)
+            query_mgr.add_query("ble_status_get", dst_addr=pb.PACKET_ADDR_CENTRAL)
+            query_mgr.add_query("ble_conn_params_get", dst_addr=pb.PACKET_ADDR_CENTRAL)
             
+            query_mgr.start()
+            
+            # Wait for all queries to finish before next query period
+            while query_mgr.is_running:
+                time.sleep(0.05)
+                
             time.sleep(3.0)
             
     except KeyboardInterrupt:

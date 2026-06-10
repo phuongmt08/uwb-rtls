@@ -94,7 +94,6 @@ enum ble_state_t {
     BLE_STATE_ADVERTISING   = 3;
     BLE_STATE_CONNECTING    = 4;
     BLE_STATE_CONNECTED     = 5;
-    BLE_STATE_DISCONNECTED  = 6;
 }
 
 enum host_transport_t {

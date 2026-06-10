@@ -76,6 +76,7 @@ import time
 from collections import deque
 from PyQt6.QtCore import QObject, pyqtSignal
 from services.protocol_service import ProtocolService
+from utils.app_state import shared_app_state
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ class RangingModel(QObject):
     def set_anchor_layout(self, anchors: list):
         """Set anchor positions. Called by ConfigViewModel."""
         self._anchor_layout = anchors
+        shared_app_state.anchor_layout = anchors
 
     def clear_history(self):
         """Clear position history buffer."""
@@ -136,6 +138,7 @@ class RangingModel(QObject):
             "update_rate_hz": 0.0,
         }
         self._last_result_time = 0.0
+        shared_app_state.ranging_stats = self._stats.copy()
 
     # ── Packet handler ───────────────────────────────────────────────
 
@@ -183,6 +186,7 @@ class RangingModel(QObject):
 
         # Emit updated stats
         self.stats_updated.emit(self._stats.copy())
+        shared_app_state.ranging_stats = self._stats.copy()
 
     def _handle_anchor_layout(self, resp):
         """Parse anchor_layout_resp and store."""
@@ -196,3 +200,4 @@ class RangingModel(QObject):
             })
         log.info("Anchor layout received: %d anchors", len(self._anchor_layout))
         self.anchor_layout_updated.emit(self._anchor_layout)
+        shared_app_state.anchor_layout = self._anchor_layout

@@ -10,6 +10,50 @@
     <height>798</height>
    </rect>
   </property>
+  <property name="styleSheet">
+   <string notr="true">QWidget#DeviceInfoTab { background-color: #0F172A; color: #F8FAFC; font-family: 'Segoe UI'; font-size: 13px; }
+QGroupBox {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    margin-top: 18px;
+    padding: 20px 12px 12px 12px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 4px 10px;
+    color: #22D3EE;
+    background-color: rgba(34, 211, 238, 0.10);
+    border-left: 3px solid #22D3EE;
+    border-bottom: 1px solid rgba(34, 211, 238, 0.45);
+    border-radius: 4px;
+    font-family: 'Segoe UI';
+    font-size: 14px;
+    font-weight: bold;
+}
+QLabel { font-size: 13px; }
+QTableWidget {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    gridline-color: #334155;
+    selection-background-color: rgba(34, 211, 238, 0.15);
+    selection-color: #22D3EE;
+    alternate-background-color: #1E293B;
+}
+QHeaderView::section {
+    background-color: #1E293B;
+    color: #22D3EE;
+    border: 1px solid #334155;
+    padding: 8px;
+    font-family: 'Segoe UI';
+    font-size: 13px;
+    font-weight: bold;
+}</string>
+  </property>
   <layout class="QVBoxLayout" name="base_layout">
    <property name="leftMargin">
     <number>0</number>
@@ -44,13 +88,7 @@
        </rect>
       </property>
       <property name="styleSheet">
-       <string notr="true">
-QWidget { background: transparent; }
-QGroupBox { font-size: 14px; font-weight: bold; }
-QLabel { font-size: 13px; }
-QTableWidget { font-size: 13px; }
-QHeaderView::section { font-size: 13px; font-weight: bold; }
-      </string>
+       <string notr="true">QWidget { background: transparent; }</string>
       </property>
       <layout class="QHBoxLayout" name="main_hbox" stretch="35,75">
        <property name="spacing">

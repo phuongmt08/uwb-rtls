@@ -22,23 +22,15 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from services.protocol_service import ProtocolService
 from common.transport import VvAddress
+from utils.app_state import shared_app_state, JobState
+from utils.constants import (
+    DEVICE_TIMEOUT_S,
+    STOP_TO_CONNECT_DELAY_MS,
+    TIME_SYNC_THRESHOLD_MS,
+    DEVICE_TYPE_LABELS,
+)
 
 log = logging.getLogger(__name__)
-
-# Timeout for stale advertising devices (seconds)
-_DEVICE_TIMEOUT_S = 5.0
-# Delay after ble_scan_stop before sending ble_connect (ms)
-_STOP_TO_CONNECT_DELAY_MS = 400
-# Time sync drift threshold (ms) — auto-correct if exceeded
-_TIME_SYNC_THRESHOLD_MS = 5000
-
-_DEVICE_TYPE_LABELS = {
-    0: "UNSPECIFIED",
-    1: "TAG",
-    2: "ANCHOR",
-    3: "GATEWAY",
-    4: "DEBUG_TOOL",
-}
 
 
 class DeviceModel(QObject):
@@ -75,6 +67,7 @@ class DeviceModel(QObject):
         # ── State (single source of truth) ───────────────────────────
         self._connected_mac = ""
         self._connected_name = ""
+        self._connection_status = "Disconnected"
         self._is_scanning = False
         self._pending_connect_mac = ""
 
@@ -88,6 +81,11 @@ class DeviceModel(QObject):
         # ── Prune timer for stale advertising devices ────────────────
         self._prune_timer = QTimer(self)
         self._prune_timer.timeout.connect(self._prune_devices)
+        
+        # ── BLE status check timer (5s interval) ──────────────────
+        self._ble_status_timer = QTimer(self)
+        self._ble_status_timer.setInterval(5000)
+        self._ble_status_timer.timeout.connect(self._poll_ble_status)
         
         # ── Serial Connection Lost Listener ─────────────────────────
         self._protocol._serial.connection_lost.connect(self.on_connection_lost)
@@ -120,32 +118,39 @@ class DeviceModel(QObject):
         """Called by main.py / ViewModel after ScanPopup to seed initial state."""
         self._connected_mac = mac
         self._connected_name = name
+        self._connection_status = "Connected"
         self.connection_state_changed.emit({
             "name": name, "mac": mac, "status": "Connected", "SwitchToLogTab": True
         })
         log.info("Connected device set: %s (%s)", name, mac)
+        
+        # Start the background BLE status check timer immediately
+        if not self._ble_status_timer.isActive():
+            self._ble_status_timer.start()
 
 
     def request_initial_telemetry(self):
-        """Send GET commands once upon connection to fetch the baseline state.
-        Further updates should be pushed automatically by the Firmware as events."""
-        log.info("Requesting initial baseline telemetry from device...")
+        """Send GET commands sequentially using a state machine to fetch the baseline state.
+        This prevents collisions and packet drops on serial/BLE links."""
+        log.info("Requesting initial baseline telemetry from device via global shared_app_state...")
         
-        # Requests intended for the MCU (battery, device info, time sync)
-        self._protocol.send_command("device_information_get", dst_addr=VvAddress.MCU)
-        self._protocol.send_command("battery_info_get", dst_addr=VvAddress.MCU)
-        self._protocol.send_command("time_sync_get", dst_addr=VvAddress.MCU)
+        shared_app_state.update_job("initial_telemetry", JobState.RUNNING)
         
-        # Requests intended for the BLE Central logic
-        self._protocol.send_command("ble_status_get", dst_addr=VvAddress.CENTRAL)
-        self._protocol.send_command("ble_conn_params_get", dst_addr=VvAddress.CENTRAL)
+        # Enqueue MCU telemetry queries
+        shared_app_state.enqueue_query("device_information_get", dst_addr=VvAddress.MCU)
+        shared_app_state.enqueue_query("battery_info_get", dst_addr=VvAddress.MCU)
+        shared_app_state.enqueue_query("time_sync_get", dst_addr=VvAddress.MCU)
+        
+        # Enqueue BLE Central telemetry queries
+        shared_app_state.enqueue_query("ble_status_get", dst_addr=VvAddress.CENTRAL)
+        shared_app_state.enqueue_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL)
 
-        # Requests intended for layout and other configs
-        self._protocol.send_command("anchor_layout_get", dst_addr=VvAddress.MCU)
-        self._protocol.send_command("sys_config_get", dst_addr=VvAddress.MCU)
-        self._protocol.send_command("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
-        self._protocol.send_command("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU)
-        self._protocol.send_command("pos_calib_cfg_get", dst_addr=VvAddress.MCU)
+        # Enqueue config and layout queries
+        shared_app_state.enqueue_query("anchor_layout_get", dst_addr=VvAddress.MCU)
+        shared_app_state.enqueue_query("sys_config_get", dst_addr=VvAddress.MCU)
+        shared_app_state.enqueue_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
+        shared_app_state.enqueue_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU)
+        shared_app_state.enqueue_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU)
 
 
     def start_scan(self):
@@ -158,11 +163,12 @@ class DeviceModel(QObject):
         # When connected, the central firmware automatically runs background scanning,
         # so sending this command would override the LED state of the dongle.
         if not self.is_connected:
-            self._protocol.send_command(
-                "ble_scan_start",
-                src_addr=self._protocol.pb.PACKET_ADDR_HOST,
-                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
-            )
+            if not self._is_scanning:
+                self._protocol.send_command(
+                    "ble_scan_start",
+                    src_addr=self._protocol.pb.PACKET_ADDR_HOST,
+                    dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
+                )
         else:
             log.info("Background scanning enabled locally (central is already scanning internally)")
 
@@ -221,8 +227,10 @@ class DeviceModel(QObject):
             self.connection_state_changed.emit({
                 "name": self._connected_name, "mac": self._connected_mac, "status": "Disconnecting"
             })
+            self._connection_status = "Disconnecting"
             self._connected_mac = ""
             self._connected_name = ""
+            self._ble_status_timer.stop()
             delay_ms = 150 # Reduced delay
 
         # 2) Stop scan
@@ -256,6 +264,7 @@ class DeviceModel(QObject):
         # Update state + emit UI status
         self._connected_mac = mac_hex
         self._connected_name = name
+        self._connection_status = "Connecting"
         self.connection_state_changed.emit({
             "name": name, "mac": mac_hex, "status": "Connecting"
         })
@@ -268,8 +277,10 @@ class DeviceModel(QObject):
         log.warning("Dongle physically disconnected!")
         self._connected_mac = ""
         self._connected_name = ""
+        self._connection_status = "Disconnected"
         self._is_scanning = False
         self._prune_timer.stop()
+        self._ble_status_timer.stop()
 
         self.connection_state_changed.emit({
             "name": "-", "mac": "-", "status": "Disconnected"
@@ -316,16 +327,21 @@ class DeviceModel(QObject):
         else:
             role_str = "UNSPECIFIED"
             
-        self.device_info_parsed.emit({
-            "Type": _DEVICE_TYPE_LABELS.get(device_type, str(device_type)),
+        info = {
+            "Type": DEVICE_TYPE_LABELS.get(device_type, str(device_type)),
             "Role": role_str,
             "Serial Number": f"0x{resp.serial_number:08X}" if hasattr(resp, 'serial_number') else "-",
             "Firmware": f"v{resp.fw_version.major}.{resp.fw_version.minor}.{resp.fw_version.patch}",
             "Hardware Rev": str(getattr(resp, 'hw_version', '')),
-        })
+        }
+        self.device_info_parsed.emit(info)
+        
+        dev = shared_app_state.connected_device
+        dev.update(info)
+        shared_app_state.connected_device = dev
 
     def _handle_battery_info(self, resp):
-        self.battery_info_parsed.emit({
+        info = {
             "bat_voltage_mv": getattr(resp, 'bat_voltage_mv', 0),
             "bat_soc_percent": getattr(resp, 'bat_soc_percent', 0),
             "remaining_min": getattr(resp, 'remaining_min', 0),
@@ -336,42 +352,77 @@ class DeviceModel(QObject):
             "uwb_vbat_mv": getattr(resp, 'uwb_vbat_mv', 0),
             "imu_temp_c": getattr(resp, 'imu_temp_c', 0.0),
             "error_mask": getattr(resp, 'error_mask', 0),
-        })
+        }
+        self.battery_info_parsed.emit(info)
+        shared_app_state.battery_info = info
 
     def _handle_ble_status(self, resp):
         state = getattr(resp, 'state', 0)
         rssi = getattr(resp, 'rssi_dbm', 0)
 
-        self.ble_status_parsed.emit({
+        ble_info = {
             "state": state,
             "rssi_dbm": rssi,
-        })
-
+        }
+        self.ble_status_parsed.emit(ble_info)
+        
+        # Write to Shared App State
+        curr_ble = shared_app_state.ble_status
+        curr_ble.update(ble_info)
+        shared_app_state.ble_status = curr_ble
 
         # ── Connection state machine ────────────────────────────────
         pb = self._protocol.pb
 
         if state == pb.BLE_STATE_CONNECTED and self._connected_mac:
             log.info("Dongle confirmed BLE_STATE_CONNECTED.")
-            self.connection_state_changed.emit({
-                "name": self._connected_name,
-                "mac": self._connected_mac,
-                "status": "Connected",
-                "SwitchToLogTab": True,
-            })
-            # Resume scanning to populate 'Other Advertising Devices' table
-            # Added 500ms delay to prevent firmware race condition which causes LED to turn off ("sáng xong tắt ngay")
-            QTimer.singleShot(500, self.start_scan)
+            if self._connection_status != "Connected":
+                self._connection_status = "Connected"
+                shared_app_state.connection_status = "Connected"
+                dev_info = shared_app_state.connected_device
+                dev_info.update({"name": self._connected_name, "mac": self._connected_mac})
+                shared_app_state.connected_device = dev_info
 
-        elif state == pb.BLE_STATE_IDLE and self._connected_mac:
-            log.warning("BLE_STATE_IDLE while device was connected — lost connection.")
+                self.connection_state_changed.emit({
+                    "name": self._connected_name,
+                    "mac": self._connected_mac,
+                    "status": "Connected",
+                    "SwitchToLogTab": True,
+                })
+                
+                # Start/Restart the 5s BLE status checking timer
+                if not self._ble_status_timer.isActive():
+                    self._ble_status_timer.start()
+
+                # Resume scanning to populate 'Other Advertising Devices' table
+                # Added 500ms delay to prevent firmware race condition which causes LED to turn off ("sáng xong tắt ngay")
+                QTimer.singleShot(500, self.start_scan)
+
+        elif self._connected_mac and (
+            (self._ble_status_timer.isActive() and state != pb.BLE_STATE_CONNECTED) or
+            (state != pb.BLE_STATE_CONNECTED and state != pb.BLE_STATE_CONNECTING)
+        ):
+            log.warning("BLE state changed to %d while device was connected — lost connection.", state)
             self._connected_mac = ""
             self._connected_name = ""
+            self._connection_status = "Disconnected"
+            shared_app_state.connection_status = "Disconnected"
+            shared_app_state.connected_device = {}
+            self._ble_status_timer.stop()
             self.connection_state_changed.emit({
                 "name": "-", "mac": "-", "status": "Disconnected"
             })
             # Restart scan so user can find it again
             self.start_scan()
+
+    def _poll_ble_status(self):
+        """Poll BLE status from Central device (dongle) periodically."""
+        if self._connected_mac:
+            log.debug("Polling BLE status from dongle...")
+            try:
+                self._protocol.send_command("ble_status_get", dst_addr=VvAddress.CENTRAL)
+            except Exception as e:
+                log.error("Failed to send ble_status_get: %s", e)
 
     def _handle_ble_conn_params(self, resp):
         p = getattr(resp, 'params', None)
@@ -396,7 +447,7 @@ class DeviceModel(QObject):
         tz_offset_sec = -timezone_offset
 
         time_diff_ms = abs(host_time_ms - dev_time_ms)
-        is_synced = time_diff_ms <= _TIME_SYNC_THRESHOLD_MS
+        is_synced = time_diff_ms <= TIME_SYNC_THRESHOLD_MS
         was_corrected = False
 
         # Auto-correct if drift exceeds threshold
@@ -424,7 +475,7 @@ class DeviceModel(QObject):
 
     def _handle_sys_config(self, resp):
         cfg = resp.config
-        self.sys_config_parsed.emit({
+        cfg_dict = {
             "role": cfg.role,
             "device_id": cfg.device_id,
             "ranging_period_ms": cfg.ranging_period_ms,
@@ -438,18 +489,22 @@ class DeviceModel(QObject):
             "tx_power": cfg.tx_power,
             "anchor_list": cfg.anchor_list,
             "power_mode": cfg.power_mode,
-        })
+        }
+        self.sys_config_parsed.emit(cfg_dict)
+        shared_app_state.sys_config = cfg_dict
 
     def _handle_sys_ranging_cfg(self, resp):
         cfg = resp.config
-        self.sys_ranging_cfg_parsed.emit({
+        cfg_dict = {
             "rx_timeout_ms": cfg.rx_timeout_ms,
             "ranging_period_ms": cfg.ranging_period_ms,
-        })
+        }
+        self.sys_ranging_cfg_parsed.emit(cfg_dict)
+        shared_app_state.sys_ranging_cfg = cfg_dict
 
     def _handle_sensor_fusion_cfg(self, resp):
         cfg = resp.config
-        self.sensor_fusion_cfg_parsed.emit({
+        cfg_dict = {
             "alpha": cfg.alpha,
             "kappa": cfg.kappa,
             "beta": cfg.beta,
@@ -464,11 +519,13 @@ class DeviceModel(QObject):
             "init_p_bias_ax": cfg.init_p_bias_ax,
             "init_p_bias_ay": cfg.init_p_bias_ay,
             "init_p_bias_gz": cfg.init_p_bias_gz,
-        })
+        }
+        self.sensor_fusion_cfg_parsed.emit(cfg_dict)
+        shared_app_state.sensor_fusion_cfg = cfg_dict
 
     def _handle_pos_calib_cfg(self, resp):
         cfg = resp.config
-        self.pos_calib_cfg_parsed.emit({
+        cfg_dict = {
             "enable_anchor_auto_calib": cfg.enable_anchor_auto_calib,
             "enable_tag_auto_calib": cfg.enable_tag_auto_calib,
             "ref_distance_xy_m": cfg.ref_distance_xy_m,
@@ -482,7 +539,9 @@ class DeviceModel(QObject):
             "max_std_m": cfg.max_std_m,
             "damping": cfg.damping,
             "iterations": cfg.iterations,
-        })
+        }
+        self.pos_calib_cfg_parsed.emit(cfg_dict)
+        shared_app_state.pos_calib_cfg = cfg_dict
 
 
     # ── Scan result handling ─────────────────────────────────────────
@@ -531,12 +590,12 @@ class DeviceModel(QObject):
         """Remove advertising devices not seen for > 15 seconds."""
         now = time.monotonic()
         stale_macs = [mac for mac, d in self._adv_devices.items()
-                      if now - d.get("last_seen", 0) > _DEVICE_TIMEOUT_S]
+                      if now - d.get("last_seen", 0) > DEVICE_TIMEOUT_S]
         for mac in stale_macs:
             del self._adv_devices[mac]
 
         stale_ids = [did for did, d in self._adv_status_by_device_id.items()
-                     if now - d.get("last_seen", 0) > _DEVICE_TIMEOUT_S]
+                     if now - d.get("last_seen", 0) > DEVICE_TIMEOUT_S]
         for did in stale_ids:
             del self._adv_status_by_device_id[did]
 
