@@ -248,9 +248,17 @@ int main(void)
   }
 
   bsp_util_init();
-  if (bsp_imu_init() != BSP_IMU_OK)
+  if (cfg->device_type == DEVICE_TYPE_TAG)
   {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
+    if (bsp_imu_init() != BSP_IMU_OK)
+    {
+      RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
+    }
+  }
+  else
+  {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "IMU initialization skipped for non-tag device_type=%u",
+           (unsigned)cfg->device_type);
   }
 
 #if TEST_SEND_POS && TEST_DISABLE_RANGING

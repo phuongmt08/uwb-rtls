@@ -11,6 +11,7 @@
 #include "bsp_battery.h"
 #include "bsp_uwb.h"
 #include "bsp_imu.h"
+#include "sys_config.h"
 #include "sys_logger.h"
 #include "main.h"
 
@@ -55,6 +56,7 @@ static const pm_threshold_t PM_THRESHOLD_TABLE[PM_CH_MAX] = {
 static sys_pm_status_t s_pm_status = {0};
 
 /* Private Helpers */
+static bool sys_pm_imu_required(void);
 static void update_hw_watchdog(uint16_t vdda_min_mv, uint16_t vdda_max_mv);
 static uint32_t sys_pm_make_critical_mask(uint32_t current_errors);
 static void sys_pm_update_uwb_telemetry(void);
@@ -87,11 +89,13 @@ void sys_pm_init(void)
         RLOG_W(LOG_OBJECT_CODE_PM, "PM: UWB driver not initialized!");
     }
 
-    /* Check if IMU was initialized successfully */
-    if (bsp_imu_is_initialized()) {
-        s_pm_status.init_mask |= PM_INIT_IMU_BIT;
-    } else {
-        RLOG_W(LOG_OBJECT_CODE_PM, "PM: IMU driver not initialized!");
+    /* IMU/sensor fusion exists only on tag hardware. */
+    if (sys_pm_imu_required()) {
+        if (bsp_imu_is_initialized()) {
+            s_pm_status.init_mask |= PM_INIT_IMU_BIT;
+        } else {
+            RLOG_W(LOG_OBJECT_CODE_PM, "PM: IMU driver not initialized!");
+        }
     }
     
     /* Initial Charge State */
@@ -125,7 +129,7 @@ void sys_pm_process(void)
     if (!(s_pm_status.init_mask & PM_INIT_BATTERY_BIT)) {
         current_errors |= PM_ERR_BAT_INIT_FAIL;
     }
-    if (!(s_pm_status.init_mask & PM_INIT_IMU_BIT)) {
+    if (sys_pm_imu_required() && !(s_pm_status.init_mask & PM_INIT_IMU_BIT)) {
         current_errors |= PM_ERR_IMU_INIT_FAIL;
     }
     if (!(s_pm_status.init_mask & PM_INIT_UWB_BIT)) {
@@ -200,7 +204,7 @@ void sys_pm_process(void)
     }
 
     // IMU Sensor Telemetry
-    if (s_pm_status.init_mask & PM_INIT_IMU_BIT) {
+    if (sys_pm_imu_required() && (s_pm_status.init_mask & PM_INIT_IMU_BIT)) {
         float imu_temp = 0.0f;
         if (bsp_imu_get_temp(&imu_temp) == BSP_IMU_OK) {
             s_pm_status.values[PM_CH_IMU_TEMP] = imu_temp;
@@ -219,7 +223,7 @@ void sys_pm_process(void)
         } else if (i == PM_CH_VDDA || i == PM_CH_TEMP) {
             if (!(s_pm_status.init_mask & PM_INIT_ADC_BIT)) continue;
         } else if (i == PM_CH_IMU_TEMP) {
-            if (!(s_pm_status.init_mask & PM_INIT_IMU_BIT)) continue;
+            if (!sys_pm_imu_required() || !(s_pm_status.init_mask & PM_INIT_IMU_BIT)) continue;
         } else if (i == PM_CH_UWB_TEMP || i == PM_CH_UWB_VBAT) {
             if (!(s_pm_status.init_mask & PM_INIT_UWB_BIT)) continue;
         }
@@ -301,6 +305,11 @@ void sys_pm_task(void *arg)
 }
 
 /* Private Functions -------------------------------------------------------- */
+
+static bool sys_pm_imu_required(void)
+{
+    return sys_config_get_device_type() == DEVICE_TYPE_TAG;
+}
 
 static uint32_t sys_pm_make_critical_mask(uint32_t current_errors)
 {
