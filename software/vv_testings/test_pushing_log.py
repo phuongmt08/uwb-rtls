@@ -162,6 +162,14 @@ class LogRealtimeTester:
         pkt.host_transport_set.transport = int(HostTransport.USB)
         return pkt
 
+    def _build_device_information_get(self) -> pb.packet_t:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.proto.next_seq()
+        pkt.device_information_get.dummy = 0
+        return pkt
+
     def _build_log_data_get(self) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
@@ -213,6 +221,8 @@ class LogRealtimeTester:
 
     def bootstrap(self) -> None:
         self._send_packet(self._build_none())
+        time.sleep(0.05)
+        self._send_packet(self._build_device_information_get())
         time.sleep(0.05)
         self._send_packet(self._build_time_sync_set())
         time.sleep(0.05)
