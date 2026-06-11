@@ -1,4 +1,4 @@
-const TIME_AXIS_PLOTS = ['distances', 'scores', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame', 'fp_amp', 'fp_snr'];
+const TIME_AXIS_PLOTS = ['distances', 'scores', 'triplet_selection', 'triplet_debug', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame', 'fp_amp', 'fp_snr'];
 
 function sampleToTime(sampleIndex, times, totalTime) {
     if (!times || times.length === 0 || !Number.isFinite(sampleIndex)) return 0;
@@ -69,9 +69,34 @@ function attachAllTimeAxisZoomSync() {
     TIME_AXIS_PLOTS.forEach(attachTimeAxisZoomSync);
 }
 
+function tripletAxisData(anchorList) {
+    const keys = [];
+    const labels = [];
+    for (let i = 0; i < anchorList.length - 2; i++) {
+        for (let j = i + 1; j < anchorList.length - 1; j++) {
+            for (let k = j + 1; k < anchorList.length; k++) {
+                const ids = [anchorList[i].id, anchorList[j].id, anchorList[k].id].sort((a, b) => a - b);
+                keys.push(ids.join(','));
+                labels.push(ids.map(id => 'A' + id).join(','));
+            }
+        }
+    }
+    const valueByKey = {};
+    keys.forEach((key, i) => {
+        valueByKey[key] = i;
+    });
+    return {
+        keys,
+        labels,
+        tickvals: keys.map((_, i) => i),
+        valueByKey
+    };
+}
+
 function initPlots(anchors, gt_square, rawData, samples) {
     const colors = SIM_CONFIG.VIEW.COLORS;
     const isPathCsv = rawData.log_format === 'path_csv';
+    const tripletAxis = tripletAxisData(anchors);
     // 1. Trajectory
     Plotly.newPlot('trajectory', [
         { x: anchors.map(a => a.x), y: anchors.map(a => a.y), mode: 'markers+text',
@@ -161,7 +186,87 @@ function initPlots(anchors, gt_square, rawData, samples) {
         yaxis: { title: 'D2 Score' }, hovermode: 'x unified'
     });
 
-    // 4. Accel
+    // 4. Triplet selection timeline
+    Plotly.newPlot('triplet_selection', [
+        { x: [], y: [], name: 'Selected Triplet', mode: 'markers', type: 'scattergl',
+          marker: { color: '#2563eb', size: 7, symbol: 'square' },
+          hovertemplate: 'Sample: %{x}<br>Time: %{customdata[0]:.4f}s<br>Selected: %{customdata[1]}<br>UKF used: %{customdata[10]}<br>Score: %{customdata[12]:.4f}<br>Health: %{customdata[8]:.4f}<br>Candidates: %{customdata[4]}<extra></extra>' },
+        { x: [], y: [], name: 'UKF Used Selected', mode: 'markers', type: 'scattergl',
+          marker: { color: '#16a34a', size: 10, symbol: 'circle-open', line: { width: 2, color: '#16a34a' } },
+          hovertemplate: 'Sample: %{x}<br>Time: %{customdata[0]:.4f}s<br>UKF update used: %{customdata[11]}<br>Selected: %{customdata[1]}<extra></extra>' },
+        { x: [], y: [], name: 'No UKF Update', mode: 'markers', type: 'scattergl',
+          marker: { color: '#dc2626', size: 9, symbol: 'x' },
+          hovertemplate: 'Sample: %{x}<br>Time: %{customdata[0]:.4f}s<br>No UKF update<br>Selected: %{customdata[1]}<extra></extra>' },
+        { x: [], y: [], name: 'Held Previous', mode: 'markers', type: 'scattergl',
+          marker: { color: '#f97316', size: 9, symbol: 'triangle-up' },
+          hovertemplate: 'Sample: %{x}<br>Time: %{customdata[0]:.4f}s<br>Held: %{customdata[1]}<br>Challenger: %{customdata[3]}<br>Challenger score: %{customdata[7]:.4f}<extra></extra>' },
+        { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+    ], {
+        margin: { t: 40, b: 40, l: 90, r: 40 },
+        xaxis: { title: 'Sample Index' },
+        xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
+        yaxis: {
+            title: 'Triplet',
+            tickvals: tripletAxis.tickvals,
+            ticktext: tripletAxis.labels,
+            range: [-0.75, Math.max(0.75, tripletAxis.keys.length - 0.25)],
+            gridcolor: '#f1f5f9'
+        },
+        hovermode: 'closest'
+    });
+
+    // 5. Triplet debug. GDOP is diagnostic only and does not enter the score.
+    Plotly.newPlot('triplet_debug', [
+        { x: [], y: [], name: 'Selected GDOP', mode: 'lines+markers', type: 'scatter',
+          line: { color: '#0ea5e9', width: 2 }, marker: { size: 4 },
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>Candidates: %{customdata[4]}<br>GDOP: %{y:.4f}<br>Avg D2: %{customdata[6]:.4f}<br>Residual: %{customdata[5]:.4f}m<extra></extra>' },
+        { x: [], y: [], name: 'Triplet Score', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#8b5cf6', width: 2 },
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>Status: %{customdata[2]}<br>Challenger: %{customdata[3]}<br>Challenger score: %{customdata[7]:.4f}<br>Challenger health: %{customdata[9]:.4f}<br>Score: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'Health Penalty', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#db2777', width: 2 },
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>Health penalty: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'D2 Penalty', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#ef4444', width: 1.5 }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>D2 penalty: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'FP Penalty', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#10b981', width: 1.5 }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>FP penalty: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'Residual Penalty', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#f59e0b', width: 1.5 }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>Residual penalty: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'Distance Penalty', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#64748b', width: 1.5 }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>Distance penalty: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'GDOP Penalty', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: '#38bdf8', width: 1, dash: 'dot' }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Triplet: %{customdata[1]}<br>GDOP penalty: %{y:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'A1 Health', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: colors[0], width: 1, dash: 'dot' }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>A1 health: %{y:.4f}<br>Reject streak: %{customdata[1]}<br>Rescue streak: %{customdata[2]}<br>Reject EWMA: %{customdata[3]:.4f}<br>Rescue EWMA: %{customdata[4]:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'A2 Health', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: colors[1], width: 1, dash: 'dot' }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>A2 health: %{y:.4f}<br>Reject streak: %{customdata[1]}<br>Rescue streak: %{customdata[2]}<br>Reject EWMA: %{customdata[3]:.4f}<br>Rescue EWMA: %{customdata[4]:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'A3 Health', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: colors[2], width: 1, dash: 'dot' }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>A3 health: %{y:.4f}<br>Reject streak: %{customdata[1]}<br>Rescue streak: %{customdata[2]}<br>Reject EWMA: %{customdata[3]:.4f}<br>Rescue EWMA: %{customdata[4]:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'A4 Health', mode: 'lines', type: 'scatter', yaxis: 'y2',
+          line: { color: colors[3], width: 1, dash: 'dot' }, visible: 'legendonly',
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>A4 health: %{y:.4f}<br>Reject streak: %{customdata[1]}<br>Rescue streak: %{customdata[2]}<br>Reject EWMA: %{customdata[3]:.4f}<br>Rescue EWMA: %{customdata[4]:.4f}<extra></extra>' },
+        { x: [], y: [], name: 'Held Previous', mode: 'markers', type: 'scatter', yaxis: 'y2',
+          marker: { color: '#dc2626', symbol: 'triangle-up', size: 9 },
+          hovertemplate: 'Time: %{customdata[0]:.4f}s<br>Held: %{customdata[1]}<br>Challenger: %{customdata[3]}<br>Challenger score: %{customdata[7]:.4f}<br>Challenger health: %{customdata[9]:.4f}<br>Held score: %{y:.4f}<extra></extra>' },
+        { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
+    ], {
+        margin: { t: 40, b: 40, l: 60, r: 70 },
+        xaxis: { title: 'Sample Index' },
+        xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
+        yaxis: { title: 'GDOP', side: 'left', gridcolor: '#f1f5f9' },
+        yaxis2: { title: 'Score / Penalty', overlaying: 'y', side: 'right', range: [0, 1], showgrid: false },
+        hovermode: 'x unified'
+    });
+
+    // 6. Accel
     Plotly.newPlot('accel', [
         { x: [], y: [], name: 'Ax', mode: 'lines', type: 'scatter', line: { color: '#2564eb8f' },
           hovertemplate: 'Ax: %{y:.3f} m/s²<extra></extra>' },

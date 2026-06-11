@@ -1,5 +1,5 @@
 let ruleCounter = 0;
-const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 6;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 8;
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -301,6 +301,23 @@ function countTrilaterationUpdates(entries, isPathCsv) {
     return count;
 }
 
+function countRangingErrorDelta(entries) {
+    let total = 0;
+    let prev = null;
+
+    entries.forEach(entry => {
+        const err = Number(entry.err);
+        if (!Number.isFinite(err) || err < 0) return;
+
+        if (prev !== null) {
+            total += err >= prev ? (err - prev) : err;
+        }
+        prev = err;
+    });
+
+    return total;
+}
+
 function updatePositionRateDisplay(totalTimeOverride) {
     if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
     const isPathCsv = rawData.log_format === 'path_csv';
@@ -314,14 +331,18 @@ function updatePositionRateDisplay(totalTimeOverride) {
     const trilUpdates = countTrilaterationUpdates(entries, isPathCsv);
     const predictCount = entries.filter(e => e.type === 'Predict').length;
     const updateCount = entries.filter(e => e.type === 'Update').length;
+    const errorCount = countRangingErrorDelta(entries);
+    const rangingAttempts = updateCount + errorCount;
     
     const trilHz = duration > 0 ? (trilUpdates / duration).toFixed(2) : "0.00";
     const predictHz = duration > 0 ? (predictCount / duration).toFixed(2) : "0.00";
     const updateHz = duration > 0 ? (updateCount / duration).toFixed(2) : "0.00";
+    const attemptHz = duration > 0 ? (rangingAttempts / duration).toFixed(2) : "0.00";
+    const errorPct = rangingAttempts > 0 ? (100 * errorCount / rangingAttempts).toFixed(2) : "0.00";
     
     const elem = document.getElementById('position_rate_info');
     if (elem) {
-        elem.textContent = `Duration: ${duration.toFixed(2)}s | Trilateration: ${trilUpdates} (${trilHz} Hz) | Predict: ${predictCount} (${predictHz} Hz) | Update: ${updateCount} (${updateHz} Hz)`;
+        elem.textContent = `Duration: ${duration.toFixed(2)}s | Trilateration: ${trilUpdates} (${trilHz} Hz) | Predict: ${predictCount} (${predictHz} Hz) | Update: ${updateCount} (${updateHz} Hz) | Attempt: ${rangingAttempts} (${attemptHz} Hz) | Error: ${errorCount} (${errorPct}%)`;
     }
 }
 
@@ -405,8 +426,10 @@ function saveDefaults() {
         r_gate: document.getElementById('ukf_rgate_input').value,
         triplet_w_d2: document.getElementById('triplet_w_d2_input').value,
         triplet_w_fp: document.getElementById('triplet_w_fp_input').value,
-        triplet_w_gdop: document.getElementById('triplet_w_gdop_input').value,
-        triplet_w_resid: document.getElementById('triplet_w_resid_input').value
+        triplet_w_resid: document.getElementById('triplet_w_resid_input').value,
+        triplet_w_dist: document.getElementById('triplet_w_dist_input').value,
+        triplet_switch_margin: document.getElementById('triplet_switch_margin_input').value,
+        triplet_switch_eps: document.getElementById('triplet_switch_eps_input').value
     };
     const ruleDivs = document.getElementById('rules_container').children;
     for (let i = 0; i < ruleDivs.length; i++) {
@@ -473,11 +496,12 @@ function loadDefaults() {
                 document.getElementById('max_samples_range').value = config.max_samples;
                 document.getElementById('max_samples_val').innerText = config.max_samples;
             }
-            if (loadTuning && config.enable_smoother !== undefined) {
-                document.getElementById('enable_smoother').checked = config.enable_smoother;
-            }
+
             if (loadTuning && config.enable_mahalanobis !== undefined) {
                 document.getElementById('enable_mahalanobis').checked = config.enable_mahalanobis;
+            }
+            if (loadTuning && config.enable_smoother !== undefined) {
+                document.getElementById('enable_smoother').checked = config.enable_smoother;
             }
             if (loadTuning && config.enable_imu_lpf !== undefined) {
                 document.getElementById('enable_imu_lpf').checked = config.enable_imu_lpf;
@@ -553,15 +577,25 @@ function loadDefaults() {
                 document.getElementById('triplet_w_fp_range').value = config.triplet_w_fp;
                 document.getElementById('triplet_w_fp_val').innerText = config.triplet_w_fp;
             }
-            if (loadTuning && config.triplet_w_gdop !== undefined) {
-                document.getElementById('triplet_w_gdop_input').value = config.triplet_w_gdop;
-                document.getElementById('triplet_w_gdop_range').value = config.triplet_w_gdop;
-                document.getElementById('triplet_w_gdop_val').innerText = config.triplet_w_gdop;
-            }
             if (loadTuning && config.triplet_w_resid !== undefined) {
                 document.getElementById('triplet_w_resid_input').value = config.triplet_w_resid;
                 document.getElementById('triplet_w_resid_range').value = config.triplet_w_resid;
                 document.getElementById('triplet_w_resid_val').innerText = config.triplet_w_resid;
+            }
+            if (loadTuning && config.triplet_w_dist !== undefined) {
+                document.getElementById('triplet_w_dist_input').value = config.triplet_w_dist;
+                document.getElementById('triplet_w_dist_range').value = config.triplet_w_dist;
+                document.getElementById('triplet_w_dist_val').innerText = config.triplet_w_dist;
+            }
+            if (loadTuning && config.triplet_switch_margin !== undefined) {
+                document.getElementById('triplet_switch_margin_input').value = config.triplet_switch_margin;
+                document.getElementById('triplet_switch_margin_range').value = config.triplet_switch_margin;
+                document.getElementById('triplet_switch_margin_val').innerText = parseFloat(config.triplet_switch_margin).toFixed(2);
+            }
+            if (loadTuning && config.triplet_switch_eps !== undefined) {
+                document.getElementById('triplet_switch_eps_input').value = config.triplet_switch_eps;
+                document.getElementById('triplet_switch_eps_range').value = config.triplet_switch_eps;
+                document.getElementById('triplet_switch_eps_val').innerText = parseFloat(config.triplet_switch_eps).toFixed(3);
             }
 
             if (loadTuning && config.rules && config.rules.length > 0) {

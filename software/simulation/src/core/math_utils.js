@@ -96,35 +96,94 @@ function tripletGdop(pos, triplet) {
 
 function normalizeTripletWeights(weights) {
     const defaults = {
-        d2: SIM_CONFIG.FILTER.TRIPLET_W_D2,
-        fp_amp: SIM_CONFIG.FILTER.TRIPLET_W_FP,
-        gdop: SIM_CONFIG.FILTER.TRIPLET_W_GDOP,
-        residual: SIM_CONFIG.FILTER.TRIPLET_W_RESIDUAL
+        d2: SIM_CONFIG.FILTER.TRIPLET_W_D2 || 0.35,
+        fp_amp: SIM_CONFIG.FILTER.TRIPLET_W_FP || 0.15,
+        residual: SIM_CONFIG.FILTER.TRIPLET_W_RESIDUAL || 0.30,
+        dist: SIM_CONFIG.FILTER.TRIPLET_W_DIST || 0.25,
+        health: SIM_CONFIG.FILTER.TRIPLET_W_HEALTH || 0.25
     };
 
     const w = {
         d2: weights && Number.isFinite(weights.d2) ? weights.d2 : defaults.d2,
         fp_amp: weights && Number.isFinite(weights.fp_amp) ? weights.fp_amp : defaults.fp_amp,
-        gdop: weights && Number.isFinite(weights.gdop) ? weights.gdop : defaults.gdop,
-        residual: weights && Number.isFinite(weights.residual) ? weights.residual : defaults.residual
+        residual: weights && Number.isFinite(weights.residual) ? weights.residual : defaults.residual,
+        dist: weights && Number.isFinite(weights.dist) ? weights.dist : defaults.dist,
+        health: weights && Number.isFinite(weights.health) ? weights.health : defaults.health
     };
 
-    const sum = w.d2 + w.fp_amp + w.gdop + w.residual;
+    const callerUsesPercent = [w.d2, w.fp_amp, w.residual, w.dist].some(v => Math.abs(v) > 1.0);
+    if ((!weights || !Number.isFinite(weights.health)) && callerUsesPercent) {
+        w.health = defaults.health * 100.0;
+    }
+
+    const sum = w.d2 + w.fp_amp + w.residual + w.dist + w.health;
     if (!Number.isFinite(sum) || sum <= 0) return defaults;
 
     return {
         d2: w.d2 / sum,
         fp_amp: w.fp_amp / sum,
-        gdop: w.gdop / sum,
-        residual: w.residual / sum
+        residual: w.residual / sum,
+        dist: w.dist / sum,
+        health: w.health / sum
     };
 }
 
-function selectBestTriplet(vAnchors, d2Reject, weights) {
+function tripletKey(triplet) {
+    return triplet.map(a => a.id).slice().sort((a, b) => a - b).join(',');
+}
+
+function anchorHealthPenalty(anchor, healthById) {
+    if (!anchor || !healthById) return 0.0;
+    const health = healthById[anchor.id] !== undefined ? healthById[anchor.id] : healthById[String(anchor.id)];
+    if (Number.isFinite(health)) return clamp01(health);
+    if (health && Number.isFinite(health.score)) return clamp01(health.score);
+    return 0.0;
+}
+
+function averageTripletHealthPenalty(triplet, healthById) {
+    if (!healthById) return 0.0;
+    return triplet.reduce((s, a) => s + anchorHealthPenalty(a, healthById), 0.0) / triplet.length;
+}
+
+function scoreTripletCandidate(c, d2Reject, weights, minGdop, maxGdop) {
+    const gdopSpan = Math.max(0.001, maxGdop - minGdop);
+    const avgD2Penalty = c.triplet.reduce((s, a) => s + d2Penalty(a.d2, d2Reject), 0) / 3;
+    const gdopPenalty = clamp01((c.gdop - minGdop) / gdopSpan);
+    const residualPenalty = clamp01(c.residual / 0.30);
+    const fpAmpPenaltyAvg = c.avgFpAmpPenalty;
+    const distPenalty = c.rangePenalty;
+    const healthPenaltyAvg = c.avgHealthPenalty;
+    const score =
+        weights.d2 * avgD2Penalty +
+        weights.fp_amp * fpAmpPenaltyAvg +
+        weights.residual * residualPenalty +
+        weights.dist * distPenalty +
+        weights.health * healthPenaltyAvg;
+
+    return {
+        triplet: c.triplet,
+        key: c.key,
+        candidateCount: c.candidateCount,
+        pos: c.pos,
+        score,
+        avgD2Raw: c.avgD2Raw,
+        avgD2Penalty,
+        gdopRaw: c.gdop,
+        gdopPenalty,
+        fpAmpPenalty: fpAmpPenaltyAvg,
+        residual: c.residual,
+        residualPenalty,
+        distPenalty,
+        healthPenalty: healthPenaltyAvg
+    };
+}
+
+function selectBestTriplet(vAnchors, d2Reject, weights, options) {
     if (vAnchors.length < 3) return null;
     const candidates = [];
     let minGdop = Infinity;
     let maxGdop = 0;
+    const healthById = options && options.healthById;
 
     for (let i = 0; i < vAnchors.length - 2; i++) {
         for (let j = i + 1; j < vAnchors.length - 1; j++) {
@@ -137,7 +196,20 @@ function selectBestTriplet(vAnchors, d2Reject, weights) {
                 const residual = residualRms(pos, triplet);
                 const avgD2Raw = triplet.reduce((s, a) => s + (a.d2 || 0), 0) / 3;
                 const avgFpAmpPenalty = triplet.reduce((s, a) => s + fpAmpPenalty(a.fp_amp), 0) / 3;
-                candidates.push({ triplet, pos, gdop, residual, avgD2Raw, avgFpAmpPenalty });
+                const avgHealthPenalty = averageTripletHealthPenalty(triplet, healthById);
+                const avgRange = triplet.reduce((s, a) => s + (a.r || 0), 0) / 3;
+                const rangePenalty = clamp01(avgRange / 15.0);
+                candidates.push({
+                    triplet,
+                    key: tripletKey(triplet),
+                    pos,
+                    gdop,
+                    residual,
+                    avgD2Raw,
+                    avgFpAmpPenalty,
+                    avgHealthPenalty,
+                    rangePenalty
+                });
                 minGdop = Math.min(minGdop, gdop);
                 maxGdop = Math.max(maxGdop, gdop);
             }
@@ -147,31 +219,58 @@ function selectBestTriplet(vAnchors, d2Reject, weights) {
 
     let best = null;
     const w = normalizeTripletWeights(weights);
-    const gdopSpan = Math.max(0.001, maxGdop - minGdop);
-    for (const c of candidates) {
-        const avgD2Penalty = c.triplet.reduce((s, a) => s + d2Penalty(a.d2, d2Reject), 0) / 3;
-        const gdopPenalty = clamp01((c.gdop - minGdop) / gdopSpan);
-        const residualPenalty = clamp01(c.residual / 0.30);
-        const fpAmpPenaltyAvg = c.avgFpAmpPenalty;
-        const score =
-            w.d2 * avgD2Penalty +
-            w.fp_amp * fpAmpPenaltyAvg +
-            w.gdop * gdopPenalty +
-            w.residual * residualPenalty;
+    const residualSumsById = {};
+    const residualCountsById = {};
+    candidates.forEach(c => {
+        c.candidateCount = candidates.length;
+    });
 
-        if (!best || score < best.score) {
-            best = {
-                triplet: c.triplet,
-                pos: c.pos,
-                score,
-                avgD2Raw: c.avgD2Raw,
-                avgD2Penalty,
-                gdopRaw: c.gdop,
-                gdopPenalty,
-                fpAmpPenalty: fpAmpPenaltyAvg,
-                residual: c.residual,
-                residualPenalty
-            };
+    for (const c of candidates) {
+        const scored = scoreTripletCandidate(c, d2Reject, w, minGdop, maxGdop);
+        c.triplet.forEach(a => {
+            const id = String(a.id);
+            residualSumsById[id] = (residualSumsById[id] || 0.0) + scored.residualPenalty;
+            residualCountsById[id] = (residualCountsById[id] || 0) + 1;
+        });
+
+        if (!best || scored.score < best.score) {
+            best = scored;
+        }
+    }
+
+    const residualContributionById = {};
+    Object.keys(residualSumsById).forEach(id => {
+        residualContributionById[id] = residualSumsById[id] / Math.max(1, residualCountsById[id]);
+    });
+    if (best) {
+        best.residualContributionById = residualContributionById;
+    }
+
+    const previousKey = options && options.previousKey;
+    if (best && previousKey && best.key !== previousKey) {
+        const challengerKey = best.key;
+        const challengerScore = best.score;
+        const challengerHealthPenalty = best.healthPenalty;
+        const previous = candidates.find(c => c.key === previousKey);
+        if (previous) {
+            const scoredPrevious = scoreTripletCandidate(previous, d2Reject, w, minGdop, maxGdop);
+            const switchMargin = options && Number.isFinite(options.switchMargin)
+                ? Math.max(0, options.switchMargin)
+                : (SIM_CONFIG.FILTER.TRIPLET_SWITCH_MARGIN || 0);
+            const switchScoreEps = options && Number.isFinite(options.switchScoreEps)
+                ? Math.max(0, options.switchScoreEps)
+                : (SIM_CONFIG.FILTER.TRIPLET_SWITCH_SCORE_EPS || 0);
+            const keepPrevious = scoredPrevious.score <= (best.score * (1.0 + switchMargin)) + switchScoreEps;
+
+            if (keepPrevious) {
+                best = Object.assign(scoredPrevious, {
+                    residualContributionById,
+                    keptPrevious: true,
+                    challengerKey,
+                    challengerScore,
+                    challengerHealthPenalty
+                });
+            }
         }
     }
     return best;
