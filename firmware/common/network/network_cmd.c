@@ -84,6 +84,8 @@ static void network_cmd_ranging_stop(const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
+static void network_cmd_prefilter_cfg_get(const protobuf_packet_t *pkt);
+static void network_cmd_prefilter_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt);
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt);
@@ -230,6 +232,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 66 */
+    CMD_INFO(protobuf_packet_t_prefilter_cfg_get_tag,         network_cmd_prefilter_cfg_get,           "prefilter_get"),      /* 75 */
+    CMD_INFO(protobuf_packet_t_prefilter_cfg_set_tag,         network_cmd_prefilter_cfg_set,           "prefilter_set"),      /* 76 */
+    CMD_INFO(protobuf_packet_t_prefilter_cfg_resp_tag,        network_cmd_unimplemented,               "prefilter_resp"),     /* 77 */
+    CMD_INFO(protobuf_packet_t_vehicle_control_tag,           network_cmd_unimplemented,               "vehicle_control"),    /* 78 */
+    CMD_INFO(protobuf_packet_t_vehicle_status_tag,            network_cmd_unimplemented,               "vehicle_status"),     /* 79 */
 #endif
     //      +=================================================+=======================================+========================+
 };
@@ -628,6 +635,41 @@ static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt)
     }
 
     network_cmd_config_save("calibration config");
+}
+
+static void network_cmd_prefilter_cfg_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
+    if (!prefilter_cfg) {
+        RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM, "Failed to get prefilter config");
+        return;
+    }
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_prefilter_cfg_resp_tag);
+    resp.params.prefilter_cfg_resp.has_config = true;
+    resp.params.prefilter_cfg_resp.config = *prefilter_cfg;
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_prefilter_cfg_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    if (!pkt->params.prefilter_cfg_set.has_config) {
+        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
+        return;
+    }
+
+    if (sys_config_set_prefilter(&pkt->params.prefilter_cfg_set.config) != 0) {
+        RLOG_W(OBJECT_CODE, "Invalid prefilter config received from host");
+        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
+        return;
+    }
+
+    network_cmd_config_save("prefilter config");
 }
 
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt)

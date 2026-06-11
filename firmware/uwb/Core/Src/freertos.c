@@ -100,6 +100,7 @@ static uint32_t s_fusion_error_count = 0U;
 static uint8_t s_last_selected_anchors_mask = 0U;
 static float s_latest_tril_x = 0.0f;
 static float s_latest_tril_y = 0.0f;
+static bool s_latest_tril_valid = false;
 #endif
 
 /* USER CODE END Variables */
@@ -373,9 +374,12 @@ void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
 #if ENABLE_SYS_FUSION
-  if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
+  if (sys_config_get_device_type() != DEVICE_TYPE_TAG)
   {
-    osThreadExit();
+    for (;;)
+    {
+      osDelay(1000);
+    }
   }
 
 #if UKF_BLE_STREAM_TEST_ENABLE
@@ -402,10 +406,14 @@ void sensor_fusion_entry(void *argument)
   }
 #else
   /* Khởi tạo bộ lọc định vị và prefilter */
+  const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
   mw_filter_mahalanobis_init(&s_prefilter,
-                             MAHALANOBIS_PREFILTER_D2_RECOVER,
-                             MAHALANOBIS_PREFILTER_D2_REJECT,
-                             MAHALANOBIS_PREFILTER_R_BASE);
+                             prefilter_cfg->recover_d2,
+                             prefilter_cfg->reject_d2,
+                             prefilter_cfg->r_base,
+                             prefilter_cfg->r_gate,
+                             prefilter_cfg->velocity_weight,
+                             prefilter_cfg->min_covariance);
   mw_filter_ukf_init_reset(&s_ukf_init_filter);
   mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
   
@@ -418,7 +426,6 @@ void sensor_fusion_entry(void *argument)
   {
     osDelay(20);
 
-    if (sys_sensor_fusion_check_predict_flag())
     if (sys_sensor_fusion_check_predict_flag())
     {
       float dt = 0.01f;
@@ -436,22 +443,6 @@ void sensor_fusion_entry(void *argument)
         if (dt_ms < 1U) dt_ms = 1U;
         dt = (float)dt_ms / 1000.0f;
       }
-      float dt = 0.01f;
-      if (s_fusion_first_run)
-      {
-        s_fusion_last_tick = HAL_GetTick();
-        s_fusion_first_run = false;
-      }
-      else
-      {
-        uint32_t now = HAL_GetTick();
-        uint32_t dt_ms = now - s_fusion_last_tick;
-        s_fusion_last_tick = now;
-        if (dt_ms > 100U) dt_ms = 100U;
-        if (dt_ms < 1U) dt_ms = 1U;
-        dt = (float)dt_ms / 1000.0f;
-      }
-
       sys_sensor_fusion_predict(&ukf_data, dt);
 
 #if ENABLE_SYS_FUSION_LOG
@@ -555,7 +546,14 @@ void sensor_fusion_entry(void *argument)
             anchor_entry.fp_penalty = 0.0;
 
 #if ENABLE_MAHALANOBIS_PREFILTER
-            if (s_ukf_initialized) {
+            const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
+            if (s_ukf_initialized && prefilter_cfg->enable) {
+                s_prefilter.T1 = prefilter_cfg->recover_d2;
+                s_prefilter.T2 = prefilter_cfg->reject_d2;
+                s_prefilter.R_base = prefilter_cfg->r_base;
+                s_prefilter.R_gate = prefilter_cfg->r_gate;
+                s_prefilter.velocity_weight = prefilter_cfg->velocity_weight;
+                s_prefilter.min_covariance = prefilter_cfg->min_covariance;
                 /* Running Mahalanobis prefilter dynamically inside SensorFusion task context */
                 bool pass = mw_filter_mahalanobis_update(&s_prefilter,
                                                          aid - 1U,
@@ -721,8 +719,10 @@ void sensor_fusion_entry(void *argument)
                 s_latest_tril_valid = false;
             }
         } else {
-            s_error_count++;
-            app_tag_set_latest_fusion_data(0.0f, 0.0f, false, s_error_count);
+            s_fusion_error_count++;
+            s_latest_tril_x = 0.0f;
+            s_latest_tril_y = 0.0f;
+            s_latest_tril_valid = false;
         }
 
         /* Update logging metrics mailbox passively when in Sensor Fusion mode */
@@ -742,10 +742,12 @@ void sensor_fusion_entry(void *argument)
       float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
       float yaw = sys_sensor_fusion_get_yaw_deg();
 
-      bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask, ukf_data.px, ukf_data.py, ukf_yaw, s_latest_tril_x, s_latest_tril_y, yaw, s_error_count);
+      bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask, ukf_data.px, ukf_data.py, ukf_yaw, s_latest_tril_x, s_latest_tril_y, yaw, s_fusion_error_count);
     }
+  }
 #endif
 
+#endif
 #else
   osThreadExit();
 #endif
@@ -996,10 +998,14 @@ void sys_sensor_fusion_reset(void)
     
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
     mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
+    const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
     mw_filter_mahalanobis_init(&s_prefilter,
-                               MAHALANOBIS_PREFILTER_D2_RECOVER,
-                               MAHALANOBIS_PREFILTER_D2_REJECT,
-                               MAHALANOBIS_PREFILTER_R_BASE);
+                               prefilter_cfg->recover_d2,
+                               prefilter_cfg->reject_d2,
+                               prefilter_cfg->r_base,
+                               prefilter_cfg->r_gate,
+                               prefilter_cfg->velocity_weight,
+                               prefilter_cfg->min_covariance);
                                
     for (int i = 0; i < NUM_ANCHORS; i++) {
         s_latest_distances[i] = 0.0f;

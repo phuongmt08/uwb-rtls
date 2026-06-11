@@ -28,6 +28,7 @@ typedef protobuf_device_type_t        device_type_t;
 typedef protobuf_host_transport_t     host_transport_t;
 typedef protobuf_pos_calib_cfg_t      sys_calib_cfg_t;
 typedef protobuf_anchor_layout_item_t sys_anchor_layout_t;
+typedef protobuf_prefilter_cfg_t      sys_prefilter_cfg_t;
 
 #define DEVICE_ROLE_UNSPECIFIED      protobuf_DEVICE_ROLE_UNSPECIFIED
 #define DEVICE_ROLE_TAG              protobuf_DEVICE_ROLE_TAG
@@ -65,13 +66,14 @@ typedef struct
   device_type_t       device_type;
   host_transport_t    host_transport;
   protobuf_uwb_cfg_t  uwb; /* maps to sys_config_set/resp.config */
+  sys_prefilter_cfg_t prefilter;
   sys_calib_cfg_t     calib;
   uint32_t            anchor_count;
   sys_anchor_layout_t anchor_layout[SYS_CONFIG_MAX_ANCHORS];
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            25     /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            26     /* bump -> forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
@@ -93,6 +95,7 @@ typedef struct
 #define DEFAULT_UWB_PHR_MODE      0    /* DWT_PHRMODE_STD */
 #define DEFAULT_SMART_TX_POWER    true
 #define DEFAULT_PG_DELAY          0xC2
+#define DEFAULT_PREFILTER_ENABLE  ENABLE_MAHALANOBIS_PREFILTER
 
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
@@ -115,6 +118,8 @@ device_type_t          sys_config_get_device_type(void);
 host_transport_t       sys_config_get_host_transport(void);
 const sys_calib_cfg_t *sys_config_get_calib(void);
 int                    sys_config_set_calib(const sys_calib_cfg_t *calib);
+const sys_prefilter_cfg_t *sys_config_get_prefilter(void);
+int                    sys_config_set_prefilter(const sys_prefilter_cfg_t *prefilter);
 void                   sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);
 int                    sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count);
 int sys_config_set_power_mode(anchor_power_mode_t mode);

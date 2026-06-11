@@ -66,14 +66,11 @@ static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
-static app_tag_output_mode_t s_output_mode = APP_TAG_MODE_TRILATERATION;
-static bool s_position_valid = false;
 static uint8_t s_last_selected_anchors_mask = 0;
 
 #if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
-static uint8_t s_last_selected_anchors_mask = 0;
 static float s_latest_distances[NUM_ANCHORS] = {0};
 static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0};
 static double s_latest_fp_snr[NUM_ANCHORS] = {0};
@@ -114,12 +111,16 @@ static void init_filters(void)
     memset(&s_filters, 0, sizeof(s_filters));
 
 #if SYS_FUSION_PREFILTER_ENABLED
+    const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
     /* Fusion-predicted Mahalanobis prefilter state:
      * T1 = recover threshold, T2 = reject threshold, R = adaptive output base. */
     mw_filter_mahalanobis_init(&s_filters.prefilter,
-                               MAHALANOBIS_PREFILTER_D2_RECOVER,
-                               MAHALANOBIS_PREFILTER_D2_REJECT,
-                               MAHALANOBIS_PREFILTER_R_BASE);
+                               prefilter_cfg->recover_d2,
+                               prefilter_cfg->reject_d2,
+                               prefilter_cfg->r_base,
+                               prefilter_cfg->r_gate,
+                               prefilter_cfg->velocity_weight,
+                               prefilter_cfg->min_covariance);
 #endif
 
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
@@ -416,7 +417,14 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         anchor_entry.fp_penalty = 0.0;
 
 #if SYS_FUSION_PREFILTER_ENABLED
-        if (s_ukf_initialized) {
+        const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
+        if (s_ukf_initialized && prefilter_cfg->enable) {
+            s_filters.prefilter.T1 = prefilter_cfg->recover_d2;
+            s_filters.prefilter.T2 = prefilter_cfg->reject_d2;
+            s_filters.prefilter.R_base = prefilter_cfg->r_base;
+            s_filters.prefilter.R_gate = prefilter_cfg->r_gate;
+            s_filters.prefilter.velocity_weight = prefilter_cfg->velocity_weight;
+            s_filters.prefilter.min_covariance = prefilter_cfg->min_covariance;
             bool pass = mw_filter_mahalanobis_update(&s_filters.prefilter,
                                                      aid - 1U,
                                                      d_used,
@@ -711,8 +719,10 @@ app_err_t app_tag_init(void)
 
 #if SYS_FUSION_PREFILTER_ENABLED
     RLOG_I(LOG_OBJECT_CODE_TAG,
-           "Pre-Filter: fusion mw_filter Mahalanobis ON (rescue_min=%u)",
-           (unsigned)MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS);
+           "Pre-Filter: fusion mw_filter Mahalanobis %s (recover=%.2f reject=%.2f)",
+           cfg->prefilter.enable ? "ON" : "OFF",
+           cfg->prefilter.recover_d2,
+           cfg->prefilter.reject_d2);
 #else
     RLOG_I(LOG_OBJECT_CODE_TAG, "Pre-Filter: Mahalanobis OFF");
 #endif

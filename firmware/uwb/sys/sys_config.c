@@ -15,6 +15,7 @@
 #include "otp/otp.h"
 #include <string.h>
 #include <stddef.h>
+#include <math.h>
 #include "version.h"
 #ifdef HAVE_FLASH_STORAGE
 #include "sys_flash_storage.h"
@@ -79,6 +80,29 @@ static bool sys_config_host_transport_valid(host_transport_t host_transport)
     return host_transport == HOST_TRANSPORT_UNSPECIFIED ||
            host_transport == HOST_TRANSPORT_USB ||
            host_transport == HOST_TRANSPORT_UART;
+}
+
+static bool sys_config_prefilter_valid(const sys_prefilter_cfg_t *prefilter)
+{
+    if (!prefilter) {
+        return false;
+    }
+
+    if (!isfinite(prefilter->recover_d2) ||
+        !isfinite(prefilter->reject_d2) ||
+        !isfinite(prefilter->r_base) ||
+        !isfinite(prefilter->r_gate) ||
+        !isfinite(prefilter->velocity_weight) ||
+        !isfinite(prefilter->min_covariance)) {
+        return false;
+    }
+
+    return prefilter->recover_d2 >= 0.0f &&
+           prefilter->reject_d2 > prefilter->recover_d2 &&
+           prefilter->r_base > 0.0f &&
+           prefilter->r_gate > 0.0f &&
+           prefilter->velocity_weight >= 0.0f &&
+           prefilter->min_covariance > 0.0f;
 }
 
 static device_role_t sys_config_default_role_from_device_type(device_type_t device_type)
@@ -523,6 +547,19 @@ int sys_config_load(void)
         normalize_and_save = true;
     }
 
+    if (!sys_config_prefilter_valid(&temp_storage.config.prefilter)) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid prefilter config in flash, forcing defaults");
+        memset(&temp_storage.config.prefilter, 0, sizeof(temp_storage.config.prefilter));
+        temp_storage.config.prefilter.enable = DEFAULT_PREFILTER_ENABLE;
+        temp_storage.config.prefilter.recover_d2 = MAHALANOBIS_PREFILTER_D2_RECOVER;
+        temp_storage.config.prefilter.reject_d2 = MAHALANOBIS_PREFILTER_D2_REJECT;
+        temp_storage.config.prefilter.r_base = MAHALANOBIS_PREFILTER_R_BASE;
+        temp_storage.config.prefilter.r_gate = MAHALANOBIS_PREFILTER_R_GATE;
+        temp_storage.config.prefilter.velocity_weight = MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
+        temp_storage.config.prefilter.min_covariance = MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
+        normalize_and_save = true;
+    }
+
     memcpy(&g_storage, &temp_storage, sizeof(sys_config_storage_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
 
@@ -621,6 +658,16 @@ void sys_config_reset_to_defaults(void)
     g_storage.config.uwb.uwb_phr_mode                       =           DEFAULT_UWB_PHR_MODE;
     g_storage.config.uwb.smart_tx_power                     =           DEFAULT_SMART_TX_POWER;
     g_storage.config.uwb.pg_delay                           =           DEFAULT_PG_DELAY;
+
+    /* Positioning Prefilter Configuration
+       ---------- */
+    g_storage.config.prefilter.enable                       =           DEFAULT_PREFILTER_ENABLE;
+    g_storage.config.prefilter.recover_d2                   =           MAHALANOBIS_PREFILTER_D2_RECOVER;
+    g_storage.config.prefilter.reject_d2                    =           MAHALANOBIS_PREFILTER_D2_REJECT;
+    g_storage.config.prefilter.r_base                       =           MAHALANOBIS_PREFILTER_R_BASE;
+    g_storage.config.prefilter.r_gate                       =           MAHALANOBIS_PREFILTER_R_GATE;
+    g_storage.config.prefilter.velocity_weight              =           MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
+    g_storage.config.prefilter.min_covariance               =           MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
     
     /* Calibration Configuration
        ---------- */
@@ -732,6 +779,12 @@ void sys_config_print(void)
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
     CFG_LOG("Power Mode    : %lu", g_storage.config.uwb.power_mode);
+    CFG_LOG("Prefilter     : %s recover=%.2f reject=%.2f r_base=%.3f r_gate=%.3f",
+            g_storage.config.prefilter.enable ? "ON" : "OFF",
+            g_storage.config.prefilter.recover_d2,
+            g_storage.config.prefilter.reject_d2,
+            g_storage.config.prefilter.r_base,
+            g_storage.config.prefilter.r_gate);
     CFG_LOG("==========================================");
     CFG_LOG("");
 }
@@ -758,6 +811,22 @@ int sys_config_set_calib(const sys_calib_cfg_t *calib)
 {
     if (!calib) return -1;
     g_storage.config.calib = *calib;
+    return 0;
+}
+
+const sys_prefilter_cfg_t *sys_config_get_prefilter(void)
+{
+    return &g_storage.config.prefilter;
+}
+
+int sys_config_set_prefilter(const sys_prefilter_cfg_t *prefilter)
+{
+    if (!sys_config_prefilter_valid(prefilter)) {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid prefilter config");
+        return -1;
+    }
+
+    g_storage.config.prefilter = *prefilter;
     return 0;
 }
 
