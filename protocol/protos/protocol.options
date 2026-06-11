@@ -27,3 +27,4 @@ protobuf.ble_state_t                                long_names:false
 protobuf.flash_addr_region_t                        long_names:false
 protobuf.fota_state_index_t                         long_names:false
 protobuf.session_end_reason_t                       long_names:false
+protobuf.vehicle_command_type_t                     long_names:false

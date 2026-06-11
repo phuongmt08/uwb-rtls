@@ -10,6 +10,7 @@ class VvAddress(IntEnum):
     # Keep values aligned with protocol_pb2 to avoid routing packets to wrong link.
     NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
     MCU = int(pb.PACKET_ADDR_MCU)
+    VEHICLE = int(pb.PACKET_ADDR_VEHICLE)
     CENTRAL = int(pb.PACKET_ADDR_CENTRAL)
     PERIPHERAL = int(pb.PACKET_ADDR_PERIPHERAL)
     HOST = int(pb.PACKET_ADDR_HOST)

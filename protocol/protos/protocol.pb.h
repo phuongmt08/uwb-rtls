@@ -47,7 +47,8 @@ typedef enum _protobuf_device_addr_t {
     protobuf_PACKET_ADDR_PERIPHERAL = 4,
     protobuf_PACKET_ADDR_HOST = 5,
     protobuf_PACKET_ADDR_DEBUG = 7,
-    protobuf_PACKET_ADDR_BCAST = 15
+    protobuf_PACKET_ADDR_BCAST = 15,
+    protobuf_PACKET_ADDR_VEHICLE = 16
 } protobuf_device_addr_t;
 
 /* NOTE deprecated */
@@ -113,6 +114,12 @@ typedef enum _protobuf_session_end_reason_t {
     protobuf_SESSION_END_REASON_RANGING_RESULTS = 2,
     protobuf_SESSION_END_REASON_DEBUG_STREAMING = 3
 } protobuf_session_end_reason_t;
+
+typedef enum _protobuf_vehicle_command_type_t {
+    protobuf_VEHICLE_COMMAND_TYPE_UNSPECIFIED = 0,
+    protobuf_VEHICLE_COMMAND_TYPE_TARGET_XY = 1,
+    protobuf_VEHICLE_COMMAND_TYPE_SPEED_STEERING = 2
+} protobuf_vehicle_command_type_t;
 
 typedef enum _protobuf_fota_state_index_t {
     protobuf_FOTA_STATE_UNSPECIFIED = 0,
@@ -312,6 +319,59 @@ typedef struct _protobuf_sensor_fusion_result_t {
     uint32_t ranging_error_count;
     uint32_t timestamp_ms;
 } protobuf_sensor_fusion_result_t;
+
+typedef struct _protobuf_prefilter_cfg_t {
+    bool enable;
+    float recover_d2;
+    float reject_d2;
+    float r_base;
+    float r_gate;
+    float velocity_weight;
+    float min_covariance;
+} protobuf_prefilter_cfg_t;
+
+typedef struct _protobuf_prefilter_cfg_get_t {
+    uint32_t dummy;
+} protobuf_prefilter_cfg_get_t;
+
+typedef struct _protobuf_prefilter_cfg_set_t {
+    bool has_config;
+    protobuf_prefilter_cfg_t config;
+} protobuf_prefilter_cfg_set_t;
+
+typedef struct _protobuf_prefilter_cfg_resp_t {
+    bool has_config;
+    protobuf_prefilter_cfg_t config;
+} protobuf_prefilter_cfg_resp_t;
+
+typedef struct _protobuf_vehicle_target_xy_t {
+    float target_x_m;
+    float target_y_m;
+    float tolerance_m;
+} protobuf_vehicle_target_xy_t;
+
+typedef struct _protobuf_vehicle_speed_steering_t {
+    float speed_mps;
+    float steering_angle_rad;
+} protobuf_vehicle_speed_steering_t;
+
+typedef struct _protobuf_vehicle_control_t {
+    uint32_t command_seq;
+    uint32_t valid_for_ms;
+    bool emergency_stop;
+    pb_size_t which_command;
+    union _protobuf_vehicle_control_t_command {
+        protobuf_vehicle_target_xy_t target_xy;
+        protobuf_vehicle_speed_steering_t speed_steering;
+    } command;
+} protobuf_vehicle_control_t;
+
+typedef struct _protobuf_vehicle_status_t {
+    uint32_t last_command_seq;
+    bool accepted;
+    protobuf_vehicle_command_type_t active_command_type;
+    uint32_t fault_flags;
+} protobuf_vehicle_status_t;
 
 /* IMU / ICM configuration -------------------------------------------------- */
 typedef struct _protobuf_imu_reset_t {
@@ -749,6 +809,13 @@ typedef struct _protobuf_packet_t {
         protobuf_rtos_resource_resp_t rtos_resource_resp;
         protobuf_rtos_task_stats_get_t rtos_task_stats_get;
         protobuf_rtos_task_stats_resp_t rtos_task_stats_resp;
+        /* Positioning prefilter config */
+        protobuf_prefilter_cfg_get_t prefilter_cfg_get;
+        protobuf_prefilter_cfg_set_t prefilter_cfg_set;
+        protobuf_prefilter_cfg_resp_t prefilter_cfg_resp;
+        /* Vehicle HIL */
+        protobuf_vehicle_control_t vehicle_control;
+        protobuf_vehicle_status_t vehicle_status;
     } params;
 } protobuf_packet_t;
 
@@ -793,8 +860,8 @@ extern "C" {
 #define protobuf_device_role_t_DEVICE_ROLE_ANCHOR protobuf_DEVICE_ROLE_ANCHOR
 
 #define _protobuf_device_addr_t_MIN protobuf_PACKET_ADDR_UNSPECIFIED
-#define _protobuf_device_addr_t_MAX protobuf_PACKET_ADDR_BCAST
-#define _protobuf_device_addr_t_ARRAYSIZE ((protobuf_device_addr_t)(protobuf_PACKET_ADDR_BCAST+1))
+#define _protobuf_device_addr_t_MAX protobuf_PACKET_ADDR_VEHICLE
+#define _protobuf_device_addr_t_ARRAYSIZE ((protobuf_device_addr_t)(protobuf_PACKET_ADDR_VEHICLE+1))
 #define protobuf_device_addr_t_PACKET_ADDR_UNSPECIFIED protobuf_PACKET_ADDR_UNSPECIFIED
 #define protobuf_device_addr_t_PACKET_ADDR_MCU protobuf_PACKET_ADDR_MCU
 #define protobuf_device_addr_t_PACKET_ADDR_CENTRAL protobuf_PACKET_ADDR_CENTRAL
@@ -802,6 +869,7 @@ extern "C" {
 #define protobuf_device_addr_t_PACKET_ADDR_HOST protobuf_PACKET_ADDR_HOST
 #define protobuf_device_addr_t_PACKET_ADDR_DEBUG protobuf_PACKET_ADDR_DEBUG
 #define protobuf_device_addr_t_PACKET_ADDR_BCAST protobuf_PACKET_ADDR_BCAST
+#define protobuf_device_addr_t_PACKET_ADDR_VEHICLE protobuf_PACKET_ADDR_VEHICLE
 
 #define _protobuf_filter_mode_t_MIN protobuf_FILTER_MODE_UNSPECIFIED
 #define _protobuf_filter_mode_t_MAX protobuf_FILTER_MODE_KALMAN
@@ -867,6 +935,13 @@ extern "C" {
 #define protobuf_session_end_reason_t_SESSION_END_REASON_RANGING_RESULTS protobuf_SESSION_END_REASON_RANGING_RESULTS
 #define protobuf_session_end_reason_t_SESSION_END_REASON_DEBUG_STREAMING protobuf_SESSION_END_REASON_DEBUG_STREAMING
 
+#define _protobuf_vehicle_command_type_t_MIN protobuf_VEHICLE_COMMAND_TYPE_UNSPECIFIED
+#define _protobuf_vehicle_command_type_t_MAX protobuf_VEHICLE_COMMAND_TYPE_SPEED_STEERING
+#define _protobuf_vehicle_command_type_t_ARRAYSIZE ((protobuf_vehicle_command_type_t)(protobuf_VEHICLE_COMMAND_TYPE_SPEED_STEERING+1))
+#define protobuf_vehicle_command_type_t_VEHICLE_COMMAND_TYPE_UNSPECIFIED protobuf_VEHICLE_COMMAND_TYPE_UNSPECIFIED
+#define protobuf_vehicle_command_type_t_VEHICLE_COMMAND_TYPE_TARGET_XY protobuf_VEHICLE_COMMAND_TYPE_TARGET_XY
+#define protobuf_vehicle_command_type_t_VEHICLE_COMMAND_TYPE_SPEED_STEERING protobuf_VEHICLE_COMMAND_TYPE_SPEED_STEERING
+
 #define _protobuf_fota_state_index_t_MIN protobuf_FOTA_STATE_UNSPECIFIED
 #define _protobuf_fota_state_index_t_MAX protobuf_FOTA_STATE_ERROR
 #define _protobuf_fota_state_index_t_ARRAYSIZE ((protobuf_fota_state_index_t)(protobuf_FOTA_STATE_ERROR+1))
@@ -913,6 +988,15 @@ extern "C" {
 
 
 
+
+
+
+
+
+
+
+
+#define protobuf_vehicle_status_t_active_command_type_ENUMTYPE protobuf_vehicle_command_type_t
 
 
 
@@ -1007,6 +1091,14 @@ extern "C" {
 #define protobuf_sensor_fusion_cfg_set_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
 #define protobuf_sensor_fusion_cfg_resp_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
 #define protobuf_sensor_fusion_result_t_init_default {0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_prefilter_cfg_t_init_default    {0, 0, 0, 0, 0, 0, 0}
+#define protobuf_prefilter_cfg_get_t_init_default {0}
+#define protobuf_prefilter_cfg_set_t_init_default {false, protobuf_prefilter_cfg_t_init_default}
+#define protobuf_prefilter_cfg_resp_t_init_default {false, protobuf_prefilter_cfg_t_init_default}
+#define protobuf_vehicle_target_xy_t_init_default {0, 0, 0}
+#define protobuf_vehicle_speed_steering_t_init_default {0, 0}
+#define protobuf_vehicle_control_t_init_default  {0, 0, 0, 0, {protobuf_vehicle_target_xy_t_init_default}}
+#define protobuf_vehicle_status_t_init_default   {0, 0, _protobuf_vehicle_command_type_t_MIN, 0}
 #define protobuf_imu_reset_t_init_default        {0}
 #define protobuf_imu_calib_retry_t_init_default  {0}
 #define protobuf_device_reset_t_init_default     {0}
@@ -1087,6 +1179,14 @@ extern "C" {
 #define protobuf_sensor_fusion_cfg_set_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
 #define protobuf_sensor_fusion_cfg_resp_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
 #define protobuf_sensor_fusion_result_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0}
+#define protobuf_prefilter_cfg_t_init_zero       {0, 0, 0, 0, 0, 0, 0}
+#define protobuf_prefilter_cfg_get_t_init_zero   {0}
+#define protobuf_prefilter_cfg_set_t_init_zero   {false, protobuf_prefilter_cfg_t_init_zero}
+#define protobuf_prefilter_cfg_resp_t_init_zero  {false, protobuf_prefilter_cfg_t_init_zero}
+#define protobuf_vehicle_target_xy_t_init_zero   {0, 0, 0}
+#define protobuf_vehicle_speed_steering_t_init_zero {0, 0}
+#define protobuf_vehicle_control_t_init_zero     {0, 0, 0, 0, {protobuf_vehicle_target_xy_t_init_zero}}
+#define protobuf_vehicle_status_t_init_zero      {0, 0, _protobuf_vehicle_command_type_t_MIN, 0}
 #define protobuf_imu_reset_t_init_zero           {0}
 #define protobuf_imu_calib_retry_t_init_zero     {0}
 #define protobuf_device_reset_t_init_zero        {0}
@@ -1233,6 +1333,30 @@ extern "C" {
 #define protobuf_sensor_fusion_result_t_yaw_deg_tag 6
 #define protobuf_sensor_fusion_result_t_ranging_error_count_tag 7
 #define protobuf_sensor_fusion_result_t_timestamp_ms_tag 8
+#define protobuf_prefilter_cfg_t_enable_tag      1
+#define protobuf_prefilter_cfg_t_recover_d2_tag  2
+#define protobuf_prefilter_cfg_t_reject_d2_tag   3
+#define protobuf_prefilter_cfg_t_r_base_tag      4
+#define protobuf_prefilter_cfg_t_r_gate_tag      5
+#define protobuf_prefilter_cfg_t_velocity_weight_tag 6
+#define protobuf_prefilter_cfg_t_min_covariance_tag 7
+#define protobuf_prefilter_cfg_get_t_dummy_tag   1
+#define protobuf_prefilter_cfg_set_t_config_tag  1
+#define protobuf_prefilter_cfg_resp_t_config_tag 1
+#define protobuf_vehicle_target_xy_t_target_x_m_tag 1
+#define protobuf_vehicle_target_xy_t_target_y_m_tag 2
+#define protobuf_vehicle_target_xy_t_tolerance_m_tag 3
+#define protobuf_vehicle_speed_steering_t_speed_mps_tag 1
+#define protobuf_vehicle_speed_steering_t_steering_angle_rad_tag 2
+#define protobuf_vehicle_control_t_command_seq_tag 1
+#define protobuf_vehicle_control_t_valid_for_ms_tag 2
+#define protobuf_vehicle_control_t_emergency_stop_tag 3
+#define protobuf_vehicle_control_t_target_xy_tag 4
+#define protobuf_vehicle_control_t_speed_steering_tag 5
+#define protobuf_vehicle_status_t_last_command_seq_tag 1
+#define protobuf_vehicle_status_t_accepted_tag   2
+#define protobuf_vehicle_status_t_active_command_type_tag 3
+#define protobuf_vehicle_status_t_fault_flags_tag 4
 #define protobuf_imu_reset_t_dummy_tag           1
 #define protobuf_imu_calib_retry_t_dummy_tag     1
 #define protobuf_device_reset_t_dummy_tag        1
@@ -1447,6 +1571,11 @@ extern "C" {
 #define protobuf_packet_t_rtos_resource_resp_tag 72
 #define protobuf_packet_t_rtos_task_stats_get_tag 73
 #define protobuf_packet_t_rtos_task_stats_resp_tag 74
+#define protobuf_packet_t_prefilter_cfg_get_tag  75
+#define protobuf_packet_t_prefilter_cfg_set_tag  76
+#define protobuf_packet_t_prefilter_cfg_resp_tag 77
+#define protobuf_packet_t_vehicle_control_tag    78
+#define protobuf_packet_t_vehicle_status_tag     79
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1661,6 +1790,66 @@ X(a, STATIC,   SINGULAR, UINT32,   ranging_error_count,   7) \
 X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,      8)
 #define protobuf_sensor_fusion_result_t_CALLBACK NULL
 #define protobuf_sensor_fusion_result_t_DEFAULT NULL
+
+#define protobuf_prefilter_cfg_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enable,            1) \
+X(a, STATIC,   SINGULAR, FLOAT,    recover_d2,        2) \
+X(a, STATIC,   SINGULAR, FLOAT,    reject_d2,         3) \
+X(a, STATIC,   SINGULAR, FLOAT,    r_base,            4) \
+X(a, STATIC,   SINGULAR, FLOAT,    r_gate,            5) \
+X(a, STATIC,   SINGULAR, FLOAT,    velocity_weight,   6) \
+X(a, STATIC,   SINGULAR, FLOAT,    min_covariance,    7)
+#define protobuf_prefilter_cfg_t_CALLBACK NULL
+#define protobuf_prefilter_cfg_t_DEFAULT NULL
+
+#define protobuf_prefilter_cfg_get_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+#define protobuf_prefilter_cfg_get_t_CALLBACK NULL
+#define protobuf_prefilter_cfg_get_t_DEFAULT NULL
+
+#define protobuf_prefilter_cfg_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
+#define protobuf_prefilter_cfg_set_t_CALLBACK NULL
+#define protobuf_prefilter_cfg_set_t_DEFAULT NULL
+#define protobuf_prefilter_cfg_set_t_config_MSGTYPE protobuf_prefilter_cfg_t
+
+#define protobuf_prefilter_cfg_resp_t_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
+#define protobuf_prefilter_cfg_resp_t_CALLBACK NULL
+#define protobuf_prefilter_cfg_resp_t_DEFAULT NULL
+#define protobuf_prefilter_cfg_resp_t_config_MSGTYPE protobuf_prefilter_cfg_t
+
+#define protobuf_vehicle_target_xy_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FLOAT,    target_x_m,        1) \
+X(a, STATIC,   SINGULAR, FLOAT,    target_y_m,        2) \
+X(a, STATIC,   SINGULAR, FLOAT,    tolerance_m,       3)
+#define protobuf_vehicle_target_xy_t_CALLBACK NULL
+#define protobuf_vehicle_target_xy_t_DEFAULT NULL
+
+#define protobuf_vehicle_speed_steering_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FLOAT,    speed_mps,         1) \
+X(a, STATIC,   SINGULAR, FLOAT,    steering_angle_rad,   2)
+#define protobuf_vehicle_speed_steering_t_CALLBACK NULL
+#define protobuf_vehicle_speed_steering_t_DEFAULT NULL
+
+#define protobuf_vehicle_control_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   command_seq,       1) \
+X(a, STATIC,   SINGULAR, UINT32,   valid_for_ms,      2) \
+X(a, STATIC,   SINGULAR, BOOL,     emergency_stop,    3) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (command,target_xy,command.target_xy),   4) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (command,speed_steering,command.speed_steering),   5)
+#define protobuf_vehicle_control_t_CALLBACK NULL
+#define protobuf_vehicle_control_t_DEFAULT NULL
+#define protobuf_vehicle_control_t_command_target_xy_MSGTYPE protobuf_vehicle_target_xy_t
+#define protobuf_vehicle_control_t_command_speed_steering_MSGTYPE protobuf_vehicle_speed_steering_t
+
+#define protobuf_vehicle_status_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   last_command_seq,   1) \
+X(a, STATIC,   SINGULAR, BOOL,     accepted,          2) \
+X(a, STATIC,   SINGULAR, UENUM,    active_command_type,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   fault_flags,       4)
+#define protobuf_vehicle_status_t_CALLBACK NULL
+#define protobuf_vehicle_status_t_DEFAULT NULL
 
 #define protobuf_imu_reset_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
@@ -2087,7 +2276,12 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,factory_otp_write,params.factory_otp_
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_resource_get,params.rtos_resource_get),  71) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_resource_resp,params.rtos_resource_resp),  72) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_task_stats_get,params.rtos_task_stats_get),  73) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_task_stats_resp,params.rtos_task_stats_resp),  74)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_task_stats_resp,params.rtos_task_stats_resp),  74) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,prefilter_cfg_get,params.prefilter_cfg_get),  75) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,prefilter_cfg_set,params.prefilter_cfg_set),  76) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,prefilter_cfg_resp,params.prefilter_cfg_resp),  77) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,vehicle_control,params.vehicle_control),  78) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,vehicle_status,params.vehicle_status),  79)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -2159,6 +2353,11 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,rtos_task_stats_resp,params.rtos_task
 #define protobuf_packet_t_params_rtos_resource_resp_MSGTYPE protobuf_rtos_resource_resp_t
 #define protobuf_packet_t_params_rtos_task_stats_get_MSGTYPE protobuf_rtos_task_stats_get_t
 #define protobuf_packet_t_params_rtos_task_stats_resp_MSGTYPE protobuf_rtos_task_stats_resp_t
+#define protobuf_packet_t_params_prefilter_cfg_get_MSGTYPE protobuf_prefilter_cfg_get_t
+#define protobuf_packet_t_params_prefilter_cfg_set_MSGTYPE protobuf_prefilter_cfg_set_t
+#define protobuf_packet_t_params_prefilter_cfg_resp_MSGTYPE protobuf_prefilter_cfg_resp_t
+#define protobuf_packet_t_params_vehicle_control_MSGTYPE protobuf_vehicle_control_t
+#define protobuf_packet_t_params_vehicle_status_MSGTYPE protobuf_vehicle_status_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -2188,6 +2387,14 @@ extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_get_t_msg;
 extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_set_t_msg;
 extern const pb_msgdesc_t protobuf_sensor_fusion_cfg_resp_t_msg;
 extern const pb_msgdesc_t protobuf_sensor_fusion_result_t_msg;
+extern const pb_msgdesc_t protobuf_prefilter_cfg_t_msg;
+extern const pb_msgdesc_t protobuf_prefilter_cfg_get_t_msg;
+extern const pb_msgdesc_t protobuf_prefilter_cfg_set_t_msg;
+extern const pb_msgdesc_t protobuf_prefilter_cfg_resp_t_msg;
+extern const pb_msgdesc_t protobuf_vehicle_target_xy_t_msg;
+extern const pb_msgdesc_t protobuf_vehicle_speed_steering_t_msg;
+extern const pb_msgdesc_t protobuf_vehicle_control_t_msg;
+extern const pb_msgdesc_t protobuf_vehicle_status_t_msg;
 extern const pb_msgdesc_t protobuf_imu_reset_t_msg;
 extern const pb_msgdesc_t protobuf_imu_calib_retry_t_msg;
 extern const pb_msgdesc_t protobuf_device_reset_t_msg;
@@ -2270,6 +2477,14 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_sensor_fusion_cfg_set_t_fields &protobuf_sensor_fusion_cfg_set_t_msg
 #define protobuf_sensor_fusion_cfg_resp_t_fields &protobuf_sensor_fusion_cfg_resp_t_msg
 #define protobuf_sensor_fusion_result_t_fields &protobuf_sensor_fusion_result_t_msg
+#define protobuf_prefilter_cfg_t_fields &protobuf_prefilter_cfg_t_msg
+#define protobuf_prefilter_cfg_get_t_fields &protobuf_prefilter_cfg_get_t_msg
+#define protobuf_prefilter_cfg_set_t_fields &protobuf_prefilter_cfg_set_t_msg
+#define protobuf_prefilter_cfg_resp_t_fields &protobuf_prefilter_cfg_resp_t_msg
+#define protobuf_vehicle_target_xy_t_fields &protobuf_vehicle_target_xy_t_msg
+#define protobuf_vehicle_speed_steering_t_fields &protobuf_vehicle_speed_steering_t_msg
+#define protobuf_vehicle_control_t_fields &protobuf_vehicle_control_t_msg
+#define protobuf_vehicle_status_t_fields &protobuf_vehicle_status_t_msg
 #define protobuf_imu_reset_t_fields &protobuf_imu_reset_t_msg
 #define protobuf_imu_calib_retry_t_fields &protobuf_imu_calib_retry_t_msg
 #define protobuf_device_reset_t_fields &protobuf_device_reset_t_msg
@@ -2376,6 +2591,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_pos_calib_cfg_resp_t_size       128
 #define protobuf_pos_calib_cfg_set_t_size        128
 #define protobuf_pos_calib_cfg_t_size            126
+#define protobuf_prefilter_cfg_get_t_size        6
+#define protobuf_prefilter_cfg_resp_t_size       34
+#define protobuf_prefilter_cfg_set_t_size        34
+#define protobuf_prefilter_cfg_t_size            32
 #define protobuf_ranging_result_t_size           106
 #define protobuf_ranging_start_t_size            6
 #define protobuf_ranging_status_get_t_size       6
@@ -2404,6 +2623,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_time_sync_set_t_size            22
 #define protobuf_uwb_cfg_t_size                  110
 #define protobuf_uwb_reset_t_size                6
+#define protobuf_vehicle_control_t_size          31
+#define protobuf_vehicle_speed_steering_t_size   10
+#define protobuf_vehicle_status_t_size           16
+#define protobuf_vehicle_target_xy_t_size        15
 #define protobuf_version_t_size                  35
 
 #ifdef __cplusplus

@@ -11,6 +11,13 @@ from .transport import HostTransport
 
 PacketBuilder = Callable[[int, int, int], pb.packet_t]
 
+DEFAULT_ANCHOR_LAYOUT = (
+    (1, 0.0, 0.0, 0.895),
+    (2, 11.76, 0.0, 0.895),
+    (3, 0.0, 14.2, 0.895),
+    (4, 11.76, 14.2, 0.895),
+)
+
 
 @dataclass(frozen=True)
 class CommandSpec:
@@ -65,6 +72,14 @@ class CommandFactory:
         pkt = self._base(src, dst, seq)
         pkt.time_sync_set.unix_time_ms = int(time.time() * 1000)
         pkt.time_sync_set.timezone_offset = 7 * 60
+        return pkt
+
+    def time_sync_adv_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.time_sync_adv_set.device_type = pb.DEVICE_TYPE_ANCHOR
+        pkt.time_sync_adv_set.device_id = 1
+        pkt.time_sync_adv_set.unix_time_ms = int(time.time() * 1000)
+        pkt.time_sync_adv_set.timezone_offset = 7 * 60
         return pkt
 
     def time_sync_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -139,7 +154,7 @@ class CommandFactory:
         anchor = pkt.ranging_result.anchors.add()
         anchor.anchor_id = 1
         anchor.distance_mm = 1000
-        anchor.rssi_dbm = -65
+        anchor.fp_amp = 100
         return pkt
 
     def ranging_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -160,19 +175,30 @@ class CommandFactory:
     def sensor_fusion_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         cfg = pkt.sensor_fusion_cfg_set.config
-        cfg.mode = pb.FILTER_MODE_KALMAN
-        cfg.q_process_noise = 0.1
-        cfg.r_base = 0.1
-        cfg.innovation_alpha = 0.3
-        cfg.r_scale_min = 0.8
-        cfg.r_scale_max = 1.2
+        self._fill_default_sensor_fusion_cfg(cfg)
         return pkt
 
     def sensor_fusion_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        cfg = pkt.sensor_fusion_cfg_resp.config
-        cfg.mode = pb.FILTER_MODE_KALMAN
+        self._fill_default_sensor_fusion_cfg(pkt.sensor_fusion_cfg_resp.config)
         return pkt
+
+    @staticmethod
+    def _fill_default_sensor_fusion_cfg(cfg: pb.sensor_fusion_cfg_t) -> None:
+        cfg.alpha = 0.001
+        cfg.kappa = 0.0
+        cfg.beta = 2.0
+        cfg.q_a = 0.2
+        cfg.q_g = 0.01
+        cfg.r_uwb = 0.15
+        cfg.init_p_px = 0.1
+        cfg.init_p_py = 0.1
+        cfg.init_p_vx = 0.1
+        cfg.init_p_vy = 0.1
+        cfg.init_p_theta = 1.0e-6
+        cfg.init_p_bias_ax = 1.0e-5
+        cfg.init_p_bias_ay = 1.0e-5
+        cfg.init_p_bias_gz = 1.0e-6
 
     def sensor_fusion_result(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
@@ -182,8 +208,18 @@ class CommandFactory:
         pkt.sensor_fusion_result.tril_x_m = 0.0
         pkt.sensor_fusion_result.tril_y_m = 0.0
         pkt.sensor_fusion_result.yaw_deg = 0.0
-        pkt.sensor_fusion_result.error_count = 0
+        pkt.sensor_fusion_result.ranging_error_count = 0
         pkt.sensor_fusion_result.timestamp_ms = 0
+        return pkt
+
+    def imu_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.imu_reset.dummy = 0
+        return pkt
+
+    def imu_calib_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.imu_calib_start.dummy = 0
         return pkt
 
     def end_session(self, src: int, dst: int, seq: int, reason: int = 0) -> pb.packet_t:
@@ -230,7 +266,7 @@ class CommandFactory:
 
     def flash_data(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.flash_data.data = 0
+        pkt.flash_data.data = b"\x00"
         return pkt
 
     def flash_write(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -239,9 +275,11 @@ class CommandFactory:
         pkt.flash_write.data = b"\x00\x01\x02\x03"
         return pkt
 
-    def ble_enable(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def ble_adv_config_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.ble_enable.enable = True
+        pkt.ble_adv_config_set.enable = True
+        pkt.ble_adv_config_set.serial_number = 1
+        pkt.ble_adv_config_set.device_name = "uwb-rtls"
         return pkt
 
     def ble_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -257,8 +295,9 @@ class CommandFactory:
 
     def ble_adv_status(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.ble_adv_status.anchor_id = 1
-        pkt.ble_adv_status.battery_level_pct = 88
+        pkt.ble_adv_status.device = pb.DEVICE_TYPE_ANCHOR
+        pkt.ble_adv_status.device_id = 1
+        pkt.ble_adv_status.bat_soc_percent = 88
         pkt.ble_adv_status.status_flags = 0
         pkt.ble_adv_status.warning_count = 0
         pkt.ble_adv_status.error_count = 0
@@ -309,6 +348,77 @@ class CommandFactory:
         pkt.pos_calib_cfg_resp.config.enable_anchor_auto_calib = True
         return pkt
 
+    def prefilter_cfg_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.prefilter_cfg_get.dummy = 0
+        return pkt
+
+    @staticmethod
+    def _fill_default_prefilter(cfg: pb.prefilter_cfg_t) -> None:
+        cfg.enable = True
+        cfg.recover_d2 = 5.0
+        cfg.reject_d2 = 7.5
+        cfg.r_base = 0.05
+        cfg.r_gate = 0.10
+        cfg.velocity_weight = 0.5
+        cfg.min_covariance = 1.0e-6
+
+    def prefilter_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        self._fill_default_prefilter(pkt.prefilter_cfg_set.config)
+        return pkt
+
+    def prefilter_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        self._fill_default_prefilter(pkt.prefilter_cfg_resp.config)
+        return pkt
+
+    def vehicle_control_speed_steering(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        speed_mps: float = 0.0,
+        steering_angle_rad: float = 0.0,
+        valid_for_ms: int = 100,
+        emergency_stop: bool = False,
+    ) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.vehicle_control.command_seq = seq
+        pkt.vehicle_control.valid_for_ms = valid_for_ms
+        pkt.vehicle_control.emergency_stop = emergency_stop
+        pkt.vehicle_control.speed_steering.speed_mps = speed_mps
+        pkt.vehicle_control.speed_steering.steering_angle_rad = steering_angle_rad
+        return pkt
+
+    def vehicle_control_target_xy(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        target_x_m: float = 0.0,
+        target_y_m: float = 0.0,
+        tolerance_m: float = 0.10,
+        valid_for_ms: int = 250,
+        emergency_stop: bool = False,
+    ) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.vehicle_control.command_seq = seq
+        pkt.vehicle_control.valid_for_ms = valid_for_ms
+        pkt.vehicle_control.emergency_stop = emergency_stop
+        pkt.vehicle_control.target_xy.target_x_m = target_x_m
+        pkt.vehicle_control.target_xy.target_y_m = target_y_m
+        pkt.vehicle_control.target_xy.tolerance_m = tolerance_m
+        return pkt
+
+    def vehicle_status(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.vehicle_status.last_command_seq = seq
+        pkt.vehicle_status.accepted = True
+        pkt.vehicle_status.active_command_type = pb.VEHICLE_COMMAND_TYPE_SPEED_STEERING
+        pkt.vehicle_status.fault_flags = 0
+        return pkt
+
     def anchor_layout_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.anchor_layout_get.dummy = 0
@@ -316,18 +426,22 @@ class CommandFactory:
 
     def anchor_layout_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        anchor = pkt.anchor_layout_set.anchors.add()
-        anchor.anchor_id = 1
-        anchor.x_m = 0.0
-        anchor.y_m = 0.0
-        anchor.z_m = 2.5
+        self._fill_default_anchor_layout(pkt.anchor_layout_set.anchors)
         return pkt
 
     def anchor_layout_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        anchor = pkt.anchor_layout_resp.anchors.add()
-        anchor.anchor_id = 1
+        self._fill_default_anchor_layout(pkt.anchor_layout_resp.anchors)
         return pkt
+
+    @staticmethod
+    def _fill_default_anchor_layout(anchors) -> None:
+        for anchor_id, x_m, y_m, z_m in DEFAULT_ANCHOR_LAYOUT:
+            anchor = anchors.add()
+            anchor.anchor_id = anchor_id
+            anchor.x_m = x_m
+            anchor.y_m = y_m
+            anchor.z_m = z_m
 
     def enter_to_bootloader(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
@@ -342,6 +456,50 @@ class CommandFactory:
     def fota_state_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.fota_state_resp.state = pb.FOTA_STATE_IDLE
+        return pkt
+
+    def calib_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.calib_status_get.dummy = 0
+        return pkt
+
+    def calib_status_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.calib_status_resp.state = pb.CALIB_STATE_IDLE
+        pkt.calib_status_resp.progress_percent = 0
+        return pkt
+
+    def factory_otp_write(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.factory_otp_write.confirm_magic = 0x4F545057
+        pkt.factory_otp_write.otp_type = 0
+        pkt.factory_otp_write.device_type = pb.DEVICE_TYPE_ANCHOR
+        pkt.factory_otp_write.tx_antenna_delay = 0
+        pkt.factory_otp_write.rx_antenna_delay = 0
+        pkt.factory_otp_write.value_u32 = 0
+        pkt.factory_otp_write.value_u8 = 0
+        return pkt
+
+    def rtos_resource_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.rtos_resource_get.dummy = 0
+        return pkt
+
+    def rtos_resource_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.rtos_resource_resp.sample_window_ms = 1000
+        return pkt
+
+    def rtos_task_stats_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.rtos_task_stats_get.dummy = 0
+        return pkt
+
+    def rtos_task_stats_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        task = pkt.rtos_task_stats_resp.tasks.add()
+        task.task_id = 0
+        task.name = "test"
         return pkt
 
     # ── BLE central commands ──────────────────────────────────────────────────────────
@@ -428,6 +586,7 @@ class CommandCatalog:
             CommandSpec(6, "time_sync_get", self.factory.time_sync_get),
             CommandSpec(7, "time_sync_set", self.factory.time_sync_set),
             CommandSpec(8, "time_sync_resp", self.factory.time_sync_resp),
+            CommandSpec(9, "time_sync_adv_set", self.factory.time_sync_adv_set),
             CommandSpec(10, "sys_config_get", self.factory.sys_config_get),
             CommandSpec(11, "sys_config_set", self.factory.sys_config_set),
             CommandSpec(12, "sys_config_resp", self.factory.sys_config_resp),
@@ -443,6 +602,8 @@ class CommandCatalog:
             CommandSpec(22, "sensor_fusion_cfg_set", self.factory.sensor_fusion_cfg_set),
             CommandSpec(23, "sensor_fusion_cfg_resp", self.factory.sensor_fusion_cfg_resp),
             CommandSpec(24, "sensor_fusion_result", self.factory.sensor_fusion_result),
+            CommandSpec(25, "imu_reset", self.factory.imu_reset),
+            CommandSpec(26, "imu_calib_start", self.factory.imu_calib_start),
             CommandSpec(30, "device_reset", self.factory.device_reset),
             CommandSpec(31, "uwb_reset", self.factory.uwb_reset),
             CommandSpec(32, "factory_config_reset", self.factory.factory_config_reset),
@@ -452,7 +613,7 @@ class CommandCatalog:
             CommandSpec(36, "flash_read", self.factory.flash_read),
             CommandSpec(37, "flash_data", self.factory.flash_data),
             CommandSpec(38, "flash_write", self.factory.flash_write),
-            CommandSpec(39, "ble_enable", self.factory.ble_enable),
+            CommandSpec(39, "ble_adv_config_set", self.factory.ble_adv_config_set),
             CommandSpec(40, "ble_status_get", self.factory.ble_status_get),
             CommandSpec(41, "ble_status_resp", self.factory.ble_status_resp),
             CommandSpec(42, "ble_adv_status", self.factory.ble_adv_status),
@@ -477,10 +638,22 @@ class CommandCatalog:
             CommandSpec(64, "enter_to_bootloader", self.factory.enter_to_bootloader),
             CommandSpec(52, "flash_verify", self.factory.flash_verify),
             CommandSpec(61, "fota_state_resp", self.factory.fota_state_resp),
+            CommandSpec(65, "calib_status_get", self.factory.calib_status_get),
+            CommandSpec(66, "calib_status_resp", self.factory.calib_status_resp),
             CommandSpec(67, "end_session", self.factory.end_session),
+            CommandSpec(68, "factory_otp_write", self.factory.factory_otp_write),
+            CommandSpec(71, "rtos_resource_get", self.factory.rtos_resource_get),
+            CommandSpec(72, "rtos_resource_resp", self.factory.rtos_resource_resp),
+            CommandSpec(73, "rtos_task_stats_get", self.factory.rtos_task_stats_get),
+            CommandSpec(74, "rtos_task_stats_resp", self.factory.rtos_task_stats_resp),
             # Power Management
             CommandSpec(62, "battery_info_resp", self.factory.battery_info_resp),
             CommandSpec(63, "battery_info_get", self.factory.battery_info_get),
+            CommandSpec(75, "prefilter_cfg_get", self.factory.prefilter_cfg_get),
+            CommandSpec(76, "prefilter_cfg_set", self.factory.prefilter_cfg_set),
+            CommandSpec(77, "prefilter_cfg_resp", self.factory.prefilter_cfg_resp),
+            CommandSpec(78, "vehicle_control", self.factory.vehicle_control_speed_steering),
+            CommandSpec(79, "vehicle_status", self.factory.vehicle_status),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

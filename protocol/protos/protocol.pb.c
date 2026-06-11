@@ -90,6 +90,30 @@ PB_BIND(protobuf_sensor_fusion_cfg_resp_t, protobuf_sensor_fusion_cfg_resp_t, AU
 PB_BIND(protobuf_sensor_fusion_result_t, protobuf_sensor_fusion_result_t, AUTO)
 
 
+PB_BIND(protobuf_prefilter_cfg_t, protobuf_prefilter_cfg_t, AUTO)
+
+
+PB_BIND(protobuf_prefilter_cfg_get_t, protobuf_prefilter_cfg_get_t, AUTO)
+
+
+PB_BIND(protobuf_prefilter_cfg_set_t, protobuf_prefilter_cfg_set_t, AUTO)
+
+
+PB_BIND(protobuf_prefilter_cfg_resp_t, protobuf_prefilter_cfg_resp_t, AUTO)
+
+
+PB_BIND(protobuf_vehicle_target_xy_t, protobuf_vehicle_target_xy_t, AUTO)
+
+
+PB_BIND(protobuf_vehicle_speed_steering_t, protobuf_vehicle_speed_steering_t, AUTO)
+
+
+PB_BIND(protobuf_vehicle_control_t, protobuf_vehicle_control_t, AUTO)
+
+
+PB_BIND(protobuf_vehicle_status_t, protobuf_vehicle_status_t, AUTO)
+
+
 PB_BIND(protobuf_imu_reset_t, protobuf_imu_reset_t, AUTO)
 
 
@@ -244,6 +268,8 @@ PB_BIND(protobuf_end_session_t, protobuf_end_session_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, 2)
+
+
 
 
 
