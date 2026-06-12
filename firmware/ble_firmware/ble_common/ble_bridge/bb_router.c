@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "logger.h"
+#include "nrf_log.h"
 #include "bb_transport.h"
 #include "../../../protocol/nanopb/pb_decode.h"
 #include "../../../protocol/protos/protocol.pb.h"
@@ -151,6 +152,7 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
 
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
     {
+        NRF_LOG_INFO("bb_router: Decoded packet cmd_id=%u", pkt.which_params);
         if (pkt.has_hdr && pkt.hdr.has_addr)
         {
             uint32_t addr = pkt.hdr.addr.dst;

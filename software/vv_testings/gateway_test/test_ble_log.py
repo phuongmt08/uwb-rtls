@@ -27,7 +27,7 @@ import argparse
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import serial
 from serial import SerialException
@@ -45,7 +45,8 @@ from common.transport import VvAddress, HostTransport
 # Tuning Constants
 READ_TIMEOUT_S = 0.05
 HOST_ACTIVITY_PING_S = 5.0
-LOG_POLL_PERIOD_S = 1.0
+LOG_POLL_PERIOD_S = 0.5
+TERMINAL_STATS_PERIOD_S = 300.0
 MAX_RECORD_LEN = 512
 EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
 
@@ -55,6 +56,9 @@ COLOR_RED = "\033[31m"
 COLOR_CYAN = "\033[36m"
 COLOR_YELLOW = "\033[33m"
 COLOR_RESET = "\033[0m"
+COLOR_GRAY = "\033[90m"
+COLOR_BLUE = "\033[34m"
+COLOR_MAGENTA = "\033[35m"
 
 
 BLE_STATE_NAMES = {
@@ -161,6 +165,17 @@ class BleLogTester:
         self.calibration = calibration
         self.log_parser = FlashLogStreamParser()
         self.last_rx_time = time.time()
+        self.last_stats_print = 0.0
+        self.tx_counts: Dict[str, int] = {}
+        self.rx_counts: Dict[str, int] = {}
+        self.tx_total = 0
+        self.rx_total = 0
+        self.tx_ack_sent = 0
+        self.tx_log_clear_sent = 0
+        self.rx_from_mcu = 0
+        self.rx_log_data_bytes = 0
+        self.rx_log_records = 0
+        self.pending_log_clear_seq: Optional[int] = None
 
         self.record = args.record if args else None
         self.log_file = None
@@ -185,7 +200,85 @@ class BleLogTester:
             self.uwb_file.close()
 
     def _send_packet(self, pkt: pb.packet_t) -> None:
+        name = packet_name(pkt)
+        self.tx_counts[name] = self.tx_counts.get(name, 0) + 1
+        self.tx_total += 1
+        count = self.tx_counts[name]
+        if name == "ack":
+            self.tx_ack_sent += 1
+        elif name == "log_clear":
+            self.tx_log_clear_sent += 1
+        self._print_tx_packet(pkt, name, count)
         self.session.send_packet(pkt)
+
+    @staticmethod
+    def _format_counts(counts: Dict[str, int]) -> str:
+        if not counts:
+            return "none"
+        return ",".join(f"{name}={count}" for name, count in sorted(counts.items()))
+
+    @staticmethod
+    def _packet_hdr_text(pkt: pb.packet_t) -> str:
+        try:
+            return f"seq={pkt.hdr.seq} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst}"
+        except (AttributeError, ValueError):
+            return "seq=? src=? dst=?"
+
+    @staticmethod
+    def _packet_extra_text(pkt: pb.packet_t, name: str) -> str:
+        if name == "ack":
+            return f" ack_seq={pkt.ack.ack_seq} response={pkt.ack.response}"
+        if name == "log_clear":
+            return f" type={pkt.log_clear.type} offset={pkt.log_clear.offset} length={pkt.log_clear.length}"
+        if name == "log_data":
+            return f" type={pkt.log_data.type} bytes={len(pkt.log_data.data)}"
+        if name == "host_transport_set":
+            return f" transport={pkt.host_transport_set.transport}"
+        return ""
+
+    def _print_tx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
+        if name == "log_data":
+            prefix = "[POLL]"
+            color = COLOR_CYAN
+        elif name == "ack":
+            prefix = "[ACK]"
+            color = COLOR_GRAY
+        elif name == "log_clear":
+            prefix = "[CLEAR]"
+            color = COLOR_GRAY
+        else:
+            prefix = "[TX]"
+            color = COLOR_GRAY
+        print(
+            f"{color}{prefix} {name} #{count} {self._packet_hdr_text(pkt)}"
+            f"{self._packet_extra_text(pkt, name)}{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _print_rx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
+        if name == "log_data":
+            color = COLOR_GRAY
+        else:
+            color = COLOR_GRAY
+        print(
+            f"{color}[RX] {name} #{count} {self._packet_hdr_text(pkt)}"
+            f"{self._packet_extra_text(pkt, name)}{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _print_stats_if_due(self, now: float) -> None:
+        if now - self.last_stats_print < TERMINAL_STATS_PERIOD_S:
+            return
+        self.last_stats_print = now
+        print(
+            f"{COLOR_CYAN}[STATS] "
+            f"TX total={self.tx_total} ack={self.tx_ack_sent} clear={self.tx_log_clear_sent} "
+            f"by_type={self._format_counts(self.tx_counts)} | "
+            f"RX total={self.rx_total} from_mcu={self.rx_from_mcu} "
+            f"log_data_bytes={self.rx_log_data_bytes} log_records={self.rx_log_records} "
+            f"by_type={self._format_counts(self.rx_counts)}{COLOR_RESET}",
+            flush=True,
+        )
 
     def _build_none(self) -> pb.packet_t:
         pkt = pb.packet_t()
@@ -234,6 +327,16 @@ class BleLogTester:
         pkt.ack.response = pb.PACKET_ACK_RESPONSE_ACK
         return pkt
 
+    def _build_log_clear(self, length: int) -> pb.packet_t:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.session.proto.next_seq()
+        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
+        pkt.log_clear.offset = 0
+        pkt.log_clear.length = length
+        return pkt
+
     def _build_log_clear_all(self) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
@@ -268,10 +371,20 @@ class BleLogTester:
     def _process_packet(self, pkt: pb.packet_t) -> None:
         self.last_rx_time = time.time()
         name = packet_name(pkt)
+        self.rx_counts[name] = self.rx_counts.get(name, 0) + 1
+        self.rx_total += 1
+        self._print_rx_packet(pkt, name, self.rx_counts[name])
+        try:
+            if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
+                self.rx_from_mcu += 1
+        except (AttributeError, ValueError):
+            pass
 
         if name == "log_data":
             payload = bytes(pkt.log_data.data)
             lines = self.log_parser.feed(payload)
+            self.rx_log_data_bytes += len(payload)
+            self.rx_log_records += len(lines)
             for line in lines:
                 print(line)
 
@@ -309,6 +422,20 @@ class BleLogTester:
 
             ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
             self._send_packet(ack_pkt)
+
+            # Wait 200ms to prevent back-to-back packet drops on the BLE bridge
+            time.sleep(0.2)
+
+            # Send log_clear to consume the processed log bytes and release waiting_clear state on MCU
+            clear_pkt = self._build_log_clear(len(payload))
+            self.pending_log_clear_seq = int(clear_pkt.hdr.seq)
+            self._send_packet(clear_pkt)
+            return
+
+        if name == "ack" and self.pending_log_clear_seq is not None:
+            if int(pkt.ack.ack_seq) == self.pending_log_clear_seq:
+                self.pending_log_clear_seq = None
+                self._send_packet(self._build_log_data_get())
             return
 
         if name == "ble_status_resp":
@@ -339,6 +466,8 @@ class BleLogTester:
             packets = self.session.recv_packets(timeout_s=0.01)
             for pkt in packets:
                 self._process_packet(pkt)
+
+            self._print_stats_if_due(now)
 
 
 def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
