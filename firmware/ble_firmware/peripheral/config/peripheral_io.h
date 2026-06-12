@@ -34,10 +34,18 @@ extern "C" {
 
 // ─── UART (connect to gateway nRF52840 via BLE_TX/BLE_RX) ───────────────────────
 // FSC-BT630 default UART pins (nRF52832 internal mapping)
+// Bỏ comment dòng dưới đây nếu nạp cho board lỗi (câu dây chân P0.05 vào BLE_RX)
+// #define BLE_RX_BYPASS_P005
+
+#ifdef BLE_RX_BYPASS_P005
+#define RX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 5)   // Map P0.05 → UART_RX (BLE_RX) do hỏng chân P0.08
+#define RTS_PIN_NUMBER  0xFFFFFFFF               // Ngắt cấu hình RTS để tránh xung đột trên chân P0.05
+#else
 #define RX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 8)   // P0.08 → UART_RX (BLE_RX from gateway)
+#define RTS_PIN_NUMBER  NRF_GPIO_PIN_MAP(0, 5)   // P0.05 → RTS
+#endif
 #define TX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 6)   // P0.06 → UART_TX (BLE_TX to gateway)
 #define CTS_PIN_NUMBER  NRF_GPIO_PIN_MAP(0, 7)   // P0.07 → CTS
-#define RTS_PIN_NUMBER  NRF_GPIO_PIN_MAP(0, 5)   // P0.05 → RTS
 #define HWFC            true
 
 // ─── SWD (debug interface) ────────────────────────────────────────────────────
