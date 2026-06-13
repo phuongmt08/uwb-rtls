@@ -46,12 +46,9 @@ from common.transport import VvAddress, HostTransport
 READ_TIMEOUT_S = 0.05
 TERMINAL_STATS_PERIOD_S = 300.0
 LOG_BOOTSTRAP_PACKET_GAP_S = 0.2
-LOG_CLEAR_DELAY_AFTER_ACK_S = 0.05
-LOG_CLEAR_ACK_RETRY_TIMEOUT_S = 1.0
-LOG_CLEAR_ACK_MAX_RETRIES = 0  # 0 = retry forever
-LOG_NEXT_GET_DELAY_AFTER_CLEAR_ACK_S = 0.0
-LOG_DATA_GET_RESPONSE_TIMEOUT_S = 1.0
-LOG_DATA_GET_MAX_RETRIES = 0  # 0 = retry forever
+LOG_POLL_PERIOD_S = 5.0
+LOG_ACK_RETRY_PERIOD_S = 1.0
+LOG_ACK_RETRY_MAX_RETRIES = 5  # 0 = retry forever
 LOG_IDLE_KEEPALIVE_S = 15.0
 LOG_RECV_TIMEOUT_S = 0.01
 LOG_END_SESSION_DELAY_S = 0.1
@@ -169,17 +166,23 @@ class FlashLogStreamParser:
 
 class BleLogTester:
     def __init__(self, session: VvTestSession, factory: CommandFactory, src: int, dst: int,
-                 verbose: bool = False, clear_first: bool = False, calibration: bool = False, args=None):
+                 verbose: bool = False, calibration: bool = False, args=None):
         self.session = session
         self.factory = factory
         self.src = src
         self.dst = dst
         self.verbose = verbose
-        self.clear_first = clear_first
         self.calibration = calibration
         self.log_parser = FlashLogStreamParser()
         self.last_rx_time = time.time()
+        self.last_mcu_rx_time = 0.0
+        self.last_poll = 0.0
         self.last_stats_print = 0.0
+        self.pending_log_ack_seq: Optional[int] = None
+        self.pending_log_ack_dst: Optional[int] = None
+        self.pending_log_ack_confirm_seq: Optional[int] = None
+        self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_retries = 0
         self.tx_counts: Dict[str, int] = {}
         self.rx_counts: Dict[str, int] = {}
         self.tx_total = 0
@@ -189,14 +192,6 @@ class BleLogTester:
         self.rx_from_mcu = 0
         self.rx_log_data_bytes = 0
         self.rx_log_records = 0
-        self.pending_log_clear_seq: Optional[int] = None
-        self.pending_log_clear_packet: Optional[pb.packet_t] = None
-        self.pending_log_clear_sent_at = 0.0
-        self.pending_log_clear_retries = 0
-        self.pending_log_data_get_seq: Optional[int] = None
-        self.pending_log_data_get_packet: Optional[pb.packet_t] = None
-        self.pending_log_data_get_sent_at = 0.0
-        self.pending_log_data_get_retries = 0
 
         self.record = args.record if args else None
         self.log_file = None
@@ -389,25 +384,37 @@ class BleLogTester:
         pkt.ack.response = pb.PACKET_ACK_RESPONSE_ACK
         return pkt
 
-    def _build_log_clear(self, length: int) -> pb.packet_t:
-        pkt = pb.packet_t()
-        pkt.hdr.addr.src = self.src
-        pkt.hdr.addr.dst = self.dst
-        pkt.hdr.seq = self.session.proto.next_seq()
-        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
-        pkt.log_clear.offset = 0
-        pkt.log_clear.length = length
-        return pkt
+    def _track_log_ack(self, ack_pkt: pb.packet_t) -> None:
+        self.pending_log_ack_seq = int(ack_pkt.ack.ack_seq)
+        self.pending_log_ack_dst = int(ack_pkt.hdr.addr.dst)
+        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
+        self.pending_log_ack_sent_at = time.time()
+        self.pending_log_ack_retries = 0
 
-    def _build_log_clear_all(self) -> pb.packet_t:
-        pkt = pb.packet_t()
-        pkt.hdr.addr.src = self.src
-        pkt.hdr.addr.dst = self.dst
-        pkt.hdr.seq = self.session.proto.next_seq()
-        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
-        pkt.log_clear.offset = 0
-        pkt.log_clear.length = 0xFFFFFFFF
-        return pkt
+    def _clear_pending_log_ack(self) -> None:
+        self.pending_log_ack_seq = None
+        self.pending_log_ack_dst = None
+        self.pending_log_ack_confirm_seq = None
+        self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_retries = 0
+
+    def _retry_pending_log_ack(self, now: float) -> None:
+        if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
+            return
+
+        last_ack_activity = max(self.pending_log_ack_sent_at, self.last_mcu_rx_time)
+        if now - last_ack_activity < LOG_ACK_RETRY_PERIOD_S:
+            return
+
+        if LOG_ACK_RETRY_MAX_RETRIES > 0 and self.pending_log_ack_retries >= LOG_ACK_RETRY_MAX_RETRIES:
+            self._clear_pending_log_ack()
+            return
+
+        self.pending_log_ack_retries += 1
+        self.pending_log_ack_sent_at = now
+        ack_pkt = self._build_ack(self.pending_log_ack_seq, self.pending_log_ack_dst)
+        self._send_packet(ack_pkt)
+        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
 
     def send_end_session(self, reason: int) -> None:
         pkt = pb.packet_t()
@@ -425,97 +432,9 @@ class BleLogTester:
         time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
         self._send_packet(self._build_transport_set())
         time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
-        if self.clear_first:
-            self._send_packet(self._build_log_clear_all())
-            time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
-        self._send_next_log_data_get()
-
-    def _print_log_flow_notice(self, text: str) -> None:
-        if PRINT_PACKET_TRACE:
-            print(f"{COLOR_YELLOW}[FLOW]  {text}{COLOR_RESET}", flush=True)
-
-    def _send_next_log_data_get(self) -> None:
-        if LOG_NEXT_GET_DELAY_AFTER_CLEAR_ACK_S > 0:
-            time.sleep(LOG_NEXT_GET_DELAY_AFTER_CLEAR_ACK_S)
-        pkt = self._build_log_data_get()
-        self.pending_log_data_get_seq = int(pkt.hdr.seq)
-        self.pending_log_data_get_packet = pb.packet_t()
-        self.pending_log_data_get_packet.CopyFrom(pkt)
-        self.pending_log_data_get_sent_at = time.time()
-        self.pending_log_data_get_retries = 0
-        self._send_packet(pkt)
-
-    def _clear_pending_log_data_get(self) -> None:
-        self.pending_log_data_get_seq = None
-        self.pending_log_data_get_packet = None
-        self.pending_log_data_get_sent_at = 0.0
-        self.pending_log_data_get_retries = 0
-
-    def _retry_pending_log_data_get(self, now: float) -> None:
-        if self.pending_log_data_get_seq is None or self.pending_log_data_get_packet is None:
-            return
-
-        if now - self.pending_log_data_get_sent_at < LOG_DATA_GET_RESPONSE_TIMEOUT_S:
-            return
-
-        if LOG_DATA_GET_MAX_RETRIES > 0 and self.pending_log_data_get_retries >= LOG_DATA_GET_MAX_RETRIES:
-            self._print_log_flow_notice(
-                f"log_data_get timeout seq={self.pending_log_data_get_seq}; "
-                f"max retries reached={LOG_DATA_GET_MAX_RETRIES}"
-            )
-            self.pending_log_data_get_sent_at = now
-            return
-
-        self.pending_log_data_get_retries += 1
-        self.pending_log_data_get_sent_at = now
-        self._print_log_flow_notice(
-            f"resend log_data_get seq={self.pending_log_data_get_seq} "
-            f"retry={self.pending_log_data_get_retries}"
-        )
-        self._send_packet(self.pending_log_data_get_packet)
-
-    def _clear_pending_log_clear(self) -> None:
-        self.pending_log_clear_seq = None
-        self.pending_log_clear_packet = None
-        self.pending_log_clear_sent_at = 0.0
-        self.pending_log_clear_retries = 0
-
-    def _send_log_clear(self, length: int) -> None:
-        clear_pkt = self._build_log_clear(length)
-        self.pending_log_clear_seq = int(clear_pkt.hdr.seq)
-        self.pending_log_clear_packet = pb.packet_t()
-        self.pending_log_clear_packet.CopyFrom(clear_pkt)
-        self.pending_log_clear_sent_at = time.time()
-        self.pending_log_clear_retries = 0
-        self._send_packet(clear_pkt)
-
-    def _retry_pending_log_clear(self, now: float) -> None:
-        if self.pending_log_clear_seq is None or self.pending_log_clear_packet is None:
-            return
-
-        if now - self.pending_log_clear_sent_at < LOG_CLEAR_ACK_RETRY_TIMEOUT_S:
-            return
-
-        if LOG_CLEAR_ACK_MAX_RETRIES > 0 and self.pending_log_clear_retries >= LOG_CLEAR_ACK_MAX_RETRIES:
-            self._print_log_flow_notice(
-                f"log_clear ACK timeout seq={self.pending_log_clear_seq}; "
-                f"max retries reached={LOG_CLEAR_ACK_MAX_RETRIES}"
-            )
-            self.pending_log_clear_sent_at = now
-            return
-
-        self.pending_log_clear_retries += 1
-        self.pending_log_clear_sent_at = now
-        self._print_log_flow_notice(
-            f"resend log_clear seq={self.pending_log_clear_seq} "
-            f"retry={self.pending_log_clear_retries}"
-        )
-        self._send_packet(self.pending_log_clear_packet)
+        self._send_packet(self._build_log_data_get())
 
     def _handle_log_data_packet(self, pkt: pb.packet_t) -> None:
-        if self.pending_log_data_get_seq is not None:
-            self._clear_pending_log_data_get()
-
         payload = bytes(pkt.log_data.data)
         lines = self.log_parser.feed(payload)
         self.rx_log_data_bytes += len(payload)
@@ -557,11 +476,7 @@ class BleLogTester:
 
         ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
         self._send_packet(ack_pkt)
-
-        if LOG_CLEAR_DELAY_AFTER_ACK_S > 0:
-            time.sleep(LOG_CLEAR_DELAY_AFTER_ACK_S)
-
-        self._send_log_clear(len(payload))
+        self._track_log_ack(ack_pkt)
 
     def _process_packet(self, pkt: pb.packet_t) -> None:
         self.last_rx_time = time.time()
@@ -572,18 +487,20 @@ class BleLogTester:
         try:
             if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
                 self.rx_from_mcu += 1
+                self.last_mcu_rx_time = self.last_rx_time
+                self.pending_log_ack_retries = 0
         except (AttributeError, ValueError):
             pass
 
-        if name == "log_data":
-            if self.pending_log_clear_seq is not None:
-                seq, src, dst = self._packet_hdr_values(pkt)
-                self._print_log_flow_notice(
-                    f"unexpected log_data seq={seq} src={src} dst={dst}; "
-                    f"waiting log_clear ACK seq={self.pending_log_clear_seq}"
-                )
-                return
+        if name == "ack" and self.pending_log_ack_confirm_seq is not None:
+            try:
+                if int(pkt.hdr.addr.src) == int(VvAddress.MCU) and int(pkt.ack.ack_seq) == self.pending_log_ack_confirm_seq:
+                    print(f"[FLOW]  host_ack confirmed by MCU seq={self.pending_log_ack_confirm_seq}")
+                    self._clear_pending_log_ack()
+            except (AttributeError, ValueError):
+                pass
 
+        if name == "log_data":
             self._handle_log_data_packet(pkt)
             return
 
@@ -626,37 +543,6 @@ class BleLogTester:
                         self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
                         self.uwb_file.flush()
 
-            ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
-            self._send_packet(ack_pkt)
-
-            # Prevent back-to-back packet drops on the BLE bridge.
-            time.sleep(LOG_CLEAR_DELAY_AFTER_ACK_S)
-
-            # Send log_clear to consume the processed log bytes and release waiting_clear state on MCU
-            clear_pkt = self._build_log_clear(len(payload))
-            self.pending_log_clear_seq = int(clear_pkt.hdr.seq)
-            self._send_packet(clear_pkt)
-            return
-
-        if name == "ack" and self.pending_log_clear_seq is not None:
-            if int(pkt.ack.ack_seq) == self.pending_log_clear_seq:
-                acked_clear_seq = self.pending_log_clear_seq
-                self._clear_pending_log_clear()
-                self._print_log_flow_notice(f"log_clear ACK received seq={acked_clear_seq}")
-                self._send_next_log_data_get()
-            else:
-                self._print_log_flow_notice(
-                    f"ignore ACK ack_seq={pkt.ack.ack_seq}; waiting log_clear ACK seq={self.pending_log_clear_seq}"
-                )
-            return
-
-        if name == "ack" and self.pending_log_data_get_seq is not None:
-            if int(pkt.ack.ack_seq) == self.pending_log_data_get_seq:
-                self._print_log_flow_notice(
-                    f"log_data_get ACK received seq={self.pending_log_data_get_seq}; waiting log_data"
-                )
-            return
-
         if name == "ble_status_resp":
             state = pkt.ble_status_resp.state
             state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})")
@@ -675,18 +561,17 @@ class BleLogTester:
     def loop(self) -> None:
         while True:
             now = time.time()
-            self._retry_pending_log_clear(now)
-            self._retry_pending_log_data_get(now)
+            self._retry_pending_log_ack(now)
 
             # Keep-alive ping: only send if we haven't received anything from MCU for a while.
             # This completely avoids packet collisions while logs are actively streaming.
-            if (
-                self.pending_log_clear_seq is None
-                and self.pending_log_data_get_seq is None
-                and now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S
-            ):
+            if now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
                 self._send_packet(self._build_none())
                 self.last_rx_time = now
+
+            if self.pending_log_ack_seq is None and now - self.last_poll >= LOG_POLL_PERIOD_S:
+                self._send_packet(self._build_log_data_get())
+                self.last_poll = now
 
             packets = self.session.recv_packets(timeout_s=LOG_RECV_TIMEOUT_S)
             for pkt in packets:
@@ -840,7 +725,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mac", type=str, default=None, help="Connect directly to this MAC (hex with colons, e.g. AA:BB:CC:DD:EE:FF)")
     parser.add_argument("--name", type=str, default=None, help="Scan only for devices containing this string in their name")
     parser.add_argument("--verbose", action="store_true", help="Print all non-log packet types")
-    parser.add_argument("--clear-first", action="store_true", help="Clear flash log backlog before streaming")
     parser.add_argument("--calibration", action="store_true", help="Save logs to a calibration file")
     parser.add_argument("--record", choices=["uwb"], help="Record specific UWB data to a CSV file")
     parser.add_argument("--src", type=int, default=int(VvAddress.HOST), help="Source address (default: HOST=5)")
@@ -914,7 +798,6 @@ def main() -> int:
                 src=src_addr,
                 dst=mcu_dst,
                 verbose=args.verbose,
-                clear_first=args.clear_first,
                 calibration=args.calibration,
                 args=args
             )

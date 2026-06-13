@@ -26,7 +26,6 @@
 #define RESP_RETRY_MAX                  2
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      30000u
-#define WAIT_TIME_TO_CLEAR_LOG_MS       30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
 #define SENSOR_FUSION_STREAM_PERIOD_MS  50u
 
@@ -58,6 +57,7 @@ static void network_cmd_log_data_get(const protobuf_packet_t *pkt);
 static void network_cmd_log_clear(const protobuf_packet_t *pkt);
 static void network_send_log(uint8_t dst, uint32_t data_length);
 static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
+static bool network_cmd_host_active(void);
 
 #ifdef HAVE_BLE_PERIPHERAL
 static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
@@ -109,18 +109,14 @@ static network_cmd_t s_network_cmd;
 
 typedef struct {
     bool     waiting_ack;
-    bool     waiting_clear;
     uint32_t log_len;
-    uint32_t sent_tick;
     int      tracker_id;
 } network_log_tracker_t;
 
 static network_log_tracker_t s_log_tracker = {
-    .waiting_ack   = false,
-    .waiting_clear = false,
-    .log_len       = 0u,
-    .sent_tick     = 0u,
-    .tracker_id    = -1
+    .waiting_ack = false,
+    .log_len     = 0u,
+    .tracker_id  = -1
 };
 
 static bool    s_log_stream_enabled = false;
@@ -754,13 +750,6 @@ static void network_cmd_log_data_get(const protobuf_packet_t *pkt)
     s_log_stream_enabled = true;
     s_log_stream_dst     = (uint8_t)pkt->hdr.addr.src;
 
-    if (s_log_tracker.waiting_ack) {
-        s_log_tracker.waiting_ack = false;
-        s_log_tracker.waiting_clear = false;
-        s_log_tracker.log_len = 0u;
-        s_log_tracker.sent_tick = 0u;
-    }
-
     protobuf_packet_t sample;
     uint16_t max_payload = (uint16_t)sizeof(sample.params.log_data.data.bytes);
     network_send_log(s_log_stream_dst, max_payload);
@@ -783,17 +772,6 @@ static void network_cmd_log_clear(const protobuf_packet_t *pkt)
         sys_logger_clear();
     }
 #endif
-
-    if ((length == 0u) || (length >= s_log_tracker.log_len)) {
-        s_log_tracker.waiting_ack   = false;
-        s_log_tracker.waiting_clear = false;
-        s_log_tracker.log_len       = 0u;
-        s_log_tracker.sent_tick     = 0u;
-        s_log_tracker.tracker_id    = -1;
-    } else {
-        s_log_tracker.log_len -= length;
-        s_log_tracker.sent_tick = bsp_util_get_ticks();
-    }
 }
 
 static void network_send_log(uint8_t dst, uint32_t data_length)
@@ -803,16 +781,6 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     if (s_log_tracker.waiting_ack) {
         return;
-    }
-
-    if (s_log_tracker.waiting_clear) {
-        uint32_t now = bsp_util_get_ticks();
-        if ((uint32_t)(now - s_log_tracker.sent_tick) < WAIT_TIME_TO_CLEAR_LOG_MS) {
-            return;
-        }
-        s_log_tracker.waiting_clear = false;
-        s_log_tracker.log_len       = 0u;
-        s_log_tracker.sent_tick     = 0u;
     }
 
     if (sys_logger_flash_pending_bytes() == 0u) {
@@ -837,35 +805,21 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     }
 
     s_log_tracker.waiting_ack  = true;
-    s_log_tracker.waiting_clear = false;
     s_log_tracker.log_len      = read_len;
-    s_log_tracker.sent_tick    = bsp_util_get_ticks();
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
                                                         packet.hdr.seq,
                                                         WAIT_TIME_TO_RESEND_ACK_MS,
                                                         log_tracker_callback,
                                                         &s_log_tracker);
     if (s_log_tracker.tracker_id < 0) {
-        s_log_tracker.waiting_ack   = false;
-        s_log_tracker.waiting_clear = false;
-        s_log_tracker.log_len       = 0u;
-        s_log_tracker.sent_tick     = 0u;
+        s_log_tracker.waiting_ack = false;
+        s_log_tracker.log_len     = 0u;
     }
 #else
     /* No flash storage: logger returns framed entries from RAM buffer.
-     * ACK confirms transport delivery; log_clear performs actual consume. */
+     * ACK tracking mirrors the flash path - consume only after host ACKs. */
     if (s_log_tracker.waiting_ack) {
         return;
-    }
-
-    if (s_log_tracker.waiting_clear) {
-        uint32_t now = bsp_util_get_ticks();
-        if ((uint32_t)(now - s_log_tracker.sent_tick) < WAIT_TIME_TO_CLEAR_LOG_MS) {
-            return;
-        }
-        s_log_tracker.waiting_clear = false;
-        s_log_tracker.log_len       = 0u;
-        s_log_tracker.sent_tick     = 0u;
     }
 
     if (sys_logger_data_count() == 0u) {
@@ -890,19 +844,15 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     }
 
     s_log_tracker.waiting_ack  = true;
-    s_log_tracker.waiting_clear = false;
     s_log_tracker.log_len      = read_len;
-    s_log_tracker.sent_tick    = bsp_util_get_ticks();
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
                                                         packet.hdr.seq,
                                                         WAIT_TIME_TO_RESEND_ACK_MS,
                                                         log_tracker_callback,
                                                         &s_log_tracker);
     if (s_log_tracker.tracker_id < 0) {
-        s_log_tracker.waiting_ack   = false;
-        s_log_tracker.waiting_clear = false;
-        s_log_tracker.log_len       = 0u;
-        s_log_tracker.sent_tick     = 0u;
+        s_log_tracker.waiting_ack = false;
+        s_log_tracker.log_len     = 0u;
     }
 #endif
 }
@@ -951,24 +901,50 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
 {
     (void)packet;
 
+#if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     CHECK_VOID(p_tracker != NULL);
 
     network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;
     CHECK_VOID(tracker != NULL);
 
     if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
-        tracker->waiting_ack   = false;
-        tracker->waiting_clear = true;
-        tracker->sent_tick     = bsp_util_get_ticks();
-        tracker->tracker_id    = -1;
-        return;
+        sys_logger_flash_consume(tracker->log_len);
     }
 
-    tracker->waiting_ack   = false;
-    tracker->waiting_clear = false;
-    tracker->log_len       = 0u;
-    tracker->sent_tick     = 0u;
-    tracker->tracker_id    = -1;
+    tracker->waiting_ack = false;
+    tracker->log_len     = 0u;
+    tracker->tracker_id  = -1;
+#else
+    /* No flash: consume from RAM buffer when host ACKs. */
+    CHECK_VOID(p_tracker != NULL);
+
+    network_log_tracker_t *tracker = (network_log_tracker_t *)p_tracker->callback_arg;
+    CHECK_VOID(tracker != NULL);
+
+    if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
+        sys_logger_ram_consume((uint16_t)tracker->log_len);
+    }
+
+    tracker->waiting_ack = false;
+    tracker->log_len     = 0u;
+    tracker->tracker_id  = -1;
+#endif
+}
+
+static bool network_cmd_host_active(void)
+{
+    CHECK(s_network_cmd.stream, false);
+
+    if (s_network_cmd.stream->serial_connection_active) {
+        return true;
+    }
+
+    uint32_t last_tick = s_network_cmd.stream->latest_packet_tick;
+    if (last_tick == 0u) {
+        return false;
+    }
+
+    return (uint32_t)(bsp_util_get_ticks() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
 }
 
 /* ---- Public API ---- */
@@ -1007,6 +983,10 @@ void network_cmd_process(void)
     CHECK_VOID(s_network_cmd.enabled);
 
     network_cmd_retry_pending();
+
+    if (s_log_stream_enabled && network_cmd_host_active()) {
+        network_send_log(s_log_stream_dst, 0xFFFFu);
+    }
 }
 
 bool network_cmd_process_packet(const protobuf_packet_t *pkt)
