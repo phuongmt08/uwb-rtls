@@ -58,7 +58,6 @@ static void network_cmd_log_data_get(const protobuf_packet_t *pkt);
 static void network_cmd_log_clear(const protobuf_packet_t *pkt);
 static void network_send_log(uint8_t dst, uint32_t data_length);
 static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet);
-static bool network_cmd_host_active(void);
 
 #ifdef HAVE_BLE_PERIPHERAL
 static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
@@ -972,22 +971,6 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
     tracker->tracker_id    = -1;
 }
 
-static bool network_cmd_host_active(void)
-{
-    CHECK(s_network_cmd.stream, false);
-
-    if (s_network_cmd.stream->serial_connection_active) {
-        return true;
-    }
-
-    uint32_t last_tick = s_network_cmd.stream->latest_packet_tick;
-    if (last_tick == 0u) {
-        return false;
-    }
-
-    return (uint32_t)(bsp_util_get_ticks() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
-}
-
 /* ---- Public API ---- */
 
 bool network_cmd_init(network_core_t *stream)
@@ -1024,10 +1007,6 @@ void network_cmd_process(void)
     CHECK_VOID(s_network_cmd.enabled);
 
     network_cmd_retry_pending();
-
-    if (s_log_stream_enabled && network_cmd_host_active()) {
-        network_send_log(s_log_stream_dst, 0xFFFFu);
-    }
 }
 
 bool network_cmd_process_packet(const protobuf_packet_t *pkt)

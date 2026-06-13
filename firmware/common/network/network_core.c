@@ -83,22 +83,9 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
         int n = _read(in_stream, (char*)core->rx_packet, (int)core->rx_buffer_size, 0);
         CHECK(n > 0, false);
         core->rx_packet_len = (uint32_t)n;
-
-        if (in_stream == STREAM_BLE_RX) {
-            RLOG_I(OBJECT_CODE, "rx BLE frame payload_len=%lu first=%02X %02X %02X %02X",
-                   (unsigned long)core->rx_packet_len,
-                   (core->rx_packet_len > 0u) ? core->rx_packet[0] : 0u,
-                   (core->rx_packet_len > 1u) ? core->rx_packet[1] : 0u,
-                   (core->rx_packet_len > 2u) ? core->rx_packet[2] : 0u,
-                   (core->rx_packet_len > 3u) ? core->rx_packet[3] : 0u);
-        }
     }
 
     if (!network_core_decode_packet(core->rx_packet, core->rx_packet_len, out_pkt)) {
-        if (in_stream == STREAM_BLE_RX) {
-            RLOG_W(OBJECT_CODE, "rx BLE protobuf decode failed len=%lu",
-                   (unsigned long)core->rx_packet_len);
-        }
         core->rx_packet_len = 0;
         return false;
     }
@@ -107,9 +94,9 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
     return true;
 }
 
-static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
+static bool network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
 {
-    network_core_encode_and_send(core, tx_stream, packet);
+    return network_core_encode_and_send(core, tx_stream, packet);
 }
 
 static stream_type_t network_core_dst_to_tx_stream(protobuf_device_addr_t dst)
@@ -149,18 +136,18 @@ static void network_core_forward_packet(network_core_t *core, stream_type_t in_s
 
     protobuf_device_addr_t dst = (protobuf_device_addr_t)packet->hdr.addr.dst;
     
-    stream_type_t fwd = network_core_dst_to_tx_stream(dst);
     if (dst == protobuf_PACKET_ADDR_BCAST) {
-        /* BCAST: route to everything EXCEPT where it came from, and only to active soft connections */
+        /* BCAST: route to every output except the link it came from. */
         if (in_stream != STREAM_SERIAL_RX && core->serial_connection_active) {
             network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
         }
-        if (in_stream != STREAM_BLE_RX && core->ble_connection_active) {
+        if (in_stream != STREAM_BLE_RX) {
             network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
         }
         return;
     }
 
+    stream_type_t fwd = network_core_dst_to_tx_stream(dst);
     if (fwd == STREAM_MAX) return;          /* unknown dst -> drop */
 
     /* Map in_stream to its tx equivalent to avoid bouncing */
@@ -232,23 +219,6 @@ static bool network_core_process_one_stream(network_core_t *core, stream_type_t 
 
     /* ---- Routing decision based on dst ---- */
     bool for_us = network_core_is_for_us(core, &packet);
-
-    if (in_stream == STREAM_BLE_RX) {
-        uint32_t src = 0xFFu;
-        uint32_t dst = 0xFFu;
-        uint32_t seq = 0xFFFFFFFFu;
-        if (packet.has_hdr && packet.hdr.has_addr) {
-            src = packet.hdr.addr.src;
-            dst = packet.hdr.addr.dst;
-            seq = packet.hdr.seq;
-        }
-        RLOG_I(OBJECT_CODE, "rx BLE decoded tag=%lu src=%lu dst=%lu seq=%lu for_us=%u",
-               (unsigned long)packet.which_params,
-               (unsigned long)src,
-               (unsigned long)dst,
-               (unsigned long)seq,
-               (unsigned)for_us);
-    }
 
     if (for_us) {
         /* Let the application layer handle it */
@@ -322,14 +292,15 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     packet->hdr.seq = (core->tx_seq)++;
 
     if (dst == protobuf_PACKET_ADDR_BCAST) {
-        /* BCAST is sent to all active soft connections */
+        bool sent = false;
+
+        /* BCAST always goes to the BLE bridge; serial host output is session-gated. */
         if (core->serial_connection_active) {
-            network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
+            sent = network_core_encode_and_send(core, STREAM_SERIAL_TX, packet) || sent;
         }
-        if (core->ble_connection_active) {
-            network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
-        }
-        return true;
+
+        sent = network_core_send_ble_packet(core, STREAM_BLE_TX, packet) || sent;
+        return sent;
     }
 
     if (dst == protobuf_PACKET_ADDR_DEBUG) {
