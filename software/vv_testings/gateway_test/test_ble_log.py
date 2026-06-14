@@ -48,11 +48,12 @@ TERMINAL_STATS_PERIOD_S = 300.0
 LOG_BOOTSTRAP_PACKET_GAP_S = 0.2
 LOG_POLL_PERIOD_S = 5.0
 LOG_ACK_RETRY_PERIOD_S = 1.0
-LOG_ACK_RETRY_MAX_RETRIES = 5  # 0 = retry forever
+LOG_ACK_RETRY_MAX_RETRIES = 2
+LOG_ACK_SETTLE_TIMEOUT_S = 3.0
 LOG_IDLE_KEEPALIVE_S = 15.0
 LOG_RECV_TIMEOUT_S = 0.01
 LOG_END_SESSION_DELAY_S = 0.1
-PRINT_PACKET_TRACE = False
+PRINT_PACKET_TRACE = True
 PACKET_TRACE_TAG_WIDTH = 7
 PACKET_TRACE_NAME_WIDTH = 18
 PACKET_TRACE_COUNT_WIDTH = 5
@@ -182,6 +183,7 @@ class BleLogTester:
         self.pending_log_ack_dst: Optional[int] = None
         self.pending_log_ack_confirm_seq: Optional[int] = None
         self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_started_at = 0.0
         self.pending_log_ack_retries = 0
         self.tx_counts: Dict[str, int] = {}
         self.rx_counts: Dict[str, int] = {}
@@ -389,6 +391,7 @@ class BleLogTester:
         self.pending_log_ack_dst = int(ack_pkt.hdr.addr.dst)
         self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
         self.pending_log_ack_sent_at = time.time()
+        self.pending_log_ack_started_at = self.pending_log_ack_sent_at
         self.pending_log_ack_retries = 0
 
     def _clear_pending_log_ack(self) -> None:
@@ -396,14 +399,18 @@ class BleLogTester:
         self.pending_log_ack_dst = None
         self.pending_log_ack_confirm_seq = None
         self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_started_at = 0.0
         self.pending_log_ack_retries = 0
 
     def _retry_pending_log_ack(self, now: float) -> None:
         if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
             return
 
-        last_ack_activity = max(self.pending_log_ack_sent_at, self.last_mcu_rx_time)
-        if now - last_ack_activity < LOG_ACK_RETRY_PERIOD_S:
+        if now - self.pending_log_ack_started_at >= LOG_ACK_SETTLE_TIMEOUT_S:
+            self._clear_pending_log_ack()
+            return
+
+        if now - self.pending_log_ack_sent_at < LOG_ACK_RETRY_PERIOD_S:
             return
 
         if LOG_ACK_RETRY_MAX_RETRIES > 0 and self.pending_log_ack_retries >= LOG_ACK_RETRY_MAX_RETRIES:
@@ -488,7 +495,6 @@ class BleLogTester:
             if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
                 self.rx_from_mcu += 1
                 self.last_mcu_rx_time = self.last_rx_time
-                self.pending_log_ack_retries = 0
         except (AttributeError, ValueError):
             pass
 
