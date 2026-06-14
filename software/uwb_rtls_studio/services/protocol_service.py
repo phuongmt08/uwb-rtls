@@ -35,6 +35,7 @@ from __future__ import annotations
 import sys
 import os
 import logging
+import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -46,8 +47,10 @@ if _common_dir not in sys.path:
     sys.path.insert(0, os.path.dirname(_common_dir))
 
 from common.transport import VvProtocol, HdlcCodec, FRAME_TYPE_PROTOBUF, VvAddress
-from common.commands import CommandFactory
+from common.commands import CommandFactory, default_destination_for
 from common import protocol_pb2 as pb
+from data.raw_packet import RawSerialChunk
+from data.raw_packet_store import shared_raw_packet_store
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +69,8 @@ class ProtocolService(QObject):
         self._protocol = VvProtocol()
         self._commands = CommandFactory()
         self._seq = 0
+        self._seq_lock = threading.Lock()
+        self._packet_repository = None
 
         # Connect serial RX → decode
         self._serial.data_received.connect(self.on_serial_data)
@@ -81,12 +86,19 @@ class ProtocolService(QObject):
     def commands(self) -> CommandFactory:
         return self._commands
 
+    def set_packet_repository(self, repository) -> None:
+        """Attach decoded-packet repository for raw/debug and shared parsers."""
+        self._packet_repository = repository
+
     # ── RX Path ──────────────────────────────────────────────────────
 
     def on_serial_data(self, data: bytes) -> None:
         """Được gọi khi SerialService nhận raw bytes.
         Decode HDLC → protobuf → dispatch.
         """
+        if data:
+            shared_raw_packet_store.append_serial_chunk(RawSerialChunk.from_bytes(data))
+
         try:
             packets = self._protocol.decode_from_frames(data)
         except Exception as e:
@@ -103,6 +115,12 @@ class ProtocolService(QObject):
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
                 continue
 
+            if self._packet_repository:
+                try:
+                    self._packet_repository.handle_packet(param, pkt)
+                except Exception as e:
+                    log.error("Failed to forward packet to packet repository: %s", e)
+
             # Route to global query manager in shared app state
             try:
                 from utils.app_state import shared_app_state
@@ -117,8 +135,9 @@ class ProtocolService(QObject):
 
     def next_seq(self) -> int:
         """Thread-safe sequence number generator."""
-        self._seq = (self._seq + 1) & 0xFFFFFFFF
-        return self._seq
+        with self._seq_lock:
+            self._seq = (self._seq + 1) & 0xFFFFFFFF
+            return self._seq
 
     def send_packet(self, pkt: pb.packet_t) -> None:
         """Encode packet → HDLC frame → serial write."""
@@ -127,12 +146,12 @@ class ProtocolService(QObject):
         param = pkt.WhichOneof("params") or "unknown"
         log.debug("TX: %s seq=%d", param, pkt.hdr.seq)
 
-    def send_command(self, builder_name: str, dst_addr: int = VvAddress.CENTRAL, src_addr: int = VvAddress.HOST, **kwargs) -> pb.packet_t:
+    def send_command(self, builder_name: str, dst_addr: int | None = None, src_addr: int = VvAddress.HOST, **kwargs) -> pb.packet_t:
         """Build + send command bằng tên.
 
         Args:
             builder_name: tên method trong CommandFactory (e.g. 'ble_scan_start')
-            dst_addr: Địa chỉ đích (mặc định ADDR_CENTRAL)
+            dst_addr: Địa chỉ đích. Nếu None, tự suy ra theo command catalog.
             src_addr: Địa chỉ nguồn (mặc định ADDR_HOST)
             **kwargs: extra args cho builder
 
@@ -140,7 +159,8 @@ class ProtocolService(QObject):
             packet_t đã gửi (để caller track seq nếu cần).
         """
         seq = self.next_seq()
+        target_addr = default_destination_for(builder_name) if dst_addr is None else dst_addr
         builder = getattr(self._commands, builder_name)
-        pkt = builder(src_addr, dst_addr, seq, **kwargs)
+        pkt = builder(src_addr, target_addr, seq, **kwargs)
         self.send_packet(pkt)
         return pkt

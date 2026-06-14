@@ -32,8 +32,9 @@ SERIAL_WRITE_TIMEOUT_S = 1.0
 ADDR_HOST        = 0x5                 # PACKET_ADDR_HOST
 ADDR_CENTRAL     = 0x3                 # PACKET_ADDR_CENTRAL (dongle)
 ADDR_PERIPHERAL  = 0x4                 # PACKET_ADDR_PERIPHERAL (tag/anchor)
-ADDR_MCU         = 0x2                 # PACKET_ADDR_MCU
-ADDR_BCAS        = 0x9                 # PACKET_ADDR_BCAS
+ADDR_MCU         = 0x1                 # PACKET_ADDR_MCU
+ADDR_BCAST       = 0xF                 # PACKET_ADDR_BCAST
+ADDR_BCAS        = ADDR_BCAST          # Backward-compatible alias for old typo
 
 # ── UI Settings ───────────────────────────────────────────────────
 MAIN_WINDOW_MIN_WIDTH = 1200

@@ -86,13 +86,13 @@ QSplitter::handle { background-color: #0F172A; }</string>
            <property name="font">
             <font>
              <family>Segoe UI</family>
-             <pointsize>14</pointsize>
+             <pointsize>10</pointsize>
              <weight>75</weight>
              <bold>true</bold>
             </font>
            </property>
            <property name="styleSheet">
-            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px;</string>
+            <string notr="true">color: #22D3EE; background-color: #112A3E; border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
            </property>
            <property name="text">
             <string>📋 Live Log</string>
@@ -303,13 +303,13 @@ QSplitter::handle { background-color: #0F172A; }</string>
            <property name="font">
             <font>
              <family>Segoe UI</family>
-             <pointsize>14</pointsize>
+             <pointsize>10</pointsize>
              <weight>75</weight>
              <bold>true</bold>
             </font>
            </property>
            <property name="styleSheet">
-            <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px;</string>
+            <string notr="true">color: #22D3EE; background-color: #112A3E; border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
            </property>
            <property name="text">
             <string>📂 Session History</string>
@@ -345,11 +345,14 @@ QSplitter::handle { background-color: #0F172A; }</string>
          <property name="alternatingRowColors">
           <bool>true</bool>
          </property>
+         <property name="editTriggers">
+          <set>QAbstractItemView::NoEditTriggers</set>
+         </property>
          <property name="selectionBehavior">
           <enum>QAbstractItemView::SelectRows</enum>
          </property>
          <property name="columnCount">
-          <number>5</number>
+          <number>6</number>
          </property>
          <attribute name="horizontalHeaderStretchLastSection">
           <bool>true</bool>
@@ -379,7 +382,12 @@ QSplitter::handle { background-color: #0F172A; }</string>
          </column>
          <column>
           <property name="text">
-           <string>Log Files</string>
+           <string>Session Files</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Browser</string>
           </property>
          </column>
         </widget>

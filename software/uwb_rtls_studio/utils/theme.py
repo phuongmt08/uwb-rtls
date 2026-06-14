@@ -163,10 +163,46 @@ QSpinBox, QDoubleSpinBox {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 6px 26px 6px 10px; /* Leave space on the right for up/down buttons */
 }}
 QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {COLOR_ACCENT};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    border-left: 1px solid {COLOR_BORDER};
+    border-top-right-radius: 6px;
+    background-color: {COLOR_BG_DARKER};
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {{
+    background-color: {COLOR_ACCENT_DIM};
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 22px;
+    border-left: 1px solid {COLOR_BORDER};
+    border-bottom-right-radius: 6px;
+    background-color: {COLOR_BG_DARKER};
+}}
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background-color: {COLOR_ACCENT_DIM};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid {COLOR_TEXT};
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {COLOR_TEXT};
 }}
 
 /* ═══════════════════ COMBO BOX ════════════════ */
@@ -214,31 +250,44 @@ QHeaderView::section {{
 
 /* ═══════════════════ SCROLL BAR ═══════════════ */
 QScrollBar:vertical {{
-    background-color: {COLOR_BG_DARKER};
-    width: 10px;
-    border-radius: 5px;
-    margin: 0;
+    background-color: transparent;
+    width: 8px;
+    margin: 0px;
 }}
 QScrollBar::handle:vertical {{
-    background-color: {COLOR_BORDER};
-    border-radius: 5px;
+    background-color: #475569;
+    border-radius: 4px;
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background-color: {COLOR_BORDER_LT};
+    background-color: #64748B;
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
+    background: none;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: none;
 }}
 QScrollBar:horizontal {{
-    background-color: {COLOR_BG_DARKER};
-    height: 10px;
-    border-radius: 5px;
+    background-color: transparent;
+    height: 8px;
+    margin: 0px;
 }}
 QScrollBar::handle:horizontal {{
-    background-color: {COLOR_BORDER};
-    border-radius: 5px;
+    background-color: #475569;
+    border-radius: 4px;
     min-width: 30px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: #64748B;
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0px;
+    background: none;
+}}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: none;
 }}
 
 /* ═══════════════════ PROGRESS BAR ═════════════ */

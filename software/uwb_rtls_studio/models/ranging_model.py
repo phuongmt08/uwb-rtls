@@ -74,9 +74,11 @@
 import logging
 import time
 from collections import deque
-from PyQt6.QtCore import QObject, pyqtSignal
+from datetime import datetime
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from services.protocol_service import ProtocolService
-from utils.app_state import shared_app_state
+from common.transport import VvAddress
+from utils.app_state import shared_app_state, JobState, POLL_RANGING_STATUS_MS
 
 log = logging.getLogger(__name__)
 
@@ -86,20 +88,31 @@ _MAX_HISTORY_SIZE = 100000
 
 class RangingModel(QObject):
     position_updated = pyqtSignal(float, float, float, float) # x, y, z, rms
+    sensor_fusion_updated = pyqtSignal(dict)
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
     anchor_layout_updated = pyqtSignal(list)
 
-    def __init__(self, protocol_service: ProtocolService, parent=None):
+    def __init__(self, protocol_service: ProtocolService, ranging_repo=None, command_bus=None, parent=None):
         super().__init__(parent)
         self._protocol = protocol_service
-        self._protocol.packet_received.connect(self._on_packet)
+        self._ranging_repo = ranging_repo
+        self._command_bus = command_bus
+        if self._ranging_repo:
+            self._ranging_repo.position_parsed.connect(self._handle_position_sample)
+            self._ranging_repo.sensor_fusion_parsed.connect(self._handle_sensor_fusion_sample)
+            self._ranging_repo.anchor_distances_parsed.connect(self._handle_anchor_distances)
+            self._ranging_repo.anchor_layout_parsed.connect(self._handle_anchor_layout_data)
+            self._ranging_repo.stats_parsed.connect(self._handle_stats_data)
+        else:
+            self._protocol.packet_received.connect(self._on_packet)
 
         # ── State ────────────────────────────────────────────────────
         self.is_ranging = False
 
         # Position history buffer (bounded deque to prevent memory leak)
         self._position_history = deque(maxlen=_MAX_HISTORY_SIZE)
+        self._fusion_history = deque(maxlen=_MAX_HISTORY_SIZE)
 
         # Anchor layout (fixed positions)
         self._anchor_layout = []   # list of {anchor_id, x_m, y_m, z_m}
@@ -112,6 +125,11 @@ class RangingModel(QObject):
             "update_rate_hz": 0.0,
         }
         self._last_result_time = 0.0
+        self._last_fusion_sample: dict | None = None
+
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(POLL_RANGING_STATUS_MS)
+        self._status_timer.timeout.connect(self.request_ranging_status)
 
     # ── Public properties ────────────────────────────────────────────
 
@@ -120,17 +138,72 @@ class RangingModel(QObject):
         return list(self._position_history)
 
     @property
+    def fusion_history(self):
+        return list(self._fusion_history)
+
+    @property
     def anchor_layout(self):
         return self._anchor_layout
+
+    def _send_command(self, command_name: str, dst_addr: int, **kwargs):
+        if self._command_bus:
+            return self._command_bus.send(command_name, dst_addr=dst_addr, **kwargs)
+        return self._protocol.send_command(command_name, dst_addr=dst_addr, **kwargs)
+
+    def _request_query(self, command_name: str, dst_addr: int, **kwargs):
+        cache_ttl_s = kwargs.pop("cache_ttl_s", None)
+        force = kwargs.pop("force", False)
+        if self._command_bus:
+            return self._command_bus.request(
+                command_name,
+                dst_addr=dst_addr,
+                cache_ttl_s=cache_ttl_s,
+                force=force,
+                **kwargs,
+            )
+        shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
+        return True
+
+    def send_command(self, command_name: str, dst_addr: int = VvAddress.MCU, **kwargs):
+        """Public model command path used by ViewModels when no CommandBus is injected."""
+        return self._send_command(command_name, dst_addr=dst_addr, **kwargs)
+
+    def start_ranging(self):
+        pkt = self._send_command("ranging_start", dst_addr=VvAddress.MCU)
+        self.is_ranging = True
+        shared_app_state.ranging_active = True
+        shared_app_state.update_job("ranging_session", JobState.RUNNING)
+        self.request_ranging_status(force=True)
+        self._status_timer.start()
+        return pkt
+
+    def stop_ranging(self):
+        pkt = self._send_command("ranging_stop", dst_addr=VvAddress.MCU)
+        self.is_ranging = False
+        shared_app_state.ranging_active = False
+        shared_app_state.update_job("ranging_session", JobState.IDLE)
+        self._status_timer.stop()
+        return pkt
+
+    def request_ranging_status(self, force: bool = False):
+        return self._request_query(
+            "ranging_status_get",
+            dst_addr=VvAddress.MCU,
+            cache_ttl_s=0.0,
+            force=force,
+        )
 
     def set_anchor_layout(self, anchors: list):
         """Set anchor positions. Called by ConfigViewModel."""
         self._anchor_layout = anchors
+        if self._ranging_repo and hasattr(self._ranging_repo, "update_anchor_layout_cache"):
+            self._ranging_repo.update_anchor_layout_cache(anchors)
         shared_app_state.anchor_layout = anchors
 
     def clear_history(self):
         """Clear position history buffer."""
         self._position_history.clear()
+        self._fusion_history.clear()
         self._stats = {
             "total_count": 0,
             "success_count": 0,
@@ -138,33 +211,87 @@ class RangingModel(QObject):
             "update_rate_hz": 0.0,
         }
         self._last_result_time = 0.0
+        self._last_fusion_sample = None
         shared_app_state.ranging_stats = self._stats.copy()
 
     # ── Packet handler ───────────────────────────────────────────────
 
     def _on_packet(self, param_name: str, pkt) -> None:
+        seq, packet_timestamp_ms = self._packet_meta(pkt)
         if param_name == "ranging_result":
-            self._handle_ranging_result(pkt.ranging_result)
+            self._handle_ranging_result(
+                pkt.ranging_result,
+                seq=seq,
+                packet_timestamp_ms=packet_timestamp_ms,
+            )
+        elif param_name == "sensor_fusion_result":
+            self._handle_sensor_fusion_result(
+                pkt.sensor_fusion_result,
+                seq=seq,
+                packet_timestamp_ms=packet_timestamp_ms,
+            )
         elif param_name == "anchor_layout_resp":
             self._handle_anchor_layout(pkt.anchor_layout_resp)
+        elif param_name == "ranging_status_resp":
+            self._handle_ranging_status(pkt.ranging_status_resp)
 
-    def _handle_ranging_result(self, res):
+    @staticmethod
+    def _packet_meta(pkt) -> tuple[int, int]:
+        hdr = getattr(pkt, "hdr", None)
+        return (
+            int(getattr(hdr, "seq", 0) or 0),
+            int(getattr(hdr, "timestamp", 0) or 0),
+        )
+
+    @staticmethod
+    def _parse_anchor_distances(res) -> tuple[list[dict], int, dict[int, int]]:
+        anchors = []
+        anchor_mask = 0
+        distances_by_anchor: dict[int, int] = {}
+        for anchor in getattr(res, "anchors", []):
+            anchor_id = int(getattr(anchor, "anchor_id", 0) or 0)
+            distance_mm = int(getattr(anchor, "distance_mm", 0) or 0)
+            anchors.append({
+                "id": f"A{anchor_id}",
+                "anchor_id": anchor_id,
+                "distance_mm": distance_mm,
+                "distance_cm": distance_mm / 10.0,
+                "fp_amp": int(getattr(anchor, "fp_amp", 0) or 0),
+            })
+            if 0 < anchor_id < 32:
+                anchor_mask |= 1 << anchor_id
+            if anchor_id:
+                distances_by_anchor[anchor_id] = distance_mm
+        return anchors, anchor_mask, distances_by_anchor
+
+    def _handle_ranging_result(self, res, seq: int = 0, packet_timestamp_ms: int = 0):
         now = time.time()
+        anchors, anchor_mask, distances_by_anchor = self._parse_anchor_distances(res)
 
         # Store in history buffer
         sample = {
-            "x_m": res.x_m,
-            "y_m": res.y_m,
-            "z_m": res.z_m,
-            "rms_error_m": res.rms_error_m,
+            "x_m": float(getattr(res, "pos_x_m", 0.0)),
+            "y_m": float(getattr(res, "pos_y_m", 0.0)),
+            "z_m": float(getattr(res, "pos_z_m", 0.0)),
+            "rms_error_m": float(getattr(res, "rms_error_m", 0.0)),
+            "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
+            "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": now,
+            "source": "ranging",
+            "seq": int(seq or 0),
+            "anchor_mask": anchor_mask,
+            "d1_mm": distances_by_anchor.get(1, ""),
+            "d2_mm": distances_by_anchor.get(2, ""),
+            "d3_mm": distances_by_anchor.get(3, ""),
+            "d4_mm": distances_by_anchor.get(4, ""),
+            "anchors": anchors,
         }
         self._position_history.append(sample)
 
         # Update statistics
         self._stats["total_count"] += 1
         self._stats["success_count"] += 1
-        self._stats["last_rms_error_m"] = res.rms_error_m
+        self._stats["last_rms_error_m"] = sample["rms_error_m"]
         if self._last_result_time > 0:
             dt = now - self._last_result_time
             if dt > 0:
@@ -172,21 +299,59 @@ class RangingModel(QObject):
         self._last_result_time = now
 
         # Emit position
-        self.position_updated.emit(res.x_m, res.y_m, res.z_m, res.rms_error_m)
+        self.position_updated.emit(
+            sample["x_m"],
+            sample["y_m"],
+            sample["z_m"],
+            sample["rms_error_m"],
+        )
 
-        # Extract anchor distances if available
-        anchors = []
-        for a in res.anchor_distances:
-            anchors.append({
-                "id": f"A{a.anchor_id}",
-                "distance_cm": a.distance_mm / 10.0
-            })
         if anchors:
             self.anchor_distances_updated.emit(anchors)
 
         # Emit updated stats
         self.stats_updated.emit(self._stats.copy())
         shared_app_state.ranging_stats = self._stats.copy()
+
+    def _handle_sensor_fusion_result(self, res, seq: int = 0, packet_timestamp_ms: int = 0):
+        sample = {
+            "ukf_x_m": float(getattr(res, "ukf_x_m", 0.0)),
+            "ukf_y_m": float(getattr(res, "ukf_y_m", 0.0)),
+            "ukf_yaw_deg": float(getattr(res, "ukf_yaw_deg", 0.0)),
+            "tril_x_m": float(getattr(res, "tril_x_m", 0.0)),
+            "tril_y_m": float(getattr(res, "tril_y_m", 0.0)),
+            "yaw_deg": float(getattr(res, "yaw_deg", 0.0)),
+            "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
+            "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
+            "packet_timestamp_ms": int(packet_timestamp_ms or 0),
+            "received_at": time.time(),
+            "source": "sensor_fusion",
+            "seq": int(seq or 0),
+        }
+        self._handle_sensor_fusion_sample(sample)
+
+    def _handle_ranging_status(self, resp):
+        total = int(getattr(resp, "ranging_total_count", 0))
+        success = int(getattr(resp, "ranging_success_count", 0))
+        failed = int(getattr(resp, "ranging_failed_count", 0))
+        timeout = int(getattr(resp, "ranging_timeout_count", 0))
+        stats = {
+            "ranging_period_ms": int(getattr(resp, "ranging_period_ms", 0)),
+            "ranging_total_count": total,
+            "ranging_success_count": success,
+            "ranging_failed_count": failed,
+            "ranging_timeout_count": timeout,
+            "total_count": total,
+            "success_count": success,
+            "failed_count": failed,
+            "timeout_count": timeout,
+            "last_ranging_time_ms": int(getattr(resp, "last_ranging_time_ms", 0)),
+            "last_rms_error_m": float(getattr(resp, "last_rms_error_m", 0.0)),
+            "last_avg_rssi_dbm": int(getattr(resp, "last_avg_rssi_dbm", 0)),
+            "last_update_timestamp_ms": int(getattr(resp, "last_update_timestamp_ms", 0)),
+            "success_rate_percent": (success / total * 100.0) if total else 0.0,
+        }
+        self._handle_stats_data(stats)
 
     def _handle_anchor_layout(self, resp):
         """Parse anchor_layout_resp and store."""
@@ -201,3 +366,89 @@ class RangingModel(QObject):
         log.info("Anchor layout received: %d anchors", len(self._anchor_layout))
         self.anchor_layout_updated.emit(self._anchor_layout)
         shared_app_state.anchor_layout = self._anchor_layout
+
+    def _handle_position_sample(self, sample: dict):
+        stored = sample.copy()
+        stored.setdefault("source", "ranging")
+        stored.setdefault("seq", 0)
+        stored.setdefault("anchor_mask", 0)
+        stored.setdefault("d1_mm", "")
+        stored.setdefault("d2_mm", "")
+        stored.setdefault("d3_mm", "")
+        stored.setdefault("d4_mm", "")
+        self._position_history.append(stored)
+        self._stats["total_count"] += 1
+        self._stats["success_count"] += 1
+        self._stats["last_rms_error_m"] = stored.get("rms_error_m", stored.get("rms", 0.0))
+
+        now = stored.get("received_at", time.time())
+        if self._last_result_time > 0:
+            dt = now - self._last_result_time
+            if dt > 0:
+                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
+        self._last_result_time = now
+
+        x = stored.get("x_m", stored.get("x", 0.0))
+        y = stored.get("y_m", stored.get("y", 0.0))
+        z = stored.get("z_m", stored.get("z", 0.0))
+        rms = stored.get("rms_error_m", stored.get("rms", 0.0))
+        self.position_updated.emit(x, y, z, rms)
+        self.stats_updated.emit(self._stats.copy())
+        shared_app_state.ranging_stats = self._stats.copy()
+
+    def _handle_sensor_fusion_sample(self, sample: dict):
+        enriched = sample.copy()
+        enriched.setdefault("source", "sensor_fusion")
+        enriched.setdefault("seq", 0)
+        enriched.setdefault("vx_mps", 0.0)
+        enriched.setdefault("vy_mps", 0.0)
+
+        prev = self._last_fusion_sample
+        if prev:
+            curr_ts = enriched.get("timestamp_ms", 0)
+            prev_ts = prev.get("timestamp_ms", 0)
+            dt_s = 0.0
+            if curr_ts and prev_ts and curr_ts > prev_ts:
+                dt_s = (curr_ts - prev_ts) / 1000.0
+            else:
+                dt_s = enriched.get("received_at", time.time()) - prev.get("received_at", time.time())
+
+            if dt_s > 0:
+                enriched["vx_mps"] = (enriched["ukf_x_m"] - prev.get("ukf_x_m", 0.0)) / dt_s
+                enriched["vy_mps"] = (enriched["ukf_y_m"] - prev.get("ukf_y_m", 0.0)) / dt_s
+
+        self._last_fusion_sample = enriched.copy()
+        self._fusion_history.append(enriched.copy())
+        self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
+        self.sensor_fusion_updated.emit(enriched)
+        self.stats_updated.emit(self._stats.copy())
+        shared_app_state.ranging_stats = self._stats.copy()
+
+    def build_session_samples(self) -> list[dict]:
+        """Return a combined, time-ordered snapshot for session export."""
+        samples: list[dict] = []
+        for item in self._position_history:
+            copied = item.copy()
+            copied.setdefault("source", "ranging")
+            copied.setdefault("time", datetime.fromtimestamp(copied.get("received_at", time.time())).strftime("%d/%m/%Y %H:%M:%S"))
+            samples.append(copied)
+        for item in self._fusion_history:
+            copied = item.copy()
+            copied.setdefault("source", "sensor_fusion")
+            copied.setdefault("time", datetime.fromtimestamp(copied.get("received_at", time.time())).strftime("%d/%m/%Y %H:%M:%S"))
+            samples.append(copied)
+        samples.sort(key=lambda row: (int(row.get("timestamp_ms", 0) or 0), row.get("source", "")))
+        return samples
+
+    def _handle_anchor_distances(self, anchors: list):
+        self.anchor_distances_updated.emit(anchors)
+
+    def _handle_anchor_layout_data(self, anchors: list):
+        self._anchor_layout = list(anchors)
+        self.anchor_layout_updated.emit(self._anchor_layout)
+        shared_app_state.anchor_layout = self._anchor_layout
+
+    def _handle_stats_data(self, stats: dict):
+        self._stats.update(stats)
+        self.stats_updated.emit(self._stats.copy())
+        shared_app_state.ranging_stats = self._stats.copy()

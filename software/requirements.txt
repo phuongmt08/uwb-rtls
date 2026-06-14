@@ -1,3 +1,4 @@
+
 PySide6>=6.6
 PyQt6>=6.7.0
 pyusb>=1.2.1
@@ -9,3 +10,5 @@ pyqtgraph>=0.13.7            # High-performance scientific graphs/plots
 numpy>=2.0.0                 # Numerical computing (position data)
 PyInstaller>=5.9.0           # Build executable (.exe)
 psutil>=5.9.0
+PyOpenGL>=3.1.7               # 3D visualization backend
+PyOpenGL_accelerate>=3.1.7    # OpenGL acceleration (optional but highly recommended)

@@ -44,6 +44,12 @@ class ScanViewModel(QObject):
         self.scan_started.emit()
         self.log_message.emit("BLE scan started (continuous mode)")
 
+    def restart_scan(self) -> None:
+        self.log_message.emit("Restarting BLE scan...")
+        self.model.restart_scan()
+        self.scan_started.emit()
+        self.log_message.emit("BLE scan restarted")
+
     def stop_scan(self) -> None:
         self.model.stop_scan()
         self.scan_stopped.emit()

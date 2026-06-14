@@ -22,7 +22,7 @@
 """
 import logging
 import time
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal
 
 log = logging.getLogger(__name__)
 
@@ -46,19 +46,35 @@ class DeviceInfoViewModel(QObject):
     advertising_devices_updated = pyqtSignal(list, bool)   # list of dicts, is_scanning
     time_sync_updated = pyqtSignal(str, bool, bool)        # local_time_str, is_synced, is_syncing
 
-    def __init__(self, device_model, dongle_model=None, parent=None):
+    def __init__(self, device_model, dongle_model=None, telemetry_repo=None, ble_scan_repo=None, parent=None):
         super().__init__(parent)
         self.model = device_model
         self.dongle_model = dongle_model
+        self._telemetry_repo = telemetry_repo
+        self._ble_scan_repo = ble_scan_repo
+        self._last_telemetry: dict = {}
 
         # ── Bind Model signals → ViewModel presentation ─────────────
         self.model.device_info_parsed.connect(self._on_device_info_parsed)
-        self.model.battery_info_parsed.connect(self._on_battery_info_parsed)
+        
+        if self._telemetry_repo:
+            self._telemetry_repo.telemetry_updated.connect(self._on_battery_info_parsed)
+        else:
+            self.model.battery_info_parsed.connect(self._on_battery_info_parsed)
+            
         self.model.ble_status_parsed.connect(self._on_ble_status_parsed)
         self.model.ble_conn_params_parsed.connect(self._on_ble_conn_params_parsed)
         self.model.time_sync_result.connect(self._on_time_sync_result)
-        self.model.scan_data_updated.connect(self._on_scan_data_updated)
+        
+        if self._ble_scan_repo:
+            self._ble_scan_repo.scan_results_updated.connect(self._on_scan_data_updated)
+        else:
+            self.model.scan_data_updated.connect(self._on_scan_data_updated)
+            
         self.model.connection_state_changed.connect(self._on_connection_state_changed)
+
+        from utils.app_state import shared_app_state
+        shared_app_state.rtos_resource_changed.connect(self._on_rtos_resource_changed)
 
         # ── Handle Dongle Connection Lifecycle ───────────────────────
         if self.dongle_model:
@@ -69,28 +85,17 @@ class DeviceInfoViewModel(QObject):
     #  INITIALIZATION
     # ═══════════════════════════════════════════════════════════════════
 
-    def _delayed_init(self):
-        """Called once after MainWindow has wired all signals."""
+    def initialize(self):
+        """Called once by main.py after MainWindow is shown and all signals are wired.
+        Triggers initial telemetry and session start events for the connected device.
+        """
         if self.model.is_connected:
-            # Re-emit the connected device info now that UI is listening
             self.device_info_updated.emit({
                 "Device Name": self.model.connected_name,
                 "MAC Address": self.model.connected_mac,
             })
-            
-            # Request initial telemetry since we just transitioned from ScanPopup
             self.model.request_initial_telemetry()
-            
-            # Start background scanning to populate 'Other Advertising Devices'
-            self.model.start_scan()
-        else:
-            # No device connected yet — start scanning
-            self.model.start_scan()
-
-
-
-
-
+            self.model.request_session_start_events()
     # ═══════════════════════════════════════════════════════════════════
     #  PUBLIC METHODS (called by main.py or View)
     # ═══════════════════════════════════════════════════════════════════
@@ -102,6 +107,14 @@ class DeviceInfoViewModel(QObject):
     def connect_device(self, mac_hex: str):
         """Called by View when user clicks Connect on a scanned device."""
         self.model.connect_device(mac_hex)
+
+    def request_end_session(self, reason: int = 0):
+        """Forward session shutdown request to the model command path."""
+        return self.model.request_end_session(reason=reason)
+
+    def request_ble_disconnect(self, reason: int = 0):
+        """Forward BLE disconnect request to the model command path."""
+        return self.model.request_ble_disconnect(reason=reason)
 
     # ═══════════════════════════════════════════════════════════════════
     #  DONGLE LIFECYCLE
@@ -142,7 +155,29 @@ class DeviceInfoViewModel(QObject):
             "stack_usage": data.get("stack_usage", "-"),
             "cpu_usage": data.get("cpu_usage", "-")
         }
-        self.telemetry_updated.emit(formatted_data)
+        self._last_telemetry.update(formatted_data)
+        self.telemetry_updated.emit(self._last_telemetry.copy())
+
+    def _on_rtos_resource_changed(self, data: dict):
+        """Merge RTOS diagnostics into the telemetry panel without clearing battery data."""
+        self._last_telemetry.update({
+            "heap_usage": self._format_bytes(data.get("heap_free_bytes")),
+            "stack_usage": self._format_bytes(data.get("min_stack_free_bytes")),
+            "cpu_usage": f"{data.get('cpu_busy_percent', 0.0):.1f}%",
+        })
+        self.telemetry_updated.emit(self._last_telemetry.copy())
+
+    @staticmethod
+    def _format_bytes(value):
+        if value is None:
+            return "-"
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return "-"
+        if value >= 1024:
+            return f"{value / 1024.0:.1f} KB"
+        return f"{value} B"
 
     def _on_ble_status_parsed(self, info: dict):
         """Forward BLE status to View."""
@@ -157,6 +192,7 @@ class DeviceInfoViewModel(QObject):
             "conn_interval": f"{params.get('min_interval_ms', 0)} - {params.get('max_interval_ms', 0)} ms",
             "slave_latency": params.get("slave_latency"),
             "supervision_timeout": params.get("sup_timeout_ms"),
+            "phy": params.get("phy", "-"),
         })
 
     def _on_connection_state_changed(self, info: dict):
@@ -170,6 +206,7 @@ class DeviceInfoViewModel(QObject):
 
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
             self.model.request_initial_telemetry()
+            self.model.request_session_start_events()
 
     def _on_time_sync_result(self, data: dict):
         """Convert raw time sync data → formatted UI signal."""

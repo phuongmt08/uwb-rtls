@@ -25,7 +25,7 @@ QGroupBox::title {
     left: 16px;
     padding: 4px 10px;
     color: #22D3EE;
-    background-color: rgba(34, 211, 238, 0.10);
+    background-color: #112A3E;
     border-left: 3px solid #22D3EE;
     border-bottom: 1px solid rgba(34, 211, 238, 0.45);
     border-radius: 4px;

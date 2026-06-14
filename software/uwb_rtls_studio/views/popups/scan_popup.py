@@ -262,7 +262,12 @@ class ScanPopup(QDialog):
             self._vm.connect_device(self._selected_mac)
 
     def _on_rescan(self):
-        self._vm.start_scan()
+        self._selected_mac = ""
+        self._btn_connect.setEnabled(False)
+        if hasattr(self._vm, "restart_scan"):
+            self._vm.restart_scan()
+        else:
+            self._vm.start_scan()
 
     def _on_cancel(self):
         self._vm.cleanup()

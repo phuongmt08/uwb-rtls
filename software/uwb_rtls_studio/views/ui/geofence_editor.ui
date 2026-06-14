@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>GeofenceEditorWidget</class>
+ <widget class="QWidget" name="GeofenceEditorWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>350</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>350</width>
+    <height>16777215</height>
+   </size>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QWidget#GeofenceEditorWidget { background: transparent; color: #F8FAFC; font-family: 'Segoe UI'; font-size: 13px; }
+QPushButton { background: #1E293B; color: #F8FAFC; border: 1px solid #334155; border-radius: 6px; padding: 4px 8px; font-weight: bold; }
+QPushButton:hover { background: #253346; border-color: #22D3EE; }
+QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }
+QLabel { background: transparent; }</string>
+  </property>
+  <layout class="QVBoxLayout" name="main_layout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>6</number>
+   </property>
+   <property name="topMargin">
+    <number>6</number>
+   </property>
+   <property name="rightMargin">
+    <number>6</number>
+   </property>
+   <property name="bottomMargin">
+    <number>6</number>
+   </property>
+   <!-- 1. Header label -->
+   <item>
+    <widget class="QLabel" name="lbl_geofence_header">
+     <property name="text">
+      <string>HỆ THỐNG GEOFENCING 2.5D</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">color: #F59E0B; background: rgba(245, 158, 11, 0.10); border-left: 3px solid #F59E0B; border-bottom: 1px solid rgba(245, 158, 11, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 2. Editor modes -->
+   <item>
+    <layout class="QHBoxLayout" name="editor_modes_layout">
+     <item>
+      <widget class="QPushButton" name="btn_mode_draw">
+       <property name="text">
+        <string>➕ Vẽ Vùng</string>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QPushButton:checked { background-color: #2563EB; color: white; border-color: #3B82F6; }</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_mode_edit">
+       <property name="text">
+        <string>✏️ Chọn / Sửa</string>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QPushButton:checked { background-color: #2563EB; color: white; border-color: #3B82F6; }</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <!-- 3. Properties GroupBox -->
+   <item>
+    <widget class="QGroupBox" name="gb_properties">
+     <property name="title">
+      <string>Cấu hình Vùng chọn</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QGroupBox { color: #CBD5E1; font-weight: bold; border: 1px solid #334155; border-radius: 8px; margin-top: 12px; padding-top: 15px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }</string>
+     </property>
+     <layout class="QFormLayout" name="properties_form_layout">
+      <property name="verticalSpacing">
+       <number>8</number>
+      </property>
+      <!-- Row 0: Zone name -->
+      <item row="0" column="0">
+       <widget class="QLabel" name="lbl_prop_name">
+        <property name="text">
+         <string>Tên vùng:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="txt_zone_name">
+        <property name="styleSheet">
+         <string notr="true">background-color: #1E293B; border: 1px solid #475569; border-radius: 4px; color: white; padding: 3px;</string>
+        </property>
+       </widget>
+      </item>
+      <!-- Row 1: Zone type -->
+      <item row="1" column="0">
+       <widget class="QLabel" name="lbl_prop_type">
+        <property name="text">
+         <string>Loại vùng:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="cmb_zone_type">
+        <property name="styleSheet">
+         <string notr="true">background-color: #1E293B; border: 1px solid #475569; border-radius: 4px; color: white; padding: 3px;</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Allowed (Được phép đi)</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Forbidden (Vùng cấm)</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <!-- Row 2: Z min -->
+      <item row="2" column="0">
+       <widget class="QLabel" name="lbl_prop_z_min">
+        <property name="text">
+         <string>Độ cao đáy:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QDoubleSpinBox" name="sb_z_min">
+        <property name="minimum">
+         <double>-10.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>50.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="suffix">
+         <string> m</string>
+        </property>
+       </widget>
+      </item>
+      <!-- Row 3: Z max -->
+      <item row="3" column="0">
+       <widget class="QLabel" name="lbl_prop_z_max">
+        <property name="text">
+         <string>Độ cao trần:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QDoubleSpinBox" name="sb_z_max">
+        <property name="minimum">
+         <double>-10.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>50.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>3.000000000000000</double>
+        </property>
+        <property name="suffix">
+         <string> m</string>
+        </property>
+       </widget>
+      </item>
+      <!-- Row 4: Speed -->
+      <item row="4" column="0">
+       <widget class="QLabel" name="lbl_prop_speed">
+        <property name="text">
+         <string>Tốc độ tối đa:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QDoubleSpinBox" name="sb_speed">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="suffix">
+         <string> m/s</string>
+        </property>
+       </widget>
+      </item>
+      <!-- Row 5: Apply button (colspan 2) -->
+      <item row="5" column="0" colspan="2">
+       <widget class="QPushButton" name="btn_apply_properties">
+        <property name="text">
+         <string>Cập nhật thông số</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background: #059669; color: white; border: 1px solid #10B981; border-radius: 6px; padding: 5px;</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <!-- 4. Delete zone button -->
+   <item>
+    <widget class="QPushButton" name="btn_delete_zone">
+     <property name="text">
+      <string>❌ Xóa Vùng Đang Chọn</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; padding: 6px;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 5. Separator -->
+   <item>
+    <widget class="QFrame" name="separator_geofence">
+     <property name="frameShape">
+      <enum>QFrame::Shape::HLine</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Shadow::Sunken</enum>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background-color: #334155; max-height: 1px; margin: 5px 0;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 6. Save map button -->
+   <item>
+    <widget class="QPushButton" name="btn_save_map">
+     <property name="text">
+      <string>💾 Lưu Bản đồ (Save JSON)</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: #3B82F6; color: white; border: 1px solid #2563EB; border-radius: 8px; padding: 6px;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 7. Clear map button -->
+   <item>
+    <widget class="QPushButton" name="btn_clear_map">
+     <property name="text">
+      <string>🗑️ Xóa toàn bộ bản đồ</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 6px;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 8. Exit editor button -->
+   <item>
+    <widget class="QPushButton" name="btn_exit_editor">
+     <property name="text">
+      <string>🚪 Thoát Editor</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: #475569; color: white; border: 1px solid #64748B; border-radius: 8px; font-weight: bold; padding: 8px;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 9. 3D viewer button -->
+   <item>
+    <widget class="QPushButton" name="btn_view_3d">
+     <property name="text">
+      <string>🌌 Xem Bản đồ 3D</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: #06B6D4; color: white; border: 1px solid #0891B2; border-radius: 8px; font-weight: bold; padding: 8px;</string>
+     </property>
+    </widget>
+   </item>
+   <!-- 10. Vertical spacer -->
+   <item>
+    <spacer name="spacer_bottom">
+     <property name="orientation">
+      <enum>Qt::Orientation::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

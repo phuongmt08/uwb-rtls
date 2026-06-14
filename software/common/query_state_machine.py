@@ -16,11 +16,14 @@ import time
 import threading
 from typing import Callable, Any, Dict, List
 
+from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
+
 log = logging.getLogger(__name__)
 
 class QueryState:
     IDLE = "IDLE"
     PENDING = "PENDING"
+    RETRY_PENDING = "RETRY_PENDING"
     SENT = "SENT"
     WAITING = "WAITING"
     SUCCESS = "SUCCESS"
@@ -40,14 +43,15 @@ class QueryTransaction:
         self.sent_time = 0.0
         self.received_time = 0.0
         self.response_packet = None
+        self.seq = None
 
-class QueryQueueManager:
+class QueryQueueManager(QObject):
     """
     Manages a queue of query transactions. Sends queries sequentially,
     waits for the expected response, and retries on timeout.
     """
+    _send_next_requested = pyqtSignal()
     
-    # Map command builder name -> expected response packet parameter name
     RESPONSE_MAP = {
         "device_information_get": "device_information_resp",
         "battery_info_get": "battery_info_resp",
@@ -59,12 +63,18 @@ class QueryQueueManager:
         "pos_calib_cfg_get": "pos_calib_cfg_resp",
         "ble_status_get": "ble_status_resp",
         "ble_conn_params_get": "ble_conn_params_resp",
+        "ranging_status_get": "ranging_status_resp",
+        "calib_status_get": "calib_status_resp",
+        "rtos_resource_get": "rtos_resource_resp",
+        "rtos_task_stats_get": "rtos_task_stats_resp",
     }
 
     def __init__(self, send_packet_fn: Callable[[str, int, Dict[str, Any]], Any], 
                  timeout_s: float = 0.2, 
                  max_retries: int = 3, 
-                 on_complete_fn: Callable[[List[Dict[str, Any]]], None] | None = None):
+                 on_complete_fn: Callable[[List[Dict[str, Any]]], None] | None = None,
+                 response_map: Dict[str, str] | None = None,
+                 parent=None):
         """
         Args:
             send_packet_fn: Callback function to execute sending: fn(command_name, dst_addr, **kwargs)
@@ -72,20 +82,39 @@ class QueryQueueManager:
             max_retries: Maximum retries per command on timeout
             on_complete_fn: Callback function called when all queries finish
         """
+        super().__init__(parent)
         self.send_packet_fn = send_packet_fn
         self.timeout_s = timeout_s
         self.max_retries = max_retries
         self.on_complete_fn = on_complete_fn
+        self.response_map = dict(response_map or self._load_response_map())
         
         self.queue: List[QueryTransaction] = []
         self.current_transaction: QueryTransaction | None = None
-        self.lock = threading.Lock()
-        self.timer: threading.Timer | None = None
+        self.lock = threading.RLock()
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self._on_timeout)
+        self._send_next_requested.connect(self._send_next, Qt.ConnectionType.QueuedConnection)
         self.is_running = False
+
+    @classmethod
+    def _load_response_map(cls) -> Dict[str, str]:
+        try:
+            try:
+                from .commands import CommandCatalog
+            except ImportError:
+                from common.commands import CommandCatalog
+            mapped = CommandCatalog().query_response_map()
+            if mapped:
+                return mapped
+        except Exception as exc:
+            log.debug("Falling back to QueryQueueManager.RESPONSE_MAP: %s", exc)
+        return dict(cls.RESPONSE_MAP)
 
     def add_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
         """Add a query to the queue."""
-        expected_response = self.RESPONSE_MAP.get(command_name, "")
+        expected_response = self.response_map.get(command_name, "")
         if not expected_response:
             log.warning(f"No expected response mapped for command '{command_name}'. Defaulting to None.")
             
@@ -102,7 +131,7 @@ class QueryQueueManager:
             self.is_running = True
             
         log.info(f"Starting sequential query queue with {len(self.queue)} commands...")
-        self._send_next()
+        self._request_send_next()
 
     def handle_response(self, param_name: str, pkt: Any) -> bool:
         """
@@ -119,18 +148,20 @@ class QueryQueueManager:
                 tx.received_time = time.monotonic()
                 tx.response_packet = pkt
                 
-                # Cancel timeout timer
-                if self.timer:
-                    self.timer.cancel()
-                    self.timer = None
+                self.timer.stop()
                 
-                log.debug(f"Query SUCCESS: '{tx.command_name}' -> '{param_name}' (retries={tx.retries})")
+                seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else tx.seq
+                seq_str = f" seq={seq_val}" if seq_val is not None else ""
+                log.info(f"Query RX: '{param_name}' <- dst={tx.dst_addr}{seq_str} (success for '{tx.command_name}', attempt {tx.retries + 1})")
                 
-                # Send next query on a separate thread to avoid blocking call stack
-                threading.Thread(target=self._send_next, daemon=True).start()
+                self._request_send_next()
                 return True
                 
         return False
+
+    def _request_send_next(self) -> None:
+        """Schedule the next TX step on this QObject's Qt thread."""
+        self._send_next_requested.emit()
 
     def _send_next(self) -> None:
         """Sends the next pending query from the queue."""
@@ -138,16 +169,14 @@ class QueryQueueManager:
             if not self.is_running:
                 return
             
-            # Clean up old timer
-            if self.timer:
-                self.timer.cancel()
-                self.timer = None
+            self.timer.stop()
 
             # Get first pending/retry query
-            pending = [tx for tx in self.queue if tx.status in (QueryState.PENDING, "RETRY_PENDING")]
+            pending = [tx for tx in self.queue if tx.status in (QueryState.PENDING, QueryState.RETRY_PENDING)]
             if not pending:
                 # All queries processed
                 self.is_running = False
+                self.current_transaction = None
                 log.info("All queries in queue finished.")
                 if self.on_complete_fn:
                     # Construct results list
@@ -164,7 +193,7 @@ class QueryQueueManager:
                             "response_packet": tx.response_packet
                         })
                     # Call completion callback
-                    threading.Thread(target=self.on_complete_fn, args=(results,), daemon=True).start()
+                    self.on_complete_fn(results)
                 return
 
             tx = pending[0]
@@ -172,21 +201,30 @@ class QueryQueueManager:
             tx.status = QueryState.SENT
             tx.sent_time = time.monotonic()
 
-            log.info(f"Query TX: '{tx.command_name}' -> dst={tx.dst_addr} (attempt {tx.retries + 1})")
-            
             try:
-                self.send_packet_fn(tx.command_name, tx.dst_addr, **tx.kwargs)
+                sent_pkt = self.send_packet_fn(tx.command_name, tx.dst_addr, **tx.kwargs)
+                if sent_pkt is not None:
+                    if hasattr(sent_pkt, "hdr") and hasattr(sent_pkt.hdr, "seq"):
+                        tx.seq = sent_pkt.hdr.seq
+                    elif isinstance(sent_pkt, int):
+                        tx.seq = sent_pkt
             except Exception as e:
                 log.error(f"Failed to send query packet: {e}")
                 tx.status = QueryState.FAILED
                 # Attempt to move to next
-                threading.Thread(target=self._send_next, daemon=True).start()
+                self._request_send_next()
                 return
 
-            # Start timeout timer
-            self.timer = threading.Timer(self.timeout_s, self._on_timeout)
-            self.timer.daemon = True
-            self.timer.start()
+            seq_str = f" seq={tx.seq}" if tx.seq is not None else ""
+            log.info(f"Query TX: '{tx.command_name}' -> dst={tx.dst_addr}{seq_str} (attempt {tx.retries + 1})")
+
+            if not tx.expected_response:
+                tx.status = QueryState.SUCCESS
+                tx.received_time = time.monotonic()
+                self._request_send_next()
+                return
+
+            self.timer.start(max(1, int(self.timeout_s * 1000)))
 
     def _on_timeout(self) -> None:
         """Handles timeout event for current query."""
@@ -197,10 +235,10 @@ class QueryQueueManager:
             tx = self.current_transaction
             if tx.retries < self.max_retries:
                 tx.retries += 1
-                tx.status = "RETRY_PENDING"
+                tx.status = QueryState.RETRY_PENDING
                 log.warning(f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. Retrying ({tx.retries}/{self.max_retries})...")
             else:
                 tx.status = QueryState.TIMEOUT
                 log.error(f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. Failed after {self.max_retries} retries.")
             
-        self._send_next()
+        self._request_send_next()

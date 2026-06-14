@@ -105,6 +105,8 @@ class SharedAppState(QObject):
     sys_ranging_cfg_changed = pyqtSignal(dict)     # Rx timeout, ranging period
     sensor_fusion_cfg_changed = pyqtSignal(dict)   # alpha, kappa, noise covariances...
     pos_calib_cfg_changed = pyqtSignal(dict)       # Auto calibration parameters
+    rtos_resource_changed = pyqtSignal(dict)       # CPU, heap, stack, task count, health flags
+    rtos_task_stats_changed = pyqtSignal(list)     # Per-task CPU and stack snapshots
 
     # Job State Machine signal
     # Params: job_name, status, progress (0-100), retries, error_msg
@@ -128,6 +130,7 @@ class SharedAppState(QObject):
         self._battery_info: Dict[str, Any] = {}
         self._ble_status: Dict[str, Any] = {}
         self._ranging_active = False
+        self.current_session_id = ""
         self._ranging_stats: Dict[str, Any] = {}
         self._calib_status: Dict[str, Any] = {}
         self._anchor_layout: List[Dict[str, Any]] = []
@@ -135,6 +138,8 @@ class SharedAppState(QObject):
         self._sys_ranging_cfg: Dict[str, Any] = {}
         self._sensor_fusion_cfg: Dict[str, Any] = {}
         self._pos_calib_cfg: Dict[str, Any] = {}
+        self._rtos_resource: Dict[str, Any] = {}
+        self._rtos_task_stats: List[Dict[str, Any]] = []
 
         # Job State Machine storage
         self._jobs: Dict[str, Dict[str, Any]] = {}
@@ -187,6 +192,12 @@ class SharedAppState(QObject):
     def ranging_active(self, val: bool) -> None:
         if self._ranging_active != val:
             self._ranging_active = val
+            if val:
+                import datetime
+                timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.current_session_id = f"SES_{timestamp_str}_ranging"
+            else:
+                self.current_session_id = ""
             self.ranging_active_changed.emit(val)
 
     @property
@@ -251,6 +262,24 @@ class SharedAppState(QObject):
     def pos_calib_cfg(self, val: Dict[str, Any]) -> None:
         self._pos_calib_cfg = val.copy()
         self.pos_calib_cfg_changed.emit(self._pos_calib_cfg)
+
+    @property
+    def rtos_resource(self) -> Dict[str, Any]:
+        return self._rtos_resource.copy()
+
+    @rtos_resource.setter
+    def rtos_resource(self, val: Dict[str, Any]) -> None:
+        self._rtos_resource = val.copy()
+        self.rtos_resource_changed.emit(self._rtos_resource)
+
+    @property
+    def rtos_task_stats(self) -> List[Dict[str, Any]]:
+        return [item.copy() for item in self._rtos_task_stats]
+
+    @rtos_task_stats.setter
+    def rtos_task_stats(self, val: List[Dict[str, Any]]) -> None:
+        self._rtos_task_stats = [item.copy() for item in val]
+        self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
     # ── Global Query Queue Management (Retry/Timeout logic) ─────────
 

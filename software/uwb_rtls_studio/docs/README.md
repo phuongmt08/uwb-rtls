@@ -1,3 +1,193 @@
+# UWB RTLS Studio
+
+Desktop app theo dõi và debug hệ thống UWB RTLS. App dùng **PyQt6**, kiến trúc
+**MVVM + Repository**, giao tiếp firmware qua **HDLC + Protobuf**.
+
+## Mục Tiêu Kiến Trúc
+
+Project này phục vụ firmware/hardware workflow, nên code software chỉ giữ mức
+cần thiết để dễ debug, dễ mở rộng command/API, và không over-engineering.
+
+Nguyên tắc chính:
+
+- Một dongle/COM port là nguồn giao tiếp duy nhất.
+- Mọi command đi qua một command path chung.
+- Mọi packet từ firmware đi vào packet repository chung trước khi phân phối.
+- UI không parse protobuf và không truy cập raw packet trực tiếp.
+- View chỉ hiển thị UI và phát trigger.
+
+## Layer Ownership
+
+```text
+View
+  UI widgets, user trigger, dialog confirm, table/chart rendering.
+
+ViewModel
+  Nhận trigger từ View, validate command/API, gọi Model/CommandBus,
+  format dữ liệu cho View, emit Qt signals.
+
+Model
+  Business/domain logic: connection state, session lifecycle state,
+  ranging state, calculations, buffer domain data.
+
+Repository
+  Nhận decoded protobuf packet, parse thành dict/domain data,
+  cache dữ liệu dùng chung, lưu/load session history.
+
+Data
+  RawPacket, RawPacketStore, raw byte/file-based session data.
+
+Service/Common
+  Serial I/O, HDLC framing, protobuf encode/decode, command builder,
+  command queue/cache/dedupe.
+```
+
+## Data Flow Từ Firmware Lên UI
+
+```text
+MCU/BLE peripheral
+  -> Dongle
+  -> SerialService.read()
+  -> ProtocolService.decode_from_frames()
+  -> ProtocolPacketRepository.handle_packet()
+  -> RawPacketStore + domain repositories
+  -> Model/ViewModel signals
+  -> View update UI
+```
+
+Ví dụ `ranging_result`:
+
+```text
+protocol.proto:ranging_result
+  -> ProtocolService decode
+  -> ProtocolPacketRepository
+  -> RangingRepository parse position/anchors
+  -> RangingModel update history/stats
+  -> LiveTrackingViewModel emit position_updated
+  -> LiveTrackingTab/PositionCanvas render
+```
+
+Ví dụ `log_data`:
+
+```text
+protocol.proto:log_data
+  -> ProtocolPacketRepository
+  -> LogRepository parse firmware log records
+  -> LogViewModel append live log/session log
+  -> LogTab stream live log
+  -> End Session saves logs.csv + logs.txt
+```
+
+## Command Flow Từ UI Xuống Firmware
+
+```text
+View button/action
+  -> ViewModel method
+  -> Model or CommandBus
+  -> common.commands builder
+  -> ProtocolService.wrap_packet()
+  -> SerialService.write()
+  -> Dongle/Device
+```
+
+View không gọi `ProtocolService.send_command()` trực tiếp.
+
+## Shared State
+
+`utils/app_state.py` là shared memory nhẹ cho app:
+
+- shared config: anchor layout, sys config, ranging config.
+- shared telemetry: battery, BLE status, RTOS diagnostics.
+- shared job state: query queue, ranging session.
+- thread registry: detect/read worker ownership.
+
+Shared state không thay thế MVVM. View không nên đọc trực tiếp shared state.
+ViewModel/Model/Repository đọc hoặc cập nhật shared state rồi emit signal cho UI.
+
+## Repository Hiện Có
+
+- `ProtocolPacketRepository`: entry point cho mọi decoded protobuf packet.
+- `TelemetryRepository`: battery/telemetry packets.
+- `BleScanRepository`: BLE scan result và advertising status.
+- `RangingRepository`: ranging result/status và anchor layout.
+- `ConfigRepository`: sys config, ranging config, sensor fusion, pos calib.
+- `DiagnosticsRepository`: calibration status, RTOS resource/task stats.
+- `LogRepository`: firmware log_data parsing và live/session log cache.
+- `SessionRepository`: save/load session metadata, positions, logs, config snapshot.
+- `SessionBrowser`: API browse/filter/open/delete session history.
+
+## Thread Ownership
+
+- UI thread: PyQt6 widgets, ViewModels, Models, repository signal handling.
+- `SerialService`: owns the runtime serial port and read loop.
+- `DongleDetectWorker`: temporary worker for probing COM ports before runtime open.
+- Query queue: centralized in `SharedAppState`/`QueryQueueManager`.
+
+Rule quan trọng: không mở nhiều serial owner cho cùng một COM port.
+
+## Session History
+
+Khi user bấm End Session:
+
+1. `MainWindow` chỉ hỏi confirm.
+2. `MainViewModel.end_session()` điều phối flow.
+3. ViewModel gom positions/logs/config/device info từ domain layer.
+4. `SessionRepository.save_session()` lưu:
+   - `session_meta.json`
+   - `positions.csv` nếu có ranging
+   - `logs.csv` và `logs.txt` nếu có log
+   - `config_snapshot.json` nếu có config
+   - metadata vao `session_meta.json` va `data/sessions/index.json`
+5. `LogViewModel.refresh_sessions()` cập nhật tab history.
+
+## MVVM Rules
+
+| Rule | Đúng |
+| --- | --- |
+| View -> ViewModel | View gọi method khi user thao tác |
+| ViewModel -> View | ViewModel emit signal, View render |
+| ViewModel -> CommandBus/Model | ViewModel validate và gọi command/domain API |
+| Model -> Repository/Data | Model dùng data đã parse hoặc domain repository |
+| Repository -> Data | Repository đọc/lưu raw/domain/session data |
+
+| Anti-pattern | Tránh |
+| --- | --- |
+| View đọc `shared_app_state` trực tiếp | Đưa qua ViewModel signal |
+| View tự gọi `SessionRepository` | Đưa qua MainViewModel/SessionRepository |
+| ViewModel giữ `_protocol` private của Model | Dùng CommandBus hoặc Model public API |
+| Nhiều Model cùng parse một packet | Parse tập trung ở Repository |
+| Command gửi rải rác ở nhiều tab | Đi qua CommandBus/query queue |
+
+## PyQt6
+
+`uwb_rtls_studio` dùng PyQt6:
+
+- signal: `pyqtSignal`
+- widgets/core/gui: `PyQt6.QtWidgets`, `PyQt6.QtCore`, `PyQt6.QtGui`
+- UI load: `PyQt6.uic.loadUi`
+
+Không dùng PySide6 trong `uwb_rtls_studio`.
+
+## Development Checklist
+
+Khi thêm API mới từ `protocol.proto`:
+
+1. Thêm command builder trong `software/common/commands.py` nếu là command TX.
+2. Đảm bảo expected response trong query/command state machine nếu cần.
+3. Thêm parse route trong repository phù hợp.
+4. Repository emit signal hoặc cập nhật shared state/domain cache.
+5. Model xử lý logic nghiệp vụ nếu cần.
+6. ViewModel expose method/signal cho UI.
+7. View chỉ bind signal và trigger method.
+
+## Known Refactor Direction
+
+Các phần đã đi đúng hướng nhưng còn có thể làm sạch tiếp:
+
+- Giảm dần packet parsing còn lại trong `DeviceModel`.
+- Cho `ScanModel` dùng hoàn toàn `BleScanRepository` thay vì fallback parse trực tiếp.
+- Đưa các write/update shared state tạm thời trong ViewModel về Model khi domain logic lớn hơn.
+- Chuẩn hóa session start time thay vì dùng end time làm start time khi session chưa có tracker riêng.
 # 🔵 UWB RTLS Studio
 
 > Desktop monitoring dashboard cho hệ thống UWB RTLS (Ultra-Wideband Real-Time Location System).  

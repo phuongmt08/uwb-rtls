@@ -190,9 +190,9 @@ QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
        <property name="styleSheet">
         <string notr="true">QTabWidget { background-color: #0F172A; }
 QTabWidget::pane { border: none; background: #0F172A; }
-QTabBar { background-color: #1E293B; border-bottom: 1px solid #334155; }
-QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px 18px; margin: 2px 0px; font-weight: bold; min-width: 120px; }
-QTabBar::tab:selected { background: #0F172A; color: #22D3EE; border: 1.5px solid #22D3EE; }
+QTabBar { background-color: transparent; }
+QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px 18px; margin-right: 4px; font-weight: bold; min-width: 120px; }
+QTabBar::tab:selected { background: #0F172A; color: #22D3EE; border: 1.5px solid #22D3EE; border-bottom-color: #0F172A; }
 QTabBar::tab:hover:!selected { background: #253346; color: #F8FAFC; border-color: #475569; }</string>
        </property>
       <property name="currentIndex">

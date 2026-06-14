@@ -1,46 +1,88 @@
 """
-===============================================================================
-  UWB RTLS Studio — Log Model
-===============================================================================
-  File        : models/log_model.py
-  Description : Data model cho log entries.
-                Gồm 2 loại: Device Log (từ firmware gửi lên) và
-                Application Log (app tự tạo cho debug).
+Log domain model.
 
-  MVVM Role   : MODEL — chỉ chứa data + ring buffer.
-
-  Dữ liệu được quản lý:
-    - Device logs: nhận từ firmware qua log_data_t
-    - App logs: tạo bởi app cho debug (INFO, WARN, ERROR, DEBUG)
-    - Log buffer: giới hạn N entries để không tràn memory
-    - Export-ready data: để save ra .csv/.txt
-
-  Được sử dụng bởi:
-    - LogViewModel        → append logs, filter, search
-    - LogTabView          → hiển thị log entries
-    - StatusBarView       → hiển thị error/warning count
-
-  Protocol Messages liên quan:
-    - log_data_t       (tag=37)  → Device log data
-    - log_clear_t      (tag=38)  → Xóa log trên device
-
-  Data fields:
-    @dataclass
-    class LogEntry:
-        timestamp: float            # time.time()
-        level: str                  # "INFO" / "WARN" / "ERROR" / "DEBUG"
-        source: str                 # "DEVICE" / "APP" / "PROTOCOL"
-        message: str                # Nội dung log
-        raw_data: bytes | None      # Raw bytes (chỉ cho device log)
-
-    @dataclass
-    class LogState:
-        entries: list[LogEntry]     # Tất cả log entries
-        max_entries: int = 5000     # Giới hạn buffer
-        unread_error_count: int     # Số error chưa xem
-        unread_warn_count: int      # Số warning chưa xem
-        filter_level: str           # Current filter ("ALL"/"ERROR"/...)
-        search_query: str           # Current search string
-===============================================================================
+The repository parses incoming log payloads. This model owns the application
+state and business decisions around logs: buffering, clearing, app-generated
+entries, and acknowledging received firmware log segments.
 """
-pass
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+
+from PyQt6.QtCore import QObject, pyqtSignal
+
+from common.transport import VvAddress
+
+log = logging.getLogger(__name__)
+
+
+class LogModel(QObject):
+    log_entry_added = pyqtSignal(dict)
+    log_segment_received = pyqtSignal(dict)
+
+    def __init__(self, log_repository=None, command_bus=None, parent=None):
+        super().__init__(parent)
+        self._log_repository = log_repository
+        self._command_bus = command_bus
+        self._live_logs: list[dict] = []
+        self._session_logs: list[dict] = []
+
+        if self._log_repository:
+            self._log_repository.log_entry_added.connect(self._on_repository_log_entry)
+            self._log_repository.log_segment_received.connect(self._on_log_segment_received)
+
+    @property
+    def live_logs(self) -> list[dict]:
+        return [entry.copy() for entry in self._live_logs]
+
+    @property
+    def session_logs(self) -> list[dict]:
+        return [entry.copy() for entry in self._session_logs]
+
+    def clear_session_logs(self) -> None:
+        self._session_logs.clear()
+
+    def clear_live_logs(self) -> None:
+        self._live_logs.clear()
+
+    def add_live_log(self, timestamp: str, level: str, source: str, message: str) -> dict:
+        entry = {
+            "timestamp": timestamp or datetime.now().strftime("%H:%M:%S"),
+            "level": level or "INFO",
+            "source": source or "APP",
+            "message": message or "",
+        }
+        self._append_entry(entry)
+        return entry
+
+    def acknowledge_log_segment(self, segment_info: dict) -> bool:
+        if not self._command_bus or segment_info.get("length", 0) <= 0:
+            return False
+
+        try:
+            return bool(
+                self._command_bus.send(
+                    "log_clear",
+                    dst_addr=VvAddress.MCU,
+                    log_type=segment_info["log_type"],
+                    offset=segment_info["offset"],
+                    length=segment_info["length"],
+                )
+            )
+        except Exception as exc:
+            log.warning("Failed to send log_clear for segment %s: %s", segment_info, exc)
+            return False
+
+    def _on_repository_log_entry(self, entry: dict) -> None:
+        self._append_entry(entry)
+
+    def _on_log_segment_received(self, segment_info: dict) -> None:
+        self.log_segment_received.emit(segment_info)
+        self.acknowledge_log_segment(segment_info)
+
+    def _append_entry(self, entry: dict) -> None:
+        safe_entry = dict(entry or {})
+        self._live_logs.append(safe_entry)
+        self._session_logs.append(safe_entry.copy())
+        self.log_entry_added.emit(safe_entry.copy())

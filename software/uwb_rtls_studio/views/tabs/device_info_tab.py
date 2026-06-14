@@ -144,6 +144,10 @@ class DeviceInfoTab(QWidget):
         if sup_timeout is not None:
             self._ble_values["Sup. Timeout:"].setText(f"{sup_timeout} ms")
 
+        phy = info.get("phy")
+        if phy is not None:
+            self._ble_values["PHY:"].setText(str(phy))
+
     def _on_telemetry_updated(self, data: dict):
         pct = data.get("bat_soc_percent", 0)
         self._bat_pct.setText(f"{pct}%")

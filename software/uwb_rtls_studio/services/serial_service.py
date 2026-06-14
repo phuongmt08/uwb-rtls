@@ -98,6 +98,11 @@ class SerialService(QObject):
             daemon=True,
         )
         self._reader_thread.start()
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.threads.register("SerialReader", self._reader_thread)
+        except Exception as exc:
+            log.debug("Could not register SerialReader thread: %s", exc)
 
     def write(self, data: bytes) -> None:
         """Ghi data xuống serial. Thread-safe with lock."""
@@ -116,6 +121,11 @@ class SerialService(QObject):
         if self._reader_thread and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=2.0)
             self._reader_thread = None
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.threads.unregister("SerialReader")
+        except Exception as exc:
+            log.debug("Could not unregister SerialReader thread: %s", exc)
         if self._serial and self._serial.is_open:
             try:
                 self._serial.close()

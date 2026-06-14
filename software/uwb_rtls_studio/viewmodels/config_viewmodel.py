@@ -121,7 +121,6 @@
 """
 import logging
 from PyQt6.QtCore import QObject, pyqtSignal
-from common.transport import VvAddress
 
 log = logging.getLogger(__name__)
 
@@ -134,51 +133,91 @@ class ConfigViewModel(QObject):
     sensor_fusion_cfg_updated = pyqtSignal(dict)
     pos_calib_cfg_updated = pyqtSignal(dict)
 
-    def __init__(self, device_model, ranging_model, parent=None):
+    def __init__(self, device_model, ranging_model, command_bus=None, parent=None):
         super().__init__(parent)
         self.model = device_model
         self.ranging_model = ranging_model
-        self.protocol = device_model._protocol
 
         # Bind Model parsed signals to ViewModel update signals
-        self.ranging_model.anchor_layout_updated.connect(self.anchor_layout_updated.emit)
-        self.model.sys_config_parsed.connect(self.sys_config_updated.emit)
-        self.model.sys_ranging_cfg_parsed.connect(self.sys_ranging_cfg_updated.emit)
-        self.model.sensor_fusion_cfg_parsed.connect(self.sensor_fusion_cfg_updated.emit)
-        self.model.pos_calib_cfg_parsed.connect(self.pos_calib_cfg_updated.emit)
+        from utils.app_state import shared_app_state
+        self._shared_app_state = shared_app_state
+        shared_app_state.anchor_layout_changed.connect(self.anchor_layout_updated.emit)
+        shared_app_state.sys_config_changed.connect(self.sys_config_updated.emit)
+        shared_app_state.sys_ranging_cfg_changed.connect(self.sys_ranging_cfg_updated.emit)
+        shared_app_state.sensor_fusion_cfg_changed.connect(self.sensor_fusion_cfg_updated.emit)
+        shared_app_state.pos_calib_cfg_changed.connect(self.pos_calib_cfg_updated.emit)
+
+    def update_shared_anchor_layout(self, anchors: list):
+        self._shared_app_state.anchor_layout = anchors
+
+    def emit_current_state(self):
+        """Emit cached config values so the View can render without touching app state."""
+        if self._shared_app_state.anchor_layout:
+            self.anchor_layout_updated.emit(self._shared_app_state.anchor_layout)
+        if self._shared_app_state.sys_ranging_cfg:
+            self.sys_ranging_cfg_updated.emit(self._shared_app_state.sys_ranging_cfg)
+        if self._shared_app_state.sys_config:
+            self.sys_config_updated.emit(self._shared_app_state.sys_config)
+        if self._shared_app_state.sensor_fusion_cfg:
+            self.sensor_fusion_cfg_updated.emit(self._shared_app_state.sensor_fusion_cfg)
+        if self._shared_app_state.pos_calib_cfg:
+            self.pos_calib_cfg_updated.emit(self._shared_app_state.pos_calib_cfg)
 
     # ── Command Triggers (called by View) ───────────────────────────
 
     def read_anchor_layout(self):
         log.info("Requesting anchor layout from MCU via global query queue...")
-        from utils.app_state import shared_app_state
-        shared_app_state.enqueue_query("anchor_layout_get", dst_addr=VvAddress.MCU)
+        self.model.request_anchor_layout()
 
     def write_anchor_layout(self, anchors: list):
         log.info("Sending anchor layout set command to MCU: %s", anchors)
-        self.protocol.send_command("anchor_layout_set", dst_addr=VvAddress.MCU, anchors=anchors)
+        self.ranging_model.set_anchor_layout(anchors)
+        self.model.set_anchor_layout(anchors)
 
     def read_ranging_config(self):
         log.info("Requesting system ranging config from MCU via global query queue...")
-        from utils.app_state import shared_app_state
-        shared_app_state.enqueue_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
+        self.model.request_ranging_config()
 
     def write_ranging_config(self, period_ms: int, timeout_ms: int):
         log.info("Sending ranging config set command to MCU: period=%d ms, timeout=%d ms", period_ms, timeout_ms)
-        self.protocol.send_command("sys_ranging_cfg_set", dst_addr=VvAddress.MCU, period_ms=period_ms, timeout_ms=timeout_ms)
+        self.model.set_ranging_config(period_ms=period_ms, timeout_ms=timeout_ms)
+
+    def read_sys_config(self):
+        log.info("Requesting system configuration from MCU via global query queue...")
+        self.model.request_sys_config()
+
+    def write_sys_config(self, **kwargs):
+        log.info("Sending sys config set command to MCU: %s", kwargs)
+        self.model.set_sys_config(**kwargs)
+
+    def read_sensor_fusion_config(self):
+        log.info("Requesting sensor fusion configuration from MCU via global query queue...")
+        self.model.request_sensor_fusion_config()
+
+    def write_sensor_fusion_config(self, **kwargs):
+        log.info("Sending sensor fusion config set command to MCU: %s", kwargs)
+        self.model.set_sensor_fusion_config(**kwargs)
+
+    def read_pos_calib_config(self):
+        log.info("Requesting position calibration configuration from MCU via global query queue...")
+        self.model.request_pos_calib_config()
+
+    def write_pos_calib_config(self, **kwargs):
+        log.info("Sending position calibration config set command to MCU: %s", kwargs)
+        self.model.set_pos_calib_config(**kwargs)
 
     def device_reset(self):
         log.warning("Sending device_reset command to MCU...")
-        self.protocol.send_command("device_reset", dst_addr=VvAddress.MCU)
+        self.model.request_device_reset()
 
     def uwb_reset(self):
         log.warning("Sending uwb_reset command to MCU...")
-        self.protocol.send_command("uwb_reset", dst_addr=VvAddress.MCU)
+        self.model.request_uwb_reset()
 
     def factory_reset(self):
         log.warning("Sending factory_config_reset command to MCU...")
-        self.protocol.send_command("factory_config_reset", dst_addr=VvAddress.MCU)
+        self.model.request_factory_config_reset()
 
     def enter_bootloader(self):
         log.warning("Sending enter_to_bootloader command to MCU...")
-        self.protocol.send_command("enter_to_bootloader", dst_addr=VvAddress.MCU)
+        self.model.request_enter_bootloader()

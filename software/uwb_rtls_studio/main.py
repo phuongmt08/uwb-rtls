@@ -37,12 +37,15 @@ from PyQt6.QtGui import QFont
 from utils.logging_config import setup_logging
 setup_logging()
 
-
 def main():
     # High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
     app = QApplication(sys.argv)
+
+    # Apply global stylesheet (dark theme & custom scrollbars)
+    from utils.theme import DARK_STYLESHEET
+    app.setStyleSheet(DARK_STYLESHEET)
 
     # Apply global font
     font = QFont("Segoe UI", 13)
@@ -57,14 +60,37 @@ def main():
     serial_service = SerialService()
     protocol_service = ProtocolService(serial_service)
 
+    from repository.telemetry_repository import TelemetryRepository
+    from repository.ble_scan_repository import BleScanRepository
+    from repository.ranging_repository import RangingRepository
+    from repository.config_repository import ConfigRepository
+    from repository.diagnostics_repository import DiagnosticsRepository
+    from repository.log_repository import LogRepository
+    from repository.protocol_packet_repository import ProtocolPacketRepository
+    from services.command_bus import init_shared_command_bus
+
+    telemetry_repo = TelemetryRepository()
+    ble_scan_repo = BleScanRepository()
+    ranging_repo = RangingRepository()
+    config_repo = ConfigRepository()
+    diagnostics_repo = DiagnosticsRepository()
+    log_repo = LogRepository()
+    packet_repo = ProtocolPacketRepository(
+        ranging_repo,
+        telemetry_repo,
+        ble_scan_repo,
+        config_repo,
+        diagnostics_repo,
+        log_repo,
+    )
+    protocol_service.set_packet_repository(packet_repo)
+    command_bus = init_shared_command_bus(protocol_service)
+
     # Initialize global query manager in shared app state
     from utils.app_state import shared_app_state
     shared_app_state.init_query_manager(
         send_packet_fn=lambda cmd, dst, **kwargs: protocol_service.send_command(cmd, dst_addr=dst, **kwargs)
     )
-    # Register the SerialService background reader thread in the registry
-    if hasattr(serial_service, "_reader_thread") and serial_service._reader_thread:
-        shared_app_state.threads.register("SerialReader", serial_service._reader_thread)
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 2 & 3: Connection Flow
@@ -79,8 +105,9 @@ def main():
     dongle_model = DongleModel(serial_service, protocol_service)
     dongle_vm = DongleViewModel(dongle_model)
 
-    # Macro to bypass the connection flow popups (set to True to go straight to MainWindow)
-    BYPASS_POPUPS = 1
+    # Development-only bypass. Default production flow shows dongle/scan popups. Macro ON/OFF popups
+    # Set env var UWB_RTLS_BYPASS_POPUPS = 1 to skip straight to main window with mock device.
+    BYPASS_POPUPS = os.getenv("UWB_RTLS_BYPASS_POPUPS", "1").strip().lower() in {"1", "true", "yes", "on"}
 
     # Vòng lặp cho Connection Flow
     connected_name = ""
@@ -93,7 +120,7 @@ def main():
                 sys.exit(0)
 
             # Dongle ok -> Scan popup
-            scan_model = ScanModel(protocol_service, serial_service)
+            scan_model = ScanModel(protocol_service, serial_service, command_bus=command_bus)
             scan_vm = ScanViewModel(scan_model)
             scan_popup = ScanPopup(scan_vm)
 
@@ -130,15 +157,40 @@ def main():
     from models.device_model import DeviceModel
     from viewmodels.live_tracking_viewmodel import LiveTrackingViewModel
     from viewmodels.device_info_viewmodel import DeviceInfoViewModel
-
-    ranging_model = RangingModel(protocol_service)
-    live_tracking_vm = LiveTrackingViewModel(ranging_model, protocol_service)
-    
-    device_model = DeviceModel(protocol_service)
-    device_info_vm = DeviceInfoViewModel(device_model, dongle_model)
-    
+    from repository.session_repository import SessionRepository
+    from repository.session_browser import SessionBrowser
+    from models.log_model import LogModel
+    from viewmodels.log_viewmodel import LogViewModel
     from viewmodels.config_viewmodel import ConfigViewModel
-    config_vm = ConfigViewModel(device_model, ranging_model)
+    from viewmodels.main_viewmodel import MainViewModel
+    
+    session_repo = SessionRepository()
+    session_browser = SessionBrowser(session_repo)
+    log_model = LogModel(log_repository=log_repo, command_bus=command_bus)
+    log_vm = LogViewModel(session_browser, log_model=log_model)
+
+    ranging_model = RangingModel(protocol_service, ranging_repo=ranging_repo, command_bus=command_bus)
+    live_tracking_vm = LiveTrackingViewModel(
+        ranging_model,
+        protocol_service,
+        ranging_repo=ranging_repo,
+        command_bus=command_bus,
+    )
+    
+    device_model = DeviceModel(
+        protocol_service,
+        telemetry_repo=telemetry_repo,
+        ble_scan_repo=ble_scan_repo,
+        command_bus=command_bus,
+    )
+    device_info_vm = DeviceInfoViewModel(device_model, dongle_model, telemetry_repo=telemetry_repo, ble_scan_repo=ble_scan_repo)
+    config_vm = ConfigViewModel(device_model, ranging_model, command_bus=command_bus)
+    main_vm = MainViewModel(
+        live_tracking_vm=live_tracking_vm,
+        device_info_vm=device_info_vm,
+        log_vm=log_vm,
+        session_repository=session_repo,
+    )
 
     # Seed the connected device info so the tab shows it immediately
     if connected_name and connected_mac:
@@ -149,9 +201,17 @@ def main():
         device_info_vm=device_info_vm,
         config_vm=config_vm,
         dongle_vm=dongle_vm,
+        log_vm=log_vm,
+        main_vm=main_vm,
         serial_service=serial_service
     )
     window.show()
+
+    # Initialize device data after UI is fully ready
+    # QTimer.singleShot(0) defers to the next event loop iteration,
+    # ensuring all Qt signals are wired before we request telemetry.
+    from PyQt6.QtCore import QTimer
+    QTimer.singleShot(0, device_info_vm.initialize)
 
     exit_code = app.exec()
 

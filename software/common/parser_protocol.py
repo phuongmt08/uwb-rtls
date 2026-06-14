@@ -19,22 +19,22 @@ class VvProtocol(_VvProtocol):
         return self._commands.device_information_resp(src, dst, seq)
     def build_time_sync_get(self, src: int, dst: int, seq: int):
         return self._commands.time_sync_get(src, dst, seq)
-    def build_time_sync_set(self, src: int, dst: int, seq: int):
-        return self._commands.time_sync_set(src, dst, seq)
+    def build_time_sync_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.time_sync_set(src, dst, seq, **kwargs)
     def build_time_sync_resp(self, src: int, dst: int, seq: int):
         return self._commands.time_sync_resp(src, dst, seq)
-    def build_time_sync_adv_set(self, src: int, dst: int, seq: int):
-        return self._commands.time_sync_adv_set(src, dst, seq)
+    def build_time_sync_adv_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.time_sync_adv_set(src, dst, seq, **kwargs)
     def build_sys_config_get(self, src: int, dst: int, seq: int):
         return self._commands.sys_config_get(src, dst, seq)
-    def build_sys_config_set(self, src: int, dst: int, seq: int):
-        return self._commands.sys_config_set(src, dst, seq)
+    def build_sys_config_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.sys_config_set(src, dst, seq, **kwargs)
     def build_sys_config_resp(self, src: int, dst: int, seq: int):
         return self._commands.sys_config_resp(src, dst, seq)
     def build_sys_ranging_cfg_get(self, src: int, dst: int, seq: int):
         return self._commands.sys_ranging_cfg_get(src, dst, seq)
-    def build_sys_ranging_cfg_set(self, src: int, dst: int, seq: int):
-        return self._commands.sys_ranging_cfg_set(src, dst, seq)
+    def build_sys_ranging_cfg_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.sys_ranging_cfg_set(src, dst, seq, **kwargs)
     def build_sys_ranging_cfg_resp(self, src: int, dst: int, seq: int):
         return self._commands.sys_ranging_cfg_resp(src, dst, seq)
     def build_ranging_start(self, src: int, dst: int, seq: int):
@@ -49,8 +49,8 @@ class VvProtocol(_VvProtocol):
         return self._commands.ranging_status_resp(src, dst, seq)
     def build_sensor_fusion_cfg_get(self, src: int, dst: int, seq: int):
         return self._commands.sensor_fusion_cfg_get(src, dst, seq)
-    def build_sensor_fusion_cfg_set(self, src: int, dst: int, seq: int):
-        return self._commands.sensor_fusion_cfg_set(src, dst, seq)
+    def build_sensor_fusion_cfg_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.sensor_fusion_cfg_set(src, dst, seq, **kwargs)
     def build_sensor_fusion_cfg_resp(self, src: int, dst: int, seq: int):
         return self._commands.sensor_fusion_cfg_resp(src, dst, seq)
     def build_device_reset(self, src: int, dst: int, seq: int):
@@ -89,8 +89,8 @@ class VvProtocol(_VvProtocol):
         return pkt
     def build_pos_calib_cfg_get(self, src: int, dst: int, seq: int):
         return self._commands.pos_calib_cfg_get(src, dst, seq)
-    def build_pos_calib_cfg_set(self, src: int, dst: int, seq: int):
-        return self._commands.pos_calib_cfg_set(src, dst, seq)
+    def build_pos_calib_cfg_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.pos_calib_cfg_set(src, dst, seq, **kwargs)
     def build_pos_calib_cfg_resp(self, src: int, dst: int, seq: int):
         return self._commands.pos_calib_cfg_resp(src, dst, seq)
     def build_anchor_layout_get(self, src: int, dst: int, seq: int):
@@ -103,18 +103,18 @@ class VvProtocol(_VvProtocol):
         return self._commands.flash_verify(src, dst, seq)
     def build_ble_conn_params_get(self, src: int, dst: int, seq: int):
         return self._commands.ble_conn_params_get(src, dst, seq)
-    def build_ble_conn_params_set(self, src: int, dst: int, seq: int):
-        return self._commands.ble_conn_params_set(src, dst, seq)
+    def build_ble_conn_params_set(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.ble_conn_params_set(src, dst, seq, **kwargs)
     def build_ble_conn_params_resp(self, src: int, dst: int, seq: int):
         return self._commands.ble_conn_params_resp(src, dst, seq)
-    def build_ble_disconnect(self, src: int, dst: int, seq: int):
-        return self._commands.ble_disconnect(src, dst, seq)
-    def build_ble_scan_start(self, src: int, dst: int, seq: int):
-        return self._commands.ble_scan_start(src, dst, seq)
+    def build_ble_disconnect(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.ble_disconnect(src, dst, seq, **kwargs)
+    def build_ble_scan_start(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.ble_scan_start(src, dst, seq, **kwargs)
     def build_ble_scan_stop(self, src: int, dst: int, seq: int):
         return self._commands.ble_scan_stop(src, dst, seq)
-    def build_ble_connect(self, src: int, dst: int, seq: int):
-        return self._commands.ble_connect(src, dst, seq)
+    def build_ble_connect(self, src: int, dst: int, seq: int, **kwargs):
+        return self._commands.ble_connect(src, dst, seq, **kwargs)
     def build_ble_scan_result(self, src: int, dst: int, seq: int):
         return self._commands.ble_scan_result(src, dst, seq)
     def build_fota_state_resp(self, src: int, dst: int, seq: int):
@@ -137,3 +137,11 @@ class VvProtocol(_VvProtocol):
         return self._commands.imu_reset(src, dst, seq)
     def build_imu_calib_start(self, src: int, dst: int, seq: int):
         return self._commands.imu_calib_start(src, dst, seq)
+    def build_rtos_resource_get(self, src: int, dst: int, seq: int):
+        return self._commands.rtos_resource_get(src, dst, seq)
+    def build_rtos_resource_resp(self, src: int, dst: int, seq: int):
+        return self._commands.rtos_resource_resp(src, dst, seq)
+    def build_rtos_task_stats_get(self, src: int, dst: int, seq: int):
+        return self._commands.rtos_task_stats_get(src, dst, seq)
+    def build_rtos_task_stats_resp(self, src: int, dst: int, seq: int):
+        return self._commands.rtos_task_stats_resp(src, dst, seq)

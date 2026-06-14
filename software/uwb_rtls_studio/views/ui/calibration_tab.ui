@@ -12,6 +12,41 @@
     font-family: 'Segoe UI';
     font-size: 13px;
 }
+QLabel {
+    color: #94A3B8;
+    font-weight: bold;
+}
+QCheckBox {
+    color: #94A3B8;
+    font-weight: bold;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    background-color: #0A0F1E;
+}
+QCheckBox::indicator:hover {
+    border-color: #22D3EE;
+}
+QCheckBox::indicator:checked {
+    background-color: #0E7490;
+    border-color: #22D3EE;
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PScxMCcgdmlld0JveD0nMCAwIDEwIDEwJz48cGF0aCBkPSdNMiA1IEw0IDcgTDggMycgc3Ryb2tlPScjMjJEM0VFJyBzdHJva2Utd2lkdGg9JzInIGZpbGw9J25vbmUnIHN0cm9rZS1saW5lY2FwPSdyb3VuZCcgc3Ryb2tlLWxpbmVqb2luPSdyb3VuZCcvPjwvc3ZnPg==");
+}
+QProgressBar {
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background-color: #0A0F1E;
+    text-align: center;
+    color: #F8FAFC;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #0E7490, stop:1 #22D3EE);
+    border-radius: 7px;
+}
 QGroupBox {
     background-color: #1E293B;
     border: 1px solid #334155;
@@ -27,7 +62,7 @@ QGroupBox::title {
     left: 16px;
     padding: 4px 10px;
     color: #22D3EE;
-    background-color: rgba(34, 211, 238, 0.10);
+    background-color: #112A3E;
     border-left: 3px solid #22D3EE;
     border-bottom: 1px solid rgba(34, 211, 238, 0.45);
     border-radius: 4px;
@@ -44,6 +79,7 @@ QSpinBox, QDoubleSpinBox {
     padding-bottom: 5px;
     padding-left: 8px;
     padding-right: 20px;
+    padding: 6px 26px 6px 10px;
 }
 QSpinBox:focus, QDoubleSpinBox:focus {
     border-color: #22D3EE;
@@ -51,44 +87,40 @@ QSpinBox:focus, QDoubleSpinBox:focus {
 QSpinBox::up-button, QDoubleSpinBox::up-button {
     subcontrol-origin: border;
     subcontrol-position: top right;
-    width: 18px;
-    height: 13px;
+    width: 22px;
     border-left: 1px solid #334155;
-    border-bottom: 1px solid #334155;
-    border-top-right-radius: 5px;
-    background-color: #1E293B;
+    border-top-right-radius: 6px;
+    background-color: #0A0F1E;
 }
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {
-    background-color: #253346;
-}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 5 L4 2.5 L6.5 5' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
-    width: 8px;
-    height: 8px;
-}
-QSpinBox::up-arrow:hover, QDoubleSpinBox::up-arrow:hover {
-    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 5 L4 2.5 L6.5 5' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    background-color: rgba(34, 211, 238, 0.15);
 }
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     subcontrol-origin: border;
     subcontrol-position: bottom right;
-    width: 18px;
-    height: 13px;
+    width: 22px;
     border-left: 1px solid #334155;
-    border-bottom-right-radius: 5px;
-    background-color: #1E293B;
+    border-bottom-right-radius: 6px;
+    background-color: #0A0F1E;
 }
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
-    background-color: #253346;
+    background-color: rgba(34, 211, 238, 0.15);
+}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid #F8FAFC;
 }
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 3 L4 5.5 L6.5 3' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
-    width: 8px;
-    height: 8px;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #F8FAFC;
 }
-QSpinBox::down-arrow:hover, QDoubleSpinBox::down-arrow:hover {
-    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'&gt;&lt;path d='M1.5 3 L4 5.5 L6.5 3' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
-}
+
 
 QComboBox {
     background-color: #0A0F1E;
@@ -108,12 +140,12 @@ QComboBox::drop-down {
     subcontrol-position: top right;
 }
 QComboBox::down-arrow {
-    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'&gt;&lt;path d='M1.5 1.5 L5 4.5 L8.5 1.5' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PSc2JyB2aWV3Qm94PScwIDAgMTAgNic+PHBhdGggZD0nTTEuNSAxLjUgTDUgNC41IEw4LjUgMS41JyBzdHJva2U9JyM5NEEzQjgnIHN0cm9rZS13aWR0aD0nMS41JyBmaWxsPSdub25lJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLz48L3N2Zz4=");
     width: 10px;
     height: 6px;
 }
 QComboBox::down-arrow:hover {
-    image: url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'&gt;&lt;path d='M1.5 1.5 L5 4.5 L8.5 1.5' stroke='%2322D3EE' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/&gt;&lt;/svg&gt;");
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PSc2JyB2aWV3Qm94PScwIDAgMTAgNic+PHBhdGggZD0nTTEuNSAxLjUgTDUgNC41IEw4LjUgMS41JyBzdHJva2U9JyMyMkQzRUUnIHN0cm9rZS13aWR0aD0nMS41JyBmaWxsPSdub25lJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLz48L3N2Zz4=");
 }
 QComboBox QAbstractItemView {
     background-color: #1E293B;
@@ -130,9 +162,15 @@ QComboBox QAbstractItemView {
    <property name="bottomMargin"><number>0</number></property>
    <item>
     <widget class="QScrollArea" name="scroll_area">
+     <property name="styleSheet">
+      <string notr="true">QScrollArea { background: transparent; }</string>
+     </property>
      <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
      <property name="widgetResizable"><bool>true</bool></property>
      <widget class="QWidget" name="scroll_content">
+      <property name="styleSheet">
+       <string notr="true">QWidget { background: transparent; }</string>
+      </property>
       <layout class="QHBoxLayout" name="main_layout">
        <property name="spacing"><number>16</number></property>
        <property name="leftMargin"><number>16</number></property>
@@ -148,17 +186,17 @@ QComboBox QAbstractItemView {
            <property name="title"><string>🔧 Antenna Delay Calibration</string></property>
            <layout class="QGridLayout" name="delay_grid">
             <property name="spacing"><number>10</number></property>
-            <item row="0" column="0"><widget class="QLabel" name="lbl_ref_dist"><property name="text"><string>Reference Distance (m):</string></property></widget></item>
+            <item row="0" column="0"><widget class="QLabel" name="lbl_ref_dist"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Reference Distance (m):</string></property></widget></item>
             <item row="0" column="1"><widget class="QDoubleSpinBox" name="ref_dist_spin"><property name="minimum"><double>0.100000000000000</double></property><property name="maximum"><double>100.000000000000000</double></property><property name="value"><double>1.000000000000000</double></property><property name="decimals"><number>3</number></property></widget></item>
-            <item row="1" column="0"><widget class="QLabel" name="lbl_samples"><property name="text"><string>Num Samples:</string></property></widget></item>
+            <item row="1" column="0"><widget class="QLabel" name="lbl_samples"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Num Samples:</string></property></widget></item>
             <item row="1" column="1"><widget class="QSpinBox" name="samples_spin"><property name="minimum"><number>10</number></property><property name="maximum"><number>10000</number></property><property name="value"><number>1000</number></property></widget></item>
-            <item row="2" column="0"><widget class="QLabel" name="lbl_cur_tx"><property name="text"><string>Current TX Delay:</string></property></widget></item>
+            <item row="2" column="0"><widget class="QLabel" name="lbl_cur_tx"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Current TX Delay:</string></property></widget></item>
             <item row="2" column="1"><widget class="QSpinBox" name="tx_delay_spin"><property name="minimum"><number>0</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>16436</number></property></widget></item>
-            <item row="3" column="0"><widget class="QLabel" name="lbl_cur_rx"><property name="text"><string>Current RX Delay:</string></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="lbl_cur_rx"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Current RX Delay:</string></property></widget></item>
             <item row="3" column="1"><widget class="QSpinBox" name="rx_delay_spin"><property name="minimum"><number>0</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>16436</number></property></widget></item>
-            <item row="4" column="0"><widget class="QLabel" name="lbl_damping"><property name="text"><string>Damping Factor:</string></property></widget></item>
+            <item row="4" column="0"><widget class="QLabel" name="lbl_damping"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Damping Factor:</string></property></widget></item>
             <item row="4" column="1"><widget class="QDoubleSpinBox" name="damping_spin"><property name="minimum"><double>0.000000000000000</double></property><property name="maximum"><double>1.000000000000000</double></property><property name="value"><double>0.500000000000000</double></property><property name="decimals"><number>3</number></property></widget></item>
-            <item row="5" column="0"><widget class="QLabel" name="lbl_max_iter"><property name="text"><string>Max Iterations:</string></property></widget></item>
+            <item row="5" column="0"><widget class="QLabel" name="lbl_max_iter"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Max Iterations:</string></property></widget></item>
             <item row="5" column="1"><widget class="QSpinBox" name="iterations_spin"><property name="minimum"><number>1</number></property><property name="maximum"><number>100</number></property><property name="value"><number>20</number></property></widget></item>
             <item row="6" column="0" colspan="2">
              <layout class="QHBoxLayout" name="calib_btns">

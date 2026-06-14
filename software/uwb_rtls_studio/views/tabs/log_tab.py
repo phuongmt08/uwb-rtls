@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QPushButton, QTextEdit, QComboBox, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QFrame, QAbstractItemView, QButtonGroup
+    QFrame, QAbstractItemView, QButtonGroup, QFileDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat, QDesktopServices
@@ -65,10 +65,18 @@ class LogTab(QWidget):
         self._setup_detail_table()
         self._setup_dev_widgets()
         self._connect_signals()
-        self._populate_virtual_history()
+        self._vm = None
+
+        # Sẽ sinh virtual history sau 50ms nếu không có ViewModel nào được gán
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(50, self._check_and_populate_virtual)
 
         # Apply initial mode
         self.set_developer_mode(self._is_developer)
+
+    def _check_and_populate_virtual(self):
+        if self._vm is None:
+            self._populate_virtual_history()
 
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
@@ -90,18 +98,26 @@ class LogTab(QWidget):
     def _setup_session_table(self):
         """Scale the history table so ten total sessions are visible comfortably."""
         self.session_table.verticalHeader().setDefaultSectionSize(32)
+        self.session_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.session_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.session_table.setMinimumHeight(260)
+        self.session_table.setColumnCount(6)
         self.session_table.setColumnWidth(0, 240)
         self.session_table.setColumnWidth(1, 130)
         self.session_table.setColumnWidth(2, 112)
         self.session_table.setColumnWidth(3, 110)
         self.session_table.setColumnWidth(4, 86)
+        self.session_table.setColumnWidth(5, 150)
+        self.session_table.setHorizontalHeaderLabels(
+            ["Session", "Started", "Elapsed", "Ranging Runs", "Session Files", "Browser"]
+        )
         self.session_table.horizontalHeader().setStretchLastSection(True)
 
     def _setup_detail_table(self):
         """Set up the embedded detail table and footer actions."""
         self.detail_table.verticalHeader().setDefaultSectionSize(32)
         self.detail_table.horizontalHeader().setStretchLastSection(True)
+        self.detail_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.detail_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
         self._detail_mode_group = QButtonGroup(self)
@@ -109,6 +125,8 @@ class LogTab(QWidget):
         self._detail_mode_group.addButton(self.btn_detail_ranging)
         self._detail_mode_group.addButton(self.btn_detail_logs)
         self.btn_detail_ranging.setChecked(True)
+        self.btn_detail_ranging.setMinimumWidth(85)
+        self.btn_detail_logs.setMinimumWidth(85)
         self._set_detail_actions_enabled(False)
 
     def _connect_signals(self):
@@ -126,6 +144,118 @@ class LogTab(QWidget):
         self.btn_detail_open.clicked.connect(self._open_selected_detail)
         self.btn_detail_browse.clicked.connect(self._browse_selected_detail)
         self.btn_detail_remove.clicked.connect(self._remove_selected_detail)
+
+    def _readonly_item(self, value) -> QTableWidgetItem:
+        item = QTableWidgetItem(str(value))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+
+    def _set_browser_cell(self, row: int, session_id: str, browser_path: str) -> None:
+        container = QWidget(self.session_table)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        path_label = QLabel(browser_path, container)
+        path_label.setToolTip(browser_path)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        browse_btn = QPushButton("...", container)
+        browse_btn.setFixedWidth(32)
+        browse_btn.setToolTip("Copy this session to another folder")
+        browse_btn.clicked.connect(lambda _=False, sid=session_id: self._export_session_to_custom_folder(sid))
+
+        layout.addWidget(path_label, 1)
+        layout.addWidget(browse_btn, 0)
+        self.session_table.setCellWidget(row, 5, container)
+
+    def _default_browser_root(self) -> str:
+        browser_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "session_browser"))
+        os.makedirs(os.path.join(browser_root, "ranging"), exist_ok=True)
+        os.makedirs(os.path.join(browser_root, "log"), exist_ok=True)
+        return browser_root
+
+    def set_viewmodel(self, vm):
+        self._vm = vm
+        self._vm.session_list_updated.connect(self._on_session_list_updated)
+        self._vm.session_details_loaded.connect(self._on_session_details_loaded)
+        self._vm.session_deleted.connect(self._on_session_deleted)
+        self._vm.refresh_sessions()
+
+    def _on_session_list_updated(self, sessions):
+        self.session_table.blockSignals(True)
+        self.session_table.setRowCount(0)
+        self._session_records = {}
+
+        for row, s in enumerate(sessions):
+            self.session_table.insertRow(row)
+            self.session_table.setItem(row, 0, self._readonly_item(s["session_id"]))
+            self.session_table.setItem(row, 1, self._readonly_item(s["start_time"]))
+            self.session_table.setItem(row, 2, self._readonly_item(s["duration"]))
+            
+            # Giữ tương thích số tệp tin chi tiết của UI
+            ranging_count = str(s.get("ranging_count", 1 if s["type"] == "RANGING" else 0))
+            session_file_count = str(s.get("session_file_count", 0))
+            self.session_table.setItem(row, 3, self._readonly_item(ranging_count))
+            self.session_table.setItem(row, 4, self._readonly_item(session_file_count))
+            self._set_browser_cell(row, s["session_id"], s.get("browser_path", ""))
+
+            self._session_records[s["session_id"]] = s
+
+        self.session_table.blockSignals(False)
+        if sessions:
+            self.session_table.selectRow(0)
+            self._current_session_name = sessions[0]["session_id"]
+            self._vm.load_session_detail(self._current_session_name, self._detail_mode)
+
+    def _on_session_details_loaded(self, session_id, detail_type, data):
+        if session_id != self._current_session_name or detail_type != self._detail_mode:
+            return
+
+        self.detail_table.clear()
+        self._detail_rows = []
+        
+        if detail_type == "ranging":
+            headers = ["Timestamp (ms)", "X (m)", "Y (m)", "Z (m)", "RMS (m)", "Ranging Files"]
+            self.detail_table.setColumnCount(len(headers))
+            self.detail_table.setHorizontalHeaderLabels(headers)
+            self.detail_table.setRowCount(len(data))
+            
+            for row, p in enumerate(data):
+                self.detail_table.setItem(row, 0, self._readonly_item(str(p["timestamp_ms"])))
+                self.detail_table.setItem(row, 1, self._readonly_item(f"{p['x_m']:.3f}"))
+                self.detail_table.setItem(row, 2, self._readonly_item(f"{p['y_m']:.3f}"))
+                self.detail_table.setItem(row, 3, self._readonly_item(f"{p['z_m']:.3f}"))
+                self.detail_table.setItem(row, 4, self._readonly_item(f"{p['rms_error_m']:.3f}"))
+                self.detail_table.setItem(row, 5, self._readonly_item("positions.csv"))
+                self._detail_rows.append({"file": f"{session_id}:positions.csv", **p})
+            self.detail_table.setColumnWidth(5, 150)
+        else:  # logs
+            headers = ["Timestamp", "Level", "Source", "Message", "Log Files"]
+            self.detail_table.setColumnCount(len(headers))
+            self.detail_table.setHorizontalHeaderLabels(headers)
+            self.detail_table.setRowCount(len(data))
+            
+            for row, l in enumerate(data):
+                self.detail_table.setItem(row, 0, self._readonly_item(l["timestamp"]))
+                self.detail_table.setItem(row, 1, self._readonly_item(l["level"]))
+                self.detail_table.setItem(row, 2, self._readonly_item(l["source"]))
+                self.detail_table.setItem(row, 3, self._readonly_item(l["message"]))
+                self.detail_table.setItem(row, 4, self._readonly_item("logs.txt"))
+                self._detail_rows.append({"file": f"{session_id}:logs.txt", **l})
+            self.detail_table.setColumnWidth(4, 150)
+
+        self.detail_title.setText(f"Session Details · {session_id}")
+        self.detail_selection_label.setText(f"Loaded {len(data)} items")
+        self._set_detail_actions_enabled(bool(data))
+
+    def _on_session_deleted(self, session_id):
+        if self._current_session_name == session_id:
+            self._current_session_name = None
+            self.detail_table.clear()
+            self.detail_title.setText("Session Details")
+            self.detail_selection_label.setText("No file selected")
+            self._set_detail_actions_enabled(False)
 
     def set_developer_mode(self, enabled: bool):
         self._is_developer = enabled
@@ -187,10 +317,11 @@ class LogTab(QWidget):
                 record["started"],
                 record["elapsed"],
                 str(len(record["ranging"])),
-                str(len(record["logs"])),
+                str(len(record["ranging"]) + len(record["logs"])),
             ]
             for col, value in enumerate(values):
-                self.session_table.setItem(row, col, QTableWidgetItem(value))
+                self.session_table.setItem(row, col, self._readonly_item(value))
+            self._set_browser_cell(row, record["session"], self._default_browser_root())
         if session_specs:
             first_session = self.session_table.item(0, 0).text()
             self.session_table.selectRow(0)
@@ -284,7 +415,11 @@ class LogTab(QWidget):
     def _on_session_selection_changed(self):
         session_name = self._selected_session_name()
         if session_name:
-            self._load_session_detail(session_name)
+            self._current_session_name = session_name
+            if self._vm:
+                self._vm.load_session_detail(session_name, self._detail_mode)
+            else:
+                self._load_session_detail(session_name)
 
     def _selected_session_name(self):
         row = self.session_table.currentRow()
@@ -294,7 +429,10 @@ class LogTab(QWidget):
     def _set_detail_mode(self, mode):
         self._detail_mode = mode
         if self._current_session_name:
-            self._load_session_detail(self._current_session_name)
+            if self._vm:
+                self._vm.load_session_detail(self._current_session_name, self._detail_mode)
+            else:
+                self._load_session_detail(self._current_session_name)
 
     def _load_session_detail(self, session_name):
         record = self._session_records.get(session_name)
@@ -312,15 +450,17 @@ class LogTab(QWidget):
 
         for row, item in enumerate(self._detail_rows):
             for col, value in enumerate(self._detail_values(item)):
-                self.detail_table.setItem(row, col, QTableWidgetItem(value))
+                self.detail_table.setItem(row, col, self._readonly_item(value))
+
+        self.detail_table.setColumnWidth(len(headers) - 1, 150)
 
         self._set_detail_actions_enabled(False)
         self.detail_selection_label.setText("No file selected")
 
     def _detail_headers(self):
         if self._detail_mode == "logs":
-            return ["Device", "MCU ID", "First Connected", "Last Seen", "Lines", "File"]
-        return ["Run", "Started", "Ended", "Elapsed", "Samples", "File"]
+            return ["Device", "MCU ID", "First Connected", "Last Seen", "Lines", "File", "Log Files"]
+        return ["Run", "Started", "Ended", "Elapsed", "Samples", "File", "Ranging Files"]
 
     def _detail_values(self, item):
         if self._detail_mode == "logs":
@@ -331,6 +471,7 @@ class LogTab(QWidget):
                 item["last_seen"],
                 item["lines"],
                 item["file"],
+                "logs.txt",
             ]
         return [
             item["run"],
@@ -339,6 +480,7 @@ class LogTab(QWidget):
             item["elapsed"],
             item["samples"],
             item["file"],
+            "positions.csv",
         ]
 
     def _selected_detail_item(self):
@@ -362,21 +504,59 @@ class LogTab(QWidget):
         if item:
             self.detail_selection_label.setText(f"Selected: {item['file']}")
 
-    def _browse_selected_detail(self):
-        item = self._selected_detail_item()
-        if item:
-            self._browse_session_folder(item["path"])
-
-    def _remove_selected_detail(self):
-        item = self._selected_detail_item()
-        if not item or not self._current_session_name:
+    def _export_session_to_custom_folder(self, session_id: str):
+        if not self._vm:
+            self.detail_selection_label.setText("Export is available after a real session is loaded")
             return
 
-        record = self._session_records.get(self._current_session_name)
-        if record and item in record[self._detail_mode]:
-            record[self._detail_mode].remove(item)
-            self._update_total_session_counts(self._current_session_name)
-            self._load_session_detail(self._current_session_name)
+        target_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Choose folder to save session",
+            os.path.expanduser("~"),
+        )
+        if not target_dir:
+            return
+
+        exported_path = self._vm.export_session_to(session_id, target_dir)
+        if exported_path:
+            self.detail_selection_label.setText(f"Exported: {exported_path}")
+            QMessageBox.information(self, "Session Exported", f"Session saved to:\n{exported_path}")
+        else:
+            QMessageBox.warning(self, "Export Failed", f"Could not export session '{session_id}'.")
+
+    def _browse_selected_detail(self):
+        if self._vm:
+            if self._current_session_name:
+                import os
+                from repository.session_repository import SESSIONS_DIR
+                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
+                self._browse_session_folder(session_path)
+        else:
+            item = self._selected_detail_item()
+            if item:
+                self._browse_session_folder(item["path"])
+
+    def _remove_selected_detail(self):
+        if self._vm:
+            if self._current_session_name:
+                from PyQt6.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self, "Delete Session",
+                    f"Are you sure you want to permanently delete session '{self._current_session_name}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._vm.delete_session(self._current_session_name)
+        else:
+            item = self._selected_detail_item()
+            if not item or not self._current_session_name:
+                return
+
+            record = self._session_records.get(self._current_session_name)
+            if record and item in record[self._detail_mode]:
+                record[self._detail_mode].remove(item)
+                self._update_total_session_counts(self._current_session_name)
+                self._load_session_detail(self._current_session_name)
 
     def _browse_session_folder(self, session_dir):
         browse_path = session_dir
@@ -395,8 +575,8 @@ class LogTab(QWidget):
         if not record or row < 0:
             return
 
-        self.session_table.setItem(row, 3, QTableWidgetItem(str(len(record["ranging"]))))
-        self.session_table.setItem(row, 4, QTableWidgetItem(str(len(record["logs"]))))
+        self.session_table.setItem(row, 3, self._readonly_item(str(len(record["ranging"]))))
+        self.session_table.setItem(row, 4, self._readonly_item(str(len(record["ranging"]) + len(record["logs"]))))
 
     def _find_session_row(self, session_id):
         for row in range(self.session_table.rowCount()):
