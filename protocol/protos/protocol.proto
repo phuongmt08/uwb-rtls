@@ -208,6 +208,7 @@ message uwb_cfg_t {
     uint32 tx_power             = 11;
     bytes anchor_list           = 12;
     anchor_power_mode_t power_mode = 13;
+    /* for developer mode */
     uint32 uwb_preamble_len     = 14;
     uint32 uwb_rx_pac           = 15;
     uint32 uwb_ns_sfd           = 16;

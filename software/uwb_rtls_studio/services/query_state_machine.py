@@ -2,11 +2,10 @@
 ===============================================================================
   UWB RTLS Studio — Query State Machine
 ===============================================================================
-  File        : common/query_state_machine.py
+  File        : services/query_state_machine.py
   Description : Sequential Command-Response Queue & State Machine.
-                Prevents serial and BLE link congestion/packet drops by querying
-                one command at a time, checking response packets, and handling
-                timeouts and retries.
+                Host-side orchestration only. It does not change firmware
+                behavior or protobuf wire format.
 ===============================================================================
 """
 from __future__ import annotations
@@ -20,6 +19,7 @@ from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 
 log = logging.getLogger(__name__)
 
+
 class QueryState:
     IDLE = "IDLE"
     PENDING = "PENDING"
@@ -30,14 +30,16 @@ class QueryState:
     TIMEOUT = "TIMEOUT"
     FAILED = "FAILED"
 
+
 class QueryTransaction:
     """Represents a single query transaction in the state machine."""
+
     def __init__(self, command_name: str, dst_addr: int, expected_response: str, kwargs: dict):
         self.command_name = command_name
         self.dst_addr = dst_addr
         self.expected_response = expected_response
         self.kwargs = kwargs
-        
+
         self.status = QueryState.PENDING
         self.retries = 0
         self.sent_time = 0.0
@@ -45,13 +47,15 @@ class QueryTransaction:
         self.response_packet = None
         self.seq = None
 
+
 class QueryQueueManager(QObject):
     """
     Manages a queue of query transactions. Sends queries sequentially,
     waits for the expected response, and retries on timeout.
     """
+
     _send_next_requested = pyqtSignal()
-    
+
     RESPONSE_MAP = {
         "device_information_get": "device_information_resp",
         "battery_info_get": "battery_info_resp",
@@ -69,12 +73,15 @@ class QueryQueueManager(QObject):
         "rtos_task_stats_get": "rtos_task_stats_resp",
     }
 
-    def __init__(self, send_packet_fn: Callable[[str, int, Dict[str, Any]], Any], 
-                 timeout_s: float = 0.2, 
-                 max_retries: int = 3, 
-                 on_complete_fn: Callable[[List[Dict[str, Any]]], None] | None = None,
-                 response_map: Dict[str, str] | None = None,
-                 parent=None):
+    def __init__(
+        self,
+        send_packet_fn: Callable[[str, int, Dict[str, Any]], Any],
+        timeout_s: float = 0.2,
+        max_retries: int = 3,
+        on_complete_fn: Callable[[List[Dict[str, Any]]], None] | None = None,
+        response_map: Dict[str, str] | None = None,
+        parent=None,
+    ):
         """
         Args:
             send_packet_fn: Callback function to execute sending: fn(command_name, dst_addr, **kwargs)
@@ -88,7 +95,7 @@ class QueryQueueManager(QObject):
         self.max_retries = max_retries
         self.on_complete_fn = on_complete_fn
         self.response_map = dict(response_map or self._load_response_map())
-        
+
         self.queue: List[QueryTransaction] = []
         self.current_transaction: QueryTransaction | None = None
         self.lock = threading.RLock()
@@ -117,7 +124,7 @@ class QueryQueueManager(QObject):
         expected_response = self.response_map.get(command_name, "")
         if not expected_response:
             log.warning(f"No expected response mapped for command '{command_name}'. Defaulting to None.")
-            
+
         tx = QueryTransaction(command_name, dst_addr, expected_response, kwargs)
         with self.lock:
             self.queue.append(tx)
@@ -129,7 +136,7 @@ class QueryQueueManager(QObject):
                 log.warning("QueryQueueManager is already running.")
                 return
             self.is_running = True
-            
+
         log.info(f"Starting sequential query queue with {len(self.queue)} commands...")
         self._request_send_next()
 
@@ -141,22 +148,25 @@ class QueryQueueManager(QObject):
         with self.lock:
             if not self.is_running or not self.current_transaction:
                 return False
-            
+
             tx = self.current_transaction
             if tx.expected_response == param_name:
                 tx.status = QueryState.SUCCESS
                 tx.received_time = time.monotonic()
                 tx.response_packet = pkt
-                
+
                 self.timer.stop()
-                
+
                 seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else tx.seq
                 seq_str = f" seq={seq_val}" if seq_val is not None else ""
-                log.info(f"Query RX: '{param_name}' <- dst={tx.dst_addr}{seq_str} (success for '{tx.command_name}', attempt {tx.retries + 1})")
-                
+                log.info(
+                    f"Query RX: '{param_name}' <- dst={tx.dst_addr}{seq_str} "
+                    f"(success for '{tx.command_name}', attempt {tx.retries + 1})"
+                )
+
                 self._request_send_next()
                 return True
-                
+
         return False
 
     def _request_send_next(self) -> None:
@@ -168,31 +178,29 @@ class QueryQueueManager(QObject):
         with self.lock:
             if not self.is_running:
                 return
-            
+
             self.timer.stop()
 
-            # Get first pending/retry query
             pending = [tx for tx in self.queue if tx.status in (QueryState.PENDING, QueryState.RETRY_PENDING)]
             if not pending:
-                # All queries processed
                 self.is_running = False
                 self.current_transaction = None
                 log.info("All queries in queue finished.")
                 if self.on_complete_fn:
-                    # Construct results list
                     results = []
                     for tx in self.queue:
-                        results.append({
-                            "command_name": tx.command_name,
-                            "dst_addr": tx.dst_addr,
-                            "expected_response": tx.expected_response,
-                            "status": tx.status,
-                            "retries": tx.retries,
-                            "sent_time": tx.sent_time,
-                            "received_time": tx.received_time,
-                            "response_packet": tx.response_packet
-                        })
-                    # Call completion callback
+                        results.append(
+                            {
+                                "command_name": tx.command_name,
+                                "dst_addr": tx.dst_addr,
+                                "expected_response": tx.expected_response,
+                                "status": tx.status,
+                                "retries": tx.retries,
+                                "sent_time": tx.sent_time,
+                                "received_time": tx.received_time,
+                                "response_packet": tx.response_packet,
+                            }
+                        )
                     self.on_complete_fn(results)
                 return
 
@@ -211,7 +219,6 @@ class QueryQueueManager(QObject):
             except Exception as e:
                 log.error(f"Failed to send query packet: {e}")
                 tx.status = QueryState.FAILED
-                # Attempt to move to next
                 self._request_send_next()
                 return
 
@@ -236,9 +243,15 @@ class QueryQueueManager(QObject):
             if tx.retries < self.max_retries:
                 tx.retries += 1
                 tx.status = QueryState.RETRY_PENDING
-                log.warning(f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. Retrying ({tx.retries}/{self.max_retries})...")
+                log.warning(
+                    f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. "
+                    f"Retrying ({tx.retries}/{self.max_retries})..."
+                )
             else:
                 tx.status = QueryState.TIMEOUT
-                log.error(f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. Failed after {self.max_retries} retries.")
-            
+                log.error(
+                    f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. "
+                    f"Failed after {self.max_retries} retries."
+                )
+
         self._request_send_next()

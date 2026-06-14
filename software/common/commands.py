@@ -19,7 +19,9 @@ class CommandSpec:
     builder: PacketBuilder
     expected_response: str = ""
 
-
+# Host-side routing hints only.
+# These sets help the app choose a sensible default destination address.
+# They do not change the firmware protocol or protobuf wire format.
 _MCU_COMMANDS = {
     "device_information_get",
     "time_sync_get",
@@ -76,7 +78,7 @@ _PERIPHERAL_COMMANDS = {
 
 
 def default_destination_for(command_name: str) -> int:
-    """Return the default destination address for a host-origin command."""
+    """Return the host-side default destination for a command name."""
     if command_name in _MCU_COMMANDS:
         return int(VvAddress.MCU)
     if command_name in _PERIPHERAL_COMMANDS:
@@ -129,8 +131,8 @@ class CommandFactory:
         return pkt
 
     def time_sync_set(self, src: int, dst: int, seq: int,
-                      unix_time_ms: int | None = None,
-                      timezone_offset: int = 420) -> pb.packet_t:
+        unix_time_ms: int | None = None,
+        timezone_offset: int = 420) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.time_sync_set.unix_time_ms = unix_time_ms if unix_time_ms is not None else int(time.time() * 1000)
         pkt.time_sync_set.timezone_offset = timezone_offset

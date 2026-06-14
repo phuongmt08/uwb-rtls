@@ -15,7 +15,7 @@ import threading
 from typing import Dict, Any, List, Optional, Callable
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from common.query_state_machine import QueryQueueManager, QueryState
+from services.query_state_machine import QueryQueueManager, QueryState
 
 log = logging.getLogger(__name__)
 

@@ -9,6 +9,9 @@ class VvProtocol(_VvProtocol):
         super().__init__()
         self._commands = CommandFactory()
 
+    # Host-side wrapper methods.
+    # These only forward packet construction to CommandFactory and do not alter
+    # the firmware protocol or the protobuf schema used on the wire.
     def build_none(self, src: int, dst: int, seq: int):
         return self._commands.none(src, dst, seq)
     def build_ack(self, src: int, dst: int, seq: int):
