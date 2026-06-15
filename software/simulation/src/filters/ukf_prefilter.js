@@ -110,6 +110,24 @@ function invert2x2(M) {
     ];
 }
 
+function traceMatrix(M) {
+    let trace = 0.0;
+    for (let i = 0; i < M.length; i++) {
+        trace += Number.isFinite(M[i][i]) ? M[i][i] : 0.0;
+    }
+    return trace;
+}
+
+function quadraticForm(v, A) {
+    let sum = 0.0;
+    for (let i = 0; i < v.length; i++) {
+        for (let j = 0; j < v.length; j++) {
+            sum += v[i] * A[i][j] * v[j];
+        }
+    }
+    return sum;
+}
+
 class UnscentedKalmanFilter {
     constructor(config) {
         // State variables: [px, py, vx, vy, theta, bax, bay, bgz]
@@ -133,6 +151,20 @@ class UnscentedKalmanFilter {
         this.q_g = config.q_g !== undefined ? config.q_g : 4.78e-7;
         this.r_uwb = config.r_uwb !== undefined ? config.r_uwb : 0.01;
         this.r_gate = config.r_gate !== undefined ? config.r_gate : this.r_uwb;
+        this.nis_values = [];
+        this.last_update_diagnostics = null;
+        this.adaptive_q_enabled = config.adaptive_q_enabled !== undefined
+            ? config.adaptive_q_enabled
+            : true;
+        this.q_tuning = {
+            small: config.q_small !== undefined ? config.q_small : 0.01,
+            large: config.q_large !== undefined ? config.q_large : 0.1,
+            maxIterations: config.q_tune_iterations !== undefined ? config.q_tune_iterations : 10,
+            iteration: 0,
+            lowNIS: config.q_nis_low !== undefined ? config.q_nis_low : 1.5,
+            highNIS: config.q_nis_high !== undefined ? config.q_nis_high : 4.5,
+            optimal: null
+        };
         this.use_planar_ranges = config.use_planar_ranges !== undefined
             ? config.use_planar_ranges
             : true;
@@ -263,7 +295,42 @@ class UnscentedKalmanFilter {
         this.P[7][7] = 1e-5; // bgz
 
         this.is_initialized = true;
+        this.nis_values = [];
+        this.last_update_diagnostics = null;
+        this.q_tuning.iteration = 0;
+        this.q_tuning.optimal = null;
         this.seedSigmaPredictionFromState();
+    }
+
+    tuneProcessNoiseFromNIS(meanNIS) {
+        if (!this.adaptive_q_enabled || this.q_tuning.iteration >= this.q_tuning.maxIterations) {
+            return;
+        }
+        if (!Number.isFinite(meanNIS) || meanNIS <= 0) {
+            return;
+        }
+
+        const small = Math.max(1e-12, this.q_tuning.small);
+        const large = Math.max(small, this.q_tuning.large);
+        const qTest = Math.sqrt(large * small);
+
+        if (meanNIS > this.q_tuning.highNIS) {
+            this.q_tuning.small = qTest;
+        } else if (meanNIS < this.q_tuning.lowNIS) {
+            this.q_tuning.large = qTest;
+        } else {
+            this.q_tuning.optimal = qTest;
+            this.q_tuning.iteration = this.q_tuning.maxIterations;
+            this.q_a = qTest;
+            return;
+        }
+
+        this.q_tuning.iteration++;
+        const nextSmall = Math.max(1e-12, this.q_tuning.small);
+        const nextLarge = Math.max(nextSmall, this.q_tuning.large);
+        const nextQ = Math.sqrt(nextLarge * nextSmall);
+        this.q_tuning.optimal = nextQ;
+        this.q_a = nextQ;
     }
 
     predict(imu, dt) {
@@ -525,6 +592,10 @@ class UnscentedKalmanFilter {
             }
             dx[i] = sum;
         }
+        const updateVal = Float64Array.from(dx);
+        const nis = quadraticForm(y, invS);
+        this.nis_values.push(Number.isFinite(nis) ? nis : 0.0);
+        const meanNIS = this.nis_values.reduce((sum, value) => sum + value, 0.0) / this.nis_values.length;
 
         // UWB ranges are good position anchors, but poor direct estimators for IMU biases.
         dx[4] = 0.0;
@@ -602,6 +673,23 @@ class UnscentedKalmanFilter {
             this.restoreState(prevX, prevP);
             return;
         }
+        const traceP = traceMatrix(this.P);
+        this.last_update_diagnostics = {
+            innovation: Array.from(y),
+            update_val: Array.from(updateVal),
+            trace_P: traceP,
+            nis: Number.isFinite(nis) ? nis : 0.0,
+            mean_nis: meanNIS,
+            q_a: this.q_a,
+            q_tuning: {
+                small: this.q_tuning.small,
+                large: this.q_tuning.large,
+                iteration: this.q_tuning.iteration,
+                optimal: this.q_tuning.optimal
+            }
+        };
+        this.tuneProcessNoiseFromNIS(meanNIS);
+        this.last_update_diagnostics.q_a_next = this.q_a;
         this.seedSigmaPredictionFromState();
     }
 

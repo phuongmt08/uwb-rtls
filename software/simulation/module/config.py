@@ -1,5 +1,5 @@
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 # TXT
@@ -90,6 +90,14 @@ Q_A_MANUAL = 0.08
 Q_G_MANUAL = 4.78e-07
 R_UWB_MANUAL = 0.009
 
+# Binary search Q tuning from Mean NIS.
+BINARY_Q_ENABLED = False
+Q_BINARY_SMALL = 0.01
+Q_BINARY_LARGE = 0.1
+Q_BINARY_ITERATIONS = 10
+Q_BINARY_NIS_LOW = 1.5
+Q_BINARY_NIS_HIGH = 4.5
+
 # Logic to select final values
 if TEST_UKF_Q_R_Params:
     Q_A = Q_A_TEST
@@ -146,6 +154,11 @@ class UKFContext:
     use_advanced_propagate: bool = False
     prev_imu_sample: IMUSample = None
     logger: 'UKFLogger' = None
+    nis_list: list = field(default_factory=list)
+    q_binary_small: float = Q_BINARY_SMALL
+    q_binary_large: float = Q_BINARY_LARGE
+    q_binary_iter: int = 0
+    q_binary_optimal: float = None
 
 # ==================== SERIAL CONFIGURATION ====================
 # UART Configuration

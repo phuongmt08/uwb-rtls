@@ -25,6 +25,16 @@ self.onmessage = function(e) {
         ukf_kappa: params.ukf_kappa,
         q_a: params.q_a,
         q_g: params.q_g,
+        adaptive_q_enabled: params.adaptive_q_enabled !== undefined
+            ? params.adaptive_q_enabled
+            : SIM_CONFIG.FILTER.DEFAULT_ADAPTIVE_Q_ENABLED,
+        q_small: params.q_small !== undefined ? params.q_small : SIM_CONFIG.FILTER.DEFAULT_Q_SMALL,
+        q_large: params.q_large !== undefined ? params.q_large : SIM_CONFIG.FILTER.DEFAULT_Q_LARGE,
+        q_tune_iterations: params.q_tune_iterations !== undefined
+            ? params.q_tune_iterations
+            : SIM_CONFIG.FILTER.DEFAULT_Q_TUNE_ITERATIONS,
+        q_nis_low: params.q_nis_low !== undefined ? params.q_nis_low : SIM_CONFIG.FILTER.DEFAULT_Q_NIS_LOW,
+        q_nis_high: params.q_nis_high !== undefined ? params.q_nis_high : SIM_CONFIG.FILTER.DEFAULT_Q_NIS_HIGH,
         r_uwb: params.r_uwb,
         r_gate: params.r_gate,
         min_frame_measurements: params.rescue_min_anchors || 3,
@@ -48,6 +58,8 @@ self.onmessage = function(e) {
     const rescueIdx = [[], [], [], []];
     const rescueDist = [[], [], [], []];
     const ambiguityEvents = [];
+    const ukfDiagnostics = [];
+    const ukfDiagnosticsLpf = [];
 
     const insideAnchorBounds = (pos, margin) => {
         if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return false;
@@ -186,6 +198,7 @@ self.onmessage = function(e) {
             simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes,
             wlsInfo, bestTripletInfo,
             plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist, ambiguityEvents,
+            ukfDiagnostics, ukfDiagnosticsLpf,
             pos_errors_fw: blankErrors, pos_errors: blankErrors, pos_errors_wls: blankErrors,
             pos_errors_triplet: blankErrors, pos_errors_ukf: blankErrors, pos_errors_ukf_lpf: blankErrors,
             x_axis, total_time
@@ -483,6 +496,8 @@ self.onmessage = function(e) {
             // UKF Update
             filter.update(acceptedMeasurements);
             filterLpf.update(acceptedMeasurementsLpf);
+            ukfDiagnostics.push(filter.ukf.last_update_diagnostics);
+            ukfDiagnosticsLpf.push(filterLpf.ukf.last_update_diagnostics);
 
             const pos = multilaterate(v_anchors);
             simPath.x.push(pos ? pos.x : null);
@@ -576,6 +591,7 @@ self.onmessage = function(e) {
         simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes,
         wlsInfo, bestTripletInfo,
         plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist, ambiguityEvents,
+        ukfDiagnostics, ukfDiagnosticsLpf,
         pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf,
         x_axis, total_time
     });

@@ -67,6 +67,38 @@ def create_ukf_context(initial_state: np.ndarray) -> UKFContext:
         X_sigma_pred=X_sigma_pred,
     )
 
+def apply_binary_q_tuning(context: UKFContext, mean_nis: float) -> None:
+    if not config.BINARY_Q_ENABLED:
+        return
+    if context.q_binary_iter >= config.Q_BINARY_ITERATIONS:
+        return
+    if not np.isfinite(mean_nis) or mean_nis <= 0:
+        return
+
+    q_small = max(float(context.q_binary_small), 1e-12)
+    q_large = max(float(context.q_binary_large), q_small)
+    q_test = float(np.sqrt(q_large * q_small))
+
+    if mean_nis > config.Q_BINARY_NIS_HIGH:
+        context.q_binary_small = q_test
+    elif mean_nis < config.Q_BINARY_NIS_LOW:
+        context.q_binary_large = q_test
+    else:
+        context.q_binary_optimal = q_test
+        context.q_binary_iter = config.Q_BINARY_ITERATIONS
+        config.Q_A = q_test
+        config.PROCESS_NOISE_COV = np.diag([config.Q_A, config.Q_A, config.Q_G])
+        return
+
+    context.q_binary_iter += 1
+    next_small = max(float(context.q_binary_small), 1e-12)
+    next_large = max(float(context.q_binary_large), next_small)
+    next_q = float(np.sqrt(next_large * next_small))
+
+    context.q_binary_optimal = next_q
+    config.Q_A = next_q
+    config.PROCESS_NOISE_COV = np.diag([config.Q_A, config.Q_A, config.Q_G])
+
 def generate_augmented_sigma_points(context: UKFContext, return_internals=False):
     x_aug = np.zeros(config.UKF_AUGMENTED_SIZE)
     x_aug[:config.UKF_STATE_SIZE] = context.x
@@ -537,6 +569,14 @@ def ukf_update(
     context.is_first_frame = True
 
     trace_P = np.trace(context.P)
+
+    try:
+        nis = float(y.T @ np.linalg.inv(S) @ y)
+    except np.linalg.LinAlgError:
+        nis = 0.0
+    context.nis_list.append(nis)
+    mean_nis = float(np.mean(context.nis_list))
+    apply_binary_q_tuning(context, mean_nis)
 
     if context.logger:
         context.logger.log_update(

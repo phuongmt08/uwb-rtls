@@ -28,7 +28,9 @@
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
-#define SENSOR_FUSION_STREAM_PERIOD_MS  50u
+#ifndef SENSOR_FUSION_STREAM_PERIOD_MS
+#define SENSOR_FUSION_STREAM_PERIOD_MS  100u
+#endif
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);
 
@@ -1067,8 +1069,11 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {
     CHECK(stream && data, false);
-    CHECK(network_cmd_is_ranging_enabled(), false);
-//    CHECK(network_cmd_is_ble_host_active(), false);
+//    CHECK(network_cmd_is_ranging_enabled(), false);
+#if !defined(UKF_BLE_STREAM_TEST_ENABLE) || (UKF_BLE_STREAM_TEST_ENABLE == 0)
+    CHECK(network_cmd_is_ble_host_active(), false);
+#endif
+
 
     uint32_t now = bsp_util_get_ticks();
     CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);

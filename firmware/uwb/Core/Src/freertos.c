@@ -100,6 +100,12 @@ static uint32_t s_fusion_error_count = 0U;
 static uint8_t s_last_selected_anchors_mask = 0U;
 static float s_latest_tril_x = 0.0f;
 static float s_latest_tril_y = 0.0f;
+#ifndef UKF_BLE_STREAM_TEST_ENABLE
+#define UKF_BLE_STREAM_TEST_ENABLE true
+#endif
+#endif
+#if UKF_BLE_STREAM_TEST_ENABLE
+uint32_t sample_idx = 0U;
 #endif
 
 /* USER CODE END Variables */
@@ -284,6 +290,12 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_uwb_ranging_entry */
 void uwb_ranging_entry(void *argument)
 {
+#if UKF_BLE_STREAM_TEST_ENABLE
+  if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
+  {
+    osThreadExit();
+  }
+#endif
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN uwb_ranging_entry */
@@ -378,10 +390,33 @@ void sensor_fusion_entry(void *argument)
     osThreadExit();
   }
 
-#if UKF_BLE_STREAM_TEST_ENABLE
-  uint32_t sample_idx = 0U;
+	#if UKF_BLE_STREAM_TEST_ENABLE
+#ifdef HAVE_BLE_PERIPHERAL
+  /* Send 5 packets to start BLE advertising on the peripheral nRF52 */
+  uint32_t sn = bsp_util_get_serial_number();
+  char dev_name[32];
+  const sys_config_t *p_cfg = sys_config_get();
+  if (p_cfg && p_cfg->uwb.role == DEVICE_ROLE_TAG) {
+      snprintf(dev_name, sizeof(dev_name), "RTLS-Tag-%u", (unsigned int)p_cfg->uwb.device_id);
+  } else if (p_cfg) {
+      snprintf(dev_name, sizeof(dev_name), "RTLS-Anchor-%u", (unsigned int)p_cfg->uwb.device_id);
+  } else {
+      snprintf(dev_name, sizeof(dev_name), "RTLS-Node-%04X", (unsigned int)(sn & 0xFFFF));
+  }
+  for (int i = 0; i < 5; i++) {
+      network_send_ble_adv_config_set(&g_network_core, protobuf_PACKET_ADDR_PERIPHERAL, true, sn, dev_name);
+      osDelay(50);
+  }
+#endif
+
+
   for (;;)
   {
+    if (!g_ranging_enabled)
+    {
+      osDelay(50);
+      continue;
+    }
     uint32_t now_ms = HAL_GetTick();
     float step = (float)sample_idx;
     protobuf_sensor_fusion_result_t stream_data;
@@ -400,7 +435,7 @@ void sensor_fusion_entry(void *argument)
     }
     osDelay(20);
   }
-#else
+	#else
   /* Khởi tạo bộ lọc định vị và prefilter */
   mw_filter_mahalanobis_init(&s_prefilter,
                              MAHALANOBIS_PREFILTER_D2_RECOVER,
@@ -453,36 +488,6 @@ void sensor_fusion_entry(void *argument)
       }
 
       sys_sensor_fusion_predict(&ukf_data, dt);
-
-#if ENABLE_SYS_FUSION_LOG
-      {
-        app_tag_fusion_log_data_t log_data;
-        bsp_imu_data_t imu_data = {0};
-
-        if (app_tag_get_latest_fusion_log_data(&log_data))
-        {
-          float log_dt = dt;
-          if (log_data.seq != s_last_fusion_log_seq)
-          {
-            s_last_fusion_log_seq = log_data.seq;
-            log_dt = log_data.ranging_dt;
-          }
-
-          (void)bsp_imu_get_raw_data(&imu_data);
-          bsp_io_uart_send_fusion_log_data(log_data.mask,
-                                           log_data.err_count,
-                                           imu_data.ax,
-                                           imu_data.ay,
-                                           imu_data.gz,
-                                           log_data.tril_x,
-                                           log_data.tril_y,
-                                           log_data.distances,
-                                           log_data.fp_amp_norm,
-                                           log_data.fp_snr,
-                                           log_dt);
-        }
-      }
-#endif
     }
 
 #if ENABLE_SYS_FUSION
@@ -726,16 +731,6 @@ void sensor_fusion_entry(void *argument)
         }
 
         /* Update logging metrics mailbox passively when in Sensor Fusion mode */
-#if ENABLE_SYS_FUSION_LOG
-        app_tag_set_latest_fusion_log_data(s_last_selected_anchors_mask,
-                                           s_fusion_log_seq,
-                                           s_latest_ranging_dt,
-                                           (float)ukf_data.px,
-                                           (float)ukf_data.py,
-                                           s_latest_distances,
-                                           s_latest_fp_amp_norm,
-                                           s_latest_fp_snr);
-#endif
       }
 
       /* 4. Output the fusion position and logs directly */
@@ -745,9 +740,8 @@ void sensor_fusion_entry(void *argument)
       bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask, ukf_data.px, ukf_data.py, ukf_yaw, s_latest_tril_x, s_latest_tril_y, yaw, s_error_count);
     }
 #endif
-
-#else
   osThreadExit();
+#endif
 #endif
   /* USER CODE END sensor_fusion_entry */
 }
@@ -936,16 +930,16 @@ static void send_latest_fusion_frame(void)
 
     float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
     float yaw = sys_sensor_fusion_get_yaw_deg();
-    float tril_x = s_latest_tril_valid ? s_latest_tril_x : 0.0f;
-    float tril_y = s_latest_tril_valid ? s_latest_tril_y : 0.0f;
+//    float tril_x = s_latest_tril_valid ? s_latest_tril_x : 0.0f;
+//    float tril_y = s_latest_tril_valid ? s_latest_tril_y : 0.0f;
     uint32_t ranging_error_count = app_tag_get_ranging_error_count();
 
     (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
                                        (float)ukf_data.px,
                                        (float)ukf_data.py,
                                        ukf_yaw,
-                                       tril_x,
-                                       tril_y,
+                                       0,
+                                       0,
                                        yaw,
                                        ranging_error_count);
 }

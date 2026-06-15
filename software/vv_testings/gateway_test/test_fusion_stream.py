@@ -22,6 +22,7 @@ DEFAULT_SRC = int(VvAddress.HOST)
 DEFAULT_MCU_DST = int(VvAddress.MCU)
 DEFAULT_CENTRAL_DST = int(VvAddress.CENTRAL)
 TARGET_NAME_PREFIXES = ("UWB", "TAG", "ANCHOR", "NUS", "RTLS")
+DEFAULT_EXPECTED_HZ = 50.0
 
 
 def _mac_to_str(mac: bytes) -> str:
@@ -317,7 +318,18 @@ def run(
         ):
             return False
 
-    _send_device_information_get(session, verbose)
+    success = False
+    for attempt in range(1, 4):
+        if _send_device_information_get(session, verbose):
+            success = True
+            break
+        if attempt < 3:
+            print(f"Retrying device_information_get (attempt {attempt + 1}/3)...")
+            time.sleep(0.5)
+    if not success:
+        print("ERROR: Failed to get MCU device information and set ble_connection_active flag.")
+        return False
+
 
     if control_ranging:
         print("\n-- STEP 3: Start MCU ranging --")
@@ -329,18 +341,21 @@ def run(
     deadline = time.time() + seconds
     stream_packets = []
 
-    while time.time() < deadline:
-        for pkt in session.recv_packets(timeout_s=0.1):
-            name = pkt.WhichOneof("params")
-            if name == "sensor_fusion_result":
-                stream_packets.append(pkt)
-                if verbose:
-                    _print_stream(pkt)
-            elif verbose:
-                print(f"RX {name} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
-
-    if control_ranging:
-        _send_ranging_cmd(session, start=False, verbose=verbose)
+    try:
+        while time.time() < deadline:
+            for pkt in session.recv_packets(timeout_s=0.1):
+                name = pkt.WhichOneof("params")
+                if name == "sensor_fusion_result":
+                    stream_packets.append(pkt)
+                    if verbose:
+                        _print_stream(pkt)
+                elif verbose:
+                    print(f"RX {name} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
+    except KeyboardInterrupt:
+        print("\n[!] User interrupted with Ctrl+C")
+    finally:
+        if control_ranging:
+            _send_ranging_cmd(session, start=False, verbose=verbose)
 
     if not stream_packets:
         print("ERROR: no sensor_fusion_result packets received from dongle USB")
@@ -363,9 +378,11 @@ def run(
         print("ERROR: sensor_fusion_result timestamp_ms is not monotonic")
         return False
 
-    if observed_hz > 15.0:
-        print("ERROR: sensor_fusion_result rate is higher than expected low-rate app telemetry")
+    max_allowed_hz = DEFAULT_EXPECTED_HZ * 1.2
+    if observed_hz > max_allowed_hz:
+        print(f"ERROR: sensor_fusion_result rate is higher than expected {DEFAULT_EXPECTED_HZ}Hz (observed {observed_hz:.2f}Hz)")
         return False
+
 
     return True
 

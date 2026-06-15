@@ -21,7 +21,7 @@
  * Force this firmware image to run as a TAG even when flash config storage
  * cannot be erased/written or contains an invalid role.
  */
-#define FORCE_DEVICE_TAG_MODE 0
-
+/* Test mode: set to 1 to bypass BLE host check and stream fusion results continuously */
+#define UKF_BLE_STREAM_TEST_ENABLE 1
 
 #endif /* __CONFIG_H */

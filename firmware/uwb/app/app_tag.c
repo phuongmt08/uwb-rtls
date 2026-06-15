@@ -66,11 +66,10 @@ static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
-static app_tag_output_mode_t s_output_mode = APP_TAG_MODE_TRILATERATION;
 static bool s_position_valid = false;
 static uint8_t s_last_selected_anchors_mask = 0;
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
 static uint8_t s_last_selected_anchors_mask = 0;
@@ -757,7 +756,7 @@ app_err_t app_tag_init(void)
 
     sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
     if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
         RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
     } else {
