@@ -68,6 +68,7 @@ class MainWindow(QMainWindow):
         # Init session timer but do not start it yet
         self._session_timer = QTimer(self)
         self._session_timer.timeout.connect(self._tick_session)
+        self._set_session_button_active(False)
 
     def _setup_tabs(self):
         """Setup viewmodels for pre-loaded tabs from .ui"""
@@ -171,9 +172,13 @@ class MainWindow(QMainWindow):
 
     def _on_telemetry_status(self, data: dict):
         soc = data.get("bat_soc_percent")
-        if soc is not None:
-            self._status_bat.setText(f"\U0001F50B {soc}%")
-            self._status_bat.setStyleSheet("color: #10B981;" if soc > 20 else "color: #EF4444;")
+        if soc is None:
+            self._status_bat.setText("\U0001F50B --")
+            self._status_bat.setStyleSheet("color: #94A3B8;")
+            return
+        soc = int(soc)
+        self._status_bat.setText(f"\U0001F50B {soc}%")
+        self._status_bat.setStyleSheet("color: #10B981;" if soc > 20 else "color: #EF4444;")
 
     def _on_ble_info_status(self, data: dict):
         rssi = data.get("rssi_dbm")
@@ -200,18 +205,21 @@ class MainWindow(QMainWindow):
                 self._session_timer.stop()
                 self._status_session.setText("\u23F2 Session: 00:00:00")
                 self._status_session.setStyleSheet("color: #94A3B8;")
+                self._set_session_button_active(False)
             elif status_text == "Disconnecting":
                 self._status_conn.setText(f"\U0001F6D1 Disconnecting: {name}")
                 self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
                 self._status_rate.setText("\U0001F504 ---")
                 self._session_active = False
                 self._session_timer.stop()
+                self._set_session_button_active(False)
             elif status_text == "Disconnected":
                 self._status_conn.setText(f"\U0001F534 Disconnected: {name}")
                 self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
                 self._status_rate.setText("\U0001F504 ---")
                 self._session_active = False
                 self._session_timer.stop()
+                self._set_session_button_active(False)
             else:
                 self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
                 self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
@@ -223,7 +231,13 @@ class MainWindow(QMainWindow):
                     self._session_seconds = 0
                     if self._log_vm:
                         self._log_vm.clear_session_logs()
+                    if self._main_vm:
+                        try:
+                            self._main_vm.start_session()
+                        except Exception:
+                            pass
                     self._session_timer.start(1000)
+                    self._set_session_button_active(True)
         else:
             self.device_badge.setText("\u25CF -")
             self._status_conn.setText("\U0001F534 Disconnected")
@@ -239,6 +253,7 @@ class MainWindow(QMainWindow):
             self._session_timer.stop()
             self._status_session.setText("\u23F2 Session: 00:00:00")
             self._status_session.setStyleSheet("color: #94A3B8;")
+            self._set_session_button_active(False)
 
     def _make_separator(self):
         sep = QLabel("|")
@@ -258,6 +273,7 @@ class MainWindow(QMainWindow):
 
         # Update status bar
         if self._is_developer:
+            self.tabs.setCurrentWidget(self._tab_tracking)
             self._status_mode.setText("\U0001F527 Developer Mode")
             self._status_mode.setStyleSheet("color: #F59E0B; font-weight: bold;")
         else:
@@ -265,6 +281,21 @@ class MainWindow(QMainWindow):
             self._status_mode.setStyleSheet("color: #22D3EE; font-weight: bold;")
 
     def _on_end_session(self):
+        if not self._session_active:
+            if self._main_vm:
+                try:
+                    self._main_vm.start_session()
+                except Exception as exc:
+                    QMessageBox.warning(self, "Session Start Failed", str(exc))
+                    return
+            self._session_active = True
+            self._session_seconds = 0
+            if self._log_vm:
+                self._log_vm.clear_session_logs()
+            self._session_timer.start(1000)
+            self._set_session_button_active(True)
+            return
+
         reply = QMessageBox.question(
             self, "End Session",
             "End current session?\n\n"
@@ -283,19 +314,22 @@ class MainWindow(QMainWindow):
             # GOI LUU SESSION THUC TE
             if self._main_vm:
                 try:
-                    self._main_vm.end_session(duration_sec=self._session_seconds, reason=0)
+                    self._main_vm.end_session(duration_sec=self._session_seconds)
                 except Exception as exc:
                     QMessageBox.warning(self, "Session Save Failed", str(exc))
             else:
                 self._save_active_session()
             self._session_seconds = 0
+            self._session_timer.stop()
+            self._set_session_button_active(False)
             
-            # Send through ViewModel/CommandBus so cache/state invalidation stays centralized.
-            if self._device_info_vm and not self._main_vm:
-                try:
-                    self._device_info_vm.request_end_session(reason=0)
-                except Exception:
-                    pass
+    def _set_session_button_active(self, active: bool):
+        if active:
+            self.btn_end_session.setText("\U0001F534 End Session")
+            self.btn_end_session.setToolTip("End current session and save active ranging/log runs")
+        else:
+            self.btn_end_session.setText("\u25B6 Start Session")
+            self.btn_end_session.setToolTip("Start a new app session")
 
     def _save_active_session(self):
         """Compatibility wrapper. Session persistence is owned by MainViewModel."""
@@ -320,7 +354,7 @@ class MainWindow(QMainWindow):
         if self._session_active:
             if self._main_vm:
                 try:
-                    self._main_vm.end_session(duration_sec=self._session_seconds, reason=0)
+                    self._main_vm.end_session(duration_sec=self._session_seconds)
                 except Exception:
                     pass
             else:

@@ -166,58 +166,72 @@ class ConfigViewModel(QObject):
     # ── Command Triggers (called by View) ───────────────────────────
 
     def read_anchor_layout(self):
+        # BE/API: fetch anchor layout for the Config tab.
         log.info("Requesting anchor layout from MCU via global query queue...")
         self.model.request_anchor_layout()
 
     def write_anchor_layout(self, anchors: list):
+        # BE/API: persist anchor layout from Config tab.
         log.info("Sending anchor layout set command to MCU: %s", anchors)
         self.ranging_model.set_anchor_layout(anchors)
         self.model.set_anchor_layout(anchors)
 
     def read_ranging_config(self):
+        # BE/API: fetch ranging config for the Config tab.
         log.info("Requesting system ranging config from MCU via global query queue...")
         self.model.request_ranging_config()
 
     def write_ranging_config(self, period_ms: int, timeout_ms: int):
+        # BE/API: update ranging config from Config tab.
         log.info("Sending ranging config set command to MCU: period=%d ms, timeout=%d ms", period_ms, timeout_ms)
         self.model.set_ranging_config(period_ms=period_ms, timeout_ms=timeout_ms)
 
     def read_sys_config(self):
+        # BE/API: fetch UWB system config for the Config tab.
         log.info("Requesting system configuration from MCU via global query queue...")
         self.model.request_sys_config()
 
     def write_sys_config(self, **kwargs):
+        # BE/API: update UWB system config from Config tab.
         log.info("Sending sys config set command to MCU: %s", kwargs)
         self.model.set_sys_config(**kwargs)
 
     def read_sensor_fusion_config(self):
+        # BE/API: fetch sensor-fusion config for the Config tab.
         log.info("Requesting sensor fusion configuration from MCU via global query queue...")
         self.model.request_sensor_fusion_config()
 
     def write_sensor_fusion_config(self, **kwargs):
+        # BE/API: update sensor-fusion config from Config tab.
         log.info("Sending sensor fusion config set command to MCU: %s", kwargs)
         self.model.set_sensor_fusion_config(**kwargs)
 
     def read_pos_calib_config(self):
+        # BE/API: fetch position-calibration config for the Config tab.
         log.info("Requesting position calibration configuration from MCU via global query queue...")
         self.model.request_pos_calib_config()
 
     def write_pos_calib_config(self, **kwargs):
+        # BE/API: update position-calibration config from Config tab.
         log.info("Sending position calibration config set command to MCU: %s", kwargs)
         self.model.set_pos_calib_config(**kwargs)
 
     def device_reset(self):
+        # BE/API: device lifecycle action from Config tab.
         log.warning("Sending device_reset command to MCU...")
         self.model.request_device_reset()
 
     def uwb_reset(self):
+        # BE/API: device lifecycle action from Config tab.
         log.warning("Sending uwb_reset command to MCU...")
         self.model.request_uwb_reset()
 
     def factory_reset(self):
+        # BE/API: device lifecycle action from Config tab.
         log.warning("Sending factory_config_reset command to MCU...")
         self.model.request_factory_config_reset()
 
     def enter_bootloader(self):
+        # BE/API: device lifecycle action from Config tab.
         log.warning("Sending enter_to_bootloader command to MCU...")
         self.model.request_enter_bootloader()

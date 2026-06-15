@@ -63,18 +63,27 @@ class DiagnosticsRepository(QObject):
         }
 
     def parse_rtos_resource(self, resp) -> dict:
-        cpu_busy_permille = int(getattr(resp, "cpu_busy_permille", 0))
-        return {
-            "sample_window_ms": int(getattr(resp, "sample_window_ms", 0)),
+        present_fields = {field.name for field, _ in resp.ListFields()}
+
+        def value_or_none(name: str):
+            if name not in present_fields:
+                return None
+            return getattr(resp, name)
+
+        cpu_busy_permille = value_or_none("cpu_busy_permille")
+        data = {
+            "sample_window_ms": value_or_none("sample_window_ms"),
             "cpu_busy_permille": cpu_busy_permille,
-            "cpu_busy_percent": cpu_busy_permille / 10.0,
-            "heap_free_bytes": int(getattr(resp, "heap_free_bytes", 0)),
-            "heap_min_ever_free_bytes": int(getattr(resp, "heap_min_ever_free_bytes", 0)),
-            "min_stack_free_bytes": int(getattr(resp, "min_stack_free_bytes", 0)),
-            "min_stack_task_id": int(getattr(resp, "min_stack_task_id", 0)),
-            "task_count": int(getattr(resp, "task_count", 0)),
-            "health_flags": int(getattr(resp, "health_flags", 0)),
+            "heap_free_bytes": value_or_none("heap_free_bytes"),
+            "heap_min_ever_free_bytes": value_or_none("heap_min_ever_free_bytes"),
+            "min_stack_free_bytes": value_or_none("min_stack_free_bytes"),
+            "min_stack_task_id": value_or_none("min_stack_task_id"),
+            "task_count": value_or_none("task_count"),
+            "health_flags": value_or_none("health_flags"),
         }
+        if cpu_busy_permille is not None:
+            data["cpu_busy_percent"] = int(cpu_busy_permille) / 10.0
+        return {key: value for key, value in data.items() if value is not None}
 
     def parse_rtos_task_stats(self, resp) -> list[dict]:
         tasks = []

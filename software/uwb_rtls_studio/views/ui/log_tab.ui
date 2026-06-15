@@ -260,6 +260,16 @@ QSplitter::handle { background-color: #0F172A; }</string>
            </property>
           </spacer>
          </item>
+         <item>
+          <widget class="QPushButton" name="btn_clear_log">
+           <property name="toolTip">
+            <string>End and save the current log run</string>
+           </property>
+           <property name="text">
+            <string>Clear Log</string>
+           </property>
+          </widget>
+         </item>
         </layout>
        </item>
       </layout>

@@ -80,12 +80,21 @@ class LiveTrackingViewModel(QObject):
     geofence_status_updated = pyqtSignal(str, str, float)  # status, zone_name, speed_limit
     geofence_layout_updated = pyqtSignal(list)  # list of GeofenceZones
 
-    def __init__(self, model: RangingModel, protocol_service: ProtocolService, ranging_repo=None, command_bus=None, parent=None):
+    def __init__(
+        self,
+        model: RangingModel,
+        protocol_service: ProtocolService,
+        ranging_repo=None,
+        command_bus=None,
+        session_run_manager=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.model = model
         self.protocol = protocol_service
         self._ranging_repo = ranging_repo
         self._command_bus = command_bus
+        self._session_run_manager = session_run_manager
         self._pending_position: tuple[float, float, float, float] | None = None
         self._pending_sensor_fusion: dict | None = None
         
@@ -151,6 +160,8 @@ class LiveTrackingViewModel(QObject):
 
     def start_ranging(self) -> None:
         # Gọi command tới BE từ ViewModel
+        if self._session_run_manager:
+            self._session_run_manager.open_ranging_run()
         self.model.clear_history()
         self._pending_position = None
         self._pending_sensor_fusion = None
@@ -161,6 +172,8 @@ class LiveTrackingViewModel(QObject):
     def stop_ranging(self) -> None:
         self.model.stop_ranging()
         self._flush_pending_live_updates()
+        if self._session_run_manager:
+            self._session_run_manager.close_ranging_run(send_end=True)
         self.ranging_stopped.emit()
 
     # Geofence service methods

@@ -135,6 +135,30 @@ class ConfigTab(QWidget):
         self.btn_add_anchor.clicked.connect(self._add_anchor)
         self.btn_remove_anchor.clicked.connect(self._remove_anchor)
         self.anchor_table.itemChanged.connect(self._on_table_item_changed)
+        self._set_anchor_placeholders()
+
+    def _set_anchor_placeholders(self, count: int = 4):
+        self.anchor_table.blockSignals(True)
+        try:
+            self.anchor_table.setRowCount(0)
+            for idx in range(1, count + 1):
+                row = self.anchor_table.rowCount()
+                self.anchor_table.insertRow(row)
+                self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{idx}"))
+                self.anchor_table.setItem(row, 1, QTableWidgetItem("--"))
+                self.anchor_table.setItem(row, 2, QTableWidgetItem("--"))
+                self.anchor_table.setItem(row, 3, QTableWidgetItem("--"))
+        finally:
+            self.anchor_table.blockSignals(False)
+
+    @staticmethod
+    def _coord_text(value):
+        if value is None:
+            return "--"
+        try:
+            return format_coord(float(value))
+        except (TypeError, ValueError):
+            return "--"
 
     def _add_anchor(self):
         self.anchor_table.blockSignals(True)
@@ -432,13 +456,18 @@ class ConfigTab(QWidget):
             self.anchor_table.insertRow(target_row)
             self.anchor_table.setItem(target_row, 0, QTableWidgetItem(f"A{anchor_id}"))
             
-        self.anchor_table.setItem(target_row, 1, QTableWidgetItem(format_coord(x_m)))
-        self.anchor_table.setItem(target_row, 2, QTableWidgetItem(format_coord(y_m)))
-        self.anchor_table.setItem(target_row, 3, QTableWidgetItem(format_coord(z_m)))
+        self.anchor_table.setItem(target_row, 1, QTableWidgetItem(self._coord_text(x_m)))
+        self.anchor_table.setItem(target_row, 2, QTableWidgetItem(self._coord_text(y_m)))
+        self.anchor_table.setItem(target_row, 3, QTableWidgetItem(self._coord_text(z_m)))
     def _apply_anchor_layout_to_table(self):
         anchors = [dict(a) for a in self._last_anchor_layout]
         self.anchor_table.blockSignals(True)
         try:
+            if not anchors:
+                self.anchor_table.blockSignals(False)
+                self._set_anchor_placeholders()
+                self.visual_widget.set_anchors([])
+                return
             if self._current_role == 2:  # Anchor device: only expose its own layout item.
                 target_anchor = None
                 for anchor in anchors:
@@ -451,9 +480,9 @@ class ConfigTab(QWidget):
                 if target_anchor:
                     self._update_single_anchor_in_table(
                         target_anchor.get("anchor_id", self._current_device_id),
-                        target_anchor.get("x_m", 0.0),
-                        target_anchor.get("y_m", 0.0),
-                        target_anchor.get("z_m", 0.0),
+                        target_anchor.get("x_m"),
+                        target_anchor.get("y_m"),
+                        target_anchor.get("z_m"),
                     )
             else:  # Tag/Gateway: render the full anchor layout list.
                 self.anchor_table.setRowCount(0)
@@ -461,9 +490,9 @@ class ConfigTab(QWidget):
                     row = self.anchor_table.rowCount()
                     self.anchor_table.insertRow(row)
                     self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{anchor['anchor_id']}"))
-                    self.anchor_table.setItem(row, 1, QTableWidgetItem(format_coord(anchor.get("x_m", 0.0))))
-                    self.anchor_table.setItem(row, 2, QTableWidgetItem(format_coord(anchor.get("y_m", 0.0))))
-                    self.anchor_table.setItem(row, 3, QTableWidgetItem(format_coord(anchor.get("z_m", 0.0))))
+                    self.anchor_table.setItem(row, 1, QTableWidgetItem(self._coord_text(anchor.get("x_m"))))
+                    self.anchor_table.setItem(row, 2, QTableWidgetItem(self._coord_text(anchor.get("y_m"))))
+                    self.anchor_table.setItem(row, 3, QTableWidgetItem(self._coord_text(anchor.get("z_m"))))
         finally:
             self.anchor_table.blockSignals(False)
         current_anchors = self._get_anchors_from_table()

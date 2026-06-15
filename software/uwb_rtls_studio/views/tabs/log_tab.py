@@ -75,8 +75,7 @@ class LogTab(QWidget):
         self.set_developer_mode(self._is_developer)
 
     def _check_and_populate_virtual(self):
-        if self._vm is None:
-            self._populate_virtual_history()
+        return
 
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
@@ -133,6 +132,9 @@ class LogTab(QWidget):
         """Connect UI signals."""
         self.filter_level.currentTextChanged.connect(self._apply_filter)
         self.filter_source.currentIndexChanged.connect(self._apply_filter)
+        self.search_edit.textChanged.connect(self._apply_filter)
+        if hasattr(self, "btn_clear_log"):
+            self.btn_clear_log.clicked.connect(self._clear_log_session)
         self.session_table.itemSelectionChanged.connect(self._on_session_selection_changed)
         self.btn_detail_ranging.toggled.connect(
             lambda checked: checked and self._set_detail_mode("ranging")
@@ -177,10 +179,36 @@ class LogTab(QWidget):
 
     def set_viewmodel(self, vm):
         self._vm = vm
+        self._vm.log_entry_added.connect(self._append_log_entry)
+        self._vm.live_logs_cleared.connect(self._clear_live_log_view)
         self._vm.session_list_updated.connect(self._on_session_list_updated)
         self._vm.session_details_loaded.connect(self._on_session_details_loaded)
         self._vm.session_deleted.connect(self._on_session_deleted)
         self._vm.refresh_sessions()
+
+    def _append_log_entry(self, entry: dict):
+        timestamp = entry.get("timestamp", "")
+        level = entry.get("level", "")
+        source = entry.get("source", "")
+        message = entry.get("message", "")
+        object_code = entry.get("object_code")
+        object_text = f" 0x{int(object_code):02X}" if object_code is not None else ""
+        line = f"[{timestamp}] {level:<5} {source}{object_text} {message}".strip()
+        self._all_log_lines.append(line)
+        self._log_entry_count = len(self._all_log_lines)
+        self._apply_filter()
+        self.log_text.moveCursor(QTextCursor.MoveOperation.End)
+
+    def _clear_live_log_view(self):
+        self._all_log_lines.clear()
+        self._log_entry_count = 0
+        self._filter_active = False
+        self.log_text.clear()
+        self.log_count.setText("0 entries")
+
+    def _clear_log_session(self):
+        if self._vm:
+            self._vm.clear_log_session()
 
     def _on_session_list_updated(self, sessions):
         self.session_table.blockSignals(True)
@@ -263,21 +291,24 @@ class LogTab(QWidget):
             w.setVisible(enabled)
 
     def _apply_filter(self, *_):
-        if not self._filter_active:
-            self._all_log_lines = self.log_text.toPlainText().splitlines()
-
         level = self.filter_level.currentText().strip().upper()
         object_code = self.filter_source.currentData()
+        query = self.search_edit.text().strip().lower()
         lines = self._all_log_lines
 
         filtered_lines = [
             line for line in lines
             if self._line_matches_level(line, level)
             and self._line_matches_object_code(line, object_code)
+            and (not query or query in line.lower())
         ]
 
-        self._filter_active = level != "ALL" or object_code is not None
+        self._filter_active = level != "ALL" or object_code is not None or bool(query)
         self.log_text.setPlainText("\n".join(filtered_lines))
+        if self._filter_active:
+            self.log_count.setText(f"{len(filtered_lines)} / {self._log_entry_count} entries")
+        else:
+            self.log_count.setText(f"{self._log_entry_count} entries")
 
     def _line_matches_level(self, line, level):
         if level == "ALL":

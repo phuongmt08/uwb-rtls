@@ -91,6 +91,38 @@ def default_destination_for(command_name: str) -> int:
 class CommandFactory:
     def __init__(self) -> None:
         self.pb = pb
+        # Mock/default identity for test and simulation helpers only.
+        # Real device identity should come from the actual device response fields.
+        self.default_device_type = pb.DEVICE_TYPE_ANCHOR
+        self.default_device_role = pb.DEVICE_ROLE_ANCHOR
+
+    def set_device_identity(self, device_type: int, role: int | None = None) -> None:
+        """Update the mock/default identity used by packet builders."""
+        self.default_device_type = device_type
+        if role is None:
+            if device_type == pb.DEVICE_TYPE_TAG:
+                role = pb.DEVICE_ROLE_TAG
+            elif device_type == pb.DEVICE_TYPE_ANCHOR:
+                role = pb.DEVICE_ROLE_ANCHOR
+            else:
+                role = pb.DEVICE_ROLE_UNSPECIFIED
+        self.default_device_role = role
+
+    def _resolve_device_identity(
+        self,
+        device_type: int | None = None,
+        role: int | None = None,
+    ) -> tuple[int, int]:
+        resolved_type = self.default_device_type if device_type is None else device_type
+        if role is not None:
+            resolved_role = role
+        elif resolved_type == pb.DEVICE_TYPE_TAG:
+            resolved_role = pb.DEVICE_ROLE_TAG
+        elif resolved_type == pb.DEVICE_TYPE_ANCHOR:
+            resolved_role = pb.DEVICE_ROLE_ANCHOR
+        else:
+            resolved_role = self.default_device_role
+        return resolved_type, resolved_role
 
     @staticmethod
     def _base(src: int, dst: int, seq: int) -> pb.packet_t: 
@@ -116,10 +148,20 @@ class CommandFactory:
         pkt.device_information_get.dummy = 0
         return pkt
 
-    def device_information_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def device_information_resp(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        device_type: int | None = None,
+        role: int | None = None,
+    ) -> pb.packet_t:
+        # Test/mock helper: when no device payload is available, synthesize a
+        # realistic response using the current default identity.
         pkt = self._base(src, dst, seq)
-        pkt.device_information_resp.device_type = pb.DEVICE_TYPE_ANCHOR
-        pkt.device_information_resp.role = pb.DEVICE_ROLE_ANCHOR
+        resolved_type, resolved_role = self._resolve_device_identity(device_type, role)
+        pkt.device_information_resp.device_type = resolved_type
+        pkt.device_information_resp.role = resolved_role
         pkt.device_information_resp.serial_number = 1
         pkt.device_information_resp.hw_version = 1
         pkt.device_information_resp.uid = b"\x00\x01\x02\x03"
@@ -149,13 +191,14 @@ class CommandFactory:
         src: int,
         dst: int,
         seq: int,
-        device_type: int = pb.DEVICE_TYPE_ANCHOR,
+        device_type: int | None = None,
         device_id: int = 1,
         unix_time_ms: int | None = None,
         timezone_offset: int = 7 * 60,
     ) -> pb.packet_t:
+        # Test/mock helper: real devices should provide their own identity.
         pkt = self._base(src, dst, seq)
-        pkt.time_sync_adv_set.device_type = device_type
+        pkt.time_sync_adv_set.device_type = self.default_device_type if device_type is None else device_type
         pkt.time_sync_adv_set.device_id = device_id
         pkt.time_sync_adv_set.unix_time_ms = unix_time_ms if unix_time_ms is not None else int(time.time() * 1000)
         pkt.time_sync_adv_set.timezone_offset = timezone_offset
@@ -167,7 +210,7 @@ class CommandFactory:
         return pkt
 
     def sys_config_set(self, src: int, dst: int, seq: int,
-                       role: int = pb.DEVICE_ROLE_ANCHOR,
+                       role: int | None = None,
                        device_id: int = 1,
                        ranging_period_ms: int = 300,
                        rx_timeout_ms: int = 120,
@@ -186,9 +229,11 @@ class CommandFactory:
                        uwb_phr_mode: int = 0,
                        smart_tx_power: bool = False,
                        pg_delay: int = 0) -> pb.packet_t:
+        # Test/mock helper: defaults are only for simulation and fixtures.
         pkt = self._base(src, dst, seq)
+        resolved_role = self.default_device_role if role is None else role
         cfg = pkt.sys_config_set.config
-        cfg.role = role
+        cfg.role = resolved_role
         cfg.device_id = device_id
         cfg.ranging_period_ms = ranging_period_ms
         cfg.rx_timeout_ms = rx_timeout_ms
@@ -359,9 +404,10 @@ class CommandFactory:
         pkt.factory_config_reset.magic = 0xA55A55A5
         return pkt
 
-    def device_type_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def device_type_set(self, src: int, dst: int, seq: int, device_type: int | None = None) -> pb.packet_t:
+        # Test/mock helper: lets the simulator express TAG/ANCHOR identity.
         pkt = self._base(src, dst, seq)
-        pkt.device_type_set.device_type = pb.DEVICE_TYPE_ANCHOR
+        pkt.device_type_set.device_type = self.default_device_type if device_type is None else device_type
         return pkt
 
     def device_type_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -408,9 +454,10 @@ class CommandFactory:
         pkt.ble_status_resp.rssi_dbm = -70
         return pkt
 
-    def ble_adv_status(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def ble_adv_status(self, src: int, dst: int, seq: int, device_type: int | None = None) -> pb.packet_t:
+        # Test/mock helper: advertising status should match the simulated device.
         pkt = self._base(src, dst, seq)
-        pkt.ble_adv_status.device = pb.DEVICE_TYPE_ANCHOR
+        pkt.ble_adv_status.device = self.default_device_type if device_type is None else device_type
         pkt.ble_adv_status.device_id = 1
         pkt.ble_adv_status.bat_soc_percent = 88
         pkt.ble_adv_status.status_flags = 0
@@ -419,10 +466,17 @@ class CommandFactory:
         pkt.ble_adv_status.local_timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
         return pkt
 
-    def log_data(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def log_data(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        log_type: int = pb.LOG_TYPE_DEVICE_LOG,
+        data: bytes = b"",
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.log_data.type = pb.LOG_TYPE_DEVICE_LOG
-        pkt.log_data.data = b"test-log"
+        pkt.log_data.type = log_type
+        pkt.log_data.data = data or b""
         return pkt
 
     def log_clear(

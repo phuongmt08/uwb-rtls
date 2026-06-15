@@ -11,9 +11,10 @@ from utils.app_state import shared_app_state
 class TelemetryRepository(QObject):
     telemetry_updated = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, telemetry_model=None, parent=None):
         super().__init__(parent)
         self._latest_by_device: dict[str, dict] = {}
+        self._telemetry_model = telemetry_model
 
     def handle_packet(self, param_name: str, pkt, device_key: str = "") -> bool:
         if param_name == "battery_info_resp":
@@ -22,24 +23,34 @@ class TelemetryRepository(QObject):
         return False
 
     def parse_battery_info(self, resp) -> dict:
+        present_fields = {field.name for field, _ in resp.ListFields()}
+
+        def value_or_none(name: str):
+            if name not in present_fields:
+                return None
+            return getattr(resp, name)
+
         return {
-            "bat_voltage_mv": int(getattr(resp, "bat_voltage_mv", 0)),
-            "bat_soc_percent": int(getattr(resp, "bat_soc_percent", 0)),
-            "remaining_min": int(getattr(resp, "remaining_min", 0)),
-            "is_charging": bool(getattr(resp, "is_charging", False)),
-            "mcu_temp_c": float(getattr(resp, "mcu_temp_c", 0.0)),
-            "mcu_voltage_mv": int(getattr(resp, "mcu_voltage_mv", 0)),
-            "vdda_mv": int(getattr(resp, "mcu_voltage_mv", 0)),
-            "uwb_temp_c": float(getattr(resp, "uwb_temp_c", 0.0)),
-            "uwb_voltage_mv": int(getattr(resp, "uwb_voltage_mv", 0)),
-            "uwb_vbat_mv": int(getattr(resp, "uwb_voltage_mv", 0)),
-            "imu_temp_c": float(getattr(resp, "imu_temp_c", 0.0)),
-            "error_mask": int(getattr(resp, "error_mask", 0)),
+            "bat_voltage_mv": value_or_none("bat_voltage_mv"),
+            "bat_soc_percent": value_or_none("bat_soc_percent"),
+            "remaining_min": value_or_none("remaining_min"),
+            "is_charging": value_or_none("is_charging"),
+            "mcu_temp_c": value_or_none("mcu_temp_c"),
+            "mcu_voltage_mv": value_or_none("mcu_voltage_mv"),
+            "vdda_mv": value_or_none("mcu_voltage_mv"),
+            "uwb_temp_c": value_or_none("uwb_temp_c"),
+            "uwb_voltage_mv": value_or_none("uwb_voltage_mv"),
+            "uwb_vbat_mv": value_or_none("uwb_voltage_mv"),
+            "imu_temp_c": value_or_none("imu_temp_c"),
+            "error_mask": value_or_none("error_mask"),
         }
 
     def save_battery_info(self, device_key: str, info: dict) -> None:
-        data = info.copy()
+        data = {key: value for key, value in info.items() if value is not None}
         data["device_key"] = device_key
+        if self._telemetry_model:
+            data = self._telemetry_model.handle_battery_info(data)
+            data["device_key"] = device_key
         self._latest_by_device[device_key] = data
         shared_app_state.battery_info = data
         self.telemetry_updated.emit(data)

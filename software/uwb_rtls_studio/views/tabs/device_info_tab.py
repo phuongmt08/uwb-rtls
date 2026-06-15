@@ -149,26 +149,32 @@ class DeviceInfoTab(QWidget):
             self._ble_values["PHY:"].setText(str(phy))
 
     def _on_telemetry_updated(self, data: dict):
-        pct = data.get("bat_soc_percent", 0)
-        self._bat_pct.setText(f"{pct}%")
-        self._bat_bar.setValue(pct)
-        color = "#10B981" if pct > 30 else "#EF4444"
+        pct = data.get("bat_soc_percent")
+        if pct is None:
+            self._bat_pct.setText("--")
+            self._bat_bar.setValue(0)
+            color = "#94A3B8"
+        else:
+            pct = int(pct)
+            self._bat_pct.setText(f"{pct}%")
+            self._bat_bar.setValue(pct)
+            color = "#10B981" if pct > 30 else "#EF4444"
         self._bat_pct.setStyleSheet(f"color: {color}; background: transparent;")
 
-        self._bat_info_labels["Voltage:"].setText(data.get("bat_voltage_str", "-"))
-        self._bat_info_labels["Remaining:"].setText(data.get("remaining_str", "-"))
-        self._bat_info_labels["Charging:"].setText(data.get("charging_str", "-"))
+        self._bat_info_labels["Voltage:"].setText(data.get("bat_voltage_str", "--"))
+        self._bat_info_labels["Remaining:"].setText(data.get("remaining_str", "--"))
+        self._bat_info_labels["Charging:"].setText(data.get("charging_str", "--"))
 
-        self._temp_labels["MCU:"].setText(data.get("mcu_temp_str", "-"))
-        self._temp_labels["UWB Chip:"].setText(data.get("uwb_temp_str", "-"))
-        self._temp_labels["IMU:"].setText(data.get("imu_temp_str", "-"))
+        self._temp_labels["MCU:"].setText(data.get("mcu_temp_str", "--"))
+        self._temp_labels["UWB Chip:"].setText(data.get("uwb_temp_str", "--"))
+        self._temp_labels["IMU:"].setText(data.get("imu_temp_str", "--"))
 
-        self._volt_labels["VDDA:"].setText(data.get("vdda_str", "-"))
-        self._volt_labels["UWB VBAT:"].setText(data.get("uwb_vbat_str", "-"))
+        self._volt_labels["VDDA:"].setText(data.get("vdda_str", "--"))
+        self._volt_labels["UWB VBAT:"].setText(data.get("uwb_vbat_str", "--"))
 
-        self._sys_labels["HEAP:"].setText(data.get("heap_usage", "-"))
-        self._sys_labels["STACK:"].setText(data.get("stack_usage", "-"))
-        self._sys_labels["CPU:"].setText(data.get("cpu_usage", "-"))
+        self._sys_labels["HEAP:"].setText(data.get("heap_usage", "--"))
+        self._sys_labels["STACK:"].setText(data.get("stack_usage", "--"))
+        self._sys_labels["CPU:"].setText(data.get("cpu_usage", "--"))
 
     def _on_time_sync_updated(self, local_time: str, is_synced: bool, is_syncing: bool):
         self._time_local.setText(local_time)

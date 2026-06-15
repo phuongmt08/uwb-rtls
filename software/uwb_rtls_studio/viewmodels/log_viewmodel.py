@@ -112,11 +112,13 @@ class LogViewModel(QObject):
     session_list_updated = pyqtSignal(list)
     session_details_loaded = pyqtSignal(str, str, list)  # session_id, detail_type, data_list
     session_deleted = pyqtSignal(str)
+    live_logs_cleared = pyqtSignal()
 
-    def __init__(self, session_browser: SessionBrowser, log_model=None, parent=None):
+    def __init__(self, session_browser: SessionBrowser, log_model=None, session_run_manager=None, parent=None):
         super().__init__(parent)
         self.browser = session_browser
         self._log_model = log_model
+        self._session_run_manager = session_run_manager
         self._live_logs = []
         if self._log_model:
             self._log_model.log_entry_added.connect(self._on_model_log_entry)
@@ -132,6 +134,8 @@ class LogViewModel(QObject):
             self._log_model.clear_session_logs()
 
     def _on_model_log_entry(self, entry: dict):
+        if self._session_run_manager:
+            self._session_run_manager.open_log_run()
         self._live_logs.append(entry.copy())
         self.log_entry_added.emit(entry)
 
@@ -156,7 +160,16 @@ class LogViewModel(QObject):
         self._live_logs.clear()
         if self._log_model:
             self._log_model.clear_live_logs()
+        self.live_logs_cleared.emit()
         self.log_filtered.emit(0)
+
+    def clear_log_session(self):
+        """End the current log run, persist it, send LOG_DATA end reason, and clear live logs."""
+        if self._session_run_manager:
+            self._session_run_manager.close_log_run(send_end=True, clear_buffers=False)
+            self.refresh_sessions()
+        self.clear_session_logs()
+        self.clear_live_logs()
 
     # ── Session History Methods ──────────────────────────────────────
 
@@ -204,6 +217,11 @@ class LogViewModel(QObject):
 
     def _count_ranging_runs(self, session_id: str) -> int:
         return self.browser.count_ranging_runs(session_id)
+
+    def _count_log_runs(self, session_id: str) -> int:
+        if hasattr(self.browser, "count_log_runs"):
+            return self.browser.count_log_runs(session_id)
+        return 0
 
     def get_session_folder(self, session_id: str) -> str:
         return self.browser.get_session_folder(session_id)

@@ -72,6 +72,10 @@ class SessionRepository:
         if not os.path.isdir(session_folder):
             return 0
 
+        runs = self._read_runs(session_id)
+        if runs:
+            return sum(1 for run in runs if run.get("stream_type") == "ranging")
+
         count = 0
         if os.path.exists(os.path.join(session_folder, "positions.csv")):
             count += 1
@@ -88,6 +92,18 @@ class SessionRepository:
             if lowered.endswith(".csv") and lowered.startswith("ranging"):
                 count += 1
         return count
+
+    def count_log_runs(self, session_id: str) -> int:
+        if not session_id:
+            return 0
+        runs = self._read_runs(session_id)
+        if runs:
+            return sum(1 for run in runs if run.get("stream_type") == "log")
+
+        log_dir = os.path.join(self.get_session_folder(session_id), "log")
+        if not os.path.isdir(log_dir):
+            return 1 if os.path.exists(os.path.join(self.get_session_folder(session_id), "logs.csv")) else 0
+        return sum(1 for name in os.listdir(log_dir) if name.lower().startswith("log_run_") and name.lower().endswith(".csv"))
 
     def save_session(
         self,
@@ -138,6 +154,112 @@ class SessionRepository:
         self._upsert_index_entry(self._build_index_entry(normalized_meta, session_folder))
         log.info("Session %s saved successfully to file repository.", session_id)
         return session_id
+
+    def ensure_session(self, session_meta: dict) -> str:
+        """Create/update only session metadata and index."""
+        session_id = session_meta.get("session_id")
+        if not session_id:
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_id = f"SES_{timestamp_str}_session"
+            session_meta["session_id"] = session_id
+
+        session_folder = self.get_session_folder(session_id)
+        os.makedirs(session_folder, exist_ok=True)
+        normalized_meta = self._normalize_session_meta(session_meta)
+        self._write_json(os.path.join(session_folder, "session_meta.json"), normalized_meta)
+        self._upsert_index_entry(self._build_index_entry(normalized_meta, session_folder))
+        return session_id
+
+    def save_ranging_run(
+        self,
+        session_id: str,
+        run_index: int,
+        positions: list[dict] | None = None,
+        fusion_positions: list[dict] | None = None,
+        meta: dict | None = None,
+    ) -> list[str]:
+        session_folder = self.get_session_folder(session_id)
+        run_dir = os.path.join(session_folder, "ranging")
+        os.makedirs(run_dir, exist_ok=True)
+
+        files: list[str] = []
+        if positions is not None:
+            path = os.path.join(run_dir, f"ranging_run_{run_index:03d}.csv")
+            self._write_positions_csv(path, positions)
+            self._mirror_browser_file(path, "ranging", session_id)
+            files.append(os.path.relpath(path, session_folder))
+
+        if fusion_positions:
+            path = os.path.join(run_dir, f"sensor_fusion_run_{run_index:03d}.csv")
+            self._write_positions_csv(path, fusion_positions)
+            self._mirror_browser_file(path, "ranging", session_id)
+            files.append(os.path.relpath(path, session_folder))
+
+        run_meta = dict(meta or {})
+        run_meta.update({
+            "stream_type": "ranging",
+            "index": int(run_index),
+            "files": files,
+            "sample_count": len(positions or []),
+        })
+        self.append_or_update_run_meta(session_id, run_meta)
+        return files
+
+    def save_log_run(
+        self,
+        session_id: str,
+        run_index: int,
+        logs: list[dict] | None = None,
+        meta: dict | None = None,
+    ) -> list[str]:
+        session_folder = self.get_session_folder(session_id)
+        run_dir = os.path.join(session_folder, "log")
+        os.makedirs(run_dir, exist_ok=True)
+
+        logs = list(logs or [])
+        csv_path = os.path.join(run_dir, f"log_run_{run_index:03d}.csv")
+        txt_path = os.path.join(run_dir, f"log_run_{run_index:03d}.txt")
+        self._write_logs_csv(csv_path, logs)
+        self._write_logs_txt(txt_path, logs)
+        self._mirror_browser_file(csv_path, "log", session_id)
+        self._mirror_browser_file(txt_path, "log", session_id)
+        files = [
+            os.path.relpath(csv_path, session_folder),
+            os.path.relpath(txt_path, session_folder),
+        ]
+
+        run_meta = dict(meta or {})
+        run_meta.update({
+            "stream_type": "log",
+            "index": int(run_index),
+            "files": files,
+            "sample_count": len(logs),
+        })
+        self.append_or_update_run_meta(session_id, run_meta)
+        return files
+
+    def append_or_update_run_meta(self, session_id: str, run_meta: dict) -> None:
+        runs = self._read_runs(session_id)
+        key = (run_meta.get("stream_type"), int(run_meta.get("index", 0) or 0))
+        updated = False
+        for idx, existing in enumerate(runs):
+            existing_key = (existing.get("stream_type"), int(existing.get("index", 0) or 0))
+            if existing_key == key:
+                merged = existing.copy()
+                merged.update(run_meta)
+                runs[idx] = merged
+                updated = True
+                break
+        if not updated:
+            runs.append(run_meta.copy())
+        runs.sort(key=lambda item: (item.get("stream_type", ""), int(item.get("index", 0) or 0)))
+        self._write_runs(session_id, runs)
+
+    def list_session_runs(self, session_id: str, stream_type: str | None = None) -> list[dict]:
+        runs = self._read_runs(session_id)
+        if stream_type:
+            runs = [run for run in runs if run.get("stream_type") == stream_type]
+        return [run.copy() for run in runs]
 
     def export_session_to(self, session_id: str, destination_dir: str) -> str:
         if not session_id or not destination_dir:
@@ -222,10 +344,31 @@ class SessionRepository:
             return []
 
         if detail_type == "ranging":
+            rows = []
+            for run in self.list_session_runs(session_id, "ranging"):
+                for rel_path in run.get("files", []):
+                    if os.path.basename(rel_path).lower().startswith("ranging_run_"):
+                        rows.extend(self._read_positions_csv(os.path.join(session_folder, rel_path)))
+            if rows:
+                return rows
             return self._read_positions_csv(os.path.join(session_folder, "positions.csv"))
         if detail_type == "fusion":
+            rows = []
+            for run in self.list_session_runs(session_id, "ranging"):
+                for rel_path in run.get("files", []):
+                    if os.path.basename(rel_path).lower().startswith("sensor_fusion_run_"):
+                        rows.extend(self._read_positions_csv(os.path.join(session_folder, rel_path)))
+            if rows:
+                return rows
             return self._read_positions_csv(os.path.join(session_folder, "sensor_fusion_positions.csv"))
         if detail_type == "logs":
+            rows = []
+            for run in self.list_session_runs(session_id, "log"):
+                for rel_path in run.get("files", []):
+                    if rel_path.lower().endswith(".csv"):
+                        rows.extend(self._read_logs_csv(os.path.join(session_folder, rel_path)))
+            if rows:
+                return rows
             csv_path = os.path.join(session_folder, "logs.csv")
             if os.path.exists(csv_path):
                 return self._read_logs_csv(csv_path)
@@ -297,6 +440,17 @@ class SessionRepository:
 
     def _write_index(self, sessions: list[dict]) -> None:
         self._write_json(INDEX_FILE, sessions)
+
+    def _runs_path(self, session_id: str) -> str:
+        return os.path.join(self.get_session_folder(session_id), "runs.json")
+
+    def _read_runs(self, session_id: str) -> list[dict]:
+        data = self._read_json(self._runs_path(session_id), default=[])
+        return data if isinstance(data, list) else []
+
+    def _write_runs(self, session_id: str, runs: list[dict]) -> None:
+        os.makedirs(self.get_session_folder(session_id), exist_ok=True)
+        self._write_json(self._runs_path(session_id), runs)
 
     def _upsert_index_entry(self, entry: dict) -> None:
         items = [item for item in self._read_index() if item.get("session_id") != entry.get("session_id")]

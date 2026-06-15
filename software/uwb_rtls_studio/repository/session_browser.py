@@ -49,6 +49,9 @@ class SessionBrowser:
     def count_ranging_runs(self, session_id: str) -> int:
         return self._repo.count_ranging_runs(session_id)
 
+    def count_log_runs(self, session_id: str) -> int:
+        return self._repo.count_log_runs(session_id)
+
     def export_session_to(self, session_id: str, destination_dir: str) -> str:
         return self._repo.export_session_to(session_id, destination_dir)
 

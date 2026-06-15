@@ -68,8 +68,10 @@ def main():
     from repository.log_repository import LogRepository
     from repository.protocol_packet_repository import ProtocolPacketRepository
     from services.command_bus import init_shared_command_bus
+    from models.telemetry_model import TelemetryModel
 
-    telemetry_repo = TelemetryRepository()
+    telemetry_model = TelemetryModel()
+    telemetry_repo = TelemetryRepository(telemetry_model=telemetry_model)
     ble_scan_repo = BleScanRepository()
     ranging_repo = RangingRepository()
     config_repo = ConfigRepository()
@@ -89,7 +91,7 @@ def main():
     # Initialize global query manager in shared app state
     from utils.app_state import shared_app_state
     shared_app_state.init_query_manager(
-        send_packet_fn=lambda cmd, dst, **kwargs: protocol_service.send_command(cmd, dst_addr=dst, **kwargs)
+        send_packet_fn=lambda cmd, dst, **kwargs: command_bus.send(cmd, dst_addr=dst, **kwargs)
     )
 
     # ═══════════════════════════════════════════════════════════════
@@ -155,10 +157,12 @@ def main():
     from views.windows.main_window import MainWindow
     from models.ranging_model import RangingModel
     from models.device_model import DeviceModel
+    from models.session_model import SessionModel
     from viewmodels.live_tracking_viewmodel import LiveTrackingViewModel
     from viewmodels.device_info_viewmodel import DeviceInfoViewModel
     from repository.session_repository import SessionRepository
     from repository.session_browser import SessionBrowser
+    from services.session_run_manager import SessionRunManager
     from models.log_model import LogModel
     from viewmodels.log_viewmodel import LogViewModel
     from viewmodels.config_viewmodel import ConfigViewModel
@@ -167,29 +171,44 @@ def main():
     session_repo = SessionRepository()
     session_browser = SessionBrowser(session_repo)
     log_model = LogModel(log_repository=log_repo, command_bus=command_bus)
-    log_vm = LogViewModel(session_browser, log_model=log_model)
 
     ranging_model = RangingModel(protocol_service, ranging_repo=ranging_repo, command_bus=command_bus)
-    live_tracking_vm = LiveTrackingViewModel(
-        ranging_model,
-        protocol_service,
-        ranging_repo=ranging_repo,
-        command_bus=command_bus,
-    )
-    
     device_model = DeviceModel(
         protocol_service,
         telemetry_repo=telemetry_repo,
         ble_scan_repo=ble_scan_repo,
         command_bus=command_bus,
     )
-    device_info_vm = DeviceInfoViewModel(device_model, dongle_model, telemetry_repo=telemetry_repo, ble_scan_repo=ble_scan_repo)
+    device_info_vm = DeviceInfoViewModel(
+        device_model,
+        dongle_model,
+        telemetry_repo=telemetry_repo,
+        ble_scan_repo=ble_scan_repo,
+        telemetry_model=telemetry_model,
+    )
+    session_model = SessionModel()
+    session_run_manager = SessionRunManager(
+        session_model,
+        session_repo,
+        device_info_vm=device_info_vm,
+        ranging_model=ranging_model,
+        log_model=log_model,
+    )
+    log_vm = LogViewModel(session_browser, log_model=log_model, session_run_manager=session_run_manager)
+    live_tracking_vm = LiveTrackingViewModel(
+        ranging_model,
+        protocol_service,
+        ranging_repo=ranging_repo,
+        command_bus=command_bus,
+        session_run_manager=session_run_manager,
+    )
     config_vm = ConfigViewModel(device_model, ranging_model, command_bus=command_bus)
     main_vm = MainViewModel(
         live_tracking_vm=live_tracking_vm,
         device_info_vm=device_info_vm,
         log_vm=log_vm,
         session_repository=session_repo,
+        session_run_manager=session_run_manager,
     )
 
     # Seed the connected device info so the tab shows it immediately

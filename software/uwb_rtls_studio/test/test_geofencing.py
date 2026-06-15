@@ -1,6 +1,7 @@
 import os
 import sys
 import math
+import tempfile
 from PyQt6.QtCore import QCoreApplication
 
 # Add project root to path for imports
@@ -35,6 +36,7 @@ def test_geofence_zone_serialization():
     assert data["id"] == "zone_test"
     assert data["name"] == "Test Zone"
     assert data["type"] == "forbidden"
+    assert data["object_type"] == "zone"
     assert len(data["points"]) == 4
     assert data["min_z"] == 0.5
     assert data["max_z"] == 2.5
@@ -45,6 +47,7 @@ def test_geofence_zone_serialization():
     assert loaded_zone.id == zone.id
     assert loaded_zone.name == zone.name
     assert loaded_zone.zone_type == zone.zone_type
+    assert loaded_zone.object_type == zone.object_type
     assert loaded_zone.min_z == zone.min_z
     assert loaded_zone.max_z == zone.max_z
     assert loaded_zone.speed_limit == zone.speed_limit
@@ -67,25 +70,39 @@ def test_geofence_zone_contains_math():
         color="#FF0000"
     )
 
-    # 1. Point is completely inside the 2.5D box
+    # 1. Point is inside the 2D rule zone
     assert zone.contains(2.5, 2.5, 1.5) is True
 
-    # 2. Point is outside the 2D polygon but inside the height limits
+    # 2. Point is outside the 2D polygon
     assert zone.contains(6.0, 2.5, 1.5) is False
 
-    # 3. Point is inside the 2D polygon but below height limits
-    assert zone.contains(2.5, 2.5, 0.5) is False
+    # 3. Rule zones are 2D, so z no longer changes containment.
+    assert zone.contains(2.5, 2.5, 0.5) is True
 
-    # 4. Point is inside the 2D polygon but above height limits
-    assert zone.contains(2.5, 2.5, 2.5) is False
+    # 4. Map objects are geometry only and do not participate in rule checks.
+    wall = GeofenceZone(
+        id="wall_math",
+        name="Wall",
+        zone_type="wall",
+        points=points,
+        min_z=0.0,
+        max_z=3.0,
+        speed_limit=0.0,
+        color="#94A3B8",
+        object_type="wall",
+    )
+    assert wall.contains(2.5, 2.5, 1.5) is False
 
 
 def test_geofence_repository_position_checks():
     _ensure_qt_app()
     # Create a temporary file path for testing repo
-    test_json_path = os.path.join(CURRENT_DIR, "test_geofences_temp.json")
+    test_json_path = os.path.join(tempfile.gettempdir(), f"uwb_rtls_test_geofences_{os.getpid()}.json")
     if os.path.exists(test_json_path):
-        os.remove(test_json_path)
+        try:
+            os.remove(test_json_path)
+        except PermissionError:
+            pass
 
     repo = GeofenceRepository(default_file_path=test_json_path)
     
@@ -122,6 +139,20 @@ def test_geofence_repository_position_checks():
     )
     repo.add_zone(forbidden_zone)
 
+    # Add a wall map object; it should be persisted but ignored by rule checks.
+    wall_zone = GeofenceZone(
+        id="wall_1",
+        name="North Wall",
+        zone_type="wall",
+        points=[(20.0, 20.0), (21.0, 20.0), (21.0, 21.0), (20.0, 21.0)],
+        min_z=0.0,
+        max_z=3.0,
+        speed_limit=0.0,
+        color="#94A3B8",
+        object_type="wall",
+    )
+    repo.add_zone(wall_zone)
+
     # Check safe position (inside allowed, outside forbidden)
     status, zone_name, limit = repo.check_position(2.0, 2.0, 1.0)
     assert status == "allowed"
@@ -145,14 +176,17 @@ def test_geofence_repository_position_checks():
 
     # Reload repo from saved json
     new_repo = GeofenceRepository(default_file_path=test_json_path)
-    assert len(new_repo.get_zones()) == 2
+    assert len(new_repo.get_zones()) == 3
     status, zone_name, limit = new_repo.check_position(5.0, 5.0, 1.0)
     assert status == "forbidden"
     assert zone_name == "Danger Zone"
 
     # Cleanup temp file
     if os.path.exists(test_json_path):
-        os.remove(test_json_path)
+        try:
+            os.remove(test_json_path)
+        except PermissionError:
+            pass
 
 
 if __name__ == "__main__":

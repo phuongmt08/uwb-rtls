@@ -261,23 +261,6 @@ QPushButton:hover { background: #475569; }</string>
              </widget>
             </item>
             <item>
-             <widget class="QPushButton" name="btn_geofence_edit">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>38</height>
-               </size>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">QPushButton { background: #F59E0B; color: #0F172A; border: 1px solid #D97706; border-radius: 8px; font-weight: bold; font-size: 14px; padding: 6px 12px; }
-QPushButton:hover { background: #D97706; color: #FFFFFF; }</string>
-              </property>
-              <property name="text">
-               <string>⚙️ Thiết lập Geofencing</string>
-              </property>
-             </widget>
-            </item>
-            <item>
              <widget class="QFrame" name="separator_1">
               <property name="frameShape">
                <enum>QFrame::HLine</enum>

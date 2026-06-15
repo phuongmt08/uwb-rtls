@@ -46,12 +46,21 @@ class DeviceInfoViewModel(QObject):
     advertising_devices_updated = pyqtSignal(list, bool)   # list of dicts, is_scanning
     time_sync_updated = pyqtSignal(str, bool, bool)        # local_time_str, is_synced, is_syncing
 
-    def __init__(self, device_model, dongle_model=None, telemetry_repo=None, ble_scan_repo=None, parent=None):
+    def __init__(
+        self,
+        device_model,
+        dongle_model=None,
+        telemetry_repo=None,
+        ble_scan_repo=None,
+        telemetry_model=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.model = device_model
         self.dongle_model = dongle_model
         self._telemetry_repo = telemetry_repo
         self._ble_scan_repo = ble_scan_repo
+        self._telemetry_model = telemetry_model
         self._last_telemetry: dict = {}
 
         # ── Bind Model signals → ViewModel presentation ─────────────
@@ -94,8 +103,7 @@ class DeviceInfoViewModel(QObject):
                 "Device Name": self.model.connected_name,
                 "MAC Address": self.model.connected_mac,
             })
-            self.model.request_initial_telemetry()
-            self.model.request_session_start_events()
+            self.model.schedule_session_start(delay_ms=1500, force=True)
     # ═══════════════════════════════════════════════════════════════════
     #  PUBLIC METHODS (called by main.py or View)
     # ═══════════════════════════════════════════════════════════════════
@@ -110,11 +118,19 @@ class DeviceInfoViewModel(QObject):
 
     def request_end_session(self, reason: int = 0):
         """Forward session shutdown request to the model command path."""
+        # BE/API: session shutdown from Device Info flow.
         return self.model.request_end_session(reason=reason)
 
     def request_ble_disconnect(self, reason: int = 0):
         """Forward BLE disconnect request to the model command path."""
+        # BE/API: BLE disconnect from Device Info flow.
         return self.model.request_ble_disconnect(reason=reason)
+
+    def request_log_stream(self, force: bool = False):
+        """Forward device log stream trigger to the model command path."""
+        if hasattr(self.model, "request_log_stream"):
+            return self.model.request_log_stream(force=force)
+        return False
 
     # ═══════════════════════════════════════════════════════════════════
     #  DONGLE LIFECYCLE
@@ -141,6 +157,28 @@ class DeviceInfoViewModel(QObject):
 
     def _on_battery_info_parsed(self, data: dict):
         """Format telemetry data before sending to View."""
+        if self._telemetry_model:
+            if data.get("source") != "device_rx":
+                self._telemetry_model.handle_battery_info(data)
+            formatted_data = self._telemetry_model.display_snapshot()
+        else:
+            formatted_data = {
+                "bat_soc_percent": data.get("bat_soc_percent"),
+                "bat_voltage_str": self._format_voltage(data.get("bat_voltage_mv")),
+                "remaining_str": self._format_remaining(data.get("remaining_min")),
+                "charging_str": self._format_bool(data.get("is_charging")),
+                "mcu_temp_str": self._format_temp(data.get("mcu_temp_c")),
+                "uwb_temp_str": self._format_temp(data.get("uwb_temp_c")),
+                "imu_temp_str": self._format_temp(data.get("imu_temp_c")),
+                "vdda_str": self._format_voltage(data.get("vdda_mv")),
+                "uwb_vbat_str": self._format_voltage(data.get("uwb_vbat_mv")),
+                "heap_usage": data.get("heap_usage", "--"),
+                "stack_usage": data.get("stack_usage", "--"),
+                "cpu_usage": data.get("cpu_usage", "--")
+            }
+        self._last_telemetry.update(formatted_data)
+        self.telemetry_updated.emit(self._last_telemetry.copy())
+        return
         formatted_data = {
             "bat_soc_percent": data.get("bat_soc_percent", 0),
             "bat_voltage_str": f"{data.get('bat_voltage_mv', 0) / 1000.0:.2f}V",
@@ -160,6 +198,18 @@ class DeviceInfoViewModel(QObject):
 
     def _on_rtos_resource_changed(self, data: dict):
         """Merge RTOS diagnostics into the telemetry panel without clearing battery data."""
+        if self._telemetry_model:
+            self._telemetry_model.handle_rtos_resource(data)
+            self._last_telemetry.update(self._telemetry_model.display_snapshot())
+        else:
+            cpu = data.get("cpu_busy_percent")
+            self._last_telemetry.update({
+                "heap_usage": self._format_bytes(data.get("heap_free_bytes")),
+                "stack_usage": self._format_bytes(data.get("min_stack_free_bytes")),
+                "cpu_usage": f"{float(cpu):.1f}%" if cpu is not None else "--",
+            })
+        self.telemetry_updated.emit(self._last_telemetry.copy())
+        return
         self._last_telemetry.update({
             "heap_usage": self._format_bytes(data.get("heap_free_bytes")),
             "stack_usage": self._format_bytes(data.get("min_stack_free_bytes")),
@@ -170,14 +220,38 @@ class DeviceInfoViewModel(QObject):
     @staticmethod
     def _format_bytes(value):
         if value is None:
-            return "-"
+            return "--"
         try:
             value = int(value)
         except (TypeError, ValueError):
-            return "-"
+            return "--"
         if value >= 1024:
             return f"{value / 1024.0:.1f} KB"
         return f"{value} B"
+
+    @staticmethod
+    def _format_voltage(value):
+        if value is None:
+            return "--"
+        return f"{float(value) / 1000.0:.2f}V"
+
+    @staticmethod
+    def _format_remaining(value):
+        if value is None:
+            return "--"
+        return f"{int(value)} min"
+
+    @staticmethod
+    def _format_bool(value):
+        if value is None:
+            return "--"
+        return "Yes" if bool(value) else "No"
+
+    @staticmethod
+    def _format_temp(value):
+        if value is None:
+            return "--"
+        return f"{float(value):.1f} C"
 
     def _on_ble_status_parsed(self, info: dict):
         """Forward BLE status to View."""
@@ -205,8 +279,7 @@ class DeviceInfoViewModel(QObject):
         })
 
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
-            self.model.request_initial_telemetry()
-            self.model.request_session_start_events()
+            self.model.schedule_session_start(delay_ms=1500, force=True)
 
     def _on_time_sync_result(self, data: dict):
         """Convert raw time sync data → formatted UI signal."""

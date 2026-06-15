@@ -148,15 +148,21 @@ class RangingRepository(QObject):
         return distances
 
     def parse_anchor_layout(self, resp) -> list[dict]:
-        anchors = [
-            {
-                "anchor_id": int(a.anchor_id),
-                "x_m": float(a.x_m),
-                "y_m": float(a.y_m),
-                "z_m": float(a.z_m),
-            }
-            for a in getattr(resp, "anchors", [])
-        ]
+        anchors = []
+        for a in getattr(resp, "anchors", []):
+            present_fields = {field.name for field, _ in a.ListFields()}
+
+            def coord_or_none(name: str):
+                if name not in present_fields:
+                    return None
+                return float(getattr(a, name))
+
+            anchors.append({
+                "anchor_id": int(getattr(a, "anchor_id", 0)),
+                "x_m": coord_or_none("x_m"),
+                "y_m": coord_or_none("y_m"),
+                "z_m": coord_or_none("z_m"),
+            })
         self._anchor_layout = anchors
         self.anchor_layout_parsed.emit(anchors)
         return anchors

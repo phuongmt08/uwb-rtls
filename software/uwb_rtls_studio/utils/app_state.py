@@ -16,12 +16,13 @@ from typing import Dict, Any, List, Optional, Callable
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from services.query_state_machine import QueryQueueManager, QueryState
+from utils.command_flags import is_command_enabled
 
 log = logging.getLogger(__name__)
 
 # ── Centralized Retry & Timeout Configurations ────────────────────────────────
 # Modifying these values updates retry/timeout behavior across the entire app.
-QUERY_TIMEOUT_S = 0.25         # Time to wait for expected response (seconds)
+QUERY_TIMEOUT_S = 1.0          # Time to wait for expected response (seconds)
 QUERY_MAX_RETRIES = 3          # Maximum attempts per command on timeout
 
 # Polling intervals in milliseconds
@@ -192,12 +193,6 @@ class SharedAppState(QObject):
     def ranging_active(self, val: bool) -> None:
         if self._ranging_active != val:
             self._ranging_active = val
-            if val:
-                import datetime
-                timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                self.current_session_id = f"SES_{timestamp_str}_ranging"
-            else:
-                self.current_session_id = ""
             self.ranging_active_changed.emit(val)
 
     @property
@@ -295,6 +290,10 @@ class SharedAppState(QObject):
 
     def enqueue_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
         """Add a query to the sequential execution queue."""
+        if not is_command_enabled(command_name):
+            log.info("[SharedAppState] Query skipped by command flag: %s", command_name)
+            return
+
         if not hasattr(self, '_query_manager') or not self._query_manager:
             log.warning("[SharedAppState] Query manager not initialized. Can't enqueue.")
             return

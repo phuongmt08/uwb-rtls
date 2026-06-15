@@ -57,7 +57,7 @@ class GeofenceRepository:
                 data = json.load(f)
             
             self._zones = {}
-            geofences_data = data.get("geofences", [])
+            geofences_data = data.get("objects", data.get("geofences", []))
             for g_data in geofences_data:
                 zone = GeofenceZone.from_dict(g_data)
                 self._zones[zone.id] = zone
@@ -76,7 +76,12 @@ class GeofenceRepository:
         try:
             data = {
                 "map_name": "Virtual_Map_Config",
-                "geofences": [zone.to_dict() for zone in self._zones.values()]
+                "objects": [zone.to_dict() for zone in self._zones.values()],
+                "geofences": [
+                    zone.to_dict()
+                    for zone in self._zones.values()
+                    if getattr(zone, "object_type", "zone") == "zone"
+                ],
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -96,7 +101,11 @@ class GeofenceRepository:
                 zone_name: name of the zone trigger
                 speed_limit: recommended speed limit (m/s)
         """
-        zones = self.get_zones()
+        zones = [
+            zone
+            for zone in self.get_zones()
+            if getattr(zone, "object_type", "zone") == "zone"
+        ]
         if not zones:
             return "allowed", "Default Space", 1.5  # No geofences configured
 

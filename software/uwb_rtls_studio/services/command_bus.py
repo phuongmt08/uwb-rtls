@@ -18,6 +18,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from common.commands import CommandCatalog, default_destination_for
 from utils.app_state import shared_app_state
+from utils.command_flags import is_command_enabled
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,10 @@ class CommandBus(QObject):
         Returns True when a new command is enqueued, False when a fresh cache or
         pending request already covers the caller's need.
         """
+        if not is_command_enabled(command_name):
+            log.info("Command skipped by flag: %s", command_name)
+            return False
+
         ttl = self.DEFAULT_CACHE_TTL_S if cache_ttl_s is None else cache_ttl_s
         try:
             expected_response = self._catalog.expected_response_for(command_name)
@@ -89,6 +94,10 @@ class CommandBus(QObject):
         return True
 
     def send(self, command_name: str, dst_addr: int | None = None, **kwargs: Any):
+        if not is_command_enabled(command_name):
+            log.info("Command skipped by flag: %s", command_name)
+            return None
+
         self.invalidate_for_command(command_name)
         target_addr = default_destination_for(command_name) if dst_addr is None else dst_addr
         pkt = self._protocol.send_command(command_name, dst_addr=target_addr, **kwargs)

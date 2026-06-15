@@ -33,6 +33,7 @@ class MainViewModel(QObject):
         device_info_vm=None,
         log_vm=None,
         session_repository: SessionRepository | None = None,
+        session_run_manager=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -40,17 +41,49 @@ class MainViewModel(QObject):
         self.device_info_vm = device_info_vm
         self.log_vm = log_vm
         self._session_repository = session_repository or SessionRepository()
+        self._session_run_manager = session_run_manager
 
     def set_mode(self, is_developer: bool) -> None:
         self.mode_changed.emit("developer" if is_developer else "user")
 
     def end_session(self, duration_sec: float = 0.0, reason: int = 0) -> str:
         """Stop the active protocol session and persist the collected data."""
+        if self._session_run_manager:
+            session_id = self._session_run_manager.end_all_active(duration_sec=duration_sec)
+            self._clear_live_session_buffers()
+            if self.log_vm:
+                self.log_vm.refresh_sessions()
+            self.session_saved.emit(session_id)
+            self.session_ended.emit(session_id)
+            return session_id
+
         session_id = self.save_active_session(duration_sec=duration_sec)
-        self._request_device_end_session(reason=reason)
+        if reason:
+            self._request_device_end_session(reason=reason)
         self._clear_live_session_buffers()
         self.session_ended.emit(session_id)
         return session_id
+
+    def start_session(self) -> str:
+        if self._session_run_manager:
+            session_id = self._session_run_manager.start_new_session()
+            self._request_log_stream(force=True)
+            return session_id
+        from datetime import datetime
+        now = datetime.now()
+        shared_app_state.current_session_id = f"SES_{now.strftime('%Y%m%d_%H%M%S')}_session"
+        if self.log_vm:
+            self.log_vm.clear_session_logs()
+        self._request_log_stream(force=True)
+        return shared_app_state.current_session_id
+
+    def _request_log_stream(self, force: bool = False) -> None:
+        if not self.device_info_vm or not hasattr(self.device_info_vm, "request_log_stream"):
+            return
+        try:
+            self.device_info_vm.request_log_stream(force=force)
+        except Exception as exc:
+            log.warning("Failed to request log stream: %s", exc)
 
     def save_active_session(self, duration_sec: float = 0.0) -> str:
         now = datetime.now()
