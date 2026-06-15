@@ -11,7 +11,7 @@
 /* Includes ----------------------------------------------------------- */
 #include "bb_router.h"
 #include "bb_cmd_hdl.h"
-#include <stddef.h>
+#include "app_timer.h"
 
 #include "logger.h"
 #include "bb_transport.h"
@@ -183,6 +183,22 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
 
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
     {
+#if defined(BLE_PERIPHERAL)
+        if (pkt.which_params == protobuf_packet_t_sensor_fusion_result_tag)
+        {
+            static uint32_t m_fusion_packet_count = 0;
+            static uint32_t m_last_fusion_packet_time = 0;
+            uint32_t current_ticks = app_timer_cnt_get();
+            uint32_t diff_ticks = (current_ticks - m_last_fusion_packet_time) & 0x00FFFFFF;
+            if (diff_ticks > APP_TIMER_TICKS(5000))
+            {
+                m_fusion_packet_count = 0;
+            }
+            m_fusion_packet_count++;
+            m_last_fusion_packet_time = current_ticks;
+            NRF_LOG_INFO("bb_router: Decoded packet cmd_id=24, count=%u", m_fusion_packet_count);
+        }
+#endif
         if (pkt.has_hdr && pkt.hdr.has_addr)
         {
             uint32_t addr = pkt.hdr.addr.dst;
