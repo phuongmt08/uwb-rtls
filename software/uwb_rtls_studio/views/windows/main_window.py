@@ -327,9 +327,19 @@ class MainWindow(QMainWindow):
         if active:
             self.btn_end_session.setText("\U0001F534 End Session")
             self.btn_end_session.setToolTip("End current session and save active ranging/log runs")
+            self.btn_end_session.setStyleSheet(
+                "QPushButton { background: rgba(239,68,68,0.12); color: #EF4444; border: 1px solid #EF4444; "
+                "border-radius: 8px; font-weight: bold; font-size: 13px; }"
+                "QPushButton:hover { background: #EF4444; color: #F8FAFC; }"
+            )
         else:
             self.btn_end_session.setText("\u25B6 Start Session")
             self.btn_end_session.setToolTip("Start a new app session")
+            self.btn_end_session.setStyleSheet(
+                "QPushButton { background: rgba(16,185,129,0.12); color: #10B981; border: 1px solid #10B981; "
+                "border-radius: 8px; font-weight: bold; font-size: 13px; }"
+                "QPushButton:hover { background: #10B981; color: #F8FAFC; }"
+            )
 
     def _save_active_session(self):
         """Compatibility wrapper. Session persistence is owned by MainViewModel."""

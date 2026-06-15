@@ -150,11 +150,7 @@ class RangingRepository(QObject):
     def parse_anchor_layout(self, resp) -> list[dict]:
         anchors = []
         for a in getattr(resp, "anchors", []):
-            present_fields = {field.name for field, _ in a.ListFields()}
-
             def coord_or_none(name: str):
-                if name not in present_fields:
-                    return None
                 return float(getattr(a, name))
 
             anchors.append({

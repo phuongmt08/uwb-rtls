@@ -38,6 +38,7 @@ class PositionCanvas(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.position = {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "error": 0.0}
+        self.fusion_position = None
         self.anchors = [
             {"x": 0.0, "y": 0.0, "label": "A0"},
             {"x": 9.76, "y": 0.0, "label": "A1"},
@@ -164,6 +165,7 @@ class PositionCanvas(QWidget):
         self.last_update_time = current_time
         self._last_update_by_source[source] = current_time
         if source == "sensor_fusion":
+            self.fusion_position = position
             self.fusion_history.append((position["x"], position["y"]))
             if len(self.fusion_history) > self.max_history:
                 self.fusion_history.pop(0)
@@ -184,11 +186,15 @@ class PositionCanvas(QWidget):
         self.history.clear()
         self.fusion_history.clear()
         self._last_update_by_source.clear()
+        self.fusion_position = None
         self.update()
 
     def auto_fit(self):
         pts_x = [a["x"] for a in self.anchors] + [self.position["x"]]
         pts_y = [a["y"] for a in self.anchors] + [self.position["y"]]
+        if self.fusion_position is not None:
+            pts_x.append(self.fusion_position["x"])
+            pts_y.append(self.fusion_position["y"])
         for zone in self.geofence_zones:
             for point in zone.points:
                 pts_x.append(point[0])
@@ -428,24 +434,25 @@ class PositionCanvas(QWidget):
         view_x1, view_y1 = self._screen_to_world(margin, self.height() - margin)
         view_x2, view_y2 = self._screen_to_world(margin + width, margin)
 
-        # 1. Draw Fusion History Trail
+        # 1. Draw Fusion History Trail (UKF, solid sky blue)
         if len(self.fusion_history) > 1:
-            painter.setPen(QPen(QColor(248, 113, 113, 140), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor(14, 165, 233, 200), 2, Qt.PenStyle.SolidLine))
             for idx in range(len(self.fusion_history) - 1):
                 x1, y1 = to_screen(self.fusion_history[idx][0], self.fusion_history[idx][1])
                 x2, y2 = to_screen(self.fusion_history[idx + 1][0], self.fusion_history[idx + 1][1])
                 painter.drawLine(x1, y1, x2, y2)
 
-        # 2. Draw History Trail
+        # 2. Draw History Trail (Ranging/Trilateration, dashed orange)
         if len(self.history) > 1:
-            painter.setPen(QPen(QColor(96, 165, 250, 120), 2))
+            painter.setPen(QPen(QColor(249, 115, 22, 180), 2, Qt.PenStyle.DashLine))
             for idx in range(len(self.history) - 1):
                 x1, y1 = to_screen(self.history[idx][0], self.history[idx][1])
                 x2, y2 = to_screen(self.history[idx + 1][0], self.history[idx + 1][1])
                 painter.drawLine(x1, y1, x2, y2)
 
-        # 3. Draw Anchor Connections (from Tag to Anchors)
-        pos_x, pos_y = to_screen(self.position["x"], self.position["y"])
+        # 3. Draw Anchor Connections (from Active Tag position to Anchors)
+        active_pos = self.fusion_position if self.fusion_position is not None else self.position
+        pos_x, pos_y = to_screen(active_pos["x"], active_pos["y"])
         for anchor in self.anchors:
             anchor_x, anchor_y = to_screen(anchor["x"], anchor["y"])
             painter.setPen(QPen(QColor(99, 102, 241, 40), 1, Qt.PenStyle.DashLine))
@@ -469,20 +476,33 @@ class PositionCanvas(QWidget):
             painter.drawText(center_x + 16, center_y + 4, f"({anchor['x']:.1f}, {anchor['y']:.1f})")
             painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
 
-        # 5. Draw Tag Position (Direction and Error Ellipse)
+        # 5. Draw Trilateration Marker (orange circle with crosshair) ONLY when Sensor Fusion is active
+        if self.fusion_position is not None:
+            tril_x, tril_y = to_screen(self.position["x"], self.position["y"])
+            painter.setPen(QPen(QColor(249, 115, 22), 2))
+            painter.setBrush(QColor(249, 115, 22, 80))
+            painter.drawEllipse(tril_x - 8, tril_y - 8, 16, 16)
+            painter.drawLine(tril_x - 12, tril_y, tril_x + 12, tril_y)
+            painter.drawLine(tril_x, tril_y - 12, tril_x, tril_y + 12)
+
+        # 6. Draw Tag Position (Direction and Error Ellipse)
         scale_px = min(width, height) / self._view_range if self._view_range > 0 else 50
-        if self.position.get("error", 0) > 0:
-            error_radius = int(self.position["error"] * scale_px)
+        active_tag = self.fusion_position if self.fusion_position is not None else self.position
+        active_x, active_y = to_screen(active_tag["x"], active_tag["y"])
+
+        if active_tag.get("error", 0) > 0:
+            error_radius = int(active_tag["error"] * scale_px)
             painter.setPen(QPen(QColor(239, 68, 68, 60), 2, Qt.PenStyle.DashLine))
             painter.setBrush(QColor(239, 68, 68, 20))
-            painter.drawEllipse(pos_x - error_radius, pos_y - error_radius, error_radius * 2, error_radius * 2)
+            painter.drawEllipse(active_x - error_radius, active_y - error_radius, error_radius * 2, error_radius * 2)
 
+        # Draw the directional arrow
         painter.save()
-        painter.translate(pos_x, pos_y)
-        painter.rotate(-self.position.get("yaw", 0))
+        painter.translate(active_x, active_y)
+        painter.rotate(-active_tag.get("yaw", 0))
         painter.setPen(
             QPen(
-                QColor(37, 99, 235),
+                QColor(14, 165, 233),  # Sky blue color border for the arrow
                 2,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
@@ -490,8 +510,8 @@ class PositionCanvas(QWidget):
             )
         )
         gradient = QLinearGradient(0, -12, 0, 10)
-        gradient.setColorAt(0, QColor(96, 165, 250))
-        gradient.setColorAt(1, QColor(37, 99, 235))
+        gradient.setColorAt(0, QColor(56, 189, 248))  # sky blue gradient
+        gradient.setColorAt(1, QColor(14, 165, 233))
         painter.setBrush(gradient)
         path = QPainterPath()
         path.moveTo(14, 0)
@@ -505,24 +525,28 @@ class PositionCanvas(QWidget):
         painter.drawEllipse(-10, -3, 4, 6)
         painter.restore()
 
-        # Tag glow effect
-        glow_gradient = QRadialGradient(pos_x, pos_y, 18)
-        glow_gradient.setColorAt(0, QColor(96, 165, 250, 60))
-        glow_gradient.setColorAt(1, QColor(96, 165, 250, 0))
+        # Tag glow effect (sky blue)
+        glow_gradient = QRadialGradient(active_x, active_y, 18)
+        glow_gradient.setColorAt(0, QColor(56, 189, 248, 60))
+        glow_gradient.setColorAt(1, QColor(56, 189, 248, 0))
         painter.setBrush(glow_gradient)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(pos_x - 18, pos_y - 18, 36, 36)
+        painter.drawEllipse(active_x - 18, active_y - 18, 36, 36)
 
         # Tag coordinates text overlay
-        coord_text = f"{self.position['x']:.2f}, {self.position['y']:.2f}"
+        if self.fusion_position is not None:
+            coord_text = f"UKF {active_tag['x']:.2f}, {active_tag['y']:.2f}"
+        else:
+            coord_text = f"{active_tag['x']:.2f}, {active_tag['y']:.2f}"
+
         painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         text_rect = painter.fontMetrics().boundingRect(coord_text)
-        text_rect.translate(pos_x + 15, pos_y + 15)
+        text_rect.translate(active_x + 15, active_y + 15)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(15, 23, 42, 180))
         painter.drawRoundedRect(text_rect.adjusted(-4, -2, 4, 2), 4, 4)
         painter.setPen(QColor(255, 255, 255))
-        painter.drawText(pos_x + 15, pos_y + 15 + text_rect.height() - 4, coord_text)
+        painter.drawText(active_x + 15, active_y + 15 + text_rect.height() - 4, coord_text)
 
         # Draw rect zoom box if dragging right click
         if self._rect_zoom and self._rect_start and self._rect_end:

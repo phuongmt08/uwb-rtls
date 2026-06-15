@@ -357,11 +357,7 @@ class RangingModel(QObject):
         """Parse anchor_layout_resp and store."""
         self._anchor_layout = []
         for a in resp.anchors:
-            present_fields = {field.name for field, _ in a.ListFields()}
-
             def coord_or_none(name: str):
-                if name not in present_fields:
-                    return None
                 return float(getattr(a, name))
 
             self._anchor_layout.append({

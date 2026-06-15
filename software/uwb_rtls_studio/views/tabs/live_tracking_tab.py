@@ -382,21 +382,110 @@ class LiveTrackingTab(QWidget):
         grid.addWidget(title_label, row, 0)
         grid.addWidget(value_label, row, 1)
 
+    def _set_metric_value(self, label_widget, value, format_str="{:.3f}"):
+        if label_widget:
+            unit = getattr(label_widget, "unit", "")
+            unit_space = " " if unit else ""
+            if value is None or value == "--":
+                label_widget.setText("--")
+            elif isinstance(value, str):
+                label_widget.setText(f"{value}{unit_space}{unit}")
+            else:
+                label_widget.setText(f"{format_str.format(value)}{unit_space}{unit}")
+
+    def _clear_live_metrics(self):
+        widgets = [
+            "sof_label", "length_label", "anchor_mask_label", "fusion_ts_label",
+            "tx_frame_cnt_label", "error_frame_cnt_label",
+            "ukf_x_label", "ukf_y_label", "ukf_yaw_label",
+            "tril_x_label", "tril_y_label", "yaw_label",
+            "vx_label", "vy_label",
+            "d1_label", "d2_label", "d3_label", "d4_label",
+            "z_label", "error_label"
+        ]
+        for w in widgets:
+            label_widget = getattr(self, w, None)
+            if label_widget:
+                label_widget.setText("--")
+        self._last_anchor_mask = 0
+
     def _setup_dynamic_metrics(self):
-        self.tril_xy_label = self._make_metric_label("--", "#38BDF8", True)
-        self.raw_yaw_label = self._make_metric_label("--", "#F472B6", True)
-        self.fusion_ts_label = self._make_metric_label("--", "#CBD5E1", True)
+        # Clear existing layout children just in case
+        while self.pos_grid.count():
+            item = self.pos_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-        self.grp_fusion = QLabel("FUSION", self)
-        self.grp_fusion.setStyleSheet(
-            "font-size: 11px; font-weight: bold; color: #64748B; "
-            "margin-top: 5px; background-color: transparent;"
-        )
-        self.pos_grid.addWidget(self.grp_fusion, 16, 0, 1, 2)
-        self._add_metric_row(self.pos_grid, 17, "TRIL XY:", self.tril_xy_label)
-        self._add_metric_row(self.pos_grid, 18, "Raw Yaw:", self.raw_yaw_label)
-        self._add_metric_row(self.pos_grid, 19, "Fusion TS:", self.fusion_ts_label)
+        self.pos_grid.setSpacing(10)
 
+        # 7 groups of metrics based on the RTOS dashboard design combined with studio specific telemetry
+        groups = [
+            ("FRAME", [
+                ("SOF:", "sof_label", "#60A5FA", ""),
+                ("Length:", "length_label", "#60A5FA", "bytes"),
+                ("Anchor Mask:", "anchor_mask_label", "#60A5FA", ""),
+                ("Timestamp:", "fusion_ts_label", "#CBD5E1", "ms")
+            ]),
+            ("COUNTERS", [
+                ("Tx Frames:", "tx_frame_cnt_label", "#2DD4BF", ""),
+                ("Err Frames:", "error_frame_cnt_label", "#F87171", "")
+            ]),
+            ("UKF", [
+                ("X:", "ukf_x_label", "#60A5FA", "m"),
+                ("Y:", "ukf_y_label", "#60A5FA", "m"),
+                ("Yaw:", "ukf_yaw_label", "#F472B6", "deg")
+            ]),
+            ("TRILATERATION", [
+                ("X:", "tril_x_label", "#FB923C", "m"),
+                ("Y:", "tril_y_label", "#FB923C", "m"),
+                ("Yaw:", "yaw_label", "#F472B6", "deg")
+            ]),
+            ("MOTION", [
+                ("VX:", "vx_label", "#2DD4BF", "m/s"),
+                ("VY:", "vy_label", "#2DD4BF", "m/s")
+            ]),
+            ("RANGING", [
+                ("D1:", "d1_label", "#A78BFA", "m"),
+                ("D2:", "d2_label", "#A78BFA", "m"),
+                ("D3:", "d3_label", "#A78BFA", "m"),
+                ("D4:", "d4_label", "#A78BFA", "m")
+            ]),
+            ("QUALITY", [
+                ("Z Height:", "z_label", "#60A5FA", "m"),
+                ("Error:", "error_label", "#F59E0B", "m")
+            ])
+        ]
+
+        current_row = 0
+        for group_name, items in groups:
+            group_label = QLabel(group_name, self)
+            group_label.setStyleSheet(
+                "font-size: 11px; font-weight: bold; color: #64748B; "
+                "margin-top: 5px; background-color: transparent;"
+            )
+            self.pos_grid.addWidget(group_label, current_row, 0, 1, 2)
+            current_row += 1
+            
+            for text, attr, color, unit in items:
+                lbl = QLabel(text, self)
+                lbl.setStyleSheet("font-size: 13px; color: #94A3B8; background-color: transparent;")
+                self.pos_grid.addWidget(lbl, current_row, 0)
+                
+                value_label = self._make_metric_label("--", color, True)
+                value_label.unit = unit
+                self.pos_grid.addWidget(value_label, current_row, 1)
+                setattr(self, attr, value_label)
+                current_row += 1
+
+        # Backward compatibility aliases
+        self.x_label = self.ukf_x_label
+        self.y_label = self.ukf_y_label
+        self.err_cnt_label = self.error_frame_cnt_label
+        # Alias for temporary compatibilities
+        self.tril_xy_label = self.tril_x_label
+        self.raw_yaw_label = self.yaw_label
+
+        # Setup stats grid
         self.success_label = self._make_metric_label("--", "#10B981", True)
         self.failed_label = self._make_metric_label("--", "#F87171", True)
         self.timeout_label = self._make_metric_label("--", "#F59E0B", True)
@@ -510,12 +599,14 @@ class LiveTrackingTab(QWidget):
         self._start_time = time.time()
         self._canvas.clear_trail()
         self._last_stats = {}
+        self._clear_live_metrics()
         self._render_stats()
 
     def _on_ranging_stopped(self):
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self._is_ranging = False
+        self._clear_live_metrics()
 
     def _on_position_updated(self, x, y, z, rms):
         self._frame_count += 1
@@ -527,15 +618,51 @@ class LiveTrackingTab(QWidget):
                 "y": y,
                 "z": z,
                 "error": rms,
-                "yaw": 0,
+                "yaw": 0.0,
                 "source": "ranging",
             }
         )
 
-        self.x_label.setText(f"{x:.3f} m")
-        self.y_label.setText(f"{y:.3f} m")
-        self.z_label.setText(f"{z:.3f} m")
-        self.error_label.setText(f"{rms:.3f} m")
+        # Update Frame and Counters
+        seq = 0
+        anchor_mask = 0
+        timestamp_ms = 0
+        if self._vm and self._vm.model._position_history:
+            last_sample = self._vm.model._position_history[-1]
+            seq = last_sample.get("seq", 0)
+            anchor_mask = last_sample.get("anchor_mask", 0)
+            timestamp_ms = last_sample.get("timestamp_ms", 0)
+            self._last_anchor_mask = anchor_mask
+
+        self._set_metric_value(self.sof_label, "0xAA")
+        self._set_metric_value(self.length_label, 33, "{:d}") # ranging_result size mock
+        if anchor_mask:
+            self._set_metric_value(self.anchor_mask_label, f"0x{anchor_mask:02X} ({anchor_mask:08b})")
+        else:
+            self._set_metric_value(self.anchor_mask_label, "--")
+        
+        self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
+        self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
+
+        # Update Trilateration and UKF (if fusion isn't running)
+        is_fusion_stale = (time.time() - getattr(self, "_last_fusion_time", 0.0) > 2.0)
+        
+        if is_fusion_stale:
+            # Under raw ranging mode, show trilateration coordinates as UKF too to provide visualization
+            self._set_metric_value(self.ukf_x_label, x)
+            self._set_metric_value(self.ukf_y_label, y)
+            self._set_metric_value(self.ukf_yaw_label, 0.0, "{:.1f}")
+            self._set_metric_value(self.tril_x_label, x)
+            self._set_metric_value(self.tril_y_label, y)
+            self._set_metric_value(self.yaw_label, 0.0, "{:.1f}")
+            self._set_metric_value(self.vx_label, 0.0)
+            self._set_metric_value(self.vy_label, 0.0)
+
+        self._set_metric_value(self.z_label, z)
+        self._set_metric_value(self.error_label, rms)
+        
+        err_cnt = self._last_stats.get("failed_count", 0) + self._last_stats.get("timeout_count", 0)
+        self._set_metric_value(self.error_frame_cnt_label, err_cnt, "{:d}")
 
         if self._canvas.anchors:
             anchors = self._canvas.anchors
@@ -548,6 +675,7 @@ class LiveTrackingTab(QWidget):
             self.warning_label.setVisible(False)
 
     def _on_sensor_fusion_updated(self, data: dict):
+        self._last_fusion_time = time.time()
         x = float(data.get("ukf_x_m", 0.0))
         y = float(data.get("ukf_y_m", 0.0))
         yaw = float(data.get("ukf_yaw_deg", 0.0))
@@ -558,6 +686,7 @@ class LiveTrackingTab(QWidget):
         raw_yaw = float(data.get("yaw_deg", 0.0))
         timestamp_ms = int(data.get("timestamp_ms", 0))
         err_count = int(data.get("ranging_error_count", 0))
+        seq = int(data.get("seq", 0))
 
         self._canvas.update_position(
             {
@@ -570,13 +699,37 @@ class LiveTrackingTab(QWidget):
             }
         )
 
-        self.vx_label.setText(f"{vx:.3f} m/s")
-        self.vy_label.setText(f"{vy:.3f} m/s")
-        self.yaw_label.setText(f"{yaw:.3f} deg")
-        self.tril_xy_label.setText(f"{tril_x:.3f}, {tril_y:.3f} m")
-        self.raw_yaw_label.setText(f"{raw_yaw:.3f} deg")
-        self.fusion_ts_label.setText(f"{timestamp_ms} ms")
-        self.err_cnt_label.setText(f"{err_count} packets")
+        # Update Frame and Counters
+        self._set_metric_value(self.sof_label, "0xAA")
+        self._set_metric_value(self.length_label, 33, "{:d}") # payload_size
+        
+        anchor_mask = getattr(self, "_last_anchor_mask", 0)
+        if anchor_mask:
+            self._set_metric_value(self.anchor_mask_label, f"0x{anchor_mask:02X} ({anchor_mask:08b})")
+        else:
+            self._set_metric_value(self.anchor_mask_label, "--")
+
+        self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
+        self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
+        self._set_metric_value(self.error_frame_cnt_label, err_count, "{:d}")
+
+        # Update UKF
+        self._set_metric_value(self.ukf_x_label, x)
+        self._set_metric_value(self.ukf_y_label, y)
+        self._set_metric_value(self.ukf_yaw_label, yaw, "{:.1f}")
+
+        # Update TRILATERATION
+        self._set_metric_value(self.tril_x_label, tril_x)
+        self._set_metric_value(self.tril_y_label, tril_y)
+        self._set_metric_value(self.yaw_label, raw_yaw, "{:.1f}")
+
+        # Update MOTION
+        self._set_metric_value(self.vx_label, vx)
+        self._set_metric_value(self.vy_label, vy)
+
+        # Update QUALITY (Z Height and Error)
+        self._set_metric_value(self.z_label, self._last_z)
+        self._set_metric_value(self.error_label, self._last_rms)
 
     def _on_anchor_distances(self, anchors):
         for anchor in anchors:
@@ -585,7 +738,11 @@ class LiveTrackingTab(QWidget):
             label_widget = getattr(self, f"d{idx}_label", None)
             if label_widget:
                 distance_cm = anchor.get("distance_cm")
-                label_widget.setText("--" if distance_cm is None else f"{float(distance_cm) / 100.0:.3f} m")
+                self._set_metric_value(
+                    label_widget,
+                    None if distance_cm is None else float(distance_cm) / 100.0,
+                    "{:.3f}"
+                )
 
     def _update_stats(self):
         if not self._is_ranging:
@@ -790,7 +947,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.set_edit_mode("navigate")
         self.sidebar_stack.setCurrentIndex(0)
         self.canvas_header.setText("Real-time Position Tracking")
-        self.user_map_groupbox.setVisible(False)
+        self.user_map_groupbox.setVisible(True)
 
     def _update_grid_settings(self, *_args):
         major_m = self.geofence_editor_widget.sb_grid_spacing.value()
@@ -1013,8 +1170,8 @@ class LiveTrackingTab(QWidget):
             self._enter_geofence_editor()
         else:
             self.geofence_editor_widget.btn_exit_editor.setVisible(True)
-            self.user_map_groupbox.setVisible(False)
-            self._canvas.set_25d_preview(False)
+            self.user_map_groupbox.setVisible(True)
+            self._canvas.set_25d_preview(self.chk_enable_geofence.isChecked())
             if self.sidebar_stack.currentIndex() == 1:
                 self._exit_geofence_editor()
 
