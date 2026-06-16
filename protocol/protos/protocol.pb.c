@@ -228,6 +228,9 @@ PB_BIND(protobuf_anchor_layout_resp_t, protobuf_anchor_layout_resp_t, AUTO)
 PB_BIND(protobuf_calib_status_get_t, protobuf_calib_status_get_t, AUTO)
 
 
+PB_BIND(protobuf_calib_anchor_candidate_t, protobuf_calib_anchor_candidate_t, AUTO)
+
+
 PB_BIND(protobuf_calib_status_resp_t, protobuf_calib_status_resp_t, AUTO)
 
 
@@ -265,6 +268,30 @@ PB_BIND(protobuf_factory_otp_write_t, protobuf_factory_otp_write_t, AUTO)
 
 
 PB_BIND(protobuf_end_session_t, protobuf_end_session_t, AUTO)
+
+
+PB_BIND(protobuf_zone_switch_t, protobuf_zone_switch_t, AUTO)
+
+
+PB_BIND(protobuf_zone_profile_t, protobuf_zone_profile_t, AUTO)
+
+
+PB_BIND(protobuf_zone_profile_set_t, protobuf_zone_profile_set_t, AUTO)
+
+
+PB_BIND(protobuf_zone_profile_get_t, protobuf_zone_profile_get_t, AUTO)
+
+
+PB_BIND(protobuf_zone_profile_resp_t, protobuf_zone_profile_resp_t, AUTO)
+
+
+PB_BIND(protobuf_calib_start_t, protobuf_calib_start_t, AUTO)
+
+
+PB_BIND(protobuf_calib_stop_t, protobuf_calib_stop_t, AUTO)
+
+
+PB_BIND(protobuf_calib_candidate_apply_t, protobuf_calib_candidate_apply_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, 2)
