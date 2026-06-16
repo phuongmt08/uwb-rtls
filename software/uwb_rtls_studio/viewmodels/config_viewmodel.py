@@ -132,11 +132,13 @@ class ConfigViewModel(QObject):
     sys_ranging_cfg_updated = pyqtSignal(dict)
     sensor_fusion_cfg_updated = pyqtSignal(dict)
     pos_calib_cfg_updated = pyqtSignal(dict)
+    scan_devices_updated = pyqtSignal(list)
 
-    def __init__(self, device_model, ranging_model, command_bus=None, parent=None):
+    def __init__(self, device_model, ranging_model, command_bus=None, ble_scan_repo=None, parent=None):
         super().__init__(parent)
         self.model = device_model
         self.ranging_model = ranging_model
+        self._ble_scan_repo = ble_scan_repo
 
         # Bind Model parsed signals to ViewModel update signals
         from utils.app_state import shared_app_state
@@ -146,6 +148,8 @@ class ConfigViewModel(QObject):
         shared_app_state.sys_ranging_cfg_changed.connect(self.sys_ranging_cfg_updated.emit)
         shared_app_state.sensor_fusion_cfg_changed.connect(self.sensor_fusion_cfg_updated.emit)
         shared_app_state.pos_calib_cfg_changed.connect(self.pos_calib_cfg_updated.emit)
+        if self._ble_scan_repo:
+            self._ble_scan_repo.scan_results_updated.connect(self.scan_devices_updated.emit)
 
     def update_shared_anchor_layout(self, anchors: list):
         self._shared_app_state.anchor_layout = anchors
@@ -162,6 +166,8 @@ class ConfigViewModel(QObject):
             self.sensor_fusion_cfg_updated.emit(self._shared_app_state.sensor_fusion_cfg)
         if self._shared_app_state.pos_calib_cfg:
             self.pos_calib_cfg_updated.emit(self._shared_app_state.pos_calib_cfg)
+        if self._ble_scan_repo:
+            self.scan_devices_updated.emit(self._ble_scan_repo.merged_results())
 
     # ── Command Triggers (called by View) ───────────────────────────
 

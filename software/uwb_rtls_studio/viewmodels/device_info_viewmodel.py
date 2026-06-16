@@ -126,11 +126,7 @@ class DeviceInfoViewModel(QObject):
         # BE/API: BLE disconnect from Device Info flow.
         return self.model.request_ble_disconnect(reason=reason)
 
-    def request_log_stream(self, force: bool = False):
-        """Forward device log stream trigger to the model command path."""
-        if hasattr(self.model, "request_log_stream"):
-            return self.model.request_log_stream(force=force)
-        return False
+
 
     # ═══════════════════════════════════════════════════════════════════
     #  DONGLE LIFECYCLE

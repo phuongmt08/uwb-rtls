@@ -135,6 +135,8 @@ class LogTab(QWidget):
         self.search_edit.textChanged.connect(self._apply_filter)
         if hasattr(self, "btn_clear_log"):
             self.btn_clear_log.clicked.connect(self._clear_log_session)
+        if hasattr(self, "btn_start_log"):
+            self.btn_start_log.clicked.connect(self._start_log_session)
         self.session_table.itemSelectionChanged.connect(self._on_session_selection_changed)
         self.btn_detail_ranging.toggled.connect(
             lambda checked: checked and self._set_detail_mode("ranging")
@@ -210,6 +212,10 @@ class LogTab(QWidget):
         if self._vm:
             self._vm.clear_log_session()
 
+    def _start_log_session(self):
+        if self._vm:
+            self._vm.start_log_stream()
+
     def _on_session_list_updated(self, sessions):
         self.session_table.blockSignals(True)
         self.session_table.setRowCount(0)
@@ -275,7 +281,7 @@ class LogTab(QWidget):
 
         self.detail_title.setText(f"Session Details · {session_id}")
         self.detail_selection_label.setText(f"Loaded {len(data)} items")
-        self._set_detail_actions_enabled(bool(data))
+        self._set_detail_actions_enabled(self._current_session_name is not None)
 
     def _on_session_deleted(self, session_id):
         if self._current_session_name == session_id:
@@ -447,10 +453,14 @@ class LogTab(QWidget):
         session_name = self._selected_session_name()
         if session_name:
             self._current_session_name = session_name
+            self._set_detail_actions_enabled(True)
             if self._vm:
                 self._vm.load_session_detail(session_name, self._detail_mode)
             else:
                 self._load_session_detail(session_name)
+        else:
+            self._current_session_name = None
+            self._set_detail_actions_enabled(False)
 
     def _selected_session_name(self):
         row = self.session_table.currentRow()
@@ -485,7 +495,7 @@ class LogTab(QWidget):
 
         self.detail_table.setColumnWidth(len(headers) - 1, 150)
 
-        self._set_detail_actions_enabled(False)
+        self._set_detail_actions_enabled(self._current_session_name is not None)
         self.detail_selection_label.setText("No file selected")
 
     def _detail_headers(self):
@@ -522,7 +532,7 @@ class LogTab(QWidget):
 
     def _update_detail_selection_label(self):
         item = self._selected_detail_item()
-        self._set_detail_actions_enabled(item is not None)
+        self._set_detail_actions_enabled(self._current_session_name is not None)
         self.detail_selection_label.setText(item["file"] if item else "No file selected")
 
     def _set_detail_actions_enabled(self, enabled):
@@ -534,6 +544,31 @@ class LogTab(QWidget):
         item = self._selected_detail_item()
         if item:
             self.detail_selection_label.setText(f"Selected: {item['file']}")
+            if self._current_session_name:
+                import os
+                from repository.session_repository import SESSIONS_DIR
+                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
+                
+                # Determine file path
+                if self._detail_mode == "logs":
+                    file_path = os.path.join(session_path, "log", item.get("file", ""))
+                    if not os.path.exists(file_path):
+                        file_path = os.path.join(session_path, item.get("file", ""))
+                else:
+                    file_path = os.path.join(session_path, "ranging", item.get("file", ""))
+                    if not os.path.exists(file_path):
+                        file_path = os.path.join(session_path, item.get("file", ""))
+                
+                if os.path.exists(file_path):
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+                else:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
+        else:
+            if self._current_session_name:
+                import os
+                from repository.session_repository import SESSIONS_DIR
+                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
 
     def _export_session_to_custom_folder(self, session_id: str):
         if not self._vm:

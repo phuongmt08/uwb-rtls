@@ -43,6 +43,9 @@ class MainViewModel(QObject):
         self._session_repository = session_repository or SessionRepository()
         self._session_run_manager = session_run_manager
 
+        if self.device_info_vm:
+            self.device_info_vm.device_info_updated.connect(self._on_device_info_updated)
+
     def set_mode(self, is_developer: bool) -> None:
         self.mode_changed.emit("developer" if is_developer else "user")
 
@@ -78,12 +81,21 @@ class MainViewModel(QObject):
         return shared_app_state.current_session_id
 
     def _request_log_stream(self, force: bool = False) -> None:
-        if not self.device_info_vm or not hasattr(self.device_info_vm, "request_log_stream"):
+        if not self.log_vm:
             return
         try:
-            self.device_info_vm.request_log_stream(force=force)
+            self.log_vm.start_log_stream()
         except Exception as exc:
-            log.warning("Failed to request log stream: %s", exc)
+            log.warning("Failed to request log stream via log_vm: %s", exc)
+
+    def _on_device_info_updated(self, info: dict):
+        status = info.get("Status")
+        if status == "Connected" and self.log_vm:
+            log.info("MainViewModel: Device connected. Automatically starting log stream.")
+            try:
+                self.log_vm.start_log_stream()
+            except Exception as exc:
+                log.warning("Failed to automatically start log stream: %s", exc)
 
     def save_active_session(self, duration_sec: float = 0.0) -> str:
         now = datetime.now()
