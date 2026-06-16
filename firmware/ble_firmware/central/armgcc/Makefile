@@ -1,11 +1,14 @@
 PROJECT_NAME     := ble_app_blinky_c_pca10059_s140
-TARGETS          := nrf52840_xxaa
+TARGETS          := nrf52840_xxaa supermini_nrf52840
 OUTPUT_DIRECTORY := _build
 
 SDK_ROOT := ../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560
 PROJ_DIR := ..
 
 $(OUTPUT_DIRECTORY)/nrf52840_xxaa.out: \
+  LINKER_SCRIPT  := ble_central.ld
+
+$(OUTPUT_DIRECTORY)/supermini_nrf52840.out: \
   LINKER_SCRIPT  := ble_central.ld
 
 # Source files common to all targets
@@ -301,6 +304,13 @@ nrf52840_xxaa: CFLAGS += -D__HEAP_SIZE=0
 nrf52840_xxaa: CFLAGS += -D__STACK_SIZE=8192
 nrf52840_xxaa: ASMFLAGS += -D__HEAP_SIZE=0
 nrf52840_xxaa: ASMFLAGS += -D__STACK_SIZE=8192
+
+supermini_nrf52840: CFLAGS += -D__HEAP_SIZE=0
+supermini_nrf52840: CFLAGS += -D__STACK_SIZE=8192
+supermini_nrf52840: CFLAGS += -DBOARD_SUPERMINI_RED
+supermini_nrf52840: ASMFLAGS += -D__HEAP_SIZE=0
+supermini_nrf52840: ASMFLAGS += -D__STACK_SIZE=8192
+supermini_nrf52840: ASMFLAGS += -DBOARD_SUPERMINI_RED
 
 # Add standard libraries at the very end of the linker input, after all objects
 # that may need symbols provided by these libraries.

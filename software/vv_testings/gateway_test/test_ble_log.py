@@ -44,7 +44,6 @@ from common.transport import VvAddress, HostTransport
 
 # Tuning Constants
 READ_TIMEOUT_S = 0.05
-TERMINAL_STATS_PERIOD_S = 300.0
 LOG_BOOTSTRAP_PACKET_GAP_S = 0.2
 LOG_POLL_PERIOD_S = 5.0
 LOG_ACK_RETRY_PERIOD_S = 1.0
@@ -53,7 +52,8 @@ LOG_ACK_SETTLE_TIMEOUT_S = 3.0
 LOG_IDLE_KEEPALIVE_S = 15.0
 LOG_RECV_TIMEOUT_S = 0.01
 LOG_END_SESSION_DELAY_S = 0.1
-PRINT_PACKET_TRACE = True
+LOG_FIRST_PACKET_TIMEOUT_S = 3.0
+PRINT_PACKET_TRACE = False
 PACKET_TRACE_TAG_WIDTH = 7
 PACKET_TRACE_NAME_WIDTH = 18
 PACKET_TRACE_COUNT_WIDTH = 5
@@ -177,8 +177,10 @@ class BleLogTester:
         self.log_parser = FlashLogStreamParser()
         self.last_rx_time = time.time()
         self.last_mcu_rx_time = 0.0
+        self.log_session_started = False
+        self.log_first_packet_seen = False
+        self.log_start_deadline = 0.0
         self.last_poll = 0.0
-        self.last_stats_print = 0.0
         self.pending_log_ack_seq: Optional[int] = None
         self.pending_log_ack_dst: Optional[int] = None
         self.pending_log_ack_confirm_seq: Optional[int] = None
@@ -325,20 +327,6 @@ class BleLogTester:
             flush=True,
         )
 
-    def _print_stats_if_due(self, now: float) -> None:
-        if now - self.last_stats_print < TERMINAL_STATS_PERIOD_S:
-            return
-        self.last_stats_print = now
-        print(
-            f"{COLOR_CYAN}[STATS] "
-            f"TX total={self.tx_total} ack={self.tx_ack_sent} clear={self.tx_log_clear_sent} "
-            f"by_type={self._format_counts(self.tx_counts)} | "
-            f"RX total={self.rx_total} from_mcu={self.rx_from_mcu} "
-            f"log_data_bytes={self.rx_log_data_bytes} log_records={self.rx_log_records} "
-            f"by_type={self._format_counts(self.rx_counts)}{COLOR_RESET}",
-            flush=True,
-        )
-
     def _build_none(self) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
@@ -440,8 +428,13 @@ class BleLogTester:
         self._send_packet(self._build_transport_set())
         time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
         self._send_packet(self._build_log_data_get())
+        self.log_session_started = True
+        self.log_start_deadline = time.time() + LOG_FIRST_PACKET_TIMEOUT_S
+        self.last_poll = time.time()
+        print(f"[*] Waiting up to {LOG_FIRST_PACKET_TIMEOUT_S:.1f}s for first log packet...")
 
     def _handle_log_data_packet(self, pkt: pb.packet_t) -> None:
+        self.log_first_packet_seen = True
         payload = bytes(pkt.log_data.data)
         lines = self.log_parser.feed(payload)
         self.rx_log_data_bytes += len(payload)
@@ -575,7 +568,13 @@ class BleLogTester:
                 self._send_packet(self._build_none())
                 self.last_rx_time = now
 
-            if self.pending_log_ack_seq is None and now - self.last_poll >= LOG_POLL_PERIOD_S:
+            if (
+                self.log_session_started
+                and not self.log_first_packet_seen
+                and now >= self.log_start_deadline
+                and self.pending_log_ack_seq is None
+                and now - self.last_poll >= LOG_POLL_PERIOD_S
+            ):
                 self._send_packet(self._build_log_data_get())
                 self.last_poll = now
 
@@ -583,7 +582,23 @@ class BleLogTester:
             for pkt in packets:
                 self._process_packet(pkt)
 
-            self._print_stats_if_due(now)
+
+def _device_uuid_text(p: pb.packet_t) -> str:
+    scan = p.ble_scan_result
+    if hasattr(scan, "uuid") and scan.uuid:
+        raw = bytes(scan.uuid)
+        if len(raw) == 16:
+            return "-".join(
+                [
+                    raw[0:4].hex(),
+                    raw[4:6].hex(),
+                    raw[6:8].hex(),
+                    raw[8:10].hex(),
+                    raw[10:16].hex(),
+                ]
+            ).upper()
+        return raw.hex().upper()
+    return ""
 
 
 def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
@@ -596,7 +611,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
     pkt = factory.ble_scan_start(src, central_dst, session.proto.next_seq())
     session.send_packet(pkt)
 
-    discovered_devices = {}  # mac_bytes -> (name, rssi)
+    discovered_devices: Dict[bytes, Tuple[str, int, str]] = {}  # mac_bytes -> (name, rssi, uuid)
 
     if expected_mac:
         mac_str_target = ":".join(f"{b:02X}" for b in reversed(expected_mac))
@@ -615,6 +630,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                 mac_str = ":".join(f"{b:02X}" for b in reversed(mac_bytes))
                 name = p.ble_scan_result.name
                 rssi = p.ble_scan_result.rssi_dbm
+                uuid_text = _device_uuid_text(p)
 
                 if mac_bytes not in discovered_devices:
                     matched = False
@@ -622,14 +638,16 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                         matched = (mac_bytes == expected_mac)
                     else:
                         name_upper = name.upper()
+                        uuid_upper = uuid_text.upper()
                         if target_name_filter:
-                            matched = target_name_filter.upper() in name_upper
+                            matched = target_name_filter.upper() in name_upper or target_name_filter.upper() in uuid_upper
                         else:
-                            matched = any(prefix in name_upper for prefix in ["UWB", "TAG", "ANCHOR", "NUS", "RTLS"])
+                            matched = any(prefix in name_upper for prefix in ["UWB", "TAG", "ANCHOR", "NUS", "RTLS", "NODE"]) or bool(uuid_text)
 
                     if matched:
-                        discovered_devices[mac_bytes] = (name, rssi)
-                        print(f"  [Scan] Found matching device: {mac_str} ('{name}') | RSSI: {rssi} dBm")
+                        discovered_devices[mac_bytes] = (name, rssi, uuid_text)
+                        uuid_part = f" | UUID: {uuid_text}" if uuid_text else ""
+                        print(f"  [Scan] Found matching device: {mac_str} ('{name}'){uuid_part} | RSSI: {rssi} dBm")
         
         if expected_mac and expected_mac in discovered_devices:
             break
@@ -647,31 +665,46 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
 
     device_list = list(discovered_devices.items())
     if len(device_list) == 1:
-        selected_mac, (selected_name, _) = device_list[0]
+        selected_mac, (selected_name, _, _) = device_list[0]
         mac_str = ":".join(f"{b:02X}" for b in reversed(selected_mac))
         print(f"\n{COLOR_GREEN}[+] Automatically selecting the only found device: '{selected_name}' ({mac_str}){COLOR_RESET}")
     else:
         print("\n--- DISCOVERED BLE DEVICES ---")
-        for idx, (mac_bytes, (name, rssi)) in enumerate(device_list, 1):
+        for idx, (mac_bytes, (name, rssi, uuid_text)) in enumerate(device_list, 1):
             mac_str = ":".join(f"{b:02X}" for b in reversed(mac_bytes))
-            print(f"  [{idx}] {mac_str} | Name: '{name}' | RSSI: {rssi:4d} dBm")
+            uuid_part = f" | UUID: {uuid_text}" if uuid_text else ""
+            print(f"  [{idx}] {mac_str} | Name: '{name}'{uuid_part} | RSSI: {rssi:4d} dBm")
         print("------------------------------")
 
         while True:
             try:
-                choice = input(f"Select device index (1-{len(device_list)}) to connect [default 1]: ").strip()
+                choice = input(f"Enter device index (1-{len(device_list)}) or MAC [default first device]: ").strip()
                 if not choice:
                     choice_idx = 1
-                else:
-                    choice_idx = int(choice)
-
-                if 1 <= choice_idx <= len(device_list):
-                    selected_mac, (selected_name, _) = device_list[choice_idx - 1]
+                    selected_mac, (selected_name, _, _) = device_list[choice_idx - 1]
                     break
-                else:
+
+                if choice.isdigit():
+                    choice_idx = int(choice)
+                    if 1 <= choice_idx <= len(device_list):
+                        selected_mac, (selected_name, _, _) = device_list[choice_idx - 1]
+                        break
                     print(f"Invalid index. Please enter a number between 1 and {len(device_list)}.")
+                    continue
+
+                if ":" in choice:
+                    mac_input = choice.upper()
+                    normalized = bytes(reversed([int(x, 16) for x in mac_input.split(":")]))
+                    if normalized in discovered_devices:
+                        selected_mac = normalized
+                        selected_name = discovered_devices[normalized][0]
+                        break
+                    print(f"Invalid MAC. Please enter one of the discovered devices.")
+                    continue
+
+                print("Invalid input. Please enter a device index or MAC address in format AA:BB:CC:DD:EE:FF.")
             except ValueError:
-                print("Invalid input. Please enter a number.")
+                print("Invalid input. Please enter a device index or MAC address in format AA:BB:CC:DD:EE:FF.")
             except KeyboardInterrupt:
                 print("\n[ABORT] User cancelled device selection.")
                 return None
