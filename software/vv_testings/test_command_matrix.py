@@ -29,6 +29,7 @@ EXPECTED_RESP_BY_REQUEST = {
     "rtos_task_stats_get": "rtos_task_stats_resp",
     "prefilter_cfg_get": "prefilter_cfg_resp",
     "anchor_layout_get": "anchor_layout_resp",
+    "zone_profile_get": "zone_profile_resp",
 }
 
 GROUP_BY_REQUEST = {
@@ -65,6 +66,12 @@ GROUP_BY_REQUEST = {
     "battery_info_get": "battery_info",
     "prefilter_cfg_get": "prefilter_cfg",
     "prefilter_cfg_set": "prefilter_cfg",
+    "zone_switch": "zone_switch",
+    "zone_profile_set": "zone_profile",
+    "zone_profile_get": "zone_profile",
+    "calib_start": "calib_control",
+    "calib_stop": "calib_control",
+    "calib_candidate_apply": "calib_control",
 }
 
 SHORT_NAME_BY_REQUEST = {
@@ -101,6 +108,12 @@ SHORT_NAME_BY_REQUEST = {
     "battery_info_get": "get",
     "prefilter_cfg_get": "get",
     "prefilter_cfg_set": "set",
+    "zone_switch": "set",
+    "zone_profile_set": "set",
+    "zone_profile_get": "get",
+    "calib_start": "start",
+    "calib_stop": "stop",
+    "calib_candidate_apply": "apply",
 }
 
 ACK_RESPONSE_NAMES = {
@@ -159,6 +172,13 @@ SKIPPED_REQUESTS = {
     "ble_scan_stop",
     "ble_connect",
     "vehicle_control",
+    "zone_switch",
+    "zone_profile_set",
+    "zone_profile_get",
+    "zone_profile_resp",
+    "calib_start",
+    "calib_stop",
+    "calib_candidate_apply",
 }
 
 

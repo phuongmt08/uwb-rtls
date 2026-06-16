@@ -574,6 +574,60 @@ class CommandFactory:
         pkt.battery_info_resp.error_mask = 0
         return pkt
 
+    def zone_switch(self, src: int, dst: int, seq: int, uwb_preamble_code: int = 17) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.zone_switch.uwb_preamble_code = uwb_preamble_code
+        return pkt
+
+    def zone_profile_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.zone_profile_set.profile.zone_id = 1
+        pkt.zone_profile_set.profile.preamble_code = 17
+        pkt.zone_profile_set.profile.anchor_count = 4
+        for anchor_id, x_m, y_m in (
+            (1, 0.0, 0.0),
+            (2, 4.0, 0.0),
+            (3, 0.0, 4.0),
+            (4, 4.0, 4.0),
+        ):
+            anchor = pkt.zone_profile_set.profile.anchors.add()
+            anchor.anchor_id = anchor_id
+            anchor.x_m = x_m
+            anchor.y_m = y_m
+            anchor.z_m = 2.0
+        return pkt
+
+    def zone_profile_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.zone_profile_get.zone_id = 1
+        return pkt
+
+    def zone_profile_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.zone_profile_resp.profile.zone_id = 1
+        pkt.zone_profile_resp.profile.preamble_code = 17
+        pkt.zone_profile_resp.profile.anchor_count = 4
+        return pkt
+
+    def calib_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.calib_start.sample_target = 32
+        pkt.calib_start.tag_x_m = 2.0
+        pkt.calib_start.tag_y_m = 2.0
+        pkt.calib_start.tag_z_m = 1.0
+        pkt.calib_start.reference_position_valid = True
+        return pkt
+
+    def calib_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.calib_stop.dummy = 0
+        return pkt
+
+    def calib_candidate_apply(self, src: int, dst: int, seq: int) -> pb.packet_t:
+        pkt = self._base(src, dst, seq)
+        pkt.calib_candidate_apply.anchor_mask = 0xF
+        return pkt
+
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -654,6 +708,13 @@ class CommandCatalog:
             CommandSpec(77, "prefilter_cfg_resp", self.factory.prefilter_cfg_resp),
             CommandSpec(78, "vehicle_control", self.factory.vehicle_control_speed_steering),
             CommandSpec(79, "vehicle_status", self.factory.vehicle_status),
+            CommandSpec(80, "zone_switch", self.factory.zone_switch),
+            CommandSpec(81, "zone_profile_set", self.factory.zone_profile_set),
+            CommandSpec(82, "zone_profile_get", self.factory.zone_profile_get),
+            CommandSpec(83, "zone_profile_resp", self.factory.zone_profile_resp),
+            CommandSpec(84, "calib_start", self.factory.calib_start),
+            CommandSpec(85, "calib_stop", self.factory.calib_stop),
+            CommandSpec(86, "calib_candidate_apply", self.factory.calib_candidate_apply),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

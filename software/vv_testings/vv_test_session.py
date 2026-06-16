@@ -124,8 +124,36 @@ class VvTestSession:
         return ports
 
     @classmethod
-    def auto_probe(cls, src: int = int(VvAddress.DEBUG), debug: bool = True) -> ProbeResult | None:
+    def auto_probe(cls, src: int = int(VvAddress.DEBUG), role: int | None = None, debug: bool = True) -> ProbeResult | None:
         dst = int(VvAddress.BCAST)
+
+        # If port is forced by environment variable, use it directly
+        forced_port = os.environ.get("VV_PORT")
+        if forced_port:
+            for baud in BAUD_CANDIDATES:
+                try:
+                    with cls(forced_port, baud=baud, debug=debug) as sess:
+                        seq = sess.proto.next_seq()
+                        pkt = sess.proto.pb.packet_t()
+                        pkt.hdr.addr.src = src
+                        pkt.hdr.addr.dst = dst
+                        pkt.hdr.seq = seq
+                        pkt.device_information_get.dummy = 0
+                        match, _ = sess.send_expect_param(pkt, "device_information_resp", timeout_s=0.5)
+                        if match is not None:
+                            dev_role = match.device_information_resp.role
+                            if role is not None and dev_role != role:
+                                if debug:
+                                    print(f"Forced port {forced_port} has role {dev_role}, expected {role}")
+                                continue
+                            return ProbeResult(
+                                port=forced_port,
+                                baud=baud,
+                                serial_number=int(match.device_information_resp.serial_number),
+                            )
+                except SerialException:
+                    pass
+            return None
 
         for port_info in cls.prioritized_ports():
             for baud in BAUD_CANDIDATES:
@@ -139,6 +167,9 @@ class VvTestSession:
                         pkt.device_information_get.dummy = 0
                         match, _ = sess.send_expect_param(pkt, "device_information_resp", timeout_s=0.5)
                         if match is not None:
+                            dev_role = match.device_information_resp.role
+                            if role is not None and dev_role != role:
+                                continue
                             return ProbeResult(
                                 port=port_info.device,
                                 baud=baud,
