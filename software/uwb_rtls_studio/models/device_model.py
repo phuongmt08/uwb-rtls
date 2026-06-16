@@ -321,7 +321,6 @@ class DeviceModel(QObject):
         self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
         # BE/API: Device Info BLE connection parameter snapshot.
         self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
-        self.request_log_stream()
         return True
 
     def request_log_stream(self, force: bool = False):
@@ -711,6 +710,9 @@ class DeviceModel(QObject):
         })
 
     def _handle_sys_config(self, resp):
+        if not resp.HasField("config"):
+            log.warning("Received sys_config_resp without config submessage.")
+            return
         cfg = resp.config
         cfg_dict = {
             "role": cfg.role,
@@ -730,6 +732,9 @@ class DeviceModel(QObject):
         self.sys_config_parsed.emit(cfg_dict)
 
     def _handle_sys_ranging_cfg(self, resp):
+        if not resp.HasField("config"):
+            log.warning("Received sys_ranging_cfg_resp without config submessage.")
+            return
         cfg = resp.config
         cfg_dict = {
             "rx_timeout_ms": cfg.rx_timeout_ms,
@@ -738,6 +743,9 @@ class DeviceModel(QObject):
         self.sys_ranging_cfg_parsed.emit(cfg_dict)
 
     def _handle_sensor_fusion_cfg(self, resp):
+        if not resp.HasField("config"):
+            log.warning("Received sensor_fusion_cfg_resp without config submessage.")
+            return
         cfg = resp.config
         cfg_dict = {
             "alpha": cfg.alpha,
@@ -758,6 +766,9 @@ class DeviceModel(QObject):
         self.sensor_fusion_cfg_parsed.emit(cfg_dict)
 
     def _handle_pos_calib_cfg(self, resp):
+        if not resp.HasField("config"):
+            log.warning("Received pos_calib_cfg_resp without config submessage.")
+            return
         cfg = resp.config
         cfg_dict = {
             "enable_anchor_auto_calib": cfg.enable_anchor_auto_calib,

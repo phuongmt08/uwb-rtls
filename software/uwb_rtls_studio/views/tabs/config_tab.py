@@ -29,6 +29,7 @@ from PyQt6 import uic
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'config_tab.ui')
 
 from utils.helpers import format_coord
+from utils.constants import DEVICE_TYPE_LABELS_SHORT
 from views.tabs.anchor_visual_widget import AnchorVisualWidget
 
 
@@ -48,6 +49,8 @@ class ConfigTab(QWidget):
         self._setup_dev_widgets()
         self._setup_anchor_table()
         self._setup_view_toggle()
+        self._setup_target_selector()
+        self._merge_ranging_into_uwb_config()
 
         
         # Apply initial mode
@@ -58,11 +61,10 @@ class ConfigTab(QWidget):
         # Align config groupboxes to the top of their cells to prevent empty space inside them
         self.main_layout.addWidget(self.uwb_config_group, 0, 1, 2, 1, Qt.AlignmentFlag.AlignTop)
 
-        # Create a vertical layout for Column 2 to stack ranging_group, fusion_group, and pos_calib_group closely
+        # Create a vertical layout for Column 2 to stack fusion_group and pos_calib_group closely
         self.col2_layout = QVBoxLayout()
         self.col2_layout.setContentsMargins(0, 0, 0, 0)
         self.col2_layout.setSpacing(10)
-        self.col2_layout.addWidget(self.ranging_group, 0, Qt.AlignmentFlag.AlignTop)
         self.col2_layout.addWidget(self.fusion_group, 1)
         self.col2_layout.addWidget(self.pos_calib_group, 1)
 
@@ -73,6 +75,27 @@ class ConfigTab(QWidget):
         self._current_role = 1  # Default: Tag
         self._current_device_id = 0
         self._last_anchor_layout = []
+        self._scan_devices = []
+
+    def _setup_target_selector(self):
+        """Add a compact target picker fed by BLE scan results."""
+        self.lbl_target_device = QLabel("Target:")
+        self.lbl_target_device.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        self.target_device_combo = QComboBox()
+        self.target_device_combo.setMinimumWidth(190)
+        self.target_device_combo.currentIndexChanged.connect(self._on_target_device_changed)
+        self.device_ops_layout.insertWidget(0, self.lbl_target_device)
+        self.device_ops_layout.insertWidget(1, self.target_device_combo)
+        self._refresh_target_devices([])
+
+    def _merge_ranging_into_uwb_config(self):
+        """Move ranging controls under the shared UWB Configuration group."""
+        self.uwb_config_group.setTitle("UWB Configuration")
+        if not self._has_widget("ranging_group"):
+            return
+        self.uwb_config_form.insertRow(5, self.lbl_rng_period, self.rng_period_spin)
+        self.uwb_config_form.insertRow(6, self.lbl_rx_timeout, self.rx_timeout_spin)
+        self.ranging_group.setVisible(False)
 
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
@@ -221,6 +244,8 @@ class ConfigTab(QWidget):
         self._vm.sys_ranging_cfg_updated.connect(self._on_sys_ranging_cfg_loaded)
         self._vm.sensor_fusion_cfg_updated.connect(self._on_sensor_fusion_cfg_loaded)
         self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
+        if hasattr(self._vm, "scan_devices_updated"):
+            self._vm.scan_devices_updated.connect(self._refresh_target_devices)
         
         # Connect UI buttons to viewmodel actions
         self.btn_read_device.clicked.connect(self._read_device_config)
@@ -267,6 +292,93 @@ class ConfigTab(QWidget):
             anchors = self._get_anchors_from_table()
             self._vm.update_shared_anchor_layout(anchors)
 
+    def _refresh_target_devices(self, devices: list):
+        self._scan_devices = [dict(d) for d in devices]
+        selected_key = None
+        current_data = self.target_device_combo.currentData()
+        if isinstance(current_data, dict):
+            selected_key = current_data.get("key")
+
+        self.target_device_combo.blockSignals(True)
+        try:
+            self.target_device_combo.clear()
+            if not self._scan_devices:
+                fallback = {
+                    "key": "manual",
+                    "label": "Manual target",
+                    "device_id": self._parse_device_id_from_ui(default=1),
+                    "role": self._role_from_ui(),
+                    "device_type": self._role_from_ui(),
+                }
+                self.target_device_combo.addItem(fallback["label"], fallback)
+            else:
+                for idx, dev in enumerate(self._scan_devices):
+                    target = self._target_from_scan_device(dev, idx)
+                    self.target_device_combo.addItem(target["label"], target)
+                    if selected_key and selected_key == target["key"]:
+                        self.target_device_combo.setCurrentIndex(self.target_device_combo.count() - 1)
+        finally:
+            self.target_device_combo.blockSignals(False)
+        self._on_target_device_changed(self.target_device_combo.currentIndex())
+
+    def _target_from_scan_device(self, dev: dict, idx: int) -> dict:
+        device_type = int(dev.get("device_type") or 0)
+        role = device_type if device_type in (1, 2, 3) else 1
+        device_id = int(dev.get("device_id") or dev.get("serial_number") or idx + 1)
+        type_label = DEVICE_TYPE_LABELS_SHORT.get(device_type, str(device_type))
+        if type_label == "-":
+            type_label = "DEVICE"
+        label = f"{type_label} 0x{device_id:08X}"
+        mac = dev.get("mac", "")
+        if mac:
+            label = f"{label} - {mac}"
+        return {
+            "key": f"{device_type}:{device_id}:{mac}",
+            "label": label,
+            "role": role,
+            "device_type": device_type,
+            "device_id": device_id,
+            "mac": mac,
+        }
+
+    def _selected_target(self) -> dict:
+        data = self.target_device_combo.currentData()
+        if isinstance(data, dict):
+            return data
+        return {
+            "role": self._role_from_ui(),
+            "device_type": self._role_from_ui(),
+            "device_id": self._parse_device_id_from_ui(default=1),
+        }
+
+    def _on_target_device_changed(self, index: int):
+        target = self._selected_target()
+        self._apply_target_to_ui(target)
+
+    def _apply_target_to_ui(self, target: dict):
+        role = int(target.get("role") or 1)
+        device_id = int(target.get("device_id") or 1)
+        role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}
+        self._current_role = role
+        self._current_device_id = device_id
+        self.val_role.setCurrentText(role_map.get(role, "Tag"))
+        self.val_deviceid.setCurrentText(f"0x{device_id:04X}")
+        if self._last_anchor_layout:
+            self._apply_anchor_layout_to_table()
+
+    def _role_from_ui(self) -> int:
+        role_map = {"Tag": 1, "Anchor": 2, "Gateway": 3}
+        return role_map.get(self.val_role.currentText(), 1)
+
+    def _parse_device_id_from_ui(self, default=1) -> int:
+        dev_id_str = self.val_deviceid.currentText().strip()
+        try:
+            if dev_id_str.lower().startswith("0x"):
+                return int(dev_id_str, 16)
+            return int(dev_id_str)
+        except ValueError:
+            return default
+
     def _get_anchors_from_table(self):
         anchors = []
         for row in range(self.anchor_table.rowCount()):
@@ -301,6 +413,7 @@ class ConfigTab(QWidget):
 
     def _read_device_config(self):
         if self._vm:
+            self._apply_target_to_ui(self._selected_target())
             self._vm.read_anchor_layout()
             self._vm.read_ranging_config()
             self._vm.read_sys_config()
@@ -310,6 +423,7 @@ class ConfigTab(QWidget):
     def _write_device_config(self):
         if not self._vm:
             return
+        self._apply_target_to_ui(self._selected_target())
         
         # 1. Write Layout
         anchors = self._get_anchors_from_table()
@@ -321,18 +435,8 @@ class ConfigTab(QWidget):
         self._vm.write_ranging_config(period, timeout)
 
         # 3. Write UWB Config (Sys Config)
-        role_map = {"Tag": 1, "Anchor": 2, "Gateway": 3}
-        role_str = self.val_role.currentText()
-        role = role_map.get(role_str, 1)
-
-        dev_id_str = self.val_deviceid.currentText().strip()
-        try:
-            if dev_id_str.lower().startswith("0x"):
-                device_id = int(dev_id_str, 16)
-            else:
-                device_id = int(dev_id_str)
-        except ValueError:
-            device_id = 1
+        role = self._role_from_ui()
+        device_id = self._parse_device_id_from_ui(default=1)
 
         try:
             uwb_channel = int(self.val_channel.currentText())

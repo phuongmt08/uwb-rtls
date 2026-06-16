@@ -202,7 +202,7 @@ class LogViewModel(QObject):
                     "success_packets": s.get("success_packets_rx", 0),
                     "avg_rms": s.get("avg_rms_error_m", 0.0),
                     "ranging_count": self._count_ranging_runs(session_id),
-                    "session_file_count": self._count_session_files(session_id),
+                    "session_file_count": self._count_ranging_runs(session_id) + self._count_log_runs(session_id),
                     "browser_path": self.browser.get_browser_root(),
                 })
             self.session_list_updated.emit(formatted_sessions)
@@ -253,3 +253,11 @@ class LogViewModel(QObject):
                 self.refresh_sessions()
         except Exception as e:
             log.error(f"Error deleting session {session_id}: {e}")
+
+    def start_log_stream(self):
+        """Kích hoạt log stream từ thiết bị và đảm bảo mở log run."""
+        log.info("Requesting start of log stream from device...")
+        if self._session_run_manager:
+            self._session_run_manager.open_log_run()
+        if self._log_model:
+            self._log_model.request_log_stream(force=True)

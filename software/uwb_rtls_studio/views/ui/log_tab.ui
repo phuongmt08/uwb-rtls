@@ -261,6 +261,16 @@ QSplitter::handle { background-color: #0F172A; }</string>
           </spacer>
          </item>
          <item>
+          <widget class="QPushButton" name="btn_start_log">
+           <property name="toolTip">
+            <string>Start log streaming from device</string>
+           </property>
+           <property name="text">
+            <string>Start Log</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="btn_clear_log">
            <property name="toolTip">
             <string>End and save the current log run</string>

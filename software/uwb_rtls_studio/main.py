@@ -109,7 +109,7 @@ def main():
 
     # Development-only bypass. Default production flow shows dongle/scan popups. Macro ON/OFF popups
     # Set env var UWB_RTLS_BYPASS_POPUPS = 1 to skip straight to main window with mock device.
-    BYPASS_POPUPS = os.getenv("UWB_RTLS_BYPASS_POPUPS", "1").strip().lower() in {"1", "true", "yes", "on"}
+    BYPASS_POPUPS = os.getenv("UWB_RTLS_BYPASS_POPUPS", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     # Vòng lặp cho Connection Flow
     connected_name = ""
@@ -202,7 +202,12 @@ def main():
         command_bus=command_bus,
         session_run_manager=session_run_manager,
     )
-    config_vm = ConfigViewModel(device_model, ranging_model, command_bus=command_bus)
+    config_vm = ConfigViewModel(
+        device_model,
+        ranging_model,
+        command_bus=command_bus,
+        ble_scan_repo=ble_scan_repo,
+    )
     main_vm = MainViewModel(
         live_tracking_vm=live_tracking_vm,
         device_info_vm=device_info_vm,

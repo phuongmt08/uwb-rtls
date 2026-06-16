@@ -27,6 +27,7 @@ class LogModel(QObject):
         self._command_bus = command_bus
         self._live_logs: list[dict] = []
         self._session_logs: list[dict] = []
+        self._log_stream_requested = False
 
         if self._log_repository:
             self._log_repository.log_entry_added.connect(self._on_repository_log_entry)
@@ -86,3 +87,19 @@ class LogModel(QObject):
         self._live_logs.append(safe_entry)
         self._session_logs.append(safe_entry.copy())
         self.log_entry_added.emit(safe_entry.copy())
+
+    def request_log_stream(self, force: bool = False) -> bool:
+        """Trigger firmware/device log streaming for the current connected device."""
+        if self._log_stream_requested and not force:
+            return False
+        self._log_stream_requested = True
+        if self._command_bus:
+            try:
+                log.info("LogModel: Requesting log stream via command_bus...")
+                return bool(self._command_bus.send("log_data", dst_addr=VvAddress.MCU))
+            except Exception as exc:
+                log.warning("LogModel: Failed to send log_data request: %s", exc)
+                return False
+        return False
+    
+    
