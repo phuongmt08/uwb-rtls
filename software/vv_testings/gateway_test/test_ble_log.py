@@ -54,7 +54,7 @@ LOG_IDLE_KEEPALIVE_S = 15.0
 LOG_RECV_TIMEOUT_S = 0.01
 LOG_END_SESSION_DELAY_S = 0.1
 LOG_FIRST_PACKET_TIMEOUT_S = 3.0
-PRINT_PACKET_TRACE = False
+PRINT_PACKET_TRACE = True
 PACKET_TRACE_TAG_WIDTH = 7
 PACKET_TRACE_NAME_WIDTH = 18
 PACKET_TRACE_COUNT_WIDTH = 5
@@ -353,6 +353,11 @@ class BleLogTester:
         pkt.log_data.type = pb.LOG_TYPE_DEVICE_LOG
         return pkt
 
+    def _send_log_poll(self) -> None:
+        poll_pkt = self._build_log_data_get()
+        self._send_packet(poll_pkt)
+        self._send_packet(self._build_ack(poll_pkt.hdr.seq, self.dst))
+
     def _build_time_sync_set(self) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
@@ -435,7 +440,7 @@ class BleLogTester:
         time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
         self._send_packet(self._build_transport_set())
         time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
-        self._send_packet(self._build_log_data_get())
+        self._send_log_poll()
         self.log_session_started = True
         self.log_start_deadline = time.time() + LOG_FIRST_PACKET_TIMEOUT_S
         self.last_poll = time.time()
@@ -591,7 +596,7 @@ class BleLogTester:
             and self.pending_log_ack_seq is None
             and now - self.last_poll >= LOG_POLL_PERIOD_S
         ):
-            self._send_packet(self._build_log_data_get())
+            self._send_log_poll()
             self.last_poll = now
 
         packets = self.session.recv_packets(timeout_s=LOG_RECV_TIMEOUT_S)
