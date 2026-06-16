@@ -272,15 +272,7 @@ int main(void)
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
 
-  if (cfg->uwb.role == DEVICE_ROLE_TAG)
-  {
-    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u",
-           TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
-  }
-
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Active config: CH=%u PRF=%u DR=%u PCode=%u",
          cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", cfg->uwb.tx_antenna_delay,
          cfg->uwb.rx_antenna_delay);

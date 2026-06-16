@@ -56,6 +56,11 @@ static bool s_initialized = false;
 
 bsp_imu_err_t bsp_imu_init(void)
 {
+	if (s_initialized)
+	{
+		return BSP_IMU_OK;
+	}
+
 	bsp_imu.bus.set_cs       = bsp_cs_set;
 	bsp_imu.bus.spi_transfer = bsp_spi_transfer;
 	bsp_imu.bus.delay_us     = bsp_delay_us;
@@ -105,19 +110,19 @@ bsp_imu_err_t bsp_imu_get_bias_data(bsp_imu_bias_t *p_bias)
 
 bsp_imu_err_t bsp_imu_setup_interrupt()
 {
-	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(s_initialized, BSP_IMU_ERR);
 	return icm42688_setup_interrupt(&bsp_imu);
 }
 
 bsp_imu_err_t bsp_imu_clear_interrupt()
 {
-	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(s_initialized, BSP_IMU_ERR);
 	return icm42688_clear_interrupt(&bsp_imu);
 }
 
 bsp_imu_err_t bsp_imu_irq_handler()
 {
-	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(s_initialized, BSP_IMU_ERR);
 	icm42688_irq_handler(&bsp_imu);
 
 	return BSP_IMU_OK;
@@ -142,13 +147,13 @@ bool bsp_imu_is_data_ready()
 
 bsp_imu_err_t bsp_imu_soft_reset()
 {
-	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(s_initialized, BSP_IMU_ERR);
 	return icm42688_soft_reset(&bsp_imu);
 }
 
 bsp_imu_err_t bsp_imu_self_test()
 {
-	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(s_initialized, BSP_IMU_ERR);
 	return icm42688_self_test(&bsp_imu);
 }
 
@@ -230,8 +235,8 @@ static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length)
 
 bsp_imu_err_t bsp_imu_get_temp(float *temp)
 {
-	CHECK_ERR(!s_initialized, BSP_IMU_ERR);
-	CHECK_ERR(!temp, BSP_IMU_ERR);
+	CHECK_ERR(s_initialized, BSP_IMU_ERR);
+	CHECK_ERR(temp != NULL, BSP_IMU_ERR);
 	icm42688_sensor_data_t raw_data;
 
 	// Burst read raw sensor data (including temperature) from ICM-42688

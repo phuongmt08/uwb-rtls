@@ -23,5 +23,6 @@
  */
 #define FORCE_DEVICE_TAG_MODE 0
 
+#define MAX_ZONE_ANCHORS 6
 
 #endif /* __CONFIG_H */
