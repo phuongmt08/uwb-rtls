@@ -117,35 +117,57 @@
 #define MAX_ANCHORS_SUPPORTED  8
 #define NUM_ANCHORS            4
 
+/* Default active zone ID (1 or 2) */
+#ifndef DEFAULT_ZONE_ID
+#define DEFAULT_ZONE_ID        1
+#endif
+
 /* When enabled, a ranging cycle is aborted unless at least three anchors
  * respond and return results. Keep disabled so survey and degraded-layout
  * operation can consume partial ranging results. */
 #define SYS_RANGING_REQUIRE_MIN_ANCHOR_SAMPLES  0
 
-#define ANCHOR_1_X   0.0f
-#define ANCHOR_1_Y   0.0f
+/* Zone 1 Defaults */
+#define ZONE_1_ANCHOR_1_ID   1
+#define ZONE_1_ANCHOR_1_X    0.0f
+#define ZONE_1_ANCHOR_1_Y    0.0f
+#define ZONE_1_ANCHOR_1_Z    ANCHOR_HEIGHT_M
 
-#define ANCHOR_2_X   11.76f
-#define ANCHOR_2_Y   0.0f
+#define ZONE_1_ANCHOR_2_ID   2
+#define ZONE_1_ANCHOR_2_X    11.76f
+#define ZONE_1_ANCHOR_2_Y    0.0f
+#define ZONE_1_ANCHOR_2_Z    ANCHOR_HEIGHT_M
 
-#define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   14.2f
+#define ZONE_1_ANCHOR_3_ID   3
+#define ZONE_1_ANCHOR_3_X    0.0f
+#define ZONE_1_ANCHOR_3_Y    14.2f
+#define ZONE_1_ANCHOR_3_Z    ANCHOR_HEIGHT_M
 
-#define ANCHOR_4_X   11.76f
-#define ANCHOR_4_Y   14.2f
+#define ZONE_1_ANCHOR_4_ID   4
+#define ZONE_1_ANCHOR_4_X    11.76f
+#define ZONE_1_ANCHOR_4_Y    14.2f
+#define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
-#ifndef ANCHOR_1_Z
-#define ANCHOR_1_Z ANCHOR_HEIGHT_M
-#endif
-#ifndef ANCHOR_2_Z
-#define ANCHOR_2_Z ANCHOR_HEIGHT_M
-#endif
-#ifndef ANCHOR_3_Z
-#define ANCHOR_3_Z ANCHOR_HEIGHT_M
-#endif
-#ifndef ANCHOR_4_Z
-#define ANCHOR_4_Z ANCHOR_HEIGHT_M
-#endif
+/* Zone 2 Defaults */
+#define ZONE_2_ANCHOR_1_ID   5
+#define ZONE_2_ANCHOR_1_X    0.0f
+#define ZONE_2_ANCHOR_1_Y    0.0f
+#define ZONE_2_ANCHOR_1_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_2_ANCHOR_2_ID   6
+#define ZONE_2_ANCHOR_2_X    10.0f
+#define ZONE_2_ANCHOR_2_Y    0.0f
+#define ZONE_2_ANCHOR_2_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_2_ANCHOR_3_ID   7
+#define ZONE_2_ANCHOR_3_X    0.0f
+#define ZONE_2_ANCHOR_3_Y    10.0f
+#define ZONE_2_ANCHOR_3_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_2_ANCHOR_4_ID   8
+#define ZONE_2_ANCHOR_4_X    10.0f
+#define ZONE_2_ANCHOR_4_Y    10.0f
+#define ZONE_2_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
 /* ===================================================================
  * DISTANCE VALIDATION

@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include "common.h"
 #include "positioning_config.h"
+#include "sys_config.h"
 
 #if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
@@ -32,6 +33,11 @@ app_err_t app_tag_init(void);
  * @brief Main Tag process loop.
  */
 void app_tag_process(void);
+
+/**
+ * @brief Process queued UWB control requests on the UwbRanging task context.
+ */
+void app_tag_process_uwb_control(sys_config_t *cfg);
 
 /**
  * @brief Get current ranging error frame count owned by the Tag ranging flow.

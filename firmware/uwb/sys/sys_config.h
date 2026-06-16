@@ -88,7 +88,10 @@ typedef struct
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
 #define DEFAULT_UWB_DATA_RATE     2 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
-#define DEFAULT_UWB_PREAMBLE_CODE 17
+#define DEFAULT_ZONE_1_PREAMBLE_CODE 17
+#define DEFAULT_ZONE_2_PREAMBLE_CODE 18
+#define DEFAULT_ZONE_3_PREAMBLE_CODE 19
+#define DEFAULT_ZONE_4_PREAMBLE_CODE 20
 #define DEFAULT_TX_ANT_DLY        16436
 #define DEFAULT_RX_ANT_DLY        16436
 #define DEFAULT_TX_POWER          0x3A5A7A9AUL /* ~-14.5 dBm with smart power on */

@@ -54,7 +54,7 @@ void app_rtos_set_ranging_enabled(bool enabled);
 bool app_rtos_is_ranging_enabled(void);
 void app_rtos_request_sensor_fusion_reset(void);
 bool app_rtos_request_zone_switch(uint32_t zone_id);
-bool app_rtos_request_zone_profile_apply(const protobuf_zone_profile_t *profile);
+bool app_rtos_request_active_zone_profile_update(const protobuf_zone_profile_t *profile);
 bool app_rtos_request_tag_calibration_start(uint32_t sample_target,
                                             float tag_x_m,
                                             float tag_y_m,

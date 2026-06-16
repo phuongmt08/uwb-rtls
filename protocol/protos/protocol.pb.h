@@ -736,7 +736,6 @@ typedef struct _protobuf_end_session_t {
 
 typedef struct _protobuf_zone_switch_t {
     uint32_t zone_id;
-    uint32_t uwb_preamble_code;
 } protobuf_zone_switch_t;
 
 typedef struct _protobuf_zone_profile_t {
@@ -1230,7 +1229,7 @@ extern "C" {
 #define protobuf_battery_info_get_t_init_default {0}
 #define protobuf_factory_otp_write_t_init_default {0, 0, _protobuf_device_type_t_MIN, 0, 0, 0, 0}
 #define protobuf_end_session_t_init_default      {_protobuf_session_end_reason_t_MIN}
-#define protobuf_zone_switch_t_init_default      {0, 0}
+#define protobuf_zone_switch_t_init_default      {0}
 #define protobuf_zone_profile_t_init_default     {0, 0, 0, 0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_zone_profile_set_t_init_default {false, protobuf_zone_profile_t_init_default}
 #define protobuf_zone_profile_get_t_init_default {0}
@@ -1327,7 +1326,7 @@ extern "C" {
 #define protobuf_battery_info_get_t_init_zero    {0}
 #define protobuf_factory_otp_write_t_init_zero   {0, 0, _protobuf_device_type_t_MIN, 0, 0, 0, 0}
 #define protobuf_end_session_t_init_zero         {_protobuf_session_end_reason_t_MIN}
-#define protobuf_zone_switch_t_init_zero         {0, 0}
+#define protobuf_zone_switch_t_init_zero         {0}
 #define protobuf_zone_profile_t_init_zero        {0, 0, 0, 0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_zone_profile_set_t_init_zero    {false, protobuf_zone_profile_t_init_zero}
 #define protobuf_zone_profile_get_t_init_zero    {0}
@@ -1616,7 +1615,6 @@ extern "C" {
 #define protobuf_factory_otp_write_t_value_u8_tag 7
 #define protobuf_end_session_t_reason_tag        1
 #define protobuf_zone_switch_t_zone_id_tag       1
-#define protobuf_zone_switch_t_uwb_preamble_code_tag 2
 #define protobuf_zone_profile_t_zone_id_tag      1
 #define protobuf_zone_profile_t_preamble_code_tag 2
 #define protobuf_zone_profile_t_anchor_count_tag 3
@@ -2365,8 +2363,7 @@ X(a, STATIC,   SINGULAR, UENUM,    reason,            1)
 #define protobuf_end_session_t_DEFAULT NULL
 
 #define protobuf_zone_switch_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   zone_id,           1) \
-X(a, STATIC,   SINGULAR, UINT32,   uwb_preamble_code,   2)
+X(a, STATIC,   SINGULAR, UINT32,   zone_id,           1)
 #define protobuf_zone_switch_t_CALLBACK NULL
 #define protobuf_zone_switch_t_DEFAULT NULL
 
@@ -2876,7 +2873,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_zone_profile_resp_t_size        159
 #define protobuf_zone_profile_set_t_size         159
 #define protobuf_zone_profile_t_size             156
-#define protobuf_zone_switch_t_size              12
+#define protobuf_zone_switch_t_size              6
 
 #ifdef __cplusplus
 } /* extern "C" */

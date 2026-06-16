@@ -789,7 +789,6 @@ message end_session_t {
 
 message zone_switch_t {
     uint32 zone_id = 1;
-    uint32 uwb_preamble_code = 2 [deprecated = true];
 }
 
 message zone_profile_t {

@@ -749,7 +749,7 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
         return;
     }
 
-    if (!app_rtos_request_zone_profile_apply(&profile)) {
+    if (!app_rtos_request_active_zone_profile_update(&profile)) {
         RLOG_W(OBJECT_CODE, "Anchor layout update rejected: UWB control busy");
         network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
         return;
@@ -850,7 +850,7 @@ static void network_cmd_zone_profile_set(const protobuf_packet_t *pkt)
             network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
             return;
         }
-        if (!app_rtos_request_zone_profile_apply(prof)) {
+        if (!app_rtos_request_active_zone_profile_update(prof)) {
             network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
             return;
         }

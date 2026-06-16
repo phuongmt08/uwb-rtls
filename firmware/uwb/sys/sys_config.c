@@ -274,16 +274,16 @@ void sys_config_init(void)
 
     s_active_zone_id = g_storage.config.default_zone_id;
     if (s_active_zone_id < 1 || s_active_zone_id > 4) {
-        s_active_zone_id = 1;
-        g_storage.config.default_zone_id = 1;
+        s_active_zone_id = DEFAULT_ZONE_ID;
+        g_storage.config.default_zone_id = DEFAULT_ZONE_ID;
     }
     if (!sys_config_apply_zone_profile(s_active_zone_id)) {
         RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
-               "Default zone %lu is invalid; falling back to Zone 1",
-               (unsigned long)s_active_zone_id);
-        s_active_zone_id = 1U;
-        g_storage.config.default_zone_id = 1U;
-        (void)sys_config_apply_zone_profile(1U);
+               "Default zone %lu is invalid; falling back to Zone %d",
+               (unsigned long)s_active_zone_id, (int)DEFAULT_ZONE_ID);
+        s_active_zone_id = DEFAULT_ZONE_ID;
+        g_storage.config.default_zone_id = DEFAULT_ZONE_ID;
+        (void)sys_config_apply_zone_profile(DEFAULT_ZONE_ID);
     }
 
     sys_config_print();
@@ -653,7 +653,6 @@ void sys_config_reset_to_defaults(void)
     g_storage.config.uwb.uwb_channel                        =           DEFAULT_UWB_CHANNEL;
     g_storage.config.uwb.uwb_prf                            =           DEFAULT_UWB_PRF;
     g_storage.config.uwb.uwb_data_rate                      =           DEFAULT_UWB_DATA_RATE;
-    g_storage.config.uwb.uwb_preamble_code                  =           DEFAULT_UWB_PREAMBLE_CODE;
     
     /* UWB Antenna Calibration
        ---------- */
@@ -694,64 +693,84 @@ void sys_config_reset_to_defaults(void)
        ID  |    X_M     |    Y_M     |    Z_M
        ================================================================================================ */
     /* Zone Profile configurations default init */
-    g_storage.config.default_zone_id                        =           1;
+    g_storage.config.default_zone_id                        =           DEFAULT_ZONE_ID;
 
     g_storage.config.zone_profiles[0].zone_id               =           1;
-    g_storage.config.zone_profiles[0].preamble_code         =           17;
+    g_storage.config.zone_profiles[0].preamble_code         =           DEFAULT_ZONE_1_PREAMBLE_CODE;
     g_storage.config.zone_profiles[0].anchors_count         =           4;
     g_storage.config.zone_profiles[0].anchor_count          =           4;
 
-    g_storage.config.zone_profiles[0].anchors[0].anchor_id  =           1;
-    g_storage.config.zone_profiles[0].anchors[0].x_m        =           ANCHOR_1_X;
-    g_storage.config.zone_profiles[0].anchors[0].y_m        =           ANCHOR_1_Y;
-    g_storage.config.zone_profiles[0].anchors[0].z_m        =           ANCHOR_1_Z;
+    g_storage.config.zone_profiles[0].anchors[0].anchor_id  =           ZONE_1_ANCHOR_1_ID;
+    g_storage.config.zone_profiles[0].anchors[0].x_m        =           ZONE_1_ANCHOR_1_X;
+    g_storage.config.zone_profiles[0].anchors[0].y_m        =           ZONE_1_ANCHOR_1_Y;
+    g_storage.config.zone_profiles[0].anchors[0].z_m        =           ZONE_1_ANCHOR_1_Z;
 
-    g_storage.config.zone_profiles[0].anchors[1].anchor_id  =           2;
-    g_storage.config.zone_profiles[0].anchors[1].x_m        =           ANCHOR_2_X;
-    g_storage.config.zone_profiles[0].anchors[1].y_m        =           ANCHOR_2_Y;
-    g_storage.config.zone_profiles[0].anchors[1].z_m        =           ANCHOR_2_Z;
+    g_storage.config.zone_profiles[0].anchors[1].anchor_id  =           ZONE_1_ANCHOR_2_ID;
+    g_storage.config.zone_profiles[0].anchors[1].x_m        =           ZONE_1_ANCHOR_2_X;
+    g_storage.config.zone_profiles[0].anchors[1].y_m        =           ZONE_1_ANCHOR_2_Y;
+    g_storage.config.zone_profiles[0].anchors[1].z_m        =           ZONE_1_ANCHOR_2_Z;
 
-    g_storage.config.zone_profiles[0].anchors[2].anchor_id  =           3;
-    g_storage.config.zone_profiles[0].anchors[2].x_m        =           ANCHOR_3_X;
-    g_storage.config.zone_profiles[0].anchors[2].y_m        =           ANCHOR_3_Y;
-    g_storage.config.zone_profiles[0].anchors[2].z_m        =           ANCHOR_3_Z;
+    g_storage.config.zone_profiles[0].anchors[2].anchor_id  =           ZONE_1_ANCHOR_3_ID;
+    g_storage.config.zone_profiles[0].anchors[2].x_m        =           ZONE_1_ANCHOR_3_X;
+    g_storage.config.zone_profiles[0].anchors[2].y_m        =           ZONE_1_ANCHOR_3_Y;
+    g_storage.config.zone_profiles[0].anchors[2].z_m        =           ZONE_1_ANCHOR_3_Z;
 
-    g_storage.config.zone_profiles[0].anchors[3].anchor_id  =           4;
-    g_storage.config.zone_profiles[0].anchors[3].x_m        =           ANCHOR_4_X;
-    g_storage.config.zone_profiles[0].anchors[3].y_m        =           ANCHOR_4_Y;
-    g_storage.config.zone_profiles[0].anchors[3].z_m        =           ANCHOR_4_Z;
+    g_storage.config.zone_profiles[0].anchors[3].anchor_id  =           ZONE_1_ANCHOR_4_ID;
+    g_storage.config.zone_profiles[0].anchors[3].x_m        =           ZONE_1_ANCHOR_4_X;
+    g_storage.config.zone_profiles[0].anchors[3].y_m        =           ZONE_1_ANCHOR_4_Y;
+    g_storage.config.zone_profiles[0].anchors[3].z_m        =           ZONE_1_ANCHOR_4_Z;
 
     g_storage.config.zone_profiles[1].zone_id               =           2;
-    g_storage.config.zone_profiles[1].preamble_code         =           18;
-    g_storage.config.zone_profiles[1].anchors_count         =           0;
-    g_storage.config.zone_profiles[1].anchor_count          =           0;
+    g_storage.config.zone_profiles[1].preamble_code         =           DEFAULT_ZONE_2_PREAMBLE_CODE;
+    g_storage.config.zone_profiles[1].anchors_count         =           4;
+    g_storage.config.zone_profiles[1].anchor_count          =           4;
+
+    g_storage.config.zone_profiles[1].anchors[0].anchor_id  =           ZONE_2_ANCHOR_1_ID;
+    g_storage.config.zone_profiles[1].anchors[0].x_m        =           ZONE_2_ANCHOR_1_X;
+    g_storage.config.zone_profiles[1].anchors[0].y_m        =           ZONE_2_ANCHOR_1_Y;
+    g_storage.config.zone_profiles[1].anchors[0].z_m        =           ZONE_2_ANCHOR_1_Z;
+
+    g_storage.config.zone_profiles[1].anchors[1].anchor_id  =           ZONE_2_ANCHOR_2_ID;
+    g_storage.config.zone_profiles[1].anchors[1].x_m        =           ZONE_2_ANCHOR_2_X;
+    g_storage.config.zone_profiles[1].anchors[1].y_m        =           ZONE_2_ANCHOR_2_Y;
+    g_storage.config.zone_profiles[1].anchors[1].z_m        =           ZONE_2_ANCHOR_2_Z;
+
+    g_storage.config.zone_profiles[1].anchors[2].anchor_id  =           ZONE_2_ANCHOR_3_ID;
+    g_storage.config.zone_profiles[1].anchors[2].x_m        =           ZONE_2_ANCHOR_3_X;
+    g_storage.config.zone_profiles[1].anchors[2].y_m        =           ZONE_2_ANCHOR_3_Y;
+    g_storage.config.zone_profiles[1].anchors[2].z_m        =           ZONE_2_ANCHOR_3_Z;
+
+    g_storage.config.zone_profiles[1].anchors[3].anchor_id  =           ZONE_2_ANCHOR_4_ID;
+    g_storage.config.zone_profiles[1].anchors[3].x_m        =           ZONE_2_ANCHOR_4_X;
+    g_storage.config.zone_profiles[1].anchors[3].y_m        =           ZONE_2_ANCHOR_4_Y;
+    g_storage.config.zone_profiles[1].anchors[3].z_m        =           ZONE_2_ANCHOR_4_Z;
 
     g_storage.config.zone_profiles[2].zone_id               =           3;
-    g_storage.config.zone_profiles[2].preamble_code         =           19;
+    g_storage.config.zone_profiles[2].preamble_code         =           DEFAULT_ZONE_3_PREAMBLE_CODE;
     g_storage.config.zone_profiles[2].anchors_count         =           0;
     g_storage.config.zone_profiles[2].anchor_count          =           0;
 
     g_storage.config.zone_profiles[3].zone_id               =           4;
-    g_storage.config.zone_profiles[3].preamble_code         =           20;
+    g_storage.config.zone_profiles[3].preamble_code         =           DEFAULT_ZONE_4_PREAMBLE_CODE;
     g_storage.config.zone_profiles[3].anchors_count         =           0;
     g_storage.config.zone_profiles[3].anchor_count          =           0;
 
     /* Unsurveyed zones start with a valid placeholder layout so devices can
      * switch to their preamble and run the mutual anchor survey there. */
-    for (uint32_t zone = 1U; zone < 4U; zone++) {
+    for (uint32_t zone = 2U; zone < 4U; zone++) {
         g_storage.config.zone_profiles[zone].anchors_count = NUM_ANCHORS;
         g_storage.config.zone_profiles[zone].anchor_count = NUM_ANCHORS;
         for (uint32_t anchor = 0U; anchor < NUM_ANCHORS; anchor++) {
             g_storage.config.zone_profiles[zone].anchors[anchor] =
-                g_storage.config.zone_profiles[0].anchors[anchor];
+                g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[anchor];
         }
     }
 
     g_storage.config.anchor_count                           =           4;
-    g_storage.config.anchor_layout[0]                       =           g_storage.config.zone_profiles[0].anchors[0];
-    g_storage.config.anchor_layout[1]                       =           g_storage.config.zone_profiles[0].anchors[1];
-    g_storage.config.anchor_layout[2]                       =           g_storage.config.zone_profiles[0].anchors[2];
-    g_storage.config.anchor_layout[3]                       =           g_storage.config.zone_profiles[0].anchors[3];
+    g_storage.config.anchor_layout[0]                       =           g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[0];
+    g_storage.config.anchor_layout[1]                       =           g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[1];
+    g_storage.config.anchor_layout[2]                       =           g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[2];
+    g_storage.config.anchor_layout[3]                       =           g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[3];
     /* ================================================================================================ */
 
 }
@@ -951,7 +970,7 @@ bool sys_config_zone_profile_valid(const protobuf_zone_profile_t *profile)
     uint32_t id_mask = 0U;
     for (uint32_t i = 0U; i < profile->anchors_count; i++) {
         const sys_anchor_layout_t *anchor = &profile->anchors[i];
-        if (anchor->anchor_id == 0U || anchor->anchor_id > NUM_ANCHORS ||
+        if (anchor->anchor_id == 0U || anchor->anchor_id > MAX_ANCHORS_SUPPORTED ||
             !isfinite(anchor->x_m) || !isfinite(anchor->y_m) || !isfinite(anchor->z_m)) {
             return false;
         }
@@ -961,7 +980,7 @@ bool sys_config_zone_profile_valid(const protobuf_zone_profile_t *profile)
         }
         id_mask |= bit;
     }
-    return id_mask == ((1UL << NUM_ANCHORS) - 1UL);
+    return id_mask != 0U;
 }
 
 int sys_config_set_zone_profile(const protobuf_zone_profile_t *profile)

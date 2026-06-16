@@ -574,9 +574,8 @@ class CommandFactory:
         pkt.battery_info_resp.error_mask = 0
         return pkt
 
-    def zone_switch(self, src: int, dst: int, seq: int, uwb_preamble_code: int = 17) -> pb.packet_t:
+    def zone_switch(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_switch.uwb_preamble_code = uwb_preamble_code
         return pkt
 
     def zone_profile_set(self, src: int, dst: int, seq: int) -> pb.packet_t:

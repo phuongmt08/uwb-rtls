@@ -9,6 +9,8 @@
  */
 /* Includes ----------------------------------------------------------- */
 #include "app_tag.h"
+#include "app_anchor.h"
+#include "app_calib_master.h"
 #include "app_rtos_handles.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -50,6 +52,15 @@ typedef struct {
 #endif
 } filter_state_t;
 
+typedef enum {
+    APP_TAG_UWB_CONTROL_NONE = 0,
+    APP_TAG_UWB_CONTROL_SWITCH_ZONE,
+    APP_TAG_UWB_CONTROL_UPDATE_ACTIVE_ZONE_PROFILE,
+    APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION,
+    APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION,
+    APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION,
+} app_tag_uwb_control_op_t;
+
 /* Private variables -------------------------------------------------- */
 static uint32_t s_error_count = 0;
 static uint32_t s_success_count = 0;
@@ -90,6 +101,17 @@ static vec2d_t s_last_position = {.x = 0.0f, .y = 0.0f};
 static bool s_position_valid = false;
 #endif
 
+static volatile app_tag_uwb_control_op_t s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
+static uint32_t s_control_zone_id = 0U;
+static protobuf_zone_profile_t s_control_zone_profile = {0};
+static uint32_t s_control_sample_target = 0U;
+static uint32_t s_control_anchor_mask = 0U;
+static float s_control_tag_x_m = 0.0f;
+static float s_control_tag_y_m = 0.0f;
+static float s_control_tag_z_m = 0.0f;
+static uint32_t s_zone_switch_tick = 0U;
+static bool s_zone_switch_pending_save = false;
+
 /* Private prototypes --------------------------------------------------- */
 #if !ENABLE_SYS_FUSION
 static void init_filters(void);
@@ -107,12 +129,272 @@ static void finish_failed_ranging_cycle(sys_ranging_err_t err,
                                         uint32_t period_ms,
                                         bool abort_ranging,
                                         const char *reason);
+static bool queue_uwb_control_request(app_tag_uwb_control_op_t op);
+static void reset_app_after_radio_reconfigure(sys_config_t *cfg);
+static void persist_stable_zone_switch(sys_config_t *cfg);
 #if !ENABLE_SYS_FUSION
 static void record_fusion_log_update_timing(void);
 static void send_fusion_log_snapshot(void);
 #endif
 
 /* Private functions --------------------------------------------------- */
+static bool queue_uwb_control_request(app_tag_uwb_control_op_t op)
+{
+    if (s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+        return false;
+    }
+
+    s_uwb_control_op = op;
+    if (g_uwb_isr_semHandle != NULL) {
+        (void)osSemaphoreRelease(g_uwb_isr_semHandle);
+    }
+    return true;
+}
+
+bool app_rtos_request_zone_switch(uint32_t zone_id)
+{
+    if (zone_id < 1U || zone_id > 4U ||
+        s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+        return false;
+    }
+
+    s_control_zone_id = zone_id;
+    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_SWITCH_ZONE);
+}
+
+bool app_rtos_request_active_zone_profile_update(const protobuf_zone_profile_t *profile)
+{
+    if (!profile ||
+        profile->zone_id != sys_config_get_active_zone_id() ||
+        !sys_config_zone_profile_valid(profile) ||
+        s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+        return false;
+    }
+
+    s_control_zone_profile = *profile;
+    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_UPDATE_ACTIVE_ZONE_PROFILE);
+}
+
+bool app_rtos_request_tag_calibration_start(uint32_t sample_target,
+                                            float tag_x_m,
+                                            float tag_y_m,
+                                            float tag_z_m)
+{
+    if (s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+        return false;
+    }
+
+    s_control_sample_target = sample_target;
+    s_control_tag_x_m = tag_x_m;
+    s_control_tag_y_m = tag_y_m;
+    s_control_tag_z_m = tag_z_m;
+    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION);
+}
+
+bool app_rtos_request_tag_calibration_stop(void)
+{
+    app_calib_master_set_active(false);
+    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION);
+}
+
+bool app_rtos_request_tag_calibration_apply(uint32_t anchor_mask)
+{
+    if (anchor_mask == 0U || s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+        return false;
+    }
+
+    s_control_anchor_mask = anchor_mask;
+    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION);
+}
+
+static void reset_app_after_radio_reconfigure(sys_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+
+    if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+        app_tag_reset_fusion();
+        (void)app_tag_init();
+    } else {
+        (void)app_anchor_init();
+    }
+}
+
+static void persist_stable_zone_switch(sys_config_t *cfg)
+{
+    if (!cfg ||
+        !s_zone_switch_pending_save ||
+        (HAL_GetTick() - s_zone_switch_tick) <= 10000U) {
+        return;
+    }
+
+    s_zone_switch_pending_save = false;
+    uint32_t active_zone = sys_config_get_active_zone_id();
+    cfg->default_zone_id = active_zone;
+
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG,
+           "[UWB] Zone switch stable for 10s. Persisting default_zone_id=%lu to Flash...",
+           (unsigned long)active_zone);
+
+    if (sys_config_save() == 0) {
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG,
+               "[UWB] Successfully persisted default_zone_id=%lu to Flash",
+               (unsigned long)active_zone);
+    } else {
+        RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL,
+               "[UWB] Failed to persist default_zone_id to Flash");
+    }
+}
+
+void app_tag_process_uwb_control(sys_config_t *cfg)
+{
+    persist_stable_zone_switch(cfg);
+
+    app_tag_uwb_control_op_t op = s_uwb_control_op;
+    if (op == APP_TAG_UWB_CONTROL_NONE || !cfg) {
+        return;
+    }
+
+    uint32_t zone_id = s_control_zone_id;
+    protobuf_zone_profile_t zone_profile = s_control_zone_profile;
+    uint32_t sample_target = s_control_sample_target;
+    uint32_t anchor_mask = s_control_anchor_mask;
+    float tag_x_m = s_control_tag_x_m;
+    float tag_y_m = s_control_tag_y_m;
+    float tag_z_m = s_control_tag_z_m;
+    s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
+
+    (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+
+    if ((op == APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION ||
+         op == APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION ||
+         op == APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION) &&
+        cfg->uwb.role != DEVICE_ROLE_TAG) {
+        RLOG_W(LOG_OBJECT_CODE_APPLICATION,
+               "[UWB] Ignoring tag calibration control request on non-tag role");
+        (void)osMutexRelease(g_spi1_mutexHandle);
+        return;
+    }
+
+    if (op == APP_TAG_UWB_CONTROL_SWITCH_ZONE) {
+        uint32_t old_zone_id = sys_config_get_active_zone_id();
+        sys_ranging_abort();
+        bsp_uwb_idle();
+
+        if (sys_config_apply_zone_profile(zone_id) &&
+            bsp_uwb_configure(&cfg->uwb) == BSP_OK) {
+            sys_config_set_active_zone_id(zone_id);
+            reset_app_after_radio_reconfigure(cfg);
+            app_rtos_request_sensor_fusion_reset();
+            s_zone_switch_tick = HAL_GetTick();
+            s_zone_switch_pending_save = true;
+            RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER,
+                   "[UWB] Zone switch to %lu complete: preamble=%lu anchors=%lu",
+                   (unsigned long)zone_id,
+                   (unsigned long)cfg->uwb.uwb_preamble_code,
+                   (unsigned long)cfg->anchor_count);
+        } else {
+            (void)sys_config_apply_zone_profile(old_zone_id);
+            (void)bsp_uwb_configure(&cfg->uwb);
+            reset_app_after_radio_reconfigure(cfg);
+            RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_HAL,
+                   "[UWB] Zone switch to %lu failed; restored Zone %lu",
+                   (unsigned long)zone_id,
+                   (unsigned long)old_zone_id);
+        }
+    } else if (op == APP_TAG_UWB_CONTROL_UPDATE_ACTIVE_ZONE_PROFILE) {
+        uint32_t active_zone_id = sys_config_get_active_zone_id();
+        protobuf_zone_profile_t previous = cfg->zone_profiles[active_zone_id - 1U];
+        sys_ranging_abort();
+        bsp_uwb_idle();
+
+        bool updated = zone_profile.zone_id == active_zone_id &&
+                       sys_config_set_zone_profile(&zone_profile) == 0 &&
+                       sys_config_apply_zone_profile(active_zone_id) &&
+                       bsp_uwb_configure(&cfg->uwb) == BSP_OK &&
+                       sys_config_save() == 0;
+        if (updated) {
+            reset_app_after_radio_reconfigure(cfg);
+            app_rtos_request_sensor_fusion_reset();
+            RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER,
+                   "[UWB] Active Zone %lu profile updated and persisted",
+                   (unsigned long)active_zone_id);
+        } else {
+            cfg->zone_profiles[active_zone_id - 1U] = previous;
+            (void)sys_config_apply_zone_profile(active_zone_id);
+            (void)bsp_uwb_configure(&cfg->uwb);
+            reset_app_after_radio_reconfigure(cfg);
+            RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_HAL,
+                   "[UWB] Active Zone %lu profile update failed; restored previous profile",
+                   (unsigned long)active_zone_id);
+        }
+    } else if (op == APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION) {
+        bool was_ranging_enabled = app_rtos_is_ranging_enabled();
+        sys_ranging_abort();
+        bsp_uwb_idle();
+        app_tag_reset_fusion();
+        cfg->calib.samples = sample_target;
+        app_calib_master_set_active(true);
+        if (app_calib_master_set_reference_position(tag_x_m, tag_y_m, tag_z_m) &&
+            app_calib_master_init() == APP_OK) {
+            app_rtos_set_ranging_enabled(true);
+            RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB][MASTER] start request accepted");
+        } else {
+            app_calib_master_set_active(false);
+            app_rtos_set_ranging_enabled(was_ranging_enabled);
+            RLOG_E(LOG_OBJECT_CODE_TAG, ERR_INVALID_PARAM,
+                   "[CALIB][MASTER] start request rejected");
+        }
+    } else if (op == APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION) {
+        sys_ranging_abort();
+        bsp_uwb_idle();
+        app_calib_master_on_ranging_stopped();
+        app_calib_master_set_active(false);
+        app_rtos_set_ranging_enabled(true);
+        app_tag_reset_fusion();
+        (void)sys_config_save();
+    } else if (op == APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION) {
+        uint16_t tx_delay = 0U;
+        uint16_t rx_delay = 0U;
+        if (app_calib_master_get_average_candidate(anchor_mask, &tx_delay, &rx_delay)) {
+            uint32_t old_tx_delay = cfg->uwb.tx_antenna_delay;
+            uint32_t old_rx_delay = cfg->uwb.rx_antenna_delay;
+            bool old_calib_enabled = app_calib_master_is_active();
+            bool old_ranging_enabled = app_rtos_is_ranging_enabled();
+            sys_ranging_abort();
+            bsp_uwb_idle();
+            cfg->uwb.tx_antenna_delay = tx_delay;
+            cfg->uwb.rx_antenna_delay = rx_delay;
+            app_calib_master_set_active(false);
+            app_rtos_set_ranging_enabled(false);
+            if (bsp_uwb_configure(&cfg->uwb) == BSP_OK && sys_config_save() == 0) {
+                app_calib_master_on_ranging_stopped();
+                app_tag_reset_fusion();
+                app_rtos_set_ranging_enabled(true);
+                RLOG_I(LOG_OBJECT_CODE_TAG,
+                       "[CALIB][MASTER] applied tag delay TX=%u RX=%u",
+                       tx_delay,
+                       rx_delay);
+            } else {
+                cfg->uwb.tx_antenna_delay = old_tx_delay;
+                cfg->uwb.rx_antenna_delay = old_rx_delay;
+                app_calib_master_set_active(old_calib_enabled);
+                app_rtos_set_ranging_enabled(old_ranging_enabled);
+                (void)bsp_uwb_configure(&cfg->uwb);
+                RLOG_E(LOG_OBJECT_CODE_TAG, ERR_HAL,
+                       "[CALIB][MASTER] apply failed; restored previous delays");
+            }
+        } else {
+            RLOG_W(LOG_OBJECT_CODE_TAG,
+                   "[CALIB][MASTER] apply rejected: no completed candidates for mask=0x%02lX",
+                   (unsigned long)anchor_mask);
+        }
+    }
+
+    (void)osMutexRelease(g_spi1_mutexHandle);
+}
+
 #if !ENABLE_SYS_FUSION
 static void init_filters(void)
 {
@@ -339,19 +621,22 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     for (int i = 0; i < num_success; i++) {
         sys_ranging_result_t *r = &results[i];
         uint8_t aid = r->anchor_id;
-        if (aid < 1 || aid > NUM_ANCHORS) continue;
+        if (aid < 1 || aid > MAX_ANCHORS_SUPPORTED || msg.count >= MAX_ANCHORS_SUPPORTED) {
+            continue;
+        }
 
-        msg.distances[aid - 1] = r->distance_m;
-        msg.anchor_ids[aid - 1] = aid;
-        msg.fp_amp_norm[aid - 1] = (float)r->fp_amp_norm_q8 / 256.0f;
-        msg.fp_snr[aid - 1] = (float)r->fp_snr_q8 / 256.0f;
-        msg.quality_valid[aid - 1] = (r->quality != 0U) ? 1U : 0U;
+        uint8_t entry = msg.count;
+        msg.distances[entry] = r->distance_m;
+        msg.anchor_ids[entry] = aid;
+        msg.fp_amp_norm[entry] = (float)r->fp_amp_norm_q8 / 256.0f;
+        msg.fp_snr[entry] = (float)r->fp_snr_q8 / 256.0f;
+        msg.quality_valid[entry] = (r->quality != 0U) ? 1U : 0U;
 
         if (r->valid) {
             msg.mask |= (1 << (aid - 1));
             valid_count++;
-            msg.count++;
         }
+        msg.count++;
     }
 
     if (valid_count < 3U) {
