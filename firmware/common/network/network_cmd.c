@@ -124,6 +124,8 @@ static network_log_tracker_t s_log_tracker = {
 static bool    s_log_stream_enabled = false;
 static uint8_t s_log_stream_dst     = protobuf_PACKET_ADDR_HOST;
 static uint32_t s_last_sensor_fusion_stream_tick = 0u;
+float dt_s = 0.0f;
+uint32_t stream_packet_cnt = 0;
 
 /* ---- Command dispatch table ----
  * Sparse, indexed by protobuf tag via CMD_INFO.
@@ -526,6 +528,9 @@ static void network_cmd_ranging_stop(const protobuf_packet_t *pkt)
     if (!network_cmd_set_ranging_enabled(false)) {
         RLOG_W(OBJECT_CODE, "ranging_stop rejected by platform");
     }
+    dt_s = 0.0f;
+	stream_packet_cnt = 0u;
+	s_last_sensor_fusion_stream_tick = 0u;
 }
 
 #endif /* !BOOTLOADER */
@@ -896,6 +901,9 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
 
     /* Any end_session must stop log streaming immediately. */
     s_log_stream_enabled = false;
+    dt_s = 0.0f;
+    stream_packet_cnt = 0u;
+    s_last_sensor_fusion_stream_tick = 0u;
 
     switch (reason) {
         case protobuf_SESSION_END_REASON_LOG_DATA:
@@ -1065,9 +1073,6 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
  * These functions wrap packet construction and transmission for outgoing commands
  * to specific destinations (dst).
  * -------------------------------- */
-
-float dt_s = 0.0f;
-uint32_t stream_packet_cnt = 0;
 
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {

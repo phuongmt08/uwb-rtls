@@ -28,6 +28,8 @@
 #endif
 
 #define MAX_PROTOBUF_PAYLOAD_SIZE 256
+#define BB_ROUTER_APP_TIMER_TICKS_TO_MS(ticks) \
+    ((uint32_t)(((uint64_t)(ticks) * (APP_TIMER_CONFIG_RTC_FREQUENCY + 1u) * 1000u) / 32768u))
 
 /* Private variables -------------------------------------------------- */
 static bb_router_state_t m_state;
@@ -189,14 +191,24 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             static uint32_t m_fusion_packet_count = 0;
             static uint32_t m_last_fusion_packet_time = 0;
             uint32_t current_ticks = app_timer_cnt_get();
-            uint32_t diff_ticks = (current_ticks - m_last_fusion_packet_time) & 0x00FFFFFF;
+            uint32_t diff_ticks = 0;
+
+            if (m_last_fusion_packet_time != 0)
+            {
+                diff_ticks = app_timer_cnt_diff_compute(current_ticks, m_last_fusion_packet_time);
+            }
+
             if (diff_ticks > APP_TIMER_TICKS(5000))
             {
                 m_fusion_packet_count = 0;
             }
             m_fusion_packet_count++;
             m_last_fusion_packet_time = current_ticks;
-            NRF_LOG_INFO("bb_router: Decoded packet cmd_id=24, count=%u", m_fusion_packet_count);
+            uint32_t diff_ms = BB_ROUTER_APP_TIMER_TICKS_TO_MS(diff_ticks);
+            NRF_LOG_INFO("bb_router: Decoded packet cmd_id=24, count=%u, dt=%u.%03u s",
+                         m_fusion_packet_count,
+                         diff_ms / 1000u,
+                         diff_ms % 1000u);
         }
 #endif
         if (pkt.has_hdr && pkt.hdr.has_addr)

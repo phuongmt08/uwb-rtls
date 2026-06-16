@@ -692,10 +692,6 @@ void sys_sensor_fusion_test_stream_result(network_core_t *stream, bool ranging_e
 {
 #if UKF_BLE_STREAM_TEST_ENABLE
     CHECK_VOID(stream);
-    if (!ranging_enabled)
-    {
-        return;
-    }
 
     uint32_t now_ms = HAL_GetTick();
     float step = (float)s_stream_test_sample_idx;
