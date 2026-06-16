@@ -159,7 +159,8 @@ static bool trilaterate_2d_probe(const mw_tril_anchor_t *a,
 uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                                      uint8_t total_anchors,
                                      mw_tril_anchor_t *best_out,
-                                     uint8_t max_out)
+                                     uint8_t max_out,
+                                     uint8_t prev_mask)
 {
     if (!anchors || !best_out || max_out == 0) return 0;
 
@@ -228,11 +229,37 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
         return 0;
     }
 
+    /* Dynamically calculate and normalize weights (excluding health) */
+    double w_d2 = MW_TRIL_WEIGHT_D2;
+    double w_fp = MW_TRIL_WEIGHT_FP_AMP;
+    double w_residual = MW_TRIL_WEIGHT_RESIDUAL;
+    double w_dist = MW_TRIL_WEIGHT_DIST;
+    double weight_sum = w_d2 + w_fp + w_residual + w_dist;
+    if (weight_sum > 0.0) {
+        w_d2 /= weight_sum;
+        w_fp /= weight_sum;
+        w_residual /= weight_sum;
+        w_dist /= weight_sum;
+    } else {
+        w_d2 = 0.35 / 1.05;
+        w_fp = 0.15 / 1.05;
+        w_residual = 0.30 / 1.05;
+        w_dist = 0.25 / 1.05;
+    }
+
     uint8_t best_i = 0, best_j = 1, best_k = 2;
     double  best_score = 1.0e9;
     double  best_residual = 0.0;
     double  best_gdop_penalty = 0.0;
     double  best_fp_penalty = 0.0;
+    uint8_t best_mask = 0;
+
+    bool    prev_found = false;
+    uint8_t prev_i = 0, prev_j = 1, prev_k = 2;
+    double  prev_score = 1.0e9;
+    double  prev_residual = 0.0;
+    double  prev_gdop_penalty = 0.0;
+    double  prev_fp_penalty = 0.0;
 
     for (uint8_t i = 0; i < valid_count - 2; i++) {
         for (uint8_t j = i + 1; j < valid_count - 1; j++) {
@@ -263,10 +290,17 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                    + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)
                    + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)) / 3.0;
 
-                double score = (MW_TRIL_WEIGHT_D2 * avg_d2_penalty)
-                             + (MW_TRIL_WEIGHT_FP_AMP * avg_fp_penalty)
-                             + (MW_TRIL_WEIGHT_GDOP * gdop_penalty)
-                             + (MW_TRIL_WEIGHT_RESIDUAL * residual_penalty);
+                double avg_range = (valid_anchors[i].distance + valid_anchors[j].distance + valid_anchors[k].distance) / 3.0;
+                double range_penalty = clamp01(avg_range / 15.0);
+
+                double score = (w_d2 * avg_d2_penalty)
+                             + (w_fp * avg_fp_penalty)
+                             + (w_residual * residual_penalty)
+                             + (w_dist * range_penalty);
+
+                uint8_t mask = (1 << (valid_anchors[i].id - 1))
+                             | (1 << (valid_anchors[j].id - 1))
+                             | (1 << (valid_anchors[k].id - 1));
 
                 if (score < best_score) {
                     best_score = score;
@@ -276,6 +310,18 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                     best_residual = residual;
                     best_gdop_penalty = gdop_penalty;
                     best_fp_penalty = avg_fp_penalty;
+                    best_mask = mask;
+                }
+
+                if (prev_mask != 0 && mask == prev_mask) {
+                    prev_found = true;
+                    prev_i = i;
+                    prev_j = j;
+                    prev_k = k;
+                    prev_score = score;
+                    prev_residual = residual;
+                    prev_gdop_penalty = gdop_penalty;
+                    prev_fp_penalty = avg_fp_penalty;
                 }
             }
         }
@@ -285,22 +331,45 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
         return 0;
     }
 
-    best_out[0] = valid_anchors[best_i];
-    best_out[1] = valid_anchors[best_j];
-    best_out[2] = valid_anchors[best_k];
+    uint8_t selected_i = best_i;
+    uint8_t selected_j = best_j;
+    uint8_t selected_k = best_k;
+    double  selected_score = best_score;
+    double  selected_residual = best_residual;
+    double  selected_gdop_penalty = best_gdop_penalty;
+    double  selected_fp_penalty = best_fp_penalty;
+
+    if (prev_found && best_mask != prev_mask) {
+        double switch_margin = MW_TRIL_SWITCH_MARGIN;
+        double switch_score_eps = MW_TRIL_SWITCH_SCORE_EPS;
+        bool keep_previous = prev_score <= (best_score * (1.0 + switch_margin)) + switch_score_eps;
+        if (keep_previous) {
+            selected_i = prev_i;
+            selected_j = prev_j;
+            selected_k = prev_k;
+            selected_score = prev_score;
+            selected_residual = prev_residual;
+            selected_gdop_penalty = prev_gdop_penalty;
+            selected_fp_penalty = prev_fp_penalty;
+        }
+    }
+
+    best_out[0] = valid_anchors[selected_i];
+    best_out[1] = valid_anchors[selected_j];
+    best_out[2] = valid_anchors[selected_k];
 
     for (uint8_t i = 0; i < 3U; i++) {
-        best_out[i].selection_score = best_score;
-        best_out[i].residual_rms = best_residual;
-        best_out[i].gdop_penalty = best_gdop_penalty;
-        best_out[i].fp_penalty = best_fp_penalty;
+        best_out[i].selection_score = selected_score;
+        best_out[i].residual_rms = selected_residual;
+        best_out[i].gdop_penalty = selected_gdop_penalty;
+        best_out[i].fp_penalty = selected_fp_penalty;
     }
 
 #ifdef ENABLE_DEBUG_LOGGING
     RLOG_D(LOG_OBJECT_CODE_TAG,
             "Best composite anchors: #%u #%u #%u (score=%.3f residual=%.3f gdop=%.3f)",
             best_out[0].id, best_out[1].id, best_out[2].id,
-            best_score, best_residual, best_gdop_penalty);
+            selected_score, selected_residual, selected_gdop_penalty);
 #endif
 
     return 3;

@@ -105,15 +105,6 @@ static const char *sys_config_device_type_name(device_type_t device_type)
     }
 }
 
-static void sys_config_apply_forced_mode(void)
-{
-#if FORCE_DEVICE_TAG_MODE
-    g_storage.config.device_type = DEVICE_TYPE_TAG;
-    g_storage.config.uwb.role = DEVICE_ROLE_TAG;
-    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: forcing Device Type/Role to TAG");
-#endif
-}
-
 static bool sys_config_mfg_date_pack(uint32_t date_ddmmyyyy, uint8_t packed[3])
 {
     if (!packed) {
@@ -206,6 +197,42 @@ static otp_err_t sys_config_otp_set_antenna_delay(uint16_t tx_delay, uint16_t rx
     return otp_set(OTP_TYPE_ANTENNA_DELAY, sizeof(ant), &ant);
 }
 
+static void sys_config_reconcile_factory_otp(void)
+{
+    sys_config_otp_device_info_t otp_info = {0};
+    if (sys_config_otp_get_device_info(&otp_info) == OTP_OK) {
+        device_type_t otp_device_type = (device_type_t)otp_info.device_type;
+        if (otp_device_type == DEVICE_TYPE_UNSPECIFIED ||
+            !sys_config_device_type_valid(otp_device_type)) {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
+                   "Invalid OTP device type ignored: 0x%02X",
+                   otp_info.device_type);
+        } else if (g_storage.config.device_type != otp_device_type) {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
+                   "OTP device type overwrite: %s -> %s",
+                   sys_config_device_type_name(g_storage.config.device_type),
+                   sys_config_device_type_name(otp_device_type));
+            g_storage.config.device_type = otp_device_type;
+        }
+    }
+
+    uint16_t otp_tx_delay = 0;
+    uint16_t otp_rx_delay = 0;
+    if (sys_config_otp_get_antenna_delay(&otp_tx_delay, &otp_rx_delay) == OTP_OK) {
+        if (g_storage.config.uwb.tx_antenna_delay != otp_tx_delay ||
+            g_storage.config.uwb.rx_antenna_delay != otp_rx_delay) {
+            RLOG_W(LOG_OBJECT_CODE_SYS_CFG,
+                   "OTP antenna delay overwrite: TX=%lu RX=%lu -> TX=%u RX=%u",
+                   g_storage.config.uwb.tx_antenna_delay,
+                   g_storage.config.uwb.rx_antenna_delay,
+                   otp_tx_delay,
+                   otp_rx_delay);
+            g_storage.config.uwb.tx_antenna_delay = otp_tx_delay;
+            g_storage.config.uwb.rx_antenna_delay = otp_rx_delay;
+        }
+    }
+}
+
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
 /* ========================================================================== */
@@ -224,28 +251,7 @@ void sys_config_init(void)
         }
     }
 
-    /* Load and override with OTP factory values if available */
-    sys_config_otp_device_info_t otp_info = {0};
-    if (sys_config_otp_get_device_info(&otp_info) == OTP_OK) {
-        device_type_t otp_device_type = (device_type_t)otp_info.device_type;
-        if (sys_config_set_device_type(otp_device_type) == 0) {
-            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Device Type overridden by OTP factory config: 0x%02X", otp_info.device_type);
-        } else {
-            RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid OTP device type ignored: 0x%02X", otp_info.device_type);
-        }
-    }
-
-    uint16_t otp_tx_delay = 0;
-    uint16_t otp_rx_delay = 0;
-    if (sys_config_otp_get_antenna_delay(&otp_tx_delay, &otp_rx_delay) == OTP_OK) {
-        sys_config_t *cfg = sys_config_get();
-        cfg->uwb.tx_antenna_delay = otp_tx_delay;
-        cfg->uwb.rx_antenna_delay = otp_rx_delay;
-        RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Antenna Delays loaded from OTP: TX=%u, RX=%u", 
-               cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
-    }
-
-    sys_config_apply_forced_mode();
+    sys_config_reconcile_factory_otp();
 
     sys_config_print();
 }
@@ -257,13 +263,6 @@ sys_config_t *sys_config_get(void)
 
 int sys_config_set_role(device_role_t role)
 {
-#if FORCE_DEVICE_TAG_MODE
-    (void)role;
-    g_storage.config.uwb.role = DEVICE_ROLE_TAG;
-    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: role forced to TAG");
-    return 0;
-#endif
-
     if (!sys_config_device_role_valid(role)) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid role: %d", role);
         return -1;
@@ -276,14 +275,6 @@ int sys_config_set_role(device_role_t role)
 
 int sys_config_set_device_type(device_type_t device_type)
 {
-#if FORCE_DEVICE_TAG_MODE
-    (void)device_type;
-    g_storage.config.device_type = DEVICE_TYPE_TAG;
-    g_storage.config.uwb.role = DEVICE_ROLE_TAG;
-    RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: device_type forced to TAG");
-    return 0;
-#endif
-
     if (!sys_config_device_type_valid(device_type)) {
         RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_INVALID_PARAM, "Invalid device_type: %d", device_type);
         return -1;
@@ -360,12 +351,7 @@ otp_err_t sys_config_factory_otp_write(const protobuf_factory_otp_write_t *req)
         return err;
     }
 
-    if (req->otp_type == OTP_TYPE_DEVICE_INFO) {
-        (void)sys_config_set_device_type((device_type_t)req->device_type);
-    } else if (req->otp_type == OTP_TYPE_ANTENNA_DELAY) {
-        g_storage.config.uwb.tx_antenna_delay = req->tx_antenna_delay;
-        g_storage.config.uwb.rx_antenna_delay = req->rx_antenna_delay;
-    }
+    sys_config_reconcile_factory_otp();
 
     return OTP_OK;
 }
@@ -441,7 +427,7 @@ int sys_config_load(void)
         g_storage.config.uwb.tx_antenna_delay = old_tx_delay;
         g_storage.config.uwb.rx_antenna_delay = old_rx_delay;
         if (sys_config_save() == 0) {
-            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to flash (antenna delay giữ nguyên)");
+            RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to flash (antenna delay preserved)");
         } else {
             RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Failed to save default config to flash");
         }
@@ -486,6 +472,43 @@ int sys_config_load(void)
         temp_storage.config.uwb.ranging_period_ms = DEFAULT_RANGING_PERIOD_MS;
     }
 
+    if (temp_storage.config.uwb.uwb_preamble_len != 0x04 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x14 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x24 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x34 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x08 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x18 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x28 &&
+        temp_storage.config.uwb.uwb_preamble_len != 0x0C) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid preamble length in flash, forcing DWT_PLEN_512");
+        temp_storage.config.uwb.uwb_preamble_len = DEFAULT_UWB_PREAMBLE_LEN;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.uwb_rx_pac > 3) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx PAC in flash, forcing DWT_PAC16");
+        temp_storage.config.uwb.uwb_rx_pac = DEFAULT_UWB_RX_PAC;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.uwb_ns_sfd > 1) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid nsSFD in flash, forcing 1");
+        temp_storage.config.uwb.uwb_ns_sfd = DEFAULT_UWB_NS_SFD;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.uwb_phr_mode > 1) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid PHR mode in flash, forcing DWT_PHRMODE_STD");
+        temp_storage.config.uwb.uwb_phr_mode = DEFAULT_UWB_PHR_MODE;
+        normalize_and_save = true;
+    }
+
+    if (temp_storage.config.uwb.pg_delay == 0) {
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid PG delay in flash, forcing 0xC2");
+        temp_storage.config.uwb.pg_delay = DEFAULT_PG_DELAY;
+        normalize_and_save = true;
+    }
+
     memcpy(&g_storage, &temp_storage, sizeof(sys_config_storage_t));
     RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Config loaded from flash (CRC: 0x%08X)", calc_crc);
 
@@ -509,7 +532,7 @@ int sys_config_load(void)
             g_storage.config.uwb.tx_antenna_delay = old_tx_delay;
             g_storage.config.uwb.rx_antenna_delay = old_rx_delay;
             if (sys_config_save() == 0) {
-                RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to RAM (antenna delay giữ nguyên)");
+                RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Default config saved to RAM (antenna delay preserved)");
             } else {
                 RLOG_E(LOG_OBJECT_CODE_SYS_CFG, ERR_HAL, "Failed to save default config to RAM");
             }
@@ -576,8 +599,14 @@ void sys_config_reset_to_defaults(void)
        ---------- */
     g_storage.config.uwb.ranging_period_ms                  =           DEFAULT_RANGING_PERIOD_MS;
     g_storage.config.uwb.rx_timeout_ms                      =           DEFAULT_RX_TIMEOUT_MS;
-     g_storage.config.uwb.power_mode                        =           DEFAULT_ANCHOR_POWER_MODE;
+    g_storage.config.uwb.power_mode                        =           DEFAULT_ANCHOR_POWER_MODE;
     g_storage.config.uwb.anchor_list.size                   =           0;
+    g_storage.config.uwb.uwb_preamble_len                   =           DEFAULT_UWB_PREAMBLE_LEN;
+    g_storage.config.uwb.uwb_rx_pac                         =           DEFAULT_UWB_RX_PAC;
+    g_storage.config.uwb.uwb_ns_sfd                         =           DEFAULT_UWB_NS_SFD;
+    g_storage.config.uwb.uwb_phr_mode                       =           DEFAULT_UWB_PHR_MODE;
+    g_storage.config.uwb.smart_tx_power                     =           DEFAULT_SMART_TX_POWER;
+    g_storage.config.uwb.pg_delay                           =           DEFAULT_PG_DELAY;
     
     /* Calibration Configuration
        ---------- */
@@ -734,6 +763,15 @@ int sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t co
     memcpy(g_storage.config.anchor_layout, anchors, (size_t)count * sizeof(sys_anchor_layout_t));
     g_storage.config.anchor_count = count;
     return 0;
+}
+
+uint8_t sys_config_get_hw_rev(void)
+{
+    sys_config_otp_device_info_t info;
+    if (sys_config_otp_get_device_info(&info) == OTP_OK) {
+        return info.hw_rev;
+    }
+    return 0u;
 }
 
 /* End of file -------------------------------------------------------- */

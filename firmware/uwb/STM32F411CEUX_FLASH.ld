@@ -48,8 +48,8 @@ MEMORY
   /* Remaining 207 KB: application code + rodata + .data load image */
   FLASH        (rx)  : ORIGIN = 0x0800C400, LENGTH = 207K
   DATA_STORAGE (rx)  : ORIGIN = 0x08040000, LENGTH = 256K      /* Sectors 6-7: Dual-sector data storage */
-  RAM          (xrw) : ORIGIN = 0x20000000, LENGTH = 92K
-  LOG_RAM      (xrw) : ORIGIN = 0x20017000, LENGTH = 4K
+  RAM          (xrw) : ORIGIN = 0x20000000, LENGTH = 120K
+  LOG_RAM      (xrw) : ORIGIN = 0x2001E000, LENGTH = 8K
 }
 
 /* Sections */

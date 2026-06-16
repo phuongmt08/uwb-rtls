@@ -15,8 +15,10 @@
     #include "bsp_battery.h"
     #include "sys_logger.h"
     #include "sys_pm.h"
+    #include "otp/otp.h"
 #else
     #include "sys_logger_bl.h"
+    #include "otp/otp.h"
 
 #endif
 
@@ -74,6 +76,9 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
 #endif
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
+#ifndef BOOTLOADER
+static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt);
+#endif
 
 #ifndef BOOTLOADER
 
@@ -147,7 +152,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 12 */
 #endif /* !BOOTLOADER */
 
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_time_sync_adv_set,           "time_sync_adv_set"),  /* 9  */
+#else
     CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_unimplemented,               "time_sync_adv_set"),  /* 9  */
+#endif
 
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 13 */
@@ -344,6 +353,14 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
         resp.params.device_information_resp.role        = cfg->uwb.role;
     }
 
+    uint32_t hw_version = 0;
+    uint8_t otp_buf[5];
+    uint8_t otp_len = 0;
+    if (otp_get(OTP_TYPE_DEVICE_INFO, otp_buf, sizeof(otp_buf), &otp_len) == OTP_OK && otp_len == 5) {
+        hw_version = otp_buf[4];
+    }
+    resp.params.device_information_resp.hw_version = hw_version;
+
     bsp_app_image_header_t app_hdr;
     memset(&app_hdr, 0, sizeof(app_hdr));
     if (bsp_flash_read_app_header(&app_hdr, sizeof(app_hdr))) {
@@ -371,14 +388,35 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_device_information_resp_tag);
 
+    uint8_t otp_info[5] = {0};
+    uint8_t otp_len = 0u;
+    uint32_t hw_version = 0u;
+    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    if (otp_get(OTP_TYPE_DEVICE_INFO, otp_info, sizeof(otp_info), &otp_len) == OTP_OK &&
+        otp_len == sizeof(otp_info)) {
+        protobuf_device_type_t otp_device_type = (protobuf_device_type_t)otp_info[0];
+        if (otp_device_type == protobuf_DEVICE_TYPE_TAG ||
+            otp_device_type == protobuf_DEVICE_TYPE_ANCHOR ||
+            otp_device_type == protobuf_DEVICE_TYPE_GATEWAY ||
+            otp_device_type == protobuf_DEVICE_TYPE_DEBUG_TOOL) {
+            device_type = otp_device_type;
+            hw_version = otp_info[4];
+        }
+    }
+
     /* Bootloader responds with minimal identity fields only. */
-    resp.params.device_information_resp.device_type    = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    resp.params.device_information_resp.device_type    = device_type;
     resp.params.device_information_resp.role           = protobuf_DEVICE_ROLE_UNSPECIFIED;
+    if (resp.params.device_information_resp.device_type == protobuf_DEVICE_TYPE_TAG) {
+        resp.params.device_information_resp.role = protobuf_DEVICE_ROLE_TAG;
+    } else if (resp.params.device_information_resp.device_type == protobuf_DEVICE_TYPE_ANCHOR) {
+        resp.params.device_information_resp.role = protobuf_DEVICE_ROLE_ANCHOR;
+    }
     resp.params.device_information_resp.has_fw_version = true;
     resp.params.device_information_resp.fw_version     = (protobuf_version_t){0};
     /* Mark as bootloader firmware in fw_version metadata. */
     resp.params.device_information_resp.fw_version.gitsha = 0x424F4F54ULL; /* 'BOOT' */
-    resp.params.device_information_resp.hw_version     = 0u; /* unknown/not provided in bootloader */
+    resp.params.device_information_resp.hw_version     = hw_version;
     resp.params.device_information_resp.serial_number = bsp_util_get_serial_number();
 
     network_cmd_send_packet(&resp);
@@ -434,6 +472,38 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 
     if (new_cfg->uwb_channel < 1u || new_cfg->uwb_channel > 7u) {
         RLOG_W(OBJECT_CODE, "Invalid UWB channel in sys_config_set: %u", (unsigned)new_cfg->uwb_channel);
+        return;
+    }
+
+    if (new_cfg->uwb_preamble_len != 0x04 &&
+        new_cfg->uwb_preamble_len != 0x14 &&
+        new_cfg->uwb_preamble_len != 0x24 &&
+        new_cfg->uwb_preamble_len != 0x34 &&
+        new_cfg->uwb_preamble_len != 0x08 &&
+        new_cfg->uwb_preamble_len != 0x18 &&
+        new_cfg->uwb_preamble_len != 0x28 &&
+        new_cfg->uwb_preamble_len != 0x0C) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB preamble length in sys_config_set: 0x%02X", (unsigned)new_cfg->uwb_preamble_len);
+        return;
+    }
+
+    if (new_cfg->uwb_rx_pac > 3u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB rx PAC in sys_config_set: %u", (unsigned)new_cfg->uwb_rx_pac);
+        return;
+    }
+
+    if (new_cfg->uwb_ns_sfd > 1u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB nsSFD in sys_config_set: %u", (unsigned)new_cfg->uwb_ns_sfd);
+        return;
+    }
+
+    if (new_cfg->uwb_phr_mode > 1u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB PHR mode in sys_config_set: %u", (unsigned)new_cfg->uwb_phr_mode);
+        return;
+    }
+
+    if (new_cfg->pg_delay == 0u) {
+        RLOG_W(OBJECT_CODE, "Invalid UWB PG delay in sys_config_set: %u", (unsigned)new_cfg->pg_delay);
         return;
     }
 
@@ -536,6 +606,41 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
            (unsigned)rtc_time.second,
            (long)pkt->params.time_sync_set.timezone_offset);
 }
+
+#ifndef BOOTLOADER
+static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    const sys_config_t *cfg = sys_config_get();
+    if (cfg == NULL) {
+        return;
+    }
+
+    const protobuf_time_sync_adv_set_t *adv_set = &pkt->params.time_sync_adv_set;
+
+    // Check device type and device id
+    if (adv_set->device_type == cfg->device_type && adv_set->device_id == cfg->uwb.device_id) {
+        if (bsp_rtc_sync_set(adv_set->unix_time_ms,
+                             adv_set->timezone_offset) != BSP_UTIL_OK) {
+            RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_adv_set");
+            return;
+        }
+
+        bsp_rtc_time_t rtc_time;
+        bsp_rtc_get_time(&rtc_time);
+        RLOG_I(OBJECT_CODE,
+               "RTC synced (adv_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
+               (unsigned)rtc_time.day,
+               (unsigned)rtc_time.month,
+               (unsigned)(2000u + rtc_time.year),
+               (unsigned)rtc_time.hour,
+               (unsigned)rtc_time.minute,
+               (unsigned)rtc_time.second,
+               (long)adv_set->timezone_offset);
+    }
+}
+#endif
 
 
 #ifndef BOOTLOADER
@@ -666,9 +771,9 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
     
     // Hardware telemetry fields
     resp.params.battery_info_resp.mcu_temp_c       = pm_status.temp_degc;
-    resp.params.battery_info_resp.vdda_mv          = (uint32_t)pm_status.vdda_mv;
+    resp.params.battery_info_resp.mcu_voltage_mv   = (uint32_t)pm_status.vdda_mv;
     resp.params.battery_info_resp.uwb_temp_c       = pm_status.uwb_temp_c;
-    resp.params.battery_info_resp.uwb_vbat_mv      = (uint32_t)pm_status.uwb_vbat_mv;
+    resp.params.battery_info_resp.uwb_voltage_mv   = (uint32_t)pm_status.uwb_vbat_mv;
     resp.params.battery_info_resp.imu_temp_c       = pm_status.imu_temp_c;
     
     // Alert flags
@@ -1109,7 +1214,7 @@ bool network_send_ble_adv_status(network_core_t *stream, uint8_t dst, const prot
     pkt.which_params = protobuf_packet_t_ble_adv_status_tag;
     pkt.params.ble_adv_status = *status;
 
-    return network_core_send_packet(s_network_cmd.stream, dst, &pkt);
+    return network_core_send_packet(stream, dst, &pkt);
 }
 
 #endif /* HAVE_BLE_PERIPHERAL */

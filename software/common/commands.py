@@ -262,7 +262,7 @@ class CommandFactory:
         pkt.ble_adv_status.status_flags = 0
         pkt.ble_adv_status.warning_count = 0
         pkt.ble_adv_status.error_count = 0
-        pkt.ble_adv_status.local_timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
+        pkt.ble_adv_status.local_timestamp_s = int(time.time()) & 0xFFFFFFFF
         return pkt
 
     def log_data(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -409,9 +409,9 @@ class CommandFactory:
         pkt.battery_info_resp.remaining_min = 120
         pkt.battery_info_resp.is_charging = False
         pkt.battery_info_resp.mcu_temp_c = 25.0
-        pkt.battery_info_resp.vdda_mv = 3300
+        pkt.battery_info_resp.mcu_voltage_mv = 3300
         pkt.battery_info_resp.uwb_temp_c = 25.0
-        pkt.battery_info_resp.uwb_vbat_mv = 3300
+        pkt.battery_info_resp.uwb_voltage_mv = 3300
         pkt.battery_info_resp.imu_temp_c = 25.0
         pkt.battery_info_resp.error_mask = 0
         return pkt

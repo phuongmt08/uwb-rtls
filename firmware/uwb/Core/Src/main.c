@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_anchor.h"
 #include "app_tag.h"
+#include "ble/sys_ble_peripheral.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -236,6 +237,7 @@ int main(void)
   sys_config_init();
   sys_config_t *cfg = sys_config_get();
 
+  bool network_stack_ready = false;
   serial_init();
   if (!network_core_init(&g_network_core, protobuf_PACKET_ADDR_MCU, g_network_rx_buf, sizeof(g_network_rx_buf)))
   {
@@ -247,6 +249,7 @@ int main(void)
   }
   else
   {
+    network_stack_ready = true;
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
 #ifdef HAVE_BLE_PERIPHERAL
     if (!sys_ble_peripheral_init(&g_network_core))
@@ -331,6 +334,19 @@ int main(void)
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
 #endif
+
+  if (network_stack_ready)
+  {
+    if (sys_ble_peripheral_init(&g_network_core))
+    {
+      sys_ble_peripheral_set_config();
+      sys_ble_peripheral_enable(true);
+    }
+    else
+    {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "BLE peripheral init failed");
+    }
+  }
 #ifdef DEVELOPER_MODE
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "DEVELOPER MODE ENABLED: Verbose");
   // Configure SystemView here; recording starts after the scheduler is running.

@@ -17,11 +17,4 @@
 /* Developer diagnostics */
 #define DEVELOPER_MODE
 
-/*
- * Force this firmware image to run as a TAG even when flash config storage
- * cannot be erased/written or contains an invalid role.
- */
-#define FORCE_DEVICE_TAG_MODE 0
-
-
 #endif /* __CONFIG_H */

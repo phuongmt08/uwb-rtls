@@ -15,11 +15,13 @@
 #include "network/network_core.h"
 #ifdef BOOTLOADER
     #include "bsp_util_bl.h"
+    #include "otp/otp.h"
     #include "sys_logger_bl.h"
 #else
     #include "bsp_util.h"
     #include "sys_logger.h"
     #include "sys_config.h"
+    #include "bsp_battery.h"
 #endif
 
 #include <string.h>
@@ -27,6 +29,17 @@
 
 #define OBJECT_CODE             LOG_OBJECT_CODE_BLE
 #define BLE_WATCHDOG_PERIOD_MS  10000u
+
+#define BLE_CHECK(_cond, _ret)  do { if (!(_cond)) return (_ret); } while (0)
+#define BLE_CHECK_VOID(_cond)   do { if (!(_cond)) return; } while (0)
+
+#ifdef BOOTLOADER
+typedef struct {
+   uint8_t device_type;
+   uint8_t mfg_date[3];
+   uint8_t hw_rev;
+} __attribute__((packed)) ble_otp_device_info_t;
+#endif
 
 /* ─────────────────────────────────────────────
 * Internal helpers
@@ -42,6 +55,48 @@ typedef struct {
 } sys_ble_peripheral_t;
 
 static sys_ble_peripheral_t s_ble_peri;
+
+#ifdef BOOTLOADER
+static bool ble_device_type_valid(protobuf_device_type_t device_type)
+{
+   return device_type == protobuf_DEVICE_TYPE_TAG ||
+          device_type == protobuf_DEVICE_TYPE_ANCHOR ||
+          device_type == protobuf_DEVICE_TYPE_GATEWAY ||
+          device_type == protobuf_DEVICE_TYPE_DEBUG_TOOL;
+}
+#endif
+
+static const char *ble_device_type_prefix(protobuf_device_type_t device_type)
+{
+   switch (device_type) {
+       case protobuf_DEVICE_TYPE_TAG:        return "TAG";
+       case protobuf_DEVICE_TYPE_ANCHOR:     return "ANCHOR";
+       case protobuf_DEVICE_TYPE_GATEWAY:    return "GATEWAY";
+       case protobuf_DEVICE_TYPE_DEBUG_TOOL: return "DEBUG";
+       default:                              return "NODE";
+   }
+}
+
+#ifdef BOOTLOADER
+static protobuf_device_type_t ble_read_otp_device_type(void)
+{
+   ble_otp_device_info_t info = {0};
+   uint8_t len = 0u;
+
+   if (otp_get(OTP_TYPE_DEVICE_INFO, &info, sizeof(info), &len) != OTP_OK ||
+       len != sizeof(info)) {
+       return protobuf_DEVICE_TYPE_UNSPECIFIED;
+   }
+
+   protobuf_device_type_t device_type = (protobuf_device_type_t)info.device_type;
+   if (!ble_device_type_valid(device_type)) {
+       RLOG_W(OBJECT_CODE, "Invalid OTP device type ignored: 0x%02X", info.device_type);
+       return protobuf_DEVICE_TYPE_UNSPECIFIED;
+   }
+
+   return device_type;
+}
+#endif
 
 static const char *ble_state_name(protobuf_ble_state_t s)
 {
@@ -130,7 +185,7 @@ static void ble_poll_status(void)
 
 bool sys_ble_peripheral_init(network_core_t *stream)
 {
-   CHECK(stream, false);
+   BLE_CHECK(stream, false);
 
    memset(&s_ble_peri, 0, sizeof(s_ble_peri));
    s_ble_peri.stream  = stream;
@@ -145,24 +200,28 @@ bool sys_ble_peripheral_init(network_core_t *stream)
 void sys_ble_peripheral_set_config(void)
 {
     uint32_t sn = bsp_util_get_serial_number();
+    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    uint32_t device_id = sn & 0xFFFFu;
     char name[32] = {0};
 
 #ifndef BOOTLOADER
     const sys_config_t *cfg = sys_config_get();
-    if (cfg && cfg->uwb.role == DEVICE_ROLE_TAG) {
-        snprintf(name, sizeof(name), "RTLS-Tag-%u", (unsigned int)cfg->uwb.device_id);
-    } else if (cfg) {
-        snprintf(name, sizeof(name), "RTLS-Anchor-%u", (unsigned int)cfg->uwb.device_id);
-    } else {
-        snprintf(name, sizeof(name), "RTLS-Node-%04X", (unsigned int)(sn & 0xFFFF));
+    if (cfg) {
+        device_type = cfg->device_type;
+        device_id = cfg->uwb.device_id;
     }
 #else
-    /* Bootloader fallback name */
-    snprintf(name, sizeof(name), "RTLS-BL-%04X", (unsigned int)(sn & 0xFFFF));
+    device_type = ble_read_otp_device_type();
 #endif
 
+    snprintf(name, sizeof(name), "%s-%lu",
+             ble_device_type_prefix(device_type),
+             (unsigned long)device_id);
+
     s_ble_peri.serial_number = sn;
-    snprintf(s_ble_peri.device_name, sizeof(s_ble_peri.device_name), "%s", name);
+    strncpy(s_ble_peri.device_name, name, sizeof(s_ble_peri.device_name) - 1);
+    s_ble_peri.device_name[sizeof(s_ble_peri.device_name) - 1] = '\0';
+    RLOG_I(OBJECT_CODE, "BLE advertising name: %s", s_ble_peri.device_name);
     
     if (s_ble_peri.stream) {
         network_send_ble_adv_config_set(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL, 
@@ -172,7 +231,7 @@ void sys_ble_peripheral_set_config(void)
 
 bool sys_ble_peripheral_enable(bool enable)
 {
-   CHECK(s_ble_peri.stream, false);
+   BLE_CHECK(s_ble_peri.stream, false);
    
    s_ble_peri.enabled = enable;
 
@@ -186,23 +245,63 @@ bool sys_ble_peripheral_enable(bool enable)
 
 void sys_ble_peripheral_on_status_resp(const protobuf_packet_t *pkt)
 {
-   CHECK_VOID(pkt);
-   CHECK_VOID(pkt->which_params == protobuf_packet_t_ble_status_resp_tag);
+   BLE_CHECK_VOID(pkt);
+   BLE_CHECK_VOID(pkt->which_params == protobuf_packet_t_ble_status_resp_tag);
 
    ble_set_state(pkt->params.ble_status_resp.state,
                  pkt->params.ble_status_resp.rssi_dbm);
 }
 
+void sys_ble_peripheral_send_adv_status(void)
+{
+    if (!s_ble_peri.stream || !s_ble_peri.enabled) return;
+
+    protobuf_ble_adv_status_t status = protobuf_ble_adv_status_t_init_zero;
+    
+    // 1. Fill device identity
+#ifndef BOOTLOADER
+    const sys_config_t *cfg = sys_config_get();
+    if (cfg) {
+        status.device = cfg->device_type;
+        status.device_id = cfg->uwb.device_id;
+    } else {
+        status.device = protobuf_DEVICE_TYPE_UNSPECIFIED;
+        status.device_id = 0;
+    }
+    
+    // 2. Read battery percentage from the MAX17048 driver
+    status.bat_soc_percent = bsp_battery_get_soc();
+#else
+    status.device = ble_read_otp_device_type();
+    status.device_id = s_ble_peri.serial_number & 0xFFFFu;
+    status.bat_soc_percent = 100;
+#endif
+
+    // 3. Fill diagnostic status fields
+    status.status_flags = 0;
+    status.warning_count = 0;
+    status.error_count = 0;
+    status.local_timestamp_s = bsp_rtc_get_timestamp_s();
+
+    RLOG_I(OBJECT_CODE, "Sending ADV status packet: Device ID=%lu, Bat=%lu%%", 
+           status.device_id, status.bat_soc_percent);
+
+    if (!network_send_ble_adv_status(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL, &status)) {
+        RLOG_W(OBJECT_CODE, "Failed to send BLE ADV status packet");
+    }
+}
+
 void sys_ble_peripheral_process(void)
 {
-   CHECK_VOID(s_ble_peri.stream && s_ble_peri.enabled);
+   BLE_CHECK_VOID(s_ble_peri.stream && s_ble_peri.enabled);
 
    uint32_t now = HAL_GetTick();
    static uint32_t s_last_poll_tick = 0u;
    if ((uint32_t)(now - s_last_poll_tick) >= BLE_WATCHDOG_PERIOD_MS) {
        s_last_poll_tick = now;
        ble_poll_status();
-       RLOG_W(OBJECT_CODE, "send BLE status message");
+       sys_ble_peripheral_send_adv_status();
+       RLOG_W(OBJECT_CODE, "send BLE status and ADV status updates");
    }
 }
 

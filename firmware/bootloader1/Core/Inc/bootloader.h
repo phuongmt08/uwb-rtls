@@ -19,9 +19,9 @@
  * - 0x0800C000..0x0803FFFF: Application image (sectors 3-5)
  * - 0x08040000..0x0807FFFF: Data storage (sectors 6-7)
  */
-/* SRAM range for MSP sanity check (F411 has 96KB SRAM) */
+/* SRAM range for MSP sanity check (F411 has 128KB SRAM) */
 #define SRAM_BASE_ADDR     (0x20000000UL)
-#define SRAM_END_ADDR      (0x20018000UL)
+#define SRAM_END_ADDR      (0x20020000UL)
 
 /* Magic flag in SRAM to request DFU after soft reset */
 #define BL_MAGIC_ADDR      (0x2001FFF0UL)

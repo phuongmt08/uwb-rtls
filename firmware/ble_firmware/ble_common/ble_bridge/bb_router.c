@@ -34,7 +34,7 @@
 static bb_router_state_t m_state;
 static bb_packet_source_t m_target_source;
 
-// Bộ nhớ do Router cấp phát chỉ chứa dữ liệu Protobuf (Zero-Copy flow)
+// Router-owned buffer that stores protobuf payloads only.
 static uint8_t protobuf_buffer[MAX_PROTOBUF_PAYLOAD_SIZE];
 static uint16_t protobuf_buffer_len;
 
@@ -95,7 +95,7 @@ void bb_router_process(void)
 /* Private definitions ------------------------------------------------ */
 static void bb_router_state_check_dst_handle(void)
 {
-    // Kiểm tra con trỏ buf có trỏ tới ta không (chỉ lấy đích dst)
+    // Check whether the destination address targets this bridge.
     bool is_for_me = bb_router_check_dst(protobuf_buffer, protobuf_buffer_len);
 
     if (is_for_me) 
@@ -130,7 +130,7 @@ static void bb_router_state_process_cmd_handle(void)
     }
     else
     {
-        // Action = NONE (không cần gửi gì) hoặc ERROR (Báo lỗi payload) -> clear cờ chờ gói mới.
+        // NONE or ERROR means there is no response to forward.
         m_state = BB_ROUTER_STATE_IDLE;
         bb_transport_clear_packet_ready();
     }
@@ -138,8 +138,24 @@ static void bb_router_state_process_cmd_handle(void)
 
 static void bb_router_state_forward_handle(void)
 {
-    // Forward raw payload — skip expensive pb_decode log for throughput
-    bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
+    /* Forward raw payload, or the response payload produced by a command handler. */
+    //bb_router_log_forward_packet();
+    ret_code_t err_code = bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
+    if (err_code == NRF_ERROR_RESOURCES || err_code == NRF_ERROR_BUSY)
+    {
+        NRF_LOG_DEBUG("forward packet: transport busy target=%u len=%u",
+                      (unsigned)m_target_source,
+                      (unsigned)protobuf_buffer_len);
+        return;
+    }
+
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("forward packet: transport failed err=0x%x target=%u len=%u",
+                        err_code,
+                        (unsigned)m_target_source,
+                        (unsigned)protobuf_buffer_len);
+    }
 
     m_state = BB_ROUTER_STATE_IDLE;
     bb_transport_clear_packet_ready();
@@ -163,18 +179,44 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             }
 
 #if defined(BLE_CENTRAL)
-            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG || addr == protobuf_PACKET_ADDR_BCAST)
+            bb_packet_source_t rx_src = bb_transport_get_rx_source();
+            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG)
             {
                 m_target_source = BB_SOURCE_SERIAL;
+                return false;
+            }
+            if (addr == protobuf_PACKET_ADDR_BCAST)
+            {
+                if (rx_src == BB_SOURCE_SERIAL)
+                {
+                    m_target_source = BB_SOURCE_BLE_BROADCAST;
+                }
+                else
+                {
+                    m_target_source = BB_SOURCE_SERIAL;
+                }
                 return false;
             }
 
             m_target_source = BB_SOURCE_BLE;
             return false;
 #elif defined(BLE_PERIPHERAL)
-            if (addr == protobuf_PACKET_ADDR_MCU || addr == protobuf_PACKET_ADDR_BCAST)
+            bb_packet_source_t rx_src = bb_transport_get_rx_source();
+            if (addr == protobuf_PACKET_ADDR_MCU)
             {
                 m_target_source = BB_SOURCE_SERIAL;
+                return false;
+            }
+            if (addr == protobuf_PACKET_ADDR_BCAST)
+            {
+                if (rx_src == BB_SOURCE_SERIAL)
+                {
+                    m_target_source = BB_SOURCE_BLE_BROADCAST;
+                }
+                else
+                {
+                    m_target_source = BB_SOURCE_SERIAL;
+                }
                 return false;
             }
 
@@ -184,14 +226,14 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
         }
     }
 
-    // Mặc định hoặc lỗi là Forward ra BLE
+    // Default or decode-error fallback is forwarding to BLE.
     m_target_source = BB_SOURCE_BLE;
     return false;
 }
 
 static void bb_router_state_transition(void)
 {
-    // Hàm callback chuyển state được gọi khi bb_transport nhận được 1 HDLC frame hoàn chỉnh và pass CRC
+    // Transition callback invoked when the transport receives a complete HDLC frame.
     if (m_state == BB_ROUTER_STATE_IDLE) 
     {
         m_state = BB_ROUTER_STATE_CHECK_DST;

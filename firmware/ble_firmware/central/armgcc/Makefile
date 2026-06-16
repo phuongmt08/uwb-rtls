@@ -53,14 +53,15 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uart.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uarte.c \
   $(PROJ_DIR)/../ble_common/boards.c \
-    $(PROJ_DIR)/../ble_common/hdlc.c \
-    $(PROJ_DIR)/../ble_common/ble_bridge/bb_cmd_hdl.c \
-    $(PROJ_DIR)/../ble_common/ble_bridge/bb_router.c \
-    $(PROJ_DIR)/../ble_common/ble_bridge/bb_transport.c \
-    $(PROJ_DIR)/../../../protocol/nanopb/pb_common.c \
-    $(PROJ_DIR)/../../../protocol/nanopb/pb_decode.c \
-    $(PROJ_DIR)/../../../protocol/nanopb/pb_encode.c \
-    $(PROJ_DIR)/../../../protocol/protos/protocol.pb.c \
+  $(PROJ_DIR)/../ble_common/hdlc.c \
+  $(PROJ_DIR)/../ble_common/ble_broadcast.c \
+  $(PROJ_DIR)/../ble_common/ble_bridge/bb_cmd_hdl.c \
+  $(PROJ_DIR)/../ble_common/ble_bridge/bb_router.c \
+  $(PROJ_DIR)/../ble_common/ble_bridge/bb_transport.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_common.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_decode.c \
+  $(PROJ_DIR)/../../../protocol/nanopb/pb_encode.c \
+  $(PROJ_DIR)/../../../protocol/protos/protocol.pb.c \
   $(PROJ_DIR)/../ble_common/logger.c \
   $(SDK_ROOT)/components/libraries/bsp/bsp.c \
   $(SDK_ROOT)/components/libraries/bsp/bsp_btn_ble.c \
