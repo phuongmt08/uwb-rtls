@@ -31,7 +31,7 @@
 #define CHG_STOP_SOC_PCT    95.0f
 #define CHG_MAX_TEMP_DEGC   60.0f
 #define BAT_CHARGING_CRATE_PHR 1.0f
-#define ALERT_PERIOD_MS     5000
+#define ALERT_PERIOD_MS     1000
 #define UWB_TELEMETRY_PERIOD_TICKS 50U /* sys_pm_task runs at 10 Hz -> 5 s */
 
 /* Helper macro for the lookup table */
@@ -47,7 +47,7 @@ static const pm_threshold_t PM_THRESHOLD_TABLE[PM_CH_MAX] = {
     PM_LIMIT( PM_CH_TEMP             , 20.0f    , 50.0f    , "MCU TEMP (C)"  ),
     PM_LIMIT( PM_CH_VBAT             , 3000.0f  , 4250.0f  , "VBAT (mV)" ),
     PM_LIMIT( PM_CH_CRATE            , -10000.0f, 5000.0f  , "CRATE (m%/h)" ),
-    PM_LIMIT( PM_CH_UWB_TEMP         , 20.0f    , 50.0f    , "UWB TEMP (C)" ),
+    PM_LIMIT( PM_CH_UWB_TEMP         , 20.0f    , 60.0f    , "UWB TEMP (C)" ),
     PM_LIMIT( PM_CH_UWB_VBAT         , 3000.0f  , 3600.0f  , "UWB VBAT (mV)" ),
     PM_LIMIT( PM_CH_IMU_TEMP         , 20.0f    , 45.0f    , "IMU TEMP (C)" ),
 };
@@ -166,7 +166,11 @@ void sys_pm_process(void)
         if (raw.watchdog_fired) {
             current_errors |= PM_ERR_HW_WATCHDOG;
             bsp_adc_clear_watchdog();
-            RLOG_E(LOG_OBJECT_CODE_PM, ERR_HAL, "ALERT: ADC Hardware Voltage Sag detected!");
+            static uint32_t last_watchdog_tick = 0;
+            if (HAL_GetTick() - last_watchdog_tick >= ALERT_PERIOD_MS) {
+                RLOG_E(LOG_OBJECT_CODE_PM, ERR_HAL, "ALERT: ADC Hardware Voltage Sag detected!");
+                last_watchdog_tick = HAL_GetTick();
+            }
         }
     } else {
         s_pm_status.values[PM_CH_VDDA] = 3300.0f;
@@ -185,15 +189,27 @@ void sys_pm_process(void)
         uint16_t bat_alerts = bsp_battery_get_hw_alerts();
         if (bat_alerts & BAT_HW_ALRT_RESET) {
             current_errors |= PM_ERR_BAT_RESET_BIT;
-            RLOG_E(LOG_OBJECT_CODE_PM, ERR_BATTERY_INIT, "ALERT: Battery IC Reset detected!");
+            static uint32_t last_bat_reset_tick = 0;
+            if (HAL_GetTick() - last_bat_reset_tick >= ALERT_PERIOD_MS) {
+                RLOG_E(LOG_OBJECT_CODE_PM, ERR_BATTERY_INIT, "Battery IC Reset detected!");
+                last_bat_reset_tick = HAL_GetTick();
+            }
         }
         if (bat_alerts & (BAT_HW_ALRT_VOLT_LOW | BAT_HW_ALRT_SOC_LOW)) {
             current_errors |= PM_ERR_BAT_HW_LOW_BIT;
-            RLOG_E(LOG_OBJECT_CODE_PM, ERR_BATTERY_LOW, "ALERT: Hardware Battery Low detected!");
+            static uint32_t last_bat_low_tick = 0;
+            if (HAL_GetTick() - last_bat_low_tick >= ALERT_PERIOD_MS) {
+                RLOG_E(LOG_OBJECT_CODE_PM, ERR_BATTERY_LOW, "Hardware Battery Low detected!");
+                last_bat_low_tick = HAL_GetTick();
+            }
         }
         if (bat_alerts & BAT_HW_ALRT_VOLT_HIGH) {
             current_errors |= PM_ERR_BAT_HW_HIGH_BIT;
-            RLOG_E(LOG_OBJECT_CODE_PM, ERR_BATTERY_OVERVOLT, "ALERT: Hardware Battery Overvoltage detected!");
+            static uint32_t last_bat_high_tick = 0;
+            if (HAL_GetTick() - last_bat_high_tick >= ALERT_PERIOD_MS) {
+                RLOG_E(LOG_OBJECT_CODE_PM, ERR_BATTERY_OVERVOLT, "Hardware Battery Overvoltage detected! check your battery and charger.");
+                last_bat_high_tick = HAL_GetTick();
+            }
         }
     } else {
         s_pm_status.values[PM_CH_SOC]   = 0.0f;
@@ -350,13 +366,21 @@ static void sys_pm_handle_charging(uint32_t critical_errors)
 
     /* Emergency Stop: Temperature too high */
     if (current_mcu_temp > CHG_MAX_TEMP_DEGC) {
+        static uint32_t last_mcu_temp_warn = 0;
+        if (HAL_GetTick() - last_mcu_temp_warn >= ALERT_PERIOD_MS) {
             RLOG_I(LOG_OBJECT_CODE_PM, "High Temperature (%.1f C). Charging suspended.", current_mcu_temp);
-            sys_pm_set_charge_en(false);
+            last_mcu_temp_warn = HAL_GetTick();
+        }
+        sys_pm_set_charge_en(false);
         return;
     }
     if (currint_uwb_temp > CHG_MAX_TEMP_DEGC) {
+        static uint32_t last_uwb_temp_warn = 0;
+        if (HAL_GetTick() - last_uwb_temp_warn >= ALERT_PERIOD_MS) {
             RLOG_I(LOG_OBJECT_CODE_PM, "High UWB Temperature (%.1f C). Charging suspended.", currint_uwb_temp);
-            sys_pm_set_charge_en(false);
+            last_uwb_temp_warn = HAL_GetTick();
+        }
+        sys_pm_set_charge_en(false);
         return;
     }
 
