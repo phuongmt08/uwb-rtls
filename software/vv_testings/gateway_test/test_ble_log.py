@@ -25,6 +25,7 @@ import os
 import time
 import argparse
 import re
+import msvcrt
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -196,6 +197,7 @@ class BleLogTester:
         self.rx_from_mcu = 0
         self.rx_log_data_bytes = 0
         self.rx_log_records = 0
+        self.stop_requested = False
 
         self.record = args.record if args else None
         self.log_file = None
@@ -390,6 +392,12 @@ class BleLogTester:
         self.pending_log_ack_started_at = 0.0
         self.pending_log_ack_retries = 0
 
+    def request_stop(self) -> None:
+        self.stop_requested = True
+
+    def clear_stop_request(self) -> None:
+        self.stop_requested = False
+
     def _retry_pending_log_ack(self, now: float) -> None:
         if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
             return
@@ -559,28 +567,36 @@ class BleLogTester:
 
     def loop(self) -> None:
         while True:
-            now = time.time()
-            self._retry_pending_log_ack(now)
+            self.poll_once()
+            if self.stop_requested:
+                return
 
-            # Keep-alive ping: only send if we haven't received anything from MCU for a while.
-            # This completely avoids packet collisions while logs are actively streaming.
-            if now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
-                self._send_packet(self._build_none())
-                self.last_rx_time = now
+    def poll_once(self) -> None:
+        if self.stop_requested:
+            return
 
-            if (
-                self.log_session_started
-                and not self.log_first_packet_seen
-                and now >= self.log_start_deadline
-                and self.pending_log_ack_seq is None
-                and now - self.last_poll >= LOG_POLL_PERIOD_S
-            ):
-                self._send_packet(self._build_log_data_get())
-                self.last_poll = now
+        now = time.time()
+        self._retry_pending_log_ack(now)
 
-            packets = self.session.recv_packets(timeout_s=LOG_RECV_TIMEOUT_S)
-            for pkt in packets:
-                self._process_packet(pkt)
+        # Keep-alive ping: only send if we haven't received anything from MCU for a while.
+        # This completely avoids packet collisions while logs are actively streaming.
+        if now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
+            self._send_packet(self._build_none())
+            self.last_rx_time = now
+
+        if (
+            self.log_session_started
+            and not self.log_first_packet_seen
+            and now >= self.log_start_deadline
+            and self.pending_log_ack_seq is None
+            and now - self.last_poll >= LOG_POLL_PERIOD_S
+        ):
+            self._send_packet(self._build_log_data_get())
+            self.last_poll = now
+
+        packets = self.session.recv_packets(timeout_s=LOG_RECV_TIMEOUT_S)
+        for pkt in packets:
+            self._process_packet(pkt)
 
 
 def _device_uuid_text(p: pb.packet_t) -> str:
@@ -753,8 +769,44 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
         print(f"{COLOR_RED}[FAIL] BLE connection timed out or failed permanently after all retries.{COLOR_RESET}")
         return None
 
+    # Ensure scan is fully stopped before starting the log session.
+    session.send_packet(factory.ble_scan_stop(src, central_dst, session.proto.next_seq()))
+    time.sleep(0.2)
     time.sleep(1.0)
     return selected_mac, selected_name
+
+
+def _poll_stop_hotkey() -> bool:
+    while msvcrt.kbhit():
+        ch = msvcrt.getwch()
+        if ch in ("q", "Q", "x", "X"):
+            return True
+    return False
+
+
+def _run_log_session(session: VvTestSession, factory: CommandFactory, src_addr: int, mcu_dst: int,
+                     tester: BleLogTester, central_dst: int) -> None:
+    tester.clear_stop_request()
+    print(f"\n{COLOR_CYAN}=== STARTING BLE LOG VIEWER ==={COLOR_RESET}")
+    print(f"{COLOR_YELLOW}[HOTKEY] Press 'q' or 'x' to stop log, disconnect, and rescan.{COLOR_RESET}")
+    tester.bootstrap()
+
+    try:
+        while not tester.stop_requested:
+            if _poll_stop_hotkey():
+                tester.request_stop()
+                break
+
+            tester.poll_once()
+    finally:
+        print(f"\n{COLOR_YELLOW}[*] Stopping log session... sending end_session and disconnecting current device.{COLOR_RESET}")
+        try:
+            tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
+            time.sleep(LOG_END_SESSION_DELAY_S)
+            session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
+            time.sleep(0.2)
+        except Exception as exc:
+            print(f"{COLOR_RED}[WARN] Failed to stop session cleanly: {exc}{COLOR_RESET}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -816,45 +868,30 @@ def main() -> int:
         factory = CommandFactory()
 
         with VvTestSession(port, args.baud, debug=args.verbose) as session:
-            # 1. Connect to BLE target
-            res = step_auto_scan_and_connect(
-                session=session,
-                factory=factory,
-                src=src_addr,
-                central_dst=central_dst,
-                expected_mac=expected_mac,
-                target_name_filter=args.name
-            )
-            if not res:
-                return 1
+            while True:
+                res = step_auto_scan_and_connect(
+                    session=session,
+                    factory=factory,
+                    src=src_addr,
+                    central_dst=central_dst,
+                    expected_mac=expected_mac,
+                    target_name_filter=args.name
+                )
+                if not res:
+                    return 1
 
-            target_mac, target_name = res
+                tester = BleLogTester(
+                    session=session,
+                    factory=factory,
+                    src=src_addr,
+                    dst=mcu_dst,
+                    verbose=args.verbose,
+                    calibration=args.calibration,
+                    args=args
+                )
 
-            # 2. Initialize and loop logs capture
-            tester = BleLogTester(
-                session=session,
-                factory=factory,
-                src=src_addr,
-                dst=mcu_dst,
-                verbose=args.verbose,
-                calibration=args.calibration,
-                args=args
-            )
-
-            print(f"\n{COLOR_CYAN}=== STARTING BLE LOG VIEWER (Press Ctrl+C to exit) ==={COLOR_RESET}\n")
-            tester.bootstrap()
-            
-            try:
-                tester.loop()
-            except KeyboardInterrupt:
-                print(f"\n{COLOR_YELLOW}[*] Stopping... Sending end_session to remote MCU.{COLOR_RESET}")
-                tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
-                time.sleep(LOG_END_SESSION_DELAY_S)
-                
-                print(f"{COLOR_YELLOW}[*] Disconnecting BLE from Central...{COLOR_RESET}")
-                session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
-                time.sleep(0.2)
-                return 0
+                _run_log_session(session, factory, src_addr, mcu_dst, tester, central_dst)
+                print(f"{COLOR_GREEN}[+] Log session stopped. Re-entering scan flow...{COLOR_RESET}")
 
     except KeyboardInterrupt:
         print(f"\n{COLOR_YELLOW}[*] Stopping...{COLOR_RESET}")
