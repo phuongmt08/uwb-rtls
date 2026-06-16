@@ -44,6 +44,14 @@ uint32_t app_tag_get_ranging_error_count(void);
  */
 void app_tag_reset_fusion(void);
 
+/**
+ * @brief Read the latest tag position estimate if available.
+ * @param x_m Output X coordinate in meters.
+ * @param y_m Output Y coordinate in meters.
+ * @return true when a valid position is available.
+ */
+bool app_tag_get_latest_position(float *x_m, float *y_m);
+
 #if ENABLE_SYS_FUSION
 extern sys_sensor_fusion_data_t ukf_data;
 #endif

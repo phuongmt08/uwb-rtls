@@ -49,7 +49,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion
 
 sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_ukf, float dt);
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2, uint8_t mask);
+sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
+                                                 float d0,
+                                                 float d1,
+                                                 float d2,
+                                                 const uint8_t anchor_ids[3]);
 
 float sys_sensor_fusion_get_ukf_yaw_deg();
 

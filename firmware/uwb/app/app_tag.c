@@ -66,9 +66,12 @@ static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
+#if !ENABLE_SYS_FUSION
 static uint8_t s_last_selected_anchors_mask = 0;
+#endif
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
+static sys_sensor_fusion_data_t ukf_data;
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
 static float s_latest_distances[NUM_ANCHORS] = {0};
@@ -82,6 +85,11 @@ static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static uint32_t s_last_fusion_log_tick = 0U;
 #endif
 
+#if ENABLE_SYS_FUSION
+static vec2d_t s_last_position = {.x = 0.0f, .y = 0.0f};
+static bool s_position_valid = false;
+#endif
+
 /* Private prototypes --------------------------------------------------- */
 #if !ENABLE_SYS_FUSION
 static void init_filters(void);
@@ -89,7 +97,7 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
 #endif
-static void process_ranging_results(sys_ranging_result_t *results, int num_success);
+static bool process_ranging_results(sys_ranging_result_t *results, int num_success);
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
@@ -166,11 +174,14 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 
 static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids)
 {
-    uint8_t total = (NUM_ANCHORS > 8) ? 8 : NUM_ANCHORS;
+    const sys_config_t *cfg = sys_config_get();
+    uint8_t total = (cfg->anchor_count > NUM_ANCHORS)
+                    ? NUM_ANCHORS
+                    : (uint8_t)cfg->anchor_count;
     *num_anchors = total;
 
     for (uint8_t i = 0; i < total; i++) {
-        anchor_ids[i] = i + 1;
+        anchor_ids[i] = (uint8_t)cfg->anchor_layout[i].anchor_id;
     }
 }
 
@@ -317,7 +328,7 @@ static void send_fusion_log_snapshot(void)
 }
 #endif
 
-static void process_ranging_results(sys_ranging_result_t *results, int num_success)
+static bool process_ranging_results(sys_ranging_result_t *results, int num_success)
 {
     /* Active SensorFusion owns projection/trilateration/UKF. Tag task only feeds raw ranges. */
 #if ENABLE_SYS_FUSION
@@ -334,27 +345,34 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         msg.anchor_ids[aid - 1] = aid;
         msg.fp_amp_norm[aid - 1] = (float)r->fp_amp_norm_q8 / 256.0f;
         msg.fp_snr[aid - 1] = (float)r->fp_snr_q8 / 256.0f;
+        msg.quality_valid[aid - 1] = (r->quality != 0U) ? 1U : 0U;
 
         if (r->valid) {
             msg.mask |= (1 << (aid - 1));
             valid_count++;
+            msg.count++;
         }
-        msg.count++;
     }
 
     if (valid_count < 3U) {
         record_ranging_error();
-        return;
+        if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Distance queue full, dropping failed ranging cycle");
+        }
+        return false;
     }
 
-    osMessageQueuePut(g_uwb_distance_queue, &msg, 0, 0);
+    if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
+        record_ranging_error();
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Distance queue full, dropping ranging cycle");
+        return false;
+    }
     s_success_count++;
     s_error_count = 0;
+    return true;
 #else
-    mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1];
+    mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1] = {0};
     uint8_t valid_count = 0;
-    
-    for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
     float anchor_distances[NUM_ANCHORS] = {0.0f};
 #if (SYS_FUSION_PREFILTER_ENABLED && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
@@ -511,7 +529,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
                anchor_distances[0], anchor_distances[1], anchor_distances[2], anchor_distances[3]);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
         (void)ensure_minimum_ranging_anchors(valid_count, "Not enough valid anchors");
-        return;
+        return false;
     }
 
     /* ==== STEP 2.A: Compact Array ==== */
@@ -525,7 +543,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 
     if (!ensure_minimum_ranging_anchors(compact_idx, "Not enough anchors passed filter")) {
-        return;
+        return false;
     }
 
     /* ==== STEP 2.B: Sort & Extract Best Exact 3 ==== */
@@ -533,7 +551,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3, s_last_selected_anchors_mask);
     
     if (!ensure_minimum_ranging_anchors(best_count, "Not enough anchors selected")) {
-        return;
+        return false;
     }
 
     /* Build anchor selection mask */
@@ -554,7 +572,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (err != MW_TRIL_OK) {
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
             RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-            return;
+            record_ranging_error();
+            return false;
         }
 
         float init_x, init_y;
@@ -616,25 +635,32 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
 		if (err != MW_TRIL_OK) {
 			RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
 			RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-            return;
+            record_ranging_error();
+            return false;
 		}
 
 		s_last_selected_anchors_mask = 0;
 		for (uint8_t i = 0; i < 3; i++) {
 			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
 		}
-        uint8_t selected_anchor_mask = s_last_selected_anchors_mask;
-
         for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
             s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
             s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
         }
 
-        sys_sensor_fusion_update(&ukf_data,
-                                 best_3_anchors[0].distance,
-                                 best_3_anchors[1].distance,
-                                 best_3_anchors[2].distance,
-                                 selected_anchor_mask);
+        const uint8_t selected_anchor_ids[3] = {
+            best_3_anchors[0].id,
+            best_3_anchors[1].id,
+            best_3_anchors[2].id
+        };
+        if (sys_sensor_fusion_update(&ukf_data,
+                                     best_3_anchors[0].distance,
+                                     best_3_anchors[1].distance,
+                                     best_3_anchors[2].distance,
+                                     selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
+            record_ranging_error();
+            return false;
+        }
         s_latest_fusion_position = tril_position;
         s_latest_fusion_position_valid = true;
         record_fusion_log_update_timing();
@@ -642,6 +668,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 
     s_success_count++;
+    s_error_count = 0;
 #else
     /* ==== STEP 3: Trilateration (Default/Calibration mode) ==== */
     vec2d_t tril_position;
@@ -651,7 +678,8 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     if (err != MW_TRIL_OK) {
         RLOG_W(LOG_OBJECT_CODE_TAG, "[TRIL] Failed: %d", err);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
-        return;
+        record_ranging_error();
+        return false;
     }
 
     /* ==== STEP 4: Quality gating ==== */
@@ -662,7 +690,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
                (float)tril_result.error_estimate, MAX_ACCEPTABLE_ERROR_M);
         RLOG_I(LOG_OBJECT_CODE_TAG, "====================================");
         s_error_count++;
-        return;
+        return false;
     }
 #endif
 
@@ -692,6 +720,7 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 #endif
+    return true;
 }
 /* Public functions --------------------------------------------------- */
 
@@ -767,7 +796,7 @@ app_err_t app_tag_init(void)
 
     sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
 
-#if ENABLE_SYS_FUSION || ENABLE_SYS_FUSION_LOG
+#if !ENABLE_SYS_FUSION
     if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK) {
         RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
     } else {
@@ -833,6 +862,7 @@ void app_tag_process(void)
             }
         } else {
             record_ranging_error();
+            update_period_schedule(now, period_ms);
         }
         return;
     }
@@ -860,8 +890,7 @@ void app_tag_process(void)
         sys_ranging_multi_result_t multi_results = {0};
         bool cycle_success = false;
         if (sys_ranging_tag_get_results_tdma(&multi_results) == SYS_RANGING_OK) {
-            cycle_success = true;
-            process_ranging_results(multi_results.results, multi_results.count);
+            cycle_success = process_ranging_results(multi_results.results, multi_results.count);
         } else {
             record_ranging_error();
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
@@ -926,9 +955,9 @@ void app_tag_process(void)
 void app_tag_reset_fusion(void)
 {
     RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state...");
+#if !ENABLE_SYS_FUSION
     sys_sensor_fusion_clear_predict_flag();
     sys_sensor_fusion_clear_update_flag();
-#if !ENABLE_SYS_FUSION
     init_filters();
 #endif
 #if !ENABLE_SYS_FUSION
@@ -938,6 +967,10 @@ void app_tag_reset_fusion(void)
 #endif
     s_is_ranging_active = false;
     s_error_count = 0;
+    s_last_ranging_tick = HAL_GetTick();
+    s_next_due_tick = s_last_ranging_tick + sys_config_get()->uwb.ranging_period_ms;
+    s_cycle_start_tick = 0U;
+    s_last_cycle_done_tick = 0U;
     
 #if !ENABLE_SYS_FUSION
     s_ukf_initialized = false;
@@ -948,8 +981,33 @@ void app_tag_reset_fusion(void)
     }
 #else
     /* For active Sensor Fusion, delegate the reset to freertos.c */
-    void sys_sensor_fusion_reset(void);
-    sys_sensor_fusion_reset();
+    s_position_valid = false;
+    s_last_position.x = 0.0f;
+    s_last_position.y = 0.0f;
+    app_rtos_request_sensor_fusion_reset();
+#endif
+}
+
+bool app_tag_get_latest_position(float *x_m, float *y_m)
+{
+    if (!x_m || !y_m) {
+        return false;
+    }
+
+#if ENABLE_SYS_FUSION
+    if (!s_position_valid) {
+        return false;
+    }
+    *x_m = (float)s_last_position.x;
+    *y_m = (float)s_last_position.y;
+    return true;
+#else
+    if (!s_latest_fusion_position_valid) {
+        return false;
+    }
+    *x_m = (float)s_latest_fusion_position.x;
+    *y_m = (float)s_latest_fusion_position.y;
+    return true;
 #endif
 }
 

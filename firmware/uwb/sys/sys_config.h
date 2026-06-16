@@ -70,10 +70,14 @@ typedef struct
   sys_calib_cfg_t     calib;
   uint32_t            anchor_count;
   sys_anchor_layout_t anchor_layout[SYS_CONFIG_MAX_ANCHORS];
+
+  /* Zone Profile configurations */
+  uint32_t            default_zone_id;
+  protobuf_zone_profile_t zone_profiles[4];
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            26     /* bump -> forces flash reset on upgrade */
+#define CONFIG_VERSION            31     /* bump -> forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
@@ -83,7 +87,7 @@ typedef struct
 #define DEFAULT_RX_TIMEOUT_MS     60
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
-#define DEFAULT_UWB_DATA_RATE     1 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
+#define DEFAULT_UWB_DATA_RATE     2 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
 #define DEFAULT_UWB_PREAMBLE_CODE 17
 #define DEFAULT_TX_ANT_DLY        16436
 #define DEFAULT_RX_ANT_DLY        16436
@@ -126,6 +130,11 @@ int sys_config_set_power_mode(anchor_power_mode_t mode);
 otp_err_t sys_config_factory_otp_write(const protobuf_factory_otp_write_t *req);
 uint8_t sys_config_get_hw_rev(void);
 
+uint32_t sys_config_get_active_zone_id(void);
+void sys_config_set_active_zone_id(uint32_t zone_id);
+bool sys_config_zone_profile_valid(const protobuf_zone_profile_t *profile);
+int sys_config_set_zone_profile(const protobuf_zone_profile_t *profile);
+bool sys_config_apply_zone_profile(uint32_t zone_id);
 
 /* Storage */
 int  sys_config_save(void);

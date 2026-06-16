@@ -20,7 +20,7 @@ extern "C" {
 #define TDMA_PROCESSING_MARGIN_US    400      /* SPI + HAL overhead (300-500µs) */
 #define TDMA_CLOCK_GUARD_US          300      /* Clock drift + PHY jitter (200-500µs) */
 
-#define TDMA_DEFAULT_GUARD_TIME_US   1000
+#define TDMA_DEFAULT_GUARD_TIME_US   1500
 /* ====================================================================
  * TIMING CONSTANTS
  * ==================================================================== */
