@@ -894,9 +894,11 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
     RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d",
            (unsigned)pkt->hdr.addr.src, (int)reason);
 
+    /* Any end_session must stop log streaming immediately. */
+    s_log_stream_enabled = false;
+
     switch (reason) {
         case protobuf_SESSION_END_REASON_LOG_DATA:
-            s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Log streaming stopped");
             /* Also reset connection flag for LOG_DATA as it is usually the primary session */
             if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
@@ -910,7 +912,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             break;
 
         case protobuf_SESSION_END_REASON_DEBUG_STREAMING:
-            s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Debug streaming stopped");
             break;
 
@@ -920,7 +921,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
                 s_network_cmd.stream->ble_connection_active = false;
             }
-            s_log_stream_enabled = false;
             break;
     }
 }
@@ -1066,6 +1066,9 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
  * to specific destinations (dst).
  * -------------------------------- */
 
+float dt_s = 0.0f;
+uint32_t stream_packet_cnt = 0;
+
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {
     CHECK(stream && data, false);
@@ -1078,6 +1081,8 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
     uint32_t now = bsp_util_get_ticks();
     CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
 
+    dt_s = (float)(now - s_last_sensor_fusion_stream_tick) / 1000.0f;
+
     protobuf_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
     pkt.which_params = protobuf_packet_t_sensor_fusion_result_tag;
@@ -1085,6 +1090,7 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
 
     if (network_core_send_packet(stream, dst, &pkt)) {
         s_last_sensor_fusion_stream_tick = now;
+        stream_packet_cnt++;
         return true;
     }
 

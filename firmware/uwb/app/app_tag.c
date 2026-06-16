@@ -936,8 +936,7 @@ void app_tag_reset_fusion(void)
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
 #else
-    /* For active Sensor Fusion, delegate the reset to freertos.c */
-    void sys_sensor_fusion_reset(void);
+    /* For active Sensor Fusion, delegate the reset to sys_sensor_fusion. */
     sys_sensor_fusion_reset();
 #endif
 }
