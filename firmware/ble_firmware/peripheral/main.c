@@ -56,6 +56,7 @@
 #include "../ble_common/ble_config.h"
 
 #include "../ble_common/ble_bridge/bb_router.h"
+#include "../ble_common/ble_bridge/bb_cmd_hdl.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
@@ -83,12 +84,17 @@ static void power_management_init(void)
 int main(void)
 {
     // Initialize.
-    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init)
     logger_init();
     bsp_utils_init();
     power_management_init();
 
-    bb_router_init();
+    ret_code_t err_code = bb_router_init();
+    APP_ERROR_CHECK(err_code);
+    err_code = bb_cmd_request_ble_adv_config();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("ble_adv_config_request failed: 0x%08X", err_code);
+    }
     // BLE is disabled by default, initialized later via STM32 command
 
     // Start execution.
@@ -98,5 +104,6 @@ int main(void)
     for (;;)
     {
         bb_router_process();
+        bb_cmd_ble_adv_config_request_process();
     }
 }

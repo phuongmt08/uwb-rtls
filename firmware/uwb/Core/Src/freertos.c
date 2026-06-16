@@ -30,6 +30,7 @@
 #include "app_rtos_handles.h"
 #include "app_anchor.h"
 #include "app_tag.h"
+#include "ble/sys_ble_peripheral.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
 #include "bsp_imu.h"
@@ -38,6 +39,9 @@
 #include "common.h"
 #include "network/network_core.h"
 #include "network/network_cmd.h"
+#ifdef HAVE_BLE_PERIPHERAL
+#include "ble/sys_ble_peripheral.h"
+#endif
 #include "sys_config.h"
 #include "sys_logger.h"
 #include "sys_pm.h"
@@ -402,7 +406,7 @@ void sensor_fusion_entry(void *argument)
     osDelay(20);
   }
 #else
-  /* Khởi tạo bộ lọc định vị và prefilter */
+  /* Initialize positioning filters and prefilter */
   mw_filter_mahalanobis_init(&s_prefilter,
                              MAHALANOBIS_PREFILTER_D2_RECOVER,
                              MAHALANOBIS_PREFILTER_D2_REJECT,
@@ -708,6 +712,9 @@ void network_entry(void *argument)
   {
     network_core_process(&g_network_core);
     network_cmd_process();
+#ifdef HAVE_BLE_PERIPHERAL
+    sys_ble_peripheral_process();
+#endif
     osDelay(2);
   }
   /* USER CODE END network_entry */

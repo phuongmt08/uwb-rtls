@@ -46,6 +46,29 @@ extern "C" {
 
 #include "nrf_gpio.h"
 
+#if defined(BOARD_SUPERMINI_RED)
+// LED definitions for SuperMini nRF52840 Red
+#define LEDS_NUMBER    1
+
+#define LED_1          NRF_GPIO_PIN_MAP(0,15)
+
+#define LEDS_ACTIVE_STATE 1
+
+#define LEDS_LIST { LED_1 }
+
+#define LEDS_INV_MASK  0
+
+#define BSP_LED_0      LED_1
+
+#define BUTTONS_NUMBER 0
+#define BUTTONS_ACTIVE_STATE 0
+#define BUTTONS_LIST { }
+
+#define BSP_SELF_PINRESET_PIN NRF_GPIO_PIN_MAP(0,19)
+#define HWFC           true
+
+#else
+
 // LED definitions for PCA10059
 // Each LED color is considered a separate LED
 #define LEDS_NUMBER    4
@@ -87,6 +110,7 @@ extern "C" {
 #define BSP_SELF_PINRESET_PIN NRF_GPIO_PIN_MAP(0,19)
 
 #define HWFC           true
+#endif
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "logger.h"
+#include "nrf_log.h"
 #include "bb_transport.h"
 #include "../../../protocol/nanopb/pb_decode.h"
 #include "../../../protocol/protos/protocol.pb.h"
@@ -33,7 +34,7 @@
 static bb_router_state_t m_state;
 static bb_packet_source_t m_target_source;
 
-// Bộ nhớ do Router cấp phát chỉ chứa dữ liệu Protobuf (Zero-Copy flow)
+// Router-owned buffer that stores protobuf payloads only.
 static uint8_t protobuf_buffer[MAX_PROTOBUF_PAYLOAD_SIZE];
 static uint16_t protobuf_buffer_len;
 
@@ -43,7 +44,6 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length);
 static void bb_router_state_check_dst_handle(void);
 static void bb_router_state_process_cmd_handle(void);
 static void bb_router_state_forward_handle(void);
-static void bb_router_log_forward_packet(void);
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_router_init(void)
@@ -59,40 +59,43 @@ ret_code_t bb_router_init(void)
         return err_code;
     }
 
-    return NRF_SUCCESS;
+    return bb_cmd_hdl_init();
 }
 
 void bb_router_process(void)
 {
-    switch (m_state) 
+    /* ---- Collapse state machine: process all ready states in one call ---- */
+
+    if (m_state == BB_ROUTER_STATE_IDLE)
     {
-        case BB_ROUTER_STATE_IDLE:
-            bb_transport_process();
-            break;
+        bb_transport_process();
+    }
 
-        case BB_ROUTER_STATE_CHECK_DST:
-            bb_router_state_check_dst_handle();
-            break;
+    if (m_state == BB_ROUTER_STATE_CHECK_DST)
+    {
+        bb_router_state_check_dst_handle();
+    }
 
-        case BB_ROUTER_STATE_PROCESS_CMD:
-            bb_router_state_process_cmd_handle();
-            break;
+    if (m_state == BB_ROUTER_STATE_PROCESS_CMD)
+    {
+        bb_router_state_process_cmd_handle();
+        /* BB_CMD_ACTION_BUSY keeps state at PROCESS_CMD, so we stop here */
+        if (m_state == BB_ROUTER_STATE_PROCESS_CMD)
+        {
+            return;
+        }
+    }
 
-        case BB_ROUTER_STATE_FORWARD:
-            bb_router_state_forward_handle();
-            break;
-
-        default:
-            m_state = BB_ROUTER_STATE_IDLE;
-            bb_transport_clear_packet_ready();
-            break;
+    if (m_state == BB_ROUTER_STATE_FORWARD)
+    {
+        bb_router_state_forward_handle();
     }
 }
 
 /* Private definitions ------------------------------------------------ */
 static void bb_router_state_check_dst_handle(void)
 {
-    // Kiểm tra con trỏ buf có trỏ tới ta không (chỉ lấy đích dst)
+    // Check whether the destination address targets this bridge.
     bool is_for_me = bb_router_check_dst(protobuf_buffer, protobuf_buffer_len);
 
     if (is_for_me) 
@@ -127,7 +130,7 @@ static void bb_router_state_process_cmd_handle(void)
     }
     else
     {
-        // Action = NONE (không cần gửi gì) hoặc ERROR (Báo lỗi payload) -> clear cờ chờ gói mới.
+        // NONE or ERROR means there is no response to forward.
         m_state = BB_ROUTER_STATE_IDLE;
         bb_transport_clear_packet_ready();
     }
@@ -135,45 +138,27 @@ static void bb_router_state_process_cmd_handle(void)
 
 static void bb_router_state_forward_handle(void)
 {
-    // Forward raw payload (Hoặc gói response đã được cmd handler đè lên payload buf nếu cần)
-    bb_router_log_forward_packet();
-    bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
-
-    m_state = BB_ROUTER_STATE_IDLE;
-    bb_transport_clear_packet_ready();
-}
-
-static void bb_router_log_forward_packet(void)
-{
-    protobuf_packet_t pkt = protobuf_packet_t_init_zero;
-    pb_istream_t stream = pb_istream_from_buffer(protobuf_buffer, protobuf_buffer_len);
-
-    if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
+    /* Forward raw payload, or the response payload produced by a command handler. */
+    //bb_router_log_forward_packet();
+    ret_code_t err_code = bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
+    if (err_code == NRF_ERROR_RESOURCES || err_code == NRF_ERROR_BUSY)
     {
-        uint32_t src = 0xFFu;
-        uint32_t dst = 0xFFu;
-        uint32_t seq = 0xFFFFFFFFu;
-
-        if (pkt.has_hdr && pkt.hdr.has_addr)
-        {
-            src = pkt.hdr.addr.src;
-            dst = pkt.hdr.addr.dst;
-            seq = pkt.hdr.seq;
-        }
-
-        NRF_LOG_INFO("forward packet: msg_idx=%u src=%u dst=%u seq=%u target=%u len=%u",
-                     (unsigned)pkt.which_params,
-                     (unsigned)src,
-                     (unsigned)dst,
-                     (unsigned)seq,
-                     (unsigned)m_target_source,
-                     (unsigned)protobuf_buffer_len);
+        NRF_LOG_DEBUG("forward packet: transport busy target=%u len=%u",
+                      (unsigned)m_target_source,
+                      (unsigned)protobuf_buffer_len);
         return;
     }
 
-    NRF_LOG_WARNING("forward packet: decode failed target=%u len=%u",
-                    (unsigned)m_target_source,
-                    (unsigned)protobuf_buffer_len);
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("forward packet: transport failed err=0x%x target=%u len=%u",
+                        err_code,
+                        (unsigned)m_target_source,
+                        (unsigned)protobuf_buffer_len);
+    }
+
+    m_state = BB_ROUTER_STATE_IDLE;
+    bb_transport_clear_packet_ready();
 }
 
 static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
@@ -183,6 +168,7 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
 
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
     {
+        NRF_LOG_INFO("bb_router: Decoded packet cmd_id=%u", pkt.which_params);
         if (pkt.has_hdr && pkt.hdr.has_addr)
         {
             uint32_t addr = pkt.hdr.addr.dst;
@@ -193,18 +179,44 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             }
 
 #if defined(BLE_CENTRAL)
-            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG || addr == protobuf_PACKET_ADDR_BCAST)
+            bb_packet_source_t rx_src = bb_transport_get_rx_source();
+            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG)
             {
                 m_target_source = BB_SOURCE_SERIAL;
+                return false;
+            }
+            if (addr == protobuf_PACKET_ADDR_BCAST)
+            {
+                if (rx_src == BB_SOURCE_SERIAL)
+                {
+                    m_target_source = BB_SOURCE_BLE_BROADCAST;
+                }
+                else
+                {
+                    m_target_source = BB_SOURCE_SERIAL;
+                }
                 return false;
             }
 
             m_target_source = BB_SOURCE_BLE;
             return false;
 #elif defined(BLE_PERIPHERAL)
-            if (addr == protobuf_PACKET_ADDR_MCU || addr == protobuf_PACKET_ADDR_BCAST)
+            bb_packet_source_t rx_src = bb_transport_get_rx_source();
+            if (addr == protobuf_PACKET_ADDR_MCU)
             {
                 m_target_source = BB_SOURCE_SERIAL;
+                return false;
+            }
+            if (addr == protobuf_PACKET_ADDR_BCAST)
+            {
+                if (rx_src == BB_SOURCE_SERIAL)
+                {
+                    m_target_source = BB_SOURCE_BLE_BROADCAST;
+                }
+                else
+                {
+                    m_target_source = BB_SOURCE_SERIAL;
+                }
                 return false;
             }
 
@@ -214,14 +226,14 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
         }
     }
 
-    // Mặc định hoặc lỗi là Forward ra BLE
+    // Default or decode-error fallback is forwarding to BLE.
     m_target_source = BB_SOURCE_BLE;
     return false;
 }
 
 static void bb_router_state_transition(void)
 {
-    // Hàm callback chuyển state được gọi khi bb_transport nhận được 1 HDLC frame hoàn chỉnh và pass CRC
+    // Transition callback invoked when the transport receives a complete HDLC frame.
     if (m_state == BB_ROUTER_STATE_IDLE) 
     {
         m_state = BB_ROUTER_STATE_CHECK_DST;

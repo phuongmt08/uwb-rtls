@@ -68,7 +68,7 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
     
     if (err_code == NRF_SUCCESS)
     {
-        NRF_LOG_INFO("UART module initialized (115200 8N1)");
+        NRF_LOG_INFO("UART module initialized (460800 8N1)");
     }
     
     return err_code;

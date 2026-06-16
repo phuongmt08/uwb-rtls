@@ -336,4 +336,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     debug_serial_uart_rx_check();
   }
 }
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2) {
+    ble_bridge_uart_rx_recover();
+  }
+}
 /* USER CODE END 1 */

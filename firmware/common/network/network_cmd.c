@@ -18,6 +18,7 @@
     #include "otp/otp.h"
 #else
     #include "sys_logger_bl.h"
+    #include "otp/otp.h"
 
 #endif
 
@@ -63,6 +64,7 @@ static bool network_cmd_host_active(void);
 #ifdef HAVE_BLE_PERIPHERAL
 static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
 static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt);
+static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt);
 #endif
 
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt);
@@ -74,6 +76,9 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
 #endif
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
+#ifndef BOOTLOADER
+static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt);
+#endif
 
 #ifndef BOOTLOADER
 
@@ -147,7 +152,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 12 */
 #endif /* !BOOTLOADER */
 
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_time_sync_adv_set,           "time_sync_adv_set"),  /* 9  */
+#else
     CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_unimplemented,               "time_sync_adv_set"),  /* 9  */
+#endif
 
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 13 */
@@ -189,7 +198,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,        network_cmd_unimplemented,               "ble_adv_cfg_set"),    /* 33 */
     CMD_INFO(protobuf_packet_t_ble_status_get_tag,            network_cmd_unimplemented,              "ble_status_get"),     /* 34 */
     CMD_INFO(protobuf_packet_t_ble_status_resp_tag,           network_cmd_ble_status_resp,             "ble_status_resp"),    /* 35 */
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_unimplemented,              "ble_adv_status"),     /* 36 */
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_ble_adv_status,              "ble_adv_status"),     /* 36 */
+    CMD_INFO(protobuf_packet_t_ble_adv_config_request_tag,    network_cmd_ble_adv_config_request,      "ble_adv_cfg_req"),    /* 69 */
 #endif
 
     CMD_INFO(protobuf_packet_t_log_data_tag,                  network_cmd_log_data_get,                "log_data"),           /* 37 */
@@ -378,14 +388,35 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_device_information_resp_tag);
 
+    uint8_t otp_info[5] = {0};
+    uint8_t otp_len = 0u;
+    uint32_t hw_version = 0u;
+    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    if (otp_get(OTP_TYPE_DEVICE_INFO, otp_info, sizeof(otp_info), &otp_len) == OTP_OK &&
+        otp_len == sizeof(otp_info)) {
+        protobuf_device_type_t otp_device_type = (protobuf_device_type_t)otp_info[0];
+        if (otp_device_type == protobuf_DEVICE_TYPE_TAG ||
+            otp_device_type == protobuf_DEVICE_TYPE_ANCHOR ||
+            otp_device_type == protobuf_DEVICE_TYPE_GATEWAY ||
+            otp_device_type == protobuf_DEVICE_TYPE_DEBUG_TOOL) {
+            device_type = otp_device_type;
+            hw_version = otp_info[4];
+        }
+    }
+
     /* Bootloader responds with minimal identity fields only. */
-    resp.params.device_information_resp.device_type    = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    resp.params.device_information_resp.device_type    = device_type;
     resp.params.device_information_resp.role           = protobuf_DEVICE_ROLE_UNSPECIFIED;
+    if (resp.params.device_information_resp.device_type == protobuf_DEVICE_TYPE_TAG) {
+        resp.params.device_information_resp.role = protobuf_DEVICE_ROLE_TAG;
+    } else if (resp.params.device_information_resp.device_type == protobuf_DEVICE_TYPE_ANCHOR) {
+        resp.params.device_information_resp.role = protobuf_DEVICE_ROLE_ANCHOR;
+    }
     resp.params.device_information_resp.has_fw_version = true;
     resp.params.device_information_resp.fw_version     = (protobuf_version_t){0};
     /* Mark as bootloader firmware in fw_version metadata. */
     resp.params.device_information_resp.fw_version.gitsha = 0x424F4F54ULL; /* 'BOOT' */
-    resp.params.device_information_resp.hw_version     = 0u; /* unknown/not provided in bootloader */
+    resp.params.device_information_resp.hw_version     = hw_version;
     resp.params.device_information_resp.serial_number = bsp_util_get_serial_number();
 
     network_cmd_send_packet(&resp);
@@ -576,6 +607,41 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
            (long)pkt->params.time_sync_set.timezone_offset);
 }
 
+#ifndef BOOTLOADER
+static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    const sys_config_t *cfg = sys_config_get();
+    if (cfg == NULL) {
+        return;
+    }
+
+    const protobuf_time_sync_adv_set_t *adv_set = &pkt->params.time_sync_adv_set;
+
+    // Check device type and device id
+    if (adv_set->device_type == cfg->device_type && adv_set->device_id == cfg->uwb.device_id) {
+        if (bsp_rtc_sync_set(adv_set->unix_time_ms,
+                             adv_set->timezone_offset) != BSP_UTIL_OK) {
+            RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_adv_set");
+            return;
+        }
+
+        bsp_rtc_time_t rtc_time;
+        bsp_rtc_get_time(&rtc_time);
+        RLOG_I(OBJECT_CODE,
+               "RTC synced (adv_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
+               (unsigned)rtc_time.day,
+               (unsigned)rtc_time.month,
+               (unsigned)(2000u + rtc_time.year),
+               (unsigned)rtc_time.hour,
+               (unsigned)rtc_time.minute,
+               (unsigned)rtc_time.second,
+               (long)adv_set->timezone_offset);
+    }
+}
+#endif
+
 
 #ifndef BOOTLOADER
 
@@ -735,6 +801,13 @@ static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
     /* Log received telemetry from other nodes for debug */
     RLOG_I(OBJECT_CODE, "Received BLE adv status from 0x%02X", (unsigned)pkt->hdr.addr.src);
 }
+
+static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt)
+{
+    (void)pkt;
+    RLOG_I(OBJECT_CODE, "Received BLE adv config request");
+    sys_ble_peripheral_set_config();
+}
 #endif
 
 static void network_cmd_device_reset(const protobuf_packet_t *pkt)
@@ -772,6 +845,12 @@ static void network_cmd_enter_to_bootloader(const protobuf_packet_t *pkt)
 static void network_cmd_log_data_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
+
+    if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+        s_network_cmd.stream->serial_connection_active = true;
+    } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+        s_network_cmd.stream->ble_connection_active = true;
+    }
 
     s_log_stream_enabled = true;
     s_log_stream_dst     = (uint8_t)pkt->hdr.addr.src;
@@ -843,7 +922,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     }
 #else
     /* No flash storage: logger returns framed entries from RAM buffer.
-     * ACK tracking mirrors the flash path — consume only after host ACKs. */
+     * ACK tracking mirrors the flash path - consume only after host ACKs. */
     if (s_log_tracker.waiting_ack) {
         return;
     }
@@ -1135,7 +1214,7 @@ bool network_send_ble_adv_status(network_core_t *stream, uint8_t dst, const prot
     pkt.which_params = protobuf_packet_t_ble_adv_status_tag;
     pkt.params.ble_adv_status = *status;
 
-    return network_core_send_packet(s_network_cmd.stream, dst, &pkt);
+    return network_core_send_packet(stream, dst, &pkt);
 }
 
 #endif /* HAVE_BLE_PERIPHERAL */

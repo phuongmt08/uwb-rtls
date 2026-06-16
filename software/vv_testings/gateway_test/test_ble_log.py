@@ -25,9 +25,10 @@ import os
 import time
 import argparse
 import re
+import msvcrt
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import serial
 from serial import SerialException
@@ -44,8 +45,21 @@ from common.transport import VvAddress, HostTransport
 
 # Tuning Constants
 READ_TIMEOUT_S = 0.05
-HOST_ACTIVITY_PING_S = 5.0
-LOG_POLL_PERIOD_S = 1.0
+LOG_BOOTSTRAP_PACKET_GAP_S = 0.2
+LOG_POLL_PERIOD_S = 5.0
+LOG_ACK_RETRY_PERIOD_S = 1.0
+LOG_ACK_RETRY_MAX_RETRIES = 2
+LOG_ACK_SETTLE_TIMEOUT_S = 3.0
+LOG_IDLE_KEEPALIVE_S = 15.0
+LOG_RECV_TIMEOUT_S = 0.01
+LOG_END_SESSION_DELAY_S = 0.1
+LOG_FIRST_PACKET_TIMEOUT_S = 3.0
+PRINT_PACKET_TRACE = False
+PACKET_TRACE_TAG_WIDTH = 7
+PACKET_TRACE_NAME_WIDTH = 18
+PACKET_TRACE_COUNT_WIDTH = 5
+PACKET_TRACE_SEQ_WIDTH = 5
+PACKET_TRACE_ADDR_WIDTH = 13
 MAX_RECORD_LEN = 512
 EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
 
@@ -55,6 +69,9 @@ COLOR_RED = "\033[31m"
 COLOR_CYAN = "\033[36m"
 COLOR_YELLOW = "\033[33m"
 COLOR_RESET = "\033[0m"
+COLOR_GRAY = "\033[90m"
+COLOR_BLUE = "\033[34m"
+COLOR_MAGENTA = "\033[35m"
 
 
 BLE_STATE_NAMES = {
@@ -151,16 +168,36 @@ class FlashLogStreamParser:
 
 class BleLogTester:
     def __init__(self, session: VvTestSession, factory: CommandFactory, src: int, dst: int,
-                 verbose: bool = False, clear_first: bool = False, calibration: bool = False, args=None):
+                 verbose: bool = False, calibration: bool = False, args=None):
         self.session = session
         self.factory = factory
         self.src = src
         self.dst = dst
         self.verbose = verbose
-        self.clear_first = clear_first
         self.calibration = calibration
         self.log_parser = FlashLogStreamParser()
         self.last_rx_time = time.time()
+        self.last_mcu_rx_time = 0.0
+        self.log_session_started = False
+        self.log_first_packet_seen = False
+        self.log_start_deadline = 0.0
+        self.last_poll = 0.0
+        self.pending_log_ack_seq: Optional[int] = None
+        self.pending_log_ack_dst: Optional[int] = None
+        self.pending_log_ack_confirm_seq: Optional[int] = None
+        self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_started_at = 0.0
+        self.pending_log_ack_retries = 0
+        self.tx_counts: Dict[str, int] = {}
+        self.rx_counts: Dict[str, int] = {}
+        self.tx_total = 0
+        self.rx_total = 0
+        self.tx_ack_sent = 0
+        self.tx_log_clear_sent = 0
+        self.rx_from_mcu = 0
+        self.rx_log_data_bytes = 0
+        self.rx_log_records = 0
+        self.stop_requested = False
 
         self.record = args.record if args else None
         self.log_file = None
@@ -185,7 +222,112 @@ class BleLogTester:
             self.uwb_file.close()
 
     def _send_packet(self, pkt: pb.packet_t) -> None:
+        name = packet_name(pkt)
+        self.tx_counts[name] = self.tx_counts.get(name, 0) + 1
+        self.tx_total += 1
+        count = self.tx_counts[name]
+        if name == "ack":
+            self.tx_ack_sent += 1
+        elif name == "log_clear":
+            self.tx_log_clear_sent += 1
+        self._print_tx_packet(pkt, name, count)
         self.session.send_packet(pkt)
+
+    @staticmethod
+    def _format_counts(counts: Dict[str, int]) -> str:
+        if not counts:
+            return "none"
+        return ",".join(f"{name}={count}" for name, count in sorted(counts.items()))
+
+    @staticmethod
+    def _addr_text(value: int) -> str:
+        try:
+            addr = VvAddress(int(value))
+            return f"{addr.name}({int(addr)})"
+        except (ValueError, TypeError):
+            return f"UNKNOWN({value})"
+
+    @classmethod
+    def _packet_hdr_values(cls, pkt: pb.packet_t) -> Tuple[str, str, str]:
+        try:
+            return (
+                str(pkt.hdr.seq),
+                cls._addr_text(int(pkt.hdr.addr.src)),
+                cls._addr_text(int(pkt.hdr.addr.dst)),
+            )
+        except (AttributeError, TypeError, ValueError):
+            return "?", "?", "?"
+
+    @staticmethod
+    def _packet_extra_text(pkt: pb.packet_t, name: str) -> str:
+        if name == "ack":
+            return f"ack_seq={pkt.ack.ack_seq} response={pkt.ack.response}"
+        if name == "log_clear":
+            return f"type={pkt.log_clear.type} offset={pkt.log_clear.offset} length={pkt.log_clear.length}"
+        if name == "log_data":
+            return f"type={pkt.log_data.type} bytes={len(pkt.log_data.data)}"
+        if name == "host_transport_set":
+            return f"transport={pkt.host_transport_set.transport}"
+        return ""
+
+    def _packet_display_name(self, pkt: pb.packet_t, name: str) -> str:
+        if name != "ack":
+            return name
+
+        try:
+            src = VvAddress(int(pkt.hdr.addr.src))
+            return f"{src.name.lower()}_ack"
+        except (AttributeError, TypeError, ValueError):
+            return name
+
+    def _format_packet_trace(self, tag: str, pkt: pb.packet_t, name: str, count: int) -> str:
+        seq, src, dst = self._packet_hdr_values(pkt)
+        display_name = self._packet_display_name(pkt, name)
+        extra = self._packet_extra_text(pkt, name)
+        suffix = f" {extra}" if extra else ""
+        return (
+            f"{tag:<{PACKET_TRACE_TAG_WIDTH}} "
+            f"{display_name:<{PACKET_TRACE_NAME_WIDTH}} "
+            f"#{count:<{PACKET_TRACE_COUNT_WIDTH}} "
+            f"seq={seq:<{PACKET_TRACE_SEQ_WIDTH}} "
+            f"src={src:<{PACKET_TRACE_ADDR_WIDTH}} "
+            f"dst={dst:<{PACKET_TRACE_ADDR_WIDTH}}"
+            f"{suffix}"
+        )
+
+    def _print_tx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
+        if not PRINT_PACKET_TRACE:
+            return
+
+        if name == "log_data":
+            prefix = "[POLL]"
+            color = COLOR_CYAN
+        elif name == "ack":
+            prefix = "[ACK]"
+            color = COLOR_GRAY
+        elif name == "log_clear":
+            prefix = "[CLEAR]"
+            color = COLOR_GRAY
+        else:
+            prefix = "[TX]"
+            color = COLOR_GRAY
+        print(
+            f"{color}{self._format_packet_trace(prefix, pkt, name, count)}{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _print_rx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
+        if not PRINT_PACKET_TRACE:
+            return
+
+        if name == "log_data":
+            color = COLOR_GRAY
+        else:
+            color = COLOR_GRAY
+        print(
+            f"{color}{self._format_packet_trace('[RX]', pkt, name, count)}{COLOR_RESET}",
+            flush=True,
+        )
 
     def _build_none(self) -> pb.packet_t:
         pkt = pb.packet_t()
@@ -234,15 +376,48 @@ class BleLogTester:
         pkt.ack.response = pb.PACKET_ACK_RESPONSE_ACK
         return pkt
 
-    def _build_log_clear_all(self) -> pb.packet_t:
-        pkt = pb.packet_t()
-        pkt.hdr.addr.src = self.src
-        pkt.hdr.addr.dst = self.dst
-        pkt.hdr.seq = self.session.proto.next_seq()
-        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
-        pkt.log_clear.offset = 0
-        pkt.log_clear.length = 0xFFFFFFFF
-        return pkt
+    def _track_log_ack(self, ack_pkt: pb.packet_t) -> None:
+        self.pending_log_ack_seq = int(ack_pkt.ack.ack_seq)
+        self.pending_log_ack_dst = int(ack_pkt.hdr.addr.dst)
+        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
+        self.pending_log_ack_sent_at = time.time()
+        self.pending_log_ack_started_at = self.pending_log_ack_sent_at
+        self.pending_log_ack_retries = 0
+
+    def _clear_pending_log_ack(self) -> None:
+        self.pending_log_ack_seq = None
+        self.pending_log_ack_dst = None
+        self.pending_log_ack_confirm_seq = None
+        self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_started_at = 0.0
+        self.pending_log_ack_retries = 0
+
+    def request_stop(self) -> None:
+        self.stop_requested = True
+
+    def clear_stop_request(self) -> None:
+        self.stop_requested = False
+
+    def _retry_pending_log_ack(self, now: float) -> None:
+        if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
+            return
+
+        if now - self.pending_log_ack_started_at >= LOG_ACK_SETTLE_TIMEOUT_S:
+            self._clear_pending_log_ack()
+            return
+
+        if now - self.pending_log_ack_sent_at < LOG_ACK_RETRY_PERIOD_S:
+            return
+
+        if LOG_ACK_RETRY_MAX_RETRIES > 0 and self.pending_log_ack_retries >= LOG_ACK_RETRY_MAX_RETRIES:
+            self._clear_pending_log_ack()
+            return
+
+        self.pending_log_ack_retries += 1
+        self.pending_log_ack_sent_at = now
+        ack_pkt = self._build_ack(self.pending_log_ack_seq, self.pending_log_ack_dst)
+        self._send_packet(ack_pkt)
+        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
 
     def send_end_session(self, reason: int) -> None:
         pkt = pb.packet_t()
@@ -255,23 +430,91 @@ class BleLogTester:
     def bootstrap(self) -> None:
         print("[*] Bootstrapping log session with remote MCU...")
         self._send_packet(self._build_none())
-        time.sleep(0.2)
+        time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
         self._send_packet(self._build_time_sync_set())
-        time.sleep(0.2)
+        time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
         self._send_packet(self._build_transport_set())
-        time.sleep(0.2)
-        if self.clear_first:
-            self._send_packet(self._build_log_clear_all())
-            time.sleep(0.2)
+        time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
         self._send_packet(self._build_log_data_get())
+        self.log_session_started = True
+        self.log_start_deadline = time.time() + LOG_FIRST_PACKET_TIMEOUT_S
+        self.last_poll = time.time()
+        print(f"[*] Waiting up to {LOG_FIRST_PACKET_TIMEOUT_S:.1f}s for first log packet...")
+
+    def _handle_log_data_packet(self, pkt: pb.packet_t) -> None:
+        self.log_first_packet_seen = True
+        payload = bytes(pkt.log_data.data)
+        lines = self.log_parser.feed(payload)
+        self.rx_log_data_bytes += len(payload)
+        self.rx_log_records += len(lines)
+        for line in lines:
+            print(line)
+
+            # Strip ANSI escape codes for local logging
+            clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+
+            if self.calibration and self.log_file is not None:
+                self.log_file.write(clean_line + '\n')
+                self.log_file.flush()
+
+            if self.record == "uwb" and self.uwb_file is not None:
+                if "[ERROR]" in clean_line:
+                    self.frame_error_count += 1
+
+                # Match primary distance: "[TAG] Distance: 6.652 m [A:4 RSSI:0dBm]"
+                dist_match = re.search(r"Distance:\s+([\d.]+)\s+m\s+\[A:(\d+)\s+RSSI:(-?\d+)dBm\]", clean_line)
+                if dist_match:
+                    dist, aid, rssi = dist_match.group(1), dist_match.group(2), dist_match.group(3)
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                    self.uwb_file.write(f"{ts},distance,{aid},{dist},{rssi},,,, ,{self.frame_error_count}\n")
+                    self.uwb_file.flush()
+                    continue
+
+                # Match position: "Tril Px=1.234m Py=5.678m Z=0.44m | Error: +/-0.100m"
+                pos_match = re.search(r"Tril Px=([\d.-]+)m Py=([\d.-]+)m Z=([\d.-]+)m\s+\|\s+Error:\s+.([\d.]+)", clean_line)
+                if pos_match:
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                    x, y, z, err = pos_match.group(1), pos_match.group(2), pos_match.group(3), pos_match.group(4)
+                    self.uwb_file.write(f"{ts},position,,, ,{x},{y},{z},{err},{self.frame_error_count}\n")
+                    self.uwb_file.flush()
+                elif "[ERROR]" in clean_line:
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                    self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
+                    self.uwb_file.flush()
+
+        ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
+        self._send_packet(ack_pkt)
+        self._track_log_ack(ack_pkt)
 
     def _process_packet(self, pkt: pb.packet_t) -> None:
         self.last_rx_time = time.time()
         name = packet_name(pkt)
+        self.rx_counts[name] = self.rx_counts.get(name, 0) + 1
+        self.rx_total += 1
+        self._print_rx_packet(pkt, name, self.rx_counts[name])
+        try:
+            if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
+                self.rx_from_mcu += 1
+                self.last_mcu_rx_time = self.last_rx_time
+        except (AttributeError, ValueError):
+            pass
+
+        if name == "ack" and self.pending_log_ack_confirm_seq is not None:
+            try:
+                if int(pkt.hdr.addr.src) == int(VvAddress.MCU) and int(pkt.ack.ack_seq) == self.pending_log_ack_confirm_seq:
+                    print(f"[FLOW]  host_ack confirmed by MCU seq={self.pending_log_ack_confirm_seq}")
+                    self._clear_pending_log_ack()
+            except (AttributeError, ValueError):
+                pass
 
         if name == "log_data":
+            self._handle_log_data_packet(pkt)
+            return
+
             payload = bytes(pkt.log_data.data)
             lines = self.log_parser.feed(payload)
+            self.rx_log_data_bytes += len(payload)
+            self.rx_log_records += len(lines)
             for line in lines:
                 print(line)
 
@@ -307,10 +550,6 @@ class BleLogTester:
                         self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
                         self.uwb_file.flush()
 
-            ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
-            self._send_packet(ack_pkt)
-            return
-
         if name == "ble_status_resp":
             state = pkt.ble_status_resp.state
             state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})")
@@ -328,17 +567,54 @@ class BleLogTester:
 
     def loop(self) -> None:
         while True:
-            now = time.time()
+            self.poll_once()
+            if self.stop_requested:
+                return
 
-            # Keep-alive ping: only send if we haven't received anything from MCU for 15 seconds.
-            # This completely avoids packet collisions while logs are actively streaming.
-            if now - self.last_rx_time >= 15.0:
-                self._send_packet(self._build_none())
-                self.last_rx_time = now
+    def poll_once(self) -> None:
+        if self.stop_requested:
+            return
 
-            packets = self.session.recv_packets(timeout_s=0.01)
-            for pkt in packets:
-                self._process_packet(pkt)
+        now = time.time()
+        self._retry_pending_log_ack(now)
+
+        # Keep-alive ping: only send if we haven't received anything from MCU for a while.
+        # This completely avoids packet collisions while logs are actively streaming.
+        if now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
+            self._send_packet(self._build_none())
+            self.last_rx_time = now
+
+        if (
+            self.log_session_started
+            and not self.log_first_packet_seen
+            and now >= self.log_start_deadline
+            and self.pending_log_ack_seq is None
+            and now - self.last_poll >= LOG_POLL_PERIOD_S
+        ):
+            self._send_packet(self._build_log_data_get())
+            self.last_poll = now
+
+        packets = self.session.recv_packets(timeout_s=LOG_RECV_TIMEOUT_S)
+        for pkt in packets:
+            self._process_packet(pkt)
+
+
+def _device_uuid_text(p: pb.packet_t) -> str:
+    scan = p.ble_scan_result
+    if hasattr(scan, "uuid") and scan.uuid:
+        raw = bytes(scan.uuid)
+        if len(raw) == 16:
+            return "-".join(
+                [
+                    raw[0:4].hex(),
+                    raw[4:6].hex(),
+                    raw[6:8].hex(),
+                    raw[8:10].hex(),
+                    raw[10:16].hex(),
+                ]
+            ).upper()
+        return raw.hex().upper()
+    return ""
 
 
 def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
@@ -351,7 +627,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
     pkt = factory.ble_scan_start(src, central_dst, session.proto.next_seq())
     session.send_packet(pkt)
 
-    discovered_devices = {}  # mac_bytes -> (name, rssi)
+    discovered_devices: Dict[bytes, Tuple[str, int, str]] = {}  # mac_bytes -> (name, rssi, uuid)
 
     if expected_mac:
         mac_str_target = ":".join(f"{b:02X}" for b in reversed(expected_mac))
@@ -370,6 +646,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                 mac_str = ":".join(f"{b:02X}" for b in reversed(mac_bytes))
                 name = p.ble_scan_result.name
                 rssi = p.ble_scan_result.rssi_dbm
+                uuid_text = _device_uuid_text(p)
 
                 if mac_bytes not in discovered_devices:
                     matched = False
@@ -377,14 +654,16 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                         matched = (mac_bytes == expected_mac)
                     else:
                         name_upper = name.upper()
+                        uuid_upper = uuid_text.upper()
                         if target_name_filter:
-                            matched = target_name_filter.upper() in name_upper
+                            matched = target_name_filter.upper() in name_upper or target_name_filter.upper() in uuid_upper
                         else:
-                            matched = any(prefix in name_upper for prefix in ["UWB", "TAG", "ANCHOR", "NUS", "RTLS"])
+                            matched = any(prefix in name_upper for prefix in ["UWB", "TAG", "ANCHOR", "NUS", "RTLS", "NODE"]) or bool(uuid_text)
 
                     if matched:
-                        discovered_devices[mac_bytes] = (name, rssi)
-                        print(f"  [Scan] Found matching device: {mac_str} ('{name}') | RSSI: {rssi} dBm")
+                        discovered_devices[mac_bytes] = (name, rssi, uuid_text)
+                        uuid_part = f" | UUID: {uuid_text}" if uuid_text else ""
+                        print(f"  [Scan] Found matching device: {mac_str} ('{name}'){uuid_part} | RSSI: {rssi} dBm")
         
         if expected_mac and expected_mac in discovered_devices:
             break
@@ -402,31 +681,46 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
 
     device_list = list(discovered_devices.items())
     if len(device_list) == 1:
-        selected_mac, (selected_name, _) = device_list[0]
+        selected_mac, (selected_name, _, _) = device_list[0]
         mac_str = ":".join(f"{b:02X}" for b in reversed(selected_mac))
         print(f"\n{COLOR_GREEN}[+] Automatically selecting the only found device: '{selected_name}' ({mac_str}){COLOR_RESET}")
     else:
         print("\n--- DISCOVERED BLE DEVICES ---")
-        for idx, (mac_bytes, (name, rssi)) in enumerate(device_list, 1):
+        for idx, (mac_bytes, (name, rssi, uuid_text)) in enumerate(device_list, 1):
             mac_str = ":".join(f"{b:02X}" for b in reversed(mac_bytes))
-            print(f"  [{idx}] {mac_str} | Name: '{name}' | RSSI: {rssi:4d} dBm")
+            uuid_part = f" | UUID: {uuid_text}" if uuid_text else ""
+            print(f"  [{idx}] {mac_str} | Name: '{name}'{uuid_part} | RSSI: {rssi:4d} dBm")
         print("------------------------------")
 
         while True:
             try:
-                choice = input(f"Select device index (1-{len(device_list)}) to connect [default 1]: ").strip()
+                choice = input(f"Enter device index (1-{len(device_list)}) or MAC [default first device]: ").strip()
                 if not choice:
                     choice_idx = 1
-                else:
-                    choice_idx = int(choice)
-
-                if 1 <= choice_idx <= len(device_list):
-                    selected_mac, (selected_name, _) = device_list[choice_idx - 1]
+                    selected_mac, (selected_name, _, _) = device_list[choice_idx - 1]
                     break
-                else:
+
+                if choice.isdigit():
+                    choice_idx = int(choice)
+                    if 1 <= choice_idx <= len(device_list):
+                        selected_mac, (selected_name, _, _) = device_list[choice_idx - 1]
+                        break
                     print(f"Invalid index. Please enter a number between 1 and {len(device_list)}.")
+                    continue
+
+                if ":" in choice:
+                    mac_input = choice.upper()
+                    normalized = bytes(reversed([int(x, 16) for x in mac_input.split(":")]))
+                    if normalized in discovered_devices:
+                        selected_mac = normalized
+                        selected_name = discovered_devices[normalized][0]
+                        break
+                    print(f"Invalid MAC. Please enter one of the discovered devices.")
+                    continue
+
+                print("Invalid input. Please enter a device index or MAC address in format AA:BB:CC:DD:EE:FF.")
             except ValueError:
-                print("Invalid input. Please enter a number.")
+                print("Invalid input. Please enter a device index or MAC address in format AA:BB:CC:DD:EE:FF.")
             except KeyboardInterrupt:
                 print("\n[ABORT] User cancelled device selection.")
                 return None
@@ -475,8 +769,44 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
         print(f"{COLOR_RED}[FAIL] BLE connection timed out or failed permanently after all retries.{COLOR_RESET}")
         return None
 
+    # Ensure scan is fully stopped before starting the log session.
+    session.send_packet(factory.ble_scan_stop(src, central_dst, session.proto.next_seq()))
+    time.sleep(0.2)
     time.sleep(1.0)
     return selected_mac, selected_name
+
+
+def _poll_stop_hotkey() -> bool:
+    while msvcrt.kbhit():
+        ch = msvcrt.getwch()
+        if ch in ("q", "Q", "x", "X"):
+            return True
+    return False
+
+
+def _run_log_session(session: VvTestSession, factory: CommandFactory, src_addr: int, mcu_dst: int,
+                     tester: BleLogTester, central_dst: int) -> None:
+    tester.clear_stop_request()
+    print(f"\n{COLOR_CYAN}=== STARTING BLE LOG VIEWER ==={COLOR_RESET}")
+    print(f"{COLOR_YELLOW}[HOTKEY] Press 'q' or 'x' to stop log, disconnect, and rescan.{COLOR_RESET}")
+    tester.bootstrap()
+
+    try:
+        while not tester.stop_requested:
+            if _poll_stop_hotkey():
+                tester.request_stop()
+                break
+
+            tester.poll_once()
+    finally:
+        print(f"\n{COLOR_YELLOW}[*] Stopping log session... sending end_session and disconnecting current device.{COLOR_RESET}")
+        try:
+            tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
+            time.sleep(LOG_END_SESSION_DELAY_S)
+            session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
+            time.sleep(0.2)
+        except Exception as exc:
+            print(f"{COLOR_RED}[WARN] Failed to stop session cleanly: {exc}{COLOR_RESET}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -486,7 +816,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mac", type=str, default=None, help="Connect directly to this MAC (hex with colons, e.g. AA:BB:CC:DD:EE:FF)")
     parser.add_argument("--name", type=str, default=None, help="Scan only for devices containing this string in their name")
     parser.add_argument("--verbose", action="store_true", help="Print all non-log packet types")
-    parser.add_argument("--clear-first", action="store_true", help="Clear flash log backlog before streaming")
     parser.add_argument("--calibration", action="store_true", help="Save logs to a calibration file")
     parser.add_argument("--record", choices=["uwb"], help="Record specific UWB data to a CSV file")
     parser.add_argument("--src", type=int, default=int(VvAddress.HOST), help="Source address (default: HOST=5)")
@@ -539,46 +868,30 @@ def main() -> int:
         factory = CommandFactory()
 
         with VvTestSession(port, args.baud, debug=args.verbose) as session:
-            # 1. Connect to BLE target
-            res = step_auto_scan_and_connect(
-                session=session,
-                factory=factory,
-                src=src_addr,
-                central_dst=central_dst,
-                expected_mac=expected_mac,
-                target_name_filter=args.name
-            )
-            if not res:
-                return 1
+            while True:
+                res = step_auto_scan_and_connect(
+                    session=session,
+                    factory=factory,
+                    src=src_addr,
+                    central_dst=central_dst,
+                    expected_mac=expected_mac,
+                    target_name_filter=args.name
+                )
+                if not res:
+                    return 1
 
-            target_mac, target_name = res
+                tester = BleLogTester(
+                    session=session,
+                    factory=factory,
+                    src=src_addr,
+                    dst=mcu_dst,
+                    verbose=args.verbose,
+                    calibration=args.calibration,
+                    args=args
+                )
 
-            # 2. Initialize and loop logs capture
-            tester = BleLogTester(
-                session=session,
-                factory=factory,
-                src=src_addr,
-                dst=mcu_dst,
-                verbose=args.verbose,
-                clear_first=args.clear_first,
-                calibration=args.calibration,
-                args=args
-            )
-
-            print(f"\n{COLOR_CYAN}=== STARTING BLE LOG VIEWER (Press Ctrl+C to exit) ==={COLOR_RESET}\n")
-            tester.bootstrap()
-            
-            try:
-                tester.loop()
-            except KeyboardInterrupt:
-                print(f"\n{COLOR_YELLOW}[*] Stopping... Sending end_session to remote MCU.{COLOR_RESET}")
-                tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
-                time.sleep(0.1)
-                
-                print(f"{COLOR_YELLOW}[*] Disconnecting BLE from Central...{COLOR_RESET}")
-                session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
-                time.sleep(0.2)
-                return 0
+                _run_log_session(session, factory, src_addr, mcu_dst, tester, central_dst)
+                print(f"{COLOR_GREEN}[+] Log session stopped. Re-entering scan flow...{COLOR_RESET}")
 
     except KeyboardInterrupt:
         print(f"\n{COLOR_YELLOW}[*] Stopping...{COLOR_RESET}")

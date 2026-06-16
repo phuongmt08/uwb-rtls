@@ -463,7 +463,7 @@ class CommandFactory:
         pkt.ble_adv_status.status_flags = 0
         pkt.ble_adv_status.warning_count = 0
         pkt.ble_adv_status.error_count = 0
-        pkt.ble_adv_status.local_timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
+        pkt.ble_adv_status.local_timestamp_s = int(time.time()) & 0xFFFFFFFF
         return pkt
 
     def log_data(

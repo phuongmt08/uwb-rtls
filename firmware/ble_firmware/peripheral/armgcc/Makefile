@@ -78,6 +78,7 @@ SRC_FILES += \
   $(PROJ_DIR)/../ble_common/boards.c \
   $(COMMON_DIR)/logger.c \
   $(COMMON_DIR)/hdlc.c \
+  $(COMMON_DIR)/ble_broadcast.c \
   $(COMMON_DIR)/ble_bridge/bb_cmd_hdl.c \
   $(COMMON_DIR)/ble_bridge/bb_router.c \
   $(COMMON_DIR)/ble_bridge/bb_transport.c \
