@@ -54,7 +54,6 @@
 
 /* 0 = normal ranging mode
  * 1 = mutual anchor-to-anchor calibration summary mode (A2A V1)             */
-#define ENABLE_ANCHOR_AUTO_CALIB    0
 
 /* ------------------------------------------------------------------
  * A2A (Anchor-to-Anchor) Mutual Calibration V1
@@ -117,6 +116,11 @@
 
 #define MAX_ANCHORS_SUPPORTED  8
 #define NUM_ANCHORS            4
+
+/* When enabled, a ranging cycle is aborted unless at least three anchors
+ * respond and return results. Keep disabled so survey and degraded-layout
+ * operation can consume partial ranging results. */
+#define SYS_RANGING_REQUIRE_MIN_ANCHOR_SAMPLES  0
 
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
@@ -189,7 +193,7 @@
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS
-#define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   1U
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   3U
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
@@ -269,6 +273,14 @@
 
 #ifndef ENABLE_SYS_FUSION
 #define ENABLE_SYS_FUSION  1
+#endif
+
+#ifndef SYS_FUSION_RAW_DEBUG_STREAM_ENABLE
+#define SYS_FUSION_RAW_DEBUG_STREAM_ENABLE  1
+#endif
+
+#ifndef SYS_FUSION_PROTOBUF_STREAM_ENABLE
+#define SYS_FUSION_PROTOBUF_STREAM_ENABLE   1
 #endif
 
 #ifndef SYS_FUSION_PREFILTER_ENABLED
