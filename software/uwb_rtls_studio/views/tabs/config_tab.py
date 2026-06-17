@@ -54,6 +54,10 @@ class ConfigTab(QWidget):
         self._setup_dev_widgets()
         self._setup_anchor_table()
         self._setup_view_toggle()
+        self._current_role = 1  # Default: Tag
+        self._current_device_id = 0
+        self._last_anchor_layout = []
+        self._scan_devices = []
         self._setup_target_selector()
         self._merge_ranging_into_uwb_config()
 
