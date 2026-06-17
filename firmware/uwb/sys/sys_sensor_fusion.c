@@ -694,15 +694,46 @@ void sys_sensor_fusion_test_stream_result(network_core_t *stream, bool ranging_e
     CHECK_VOID(stream);
 
     uint32_t now_ms = HAL_GetTick();
-    float step = (float)s_stream_test_sample_idx;
+
     protobuf_sensor_fusion_result_t stream_data;
     memset(&stream_data, 0, sizeof(stream_data));
-    stream_data.ukf_x_m = 1.0f + 0.05f * step;
-    stream_data.ukf_y_m = 2.0f + 0.03f * step;
-    stream_data.ukf_yaw_deg = 15.0f + 0.5f * step;
-    stream_data.tril_x_m = 0.9f + 0.05f * step;
-    stream_data.tril_y_m = 1.9f + 0.03f * step;
-    stream_data.yaw_deg = 14.5f + 0.5f * step;
+
+    const float start_x = 1.0f;
+    const float end_x   = 3.0f;
+    const float start_y = 1.0f;
+    const float end_y   = 3.0f;
+    const float step_m  = 0.05f;
+
+    uint32_t points_per_row = (uint32_t)((end_x - start_x) / step_m) + 1U;
+    uint32_t row_count      = (uint32_t)((end_y - start_y) / step_m) + 1U;
+    uint32_t total_points   = points_per_row * row_count;
+
+    uint32_t idx = s_stream_test_sample_idx % total_points;
+    uint32_t row = idx / points_per_row;
+    uint32_t col = idx % points_per_row;
+
+    float x;
+    float y = start_y + ((float)row * step_m);
+
+    if ((row % 2U) == 0U)
+    {
+        x = start_x + ((float)col * step_m);   // hàng chẵn: đi sang phải
+        stream_data.ukf_yaw_deg = 0.0f;
+    }
+    else
+    {
+        x = end_x - ((float)col * step_m);     // hàng lẻ: đi sang trái
+        stream_data.ukf_yaw_deg = 180.0f;
+    }
+
+    stream_data.ukf_x_m = x;
+    stream_data.ukf_y_m = y;
+
+    /* Trilateration giả lập lệch nhẹ so với UKF */
+    stream_data.tril_x_m = stream_data.ukf_y_m + 0.05f;
+    stream_data.tril_y_m = stream_data.ukf_x_m - 0.05f;
+    stream_data.yaw_deg  = stream_data.ukf_yaw_deg;
+
     stream_data.ranging_error_count = s_stream_test_sample_idx;
     stream_data.timestamp_ms = now_ms;
 
@@ -710,12 +741,12 @@ void sys_sensor_fusion_test_stream_result(network_core_t *stream, bool ranging_e
     {
         s_stream_test_sample_idx++;
     }
+
 #else
     (void)stream;
     (void)ranging_enabled;
 #endif
 }
-
 sys_sensor_fusion_err_t sys_sensor_fusion_set_update_flag()
 {
 	ukf.enable_update = true;
