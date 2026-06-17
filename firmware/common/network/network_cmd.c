@@ -26,7 +26,7 @@
 #define OBJECT_CODE                     LOG_OBJECT_CODE_NETWORK
 #define RESP_RETRY_MAX                  2
 #define RESP_RETRY_DELAY_MS             200
-#define WAIT_TIME_TO_RESEND_ACK_MS      30000u
+#define WAIT_TIME_TO_RESEND_ACK_MS      10000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
 #define SENSOR_FUSION_STREAM_PERIOD_MS  50u
 

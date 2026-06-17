@@ -136,6 +136,10 @@ class LogViewModel(QObject):
         if self._log_model:
             self._log_model.clear_session_logs()
 
+    def set_developer_mode(self, enabled: bool):
+        if self._log_model and hasattr(self._log_model, "set_developer_mode"):
+            self._log_model.set_developer_mode(enabled)
+
     def _on_model_log_entry(self, entry: dict):
         if self._session_run_manager:
             self._session_run_manager.open_log_run()

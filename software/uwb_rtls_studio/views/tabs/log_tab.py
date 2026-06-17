@@ -292,6 +292,8 @@ class LogTab(QWidget):
         self._vm.session_list_updated.connect(self._on_session_list_updated)
         self._vm.session_details_loaded.connect(self._on_session_details_loaded)
         self._vm.session_deleted.connect(self._on_session_deleted)
+        if hasattr(self._vm, "set_developer_mode"):
+            self._vm.set_developer_mode(self._is_developer)
         self._vm.refresh_sessions()
 
     def _append_log_entry(self, entry: dict):
@@ -498,6 +500,8 @@ class LogTab(QWidget):
         self._is_developer = enabled
         for w in self._dev_widgets:
             w.setVisible(enabled)
+        if self._vm and hasattr(self._vm, "set_developer_mode"):
+            self._vm.set_developer_mode(enabled)
 
     def _apply_filter(self, *_):
         level = self.filter_level.currentText().strip().upper()
@@ -513,11 +517,39 @@ class LogTab(QWidget):
         ]
 
         self._filter_active = level != "ALL" or object_code is not None or bool(query)
-        self.log_text.setPlainText("\n".join(filtered_lines))
+        self._render_log_lines(filtered_lines)
         if self._filter_active:
             self.log_count.setText(f"{len(filtered_lines)} / {self._log_entry_count} entries")
         else:
             self.log_count.setText(f"{self._log_entry_count} entries")
+
+    def _render_log_lines(self, lines):
+        self.log_text.clear()
+        cursor = self.log_text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        for idx, line in enumerate(lines):
+            fmt = QTextCharFormat()
+            fmt.setForeground(self._line_color(line))
+            cursor.insertText(line, fmt)
+            if idx != len(lines) - 1:
+                cursor.insertText("\n")
+        self.log_text.setTextCursor(cursor)
+
+    def _line_color(self, line: str) -> QColor:
+        normalized = line.upper()
+        if normalized.startswith("[POLL]"):
+            return QColor("#22D3EE")
+        if normalized.startswith(("[RX]", "[TX]", "[ACK]", "[CLEAR]")):
+            return QColor("#94A3B8")
+        if "[ERROR" in normalized:
+            return QColor("#EF4444")
+        if "[WARN" in normalized:
+            return QColor("#F59E0B")
+        if "[DEBUG" in normalized:
+            return QColor("#22D3EE")
+        if "[INFO" in normalized:
+            return QColor("#F8FAFC")
+        return QColor("#CBD5E1")
 
     def _line_matches_level(self, line, level):
         if level == "ALL":

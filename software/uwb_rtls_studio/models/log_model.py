@@ -17,7 +17,7 @@ from common.transport import VvAddress
 
 log = logging.getLogger(__name__)
 
-LOG_PACKET_TRACE_TO_LIVE_LOG = True
+LOG_PACKET_TRACE_TO_LIVE_LOG = False
 PACKET_TRACE_TAG_WIDTH = 7
 PACKET_TRACE_NAME_WIDTH = 18
 PACKET_TRACE_COUNT_WIDTH = 5
@@ -55,6 +55,7 @@ class LogModel(QObject):
         self._pending_log_ack_retries = 0
         self._deferred_ack_trace_by_ack_seq: dict[int, str] = {}
         self._latest_mcu_log_seq = None
+        self._packet_trace_to_live_log = LOG_PACKET_TRACE_TO_LIVE_LOG
         self._tx_counts: dict[str, int] = {}
         self._rx_counts: dict[str, int] = {}
 
@@ -75,6 +76,9 @@ class LogModel(QObject):
 
     def clear_session_logs(self) -> None:
         self._session_logs.clear()
+
+    def set_developer_mode(self, enabled: bool) -> None:
+        self._packet_trace_to_live_log = bool(enabled)
 
     def clear_live_logs(self) -> None:
         self._live_logs.clear()
@@ -389,7 +393,7 @@ class LogModel(QObject):
         self._append_packet_trace_entry(line)
 
     def _append_packet_trace_entry(self, line: str) -> None:
-        if not LOG_PACKET_TRACE_TO_LIVE_LOG:
+        if not self._packet_trace_to_live_log:
             return
         self._append_entry({
             "raw_line": line,
