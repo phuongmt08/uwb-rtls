@@ -41,6 +41,11 @@ class ConfigTab(QWidget):
         super().__init__(parent)
         self._is_developer = is_developer
         self._vm = None
+        # Initialize state before UI wiring can trigger callbacks.
+        self._current_role = 1  # Default: Tag
+        self._current_device_id = 0
+        self._last_anchor_layout = []
+        self._scan_devices = []
 
         # ── Load UI from .ui file ──
         uic.loadUi(UI_FILE, self)
@@ -70,12 +75,6 @@ class ConfigTab(QWidget):
 
         # Add this vertical layout to the main grid layout in column 2, spanning all 3 rows
         self.main_layout.addLayout(self.col2_layout, 0, 2, 3, 1)
-
-        # Track the active device identity to refine layout read/write behavior
-        self._current_role = 1  # Default: Tag
-        self._current_device_id = 0
-        self._last_anchor_layout = []
-        self._scan_devices = []
 
     def _setup_target_selector(self):
         """Add a compact target picker fed by BLE scan results."""
@@ -356,6 +355,8 @@ class ConfigTab(QWidget):
         self._apply_target_to_ui(target)
 
     def _apply_target_to_ui(self, target: dict):
+        if not hasattr(self, "_last_anchor_layout"):
+            self._last_anchor_layout = []
         role = int(target.get("role") or 1)
         device_id = int(target.get("device_id") or 1)
         role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}

@@ -10,6 +10,10 @@
 
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
 
+volatile network_core_rx_debug_stats_t g_network_core_rx_debug_stats;
+volatile int32_t g_network_core_waiting_ack_tracker_index = -1;
+volatile uint32_t g_network_core_waiting_ack_seq = 0;
+
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
     protobuf_packet_t_ble_adv_status_tag,
@@ -18,6 +22,28 @@ static const uint16_t network_core_skip_ack_tb[] = {
 //    protobuf_packet_t_anchor_distance_tag,
 //    protobuf_packet_t_tag_position_tag,
 };
+
+static void network_core_publish_waiting_ack_debug(network_core_t *core)
+{
+    g_network_core_waiting_ack_tracker_index = -1;
+    g_network_core_waiting_ack_seq = 0;
+
+    if (!core) {
+        return;
+    }
+
+    for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
+        network_ack_tracker_t *t = &core->ack_tracker[i];
+
+        if (t->state != NETWORK_CORE_ACK_STATE_WAITING) {
+            continue;
+        }
+
+        g_network_core_waiting_ack_tracker_index = i;
+        g_network_core_waiting_ack_seq = t->packet_header.seq;
+        return;
+    }
+}
 
 static bool network_core_encode_and_send(network_core_t *core,
                                          stream_type_t stream,
@@ -169,6 +195,11 @@ static void network_core_update_ack_trackers(network_core_t *core, const protobu
         return;
     }
 
+    g_network_core_rx_debug_stats.ack_rx_packets_total++;
+    if (packet->has_hdr && packet->hdr.has_addr && packet->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+        g_network_core_rx_debug_stats.ack_rx_packets_from_host++;
+    }
+
     for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
         network_ack_tracker_t *t = &core->ack_tracker[i];
 
@@ -182,10 +213,14 @@ static void network_core_update_ack_trackers(network_core_t *core, const protobu
 
         t->state = network_core_is_ack_positive(packet->params.ack.response) ?
                    NETWORK_CORE_ACK_STATE_FOUND : NETWORK_CORE_NACK_STATE_FOUND;
+        g_network_core_rx_debug_stats.ack_rx_packets_routed_to_tracker++;
 
         network_core_finalize_tracker(t, packet);
+        network_core_publish_waiting_ack_debug(core);
         return;
     }
+
+    g_network_core_rx_debug_stats.ack_rx_packets_no_tracker_match++;
 }
 
 static void network_core_check_tracker_timeouts(network_core_t *core)
@@ -202,7 +237,9 @@ static void network_core_check_tracker_timeouts(network_core_t *core)
         }
 
         t->state = NETWORK_CORE_ACK_STATE_TIMEOUT;
+        g_network_core_rx_debug_stats.ack_waiting_tracker_timeouts++;
         network_core_finalize_tracker(t, NULL);
+        network_core_publish_waiting_ack_debug(core);
     }
 }
 
@@ -220,12 +257,22 @@ static bool network_core_process_one_stream(network_core_t *core, stream_type_t 
     /* ---- Routing decision based on dst ---- */
     bool for_us = network_core_is_for_us(core, &packet);
 
+    if (packet.which_params == protobuf_packet_t_ack_tag &&
+        packet.has_hdr && packet.hdr.has_addr &&
+        packet.hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+        /* ACKs can come back through a routed path. Match them as soon as we
+         * decode them, even if the packet is not ultimately routed "for us". */
+        if (packet.hdr.addr.dst == core->local_addr) {
+            g_network_core_rx_debug_stats.ack_rx_packets_for_mcu++;
+        }
+        network_core_update_ack_trackers(core, &packet);
+    }
+
     if (for_us) {
         /* Let the application layer handle it */
         if (core->packet_handler) {
             core->packet_handler(&packet);
         }
-        network_core_update_ack_trackers(core, &packet);
     }
 
     /* BCAST: handle locally AND forward; unicast: only forward if not for us */
@@ -254,6 +301,7 @@ bool network_core_init(network_core_t *core,
     core->rx_packet = rx_buffer;
     core->rx_buffer_size = rx_buffer_len;
     core->tx_seq = 0;
+    network_core_publish_waiting_ack_debug(core);
 
     _Static_assert(NETWORK_CORE_ACK_STATE_NONE == 0,
                    "ACK state NONE must be 0 for memset-init to work");
@@ -274,9 +322,11 @@ bool network_core_process(network_core_t *core)
     CHECK(core && core->enabled, false);
 
     network_core_check_tracker_timeouts(core);
+    network_core_publish_waiting_ack_debug(core);
 
     network_core_process_one_stream(core, STREAM_SERIAL_RX);
     network_core_process_one_stream(core, STREAM_BLE_RX);
+    network_core_publish_waiting_ack_debug(core);
 
     return true;
 }
@@ -347,6 +397,7 @@ int network_core_wait_ack(network_core_t *core, uint8_t seq, uint32_t timeout_ms
     t->callback = callback;
     t->callback_arg = callback_arg;
     t->state = NETWORK_CORE_ACK_STATE_WAITING;
+    network_core_publish_waiting_ack_debug(core);
 
     return (int)(t - core->ack_tracker);
 }

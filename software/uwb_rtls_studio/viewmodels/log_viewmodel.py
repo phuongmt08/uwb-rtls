@@ -100,7 +100,7 @@
 ===============================================================================
 """
 import logging
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from repository.session_browser import SessionBrowser
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,9 @@ class LogViewModel(QObject):
         self._log_model = log_model
         self._session_run_manager = session_run_manager
         self._live_logs = []
+        self._log_poll_timer = QTimer(self)
+        self._log_poll_timer.setInterval(500)
+        self._log_poll_timer.timeout.connect(self._poll_log_timeout)
         if self._log_model:
             self._log_model.log_entry_added.connect(self._on_model_log_entry)
 
@@ -165,6 +168,7 @@ class LogViewModel(QObject):
 
     def clear_log_session(self):
         """End the current log run, persist it, send LOG_DATA end reason, and clear live logs."""
+        self._log_poll_timer.stop()
         if self._session_run_manager:
             self._session_run_manager.close_log_run(send_end=True, clear_buffers=False)
             self.refresh_sessions()
@@ -260,4 +264,14 @@ class LogViewModel(QObject):
         if self._session_run_manager:
             self._session_run_manager.open_log_run()
         if self._log_model:
-            self._log_model.request_log_stream(force=True)
+            if self._log_model.request_log_stream(force=True):
+                self._log_poll_timer.start()
+
+    def send_host_log_packet(self, packet_name: str, **params) -> dict:
+        if not self._log_model:
+            return {"ok": False, "error": "Log model is not available"}
+        return self._log_model.send_host_log_packet(packet_name, **params)
+
+    def _poll_log_timeout(self):
+        if self._log_model and self._log_model.poll_log_timeout():
+            return

@@ -35,6 +35,19 @@ struct network_ack_tracker_s {
 typedef bool (*network_core_packet_handler_t)(const protobuf_packet_t *packet);
 
 typedef struct {
+    uint32_t ack_rx_packets_total;
+    uint32_t ack_rx_packets_from_host;
+    uint32_t ack_rx_packets_for_mcu;
+    uint32_t ack_rx_packets_routed_to_tracker;
+    uint32_t ack_rx_packets_no_tracker_match;
+    uint32_t ack_waiting_tracker_timeouts;
+} network_core_rx_debug_stats_t;
+
+extern volatile network_core_rx_debug_stats_t g_network_core_rx_debug_stats;
+extern volatile int32_t g_network_core_waiting_ack_tracker_index;
+extern volatile uint32_t g_network_core_waiting_ack_seq;
+
+typedef struct {
     bool enabled;
     uint8_t interface;
     stream_type_t rx_stream;

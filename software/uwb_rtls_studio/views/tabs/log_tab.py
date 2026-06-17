@@ -10,7 +10,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QPushButton, QTextEdit, QComboBox, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QFrame, QAbstractItemView, QButtonGroup, QFileDialog, QMessageBox
+    QFrame, QAbstractItemView, QButtonGroup, QFileDialog, QMessageBox,
+    QFormLayout
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat, QDesktopServices
@@ -80,6 +81,111 @@ class LogTab(QWidget):
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
         self._dev_widgets = []
+        self._setup_host_packet_sender()
+
+    def _setup_host_packet_sender(self):
+        self.host_packet_group = QGroupBox("Host Packet Sender", self)
+        self.host_packet_group.setStyleSheet(
+            "QGroupBox { color: #22D3EE; border: 1px solid #334155; border-radius: 6px; "
+            "margin-top: 8px; padding: 8px; font-weight: bold; } "
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
+        )
+
+        outer = QVBoxLayout(self.host_packet_group)
+        outer.setContentsMargins(8, 10, 8, 8)
+        outer.setSpacing(6)
+
+        packet_row = QHBoxLayout()
+        packet_row.setSpacing(6)
+        packet_row.addWidget(QLabel("Packet:", self.host_packet_group))
+
+        self.host_packet_select = QComboBox(self.host_packet_group)
+        self.host_packet_select.addItem("none keep-alive", "none")
+        self.host_packet_select.addItem("host_ack", "ack")
+        self.host_packet_select.addItem("time_sync_set", "time_sync_set")
+        self.host_packet_select.addItem("host_transport_set", "host_transport_set")
+        self.host_packet_select.addItem("log_data", "log_data")
+        self.host_packet_select.addItem("log_clear", "log_clear")
+        packet_row.addWidget(self.host_packet_select, 1)
+
+        self.host_packet_dst = QComboBox(self.host_packet_group)
+        self.host_packet_dst.addItem("MCU(1)", 1)
+        self.host_packet_dst.addItem("CENTRAL(3)", 3)
+        self.host_packet_dst.addItem("PERIPHERAL(4)", 4)
+        packet_row.addWidget(QLabel("Dst:", self.host_packet_group))
+        packet_row.addWidget(self.host_packet_dst)
+        outer.addLayout(packet_row)
+
+        self._host_packet_param_rows = {}
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(6)
+        outer.addLayout(form)
+
+        self.host_packet_log_type = QComboBox(self.host_packet_group)
+        self.host_packet_log_type.addItem("DEVICE_LOG(1)", 1)
+        self.host_packet_log_type.addItem("UNSPECIFIED(0)", 0)
+        self._add_host_packet_field(form, "log_type", "Log type:", self.host_packet_log_type)
+
+        self.host_packet_ack_seq = QLineEdit(self.host_packet_group)
+        self.host_packet_ack_seq.setPlaceholderText("seq from MCU packet")
+        self._add_host_packet_field(form, "ack_seq", "ACK seq:", self.host_packet_ack_seq)
+
+        self.host_packet_ack_response = QComboBox(self.host_packet_group)
+        self.host_packet_ack_response.addItem("ACK(1)", 1)
+        self.host_packet_ack_response.addItem("NACK_BAD_CRC(2)", 2)
+        self.host_packet_ack_response.addItem("NACK_UNIMPLEMENTED(3)", 3)
+        self.host_packet_ack_response.addItem("NACK_TIMED_OUT(4)", 4)
+        self.host_packet_ack_response.addItem("NACK_BUSY(5)", 5)
+        self.host_packet_ack_response.addItem("NACK_CMD_FAILED(6)", 6)
+        self.host_packet_ack_response.addItem("NACK_INVALID_TYPE(7)", 7)
+        self._add_host_packet_field(form, "ack_response", "Response:", self.host_packet_ack_response)
+
+        self.host_packet_data = QLineEdit(self.host_packet_group)
+        self.host_packet_data.setPlaceholderText("hex: 01 02 03 or text:hello")
+        self._add_host_packet_field(form, "data", "Data:", self.host_packet_data)
+
+        self.host_packet_offset = QLineEdit(self.host_packet_group)
+        self.host_packet_offset.setPlaceholderText("0")
+        self._add_host_packet_field(form, "offset", "Offset:", self.host_packet_offset)
+
+        self.host_packet_length = QLineEdit(self.host_packet_group)
+        self.host_packet_length.setPlaceholderText("0")
+        self._add_host_packet_field(form, "length", "Length:", self.host_packet_length)
+
+        self.host_packet_unix_ms = QLineEdit(self.host_packet_group)
+        self.host_packet_unix_ms.setPlaceholderText("blank = current host time")
+        self._add_host_packet_field(form, "unix_time_ms", "Unix ms:", self.host_packet_unix_ms)
+
+        self.host_packet_timezone = QLineEdit(self.host_packet_group)
+        self.host_packet_timezone.setText("420")
+        self._add_host_packet_field(form, "timezone_offset", "Timezone min:", self.host_packet_timezone)
+
+        self.host_packet_transport = QComboBox(self.host_packet_group)
+        self.host_packet_transport.addItem("USB(1)", 1)
+        self.host_packet_transport.addItem("UART(2)", 2)
+        self.host_packet_transport.addItem("UNSPECIFIED(0)", 0)
+        self._add_host_packet_field(form, "transport", "Transport:", self.host_packet_transport)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        self.host_packet_status = QLabel("Ready", self.host_packet_group)
+        self.host_packet_status.setStyleSheet("color: #94A3B8;")
+        self.btn_send_host_packet = QPushButton("Send Packet", self.host_packet_group)
+        action_row.addWidget(self.host_packet_status, 1)
+        action_row.addWidget(self.btn_send_host_packet, 0)
+        outer.addLayout(action_row)
+
+        self.log_layout.insertWidget(2, self.host_packet_group)
+        self._dev_widgets.append(self.host_packet_group)
+        self.host_packet_select.currentIndexChanged.connect(self._update_host_packet_fields)
+        self.btn_send_host_packet.clicked.connect(self._send_selected_host_packet)
+        self._update_host_packet_fields()
+
+    def _add_host_packet_field(self, form, key, label_text, widget):
+        label = QLabel(label_text, self.host_packet_group)
+        form.addRow(label, widget)
+        self._host_packet_param_rows[key] = (label, widget)
 
     def _setup_splitter(self):
         """Keep live log and session history as equal left/right panes."""
@@ -189,13 +295,21 @@ class LogTab(QWidget):
         self._vm.refresh_sessions()
 
     def _append_log_entry(self, entry: dict):
+        raw_line = entry.get("raw_line")
+        if raw_line:
+            line = str(raw_line)
+            self._all_log_lines.append(line)
+            self._log_entry_count = len(self._all_log_lines)
+            self._apply_filter()
+            self.log_text.moveCursor(QTextCursor.MoveOperation.End)
+            return
+
         timestamp = entry.get("timestamp", "")
         level = entry.get("level", "")
-        source = entry.get("source", "")
         message = entry.get("message", "")
         object_code = entry.get("object_code")
-        object_text = f" 0x{int(object_code):02X}" if object_code is not None else ""
-        line = f"[{timestamp}] {level:<5} {source}{object_text} {message}".strip()
+        object_text = f"0x{int(object_code):02X}" if object_code is not None else "--"
+        line = f"[{timestamp}] [{level:<5}] [{object_text}] {message}".strip()
         self._all_log_lines.append(line)
         self._log_entry_count = len(self._all_log_lines)
         self._apply_filter()
@@ -215,6 +329,95 @@ class LogTab(QWidget):
     def _start_log_session(self):
         if self._vm:
             self._vm.start_log_stream()
+
+    def _update_host_packet_fields(self):
+        packet_name = self.host_packet_select.currentData()
+        visible_fields = {
+            "none": set(),
+            "ack": {"ack_seq", "ack_response"},
+            "time_sync_set": {"unix_time_ms", "timezone_offset"},
+            "host_transport_set": {"transport"},
+            "log_data": {"log_type", "data"},
+            "log_clear": {"log_type", "offset", "length"},
+        }.get(packet_name, set())
+
+        for key, (label, widget) in self._host_packet_param_rows.items():
+            is_visible = key in visible_fields
+            label.setVisible(is_visible)
+            widget.setVisible(is_visible)
+
+    def _send_selected_host_packet(self):
+        if not self._vm:
+            self.host_packet_status.setText("No ViewModel")
+            return
+
+        packet_name = self.host_packet_select.currentData()
+        try:
+            params = self._collect_host_packet_params(packet_name)
+        except ValueError as exc:
+            self.host_packet_status.setText(str(exc))
+            return
+
+        result = self._vm.send_host_log_packet(packet_name, **params)
+        if result.get("ok"):
+            self.host_packet_status.setText(f"Sent {packet_name} seq={result.get('seq')}")
+        else:
+            self.host_packet_status.setText(result.get("error", "Send failed"))
+
+    def _collect_host_packet_params(self, packet_name):
+        params = {"dst_addr": int(self.host_packet_dst.currentData())}
+
+        if packet_name == "time_sync_set":
+            unix_text = self.host_packet_unix_ms.text().strip()
+            params["unix_time_ms"] = self._parse_optional_int(unix_text, "unix_time_ms")
+            params["timezone_offset"] = self._parse_int_field(
+                self.host_packet_timezone.text().strip() or "420",
+                "timezone_offset",
+            )
+        elif packet_name == "ack":
+            ack_text = self.host_packet_ack_seq.text().strip()
+            if not ack_text:
+                raise ValueError("ack_seq is required")
+            params["ack_seq"] = self._parse_int_field(ack_text, "ack_seq")
+            params["response"] = int(self.host_packet_ack_response.currentData())
+        elif packet_name == "host_transport_set":
+            params["transport"] = int(self.host_packet_transport.currentData())
+        elif packet_name == "log_data":
+            params["log_type"] = int(self.host_packet_log_type.currentData())
+            params["data"] = self._parse_packet_data(self.host_packet_data.text())
+        elif packet_name == "log_clear":
+            params["log_type"] = int(self.host_packet_log_type.currentData())
+            params["offset"] = self._parse_int_field(self.host_packet_offset.text().strip() or "0", "offset")
+            params["length"] = self._parse_int_field(self.host_packet_length.text().strip() or "0", "length")
+
+        return params
+
+    def _parse_optional_int(self, text, field_name):
+        if not text:
+            return None
+        return self._parse_int_field(text, field_name)
+
+    def _parse_int_field(self, text, field_name):
+        try:
+            value = int(text, 0)
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must be a number") from exc
+        if value < 0:
+            raise ValueError(f"{field_name} must be >= 0")
+        return value
+
+    def _parse_packet_data(self, text):
+        raw = (text or "").strip()
+        if not raw:
+            return b""
+        if raw.lower().startswith("text:"):
+            return raw[5:].encode("utf-8")
+
+        normalized = raw.replace(" ", "").replace(",", "").replace("_", "")
+        try:
+            return bytes.fromhex(normalized)
+        except ValueError:
+            return raw.encode("utf-8")
 
     def _on_session_list_updated(self, sessions):
         self.session_table.blockSignals(True)

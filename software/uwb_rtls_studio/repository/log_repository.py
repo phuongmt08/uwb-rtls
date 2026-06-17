@@ -15,6 +15,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 LOG_TYPE_DEVICE_LOG = 1
 LOG_HEADER_LEN = 9
 LOG_LEN_FIELD = 2
+EPOCH_MS_MIN_FOR_DATETIME = 946684800000
 
 OBJECT_LABELS = {
     0x00: "BOOTLOADER",
@@ -58,16 +59,15 @@ class LogRepository(QObject):
         offset = self._offset_by_type.get(log_type, 0)
         self._offset_by_type[log_type] = offset + len(raw)
 
-        entries = self.parse_log_payload(raw, log_type=log_type)
-        for entry in entries:
-            self.log_entry_added.emit(entry)
-
         segment_info = {
             "log_type": log_type,
+            "seq": int(getattr(pkt.hdr, "seq", 0)),
+            "dst_addr": int(getattr(pkt.hdr.addr, "src", 0)),
             "offset": offset,
             "length": len(raw),
-            "entry_count": len(entries),
+            "entries": self.parse_log_payload(raw, log_type=log_type),
         }
+        segment_info["entry_count"] = len(segment_info["entries"])
         self.log_segment_received.emit(segment_info)
         return True
 
@@ -123,7 +123,7 @@ class LogRepository(QObject):
             source = f"{device_side}/{source}"
 
         return {
-            "timestamp": f"{timestamp_ms} ms",
+            "timestamp": self._format_timestamp(timestamp_ms),
             "timestamp_ms": timestamp_ms,
             "level": self._level_name(level_code),
             "level_code": level_code,
@@ -133,6 +133,14 @@ class LogRepository(QObject):
             "log_type": log_type,
             "message": message,
         }
+
+    def _format_timestamp(self, timestamp_ms: int) -> str:
+        if timestamp_ms >= EPOCH_MS_MIN_FOR_DATETIME:
+            try:
+                return datetime.fromtimestamp(timestamp_ms / 1000.0).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            except (OverflowError, OSError, ValueError):
+                pass
+        return str(timestamp_ms)
 
     def _parse_text_records(self, raw: bytes, log_type: int) -> list[dict]:
         text = raw.decode("utf-8", errors="replace")

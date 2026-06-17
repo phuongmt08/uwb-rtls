@@ -25,7 +25,6 @@ import os
 import time
 import argparse
 import re
-import msvcrt
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -45,24 +44,8 @@ from common.transport import VvAddress, HostTransport
 
 # Tuning Constants
 READ_TIMEOUT_S = 0.05
-LOG_BOOTSTRAP_PACKET_GAP_S = 0.2
-LOG_POLL_PERIOD_S = 5.0
-LOG_ACK_RETRY_PERIOD_S = 1.0
-# Total send attempts for one log ACK, including the first send.
-LOG_LOG_ACK_MAX_SEND_ATTEMPTS = 1
-# Total send attempts for one keepalive ACK, including the first send.
-LOG_KEEPALIVE_ACK_MAX_SEND_ATTEMPTS = 3
-LOG_ACK_SETTLE_TIMEOUT_S = 3.0
-LOG_IDLE_KEEPALIVE_S = 15.0
-LOG_RECV_TIMEOUT_S = 0.01
-LOG_END_SESSION_DELAY_S = 0.1
-LOG_FIRST_PACKET_TIMEOUT_S = 3.0
-PRINT_PACKET_TRACE = True
-PACKET_TRACE_TAG_WIDTH = 7
-PACKET_TRACE_NAME_WIDTH = 18
-PACKET_TRACE_COUNT_WIDTH = 5
-PACKET_TRACE_SEQ_WIDTH = 5
-PACKET_TRACE_ADDR_WIDTH = 13
+HOST_ACTIVITY_PING_S = 5.0
+LOG_POLL_PERIOD_S = 0.1
 MAX_RECORD_LEN = 512
 EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
 
@@ -72,9 +55,6 @@ COLOR_RED = "\033[31m"
 COLOR_CYAN = "\033[36m"
 COLOR_YELLOW = "\033[33m"
 COLOR_RESET = "\033[0m"
-COLOR_GRAY = "\033[90m"
-COLOR_BLUE = "\033[34m"
-COLOR_MAGENTA = "\033[35m"
 
 
 BLE_STATE_NAMES = {
@@ -89,6 +69,30 @@ BLE_STATE_NAMES = {
 
 def packet_name(pkt: pb.packet_t) -> str:
     return pkt.WhichOneof("params") or "<none>"
+
+
+def read_control_key() -> str | None:
+    """Return one pending keyboard control char without blocking."""
+    if os.name == "nt":
+        try:
+            import msvcrt
+            if not msvcrt.kbhit():
+                return None
+            key = msvcrt.getwch()
+            if key in ("\x00", "\xe0") and msvcrt.kbhit():
+                msvcrt.getwch()
+                return None
+            return key.lower()
+        except Exception:
+            return None
+
+    try:
+        import select
+        if select.select([sys.stdin], [], [], 0)[0]:
+            return sys.stdin.read(1).lower()
+    except Exception:
+        return None
+    return None
 
 
 class FlashLogStreamParser:
@@ -171,44 +175,24 @@ class FlashLogStreamParser:
 
 class BleLogTester:
     def __init__(self, session: VvTestSession, factory: CommandFactory, src: int, dst: int,
-                 verbose: bool = False, calibration: bool = False, args=None):
+                 verbose: bool = False, clear_first: bool = False, calibration: bool = False, args=None):
         self.session = session
         self.factory = factory
         self.src = src
         self.dst = dst
         self.verbose = verbose
+        self.clear_first = clear_first
         self.calibration = calibration
         self.log_parser = FlashLogStreamParser()
         self.last_rx_time = time.time()
-        self.last_mcu_rx_time = 0.0
-        self.latest_mcu_rx_seq: Optional[int] = None
-        self.latest_mcu_ackable_seq: Optional[int] = None
-        self.log_session_started = False
-        self.log_first_packet_seen = False
-        self.log_start_deadline = 0.0
+        self.last_ping = 0.0
         self.last_poll = 0.0
-        self.pending_log_ack_seq: Optional[int] = None
-        self.pending_log_ack_dst: Optional[int] = None
-        self.pending_log_ack_confirm_seq: Optional[int] = None
-        self.pending_log_ack_sent_at = 0.0
-        self.pending_log_ack_started_at = 0.0
-        self.pending_log_ack_retries = 0
-        self.pending_none_ack_seq: Optional[int] = None
-        self.pending_none_reply_ack_seq: Optional[int] = None
-        self.pending_none_reply_ack_dst: Optional[int] = None
-        self.pending_none_reply_ack_confirm_seq: Optional[int] = None
-        self.pending_none_reply_ack_sent_at = 0.0
-        self.pending_none_reply_ack_retries = 0
-        self.tx_counts: Dict[str, int] = {}
-        self.rx_counts: Dict[str, int] = {}
-        self.tx_total = 0
-        self.rx_total = 0
-        self.tx_ack_sent = 0
-        self.tx_log_clear_sent = 0
-        self.rx_from_mcu = 0
-        self.rx_log_data_bytes = 0
-        self.rx_log_records = 0
-        self.stop_requested = False
+        self.log_poll_period_s = max(0.001, float(getattr(args, "log_poll_ms", LOG_POLL_PERIOD_S * 1000)) / 1000.0)
+        self.log_poll_enabled = not bool(getattr(args, "no_log_poll", False))
+        self.auto_send_command = "get"
+        self.auto_send_args: List[str] = []
+        self.packet_send_counts: Dict[str, int] = {}
+        self.log_poll_sent = 0
 
         self.record = args.record if args else None
         self.log_file = None
@@ -233,112 +217,7 @@ class BleLogTester:
             self.uwb_file.close()
 
     def _send_packet(self, pkt: pb.packet_t) -> None:
-        name = packet_name(pkt)
-        self.tx_counts[name] = self.tx_counts.get(name, 0) + 1
-        self.tx_total += 1
-        count = self.tx_counts[name]
-        if name == "ack":
-            self.tx_ack_sent += 1
-        elif name == "log_clear":
-            self.tx_log_clear_sent += 1
-        self._print_tx_packet(pkt, name, count)
         self.session.send_packet(pkt)
-
-    @staticmethod
-    def _format_counts(counts: Dict[str, int]) -> str:
-        if not counts:
-            return "none"
-        return ",".join(f"{name}={count}" for name, count in sorted(counts.items()))
-
-    @staticmethod
-    def _addr_text(value: int) -> str:
-        try:
-            addr = VvAddress(int(value))
-            return f"{addr.name}({int(addr)})"
-        except (ValueError, TypeError):
-            return f"UNKNOWN({value})"
-
-    @classmethod
-    def _packet_hdr_values(cls, pkt: pb.packet_t) -> Tuple[str, str, str]:
-        try:
-            return (
-                str(pkt.hdr.seq),
-                cls._addr_text(int(pkt.hdr.addr.src)),
-                cls._addr_text(int(pkt.hdr.addr.dst)),
-            )
-        except (AttributeError, TypeError, ValueError):
-            return "?", "?", "?"
-
-    @staticmethod
-    def _packet_extra_text(pkt: pb.packet_t, name: str) -> str:
-        if name == "ack":
-            return f"ack_seq={pkt.ack.ack_seq} response={pkt.ack.response}"
-        if name == "log_clear":
-            return f"type={pkt.log_clear.type} offset={pkt.log_clear.offset} length={pkt.log_clear.length}"
-        if name == "log_data":
-            return f"type={pkt.log_data.type} bytes={len(pkt.log_data.data)}"
-        if name == "host_transport_set":
-            return f"transport={pkt.host_transport_set.transport}"
-        return ""
-
-    def _packet_display_name(self, pkt: pb.packet_t, name: str) -> str:
-        if name != "ack":
-            return name
-
-        try:
-            src = VvAddress(int(pkt.hdr.addr.src))
-            return f"{src.name.lower()}_ack"
-        except (AttributeError, TypeError, ValueError):
-            return name
-
-    def _format_packet_trace(self, tag: str, pkt: pb.packet_t, name: str, count: int) -> str:
-        seq, src, dst = self._packet_hdr_values(pkt)
-        display_name = self._packet_display_name(pkt, name)
-        extra = self._packet_extra_text(pkt, name)
-        suffix = f" {extra}" if extra else ""
-        return (
-            f"{tag:<{PACKET_TRACE_TAG_WIDTH}} "
-            f"{display_name:<{PACKET_TRACE_NAME_WIDTH}} "
-            f"#{count:<{PACKET_TRACE_COUNT_WIDTH}} "
-            f"seq={seq:<{PACKET_TRACE_SEQ_WIDTH}} "
-            f"src={src:<{PACKET_TRACE_ADDR_WIDTH}} "
-            f"dst={dst:<{PACKET_TRACE_ADDR_WIDTH}}"
-            f"{suffix}"
-        )
-
-    def _print_tx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
-        if not PRINT_PACKET_TRACE:
-            return
-
-        if name == "log_data":
-            prefix = "[POLL]"
-            color = COLOR_CYAN
-        elif name == "ack":
-            prefix = "[ACK]"
-            color = COLOR_GRAY
-        elif name == "log_clear":
-            prefix = "[CLEAR]"
-            color = COLOR_GRAY
-        else:
-            prefix = "[TX]"
-            color = COLOR_GRAY
-        print(
-            f"{color}{self._format_packet_trace(prefix, pkt, name, count)}{COLOR_RESET}",
-            flush=True,
-        )
-
-    def _print_rx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
-        if not PRINT_PACKET_TRACE:
-            return
-
-        if name == "log_data":
-            color = COLOR_GRAY
-        else:
-            color = COLOR_GRAY
-        print(
-            f"{color}{self._format_packet_trace('[RX]', pkt, name, count)}{COLOR_RESET}",
-            flush=True,
-        )
 
     def _build_none(self) -> pb.packet_t:
         pkt = pb.packet_t()
@@ -347,11 +226,6 @@ class BleLogTester:
         pkt.hdr.seq = self.session.proto.next_seq()
         pkt.none.dummy = 0
         return pkt
-
-    def _send_none(self) -> None:
-        pkt = self._build_none()
-        self.pending_none_ack_seq = int(pkt.hdr.seq)
-        self._send_packet(pkt)
 
     def _build_transport_set(self) -> pb.packet_t:
         pkt = pb.packet_t()
@@ -369,9 +243,17 @@ class BleLogTester:
         pkt.log_data.type = pb.LOG_TYPE_DEVICE_LOG
         return pkt
 
-    def _send_log_poll(self) -> None:
-        poll_pkt = self._build_log_data_get()
-        self._send_packet(poll_pkt)
+    def _send_log_data_get(self, reason: str) -> None:
+        pkt = self._build_log_data_get()
+        self._send_packet(pkt)
+        self.last_poll = time.time()
+        self.log_poll_sent += 1
+        period_ms = int(self.log_poll_period_s * 1000)
+        print(
+            f"{COLOR_CYAN}[POLL] log_data_get #{self.log_poll_sent} "
+            f"seq={pkt.hdr.seq} reason={reason} period={period_ms}ms{COLOR_RESET}",
+            flush=True,
+        )
 
     def _build_time_sync_set(self) -> pb.packet_t:
         pkt = pb.packet_t()
@@ -396,204 +278,191 @@ class BleLogTester:
         pkt.ack.response = pb.PACKET_ACK_RESPONSE_ACK
         return pkt
 
-    def _send_ack_for_packet(self, pkt: pb.packet_t) -> None:
-        """Reply to an incoming packet with a transport ACK.
+    def _build_log_clear_all(self) -> pb.packet_t:
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = self.src
+        pkt.hdr.addr.dst = self.dst
+        pkt.hdr.seq = self.session.proto.next_seq()
+        pkt.log_clear.type = pb.LOG_TYPE_DEVICE_LOG
+        pkt.log_clear.offset = 0
+        pkt.log_clear.length = 0xFFFFFFFF
+        return pkt
 
-        Keep this separate from log ACK tracking so ACK-of-ACK replies do not
-        interfere with the log-state machine.
-        """
-        ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
-        self._send_packet(ack_pkt)
-
-    def _track_log_ack(self, ack_pkt: pb.packet_t) -> None:
-        self.pending_log_ack_seq = int(ack_pkt.ack.ack_seq)
-        self.pending_log_ack_dst = int(ack_pkt.hdr.addr.dst)
-        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
-        self.pending_log_ack_sent_at = time.time()
-        self.pending_log_ack_started_at = self.pending_log_ack_sent_at
-        self.pending_log_ack_retries = 0
-
-    def _clear_pending_log_ack(self) -> None:
-        self.pending_log_ack_seq = None
-        self.pending_log_ack_dst = None
-        self.pending_log_ack_confirm_seq = None
-        self.pending_log_ack_sent_at = 0.0
-        self.pending_log_ack_started_at = 0.0
-        self.pending_log_ack_retries = 0
-
-    def _track_none_reply_ack(self, ack_pkt: pb.packet_t) -> None:
-        self.pending_none_reply_ack_seq = int(ack_pkt.ack.ack_seq)
-        self.pending_none_reply_ack_dst = int(ack_pkt.hdr.addr.dst)
-        self.pending_none_reply_ack_confirm_seq = int(ack_pkt.hdr.seq)
-        self.pending_none_reply_ack_sent_at = time.time()
-        self.pending_none_reply_ack_retries = 0
-
-    def _clear_pending_none_reply_ack(self) -> None:
-        self.pending_none_reply_ack_seq = None
-        self.pending_none_reply_ack_dst = None
-        self.pending_none_reply_ack_confirm_seq = None
-        self.pending_none_reply_ack_sent_at = 0.0
-        self.pending_none_reply_ack_retries = 0
-
-    def request_stop(self) -> None:
-        self.stop_requested = True
-
-    def clear_stop_request(self) -> None:
-        self.stop_requested = False
-
-    def _retry_pending_log_ack(self, now: float) -> None:
-        if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
-            return
-
-        if self.latest_mcu_ackable_seq is not None and self.pending_log_ack_seq != self.latest_mcu_ackable_seq:
-            self._clear_pending_log_ack()
-            return
-
-        if self.pending_log_ack_retries >= max(0, LOG_LOG_ACK_MAX_SEND_ATTEMPTS - 1):
-            self._clear_pending_log_ack()
-            return
-
-        if now - self.pending_log_ack_sent_at < LOG_ACK_RETRY_PERIOD_S:
-            return
-
-        self.pending_log_ack_retries += 1
-        self.pending_log_ack_sent_at = now
-        ack_pkt = self._build_ack(self.pending_log_ack_seq, self.pending_log_ack_dst)
-        self._send_packet(ack_pkt)
-        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
-
-    def _retry_pending_none_reply_ack(self, now: float) -> None:
-        if self.pending_none_reply_ack_seq is None or self.pending_none_reply_ack_dst is None:
-            return
-
-        if self.latest_mcu_rx_seq is not None and self.pending_none_reply_ack_seq != self.latest_mcu_rx_seq:
-            self._clear_pending_none_reply_ack()
-            return
-
-        if self.pending_none_reply_ack_retries >= max(0, LOG_KEEPALIVE_ACK_MAX_SEND_ATTEMPTS - 1):
-            self._clear_pending_none_reply_ack()
-            return
-
-        if now - self.pending_none_reply_ack_sent_at < LOG_ACK_RETRY_PERIOD_S:
-            return
-
-        self.pending_none_reply_ack_retries += 1
-        self.pending_none_reply_ack_sent_at = now
-        ack_pkt = self._build_ack(self.pending_none_reply_ack_seq, self.pending_none_reply_ack_dst)
-        self._send_packet(ack_pkt)
-        self.pending_none_reply_ack_confirm_seq = int(ack_pkt.hdr.seq)
-
-    def send_end_session(self, reason: int) -> None:
+    def _build_end_session(self, reason: int = pb.SESSION_END_REASON_LOG_DATA) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
         pkt.hdr.addr.dst = self.dst
         pkt.hdr.seq = self.session.proto.next_seq()
         pkt.end_session.reason = reason
+        return pkt
+
+    def send_end_session(self, reason: int) -> None:
+        self._send_packet(self._build_end_session(reason))
+
+    def _build_packet_from_command(self, command: str, args: List[str]) -> Tuple[str, pb.packet_t]:
+        if command in ("none", "ping"):
+            return "none", self._build_none()
+        if command in ("get", "log", "log_data", "log_data_get"):
+            return "log_data_get", self._build_log_data_get()
+        if command in ("clear", "log_clear"):
+            return "log_clear", self._build_log_clear_all()
+        if command in ("time", "time_sync", "time_sync_set"):
+            return "time_sync_set", self._build_time_sync_set()
+        if command in ("transport", "transport_set", "host_transport_set"):
+            return "host_transport_set", self._build_transport_set()
+        if command in ("end", "end_session"):
+            return "end_session", self._build_end_session()
+        if command == "ack":
+            if not args:
+                raise ValueError("ack needs: ack <seq> [dst]")
+            ack_seq = int(args[0], 0)
+            dst = int(args[1], 0) if len(args) > 1 else self.dst
+            return "ack", self._build_ack(ack_seq, dst)
+        raise ValueError(f"unknown packet command: {command}")
+
+    def _reset_packet_counts(self) -> None:
+        self.packet_send_counts.clear()
+
+    def _format_packet_counts(self) -> str:
+        if not self.packet_send_counts:
+            return "none"
+        return ", ".join(f"{name}={count}" for name, count in sorted(self.packet_send_counts.items()))
+
+    def _send_command_packet(self, command: str, args: Optional[List[str]] = None, reason: str = "manual") -> None:
+        name, pkt = self._build_packet_from_command(command, args or [])
         self._send_packet(pkt)
+        self.packet_send_counts[name] = self.packet_send_counts.get(name, 0) + 1
+        if name == "log_data_get":
+            self.log_poll_sent += 1
+        print(
+            f"{COLOR_CYAN}[TX] {name} #{self.packet_send_counts[name]} "
+            f"seq={pkt.hdr.seq} reason={reason}{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _print_command_help(self) -> None:
+        print(
+            f"{COLOR_CYAN}"
+            "Packet commands:\n"
+            "  get [ms]          -> log_data_get\n"
+            "  clear [ms]        -> log_clear all device logs\n"
+            "  time [ms]         -> time_sync_set\n"
+            "  transport [ms]    -> host_transport_set USB\n"
+            "  none [ms]         -> none/ping\n"
+            "  end [ms]          -> end_session LOG_DATA\n"
+            "  ack <seq> [dst]   -> ack packet\n"
+            "  auto <cmd> [ms]   -> same as '<cmd> [ms]'\n"
+            "Controls: SPACE stops current sender and resets terminal counts; quit exits.\n"
+            "Examples: get, get 100, clear, auto transport 1000"
+            f"{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _parse_command_line(self, line: str) -> Tuple[str, List[str], Optional[float]]:
+        parts = line.strip().split()
+        if not parts:
+            return self.auto_send_command, list(self.auto_send_args), None
+
+        cmd = parts[0].lower()
+        args = parts[1:]
+
+        if cmd in ("q", "quit", "exit"):
+            raise KeyboardInterrupt
+        if cmd in ("h", "help", "?"):
+            self._print_command_help()
+            return self._prompt_for_packet_command()
+        if cmd in ("s", "stop", "pause"):
+            return "stop", [], None
+        if cmd in ("r", "resume"):
+            return self.auto_send_command, list(self.auto_send_args), None
+
+        period_s = None
+        if cmd == "auto":
+            if args:
+                cmd = args[0].lower()
+                args = args[1:]
+            else:
+                cmd = self.auto_send_command
+                args = list(self.auto_send_args)
+            if len(args) > 1:
+                period_s = max(0.001, float(args[-1]) / 1000.0)
+                args = args[:-1]
+
+        if cmd != "ack" and args:
+            period_s = max(0.001, float(args[0]) / 1000.0)
+            args = args[1:]
+
+        self._build_packet_from_command(cmd, args)
+        return cmd, args, period_s
+
+    def _prompt_for_packet_command(self) -> Tuple[str, List[str], Optional[float]]:
+        while True:
+            try:
+                line = input(f"{COLOR_GREEN}packet> {COLOR_RESET}").strip()
+                return self._parse_command_line(line)
+            except KeyboardInterrupt:
+                raise
+            except ValueError as exc:
+                print(f"{COLOR_RED}[CMD] {exc}{COLOR_RESET}", flush=True)
+
+    def _start_auto_send(self, command: str, args: Optional[List[str]] = None, period_s: Optional[float] = None) -> None:
+        if command == "stop":
+            self.log_poll_enabled = False
+            return
+        self.auto_send_command = command
+        self.auto_send_args = list(args or [])
+        if period_s is not None:
+            self.log_poll_period_s = period_s
+        self._reset_packet_counts()
+        self.log_poll_enabled = True
+        self.last_poll = 0.0
+        print(
+            f"{COLOR_GREEN}[AUTO] sending {self.auto_send_command} "
+            f"period={int(self.log_poll_period_s * 1000)}ms. Press SPACE to stop/change.{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _stop_auto_send(self, reason: str) -> None:
+        self.log_poll_enabled = False
+        print(
+            f"\n{COLOR_YELLOW}[AUTO] stopped by {reason}. "
+            f"counts: {self._format_packet_counts()}{COLOR_RESET}",
+            flush=True,
+        )
+        self._reset_packet_counts()
+        self._print_command_help()
 
     def bootstrap(self) -> None:
         print("[*] Bootstrapping log session with remote MCU...")
-        self._send_none()
-        time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
+        self._send_packet(self._build_none())
+        time.sleep(0.2)
         self._send_packet(self._build_time_sync_set())
-        time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
+        time.sleep(0.2)
         self._send_packet(self._build_transport_set())
-        time.sleep(LOG_BOOTSTRAP_PACKET_GAP_S)
-        self._send_log_poll()
-        self.log_session_started = True
-        self.log_start_deadline = time.time() + LOG_FIRST_PACKET_TIMEOUT_S
-        self.last_poll = time.time()
-        print(f"[*] Waiting up to {LOG_FIRST_PACKET_TIMEOUT_S:.1f}s for first log packet...")
+        time.sleep(0.2)
+        if self.clear_first:
+            self._send_packet(self._build_log_clear_all())
+            time.sleep(0.2)
+        print(f"{COLOR_YELLOW}[POLL] choose a packet command to start sending{COLOR_RESET}", flush=True)
 
-    def _handle_log_data_packet(self, pkt: pb.packet_t) -> None:
-        self.log_first_packet_seen = True
-        payload = bytes(pkt.log_data.data)
-        lines = self.log_parser.feed(payload)
-        self.rx_log_data_bytes += len(payload)
-        self.rx_log_records += len(lines)
-        for line in lines:
-            print(line)
+    def _handle_control_key(self) -> None:
+        key = read_control_key()
+        if key is None:
+            return
 
-            # Strip ANSI escape codes for local logging
-            clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+        if key == " ":
+            self._stop_auto_send("space")
+            return
 
-            if self.calibration and self.log_file is not None:
-                self.log_file.write(clean_line + '\n')
-                self.log_file.flush()
-
-            if self.record == "uwb" and self.uwb_file is not None:
-                if "[ERROR]" in clean_line:
-                    self.frame_error_count += 1
-
-                # Match primary distance: "[TAG] Distance: 6.652 m [A:4 RSSI:0dBm]"
-                dist_match = re.search(r"Distance:\s+([\d.]+)\s+m\s+\[A:(\d+)\s+RSSI:(-?\d+)dBm\]", clean_line)
-                if dist_match:
-                    dist, aid, rssi = dist_match.group(1), dist_match.group(2), dist_match.group(3)
-                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                    self.uwb_file.write(f"{ts},distance,{aid},{dist},{rssi},,,, ,{self.frame_error_count}\n")
-                    self.uwb_file.flush()
-                    continue
-
-                # Match position: "Tril Px=1.234m Py=5.678m Z=0.44m | Error: +/-0.100m"
-                pos_match = re.search(r"Tril Px=([\d.-]+)m Py=([\d.-]+)m Z=([\d.-]+)m\s+\|\s+Error:\s+.([\d.]+)", clean_line)
-                if pos_match:
-                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                    x, y, z, err = pos_match.group(1), pos_match.group(2), pos_match.group(3), pos_match.group(4)
-                    self.uwb_file.write(f"{ts},position,,, ,{x},{y},{z},{err},{self.frame_error_count}\n")
-                    self.uwb_file.flush()
-                elif "[ERROR]" in clean_line:
-                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                    self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
-                    self.uwb_file.flush()
-
-        ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
-        self._send_packet(ack_pkt)
-        self._track_log_ack(ack_pkt)
-
+        if key == "q":
+            raise KeyboardInterrupt
     def _process_packet(self, pkt: pb.packet_t) -> None:
         self.last_rx_time = time.time()
         name = packet_name(pkt)
-        self.rx_counts[name] = self.rx_counts.get(name, 0) + 1
-        self.rx_total += 1
-        self._print_rx_packet(pkt, name, self.rx_counts[name])
-        try:
-            if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
-                self.rx_from_mcu += 1
-                self.last_mcu_rx_time = self.last_rx_time
-                self.latest_mcu_rx_seq = int(pkt.hdr.seq)
-                if name != "ack":
-                    self.latest_mcu_ackable_seq = int(pkt.hdr.seq)
-                    self._clear_pending_none_reply_ack()
-        except (AttributeError, ValueError):
-            pass
-
-        if name == "ack":
-            try:
-                if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
-                    if self.pending_none_ack_seq is not None and int(pkt.ack.ack_seq) == self.pending_none_ack_seq:
-                        ack_pkt = self._build_ack(int(pkt.hdr.seq), int(pkt.hdr.addr.src))
-                        self._send_packet(ack_pkt)
-                        self._track_none_reply_ack(ack_pkt)
-                        self.pending_none_ack_seq = None
-                    if self.pending_log_ack_confirm_seq is not None and int(pkt.ack.ack_seq) == self.pending_log_ack_confirm_seq:
-                        print(f"[FLOW]  host_ack confirmed by MCU seq={self.pending_log_ack_confirm_seq}")
-                        self._clear_pending_log_ack()
-                    if (
-                        self.pending_none_reply_ack_confirm_seq is not None
-                        and int(pkt.ack.ack_seq) == self.pending_none_reply_ack_confirm_seq
-                    ):
-                        self._clear_pending_none_reply_ack()
-            except (AttributeError, ValueError):
-                pass
 
         if name == "log_data":
-            self._handle_log_data_packet(pkt)
-            return
-
             payload = bytes(pkt.log_data.data)
             lines = self.log_parser.feed(payload)
-            self.rx_log_data_bytes += len(payload)
-            self.rx_log_records += len(lines)
             for line in lines:
                 print(line)
 
@@ -629,6 +498,10 @@ class BleLogTester:
                         self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
                         self.uwb_file.flush()
 
+            ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
+            self._send_packet(ack_pkt)
+            return
+
         if name == "ble_status_resp":
             state = pkt.ble_status_resp.state
             state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})")
@@ -645,57 +518,34 @@ class BleLogTester:
             print(f"[PKT] {name} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
 
     def loop(self) -> None:
+        print(
+            f"{COLOR_CYAN}[POLL] period={int(self.log_poll_period_s * 1000)}ms. "
+            f"Type help for packet commands; press SPACE while sending to stop/change.{COLOR_RESET}",
+            flush=True,
+        )
+        self._print_command_help()
+        cmd, args, period_s = self._prompt_for_packet_command()
+        self._start_auto_send(cmd, args, period_s)
         while True:
-            self.poll_once()
-            if self.stop_requested:
-                return
+            now = time.time()
 
-    def poll_once(self) -> None:
-        if self.stop_requested:
-            return
+            self._handle_control_key()
+            if not self.log_poll_enabled:
+                cmd, args, period_s = self._prompt_for_packet_command()
+                self._start_auto_send(cmd, args, period_s)
+                now = time.time()
 
-        packets = self.session.recv_packets(timeout_s=LOG_RECV_TIMEOUT_S)
-        for pkt in packets:
-            self._process_packet(pkt)
+            if now - self.last_ping >= HOST_ACTIVITY_PING_S:
+                self._send_packet(self._build_none())
+                self.last_ping = now
 
-        now = time.time()
-        self._retry_pending_log_ack(now)
-        self._retry_pending_none_reply_ack(now)
+            if self.log_poll_enabled and now - self.last_poll >= self.log_poll_period_s:
+                self._send_command_packet(self.auto_send_command, self.auto_send_args, reason="periodic")
+                self.last_poll = now
 
-        if (
-            self.log_session_started
-            and not self.log_first_packet_seen
-            and now >= self.log_start_deadline
-            and self.pending_log_ack_seq is None
-            and now - self.last_poll >= LOG_POLL_PERIOD_S
-        ):
-            self._send_log_poll()
-            self.last_poll = now
-
-        # Keep-alive ping: only send if we haven't received anything from MCU for a while.
-        # This completely avoids packet collisions while logs are actively streaming.
-        if now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
-            self._send_none()
-            self.last_rx_time = now
-
-
-def _device_uuid_text(p: pb.packet_t) -> str:
-    scan = p.ble_scan_result
-    if hasattr(scan, "uuid") and scan.uuid:
-        raw = bytes(scan.uuid)
-        if len(raw) == 16:
-            return "-".join(
-                [
-                    raw[0:4].hex(),
-                    raw[4:6].hex(),
-                    raw[6:8].hex(),
-                    raw[8:10].hex(),
-                    raw[10:16].hex(),
-                ]
-            ).upper()
-        return raw.hex().upper()
-    return ""
-
+            packets = self.session.recv_packets(timeout_s=0.01)
+            for pkt in packets:
+                self._process_packet(pkt)
 
 def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                                src: int, central_dst: int, scan_timeout_s: float = 6.0,
@@ -855,46 +705,22 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
     time.sleep(1.0)
     return selected_mac, selected_name
 
-
-def _poll_hotkey() -> Optional[str]:
-    while msvcrt.kbhit():
-        ch = msvcrt.getwch()
-        if ch in ("q", "Q", "x", "X"):
-            return "stop"
-        if ch in ("p", "P"):
-            return "poll"
-    return None
-
-
-def _run_log_session(session: VvTestSession, factory: CommandFactory, src_addr: int, mcu_dst: int,
-                     tester: BleLogTester, central_dst: int) -> None:
-    tester.clear_stop_request()
-    print(f"\n{COLOR_CYAN}=== STARTING BLE LOG VIEWER ==={COLOR_RESET}")
-    print(f"{COLOR_YELLOW}[HOTKEY] Press 'p' to send log_data_get. Press 'q' or 'x' to stop log, disconnect, and rescan.{COLOR_RESET}")
-    tester.bootstrap()
-
-    try:
-        while not tester.stop_requested:
-            tester.poll_once()
-
-            hotkey = _poll_hotkey()
-            if hotkey == "stop":
-                tester.request_stop()
-                break
-            if hotkey == "poll":
-                print("[HOTKEY] Sending log_data_get...")
-                tester._send_log_poll()
-                tester.last_poll = time.time()
-    finally:
-        print(f"\n{COLOR_YELLOW}[*] Stopping log session... sending end_session and disconnecting current device.{COLOR_RESET}")
-        try:
-            tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
-            time.sleep(LOG_END_SESSION_DELAY_S)
-            session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
-            time.sleep(0.2)
-        except Exception as exc:
-            print(f"{COLOR_RED}[WARN] Failed to stop session cleanly: {exc}{COLOR_RESET}")
-
+def _device_uuid_text(p: pb.packet_t) -> str:
+    scan = p.ble_scan_result
+    if hasattr(scan, "uuid") and scan.uuid:
+        raw = bytes(scan.uuid)
+        if len(raw) == 16:
+            return "-".join(
+                [
+                    raw[0:4].hex(),
+                    raw[4:6].hex(),
+                    raw[6:8].hex(),
+                    raw[8:10].hex(),
+                    raw[10:16].hex(),
+                ]
+            ).upper()
+        return raw.hex().upper()
+    return ""
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Real-time BLE capture and MCU logs viewer")
@@ -903,8 +729,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mac", type=str, default=None, help="Connect directly to this MAC (hex with colons, e.g. AA:BB:CC:DD:EE:FF)")
     parser.add_argument("--name", type=str, default=None, help="Scan only for devices containing this string in their name")
     parser.add_argument("--verbose", action="store_true", help="Print all non-log packet types")
+    parser.add_argument("--clear-first", action="store_true", help="Clear flash log backlog before streaming")
     parser.add_argument("--calibration", action="store_true", help="Save logs to a calibration file")
     parser.add_argument("--record", choices=["uwb"], help="Record specific UWB data to a CSV file")
+    parser.add_argument("--log-poll-ms", type=float, default=LOG_POLL_PERIOD_S * 1000, help="Period for sending log_data_get packets in milliseconds (default: 100)")
+    parser.add_argument("--no-log-poll", action="store_true", help="Compatibility flag; interactive prompt always asks before sending")
     parser.add_argument("--src", type=int, default=int(VvAddress.HOST), help="Source address (default: HOST=5)")
     parser.add_argument("--dst", type=int, default=int(VvAddress.MCU), help="MCU Destination address (default: MCU=1)")
     parser.add_argument("--central-dst", type=int, default=int(VvAddress.CENTRAL), help="Central Destination address (default: CENTRAL=3)")
@@ -955,30 +784,46 @@ def main() -> int:
         factory = CommandFactory()
 
         with VvTestSession(port, args.baud, debug=args.verbose) as session:
-            while True:
-                res = step_auto_scan_and_connect(
-                    session=session,
-                    factory=factory,
-                    src=src_addr,
-                    central_dst=central_dst,
-                    expected_mac=expected_mac,
-                    target_name_filter=args.name
-                )
-                if not res:
-                    return 1
+            # 1. Connect to BLE target
+            res = step_auto_scan_and_connect(
+                session=session,
+                factory=factory,
+                src=src_addr,
+                central_dst=central_dst,
+                expected_mac=expected_mac,
+                target_name_filter=args.name
+            )
+            if not res:
+                return 1
 
-                tester = BleLogTester(
-                    session=session,
-                    factory=factory,
-                    src=src_addr,
-                    dst=mcu_dst,
-                    verbose=args.verbose,
-                    calibration=args.calibration,
-                    args=args
-                )
+            target_mac, target_name = res
 
-                _run_log_session(session, factory, src_addr, mcu_dst, tester, central_dst)
-                print(f"{COLOR_GREEN}[+] Log session stopped. Re-entering scan flow...{COLOR_RESET}")
+            # 2. Initialize and loop logs capture
+            tester = BleLogTester(
+                session=session,
+                factory=factory,
+                src=src_addr,
+                dst=mcu_dst,
+                verbose=args.verbose,
+                clear_first=args.clear_first,
+                calibration=args.calibration,
+                args=args
+            )
+
+            print(f"\n{COLOR_CYAN}=== STARTING BLE LOG VIEWER (Press Ctrl+C to exit) ==={COLOR_RESET}\n")
+            tester.bootstrap()
+            
+            try:
+                tester.loop()
+            except KeyboardInterrupt:
+                print(f"\n{COLOR_YELLOW}[*] Stopping... Sending end_session to remote MCU.{COLOR_RESET}")
+                tester.send_end_session(pb.SESSION_END_REASON_LOG_DATA)
+                time.sleep(0.1)
+                
+                print(f"{COLOR_YELLOW}[*] Disconnecting BLE from Central...{COLOR_RESET}")
+                session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
+                time.sleep(0.2)
+                return 0
 
     except KeyboardInterrupt:
         print(f"\n{COLOR_YELLOW}[*] Stopping...{COLOR_RESET}")
