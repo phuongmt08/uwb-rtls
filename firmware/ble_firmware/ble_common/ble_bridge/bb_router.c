@@ -168,7 +168,16 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
 
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
     {
-        NRF_LOG_INFO("bb_router: Decoded packet cmd_id=%u", pkt.which_params);
+        if (pkt.which_params == 43) {
+            uint32_t seq = (pkt.has_hdr) ? pkt.hdr.seq : 0;
+            NRF_LOG_INFO("bb_router: Decoded packet cmd_id=43 seq=%u", (unsigned)seq);
+        } else if (pkt.which_params == protobuf_packet_t_ack_tag &&
+                   pkt.has_hdr && pkt.hdr.has_addr &&
+                   pkt.hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+            NRF_LOG_INFO("bb_router: Decoded packet cmd_id=3 ack_seq=%u", (unsigned)pkt.params.ack.ack_seq);
+        } else {
+            NRF_LOG_INFO("bb_router: Decoded packet cmd_id=%u", pkt.which_params);
+        }
         if (pkt.has_hdr && pkt.hdr.has_addr)
         {
             uint32_t addr = pkt.hdr.addr.dst;

@@ -162,7 +162,7 @@ class LogModel(QObject):
             return {"ok": False, "error": str(exc)}
 
     def acknowledge_log_segment(self, segment_info: dict) -> bool:
-        if not self._command_bus or segment_info.get("length", 0) <= 0:
+        if not self._command_bus:
             return False
 
         try:
@@ -193,10 +193,10 @@ class LogModel(QObject):
         self._log_first_segment_seen = True
         self._latest_mcu_log_seq = int(segment_info.get("seq", 0))
         self._print_rx_log_segment(segment_info)
+        self.acknowledge_log_segment(segment_info)
         for entry in segment_info.get("entries", []):
             self._append_entry(entry)
         self.log_segment_received.emit(segment_info)
-        self.acknowledge_log_segment(segment_info)
         self._flush_deferred_ack_trace(int(segment_info.get("seq", 0)))
 
     def _append_entry(self, entry: dict) -> None:
@@ -270,11 +270,11 @@ class LogModel(QObject):
             self._clear_pending_log_ack()
             return False
 
-        if now - self._pending_log_ack_sent_at < self.LOG_ACK_RETRY_PERIOD_S:
-            return False
-
         if self._pending_log_ack_retries >= max(0, self.LOG_LOG_ACK_MAX_SEND_ATTEMPTS - 1):
             self._clear_pending_log_ack()
+            return False
+
+        if now - self._pending_log_ack_sent_at < self.LOG_ACK_RETRY_PERIOD_S:
             return False
 
         try:

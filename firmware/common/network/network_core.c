@@ -13,6 +13,7 @@
 volatile network_core_rx_debug_stats_t g_network_core_rx_debug_stats;
 volatile int32_t g_network_core_waiting_ack_tracker_index = -1;
 volatile uint32_t g_network_core_waiting_ack_seq = 0;
+volatile uint32_t g_network_core_last_tx_seq = 0;
 
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
@@ -340,6 +341,7 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     packet->hdr.addr.src = (uint8_t)core->local_addr;
     packet->hdr.addr.dst = dst;
     packet->hdr.seq = (core->tx_seq)++;
+    g_network_core_last_tx_seq = packet->hdr.seq;
 
     if (dst == protobuf_PACKET_ADDR_BCAST) {
         bool sent = false;
@@ -370,8 +372,7 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     }
 
     if (tx_stream == STREAM_BLE_TX) {
-        network_core_send_ble_packet(core, tx_stream, packet);
-        return true;
+        return network_core_send_ble_packet(core, tx_stream, packet);
     }
 
     if (!network_core_encode_and_send(core, tx_stream, packet)) {

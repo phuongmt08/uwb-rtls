@@ -46,6 +46,7 @@ typedef struct {
 extern volatile network_core_rx_debug_stats_t g_network_core_rx_debug_stats;
 extern volatile int32_t g_network_core_waiting_ack_tracker_index;
 extern volatile uint32_t g_network_core_waiting_ack_seq;
+extern volatile uint32_t g_network_core_last_tx_seq;
 
 typedef struct {
     bool enabled;

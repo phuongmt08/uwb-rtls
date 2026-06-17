@@ -38,6 +38,7 @@ import logging
 import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
+from google.protobuf.message import DecodeError
 
 # Add common to path
 _common_dir = os.path.normpath(
@@ -71,6 +72,7 @@ class ProtocolService(QObject):
         self._seq = 0
         self._seq_lock = threading.Lock()
         self._packet_repository = None
+        self._last_log_data_seq: int | None = None
 
         # Connect serial RX → decode
         self._serial.data_received.connect(self.on_serial_data)
@@ -100,7 +102,17 @@ class ProtocolService(QObject):
             shared_raw_packet_store.append_serial_chunk(RawSerialChunk.from_bytes(data))
 
         try:
-            packets = self._protocol.decode_from_frames(data)
+            packets = []
+            for chunk in self._protocol.hdlc.feed(data):
+                if chunk.frame_type != FRAME_TYPE_PROTOBUF:
+                    continue
+
+                try:
+                    packets.append(self._protocol.decode_packet(chunk.payload))
+                except DecodeError as exc:
+                    msg = f"Protobuf decode error: payload_len={len(chunk.payload)} err={exc}"
+                    log.warning(msg)
+                    self.decode_error.emit(msg)
         except Exception as e:
             self.decode_error.emit(f"HDLC decode error: {e}")
             return
@@ -109,6 +121,9 @@ class ProtocolService(QObject):
             param = pkt.WhichOneof("params")
             if param is None:
                 continue
+
+            if param == "log_data":
+                self._warn_on_log_seq_gap(int(pkt.hdr.seq))
 
             # Special handling cho ACK
             if param == "ack":
@@ -130,6 +145,15 @@ class ProtocolService(QObject):
 
             self.packet_received.emit(param, pkt)
             log.debug("RX: %s seq=%d", param, pkt.hdr.seq)
+
+    def _warn_on_log_seq_gap(self, seq: int) -> None:
+        if self._last_log_data_seq is not None:
+            expected = (self._last_log_data_seq + 1) & 0xFFFFFFFF
+            if seq != expected:
+                msg = f"[MISS] log_data seq jump: expected={expected} got={seq}"
+                print(msg, flush=True)
+                log.warning(msg)
+        self._last_log_data_seq = seq
 
     # ── TX Path ──────────────────────────────────────────────────────
 

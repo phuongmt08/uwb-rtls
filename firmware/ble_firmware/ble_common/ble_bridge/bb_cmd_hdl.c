@@ -291,21 +291,6 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
     // Tell the router to send this response back over serial.
     *p_action = BB_CMD_ACTION_SEND_SERIAL; 
 }
-/*================BLE_PERIPHERAL=================== */
-#if defined(BLE_PERIPHERAL)
-/**
- * @brief STM32 cấu hình thông số quảng bá (Advertising) của nRF52
- * Mặc định cấu hình xong không cần ping lại response.
- */
-static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
-{
-    const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
-    
-    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
-
-    *p_action = BB_CMD_ACTION_NONE; 
-}
-
 
 static void handle_ble_ack(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
