@@ -88,12 +88,12 @@ enum flash_addr_region_t {
 }
 
 enum ble_state_t {
-    BLE_STATE_UNSPECIFIED = 0;
-    BLE_STATE_IDLE        = 1;
-    BLE_STATE_SCANNING    = 2;
-    BLE_STATE_ADVERTISING = 3;
-    BLE_STATE_CONNECTING  = 4;
-    BLE_STATE_CONNECTED   = 5;
+    BLE_STATE_UNSPECIFIED   = 0;
+    BLE_STATE_IDLE          = 1;
+    BLE_STATE_SCANNING      = 2;
+    BLE_STATE_ADVERTISING   = 3;
+    BLE_STATE_CONNECTING    = 4;
+    BLE_STATE_CONNECTED     = 5;
 }
 
 enum host_transport_t {
@@ -208,6 +208,7 @@ message uwb_cfg_t {
     uint32 tx_power             = 11;
     bytes anchor_list           = 12;
     anchor_power_mode_t power_mode = 13;
+    /* for developer mode */
     uint32 uwb_preamble_len     = 14;
     uint32 uwb_rx_pac           = 15;
     uint32 uwb_ns_sfd           = 16;
@@ -402,7 +403,7 @@ message ble_status_get_t {
 message ble_status_resp_t {
     ble_state_t state        = 1;
     int32 rssi_dbm           = 2;  /* valid only when connected */
-    optional uint32 disconnect_reason = 3;  
+    uint32 disconnect_reason = 3;  
 }
 
 message ble_scan_result_t {
@@ -672,6 +673,10 @@ message fota_state_resp_t {
 
 /* Battery information -----------------------------------------------------------*/
 
+message battery_info_get_t {
+    uint32 dummy = 1;
+}
+
 message battery_info_resp_t {
     uint32 bat_voltage_mv  = 1;
     uint32 bat_soc_percent = 2;
@@ -685,10 +690,7 @@ message battery_info_resp_t {
     uint32 uwb_voltage_mv      = 8;  /* DW1000 supply voltage in mV */
     float  imu_temp_c       = 9;  /* IMU sensor internal temperature in degrees Celsius */
     
-    uint32 error_mask      = 10; /* Bitmask of breached thresholds */
-}
-message battery_info_get_t {
-    uint32 dummy = 1;
+    uint32 error_mask       = 10; /* Bitmask of breached thresholds */
 }
 
 /* Factory OTP provisioning -------------------------------------------------- */

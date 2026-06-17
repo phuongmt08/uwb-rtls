@@ -1,0 +1,454 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LiveTrackingTab</class>
+ <widget class="QWidget" name="LiveTrackingTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1300</width>
+    <height>800</height>
+   </rect>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QWidget#LiveTrackingTab { background: #0F172A; color: #F8FAFC; font-family: 'Segoe UI'; font-size: 13px; }
+QPushButton { background: #1E293B; color: #F8FAFC; border: 1px solid #334155; border-radius: 6px; padding: 4px 8px; font-weight: bold; }
+QPushButton:hover { background: #253346; border-color: #22D3EE; }
+QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }
+QLabel { background: transparent; }</string>
+  </property>
+  <layout class="QGridLayout" name="main_layout">
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item row="0" column="0" rowspan="2" colspan="2">
+    <widget class="PositionCanvas" name="position_canvas">
+     <property name="minimumSize">
+      <size>
+       <width>400</width>
+       <height>300</height>
+      </size>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: #1E293B; border: none;</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="0" alignment="Qt::AlignTop|Qt::AlignLeft">
+    <widget class="QWidget" name="header_widget" native="true">
+     <property name="minimumSize">
+      <size>
+       <width>300</width>
+       <height>50</height>
+      </size>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background: transparent;</string>
+     </property>
+     <layout class="QHBoxLayout" name="header_layout">
+      <property name="spacing">
+       <number>10</number>
+      </property>
+      <property name="leftMargin">
+       <number>15</number>
+      </property>
+      <property name="topMargin">
+       <number>15</number>
+      </property>
+      <property name="rightMargin">
+       <number>15</number>
+      </property>
+      <property name="bottomMargin">
+       <number>15</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="canvas_header">
+        <property name="styleSheet">
+         <string notr="true">color: #F1F5F9; font-size: 16px; font-weight: bold; background-color: transparent;</string>
+        </property>
+        <property name="text">
+         <string>Real-time Position Tracking</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="warning_label">
+        <property name="styleSheet">
+         <string notr="true">color: white; font-size: 14px; font-weight: bold; background-color: #EF4444; padding: 2px 10px; border-radius: 4px;</string>
+        </property>
+        <property name="text">
+         <string>OUT OF ZONE</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+  <widget class="QWidget" name="right_widget" native="true">
+   <property name="geometry">
+    <rect>
+     <x>910</x>
+     <y>10</y>
+     <width>380</width>
+     <height>780</height>
+    </rect>
+   </property>
+   <property name="minimumSize">
+    <size>
+     <width>380</width>
+     <height>0</height>
+    </size>
+   </property>
+   <property name="maximumSize">
+    <size>
+     <width>380</width>
+     <height>16777215</height>
+    </size>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">QWidget#right_widget { background-color: rgba(30, 41, 59, 0.85); border-radius: 10px; border: 1px solid rgba(51, 65, 85, 0.80); }</string>
+   </property>
+   <layout class="QVBoxLayout" name="right_outer_layout">
+    <property name="spacing">
+     <number>0</number>
+    </property>
+    <property name="leftMargin">
+     <number>15</number>
+    </property>
+    <property name="topMargin">
+     <number>15</number>
+    </property>
+    <property name="rightMargin">
+     <number>15</number>
+    </property>
+    <property name="bottomMargin">
+     <number>15</number>
+    </property>
+    <item>
+     <widget class="QStackedWidget" name="sidebar_stack">
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="telemetry_page">
+       <layout class="QVBoxLayout" name="telemetry_page_layout">
+        <property name="spacing">
+         <number>0</number>
+        </property>
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+        <item>
+         <widget class="QScrollArea" name="right_scroll">
+          <property name="widgetResizable">
+           <bool>true</bool>
+          </property>
+          <property name="horizontalScrollBarPolicy">
+           <enum>Qt::ScrollBarAlwaysOff</enum>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QScrollArea { border: none; background: transparent; }
+QScrollBar:vertical { background-color: transparent; width: 8px; margin: 0px; }
+QScrollBar::handle:vertical { background-color: #475569; border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background-color: #64748B; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }</string>
+          </property>
+          <widget class="QWidget" name="scroll_content">
+           <property name="styleSheet">
+            <string notr="true">background: transparent;</string>
+           </property>
+           <layout class="QVBoxLayout" name="right_panel">
+            <property name="spacing">
+             <number>15</number>
+            </property>
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lbl_ctrl_header">
+              <property name="styleSheet">
+               <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+              </property>
+              <property name="text">
+               <string>Telemetry Controls</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_start">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>38</height>
+               </size>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981; border-radius: 8px; font-weight: bold; font-size: 14px; }
+QPushButton:hover { background: #10B981; }</string>
+              </property>
+              <property name="text">
+               <string>Start Ranging</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_stop">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>38</height>
+               </size>
+              </property>
+              <property name="enabled">
+               <bool>false</bool>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 14px; }
+QPushButton:hover { background: #EF4444; color: #F8FAFC; }
+QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }</string>
+              </property>
+              <property name="text">
+               <string>Stop Ranging</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_clear">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>38</height>
+               </size>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QPushButton { background: #334155; color: #F8FAFC; border: 1px solid #475569; border-radius: 8px; font-weight: bold; font-size: 14px; }
+QPushButton:hover { background: #475569; }</string>
+              </property>
+              <property name="text">
+               <string>Clear Trail</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="separator_1">
+              <property name="frameShape">
+               <enum>QFrame::HLine</enum>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">background-color: #334155; max-height: 1px;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lbl_pos_header">
+              <property name="styleSheet">
+               <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+              </property>
+              <property name="text">
+               <string>Live Position</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <layout class="QGridLayout" name="pos_grid"/>
+            </item>
+            <item>
+             <widget class="QFrame" name="separator_2">
+              <property name="frameShape">
+               <enum>QFrame::HLine</enum>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">background-color: #334155; max-height: 1px;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lbl_stats_header">
+              <property name="styleSheet">
+               <string notr="true">color: #22D3EE; background: rgba(34, 211, 238, 0.10); border-left: 3px solid #22D3EE; border-bottom: 1px solid rgba(34, 211, 238, 0.45); border-radius: 4px; padding: 4px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+              </property>
+              <property name="text">
+               <string>Statistics</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <layout class="QGridLayout" name="stats_grid">
+              <property name="spacing">
+               <number>10</number>
+              </property>
+              <item row="0" column="0">
+               <widget class="QLabel" name="lbl_frames">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Frames:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLabel" name="frames_label">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 15px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>0</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="lbl_fps">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>FPS:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QLabel" name="fps_label">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 15px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>0</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="lbl_uptime">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Uptime:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="QLabel" name="uptime_label">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 15px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>0</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <spacer name="right_panel_spacer">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>40</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="geofence_page">
+       <layout class="QVBoxLayout" name="geofence_page_layout">
+        <property name="spacing">
+         <number>0</number>
+        </property>
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QPushButton" name="btn_toggle_sidebar">
+   <property name="geometry">
+    <rect>
+     <x>886</x>
+     <y>370</y>
+     <width>24</width>
+     <height>60</height>
+    </rect>
+   </property>
+   <property name="minimumSize">
+    <size>
+     <width>24</width>
+     <height>60</height>
+    </size>
+   </property>
+   <property name="maximumSize">
+    <size>
+     <width>24</width>
+     <height>60</height>
+    </size>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">QPushButton { background-color: rgba(30, 41, 59, 0.90); color: #22D3EE; border: 1px solid rgba(51, 65, 85, 0.80); border-right: none; border-top-left-radius: 8px; border-bottom-left-radius: 8px; font-weight: bold; font-size: 14px; }
+QPushButton:hover { background-color: rgba(37, 99, 235, 0.90); color: #FFFFFF; }</string>
+   </property>
+   <property name="text">
+    <string>&gt;</string>
+   </property>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PositionCanvas</class>
+   <extends>QWidget</extends>
+   <header>views.components.position_canvas</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

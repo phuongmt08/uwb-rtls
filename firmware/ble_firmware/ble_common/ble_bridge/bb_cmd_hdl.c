@@ -46,12 +46,15 @@ typedef struct {
 
 /* Private function prototypes ---------------------------------------- */
 /* Common handlers Peripheral*/
+// Common handler
+static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
+
 #if defined(BLE_PERIPHERAL)
 static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
-static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #endif
-static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #if defined(BLE_CENTRAL)
 static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
@@ -62,20 +65,18 @@ static void handle_ble_conn_params_resp(const protobuf_packet_t * p_in, protobuf
 static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 #endif
-static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action);
 
 /* Private variables -------------------------------------------------- */
 // Chỉ config mảng những lệnh nào nRF52832 tự xử lý. 
 // Nếu id nào không được config sẽ tự rớt xuống undefined / bỏ qua.
 static const bb_cmd_entry_t m_cmd_table[] = {
+    CMD_INFO(protobuf_packet_t_ble_status_get_tag,                handle_ble_status_get,            "ble_status_get"),
 #if defined(BLE_PERIPHERAL)
-    CMD_INFO(protobuf_packet_t_ble_status_get_tag,     handle_ble_status_get,     "ble_status_get"),
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_adv_status,     "ble_adv_status"),
-    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_adv_config_set, "ble_adv_config_set"),
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_adv_status,            "ble_adv_status"),
+    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_adv_config_set,        "ble_adv_config_set"),
 #else
-    CMD_INFO(protobuf_packet_t_ble_status_get_tag,     handle_ble_unimplemented,  "ble_status_get"),
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,     handle_ble_unimplemented,  "ble_adv_status"),
-    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag, handle_ble_unimplemented,  "ble_adv_config_set"),
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_unimplemented,         "ble_adv_status"),
+    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_unimplemented,         "ble_adv_config_set"),
 #endif /* !BLE_PERIPHERAL */
 #if defined(BLE_CENTRAL)
     CMD_INFO(protobuf_packet_t_ble_disconnect_tag,                handle_ble_disconnect,            "ble_disconnect"),
@@ -160,6 +161,7 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
     {
         out_pkt.has_hdr = true;
         out_pkt.hdr.timestamp = in_pkt.hdr.timestamp; 
+        out_pkt.hdr.seq = in_pkt.hdr.seq;
         
         // Reply to the original sender (STM32 TAG/ANCHOR or PC HOST).
         if (in_pkt.hdr.has_addr)
@@ -190,20 +192,6 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
 }
 
 /* Private definitions ------------------------------------------------ */
-/*================BLE_PERIPHERAL=================== */
-#if defined(BLE_PERIPHERAL)
-/**
- * @brief STM32 cấu hình thông số quảng bá (Advertising) của nRF52
- * Mặc định cấu hình xong không cần ping lại response.
- */
-static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
-{
-    const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
-    
-    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
-
-    *p_action = BB_CMD_ACTION_NONE; 
-}
 
 /**
  * @brief STM32 hỏi trạng thái mạng BLE. Cần trả lời lại bằng status_resp
@@ -241,6 +229,21 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
     // Gắn nhãn báo cho Router biết hãy ném gói mới này vào đường SERIAL
     *p_action = BB_CMD_ACTION_SEND_SERIAL; 
 }
+/*================BLE_PERIPHERAL=================== */
+#if defined(BLE_PERIPHERAL)
+/**
+ * @brief STM32 cấu hình thông số quảng bá (Advertising) của nRF52
+ * Mặc định cấu hình xong không cần ping lại response.
+ */
+static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
+{
+    const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
+    
+    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
+
+    *p_action = BB_CMD_ACTION_NONE; 
+}
+
 
 /**
  * @brief STM32 bắn dữ liệu lên nRF52 yêu cầu Broadcast / Forward đến thiết bị BLE Host (Central / Phone) 

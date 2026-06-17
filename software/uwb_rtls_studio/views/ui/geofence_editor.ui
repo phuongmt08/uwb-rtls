@@ -1,0 +1,534 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>GeofenceEditorWidget</class>
+ <widget class="QWidget" name="GeofenceEditorWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>350</width>
+    <height>760</height>
+   </rect>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>350</width>
+    <height>16777215</height>
+   </size>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QWidget#GeofenceEditorWidget { background: transparent; color: #F8FAFC; font-family: 'Segoe UI'; font-size: 13px; }
+QPushButton { background: #1E293B; color: #F8FAFC; border: 1px solid #334155; border-radius: 6px; padding: 5px 8px; font-weight: bold; }
+QPushButton:hover { background: #253346; border-color: #22D3EE; }
+QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }
+QLabel { background: transparent; }
+QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background-color: #111827; border: 1px solid #475569; border-radius: 5px; color: #F8FAFC; padding: 4px; }
+QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus { border-color: #22D3EE; }
+QTabWidget::pane { border: 1px solid #334155; border-radius: 8px; background: rgba(15, 23, 42, 0.35); margin-top: -1px; }
+QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 7px 12px; font-weight: bold; min-width: 110px; }
+QTabBar::tab:selected { background: #0F172A; color: #22D3EE; border-color: #22D3EE; }
+QGroupBox { color: #CBD5E1; font-weight: bold; border: 1px solid #334155; border-radius: 8px; margin-top: 12px; padding-top: 16px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }</string>
+  </property>
+  <layout class="QVBoxLayout" name="main_layout">
+   <property name="spacing">
+    <number>8</number>
+   </property>
+   <property name="leftMargin">
+    <number>6</number>
+   </property>
+   <property name="topMargin">
+    <number>6</number>
+   </property>
+   <property name="rightMargin">
+    <number>6</number>
+   </property>
+   <property name="bottomMargin">
+    <number>6</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="lbl_geofence_header">
+     <property name="text">
+      <string>Geofencing Setup</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">color: #F59E0B; background: rgba(245, 158, 11, 0.10); border-left: 3px solid #F59E0B; border-bottom: 1px solid rgba(245, 158, 11, 0.45); border-radius: 4px; padding: 6px 10px; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QScrollArea" name="editor_scroll">
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
+     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QScrollArea { border: none; background: transparent; }
+QScrollBar:vertical { background-color: transparent; width: 8px; margin: 0px; }
+QScrollBar::handle:vertical { background-color: #475569; border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background-color: #64748B; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }</string>
+     </property>
+     <widget class="QWidget" name="editor_scroll_content">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>326</width>
+        <height>720</height>
+       </rect>
+      </property>
+      <layout class="QVBoxLayout" name="editor_content_layout">
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="gb_grid">
+         <property name="title">
+          <string>Grid Resolution</string>
+         </property>
+         <layout class="QFormLayout" name="grid_form_layout">
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="lbl_grid_spacing">
+            <property name="text">
+             <string>Major cell:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QDoubleSpinBox" name="sb_grid_spacing">
+            <property name="minimum">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>10.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="value">
+             <double>1.000000000000000</double>
+            </property>
+            <property name="suffix">
+             <string> m</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="lbl_grid_subdivisions">
+            <property name="text">
+             <string>Subdivisions:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QSpinBox" name="sb_grid_subdivisions">
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>20</number>
+            </property>
+            <property name="value">
+             <number>5</number>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="lbl_minor_title">
+            <property name="text">
+             <string>Snap step:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLabel" name="lbl_minor_resolution">
+            <property name="text">
+             <string>0.20 m</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color: #22D3EE; font-family: 'Consolas'; font-weight: bold;</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTabWidget" name="editor_tabs">
+         <property name="currentIndex">
+          <number>0</number>
+         </property>
+         <widget class="QWidget" name="tab_map_layout">
+          <attribute name="title">
+           <string>Map Layout</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="map_tab_layout">
+           <property name="spacing">
+            <number>8</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>8</number>
+           </property>
+           <property name="bottomMargin">
+            <number>8</number>
+           </property>
+           <item>
+            <layout class="QHBoxLayout" name="map_modes_layout">
+             <item>
+              <widget class="QPushButton" name="btn_mode_room">
+               <property name="text">
+                <string>Room</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">QPushButton:checked { background-color: #F8FAFC; color: #0F172A; border-color: #CBD5E1; }</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_mode_wall">
+               <property name="text">
+                <string>Wall</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">QPushButton:checked { background-color: #64748B; color: white; border-color: #94A3B8; }</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_mode_edit_map">
+               <property name="text">
+                <string>Edit</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">QPushButton:checked { background-color: #2563EB; color: white; border-color: #3B82F6; }</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="gb_map_properties">
+             <property name="title">
+              <string>Map Object Properties</string>
+             </property>
+             <layout class="QFormLayout" name="map_properties_form_layout">
+              <property name="verticalSpacing">
+               <number>8</number>
+              </property>
+              <item row="0" column="0">
+               <widget class="QLabel" name="lbl_map_name">
+                <property name="text">
+                 <string>Name:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLineEdit" name="txt_map_name"/>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="lbl_map_type">
+                <property name="text">
+                 <string>Object:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QComboBox" name="cmb_map_type">
+                <item>
+                 <property name="text">
+                  <string>Room</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Wall</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="lbl_map_height">
+                <property name="text">
+                 <string>Height:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="QDoubleSpinBox" name="sb_map_height">
+                <property name="minimum">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>20.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="value">
+                 <double>3.000000000000000</double>
+                </property>
+                <property name="suffix">
+                 <string> m</string>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="0" colspan="2">
+               <widget class="QPushButton" name="btn_apply_map_properties">
+                <property name="text">
+                 <string>Update Map Object</string>
+                </property>
+                <property name="styleSheet">
+                 <string notr="true">background: #0F766E; color: white; border: 1px solid #14B8A6; border-radius: 6px; padding: 6px;</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="tab_rule_zones">
+          <attribute name="title">
+           <string>Rule Zones</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="rule_tab_layout">
+           <property name="spacing">
+            <number>8</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>8</number>
+           </property>
+           <property name="bottomMargin">
+            <number>8</number>
+           </property>
+           <item>
+            <layout class="QHBoxLayout" name="rule_modes_layout">
+             <item>
+              <widget class="QPushButton" name="btn_mode_draw">
+               <property name="text">
+                <string>Draw Zone</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">QPushButton:checked { background-color: #2563EB; color: white; border-color: #3B82F6; }</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_mode_edit">
+               <property name="text">
+                <string>Edit</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">QPushButton:checked { background-color: #2563EB; color: white; border-color: #3B82F6; }</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="gb_properties">
+             <property name="title">
+              <string>Rule Zone Properties</string>
+             </property>
+             <layout class="QFormLayout" name="properties_form_layout">
+              <property name="verticalSpacing">
+               <number>8</number>
+              </property>
+              <item row="0" column="0">
+               <widget class="QLabel" name="lbl_prop_name">
+                <property name="text">
+                 <string>Name:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLineEdit" name="txt_zone_name"/>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="lbl_prop_type">
+                <property name="text">
+                 <string>Zone type:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QComboBox" name="cmb_zone_type">
+                <item>
+                 <property name="text">
+                  <string>Allowed</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Forbidden</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="lbl_prop_speed">
+                <property name="text">
+                 <string>Max speed:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="QDoubleSpinBox" name="sb_speed">
+                <property name="minimum">
+                 <double>0.000000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>10.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="value">
+                 <double>1.000000000000000</double>
+                </property>
+                <property name="suffix">
+                 <string> m/s</string>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="0" colspan="2">
+               <widget class="QPushButton" name="btn_apply_properties">
+                <property name="text">
+                 <string>Update Rule Zone</string>
+                </property>
+                <property name="styleSheet">
+                 <string notr="true">background: #059669; color: white; border: 1px solid #10B981; border-radius: 6px; padding: 6px;</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_delete_zone">
+         <property name="text">
+          <string>Delete Selected Object</string>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background: rgba(239,68,68,0.15); color: #F87171; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; padding: 7px;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="separator_geofence">
+         <property name="frameShape">
+          <enum>QFrame::Shape::HLine</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Shadow::Sunken</enum>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background-color: #334155; max-height: 1px; margin: 5px 0;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_save_map">
+         <property name="text">
+          <string>Save Map JSON</string>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background: #3B82F6; color: white; border: 1px solid #2563EB; border-radius: 8px; padding: 7px;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_clear_map">
+         <property name="text">
+          <string>Clear Entire Map</string>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 7px;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_exit_editor">
+         <property name="text">
+          <string>Return to Live View</string>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background: #475569; color: white; border: 1px solid #64748B; border-radius: 8px; font-weight: bold; padding: 8px;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="spacer_bottom">
+         <property name="orientation">
+          <enum>Qt::Orientation::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
