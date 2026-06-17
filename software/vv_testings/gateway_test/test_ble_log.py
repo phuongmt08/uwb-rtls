@@ -546,10 +546,6 @@ class BleLogTester:
                     self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
                     self.uwb_file.flush()
 
-        ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
-        self._send_packet(ack_pkt)
-        self._track_log_ack(ack_pkt)
-
     def _process_packet(self, pkt: pb.packet_t) -> None:
         self.last_rx_time = time.time()
         name = packet_name(pkt)
@@ -564,6 +560,12 @@ class BleLogTester:
                 if name != "ack":
                     self.latest_mcu_ackable_seq = int(pkt.hdr.seq)
                     self._clear_pending_none_reply_ack()
+
+                if name != "ack":
+                    self._send_ack_for_packet(pkt)
+                    if name == "log_data":
+                        ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
+                        self._track_log_ack(ack_pkt)
         except (AttributeError, ValueError):
             pass
 
