@@ -11,6 +11,7 @@
  */
 /* Includes ----------------------------------------------------------------- */
 #include "sys_config.h"
+#include "bsp_io.h"
 #include "sys_logger.h"
 #include "otp/otp.h"
 #include <string.h>
@@ -137,6 +138,85 @@ static void sys_config_apply_forced_mode(void)
     g_storage.config.uwb.role = DEVICE_ROLE_TAG;
     RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "FORCE_DEVICE_TAG_MODE enabled: forcing Device Type/Role to TAG");
 #endif
+}
+
+static void sys_config_apply_dip_device_id_override(void)
+{
+    uint8_t dip_value = bsp_io_dip_read();
+    if (dip_value == 0U) {
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG,
+               "[DIP=0] Using saved Device ID: %u",
+               g_storage.config.uwb.device_id);
+        return;
+    }
+
+    if (sys_config_set_device_id(dip_value) == 0) {
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG,
+               "[DIP=%u] Device ID FORCED to: %u",
+               dip_value,
+               dip_value);
+    }
+}
+
+static bool sys_config_find_zone_for_anchor_id(uint8_t anchor_id, uint32_t *zone_id_out)
+{
+    if (anchor_id == 0U || !zone_id_out) {
+        return false;
+    }
+
+    uint32_t matched_zone_id = 0U;
+    uint32_t match_count = 0U;
+
+    for (uint32_t zone = 0U; zone < 4U; zone++) {
+        const protobuf_zone_profile_t *profile = &g_storage.config.zone_profiles[zone];
+        if (!sys_config_zone_profile_valid(profile)) {
+            continue;
+        }
+
+        uint32_t anchor_count = profile->anchors_count;
+
+        for (uint32_t i = 0U; i < anchor_count; i++) {
+            if (profile->anchors[i].anchor_id == anchor_id) {
+                matched_zone_id = profile->zone_id;
+                match_count++;
+                break;
+            }
+        }
+    }
+
+    if (match_count == 1U && matched_zone_id >= 1U && matched_zone_id <= 4U) {
+        *zone_id_out = matched_zone_id;
+        return true;
+    }
+
+    return false;
+}
+
+static uint32_t sys_config_get_boot_zone_id(void)
+{
+    uint32_t default_zone_id = g_storage.config.default_zone_id;
+    if (default_zone_id < 1U || default_zone_id > 4U) {
+        default_zone_id = DEFAULT_ZONE_ID;
+    }
+
+    if (g_storage.config.uwb.role != DEVICE_ROLE_ANCHOR) {
+        return default_zone_id;
+    }
+
+    uint32_t zone_id = 0U;
+    if (sys_config_find_zone_for_anchor_id(g_storage.config.uwb.device_id, &zone_id)) {
+        RLOG_I(LOG_OBJECT_CODE_SYS_CFG,
+               "Anchor ID %u found in Zone %lu",
+               g_storage.config.uwb.device_id,
+               (unsigned long)zone_id);
+        return zone_id;
+    }
+
+    RLOG_I(LOG_OBJECT_CODE_SYS_CFG,
+           "Anchor ID %u not found in any zone; using default Zone %lu",
+           g_storage.config.uwb.device_id,
+           (unsigned long)default_zone_id);
+    return default_zone_id;
 }
 
 static bool sys_config_mfg_date_pack(uint32_t date_ddmmyyyy, uint8_t packed[3])
@@ -271,9 +351,10 @@ void sys_config_init(void)
     }
 
     sys_config_apply_forced_mode();
+    sys_config_apply_dip_device_id_override();
 
-    s_active_zone_id = g_storage.config.default_zone_id;
-    if (s_active_zone_id < 1 || s_active_zone_id > 4) {
+    s_active_zone_id = sys_config_get_boot_zone_id();
+    if (s_active_zone_id < 1U || s_active_zone_id > 4U) {
         s_active_zone_id = DEFAULT_ZONE_ID;
         g_storage.config.default_zone_id = DEFAULT_ZONE_ID;
     }
@@ -754,17 +835,6 @@ void sys_config_reset_to_defaults(void)
     g_storage.config.zone_profiles[3].preamble_code         =           DEFAULT_ZONE_4_PREAMBLE_CODE;
     g_storage.config.zone_profiles[3].anchors_count         =           0;
     g_storage.config.zone_profiles[3].anchor_count          =           0;
-
-    /* Unsurveyed zones start with a valid placeholder layout so devices can
-     * switch to their preamble and run the mutual anchor survey there. */
-    for (uint32_t zone = 2U; zone < 4U; zone++) {
-        g_storage.config.zone_profiles[zone].anchors_count = NUM_ANCHORS;
-        g_storage.config.zone_profiles[zone].anchor_count = NUM_ANCHORS;
-        for (uint32_t anchor = 0U; anchor < NUM_ANCHORS; anchor++) {
-            g_storage.config.zone_profiles[zone].anchors[anchor] =
-                g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[anchor];
-        }
-    }
 
     g_storage.config.anchor_count                           =           4;
     g_storage.config.anchor_layout[0]                       =           g_storage.config.zone_profiles[DEFAULT_ZONE_ID - 1].anchors[0];

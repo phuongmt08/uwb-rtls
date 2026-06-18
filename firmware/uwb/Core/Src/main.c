@@ -288,20 +288,6 @@ int main(void)
   sys_pm_init();
 
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-  /* Read DIP switch - ALWAYS OVERRIDES saved config */
-  uint8_t dip_value = bsp_io_dip_read();
-  if (dip_value == 0)
-  {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
-  }
-  else
-  {
-    sys_config_set_device_id(dip_value);
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-  }
-
-  cfg = sys_config_get();
-
   /* Initialize application based on role */
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
