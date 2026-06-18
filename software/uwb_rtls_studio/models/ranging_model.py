@@ -365,6 +365,17 @@ class RangingModel(QObject):
                 "x_m": coord_or_none("x_m"),
                 "y_m": coord_or_none("y_m"),
                 "z_m": coord_or_none("z_m"),
+                "label": f"A{a.anchor_id}",
+                "role": "anchor",
+                "device_type": "uwb_anchor",
+                "device_id": a.anchor_id,
+                "zone_id": "",
+                "zone_name": "",
+                "zone_ids": [],
+                "zone_names": [],
+                "placed": True,
+                "is_scanned": False,
+                "sync_state": "synced",
             })
         log.info("Anchor layout received: %d anchors", len(self._anchor_layout))
         self.anchor_layout_updated.emit(self._anchor_layout)

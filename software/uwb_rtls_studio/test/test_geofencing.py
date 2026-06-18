@@ -76,8 +76,9 @@ def test_geofence_zone_contains_math():
     # 2. Point is outside the 2D polygon
     assert zone.contains(6.0, 2.5, 1.5) is False
 
-    # 3. Rule zones are 2D, so z no longer changes containment.
-    assert zone.contains(2.5, 2.5, 0.5) is True
+    # 3. Rule zones are 2.5D, so z coordinates outside [min_z, max_z] return False.
+    assert zone.contains(2.5, 2.5, 0.5) is False
+    assert zone.contains(2.5, 2.5, 1.5) is True
 
     # 4. Map objects are geometry only and do not participate in rule checks.
     wall = GeofenceZone(
@@ -88,7 +89,7 @@ def test_geofence_zone_contains_math():
         min_z=0.0,
         max_z=3.0,
         speed_limit=0.0,
-        color="#94A3B8",
+        color="#0F172A",
         object_type="wall",
     )
     assert wall.contains(2.5, 2.5, 1.5) is False
@@ -148,7 +149,7 @@ def test_geofence_repository_position_checks():
         min_z=0.0,
         max_z=3.0,
         speed_limit=0.0,
-        color="#94A3B8",
+        color="#0F172A",
         object_type="wall",
     )
     repo.add_zone(wall_zone)

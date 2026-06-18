@@ -42,6 +42,12 @@ class ConfigTab(QWidget):
         self._is_developer = is_developer
         self._vm = None
 
+        # Track the active device identity to refine layout read/write behavior
+        self._current_role = 1  # Default: Tag
+        self._current_device_id = 0
+        self._last_anchor_layout = []
+        self._scan_devices = []
+
         # ── Load UI from .ui file ──
         uic.loadUi(UI_FILE, self)
 
@@ -70,12 +76,6 @@ class ConfigTab(QWidget):
 
         # Add this vertical layout to the main grid layout in column 2, spanning all 3 rows
         self.main_layout.addLayout(self.col2_layout, 0, 2, 3, 1)
-
-        # Track the active device identity to refine layout read/write behavior
-        self._current_role = 1  # Default: Tag
-        self._current_device_id = 0
-        self._last_anchor_layout = []
-        self._scan_devices = []
 
     def _setup_target_selector(self):
         """Add a compact target picker fed by BLE scan results."""

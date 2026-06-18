@@ -26,6 +26,7 @@ class GeofenceZone:
     object_type: str = "zone"  # "zone" | "room" | "wall"
 
     def to_dict(self) -> dict:
+        height_m = max(0.0, self.max_z - self.min_z) if self.object_type == "wall" else 0.0
         return {
             "id": self.id,
             "name": self.name,
@@ -34,7 +35,7 @@ class GeofenceZone:
             "points": [{"x": p[0], "y": p[1]} for p in self.points],
             "min_z": self.min_z,
             "max_z": self.max_z,
-            "height_m": max(0.0, self.max_z - self.min_z),
+            "height_m": height_m,
             "speed_limit": self.speed_limit,
             "color": self.color,
         }
@@ -52,7 +53,10 @@ class GeofenceZone:
         height_m = data.get("height_m")
         min_z = float(data.get("min_z", 0.0))
         max_z = float(data.get("max_z", 3.0))
-        if height_m is not None and object_type in {"room", "wall"}:
+        if object_type == "room":
+            min_z = 0.0
+            max_z = 0.0
+        elif height_m is not None and object_type == "wall":
             max_z = min_z + float(height_m)
 
         return cls(
@@ -70,6 +74,10 @@ class GeofenceZone:
     def contains(self, x: float, y: float, z: float) -> bool:
         if self.object_type != "zone":
             return False
+
+        if self.min_z != self.max_z:
+            if not (self.min_z <= z <= self.max_z):
+                return False
 
         poly = QPolygonF()
         for pt in self.points:

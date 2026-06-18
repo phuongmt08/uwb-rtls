@@ -54,6 +54,7 @@
 ===============================================================================
 """
 import logging
+import math
 from typing import Optional
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from models.ranging_model import RangingModel
@@ -75,6 +76,7 @@ class LiveTrackingViewModel(QObject):
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
     anchor_layout_updated = pyqtSignal(list)
+    scan_devices_updated = pyqtSignal(list)
     
     # Geofence signals
     geofence_status_updated = pyqtSignal(str, str, float)  # status, zone_name, speed_limit
@@ -87,6 +89,7 @@ class LiveTrackingViewModel(QObject):
         ranging_repo=None,
         command_bus=None,
         session_run_manager=None,
+        ble_scan_repo=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -95,6 +98,7 @@ class LiveTrackingViewModel(QObject):
         self._ranging_repo = ranging_repo
         self._command_bus = command_bus
         self._session_run_manager = session_run_manager
+        self._ble_scan_repo = ble_scan_repo
         self._pending_position: tuple[float, float, float, float] | None = None
         self._pending_sensor_fusion: dict | None = None
         
@@ -109,6 +113,9 @@ class LiveTrackingViewModel(QObject):
         self.model.stats_updated.connect(self.stats_updated.emit)
         shared_app_state.anchor_layout_changed.connect(self.anchor_layout_updated.emit)
 
+        if self._ble_scan_repo:
+            self._ble_scan_repo.scan_results_updated.connect(self.scan_devices_updated.emit)
+
         self._render_timer = QTimer(self)
         self._render_timer.setInterval(LIVE_RENDER_INTERVAL_MS)
         self._render_timer.timeout.connect(self._flush_pending_live_updates)
@@ -119,7 +126,7 @@ class LiveTrackingViewModel(QObject):
 
     def _emit_position_update(self, x: float, y: float, z: float, rms: float):
         self.position_updated.emit(x, y, z, rms)
-        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z)
+        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z, speed=0.0)
         self.geofence_status_updated.emit(status, zone_name, speed_limit)
 
     def _on_model_sensor_fusion_updated(self, data: dict):
@@ -132,7 +139,10 @@ class LiveTrackingViewModel(QObject):
         z = 0.0
         if self.model._position_history:
             z = self.model._position_history[-1].get("z_m", 0.0)
-        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z)
+        vx = data.get("vx_mps", 0.0)
+        vy = data.get("vy_mps", 0.0)
+        speed = math.hypot(vx, vy)
+        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z, speed)
         self.geofence_status_updated.emit(status, zone_name, speed_limit)
 
     def _flush_pending_live_updates(self):
@@ -179,6 +189,59 @@ class LiveTrackingViewModel(QObject):
     # Geofence service methods
     def get_geofence_zones(self) -> list:
         return self.geofence_repo.get_zones()
+
+    def get_map_anchors(self) -> list:
+        return self.geofence_repo.get_anchors()
+
+    def _coerce_int_id(self, value, default: int = 0) -> int:
+        if value is None or value == "":
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        text = str(value).strip()
+        try:
+            if text.lower().startswith("0x"):
+                return int(text, 16)
+            if text.lower().startswith("a") and text[1:].isdigit():
+                return int(text[1:])
+            return int(text)
+        except (TypeError, ValueError):
+            return default
+
+    def update_anchor_layout_from_map(self, anchors: list) -> None:
+        normalized = []
+        for idx, anchor in enumerate(anchors):
+            anchor_id = self._coerce_int_id(anchor.get("anchor_id"), idx)
+            normalized.append({
+                "anchor_id": anchor_id,
+                "x_m": float(anchor.get("x_m", anchor.get("x", 0.0))),
+                "y_m": float(anchor.get("y_m", anchor.get("y", 0.0))),
+                "z_m": float(anchor.get("z_m", anchor.get("z", 0.0))),
+                "label": anchor.get("label", f"A{anchor_id}"),
+                "role": anchor.get("role", "anchor"),
+                "device_type": anchor.get("device_type", "uwb_anchor"),
+                "device_id": self._coerce_int_id(anchor.get("device_id"), anchor_id),
+                "mac": anchor.get("mac", ""),
+                "zone_id": anchor.get("zone_id", ""),
+                "zone_name": anchor.get("zone_name", ""),
+                "zone_ids": list(anchor.get("zone_ids", [])),
+                "zone_names": list(anchor.get("zone_names", [])),
+                "placed": bool(anchor.get("placed", True)),
+                "is_scanned": bool(anchor.get("is_scanned", anchor.get("scan_seen", False))),
+                "sync_state": anchor.get("sync_state", "synced"),
+            })
+        self.geofence_repo.set_anchors(normalized)
+        if hasattr(self.model, "set_anchor_layout"):
+            self.model.set_anchor_layout(normalized)
+        else:
+            shared_app_state.anchor_layout = normalized
+
+    def get_scan_devices(self) -> list:
+        if self._ble_scan_repo:
+            return self._ble_scan_repo.merged_results()
+        return []
 
     def add_geofence_zone(self, zone: GeofenceZone) -> None:
         self.geofence_repo.add_zone(zone)
