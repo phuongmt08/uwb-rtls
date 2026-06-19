@@ -1,6 +1,6 @@
 """
 ===============================================================================
-  UWB RTLS Studio — Geofencing Floating Property Panel
+  UWB RTLS Studio - Geofencing Floating Property Panel
 ===============================================================================
   File        : views/components/zone_property_panel.py
   Description : Floating overlay panel for editing geofence zone parameters.
@@ -46,13 +46,13 @@ class ZonePropertyPanel(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
         
-        # Modern white look matching studio aesthetics
+        # Dark editor styling keeps the floating panel aligned with the canvas.
         self.setObjectName("ZonePropertyPanel")
         self.setStyleSheet("""
             QFrame#ZonePropertyPanel {
-                background-color: #F8FAFC;
-                border: 2px solid #0EA5E9;
-                border-radius: 12px;
+                background-color: #0B1220;
+                border: 1px solid #22D3EE;
+                border-radius: 8px;
             }
             QWidget {
                 background: transparent;
@@ -60,18 +60,18 @@ class ZonePropertyPanel(QFrame):
             QLabel {
                 font-family: 'Segoe UI';
                 font-size: 12px;
-                color: #1E293B;
+                color: #CBD5E1;
                 font-weight: bold;
                 border: none;
                 background: transparent;
             }
             QLabel#lbl_title {
                 font-size: 13px;
-                color: #0EA5E9;
+                color: #22D3EE;
                 font-weight: bold;
             }
             QLabel#lbl_sec_title {
-                color: #64748B;
+                color: #94A3B8;
                 font-size: 11px;
                 font-weight: bold;
                 margin-top: 6px;
@@ -79,16 +79,16 @@ class ZonePropertyPanel(QFrame):
                 padding-bottom: 2px;
             }
             QLineEdit, QDoubleSpinBox, QComboBox {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
+                background-color: #111827;
+                border: 1px solid #334155;
                 border-radius: 6px;
-                color: #0F172A;
+                color: #F8FAFC;
                 padding: 4px 6px;
                 font-size: 12px;
                 font-family: 'Segoe UI';
             }
             QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus {
-                border: 1.5px solid #0EA5E9;
+                border: 1.5px solid #22D3EE;
             }
             QPushButton#btn_close {
                 background: transparent;
@@ -114,35 +114,35 @@ class ZonePropertyPanel(QFrame):
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background-color: #CBD5E1;
+                background-color: #475569;
                 border-radius: 3px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #94A3B8;
+                background-color: #64748B;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
                 background: none;
             }
             QComboBox QAbstractItemView {
-                background-color: #FFFFFF;
-                color: #0F172A;
-                selection-background-color: #0EA5E9;
+                background-color: #111827;
+                color: #F8FAFC;
+                selection-background-color: #2563EB;
                 selection-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #334155;
             }
             QComboBox QAbstractItemView::item {
-                color: #0F172A;
-                background-color: #FFFFFF;
+                color: #F8FAFC;
+                background-color: #111827;
             }
             QComboBox QAbstractItemView QWidget {
-                color: #0F172A;
-                background-color: #FFFFFF;
+                color: #F8FAFC;
+                background-color: #111827;
             }
         """)
         
-        self.setFixedSize(280, 340)
+        self.setFixedSize(292, 352)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -150,15 +150,15 @@ class ZonePropertyPanel(QFrame):
         main_layout.setContentsMargins(10, 8, 10, 10)
         main_layout.setSpacing(6)
         
-        # Header Row
+        # Header row
         header_layout = QHBoxLayout()
-        self.lbl_title = QLabel("Zone Properties", self)
+        self.lbl_title = QLabel("Selection Properties", self)
         self.lbl_title.setObjectName("lbl_title")
         header_layout.addWidget(self.lbl_title)
         
         header_layout.addStretch()
         
-        self.btn_close = QPushButton("×", self)
+        self.btn_close = QPushButton("x", self)
         self.btn_close.setObjectName("btn_close")
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.clicked.connect(self.closed.emit)
@@ -166,7 +166,7 @@ class ZonePropertyPanel(QFrame):
         
         main_layout.addLayout(header_layout)
         
-        # General Form layout
+        # General form layout
         self.form_widget = QWidget(self)
         self.form_layout = QFormLayout(self.form_widget)
         self.form_layout.setContentsMargins(0, 0, 0, 0)
@@ -186,9 +186,19 @@ class ZonePropertyPanel(QFrame):
         self.sb_height.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         self.sb_height.editingFinished.connect(self._on_height_changed)
         self.form_layout.addRow(self.lbl_height, self.sb_height)
+
+        # Wall thickness field
+        self.lbl_thickness = QLabel("Thickness:", self)
+        self.sb_thickness = QDoubleSpinBox(self)
+        self.sb_thickness.setRange(0.01, 5.0)
+        self.sb_thickness.setSingleStep(0.05)
+        self.sb_thickness.setSuffix(" m")
+        self.sb_thickness.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        self.sb_thickness.editingFinished.connect(self._on_thickness_changed)
+        self.form_layout.addRow(self.lbl_thickness, self.sb_thickness)
         
-        # Speed Limit field
-        self.lbl_speed = QLabel("Max Speed (m/s):", self)
+        # Speed limit field
+        self.lbl_speed = QLabel("Speed limit:", self)
         self.sb_speed = QDoubleSpinBox(self)
         self.sb_speed.setRange(0.0, 10.0)
         self.sb_speed.setSingleStep(0.1)
@@ -196,16 +206,16 @@ class ZonePropertyPanel(QFrame):
         self.sb_speed.editingFinished.connect(self._on_speed_changed)
         self.form_layout.addRow(self.lbl_speed, self.sb_speed)
         
-        # Color Combo field
-        self.lbl_color = QLabel("Theme Color:", self)
+        # Color combo field
+        self.lbl_color = QLabel("Display style:", self)
         self.cmb_color = QComboBox(self)
         self.cmb_color.currentIndexChanged.connect(self._on_color_changed)
         self.form_layout.addRow(self.lbl_color, self.cmb_color)
         
         main_layout.addWidget(self.form_widget)
         
-        # Segment Dimensions Header
-        lbl_dimensions = QLabel("Dimensions & Angles", self)
+        # Segment dimensions header
+        lbl_dimensions = QLabel("Edges & Angles", self)
         lbl_dimensions.setObjectName("lbl_sec_title")
         main_layout.addWidget(lbl_dimensions)
         
@@ -231,13 +241,33 @@ class ZonePropertyPanel(QFrame):
     def has_user_position(self):
         return self._user_moved
 
+    def _display_kind(self, zone):
+        design_kind = getattr(zone, "design_kind", None)
+        if design_kind == "room":
+            return "ROOM"
+        if design_kind == "wall":
+            return "WALL"
+        if design_kind == "no_go_rule":
+            return "NO-GO RULE"
+        if design_kind == "speed_rule":
+            return "SPEED RULE"
+
+        object_type = getattr(zone, "object_type", "zone")
+        if object_type == "room":
+            return "ROOM"
+        if object_type == "wall":
+            return "WALL"
+        if getattr(zone, "zone_type", "") == "forbidden":
+            return "NO-GO RULE"
+        return "SPEED RULE"
+
     def load_zone(self, zone):
         self._updating_ui = True
         self.zone_id = zone.id
         self.zone_type = zone.zone_type
         self.object_type = getattr(zone, "object_type", "zone")
         
-        self.lbl_title.setText(f"{self.object_type.upper()}: {zone.name}")
+        self.lbl_title.setText(f"{self._display_kind(zone)}: {zone.name}")
         
         # Hide/Show fields based on type
         if self.object_type == "room":
@@ -248,11 +278,13 @@ class ZonePropertyPanel(QFrame):
             self.sb_speed.hide()
             self.lbl_height.hide()
             self.sb_height.hide()
+            self.lbl_thickness.hide()
+            self.sb_thickness.hide()
 
             self.cmb_color.blockSignals(True)
             self.cmb_color.clear()
-            self.cmb_color.addItem("White", "#F8FAFC")
-            self.cmb_color.addItem("White Semi-transparent", "#F8FAFC_semi")
+            self.cmb_color.addItem("Room Fill", "#F8FAFC")
+            self.cmb_color.addItem("Room Fill Soft", "#F8FAFC_semi")
             is_semi = zone.color.endswith("_semi") or getattr(zone, "alpha", 255) < 150
             idx = 1 if is_semi else 0
             self.cmb_color.setCurrentIndex(idx)
@@ -265,14 +297,17 @@ class ZonePropertyPanel(QFrame):
 
             self.cmb_color.blockSignals(True)
             self.cmb_color.clear()
-            self.cmb_color.addItem("Black", "#0F172A")
-            self.cmb_color.addItem("Dark Gray", "#475569")
+            self.cmb_color.addItem("Wall Black", "#0F172A")
+            self.cmb_color.addItem("Wall Gray", "#475569")
             idx = 1 if zone.color == "#475569" else 0
             self.cmb_color.setCurrentIndex(idx)
             self.cmb_color.blockSignals(False)
             self.lbl_height.show()
             self.sb_height.show()
             self.sb_height.setValue(max(0.1, zone.max_z - zone.min_z))
+            self.lbl_thickness.show()
+            self.sb_thickness.show()
+            self.sb_thickness.setValue(max(0.01, getattr(zone, "thickness_m", 0.1)))
         else:  # allowed / forbidden zones
             self.lbl_name.show()
             self.txt_name.show()
@@ -280,6 +315,8 @@ class ZonePropertyPanel(QFrame):
             
             self.lbl_height.hide()
             self.sb_height.hide()
+            self.lbl_thickness.hide()
+            self.sb_thickness.hide()
             
             if self.zone_type == "allowed":
                 self.lbl_speed.show()
@@ -289,10 +326,10 @@ class ZonePropertyPanel(QFrame):
                 # Setup bright colors
                 self.cmb_color.blockSignals(True)
                 self.cmb_color.clear()
-                self.cmb_color.addItem("Green", "#22C55E")
-                self.cmb_color.addItem("Purple", "#A855F7")
-                self.cmb_color.addItem("Yellow", "#EAB308")
-                self.cmb_color.addItem("Blue", "#3B82F6")
+                self.cmb_color.addItem("Speed Green", "#22C55E")
+                self.cmb_color.addItem("Review Purple", "#A855F7")
+                self.cmb_color.addItem("Caution Yellow", "#EAB308")
+                self.cmb_color.addItem("Info Blue", "#3B82F6")
                 
                 # Select current color
                 color_map = {"#22C55E": 0, "#A855F7": 1, "#EAB308": 2, "#3B82F6": 3}
@@ -305,9 +342,9 @@ class ZonePropertyPanel(QFrame):
                 # Setup colors for forbidden
                 self.cmb_color.blockSignals(True)
                 self.cmb_color.clear()
-                self.cmb_color.addItem("Red", "#EF4444")
-                self.cmb_color.addItem("Black", "#0F172A")
-                self.cmb_color.addItem("Dark Gray", "#475569")
+                self.cmb_color.addItem("No-Go Red", "#EF4444")
+                self.cmb_color.addItem("No-Go Black", "#0F172A")
+                self.cmb_color.addItem("No-Go Gray", "#475569")
                 
                 color_map = {"#EF4444": 0, "#0F172A": 1, "#475569": 2}
                 self.cmb_color.setCurrentIndex(color_map.get(zone.color, 0))
@@ -379,7 +416,7 @@ class ZonePropertyPanel(QFrame):
             return
         name = self.txt_name.text().strip()
         if name:
-            self.lbl_title.setText(f"{self.object_type.upper()}: {name}")
+            self.lbl_title.setText(f"{self._display_kind(self)}: {name}")
             self.property_changed.emit("name", name)
 
     def _on_height_changed(self):
@@ -387,6 +424,11 @@ class ZonePropertyPanel(QFrame):
             return
         height = self.sb_height.value()
         self.property_changed.emit("height", height)
+
+    def _on_thickness_changed(self):
+        if self._updating_ui:
+            return
+        self.property_changed.emit("thickness_m", self.sb_thickness.value())
 
     def _on_speed_changed(self):
         if self._updating_ui:

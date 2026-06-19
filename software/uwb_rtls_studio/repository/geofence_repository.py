@@ -19,9 +19,8 @@ log = logging.getLogger(__name__)
 class GeofenceRepository:
     def __init__(self, default_file_path: Optional[str] = None):
         if default_file_path is None:
-            # Save inside data/runtime folder
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.default_file_path = os.path.join(base_dir, "data", "runtime", "geofence_map.json")
+            self.default_file_path = os.path.join(base_dir, "data", "maps", "geofence_map.json")
         else:
             self.default_file_path = default_file_path
 
@@ -62,6 +61,13 @@ class GeofenceRepository:
     def _normalize_anchor(self, anchor: dict, idx: int = 0) -> dict:
         anchor_id = self._coerce_int_id(anchor.get("anchor_id", anchor.get("id", idx)), idx)
         label = str(anchor.get("label") or anchor.get("name") or f"A{anchor_id}")
+        # local_x_m / local_y_m are room-local coordinates.
+        # x_m / y_m may equal local_x_m/y_m when a room is assigned
+        # (overwritten by _annotate_anchor_membership in live_tracking_tab).
+        # We preserve BOTH so _format_anchors_for_canvas can reconstruct the
+        # correct global scene position on load via _room_local_to_scene().
+        local_x = float(anchor.get("local_x_m", anchor.get("x_m", anchor.get("x", 0.0))))
+        local_y = float(anchor.get("local_y_m", anchor.get("y_m", anchor.get("y", 0.0))))
         return {
             "anchor_id": anchor_id,
             "label": label,
@@ -69,10 +75,14 @@ class GeofenceRepository:
             "device_type": anchor.get("device_type", "uwb_anchor"),
             "device_id": self._coerce_int_id(anchor.get("device_id"), anchor_id),
             "mac": anchor.get("mac", ""),
+            # room_id + local coords are the source of truth for position on reload
+            "room_id": anchor.get("room_id", anchor.get("zone_id", "")),
             "zone_id": anchor.get("zone_id", ""),
             "zone_name": anchor.get("zone_name", ""),
             "zone_ids": list(anchor.get("zone_ids", [])),
             "zone_names": list(anchor.get("zone_names", [])),
+            "local_x_m": local_x,
+            "local_y_m": local_y,
             "x_m": float(anchor.get("x_m", anchor.get("x", 0.0))),
             "y_m": float(anchor.get("y_m", anchor.get("y", 0.0))),
             "z_m": float(anchor.get("z_m", anchor.get("z", 0.0))),
@@ -89,6 +99,7 @@ class GeofenceRepository:
     def _split_zones(self) -> tuple[list[dict], list[dict], list[dict]]:
         rooms = []
         walls = []
+        objects = []
         rule_zones = []
         for zone in self._zones.values():
             data = zone.to_dict()
@@ -97,9 +108,11 @@ class GeofenceRepository:
                 rooms.append(data)
             elif object_type == "wall":
                 walls.append(data)
+            elif object_type == "object":
+                objects.append(data)
             elif object_type == "zone":
                 rule_zones.append(data)
-        return rooms, walls, rule_zones
+        return rooms, walls, objects, rule_zones
 
     def add_zone(self, zone: GeofenceZone) -> None:
         self._zones[zone.id] = zone
@@ -126,7 +139,7 @@ class GeofenceRepository:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             self._zones = {}
             self._anchors = []
             self._meta = dict(data.get("meta", {}))
@@ -135,16 +148,18 @@ class GeofenceRepository:
             if isinstance(map_objects, dict):
                 self._load_zone_list(map_objects.get("rooms", []))
                 self._load_zone_list(map_objects.get("walls", []))
+                self._load_zone_list(map_objects.get("objects", []))
                 anchor_items = map_objects.get("anchors", data.get("anchors", []))
             else:
                 anchor_items = data.get("anchors", [])
 
             self._load_zone_list(data.get("rule_zones", []))
 
+            has_structured_map = bool(map_objects) or bool(data.get("rule_zones"))
             legacy_objects = data.get("objects", [])
-            if legacy_objects:
+            if legacy_objects and not has_structured_map:
                 self._load_zone_list(legacy_objects)
-            elif data.get("geofences"):
+            elif data.get("geofences") and not has_structured_map:
                 self._load_zone_list(data.get("geofences", []))
 
             self._anchors = [
@@ -159,22 +174,26 @@ class GeofenceRepository:
 
     def save(self, file_path: Optional[str] = None) -> bool:
         path = file_path or self.default_file_path
-        
+
         # Ensure directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         try:
-            rooms, walls, rule_zones = self._split_zones()
+            rooms, walls, objects, rule_zones = self._split_zones()
             anchors = [dict(anchor) for anchor in self._anchors]
+            meta = dict(self._meta)
+            meta.pop("editor_settings", None)
+            meta.update({
+                "name": meta.get("name", "Virtual_Map_Config"),
+                "version": 2,
+                "schema": "uwb_rtls_geofence_map",
+            })
             data = {
-                "meta": {
-                    "name": self._meta.get("name", "Virtual_Map_Config"),
-                    "version": 2,
-                    "schema": "uwb_rtls_geofence_map",
-                },
+                "meta": meta,
                 "map_objects": {
                     "rooms": rooms,
                     "walls": walls,
+                    "objects": objects,
                     "anchors": anchors,
                     "gateways": [],
                 },
@@ -195,7 +214,7 @@ class GeofenceRepository:
     def check_position(self, x: float, y: float, z: float, speed: float = 0.0) -> Tuple[str, str, float]:
         """
         Checks a coordinate against all active geofence zones.
-        
+
         Returns:
             Tuple[str, str, float]: (status, zone_name, speed_limit)
                 status: "allowed" | "forbidden" | "overspeed"

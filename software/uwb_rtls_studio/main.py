@@ -41,6 +41,12 @@ def main():
     # High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
+    # Configure hardware anti-aliasing for OpenGL
+    from PyQt6.QtGui import QSurfaceFormat
+    fmt = QSurfaceFormat()
+    fmt.setSamples(8)  # 8x MSAA
+    QSurfaceFormat.setDefaultFormat(fmt)
+
     app = QApplication(sys.argv)
 
     # Apply global stylesheet (dark theme & custom scrollbars)
