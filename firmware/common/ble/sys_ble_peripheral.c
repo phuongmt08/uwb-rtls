@@ -110,6 +110,32 @@ static const char *ble_state_name(protobuf_ble_state_t s)
    }
 }
 
+static void ble_refresh_adv_config(void)
+{
+    uint32_t sn = bsp_util_get_serial_number();
+    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    uint32_t device_id = sn & 0xFFFFu;
+    char name[32] = {0};
+
+#ifndef BOOTLOADER
+    const sys_config_t *cfg = sys_config_get();
+    if (cfg) {
+        device_type = cfg->device_type;
+        device_id = cfg->uwb.device_id;
+    }
+#else
+    device_type = ble_read_otp_device_type();
+#endif
+
+    snprintf(name, sizeof(name), "%s-%lu",
+             ble_device_type_prefix(device_type),
+             (unsigned long)device_id);
+
+    s_ble_peri.serial_number = sn;
+    strncpy(s_ble_peri.device_name, name, sizeof(s_ble_peri.device_name) - 1);
+    s_ble_peri.device_name[sizeof(s_ble_peri.device_name) - 1] = '\0';
+}
+
 static void ble_set_state(protobuf_ble_state_t new_state, int32_t rssi_dbm)
 {
    protobuf_ble_state_t old_state = s_ble_peri.state;
@@ -192,41 +218,33 @@ bool sys_ble_peripheral_init(network_core_t *stream)
    s_ble_peri.state   = protobuf_BLE_STATE_UNSPECIFIED;
    s_ble_peri.enabled = true;
 
-   ble_poll_status();
    RLOG_I(OBJECT_CODE, "sys_ble_peripheral initialised");
    return true;
 }
 
 void sys_ble_peripheral_set_config(void)
 {
-    uint32_t sn = bsp_util_get_serial_number();
-    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
-    uint32_t device_id = sn & 0xFFFFu;
-    char name[32] = {0};
-
-#ifndef BOOTLOADER
-    const sys_config_t *cfg = sys_config_get();
-    if (cfg) {
-        device_type = cfg->device_type;
-        device_id = cfg->uwb.device_id;
-    }
-#else
-    device_type = ble_read_otp_device_type();
-#endif
-
-    snprintf(name, sizeof(name), "%s-%lu",
-             ble_device_type_prefix(device_type),
-             (unsigned long)device_id);
-
-    s_ble_peri.serial_number = sn;
-    strncpy(s_ble_peri.device_name, name, sizeof(s_ble_peri.device_name) - 1);
-    s_ble_peri.device_name[sizeof(s_ble_peri.device_name) - 1] = '\0';
+    ble_refresh_adv_config();
     RLOG_I(OBJECT_CODE, "BLE advertising name: %s", s_ble_peri.device_name);
-    
-    if (s_ble_peri.stream) {
-        network_send_ble_adv_config_set(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL, 
-                                        s_ble_peri.enabled, s_ble_peri.serial_number, s_ble_peri.device_name);
+
+    if (!sys_ble_peripheral_send_config(protobuf_PACKET_ADDR_PERIPHERAL)) {
+        RLOG_W(OBJECT_CODE, "ble_adv_config_set send failed");
     }
+}
+
+bool sys_ble_peripheral_send_config(uint8_t dst)
+{
+   BLE_CHECK(s_ble_peri.stream, false);
+
+   if (s_ble_peri.device_name[0] == '\0' || s_ble_peri.serial_number == 0u) {
+       ble_refresh_adv_config();
+   }
+
+   return network_send_ble_adv_config_set(s_ble_peri.stream,
+                                          dst,
+                                          s_ble_peri.enabled,
+                                          s_ble_peri.serial_number,
+                                          s_ble_peri.device_name);
 }
 
 bool sys_ble_peripheral_enable(bool enable)
@@ -235,8 +253,7 @@ bool sys_ble_peripheral_enable(bool enable)
    
    s_ble_peri.enabled = enable;
 
-   bool ok = network_send_ble_adv_config_set(s_ble_peri.stream, protobuf_PACKET_ADDR_PERIPHERAL, 
-                                             s_ble_peri.enabled, s_ble_peri.serial_number, s_ble_peri.device_name);
+   bool ok = sys_ble_peripheral_send_config(protobuf_PACKET_ADDR_PERIPHERAL);
    if (!ok) {
        RLOG_W(OBJECT_CODE, "ble_adv_config_set(%d) send failed", (int)enable);
    }
