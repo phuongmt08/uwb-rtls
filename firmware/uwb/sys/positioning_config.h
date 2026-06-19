@@ -36,7 +36,7 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.45f)
+#define TAG_HEIGHT_M            (0.20f)
 
 /**
  * @brief Anchor height from ground (meters)
@@ -121,14 +121,14 @@
 #define ANCHOR_1_X   0.0f
 #define ANCHOR_1_Y   0.0f
 
-#define ANCHOR_2_X   9.76f
+#define ANCHOR_2_X   11.76f
 #define ANCHOR_2_Y   0.0f
 
 #define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   9.76f
+#define ANCHOR_3_Y   14.2f
 
-#define ANCHOR_4_X   9.76f
-#define ANCHOR_4_Y   9.76f
+#define ANCHOR_4_X   11.76f
+#define ANCHOR_4_Y   14.2f
 
 #ifndef ANCHOR_1_Z
 #define ANCHOR_1_Z ANCHOR_HEIGHT_M
@@ -292,15 +292,15 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_QA
-#define SYS_FUSION_UKF_QA      0.25f
+#define SYS_FUSION_UKF_QA      0.04f
 #endif
 
 #ifndef SYS_FUSION_UKF_QG
-#define SYS_FUSION_UKF_QG      1.0e-6f
+#define SYS_FUSION_UKF_QG      0.0012f
 #endif
 
 #ifndef SYS_FUSION_UKF_R_UWB
-#define SYS_FUSION_UKF_R_UWB   0.05f
+#define SYS_FUSION_UKF_R_UWB   0.01f
 #endif
 
 

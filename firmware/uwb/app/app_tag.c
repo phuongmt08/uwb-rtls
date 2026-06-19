@@ -66,8 +66,10 @@ static uint32_t s_cycle_start_tick = 0;
 static uint32_t s_last_cycle_done_tick = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
+static bool s_position_valid = false;
+static uint8_t s_last_selected_anchors_mask = 0;
+
 #if !ENABLE_SYS_FUSION
-static sys_sensor_fusion_data_t ukf_data;
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
 static uint8_t s_last_selected_anchors_mask = 0;
@@ -934,8 +936,7 @@ void app_tag_reset_fusion(void)
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
 #else
-    /* For active Sensor Fusion, delegate the reset to freertos.c */
-    void sys_sensor_fusion_reset(void);
+    /* For active Sensor Fusion, delegate the reset to sys_sensor_fusion. */
     sys_sensor_fusion_reset();
 #endif
 }

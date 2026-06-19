@@ -1,5 +1,5 @@
 let ruleCounter = 0;
-const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 5;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 6;
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -370,6 +370,7 @@ function saveDefaults() {
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
         enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
         imu_lpf_cutoff_hz: document.getElementById('imu_lpf_cutoff_input').value,
+        imu_filter_order: document.getElementById('imu_filter_order_input').value,
         groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
         anchors: readAnchorsFromInputs(),
         rules: [],
@@ -466,6 +467,12 @@ function loadDefaults() {
                 document.getElementById('imu_lpf_cutoff_input').value = config.imu_lpf_cutoff_hz;
                 document.getElementById('imu_lpf_cutoff_range').value = config.imu_lpf_cutoff_hz;
                 document.getElementById('imu_lpf_cutoff_val').innerText = parseFloat(config.imu_lpf_cutoff_hz).toFixed(2);
+            }
+            if (loadTuning && config.imu_filter_order) {
+                const order = Math.min(SIM_CONFIG.IMU.MAX_FILTER_ORDER, Math.max(SIM_CONFIG.IMU.MIN_FILTER_ORDER, parseInt(config.imu_filter_order)));
+                document.getElementById('imu_filter_order_input').value = order;
+                document.getElementById('imu_filter_order_range').value = order;
+                document.getElementById('imu_filter_order_val').innerText = order;
             }
             if (loadTuning && config.tag_height) {
                 document.getElementById('tag_height_input').value = config.tag_height;

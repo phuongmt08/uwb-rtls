@@ -11,7 +11,7 @@
 /* Includes ----------------------------------------------------------- */
 #include "bb_router.h"
 #include "bb_cmd_hdl.h"
-#include <stddef.h>
+#include "app_timer.h"
 
 #include "logger.h"
 #include "nrf_log.h"
@@ -33,6 +33,8 @@
 #endif
 
 #define MAX_PROTOBUF_PAYLOAD_SIZE 256
+#define BB_ROUTER_APP_TIMER_TICKS_TO_MS(ticks) \
+    ((uint32_t)(((uint64_t)(ticks) * (APP_TIMER_CONFIG_RTC_FREQUENCY + 1u) * 1000u) / 32768u))
 
 /* Private variables -------------------------------------------------- */
 static bb_router_state_t m_state;

@@ -88,7 +88,7 @@
                         <input type="checkbox" id="enable_smoother" onchange="update()"> <span style="color: #475569;">Enable Distance Smoothing (Alpha: 0.25, Jump Limit: 0.3m)</span>
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f0f9ff; padding: 10px; border-radius: 8px; margin: 0;">
-                        <input type="checkbox" id="enable_imu_lpf" checked onchange="update()"> <span style="color: #075985;">Enable IMU LPF branch (adds LPF data, does not replace raw IMU)</span>
+                        <input type="checkbox" id="enable_imu_lpf" checked onchange="update()"> <span style="color: #075985;">Enable IMU Butterworth filter for UKF predict</span>
                     </label>
                 </div>
                 
@@ -100,7 +100,7 @@
                             <option value="wls">Export: Simulated Path (Multilateration)</option>
                             <option value="triplet">Export: Simulated Path (Best Triplet)</option>
                             <option value="ukf" selected>Export: Simulated Path (UKF Fusion)</option>
-                            <option value="ukf_lpf">Export: Simulated Path (UKF Fusion + IMU LPF)</option>
+                            <option value="ukf_lpf">Export: Simulated Path (UKF Fusion + IMU Butterworth)</option>
                         </select>
                     </div>
                     <button onclick="exportTrajectoryCsv()" style="background: #8b5cf6; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Export CSV</button>
@@ -174,10 +174,19 @@
             </div>
             <div class="control-group">
                 <div class="control-item">
-                    <label>IMU LPF Cutoff (Hz): <span id="imu_lpf_cutoff_val" class="val">2.00</span></label>
+                    <label>IMU Butterworth Cutoff (Hz): <span id="imu_lpf_cutoff_val" class="val">2.00</span> <span style="color:#64748b;">| Nyquist: <span id="imu_filter_nyquist_val">--</span> Hz</span></label>
                     <div style="display:flex; gap:10px; align-items:center;">
                         <input type="range" id="imu_lpf_cutoff_range" min="0.05" max="20.0" step="0.05" value="2.0" style="flex-grow:1" oninput="update()">
                         <input type="number" id="imu_lpf_cutoff_input" min="0.05" max="20.0" step="0.05" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="2.0" onchange="update()">
+                    </div>
+                </div>
+            </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>IMU Butterworth Order: <span id="imu_filter_order_val" class="val">2</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="imu_filter_order_range" min="1" max="6" step="1" value="2" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="imu_filter_order_input" min="1" max="6" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="2" onchange="update()">
                     </div>
                 </div>
             </div>
@@ -373,6 +382,7 @@ __APP_JS_BUNDLE__
         syncInput('zupt_acc_range', 'zupt_acc_input');
         syncInput('zupt_gyr_range', 'zupt_gyr_input');
         syncInput('imu_lpf_cutoff_range', 'imu_lpf_cutoff_input');
+        syncInput('imu_filter_order_range', 'imu_filter_order_input');
         syncInput('max_samples_range', 'max_samples_input');
         
         // Sync UKF Inputs

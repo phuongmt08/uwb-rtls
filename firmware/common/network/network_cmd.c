@@ -29,7 +29,9 @@
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      30000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
-#define SENSOR_FUSION_STREAM_PERIOD_MS  50u
+#ifndef SENSOR_FUSION_STREAM_PERIOD_MS
+#define SENSOR_FUSION_STREAM_PERIOD_MS  100u
+#endif
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);
 
@@ -129,6 +131,8 @@ static network_log_tracker_t s_log_tracker = {
 static bool    s_log_stream_enabled = false;
 static uint8_t s_log_stream_dst     = protobuf_PACKET_ADDR_HOST;
 static uint32_t s_last_sensor_fusion_stream_tick = 0u;
+float dt_s = 0.0f;
+uint32_t stream_packet_cnt = 0;
 
 /* ---- Command dispatch table ----
  * Sparse, indexed by protobuf tag via CMD_INFO.
@@ -557,6 +561,9 @@ static void network_cmd_ranging_stop(const protobuf_packet_t *pkt)
     if (!network_cmd_set_ranging_enabled(false)) {
         RLOG_W(OBJECT_CODE, "ranging_stop rejected by platform");
     }
+    dt_s = 0.0f;
+	stream_packet_cnt = 0u;
+	s_last_sensor_fusion_stream_tick = 0u;
 }
 
 #endif /* !BOOTLOADER */
@@ -986,9 +993,14 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
     RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d",
            (unsigned)pkt->hdr.addr.src, (int)reason);
 
+    /* Any end_session must stop log streaming immediately. */
+    s_log_stream_enabled = false;
+    dt_s = 0.0f;
+    stream_packet_cnt = 0u;
+    s_last_sensor_fusion_stream_tick = 0u;
+
     switch (reason) {
         case protobuf_SESSION_END_REASON_LOG_DATA:
-            s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Log streaming stopped");
             /* Also reset connection flag for LOG_DATA as it is usually the primary session */
             if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
@@ -1002,7 +1014,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             break;
 
         case protobuf_SESSION_END_REASON_DEBUG_STREAMING:
-            s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Debug streaming stopped");
             break;
 
@@ -1012,7 +1023,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
                 s_network_cmd.stream->ble_connection_active = false;
             }
-            s_log_stream_enabled = false;
             break;
     }
 }
@@ -1173,11 +1183,16 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {
     CHECK(stream && data, false);
-    CHECK(network_cmd_is_ranging_enabled(), false);
-//    CHECK(network_cmd_is_ble_host_active(), false);
+//    CHECK(network_cmd_is_ranging_enabled(), false);
+#if !defined(UKF_BLE_STREAM_TEST_ENABLE) || (UKF_BLE_STREAM_TEST_ENABLE == 0)
+    CHECK(network_cmd_is_ble_host_active(), false);
+#endif
+
 
     uint32_t now = bsp_util_get_ticks();
     CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+
+    dt_s = (float)(now - s_last_sensor_fusion_stream_tick) / 1000.0f;
 
     protobuf_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -1186,6 +1201,7 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
 
     if (network_core_send_packet(stream, dst, &pkt)) {
         s_last_sensor_fusion_stream_tick = now;
+        stream_packet_cnt++;
         return true;
     }
 

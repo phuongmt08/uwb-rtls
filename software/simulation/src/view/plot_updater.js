@@ -6,20 +6,44 @@ function updatePlots(res, samples, rawData) {
         pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf,
         x_axis, total_time 
     } = res;
+    const isPathCsv = rawData.log_format === 'path_csv';
 
     // 1. Trajectory
-    Plotly.restyle('trajectory', { 
-        x: [rawData.fw_path.x.slice(0, x_axis.length), simPathRuled.x, simPathWLS.x, simPathTriplet.x, simPathUKF.x, simPathUKF_lpf.x],
-        y: [rawData.fw_path.y.slice(0, x_axis.length), simPathRuled.y, simPathWLS.y, simPathTriplet.y, simPathUKF.y, simPathUKF_lpf.y],
-        text: [
-            samples.slice(0, x_axis.length).map((_, i) => 'Idx: ' + i + '<br>Mask: ' + rawData.fw_path.mask[i] + ' (A' + decodeMask(rawData.fw_path.mask[i]) + ')'), 
-            simPathRuled.x.map((_, i) => 'Idx: ' + i),
-            simPathWLS.x.map((_, i) => 'Idx: ' + i + '<br>Multilateration: ' + wlsInfo[i]),
-            simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i]),
-            simPathUKF.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion'),
-            simPathUKF_lpf.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion + IMU LPF')
-        ]
-    }, [2, 3, 4, 5, 6, 7]);
+    if (isPathCsv) {
+        const pathSamples = samples.slice(0, x_axis.length);
+        Plotly.restyle('trajectory', {
+            x: [
+                pathSamples.map(s => s.tril_x),
+                pathSamples.map(s => s.ukf_x),
+                [], [], [], []
+            ],
+            y: [
+                pathSamples.map(s => s.tril_y),
+                pathSamples.map(s => s.ukf_y),
+                [], [], [], []
+            ],
+            text: [
+                pathSamples.map((s, i) => `Idx: ${i}<br>Tril: ${s.tril_x}, ${s.tril_y}`),
+                pathSamples.map((s, i) => `Idx: ${i}<br>UKF: ${s.ukf_x}, ${s.ukf_y}`),
+                [], [], [], []
+            ],
+            name: ['Trilateration Path', 'UKF Path', '', '', '', ''],
+            visible: [true, true, false, false, false, false]
+        }, [2, 3, 4, 5, 6, 7]);
+    } else {
+        Plotly.restyle('trajectory', { 
+            x: [rawData.fw_path.x.slice(0, x_axis.length), simPathRuled.x, simPathWLS.x, simPathTriplet.x, simPathUKF.x, simPathUKF_lpf.x],
+            y: [rawData.fw_path.y.slice(0, x_axis.length), simPathRuled.y, simPathWLS.y, simPathTriplet.y, simPathUKF.y, simPathUKF_lpf.y],
+            text: [
+                samples.slice(0, x_axis.length).map((_, i) => 'Idx: ' + i + '<br>Mask: ' + rawData.fw_path.mask[i] + ' (A' + decodeMask(rawData.fw_path.mask[i]) + ')'), 
+                simPathRuled.x.map((_, i) => 'Idx: ' + i),
+                simPathWLS.x.map((_, i) => 'Idx: ' + i + '<br>Multilateration: ' + wlsInfo[i]),
+                simPathTriplet.x.map((_, i) => 'Idx: ' + i + '<br>Best Triplet: ' + bestTripletInfo[i]),
+                simPathUKF.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion'),
+            simPathUKF_lpf.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion + IMU Butterworth')
+            ]
+        }, [2, 3, 4, 5, 6, 7]);
+    }
 
     // 2. Distances & Scores
     for (let i = 0; i < 4; i++) {
@@ -80,28 +104,68 @@ function updatePlots(res, samples, rawData) {
         y: [plotData.vx_raw, plotData.vy_raw, plotData.vx, plotData.vy, plotData.vx_lpf, plotData.vy_lpf, plotData.zupt],
         customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
     }, [0, 1, 2, 3, 4, 5, 6]);
+    const csvYaw = isPathCsv ? samples.slice(0, x_axis.length).map(s => s.yaw) : plotData.yaw;
+    const csvUkfYaw = isPathCsv ? samples.slice(0, x_axis.length).map(s => s.ukf_yaw) : plotData.ukf_yaw;
     Plotly.restyle('yaw_plot', { 
         x: [x_axis, x_axis, x_axis, x_axis],
-        y: [plotData.gz, plotData.gz_lpf, plotData.yaw, plotData.ukf_yaw],
-        customdata: [plotData.times, plotData.times, plotData.times, plotData.times]
+        y: [isPathCsv ? [] : plotData.gz, isPathCsv ? [] : plotData.gz_lpf, csvYaw, csvUkfYaw],
+        customdata: [plotData.times, plotData.times, plotData.times, plotData.times],
+        visible: [!isPathCsv, !isPathCsv, true, true]
     }, [0, 1, 2, 3]);
 
-    Plotly.restyle('pos_error', {
-        x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
-        y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf],
-        name: [
-            `Pos Error (Firmware) Mean: ${meanErr(pos_errors_fw)}m`,
-            `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
-            `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
-            `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,
-            `Pos Error (UKF Fusion) Mean: ${meanErr(pos_errors_ukf)}m`,
-            `Pos Error (UKF Fusion + IMU LPF) Mean: ${meanErr(pos_errors_ukf_lpf)}m`
-        ],
-        customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
-    }, [0, 1, 2, 3, 4, 5]);
+    if (isPathCsv) {
+        const pathSamples = samples.slice(0, x_axis.length);
+        const trilErrors = calcPathErrors(pathSamples.map(s => s.tril_x), pathSamples.map(s => s.tril_y));
+        const dataUkfErrors = calcPathErrors(pathSamples.map(s => s.ukf_x), pathSamples.map(s => s.ukf_y));
+        Plotly.restyle('pos_error', {
+            x: [x_axis, x_axis, [], [], [], []],
+            y: [trilErrors, dataUkfErrors, [], [], [], []],
+            name: [
+                `Pos Error (Trilateration) Mean: ${meanErr(trilErrors)}m`,
+                `Pos Error (Data UKF) Mean: ${meanErr(dataUkfErrors)}m`,
+                '', '', '', ''
+            ],
+            visible: [true, true, false, false, false, false],
+            customdata: [plotData.times, plotData.times, [], [], [], []]
+        }, [0, 1, 2, 3, 4, 5]);
+    } else {
+        Plotly.restyle('pos_error', {
+            x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
+            y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf],
+            name: [
+                `Pos Error (Firmware) Mean: ${meanErr(pos_errors_fw)}m`,
+                `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
+                `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
+                `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,
+                `Pos Error (UKF Fusion) Mean: ${meanErr(pos_errors_ukf)}m`,
+            `Pos Error (UKF Fusion + IMU Butterworth) Mean: ${meanErr(pos_errors_ukf_lpf)}m`
+            ],
+            customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
+        }, [0, 1, 2, 3, 4, 5]);
+    }
 
     const csv_errors = samples.slice(0, x_axis.length).map(s => s.err);
     Plotly.restyle('error_frame', { x: [x_axis], y: [csv_errors], customdata: [plotData.times] }, [0]);
+
+    function calcPathErrors(pathX, pathY) {
+        const gtSegments = (typeof activeGroundTruth !== 'undefined' && activeGroundTruth && activeGroundTruth.segments) || [];
+        return pathX.map((px, i) => {
+            const py = pathY[i];
+            if (!Number.isFinite(px) || !Number.isFinite(py) || gtSegments.length === 0) return null;
+
+            let minDist = Infinity;
+            for (const seg of gtSegments) {
+                const [x1, y1, x2, y2] = seg;
+                const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+                if (l2 <= 0.000001) continue;
+                const t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2));
+                const projX = x1 + t * (x2 - x1);
+                const projY = y1 + t * (y2 - y1);
+                minDist = Math.min(minDist, Math.hypot(px - projX, py - projY));
+            }
+            return Number.isFinite(minDist) ? minDist : null;
+        });
+    }
 
     function getStats(arr) {
         const valid = arr.filter(v => v !== null && v !== undefined && !isNaN(v));
