@@ -166,6 +166,7 @@ def main():
     from models.log_model import LogModel
     from viewmodels.log_viewmodel import LogViewModel
     from viewmodels.config_viewmodel import ConfigViewModel
+    from viewmodels.calibration_viewmodel import CalibrationViewModel
     from viewmodels.main_viewmodel import MainViewModel
     
     session_repo = SessionRepository()
@@ -209,6 +210,7 @@ def main():
         command_bus=command_bus,
         ble_scan_repo=ble_scan_repo,
     )
+    calibration_vm = CalibrationViewModel(device_model)
     main_vm = MainViewModel(
         live_tracking_vm=live_tracking_vm,
         device_info_vm=device_info_vm,
@@ -225,12 +227,13 @@ def main():
         live_tracking_vm=live_tracking_vm,
         device_info_vm=device_info_vm,
         config_vm=config_vm,
+        calibration_vm=calibration_vm,
         dongle_vm=dongle_vm,
         log_vm=log_vm,
         main_vm=main_vm,
         serial_service=serial_service
     )
-    window.show()
+    window.showMaximized()
 
     # Initialize device data after UI is fully ready
     # QTimer.singleShot(0) defers to the next event loop iteration,

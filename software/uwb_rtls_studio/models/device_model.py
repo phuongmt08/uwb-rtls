@@ -79,6 +79,7 @@ class DeviceModel(QObject):
         self._next_scan_device_order = 0
         self._connected_grace_until = 0.0
         self._session_start_scheduled = False
+        self._pending_target_operation = None
 
         # Advertising devices storage
         self._adv_devices = {}                  # mac_hex -> scan fields
@@ -100,10 +101,6 @@ class DeviceModel(QObject):
         self._session_bootstrap_timer.setSingleShot(True)
         self._session_bootstrap_timer.timeout.connect(self._run_scheduled_session_start)
 
-        self._time_sync_monitor_timer = QTimer(self)
-        self._time_sync_monitor_timer.setInterval(10000)
-        self._time_sync_monitor_timer.timeout.connect(self._poll_time_sync)
-        
         # ── Serial Connection Lost Listener ─────────────────────────
         self._protocol._serial.connection_lost.connect(self.on_connection_lost)
 
@@ -226,6 +223,59 @@ class DeviceModel(QObject):
         # BE/API: lifecycle action exposed to Config tab.
         return self._send_command("enter_to_bootloader", dst_addr=VvAddress.MCU)
 
+    def request_calibration_status(self):
+        return self._request_query(
+            "calib_status_get",
+            dst_addr=VvAddress.MCU,
+            cache_ttl_s=0.0,
+            force=False,
+        )
+
+    def request_imu_reset(self):
+        return self._send_command("imu_reset", dst_addr=VvAddress.MCU)
+
+    def request_imu_calibration(self):
+        return self._send_command("imu_calib_start", dst_addr=VvAddress.MCU)
+
+    def execute_for_target(self, target: dict | None, operation):
+        """
+        Run a config operation against the selected BLE peripheral.
+
+        Current GET messages have no device-id field, so another scanned
+        target must be connected before its MCU configuration can be queried.
+        """
+        target = dict(target or {})
+        target_mac = self._normalize_mac(target.get("mac", ""))
+        connected_mac = self._normalize_mac(self._connected_mac)
+
+        if not target_mac or target_mac == connected_mac:
+            operation()
+            return True
+
+        self._pending_target_operation = {
+            "mac": target_mac,
+            "operation": operation,
+        }
+        self.connect_device(target_mac)
+        return True
+
+    @staticmethod
+    def _normalize_mac(mac: str) -> str:
+        return str(mac or "").strip().replace("-", ":").upper()
+
+    def _run_pending_target_operation(self):
+        pending = self._pending_target_operation
+        if not pending:
+            return
+        if self._normalize_mac(self._connected_mac) != pending["mac"]:
+            return
+
+        self._pending_target_operation = None
+        try:
+            pending["operation"]()
+        except Exception:
+            log.exception("Target config operation failed for %s", pending["mac"])
+
     # ═══════════════════════════════════════════════════════════════════
     #  PUBLIC PROPERTIES (read-only access for ViewModel)
     # ═══════════════════════════════════════════════════════════════════
@@ -301,12 +351,44 @@ class DeviceModel(QObject):
         
         # BE/API: session bootstrap queries owned by Device Info.
         self._request_query("device_information_get", dst_addr=VvAddress.MCU)
-        self._request_query("time_sync_get", dst_addr=VvAddress.MCU)
+        self._sync_host_time_once()
+
+        # Load the connected device configuration once. Repository signals
+        # remain the source of all response-driven UI updates.
+        self._request_query("anchor_layout_get", dst_addr=VvAddress.MCU)
+        self._request_query("sys_config_get", dst_addr=VvAddress.MCU)
+        self._request_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
+        self._request_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU)
+        self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU)
         
         # BE/API: confirm dongle BLE state for the current device session.
         self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL)
-        self._time_sync_monitor_timer.start()
         return True
+
+    def _sync_host_time_once(self):
+        """Set host time after connect, then verify it with one GET."""
+        host_time_ms = int(time.time() * 1000)
+        local_time_struct = time.localtime()
+        timezone_offset = getattr(time, "timezone", 0)
+        if getattr(time, "daylight", 0) and local_time_struct.tm_isdst:
+            timezone_offset = getattr(time, "altzone", timezone_offset)
+        tz_offset_min = int((-timezone_offset) / 60)
+
+        self._send_command(
+            "time_sync_set",
+            dst_addr=VvAddress.MCU,
+            unix_time_ms=host_time_ms,
+            timezone_offset=tz_offset_min,
+        )
+        QTimer.singleShot(
+            200,
+            lambda: self._request_query(
+                "time_sync_get",
+                dst_addr=VvAddress.MCU,
+                cache_ttl_s=0.0,
+                force=True,
+            ),
+        )
 
     def request_session_start_events(self, force: bool = False):
         """Trigger session-start data events that should be fetched once per connection."""
@@ -413,7 +495,6 @@ class DeviceModel(QObject):
             self._connected_grace_until = 0.0
             self._ble_status_timer.stop()
             self._session_bootstrap_timer.stop()
-            self._time_sync_monitor_timer.stop()
             delay_ms = 150 # Reduced delay
 
         # 2) Stop scan
@@ -470,7 +551,7 @@ class DeviceModel(QObject):
         self._prune_timer.stop()
         self._ble_status_timer.stop()
         self._session_bootstrap_timer.stop()
-        self._time_sync_monitor_timer.stop()
+        self._pending_target_operation = None
 
         self.connection_state_changed.emit({
             "name": "-", "mac": "-", "status": "Disconnected"
@@ -615,6 +696,8 @@ class DeviceModel(QObject):
                 # Scanning causes dongle firmware to exit CONNECTED LED state.
                 # User can manually start scan from UI if needed.
 
+            QTimer.singleShot(250, self._run_pending_target_operation)
+
         elif self._connected_mac and state not in (
             pb.BLE_STATE_CONNECTED,
             pb.BLE_STATE_CONNECTING,
@@ -632,7 +715,7 @@ class DeviceModel(QObject):
             shared_app_state.connected_device = {}
             self._ble_status_timer.stop()
             self._session_bootstrap_timer.stop()
-            self._time_sync_monitor_timer.stop()
+            self._pending_target_operation = None
             self.connection_state_changed.emit({
                 "name": "-", "mac": "-", "status": "Disconnected"
             })
@@ -648,15 +731,6 @@ class DeviceModel(QObject):
             except Exception as e:
                 log.error("Failed to send ble_status_get: %s", e)
 
-    def _poll_time_sync(self):
-        """Poll MCU time periodically and auto-correct drift when needed."""
-        if self._connected_mac:
-            log.debug("Polling MCU time_sync_get...")
-            try:
-                self._request_query("time_sync_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
-            except Exception as e:
-                log.error("Failed to send time_sync_get: %s", e)
-
     def _handle_ble_conn_params(self, resp):
         p = getattr(resp, 'params', None)
         if p:
@@ -669,7 +743,7 @@ class DeviceModel(QObject):
             })
 
     def _handle_time_sync(self, resp):
-        """Parse time_sync_resp, compare with host, auto-correct if drift > threshold."""
+        """Publish the event-driven time-sync response."""
         dev_time_ms = getattr(resp, 'unix_time_ms', 0)
         host_time_ms = int(time.time() * 1000)
 
@@ -683,21 +757,6 @@ class DeviceModel(QObject):
 
         time_diff_ms = abs(host_time_ms - dev_time_ms)
         is_synced = time_diff_ms <= TIME_SYNC_THRESHOLD_MS
-        was_corrected = False
-
-        # Auto-correct if drift exceeds threshold
-        if not is_synced:
-            log.info("Time out of sync (diff %d ms). Sending time_sync_set...", time_diff_ms)
-            try:
-                self._send_command(
-                    "time_sync_set",
-                    dst_addr=VvAddress.MCU,
-                    unix_time_ms=host_time_ms,
-                    timezone_offset=tz_offset_min
-                )
-                was_corrected = True
-            except Exception as e:
-                log.warning("Failed to send time_sync_set: %s", e)
 
         self.time_sync_result.emit({
             "dev_time_ms": dev_time_ms,
@@ -706,7 +765,7 @@ class DeviceModel(QObject):
             "tz_offset_min": tz_offset_min,
             "time_diff_ms": time_diff_ms,
             "is_synced": is_synced,
-            "was_corrected": was_corrected,
+            "was_corrected": False,
         })
 
     def _handle_sys_config(self, resp):

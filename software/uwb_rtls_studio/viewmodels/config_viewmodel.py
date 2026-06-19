@@ -171,6 +171,48 @@ class ConfigViewModel(QObject):
 
     # ── Command Triggers (called by View) ───────────────────────────
 
+    def read_device_config(self, target: dict | None = None):
+        """Read all config groups after the selected target is connected."""
+        target = dict(target or {})
+
+        def operation():
+            log.info("Reading complete config for target: %s", target)
+            self.read_anchor_layout()
+            self.read_ranging_config()
+            self.read_sys_config()
+            self.read_sensor_fusion_config()
+            self.read_pos_calib_config()
+
+        return self.model.execute_for_target(target, operation)
+
+    def write_device_config(
+        self,
+        target: dict | None,
+        anchors: list,
+        ranging_config: dict,
+        sys_config: dict,
+        sensor_fusion_config: dict,
+        pos_calib_config: dict | None = None,
+    ):
+        """Write one captured UI snapshot to the selected target."""
+        target = dict(target or {})
+        anchors = [dict(anchor) for anchor in anchors]
+        ranging_config = dict(ranging_config)
+        sys_config = dict(sys_config)
+        sensor_fusion_config = dict(sensor_fusion_config)
+        pos_calib_config = dict(pos_calib_config or {})
+
+        def operation():
+            log.info("Writing complete config for target: %s", target)
+            self.write_anchor_layout(anchors)
+            self.write_ranging_config(**ranging_config)
+            self.write_sys_config(**sys_config)
+            self.write_sensor_fusion_config(**sensor_fusion_config)
+            if pos_calib_config:
+                self.write_pos_calib_config(**pos_calib_config)
+
+        return self.model.execute_for_target(target, operation)
+
     def read_anchor_layout(self):
         # BE/API: fetch anchor layout for the Config tab.
         log.info("Requesting anchor layout from MCU via global query queue...")

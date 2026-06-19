@@ -103,14 +103,15 @@ class DeviceInfoTab(QWidget):
 
     def _setup_table(self):
         """Configure the advertising devices table header sizing."""
-        self._adv_table.setColumnWidth(0,150)
-        self._adv_table.setColumnWidth(1,200)
-        self._adv_table.setColumnWidth(2,100)
-        self._adv_table.setColumnWidth(3,300)
-        self._adv_table.setColumnWidth(4,100)
-        self._adv_table.setColumnWidth(5,110)
-        self._adv_table.setColumnWidth(6,110)
-        self._adv_table.setColumnWidth(7,90)
+        self._adv_table.setColumnWidth(0, 150)  # Device
+        self._adv_table.setColumnWidth(1, 150)  # MAC
+        self._adv_table.setColumnWidth(2, 70)   # Bat %
+        self._adv_table.setColumnWidth(3, 300)  # Time
+        self._adv_table.setColumnWidth(4, 90)   # Status
+        self._adv_table.setColumnWidth(5, 90)   # Warn
+        self._adv_table.setColumnWidth(6, 90)   # Error
+        self._adv_table.setColumnWidth(7, 65)   # Action (Connect button)
+
     def set_viewmodel(self, vm):
         self._vm = vm
         self._vm.device_info_updated.connect(self._on_device_info)

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from common import protocol_pb2 as pb
 from common.transport import VvAddress
 
 log = logging.getLogger(__name__)
@@ -101,5 +102,22 @@ class LogModel(QObject):
                 log.warning("LogModel: Failed to send log_data request: %s", exc)
                 return False
         return False
-    
-    
+
+    def stop_log_stream(self) -> bool:
+        """Stop the current firmware log session using the plan's log_clear contract."""
+        self._log_stream_requested = False
+        if not self._command_bus:
+            return False
+        try:
+            return bool(
+                self._command_bus.send(
+                    "log_clear",
+                    dst_addr=VvAddress.MCU,
+                    log_type=pb.LOG_TYPE_DEVICE_LOG,
+                    offset=0,
+                    length=0,
+                )
+            )
+        except Exception as exc:
+            log.warning("LogModel: Failed to stop log stream: %s", exc)
+            return False

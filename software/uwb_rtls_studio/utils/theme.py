@@ -66,6 +66,9 @@ QGroupBox::title {{
 }}
 
 /* ═══════════════════ TAB WIDGET ════════════════ */
+LeftTabWidget {{
+    background-color: #13111C;
+}}
 QTabWidget::pane {{
     border: 1px solid {COLOR_BORDER};
     border-radius: 8px;

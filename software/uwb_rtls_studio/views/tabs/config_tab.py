@@ -164,7 +164,7 @@ class ConfigTab(QWidget):
         self.anchor_table.blockSignals(True)
         try:
             self.anchor_table.setRowCount(0)
-            for idx in range(1, count + 1):
+            for idx in range(count):
                 row = self.anchor_table.rowCount()
                 self.anchor_table.insertRow(row)
                 self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{idx}"))
@@ -413,26 +413,19 @@ class ConfigTab(QWidget):
 
     def _read_device_config(self):
         if self._vm:
-            self._apply_target_to_ui(self._selected_target())
-            self._vm.read_anchor_layout()
-            self._vm.read_ranging_config()
-            self._vm.read_sys_config()
-            self._vm.read_sensor_fusion_config()
-            self._vm.read_pos_calib_config()
+            target = self._selected_target()
+            self._apply_target_to_ui(target)
+            self._vm.read_device_config(target)
 
     def _write_device_config(self):
         if not self._vm:
             return
-        self._apply_target_to_ui(self._selected_target())
+        target = self._selected_target()
+        self._apply_target_to_ui(target)
         
-        # 1. Write Layout
         anchors = self._get_anchors_from_table()
-        self._vm.write_anchor_layout(anchors)
-        
-        # 2. Write Ranging Config
         period = self.rng_period_spin.value()
         timeout = self.rx_timeout_spin.value()
-        self._vm.write_ranging_config(period, timeout)
 
         # 3. Write UWB Config (Sys Config)
         role = self._role_from_ui()
@@ -480,7 +473,7 @@ class ConfigTab(QWidget):
         smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False
         pg_delay = self._spin_value("val_pg_delay", 193)
 
-        self._vm.write_sys_config(
+        sys_config = dict(
             role=role,
             device_id=device_id,
             uwb_channel=uwb_channel,
@@ -501,7 +494,7 @@ class ConfigTab(QWidget):
         )
 
         # 4. Write Sensor Fusion Config
-        self._vm.write_sensor_fusion_config(
+        sensor_fusion_config = dict(
             alpha=self.alpha_spin.value(),
             beta=self.beta_spin.value(),
             kappa=self.kappa_spin.value(),
@@ -519,8 +512,9 @@ class ConfigTab(QWidget):
         )
 
         # 5. Write Position Calibration Config
+        pos_calib_config = {}
         if self._has_widget("chk_enable_anchor_calib"):
-            self._vm.write_pos_calib_config(
+            pos_calib_config = dict(
                 enable_anchor_auto_calib=self.chk_enable_anchor_calib.isChecked(),
                 enable_tag_auto_calib=getattr(self, "chk_enable_tag_calib", self.chk_enable_anchor_calib).isChecked(),
                 ref_distance_xy_m=self._spin_value("pos_ref_dist_spin", 2.0),
@@ -535,6 +529,18 @@ class ConfigTab(QWidget):
                 damping=self._spin_value("pos_damping_spin", 0.1),
                 iterations=self._spin_value("pos_iterations_spin", 100)
             )
+
+        self._vm.write_device_config(
+            target=target,
+            anchors=anchors,
+            ranging_config={
+                "period_ms": period,
+                "timeout_ms": timeout,
+            },
+            sys_config=sys_config,
+            sensor_fusion_config=sensor_fusion_config,
+            pos_calib_config=pos_calib_config,
+        )
 
     def _write_all_devices(self):
         # UI only (Backend defined later)

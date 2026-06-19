@@ -5,6 +5,7 @@
 """
 import math
 import time
+from copy import deepcopy
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPointF, QPoint
 from PyQt6.QtGui import (
     QBrush,
@@ -34,6 +35,7 @@ class PositionCanvas(QWidget):
     zone_properties_updated = pyqtSignal(str, dict) # zone_id, dict of updated properties
     anchor_selected = pyqtSignal(int)     # index in anchors list, -1 means none
     anchor_layout_edited = pyqtSignal(list)
+    zones_undo_remove_requested = pyqtSignal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,9 +47,9 @@ class PositionCanvas(QWidget):
         self.fusion_position = None
         self.anchors = [
             {"anchor_id": 0, "x": 0.0, "y": 0.0, "z": 0.0, "label": "A0"},
-            {"anchor_id": 1, "x": 9.76, "y": 0.0, "z": 0.0, "label": "A1"},
-            {"anchor_id": 2, "x": 9.76, "y": 9.76, "z": 0.0, "label": "A2"},
-            {"anchor_id": 3, "x": 0.0, "y": 9.76, "z": 0.0, "label": "A3"},
+            {"anchor_id": 1, "x": 10.76, "y": 0.0, "z": 0.0, "label": "A1"},
+            {"anchor_id": 2, "x": 0.0, "y": 13.2, "z": 0.0, "label": "A2"},
+            {"anchor_id": 3, "x": 10.76, "y": 13.2, "z": 0.0, "label": "A3"},
         ]
         self.history = []
         self.fusion_history = []
@@ -92,9 +94,13 @@ class PositionCanvas(QWidget):
         self._grid_subdivisions = 5
         self._show_scale_bar = True
         self._show_mouse_coords = True
+        self._show_tracking_grid = True
+        self._tracking_grid_spacing = 1.0
+        self._tracking_grid_subdivisions = 5
         self.is_developer_mode = False
         self.snapped_grid_pt = None
         self.preview_25d = False
+        self._undo_stack = []
 
         # Floating Property Panel Integration
         self.property_panel = ZonePropertyPanel(self)
@@ -108,6 +114,44 @@ class PositionCanvas(QWidget):
     def set_geofences(self, zones):
         self.geofence_zones = zones
         self.update()
+
+    def _push_undo_state(self):
+        self._undo_stack.append(
+            {
+                "anchors": deepcopy(self.anchors),
+                "zones": [(zone.id, list(zone.points)) for zone in self.geofence_zones],
+            }
+        )
+        if len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+
+    def undo_last_action(self):
+        if not self.is_developer_mode:
+            return False
+
+        if self.current_draw_points:
+            self.current_draw_points.pop()
+            self.update()
+            return True
+        if not self._undo_stack:
+            return False
+
+        state = self._undo_stack.pop()
+        self.anchors = deepcopy(state["anchors"])
+        zone_points = dict(state["zones"])
+        added_zone_ids = [zone.id for zone in self.geofence_zones if zone.id not in zone_points]
+        if added_zone_ids:
+            self.zones_undo_remove_requested.emit(added_zone_ids)
+        for zone in self.geofence_zones:
+            if zone.id in zone_points:
+                zone.points = list(zone_points[zone.id])
+                self.zone_modified.emit(zone.id, zone.points)
+        self.selected_vertex_idx = None
+        self.selected_edge_idx = None
+        self.dragging_anchor_idx = None
+        self._emit_anchor_layout_edited()
+        self.update()
+        return True
 
     def set_edit_mode(self, mode):
         self.edit_mode = mode
@@ -144,7 +188,7 @@ class PositionCanvas(QWidget):
 
     def set_grid_settings(self, major_spacing_m: float, subdivisions: int):
         """Set major grid spacing and snap subdivisions."""
-        self._grid_spacing = max(0.1, min(float(major_spacing_m), 10.0))
+        self._grid_spacing = max(0.1, min(float(major_spacing_m), 15.0))
         self._grid_subdivisions = max(1, min(int(subdivisions), 20))
         self.update()
 
@@ -340,6 +384,7 @@ class PositionCanvas(QWidget):
         self.update()
 
     def add_or_move_anchor_at(self, world_x, world_y):
+        self._push_undo_state()
         if self.selected_anchor_idx is not None and self.selected_anchor_idx < len(self.anchors):
             anchor = self.anchors[self.selected_anchor_idx]
             anchor["x"] = world_x
@@ -381,6 +426,7 @@ class PositionCanvas(QWidget):
     def update_selected_anchor(self, *, anchor_id=None, label=None, x=None, y=None, z=None, role=None, device_type=None):
         if self.selected_anchor_idx is None or self.selected_anchor_idx >= len(self.anchors):
             return
+        self._push_undo_state()
         anchor = self.anchors[self.selected_anchor_idx]
         if anchor_id is not None:
             anchor["anchor_id"] = self._coerce_int_id(anchor_id, 0)
@@ -407,6 +453,7 @@ class PositionCanvas(QWidget):
     def delete_selected_anchor(self):
         if self.selected_anchor_idx is None or self.selected_anchor_idx >= len(self.anchors):
             return False
+        self._push_undo_state()
         self.anchors.pop(self.selected_anchor_idx)
         self.selected_anchor_idx = None
         self.dragging_anchor_idx = None
@@ -460,8 +507,14 @@ class PositionCanvas(QWidget):
         )
 
         scale = min(full_width, full_height) / self._view_range if self._view_range > 0 else 50
-        self._view_cx = (min_x + max_x) / 2.0
-        self._view_cy = (min_y + max_y) / 2.0
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        if right_panel_width > 0:
+            visible_center_x = margin + (visible_width / 2.0)
+            full_center_x = margin + (full_width / 2.0)
+            center_x += (full_center_x - visible_center_x) / scale
+        self._view_cx = center_x
+        self._view_cy = center_y
         self.update()
 
     def _world_to_screen(self, world_x, world_y):
@@ -483,6 +536,11 @@ class PositionCanvas(QWidget):
         return world_x, world_y
 
     def mouseDoubleClickEvent(self, event):
+        if not self.is_developer_mode:
+            self.set_edit_mode("navigate")
+            self.auto_fit()
+            return
+
         pos = event.position()
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         
@@ -526,6 +584,10 @@ class PositionCanvas(QWidget):
         self.update()
 
     def mousePressEvent(self, event):
+        self.setFocus()
+        if not self.is_developer_mode and self.edit_mode != "navigate":
+            self.set_edit_mode("navigate")
+
         pos = event.position()
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
@@ -533,6 +595,7 @@ class PositionCanvas(QWidget):
         if self.edit_mode == "draw" and self.draw_object_type == "anchor" and event.button() == Qt.MouseButton.LeftButton:
             hit_anchor_idx = self._anchor_at_screen_pos(pos.x(), pos.y())
             if hit_anchor_idx is not None:
+                self._push_undo_state()
                 self.set_selected_anchor(hit_anchor_idx)
                 self.dragging_anchor_idx = hit_anchor_idx
             else:
@@ -545,6 +608,7 @@ class PositionCanvas(QWidget):
             # Check if clicked near the first point to close the polygon
             if self.current_draw_points and self._is_close(self.current_draw_points[0], pos.x(), pos.y()):
                 if len(self.current_draw_points) >= 3:
+                    self._push_undo_state()
                     pts = list(self.current_draw_points)
                     self.current_draw_points.clear()
                     self.polygon_completed.emit(pts)
@@ -575,6 +639,7 @@ class PositionCanvas(QWidget):
                 if sel_zone:
                     for idx, pt in enumerate(sel_zone.points):
                         if self._is_close(pt, pos.x(), pos.y()):
+                            self._push_undo_state()
                             self.selected_vertex_idx = idx
                             self.setCursor(Qt.CursorShape.SizeAllCursor)
                             return
@@ -585,6 +650,7 @@ class PositionCanvas(QWidget):
                         sx2, sy2 = self._world_to_screen(pt2[0], pt2[1])
                         distance_px, t = self._distance_to_segment_px((pos.x(), pos.y()), (sx1, sy1), (sx2, sy2))
                         if distance_px <= 10 and 0.05 <= t <= 0.95:
+                            self._push_undo_state()
                             self.selected_edge_idx = edge_idx
                             self._edge_drag_start_world = (snapped_x, snapped_y)
                             self._edge_drag_original_points = list(sel_zone.points)
@@ -605,6 +671,7 @@ class PositionCanvas(QWidget):
                 for idx, pt in enumerate(zone.points):
                     if self._is_close(pt, pos.x(), pos.y()):
                         self.set_selected_zone(zone.id)
+                        self._push_undo_state()
                         self.selected_vertex_idx = idx
                         self.zone_selected.emit(zone.id)
                         self.setCursor(Qt.CursorShape.SizeAllCursor)
@@ -617,6 +684,7 @@ class PositionCanvas(QWidget):
                 zone = next((z for z in sorted_for_click if z.id == zone_id), None)
                 if zone:
                     self.set_selected_zone(zone.id)
+                    self._push_undo_state()
                     self.selected_edge_idx = edge_idx
                     self._edge_drag_start_world = (snapped_x, snapped_y)
                     self._edge_drag_original_points = list(zone.points)
@@ -654,6 +722,9 @@ class PositionCanvas(QWidget):
             self._rect_end = event.position()
 
     def mouseMoveEvent(self, event):
+        if not self.is_developer_mode and self.edit_mode != "navigate":
+            self.set_edit_mode("navigate")
+
         pos = event.position()
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
@@ -850,6 +921,72 @@ class PositionCanvas(QWidget):
                 f"({anchor['x']:.1f}, {anchor['y']:.1f}, {anchor.get('z', 0.0):.1f})",
             )
 
+    def _draw_tracking_grid(self, painter, to_screen, view_x1, view_y1, view_x2, view_y2, margin, width, height):
+        """Draw a fixed 1 m grid for User mode without changing Spatial settings."""
+        major_step = self._tracking_grid_spacing
+        minor_step = major_step / max(self._tracking_grid_subdivisions, 1)
+        scale_px = min(width, height) / self._view_range if self._view_range > 0 else 50
+
+        if minor_step * scale_px >= 4:
+            painter.setPen(QPen(QColor(148, 163, 184, 24), 1, Qt.PenStyle.DotLine))
+            grid_x = math.floor(view_x1 / minor_step) * minor_step
+            guard = 0
+            while grid_x <= view_x2 and guard < 5000:
+                screen_x, _ = to_screen(grid_x, 0)
+                painter.drawLine(screen_x, margin, screen_x, self.height() - margin)
+                grid_x += minor_step
+                guard += 1
+
+            grid_y = math.floor(view_y1 / minor_step) * minor_step
+            guard = 0
+            while grid_y <= view_y2 and guard < 5000:
+                _, screen_y = to_screen(0, grid_y)
+                painter.drawLine(margin, screen_y, margin + width, screen_y)
+                grid_y += minor_step
+                guard += 1
+
+        painter.setPen(QPen(QColor(148, 163, 184, 70), 1, Qt.PenStyle.DotLine))
+        grid_x = math.floor(view_x1 / major_step) * major_step
+        guard = 0
+        while grid_x <= view_x2 and guard < 2000:
+            screen_x, _ = to_screen(grid_x, 0)
+            painter.drawLine(screen_x, margin, screen_x, self.height() - margin)
+            grid_x += major_step
+            guard += 1
+
+        grid_y = math.floor(view_y1 / major_step) * major_step
+        guard = 0
+        while grid_y <= view_y2 and guard < 2000:
+            _, screen_y = to_screen(0, grid_y)
+            painter.drawLine(margin, screen_y, margin + width, screen_y)
+            grid_y += major_step
+            guard += 1
+
+        axis_x, axis_y = to_screen(0, 0)
+        painter.setPen(QPen(QColor(226, 232, 240, 150), 1.5))
+        if margin <= axis_x <= margin + width:
+            painter.drawLine(axis_x, margin, axis_x, self.height() - margin)
+        if margin <= axis_y <= self.height() - margin:
+            painter.drawLine(margin, axis_y, margin + width, axis_y)
+
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.setPen(QColor(203, 213, 225))
+        grid_x = math.floor(view_x1 / major_step) * major_step
+        guard = 0
+        while grid_x <= view_x2 and guard < 2000:
+            screen_x, _ = to_screen(grid_x, 0)
+            painter.drawText(screen_x - 12, self.height() - margin + 16, f"{grid_x:.0f}m")
+            grid_x += major_step
+            guard += 1
+
+        grid_y = math.floor(view_y1 / major_step) * major_step
+        guard = 0
+        while grid_y <= view_y2 and guard < 2000:
+            _, screen_y = to_screen(0, grid_y)
+            painter.drawText(4, screen_y + 4, f"{grid_y:.0f}m")
+            grid_y += major_step
+            guard += 1
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -865,6 +1002,19 @@ class PositionCanvas(QWidget):
         to_screen = self._world_to_screen
         view_x1, view_y1 = self._screen_to_world(margin, self.height() - margin)
         view_x2, view_y2 = self._screen_to_world(margin + width, margin)
+
+        if self._show_tracking_grid and not self.dim_tracking_view:
+            self._draw_tracking_grid(
+                painter,
+                to_screen,
+                view_x1,
+                view_y1,
+                view_x2,
+                view_y2,
+                margin,
+                width,
+                height,
+            )
 
         # 1. Draw Fusion History Trail (UKF, solid sky blue)
         if len(self.fusion_history) > 1:
@@ -1252,12 +1402,8 @@ class PositionCanvas(QWidget):
         if self._show_scale_bar:
             scale_px = min(width, height) / self._view_range if self._view_range > 0 else 50
             major_step = self._grid_spacing
-            multiplier = 1
-            while major_step * multiplier * scale_px < 60 and multiplier < 20:
-                multiplier += 1
-            while major_step * multiplier * scale_px > 220 and multiplier > 1:
-                multiplier -= 1
-            bar_world_m = major_step * multiplier
+            # Keep the reference bar aligned with one configured major grid cell.
+            bar_world_m = major_step
 
             start_x_world = math.ceil((view_x1 + major_step * 0.25) / major_step) * major_step
             start_y_world = math.ceil((view_y1 + major_step * 0.25) / major_step) * major_step

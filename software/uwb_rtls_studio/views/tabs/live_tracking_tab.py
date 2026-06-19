@@ -32,12 +32,20 @@ from PyQt6.QtWidgets import (
     QDialog,
     QToolButton,
 )
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF, QShortcut, QKeySequence
 
 from views.components.position_canvas import PositionCanvas
 from models.geofence_model import GeofenceZone
 from views.components.geofence_editor import GeofenceEditorWidget
 from utils.config_dim import GRID_SPACING_M
+from utils.app_state import shared_app_state
+
+DEFAULT_ANCHOR_LAYOUT = [
+    {"anchor_id": 0, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "label": "A0"},
+    {"anchor_id": 1, "x_m": 10.76, "y_m": 0.0, "z_m": 0.0, "label": "A1"},
+    {"anchor_id": 2, "x_m": 0.0, "y_m": 13.2, "z_m": 0.0, "label": "A2"},
+    {"anchor_id": 3, "x_m": 10.76, "y_m": 13.2, "z_m": 0.0, "label": "A3"},
+]
 
 
 class _PreviewPane(QWidget):
@@ -45,12 +53,66 @@ class _PreviewPane(QWidget):
         super().__init__(parent)
         self._source = source
         self._mode = mode
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._dragging = False
+        self._drag_start = None
+        self._drag_pan_x = 0.0
+        self._drag_pan_y = 0.0
         self.setMinimumSize(760, 420)
         self.setStyleSheet("background: #DDE3EA; border: 1px solid #CBD5E1; border-radius: 8px;")
+        self.setMouseTracking(True)
 
     def set_mode(self, mode: str):
         self._mode = "angled" if mode == "angled" else "top"
         self.update()
+
+    def reset_view(self):
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self.update()
+
+    def wheelEvent(self, event):
+        factor = 1.15 if event.angleDelta().y() > 0 else (1.0 / 1.15)
+        self._zoom = max(0.35, min(self._zoom * factor, 8.0))
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self._drag_start = event.position()
+            self._drag_pan_x = self._pan_x
+            self._drag_pan_y = self._pan_y
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging and self._drag_start:
+            dx = event.position().x() - self._drag_start.x()
+            dy = event.position().y() - self._drag_start.y()
+            self._pan_x = self._drag_pan_x + dx
+            self._pan_y = self._drag_pan_y + dy
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._dragging = False
+            self._drag_start = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self.reset_view()
+        event.accept()
 
     def _zones(self):
         if hasattr(self._source, "get_geofence_zones"):
@@ -155,14 +217,19 @@ class _PreviewPane(QWidget):
         min_x, min_y, max_x, max_y = bounds
         w = max(max_x - min_x, 0.1)
         h = max(max_y - min_y, 0.1)
-        sx = rect.left() + 18 + (x - min_x) / w * (rect.width() - 36)
-        sy = rect.bottom() - 18 - (y - min_y) / h * (rect.height() - 36)
+        inset = 18
+        base_w = rect.width() - 2 * inset
+        base_h = rect.height() - 2 * inset
+        cx = rect.center().x() + self._pan_x
+        cy = rect.center().y() + self._pan_y
+        sx = cx + (((x - min_x) / w) - 0.5) * base_w * self._zoom
+        sy = cy - (((y - min_y) / h) - 0.5) * base_h * self._zoom
         return QPointF(sx, sy)
 
     def _draw_top_view(self, painter, zones):
         rect = self.rect().adjusted(12, 12, -12, -12)
         painter.setPen(QPen(QColor(14, 116, 144), 1))
-        painter.setBrush(QColor(255, 255, 255))
+        painter.setBrush(QColor(229, 231, 235))
         painter.drawRoundedRect(rect, 8, 8)
 
         bounds = self._bounds(zones)
@@ -242,8 +309,8 @@ class _PreviewPane(QWidget):
         h = max(max_y - min_y, 0.1)
         nx = (x - min_x) / w
         ny = (y - min_y) / h
-        # Keep coordinates proportional to the real map and only add a mild oblique lift for depth.
-        return nx * 2.0 + ny * 0.12, -(ny * 1.15) - z * 0.18
+        # Keep the angled view mostly front-facing: less horizontal skew, more top-down lift.
+        return nx * 1.75 + ny * 0.06, -(ny * 1.35) - z * 0.24
 
     def _angle_bounds(self, zones, bounds):
         raw = []
@@ -270,9 +337,9 @@ class _PreviewPane(QWidget):
         min_x, min_y, max_x, max_y = angle_bounds
         w = max(max_x - min_x, 0.1)
         h = max(max_y - min_y, 0.1)
-        scale = min((rect.width() - 72) / w, (rect.height() - 76) / h)
-        cx = rect.center().x()
-        cy = rect.center().y() + 12
+        scale = min((rect.width() - 72) / w, (rect.height() - 76) / h) * self._zoom
+        cx = rect.center().x() + self._pan_x
+        cy = rect.center().y() + 18 + self._pan_y
         return QPointF(
             cx + (raw_x - (min_x + max_x) / 2.0) * scale,
             cy + (raw_y - (min_y + max_y) / 2.0) * scale,
@@ -287,7 +354,7 @@ class _PreviewPane(QWidget):
     def _draw_angled_view(self, painter, zones):
         rect = self.rect().adjusted(12, 12, -12, -12)
         painter.setPen(QPen(QColor(194, 120, 3), 1))
-        painter.setBrush(QColor(221, 227, 234))
+        painter.setBrush(QColor(229, 231, 235))
         painter.drawRoundedRect(rect, 8, 8)
         painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         painter.setPen(QColor(30, 41, 59))
@@ -295,9 +362,15 @@ class _PreviewPane(QWidget):
 
         bounds = self._bounds(zones)
         angle_bounds = self._angle_bounds(zones, bounds)
+        room_zones = [zone for zone in zones if getattr(zone, "object_type", "zone") == "room" and len(zone.points) >= 3]
         floor = QPolygonF()
-        for x, y in [(bounds[0], bounds[1]), (bounds[2], bounds[1]), (bounds[2], bounds[3]), (bounds[0], bounds[3])]:
-            floor.append(self._angle_point(x, y, 0.0, bounds, angle_bounds, rect))
+        if room_zones:
+            primary_room = max(room_zones, key=lambda zone: abs(self._polygon_area(zone.points)))
+            for x, y in primary_room.points:
+                floor.append(self._angle_point(x, y, 0.0, bounds, angle_bounds, rect))
+        else:
+            for x, y in [(bounds[0], bounds[1]), (bounds[2], bounds[1]), (bounds[2], bounds[3]), (bounds[0], bounds[3])]:
+                floor.append(self._angle_point(x, y, 0.0, bounds, angle_bounds, rect))
 
         painter.setBrush(QColor(241, 245, 249))
         painter.setPen(QPen(QColor(203, 213, 225), 2))
@@ -386,6 +459,15 @@ class _PreviewPane(QWidget):
                 painter.drawLine(base_poly[idx], top_poly[idx])
 
         self._draw_preview_anchors(painter, bounds, rect, angled=True, angle_bounds=angle_bounds)
+
+    def _polygon_area(self, points):
+        if len(points) < 3:
+            return 0.0
+        area = 0.0
+        for idx, (x1, y1) in enumerate(points):
+            x2, y2 = points[(idx + 1) % len(points)]
+            area += (x1 * y2) - (x2 * y1)
+        return area / 2.0
 
     def _draw_preview_anchors(self, painter, bounds, rect, angled=False, angle_bounds=None):
         painter.save()
@@ -481,7 +563,7 @@ class LiveTrackingTab(QWidget):
         self._canvas = self.position_canvas
         self._canvas.parent_tab = self
         self._preview_dialog = None
-        self._preview_overlay_btn = QToolButton(self)
+        self._preview_overlay_btn = self.btn_preview_overlay
 
         self._setup_geofencing_ui()
 
@@ -528,20 +610,8 @@ class LiveTrackingTab(QWidget):
         self._position_canvas_preview_button()
 
     def _setup_canvas_preview_button(self):
-        btn = self._preview_overlay_btn
-        btn.setText("2.5D Preview")
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        btn.setAutoRaise(True)
-        btn.setFixedSize(136, 36)
-        btn.setStyleSheet(
-            "QToolButton { background: rgba(17, 24, 39, 230); color: #F8FAFC; border: 1px solid #FACC15; "
-            "border-radius: 8px; font-weight: bold; padding: 5px 10px; }"
-            "QToolButton:hover { background: rgba(30, 41, 59, 245); border-color: #FDE047; }"
-            "QToolButton:pressed { background: rgba(15, 23, 42, 245); }"
-        )
-        btn.clicked.connect(self._open_preview_dialog)
-        btn.raise_()
+        self._preview_overlay_btn.clicked.connect(self._open_preview_dialog)
+        self._preview_overlay_btn.raise_()
         self._position_canvas_preview_button()
 
     def _position_canvas_preview_button(self):
@@ -597,97 +667,35 @@ class LiveTrackingTab(QWidget):
         self._last_anchor_mask = 0
 
     def _setup_dynamic_metrics(self):
-        # Clear existing layout children just in case
-        while self.pos_grid.count():
-            item = self.pos_grid.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        self.pos_grid.setSpacing(10)
-
-        # 7 groups of metrics based on the RTOS dashboard design combined with studio specific telemetry
-        groups = [
-            ("FRAME", [
-                ("SOF:", "sof_label", "#60A5FA", ""),
-                ("Length:", "length_label", "#60A5FA", "bytes"),
-                ("Anchor Mask:", "anchor_mask_label", "#60A5FA", ""),
-                ("Timestamp:", "fusion_ts_label", "#CBD5E1", "ms")
-            ]),
-            ("COUNTERS", [
-                ("Tx Frames:", "tx_frame_cnt_label", "#2DD4BF", ""),
-                ("Err Frames:", "error_frame_cnt_label", "#F87171", "")
-            ]),
-            ("UKF", [
-                ("X:", "ukf_x_label", "#60A5FA", "m"),
-                ("Y:", "ukf_y_label", "#60A5FA", "m"),
-                ("Yaw:", "ukf_yaw_label", "#F472B6", "deg")
-            ]),
-            ("TRILATERATION", [
-                ("X:", "tril_x_label", "#FB923C", "m"),
-                ("Y:", "tril_y_label", "#FB923C", "m"),
-                ("Yaw:", "yaw_label", "#F472B6", "deg")
-            ]),
-            ("MOTION", [
-                ("VX:", "vx_label", "#2DD4BF", "m/s"),
-                ("VY:", "vy_label", "#2DD4BF", "m/s")
-            ]),
-            ("RANGING", [
-                ("D1:", "d1_label", "#A78BFA", "m"),
-                ("D2:", "d2_label", "#A78BFA", "m"),
-                ("D3:", "d3_label", "#A78BFA", "m"),
-                ("D4:", "d4_label", "#A78BFA", "m")
-            ]),
-            ("QUALITY", [
-                ("Z Height:", "z_label", "#60A5FA", "m"),
-                ("Error:", "error_label", "#F59E0B", "m")
-            ])
-        ]
-
-        current_row = 0
-        for group_name, items in groups:
-            group_label = QLabel(group_name, self)
-            group_label.setStyleSheet(
-                "font-size: 11px; font-weight: bold; color: #64748B; "
-                "margin-top: 5px; background-color: transparent;"
-            )
-            self.pos_grid.addWidget(group_label, current_row, 0, 1, 2)
-            current_row += 1
-            
-            for text, attr, color, unit in items:
-                lbl = QLabel(text, self)
-                lbl.setStyleSheet("font-size: 13px; color: #94A3B8; background-color: transparent;")
-                self.pos_grid.addWidget(lbl, current_row, 0)
-                
-                value_label = self._make_metric_label("--", color, True)
-                value_label.unit = unit
-                self.pos_grid.addWidget(value_label, current_row, 1)
-                setattr(self, attr, value_label)
-                current_row += 1
+        # Configure units for the statically loaded metric labels
+        self.length_label.unit = "bytes"
+        self.fusion_ts_label.unit = "ms"
+        
+        self.ukf_x_label.unit = "m"
+        self.ukf_y_label.unit = "m"
+        self.ukf_yaw_label.unit = "deg"
+        
+        self.tril_x_label.unit = "m"
+        self.tril_y_label.unit = "m"
+        self.yaw_label.unit = "deg"
+        
+        self.vx_label.unit = "m/s"
+        self.vy_label.unit = "m/s"
+        
+        self.d1_label.unit = "m"
+        self.d2_label.unit = "m"
+        self.d3_label.unit = "m"
+        self.d4_label.unit = "m"
+        
+        self.z_label.unit = "m"
+        self.error_label.unit = "m"
 
         # Backward compatibility aliases
         self.x_label = self.ukf_x_label
         self.y_label = self.ukf_y_label
         self.err_cnt_label = self.error_frame_cnt_label
-        # Alias for temporary compatibilities
         self.tril_xy_label = self.tril_x_label
         self.raw_yaw_label = self.yaw_label
-
-        # Setup stats grid
-        self.success_label = self._make_metric_label("--", "#10B981", True)
-        self.failed_label = self._make_metric_label("--", "#F87171", True)
-        self.timeout_label = self._make_metric_label("--", "#F59E0B", True)
-        self.period_label = self._make_metric_label("--", "#60A5FA", True)
-        self.success_rate_label = self._make_metric_label("--", "#10B981", True)
-        self.avg_rssi_label = self._make_metric_label("--", "#A78BFA", True)
-        self.last_range_time_label = self._make_metric_label("--", "#CBD5E1", True)
-
-        self._add_metric_row(self.stats_grid, 3, "Success:", self.success_label)
-        self._add_metric_row(self.stats_grid, 4, "Failed:", self.failed_label)
-        self._add_metric_row(self.stats_grid, 5, "Timeout:", self.timeout_label)
-        self._add_metric_row(self.stats_grid, 6, "Period:", self.period_label)
-        self._add_metric_row(self.stats_grid, 7, "Success Rate:", self.success_rate_label)
-        self._add_metric_row(self.stats_grid, 8, "Avg RSSI:", self.avg_rssi_label)
-        self._add_metric_row(self.stats_grid, 9, "Last Range:", self.last_range_time_label)
 
     def toggle_sidebar(self):
         self.sidebar_expanded = not self.sidebar_expanded
@@ -758,6 +766,9 @@ class LiveTrackingTab(QWidget):
         self._canvas.set_geofences(self._vm.get_geofence_zones())
         
         current_layout = getattr(self._vm, "current_anchor_layout", [])
+        if not current_layout:
+            self._vm.update_anchor_layout_from_map(DEFAULT_ANCHOR_LAYOUT)
+            current_layout = getattr(self._vm, "current_anchor_layout", [])
         if current_layout:
             self._on_anchor_layout_updated(current_layout)
 
@@ -1218,67 +1229,10 @@ class LiveTrackingTab(QWidget):
     # --- 2.5D GEOFENCING IMPLEMENTATION ---
 
     def _setup_user_map_ui(self):
-        self.user_map_groupbox = QGroupBox("Active Geofence Map", self)
-        self.user_map_groupbox.setStyleSheet("""
-            QGroupBox {
-                background-color: rgba(15, 23, 42, 0.90);
-                color: #38BDF8;
-                font-weight: bold;
-                font-family: 'Segoe UI';
-                font-size: 13px;
-                border: 1px solid rgba(56, 189, 248, 0.35);
-                border-radius: 8px;
-                padding-top: 15px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-                background-color: transparent;
-            }
-            QComboBox {
-                background-color: #1E293B;
-                border: 1px solid #475569;
-                border-radius: 6px;
-                color: #F8FAFC;
-                padding: 5px;
-                font-size: 12px;
-            }
-            QComboBox:hover {
-                border-color: #38BDF8;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #0F172A;
-                color: #F8FAFC;
-                selection-background-color: #2563EB;
-                border: 1px solid #334155;
-            }
-            QCheckBox {
-                color: #CBD5E1;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-
-        layout = QVBoxLayout(self.user_map_groupbox)
-        layout.setContentsMargins(10, 15, 10, 10)
-        layout.setSpacing(8)
-
-        self.cmb_user_map = QComboBox(self)
-        self.chk_enable_geofence = QCheckBox("Geofence map disabled", self)
-
-        layout.addWidget(self.cmb_user_map)
-        layout.addWidget(self.chk_enable_geofence)
-
         self.chk_enable_geofence.toggled.connect(self._on_enable_geofence_toggled)
         self.chk_enable_geofence.setChecked(True)
         self.cmb_user_map.currentIndexChanged.connect(self._on_user_map_changed)
-
         self._refresh_map_list()
-
-        self.user_map_groupbox.setParent(self)
-        self.user_map_groupbox.setVisible(True)
-        self.update_sidebar_geometry()
 
     def _refresh_map_list(self):
         self.cmb_user_map.clear()
@@ -1310,14 +1264,13 @@ class LiveTrackingTab(QWidget):
                 self._canvas.set_geofences(self._vm.get_geofence_zones())
 
     def _setup_geofencing_ui(self):
-        self.geofence_editor_widget = GeofenceEditorWidget(self)
-        self.geofence_page_layout.addWidget(self.geofence_editor_widget)
         self._setup_user_map_ui()
 
         self.sidebar_stack.setCurrentIndex(0)
         self.user_map_groupbox.setVisible(False)
         self._canvas._show_scale_bar = False
         self._canvas._show_mouse_coords = False
+        self._canvas._show_tracking_grid = True
         self._canvas.is_developer_mode = False
 
         editor = self.geofence_editor_widget
@@ -1345,126 +1298,54 @@ class LiveTrackingTab(QWidget):
         self._canvas.zone_properties_updated.connect(self._on_canvas_zone_properties_updated)
         self._canvas.anchor_selected.connect(self._on_canvas_anchor_selected)
         self._canvas.anchor_layout_edited.connect(self._on_canvas_anchor_layout_edited)
+        self._canvas.zones_undo_remove_requested.connect(self._undo_remove_zones)
+        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self._undo_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._undo_shortcut.activated.connect(self._canvas.undo_last_action)
 
         self._update_grid_settings()
         self._sync_map_height_visibility()
         self._set_editor_tool("room", "draw")
 
+    def _undo_remove_zones(self, zone_ids):
+        if not self._vm:
+            return
+        for zone_id in zone_ids:
+            self._vm.geofence_repo.remove_zone(zone_id)
+        self._canvas.set_geofences(self._vm.get_geofence_zones())
+        self._canvas.set_selected_zone(None)
+        self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
+
     def _setup_anchor_authoring_controls(self, editor):
-        if editor.cmb_map_type.findText("Anchor") < 0:
-            editor.cmb_map_type.addItem("Anchor")
-        if not hasattr(editor, "btn_mode_anchor"):
-            editor.btn_mode_anchor = QPushButton("Anchor", editor)
-            editor.btn_mode_anchor.setCheckable(True)
-            editor.btn_mode_anchor.setStyleSheet(
-                "QPushButton:checked { background-color: #0891B2; color: white; border-color: #22D3EE; }"
-            )
-            editor.map_modes_layout.insertWidget(2, editor.btn_mode_anchor)
+        # Configure coordinates inputs
+        for spin in (editor.sb_anchor_x, editor.sb_anchor_y, editor.sb_anchor_z):
+            spin.setRange(-1000.0, 1000.0)
+            spin.setDecimals(3)
+            spin.setSingleStep(0.1)
+            spin.setSuffix(" m")
 
-        # Inject scanned devices picker
-        if not hasattr(editor, "cmb_scanned_anchors"):
-            editor.lbl_scanned_device = QLabel("Scanned Link:", editor)
-            editor.cmb_scanned_anchors = QComboBox(editor)
-            editor.cmb_scanned_anchors.addItem("Manual (No Link)", None)
-            editor.map_properties_form_layout.insertRow(3, editor.lbl_scanned_device, editor.cmb_scanned_anchors)
-            
-            # Auto fill name when combobox changes
-            def on_cmb_changed(index):
-                data = editor.cmb_scanned_anchors.itemData(index)
-                self._apply_anchor_template_from_combo()
-                if isinstance(data, dict):
-                    editor.txt_map_name.setText(data.get("label", f"A{data.get('anchor_id', 0)}"))
-            editor.cmb_scanned_anchors.currentIndexChanged.connect(on_cmb_changed)
-            self._on_scan_devices_updated([])
+        # Scanned link combo setup
+        def on_cmb_changed(index):
+            data = editor.cmb_scanned_anchors.itemData(index)
+            self._apply_anchor_template_from_combo()
+            if isinstance(data, dict):
+                editor.txt_map_name.setText(data.get("label", f"A{data.get('anchor_id', 0)}"))
+        editor.cmb_scanned_anchors.currentIndexChanged.connect(on_cmb_changed)
+        self._on_scan_devices_updated([])
 
-        if not hasattr(editor, "sb_anchor_x"):
-            editor.lbl_anchor_x = QLabel("X:", editor)
-            editor.sb_anchor_x = QDoubleSpinBox(editor)
-            editor.lbl_anchor_y = QLabel("Y:", editor)
-            editor.sb_anchor_y = QDoubleSpinBox(editor)
-            editor.lbl_anchor_z = QLabel("Z:", editor)
-            editor.sb_anchor_z = QDoubleSpinBox(editor)
-            for spin in (editor.sb_anchor_x, editor.sb_anchor_y, editor.sb_anchor_z):
-                spin.setRange(-1000.0, 1000.0)
-                spin.setDecimals(3)
-                spin.setSingleStep(0.1)
-                spin.setSuffix(" m")
-            editor.map_properties_form_layout.insertRow(4, editor.lbl_anchor_x, editor.sb_anchor_x)
-            editor.map_properties_form_layout.insertRow(5, editor.lbl_anchor_y, editor.sb_anchor_y)
-            editor.map_properties_form_layout.insertRow(6, editor.lbl_anchor_z, editor.sb_anchor_z)
+        # Wire anchor button actions
+        editor.btn_create_default_anchors.clicked.connect(self._create_default_anchors)
+        editor.btn_add_anchor.clicked.connect(self._add_anchor)
+        editor.btn_assign_anchor.clicked.connect(self._assign_or_focus_selected_anchor)
+        editor.btn_remove_anchor.clicked.connect(self._remove_selected_anchor)
 
-        if not hasattr(editor, "btn_create_default_anchors"):
-            editor.btn_create_default_anchors = QPushButton("Create A0..A3", editor)
-            editor.btn_add_anchor = QPushButton("Add Anchor", editor)
-            editor.btn_assign_anchor = QPushButton("Assign / Focus", editor)
-            editor.btn_remove_anchor = QPushButton("Remove Anchor", editor)
-            anchor_actions = QGridLayout()
-            anchor_actions.setHorizontalSpacing(6)
-            anchor_actions.setVerticalSpacing(6)
-            anchor_actions.addWidget(editor.btn_create_default_anchors, 0, 0)
-            anchor_actions.addWidget(editor.btn_add_anchor, 0, 1)
-            anchor_actions.addWidget(editor.btn_assign_anchor, 1, 0)
-            anchor_actions.addWidget(editor.btn_remove_anchor, 1, 1)
-            for btn in (
-                editor.btn_create_default_anchors,
-                editor.btn_add_anchor,
-                editor.btn_assign_anchor,
-                editor.btn_remove_anchor,
-            ):
-                btn.setMinimumHeight(30)
-            editor.map_tab_layout.insertLayout(2, anchor_actions)
-            editor.btn_create_default_anchors.clicked.connect(self._create_default_anchors)
-            editor.btn_add_anchor.clicked.connect(self._add_anchor)
-            editor.btn_assign_anchor.clicked.connect(self._assign_or_focus_selected_anchor)
-            editor.btn_remove_anchor.clicked.connect(self._remove_selected_anchor)
+        # Device target setup
+        editor.cmb_device_target.setItemData(0, {"dst_addr": 1, "role": "tag"})
+        editor.btn_read_layout_dev.clicked.connect(self._read_layout_from_device)
+        editor.btn_write_layout_dev.clicked.connect(self._write_layout_to_device)
 
-        if not hasattr(editor, "lbl_anchor_status"):
-            editor.lbl_anchor_status = QLabel("No anchors placed", editor)
-            editor.lbl_anchor_status.setWordWrap(True)
-            editor.lbl_anchor_status.setStyleSheet("color: #94A3B8; font-weight: bold;")
-            editor.map_tab_layout.insertWidget(3, editor.lbl_anchor_status)
-
-        # Inject Device Layout Sync groupbox above btn_save_map
-        if not hasattr(editor, "btn_read_layout_dev"):
-            sync_parent_layout = getattr(editor, "editor_content_layout", editor.main_layout)
-            idx = sync_parent_layout.indexOf(editor.btn_save_map)
-            if idx >= 0:
-                sync_gb = QGroupBox("Device Layout Sync", editor)
-                sync_layout = QVBoxLayout(sync_gb)
-                sync_layout.setContentsMargins(6, 10, 6, 6)
-                sync_layout.setSpacing(8)
-                editor.cmb_device_target = QComboBox(sync_gb)
-                editor.cmb_device_target.addItem("Tag / MCU (0x0001)", {"dst_addr": 1, "role": "tag"})
-                
-                editor.btn_read_layout_dev = QPushButton("Read from Tag", sync_gb)
-                editor.btn_read_layout_dev.setStyleSheet("background: #0284C7; color: white; border: 1px solid #0369A1; font-weight: bold; padding: 6px;")
-                editor.btn_write_layout_dev = QPushButton("Write to Tag", sync_gb)
-                editor.btn_write_layout_dev.setStyleSheet("background: #0D9488; color: white; border: 1px solid #0F766E; font-weight: bold; padding: 6px;")
-                
-                sync_buttons = QHBoxLayout()
-                sync_buttons.addWidget(editor.btn_read_layout_dev)
-                sync_buttons.addWidget(editor.btn_write_layout_dev)
-                sync_layout.addWidget(editor.cmb_device_target)
-                sync_layout.addLayout(sync_buttons)
-                
-                sync_parent_layout.insertWidget(idx, sync_gb)
-                
-                editor.btn_read_layout_dev.clicked.connect(self._read_layout_from_device)
-                editor.btn_write_layout_dev.clicked.connect(self._write_layout_to_device)
-
-        if not hasattr(editor, "btn_load_map"):
-            editor.btn_load_map = QPushButton("Load Map JSON", editor)
-            editor.btn_load_map.setStyleSheet(
-                "background: #334155; color: white; border: 1px solid #475569; "
-                "font-weight: bold; padding: 6px;"
-            )
-            parent_layout = editor.btn_save_map.parentWidget().layout() if editor.btn_save_map.parentWidget() else None
-            if parent_layout:
-                save_idx = parent_layout.indexOf(editor.btn_save_map)
-                parent_layout.insertWidget(max(save_idx, 0), editor.btn_load_map)
-            else:
-                editor.map_tab_layout.addWidget(editor.btn_load_map)
-            editor.btn_load_map.clicked.connect(self._load_map)
+        # Load map setup
+        editor.btn_load_map.clicked.connect(self._load_map)
 
         self._sync_map_height_visibility()
         self._refresh_anchor_status_label()
@@ -1501,11 +1382,11 @@ class LiveTrackingTab(QWidget):
             {"anchor_id": 2, "label": "A2", "x_m": max_x, "y_m": max_y, "z_m": 0.0},
             {"anchor_id": 3, "label": "A3", "x_m": min_x, "y_m": max_y, "z_m": 0.0},
         ]
-        self._canvas.set_anchors(self._format_anchors_for_canvas(anchors))
         self._draft_anchor_layout = self._annotate_anchor_membership(anchors)
         self._canvas.set_anchors(self._format_anchors_for_canvas(self._draft_anchor_layout))
         self._anchor_layout_commit_pending = True
         self._vm.geofence_repo.set_anchors(self._draft_anchor_layout)
+        shared_app_state.anchor_layout = [dict(anchor) for anchor in self._draft_anchor_layout]
         self._refresh_anchor_status_label()
 
     def _add_anchor(self):
@@ -1695,7 +1576,7 @@ class LiveTrackingTab(QWidget):
         self._pending_layout_read_for_editor = False
         self.user_map_groupbox.setVisible(False)
         self.sidebar_stack.setCurrentIndex(1)
-        self.canvas_header.setText("Geofencing Map Setup")
+        self.canvas_header.setText("Spatial Constraints Setup")
 
         if self._canvas.edit_mode == "navigate":
             self._set_editor_tool("room", "draw")
@@ -1728,7 +1609,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.set_edit_mode("navigate")
         self.sidebar_stack.setCurrentIndex(0)
         self.canvas_header.setText("Real-time Position Tracking")
-        self.user_map_groupbox.setVisible(True)
+        self.user_map_groupbox.setVisible(False)
         if self._vm:
             self._canvas.set_anchors(self._vm.current_anchor_layout)
 
@@ -1748,6 +1629,7 @@ class LiveTrackingTab(QWidget):
             self._set_editor_tool("room", "draw")
         else:
             self._set_editor_tool("zone", "draw")
+        self.geofence_editor_widget.editor_tabs.updateGeometry()
 
     def _set_editor_tool(self, object_type: str, mode: str):
         self._canvas.set_draw_object_type(object_type)
@@ -1756,6 +1638,7 @@ class LiveTrackingTab(QWidget):
             self.geofence_editor_widget.editor_tabs.blockSignals(True)
             self.geofence_editor_widget.editor_tabs.setCurrentIndex(target_tab)
             self.geofence_editor_widget.editor_tabs.blockSignals(False)
+            self.geofence_editor_widget.editor_tabs.updateGeometry()
         if object_type in {"room", "wall", "anchor"}:
             idx = self.geofence_editor_widget.cmb_map_type.findText(object_type.title())
             if idx >= 0 and self.geofence_editor_widget.cmb_map_type.currentIndex() != idx:
@@ -2023,6 +1906,7 @@ class LiveTrackingTab(QWidget):
                 self._geofence_anchor_baseline,
             )
             self._vm.geofence_repo.set_anchors(self._draft_anchor_layout)
+            shared_app_state.anchor_layout = [dict(anchor) for anchor in self._draft_anchor_layout]
             self._refresh_anchor_status_label()
             return
         self._vm.update_anchor_layout_from_map(self._annotate_anchor_membership(anchors))
@@ -2150,6 +2034,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.is_developer_mode = is_developer
         self._canvas._show_scale_bar = is_developer
         self._canvas._show_mouse_coords = is_developer
+        self._canvas._show_tracking_grid = not is_developer
         # Keep the editor canvas strictly 2D; 2.5D is shown only in the preview dialog.
         self._canvas.set_25d_preview(False)
         if is_developer:
@@ -2158,11 +2043,15 @@ class LiveTrackingTab(QWidget):
             self._enter_geofence_editor()
         else:
             self.geofence_editor_widget.btn_exit_editor.setVisible(True)
-            self.user_map_groupbox.setVisible(True)
-            if self._vm:
-                self._canvas.set_anchors(self._vm.current_anchor_layout)
+            self.user_map_groupbox.setVisible(False)
+            self._canvas.set_edit_mode("navigate")
+            self._canvas.clear_active_drawing()
+            self._canvas.set_selected_zone(None)
+            self._canvas.set_selected_anchor(None)
             if self.sidebar_stack.currentIndex() == 1:
                 self._exit_geofence_editor()
+            elif self._vm:
+                self._canvas.set_anchors(self._vm.current_anchor_layout)
 
     def _on_enable_geofence_toggled(self, checked):
         self._canvas.set_25d_preview(False)
