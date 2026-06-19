@@ -64,6 +64,7 @@ static bool network_cmd_host_active(void);
 #ifdef HAVE_BLE_PERIPHERAL
 static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
 static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt);
+static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt);
 #endif
 
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt);
@@ -115,6 +116,7 @@ typedef struct {
     bool     waiting_ack;
     uint32_t log_len;
     int      tracker_id;
+    uint8_t  waiting_seq;
 } network_log_tracker_t;
 
 typedef struct {
@@ -127,11 +129,15 @@ typedef struct {
 } network_cmd_log_debug_stats_t;
 
 volatile network_cmd_log_debug_stats_t g_network_cmd_log_debug_stats;
+volatile uint32_t g_network_cmd_log_tx_count = 0;
+volatile uint32_t g_network_cmd_log_dt_min = 0xFFFFFFFF;
+volatile uint32_t g_network_cmd_log_last_tx_tick = 0;
 
 static network_log_tracker_t s_log_tracker = {
     .waiting_ack = false,
     .log_len     = 0u,
-    .tracker_id  = -1
+    .tracker_id  = -1,
+    .waiting_seq = 0
 };
 
 static bool    s_log_stream_enabled = false;
@@ -209,6 +215,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_status_get_tag,            network_cmd_unimplemented,              "ble_status_get"),     /* 34 */
     CMD_INFO(protobuf_packet_t_ble_status_resp_tag,           network_cmd_ble_status_resp,             "ble_status_resp"),    /* 35 */
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_ble_adv_status,              "ble_adv_status"),     /* 36 */
+    CMD_INFO(protobuf_packet_t_ble_adv_config_request_tag,    network_cmd_ble_adv_config_request,      "ble_adv_cfg_req"),    /* 69 */
 #endif
 
     CMD_INFO(protobuf_packet_t_log_data_tag,                  network_cmd_log_data_get,                "log_data"),           /* 37 */
@@ -810,6 +817,21 @@ static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
     /* Log received telemetry from other nodes for debug */
     RLOG_I(OBJECT_CODE, "Received BLE adv status from 0x%02X", (unsigned)pkt->hdr.addr.src);
 }
+
+static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    uint8_t dst = protobuf_PACKET_ADDR_PERIPHERAL;
+    if (pkt->has_hdr && pkt->hdr.has_addr) {
+        dst = (uint8_t)pkt->hdr.addr.src;
+    }
+
+    RLOG_I(OBJECT_CODE, "Received BLE adv config request from 0x%02X", (unsigned)dst);
+    if (!sys_ble_peripheral_send_config(dst)) {
+        RLOG_W(OBJECT_CODE, "Failed to send BLE adv config to 0x%02X", (unsigned)dst);
+    }
+}
 #endif
 
 static void network_cmd_device_reset(const protobuf_packet_t *pkt)
@@ -912,9 +934,21 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
         return;
     }
 
+    g_network_cmd_log_tx_count++;
+
+    uint32_t now = bsp_util_get_ticks();
+    if (g_network_cmd_log_last_tx_tick != 0) {
+        uint32_t dt = now - g_network_cmd_log_last_tx_tick;
+        if (dt < g_network_cmd_log_dt_min) {
+            g_network_cmd_log_dt_min = dt;
+        }
+    }
+    g_network_cmd_log_last_tx_tick = now;
+
     s_log_tracker.waiting_ack  = true;
     g_network_cmd_log_debug_stats.ack_wait_set_on_log_send++;
     s_log_tracker.log_len      = read_len;
+    s_log_tracker.waiting_seq  = packet.hdr.seq;
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
                                                         packet.hdr.seq,
                                                         WAIT_TIME_TO_RESEND_ACK_MS,
@@ -923,6 +957,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     if (s_log_tracker.tracker_id < 0) {
         s_log_tracker.waiting_ack = false;
         s_log_tracker.log_len     = 0u;
+        s_log_tracker.waiting_seq = 0;
     }
 #else
     /* No flash storage: logger returns framed entries from RAM buffer.
@@ -953,9 +988,21 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
         return;
     }
 
+    g_network_cmd_log_tx_count++;
+
+    uint32_t now = bsp_util_get_ticks();
+    if (g_network_cmd_log_last_tx_tick != 0) {
+        uint32_t dt = now - g_network_cmd_log_last_tx_tick;
+        if (dt < g_network_cmd_log_dt_min) {
+            g_network_cmd_log_dt_min = dt;
+        }
+    }
+    g_network_cmd_log_last_tx_tick = now;
+
     s_log_tracker.waiting_ack  = true;
     g_network_cmd_log_debug_stats.ack_wait_set_on_log_send++;
     s_log_tracker.log_len      = read_len;
+    s_log_tracker.waiting_seq  = packet.hdr.seq;
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
                                                         packet.hdr.seq,
                                                         WAIT_TIME_TO_RESEND_ACK_MS,
@@ -964,6 +1011,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     if (s_log_tracker.tracker_id < 0) {
         s_log_tracker.waiting_ack = false;
         s_log_tracker.log_len     = 0u;
+        s_log_tracker.waiting_seq = 0;
     }
 #endif
 }
@@ -1024,6 +1072,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
         tracker->waiting_ack = false;
         tracker->log_len     = 0u;
         tracker->tracker_id  = -1;
+        tracker->waiting_seq = 0;
         g_network_cmd_log_debug_stats.ack_wait_callback_found++;
         g_network_cmd_log_debug_stats.ack_wait_cleared_by_tracker_callback++;
         return;
@@ -1033,6 +1082,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
     tracker->waiting_ack = false;
     tracker->log_len     = 0u;
     tracker->tracker_id  = -1;
+    tracker->waiting_seq = 0;
 #else
     /* No flash: consume from RAM buffer when host ACKs. */
     CHECK_VOID(p_tracker != NULL);
@@ -1045,6 +1095,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
         tracker->waiting_ack = false;
         tracker->log_len     = 0u;
         tracker->tracker_id  = -1;
+        tracker->waiting_seq = 0;
         g_network_cmd_log_debug_stats.ack_wait_callback_found++;
         g_network_cmd_log_debug_stats.ack_wait_cleared_by_tracker_callback++;
         return;
@@ -1054,6 +1105,7 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
     tracker->waiting_ack = false;
     tracker->log_len     = 0u;
     tracker->tracker_id  = -1;
+    tracker->waiting_seq = 0;
 #endif
 }
 
@@ -1204,7 +1256,14 @@ bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool e
     if (device_name) {
         strncpy(pkt.params.ble_adv_config_set.device_name, device_name,
                 sizeof(pkt.params.ble_adv_config_set.device_name) - 1);
+        pkt.params.ble_adv_config_set.device_name[sizeof(pkt.params.ble_adv_config_set.device_name) - 1] = '\0';
     }
+
+    RLOG_I(OBJECT_CODE, "Send BLE adv config dst=0x%02X enable=%d sn=%lu name=%s",
+           (unsigned)dst,
+           (int)pkt.params.ble_adv_config_set.enable,
+           (unsigned long)pkt.params.ble_adv_config_set.serial_number,
+           pkt.params.ble_adv_config_set.device_name);
 
     return network_core_send_packet(stream, dst, &pkt);
 }
