@@ -15,7 +15,11 @@
 
 #include "logger.h"
 #include "nrf_log.h"
+#include "bb_debug.h"
 #include "bb_transport.h"
+#if defined(BLE_PERIPHERAL)
+#include "app_timer.h"
+#endif
 #include "../../../protocol/nanopb/pb_decode.h"
 #include "../../../protocol/protos/protocol.pb.h"
 
@@ -33,6 +37,13 @@
 /* Private variables -------------------------------------------------- */
 static bb_router_state_t m_state;
 static bb_packet_source_t m_target_source;
+#if defined(BLE_PERIPHERAL)
+volatile uint32_t g_bb_router_mcu_rx_total_count = 0;
+volatile uint32_t g_bb_router_mcu_rx_id_count[BB_ROUTER_MCU_BLE_PACKET_ID_COUNT] = {0};
+#if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
+static uint32_t m_last_mcu_rx_stats_log_tick;
+#endif
+#endif
 
 // Router-owned buffer that stores protobuf payloads only.
 static uint8_t protobuf_buffer[MAX_PROTOBUF_PAYLOAD_SIZE];
@@ -44,6 +55,12 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length);
 static void bb_router_state_check_dst_handle(void);
 static void bb_router_state_process_cmd_handle(void);
 static void bb_router_state_forward_handle(void);
+#if defined(BLE_PERIPHERAL)
+static int bb_router_mcu_ble_packet_index(uint32_t cmd_id);
+#if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
+static void bb_router_mcu_rx_stats_log_process(void);
+#endif
+#endif
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_router_init(void)
@@ -59,11 +76,19 @@ ret_code_t bb_router_init(void)
         return err_code;
     }
 
+#if defined(BLE_PERIPHERAL) && BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
+    m_last_mcu_rx_stats_log_tick = app_timer_cnt_get();
+#endif
+
     return bb_cmd_hdl_init();
 }
 
 void bb_router_process(void)
 {
+#if defined(BLE_PERIPHERAL) && BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
+    bb_router_mcu_rx_stats_log_process();
+#endif
+
     /* ---- Collapse state machine: process all ready states in one call ---- */
 
     if (m_state == BB_ROUTER_STATE_IDLE)
@@ -93,6 +118,48 @@ void bb_router_process(void)
 }
 
 /* Private definitions ------------------------------------------------ */
+#if defined(BLE_PERIPHERAL)
+static int bb_router_mcu_ble_packet_index(uint32_t cmd_id)
+{
+    switch (cmd_id) {
+        case protobuf_packet_t_ack_tag:                     return 0; /* cmd_id 3 */
+        case protobuf_packet_t_ble_adv_config_set_tag:      return 1; /* cmd_id 39 */
+        case protobuf_packet_t_ble_status_get_tag:          return 2; /* cmd_id 40 */
+        case protobuf_packet_t_ble_status_resp_tag:         return 3; /* cmd_id 41 */
+        case protobuf_packet_t_ble_adv_status_tag:          return 4; /* cmd_id 42 */
+        case protobuf_packet_t_log_data_tag:                return 5; /* cmd_id 43 */
+        case protobuf_packet_t_ble_adv_config_request_tag:  return 6; /* cmd_id 69 */
+        default:                                            return -1;
+    }
+}
+
+#if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
+static void bb_router_mcu_rx_stats_log_process(void)
+{
+    uint32_t now = app_timer_cnt_get();
+    uint32_t elapsed_ticks = app_timer_cnt_diff_compute(now, m_last_mcu_rx_stats_log_tick);
+
+    if (elapsed_ticks < APP_TIMER_TICKS(DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS))
+    {
+        return;
+    }
+
+    m_last_mcu_rx_stats_log_tick = now;
+    BB_DEBUG_LOG_INFO("PERI: rx stats total=%u",
+                 (unsigned)g_bb_router_mcu_rx_total_count);
+    BB_DEBUG_LOG_INFO("PERI: rx stats id3=%u id39=%u id40=%u id41=%u",
+                 (unsigned)g_bb_router_mcu_rx_id_count[0],
+                 (unsigned)g_bb_router_mcu_rx_id_count[1],
+                 (unsigned)g_bb_router_mcu_rx_id_count[2],
+                 (unsigned)g_bb_router_mcu_rx_id_count[3]);
+    BB_DEBUG_LOG_INFO("               id42=%u id43=%u id69=%u",
+                 (unsigned)g_bb_router_mcu_rx_id_count[4],
+                 (unsigned)g_bb_router_mcu_rx_id_count[5],
+                 (unsigned)g_bb_router_mcu_rx_id_count[6]);
+}
+#endif
+#endif
+
 static void bb_router_state_check_dst_handle(void)
 {
     // Check whether the destination address targets this bridge.
@@ -168,15 +235,40 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
 
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
     {
+#if defined(BLE_PERIPHERAL)
+        if (bb_transport_get_rx_source() == BB_SOURCE_SERIAL)
+        {
+#if BB_DEBUG_STREAM_MCU_PERI_ENABLED
+            int idx = bb_router_mcu_ble_packet_index(pkt.which_params);
+            g_bb_router_mcu_rx_total_count++;
+            if (idx >= 0)
+            {
+                g_bb_router_mcu_rx_id_count[idx]++;
+                NRF_LOG_INFO("PERI: received total=%u cmd_id=%u id_count=%u from MCU",
+                             (unsigned)g_bb_router_mcu_rx_total_count,
+                             (unsigned)pkt.which_params,
+                             (unsigned)g_bb_router_mcu_rx_id_count[idx]);
+            }
+            else
+            {
+                NRF_LOG_INFO("PERI: received total=%u cmd_id=%u from MCU",
+                             (unsigned)g_bb_router_mcu_rx_total_count,
+                             (unsigned)pkt.which_params);
+            }
+#endif
+        }
+#endif
         if (pkt.which_params == 43) {
             uint32_t seq = (pkt.has_hdr) ? pkt.hdr.seq : 0;
             NRF_LOG_INFO("bb_router: Decoded packet cmd_id=43 seq=%u", (unsigned)seq);
+#if !BB_DEBUG_STREAM_MCU_PERI_ENABLED
         } else if (pkt.which_params == protobuf_packet_t_ack_tag &&
                    pkt.has_hdr && pkt.hdr.has_addr &&
                    pkt.hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
             NRF_LOG_INFO("bb_router: Decoded packet cmd_id=3 ack_seq=%u", (unsigned)pkt.params.ack.ack_seq);
         } else {
             NRF_LOG_INFO("bb_router: Decoded packet cmd_id=%u", pkt.which_params);
+#endif
         }
         if (pkt.has_hdr && pkt.hdr.has_addr)
         {
