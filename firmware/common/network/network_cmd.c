@@ -119,20 +119,6 @@ typedef struct {
     uint8_t  waiting_seq;
 } network_log_tracker_t;
 
-typedef struct {
-    uint32_t ack_wait_set_on_log_send;
-    uint32_t ack_wait_blocked_by_existing_wait;
-    uint32_t ack_wait_cleared_by_tracker_callback;
-    uint32_t ack_wait_callback_entered;
-    uint32_t ack_wait_callback_found;
-    uint32_t ack_wait_callback_not_found;
-} network_cmd_log_debug_stats_t;
-
-volatile network_cmd_log_debug_stats_t g_network_cmd_log_debug_stats;
-volatile uint32_t g_network_cmd_log_tx_count = 0;
-volatile uint32_t g_network_cmd_log_dt_min = 0xFFFFFFFF;
-volatile uint32_t g_network_cmd_log_last_tx_tick = 0;
-
 static network_log_tracker_t s_log_tracker = {
     .waiting_ack = false,
     .log_len     = 0u,
@@ -909,7 +895,6 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     if (s_log_tracker.waiting_ack) {
-        g_network_cmd_log_debug_stats.ack_wait_blocked_by_existing_wait++;
         return;
     }
 
@@ -934,17 +919,6 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
         return;
     }
 
-    g_network_cmd_log_tx_count++;
-
-    uint32_t now = bsp_util_get_ticks();
-    if (g_network_cmd_log_last_tx_tick != 0) {
-        uint32_t dt = now - g_network_cmd_log_last_tx_tick;
-        if (dt < g_network_cmd_log_dt_min) {
-            g_network_cmd_log_dt_min = dt;
-        }
-    }
-    g_network_cmd_log_last_tx_tick = now;
-
     s_log_tracker.waiting_ack  = true;
     g_network_cmd_log_debug_stats.ack_wait_set_on_log_send++;
     s_log_tracker.log_len      = read_len;
@@ -963,7 +937,6 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     /* No flash storage: logger returns framed entries from RAM buffer.
      * ACK tracking mirrors the flash path - consume only after host ACKs. */
     if (s_log_tracker.waiting_ack) {
-        g_network_cmd_log_debug_stats.ack_wait_blocked_by_existing_wait++;
         return;
     }
 
@@ -988,19 +961,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
         return;
     }
 
-    g_network_cmd_log_tx_count++;
-
-    uint32_t now = bsp_util_get_ticks();
-    if (g_network_cmd_log_last_tx_tick != 0) {
-        uint32_t dt = now - g_network_cmd_log_last_tx_tick;
-        if (dt < g_network_cmd_log_dt_min) {
-            g_network_cmd_log_dt_min = dt;
-        }
-    }
-    g_network_cmd_log_last_tx_tick = now;
-
     s_log_tracker.waiting_ack  = true;
-    g_network_cmd_log_debug_stats.ack_wait_set_on_log_send++;
     s_log_tracker.log_len      = read_len;
     s_log_tracker.waiting_seq  = packet.hdr.seq;
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
@@ -1059,7 +1020,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
 static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobuf_packet_t *packet)
 {
     (void)packet;
-    g_network_cmd_log_debug_stats.ack_wait_callback_entered++;
 
 #if defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG)
     CHECK_VOID(p_tracker != NULL);
@@ -1073,12 +1033,9 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
         tracker->log_len     = 0u;
         tracker->tracker_id  = -1;
         tracker->waiting_seq = 0;
-        g_network_cmd_log_debug_stats.ack_wait_callback_found++;
-        g_network_cmd_log_debug_stats.ack_wait_cleared_by_tracker_callback++;
         return;
     }
 
-    g_network_cmd_log_debug_stats.ack_wait_callback_not_found++;
     tracker->waiting_ack = false;
     tracker->log_len     = 0u;
     tracker->tracker_id  = -1;
@@ -1096,12 +1053,9 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
         tracker->log_len     = 0u;
         tracker->tracker_id  = -1;
         tracker->waiting_seq = 0;
-        g_network_cmd_log_debug_stats.ack_wait_callback_found++;
-        g_network_cmd_log_debug_stats.ack_wait_cleared_by_tracker_callback++;
         return;
     }
 
-    g_network_cmd_log_debug_stats.ack_wait_callback_not_found++;
     tracker->waiting_ack = false;
     tracker->log_len     = 0u;
     tracker->tracker_id  = -1;

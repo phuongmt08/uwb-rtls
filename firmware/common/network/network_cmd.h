@@ -11,9 +11,6 @@ extern bool g_ranging_enabled;
 /** Set true while PM wants ranging paused; independent from manual stop/start. */
 extern bool g_pm_ranging_blocked;
 
-extern volatile uint32_t g_network_cmd_log_tx_count;
-extern volatile uint32_t g_network_cmd_log_dt_min;
-
 bool network_cmd_init(network_core_t *stream);
 void network_cmd_process(void);
 bool network_cmd_process_packet(const protobuf_packet_t *pkt);

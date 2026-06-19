@@ -11,7 +11,6 @@
 #include <stdint.h>
 
 #define NETWORK_CORE_MAX_TRACKERS 4
-#define NETWORK_CORE_MCU_BLE_PACKET_ID_COUNT 7
 
 typedef enum {
     NETWORK_CORE_ACK_STATE_NONE,
@@ -34,35 +33,6 @@ struct network_ack_tracker_s {
 };
 
 typedef bool (*network_core_packet_handler_t)(const protobuf_packet_t *packet);
-
-typedef struct {
-    uint32_t ack_rx_packets_total;
-    uint32_t ack_rx_packets_from_host;
-    uint32_t ack_rx_packets_for_mcu;
-    uint32_t ack_rx_packets_routed_to_tracker;
-    uint32_t ack_rx_packets_no_tracker_match;
-    uint32_t ack_waiting_tracker_timeouts;
-} network_core_rx_debug_stats_t;
-
-extern volatile network_core_rx_debug_stats_t g_network_core_rx_debug_stats;
-extern volatile int32_t g_network_core_waiting_ack_tracker_index;
-extern volatile uint32_t g_network_core_waiting_ack_seq;
-extern volatile uint32_t g_network_core_last_tx_seq;
-extern volatile uint32_t g_network_core_last_tx_stream;
-extern volatile uint32_t g_network_core_tx_serial_count;
-extern volatile uint32_t g_network_core_tx_ble_count;
-/*
- * MCU -> BLE packet counters by array index:
- * [0] cmd_id 3:  protobuf_packet_t_ack_tag
- * [1] cmd_id 39: protobuf_packet_t_ble_adv_config_set_tag
- * [2] cmd_id 40: protobuf_packet_t_ble_status_get_tag
- * [3] cmd_id 41: protobuf_packet_t_ble_status_resp_tag
- * [4] cmd_id 42: protobuf_packet_t_ble_adv_status_tag
- * [5] cmd_id 43: protobuf_packet_t_log_data_tag
- * [6] cmd_id 69: protobuf_packet_t_ble_adv_config_request_tag
- */
-extern volatile uint32_t g_network_core_tx_ble_id_count[NETWORK_CORE_MCU_BLE_PACKET_ID_COUNT];
-extern protobuf_packet_t g_network_core_last_ble_tx_packet;
 
 typedef struct {
     bool enabled;

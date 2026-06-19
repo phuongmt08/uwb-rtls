@@ -10,16 +10,6 @@
 
 #define OBJECT_CODE LOG_OBJECT_CODE_NETWORK
 
-volatile network_core_rx_debug_stats_t g_network_core_rx_debug_stats;
-volatile int32_t g_network_core_waiting_ack_tracker_index = -1;
-volatile uint32_t g_network_core_waiting_ack_seq = 0;
-volatile uint32_t g_network_core_last_tx_seq = 0;
-volatile uint32_t g_network_core_last_tx_stream = 0xFFFFFFFF;
-volatile uint32_t g_network_core_tx_serial_count = 0;
-volatile uint32_t g_network_core_tx_ble_count = 0;
-volatile uint32_t g_network_core_tx_ble_id_count[NETWORK_CORE_MCU_BLE_PACKET_ID_COUNT] = {0};
-protobuf_packet_t g_network_core_last_ble_tx_packet;
-
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
     protobuf_packet_t_ble_adv_status_tag,
@@ -29,42 +19,6 @@ static const uint16_t network_core_skip_ack_tb[] = {
 //    protobuf_packet_t_anchor_distance_tag,
 //    protobuf_packet_t_tag_position_tag,
 };
-
-static int network_core_mcu_ble_packet_index(uint32_t cmd_id)
-{
-    switch (cmd_id) {
-        case protobuf_packet_t_ack_tag:                     return 0; /* cmd_id 3 */
-        case protobuf_packet_t_ble_adv_config_set_tag:      return 1; /* cmd_id 39 */
-        case protobuf_packet_t_ble_status_get_tag:          return 2; /* cmd_id 40 */
-        case protobuf_packet_t_ble_status_resp_tag:         return 3; /* cmd_id 41 */
-        case protobuf_packet_t_ble_adv_status_tag:          return 4; /* cmd_id 42 */
-        case protobuf_packet_t_log_data_tag:                return 5; /* cmd_id 43 */
-        case protobuf_packet_t_ble_adv_config_request_tag:  return 6; /* cmd_id 69 */
-        default:                                            return -1;
-    }
-}
-
-// static void network_core_publish_waiting_ack_debug(network_core_t *core)
-// {
-//     g_network_core_waiting_ack_tracker_index = -1;
-//     g_network_core_waiting_ack_seq = 0;
-
-//     if (!core) {
-//         return;
-//     }
-
-//     for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
-//         network_ack_tracker_t *t = &core->ack_tracker[i];
-
-//         if (t->state != NETWORK_CORE_ACK_STATE_WAITING) {
-//             continue;
-//         }
-
-//         g_network_core_waiting_ack_tracker_index = i;
-//         g_network_core_waiting_ack_seq = t->packet_header.seq;
-//         return;
-//     }
-// }
 
 static bool network_core_encode_and_send(network_core_t *core,
                                          stream_type_t stream,
@@ -92,31 +46,6 @@ static bool network_core_encode_and_send(network_core_t *core,
                "tx fail tag=%lu dst=%lu stream=%d enc_len=%lu wr=%d",
                which, dst, (int)stream, (unsigned long)len, wr);
         return false;
-    }
-
-    g_network_core_last_tx_stream = (uint32_t)stream;
-    if (stream == STREAM_SERIAL_TX) {
-        g_network_core_tx_serial_count++;
-    } else if (stream == STREAM_BLE_TX) {
-        g_network_core_tx_ble_count++;
-        if (packet != NULL) {
-            g_network_core_last_ble_tx_packet = *packet;
-            int idx = network_core_mcu_ble_packet_index(packet->which_params);
-            if (idx >= 0) {
-                g_network_core_tx_ble_id_count[idx]++;
-            }
-        }
-    }
-
-    if (packet->which_params == protobuf_packet_t_ble_adv_config_set_tag) {
-        uint32_t dst = (packet->has_hdr && packet->hdr.has_addr) ?
-                       (uint32_t)packet->hdr.addr.dst : 0xFFu;
-        RLOG_I(OBJECT_CODE, "tx ok tag=%lu dst=%lu stream=%d enc_len=%lu wr=%d",
-               (unsigned long)packet->which_params,
-               (unsigned long)dst,
-               (int)stream,
-               (unsigned long)len,
-               wr);
     }
 
     return true;
@@ -241,11 +170,6 @@ static void network_core_update_ack_trackers(network_core_t *core, const protobu
         return;
     }
 
-    g_network_core_rx_debug_stats.ack_rx_packets_total++;
-    if (packet->has_hdr && packet->hdr.has_addr && packet->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
-        g_network_core_rx_debug_stats.ack_rx_packets_from_host++;
-    }
-
     for (int i = 0; i < NETWORK_CORE_MAX_TRACKERS; i++) {
         network_ack_tracker_t *t = &core->ack_tracker[i];
 
@@ -259,13 +183,11 @@ static void network_core_update_ack_trackers(network_core_t *core, const protobu
 
         t->state = network_core_is_ack_positive(packet->params.ack.response) ?
                    NETWORK_CORE_ACK_STATE_FOUND : NETWORK_CORE_NACK_STATE_FOUND;
-        g_network_core_rx_debug_stats.ack_rx_packets_routed_to_tracker++;
 
         network_core_finalize_tracker(t, packet);
         return;
     }
 
-    g_network_core_rx_debug_stats.ack_rx_packets_no_tracker_match++;
 }
 
 static void network_core_check_tracker_timeouts(network_core_t *core)
@@ -282,7 +204,6 @@ static void network_core_check_tracker_timeouts(network_core_t *core)
         }
 
         t->state = NETWORK_CORE_ACK_STATE_TIMEOUT;
-        g_network_core_rx_debug_stats.ack_waiting_tracker_timeouts++;
         network_core_finalize_tracker(t, NULL);
     }
 }
@@ -359,8 +280,6 @@ bool network_core_process(network_core_t *core)
     network_core_process_one_stream(core, STREAM_SERIAL_RX);
     network_core_process_one_stream(core, STREAM_BLE_RX);
 
-    // network_core_publish_waiting_ack_debug(core);
-
     return true;
 }
 
@@ -373,7 +292,6 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     packet->hdr.addr.src = (uint8_t)core->local_addr;
     packet->hdr.addr.dst = dst;
     packet->hdr.seq = (core->tx_seq)++;
-    g_network_core_last_tx_seq = packet->hdr.seq;
 
     if (dst == protobuf_PACKET_ADDR_BCAST) {
         bool sent = false;
