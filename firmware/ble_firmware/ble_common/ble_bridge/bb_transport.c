@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stddef.h>
 #include "bb_transport.h"
+#include "bb_debug.h"
 #include "hdlc.h"
 #include "logger.h"
 #if defined(BLE_PERIPHERAL)
@@ -132,7 +133,9 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     // Register the BLE receive callback.
     ble_peripheral_rx_cb_register(on_rx_ble);
 #elif defined(BLE_CENTRAL)
+#if !BB_DEBUG_STREAM_MCU_PERI_ENABLED
     NRF_LOG_INFO("Initializing USB CDC ACM for Central...");
+#endif
     err_code = bsp_usbd_init(on_rx_byte); // Central serial I/O is handled by USB CDC ACM.
     
     // Register BLE receive callback for Central
@@ -144,11 +147,6 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 
 void bb_transport_process(void)
 {
-    #if defined(BLE_PERIPHERAL)
-    // Peripheral transport is event driven by UART RX callbacks; keep this hook for polling/timeout work.
-    bsp_uart_read_byte();
-    #endif
-
     /* 1. Drain serial ring buffer (UART/USB HDLC bytes) */
     uint8_t byte;
     while (!m_is_packet_ready && rx_ring_pop(&byte))
@@ -165,6 +163,7 @@ void bb_transport_process(void)
                     {
                         memcpy(p_protobuf_buffer, rx_chunk.data, rx_chunk.len);
                     }
+                    m_rx_source = BB_SOURCE_SERIAL;
                     m_is_packet_ready = true;
 
                     if (m_rx_cb != NULL)
@@ -212,12 +211,16 @@ ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t length, bb_pa
     } 
     else if (tx_source == BB_SOURCE_BLE) 
     {
+#if !BB_DEBUG_STREAM_MCU_PERI_ENABLED
         NRF_LOG_INFO("Send packet via BLE link");
+#endif
         return bb_transport_send_ble(p_data, length);
     }
     else if (tx_source == BB_SOURCE_BLE_BROADCAST)
     {
+#if !BB_DEBUG_STREAM_MCU_PERI_ENABLED
         NRF_LOG_INFO("Send packet via BLE broadcast");
+#endif
         return bb_transport_send_ble_broadcast(p_data, length);
     }
     return NRF_ERROR_INVALID_PARAM;
@@ -236,7 +239,9 @@ static ret_code_t bb_transport_send_serial(uint8_t const * p_data, uint16_t leng
         // Send the framed bytes through the peripheral UART.
 #if defined(BLE_PERIPHERAL)
         ret_code_t err_code = bsp_uart_transmit(tx_buf, (uint16_t)frame_size);
+#if !BB_DEBUG_STREAM_MCU_PERI_ENABLED
         NRF_LOG_INFO("bb_transport: Transmitted %d bytes over UART", frame_size);
+#endif
         if (err_code == NRF_SUCCESS) 
         {
             return NRF_SUCCESS;

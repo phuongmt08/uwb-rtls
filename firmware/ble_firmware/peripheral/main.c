@@ -57,6 +57,7 @@
 
 #include "../ble_common/ble_bridge/bb_router.h"
 #include "../ble_common/ble_bridge/bb_cmd_hdl.h"
+#include "../ble_common/ble_bridge/bb_debug.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
@@ -67,7 +68,6 @@
 #include "logger.h"
 
 #include "bb_transport.h"
-#include "app_uart.h"
 
 /*
 **@brief Function for initializing power management.
@@ -98,7 +98,7 @@ int main(void)
     // BLE is disabled by default, initialized later via STM32 command
 
     // Start execution.
-    NRF_LOG_INFO("BLE Peripheral started !");
+    BB_DEBUG_LOG_INFO("BLE Peripheral started !");
 
     // Enter main loop.
     for (;;)

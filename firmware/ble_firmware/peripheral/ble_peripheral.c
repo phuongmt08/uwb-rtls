@@ -24,6 +24,7 @@
 #include "ble_nus.h"
 #include "../ble_common/ble_config.h"
 #include "../ble_common/ble_broadcast.h"
+#include "../ble_common/ble_bridge/bb_debug.h"
 #include "../../../protocol/protos/protocol.pb.h"
 #include "nrf_delay.h"
 
@@ -233,9 +234,9 @@ static ret_code_t bcast_start_current_fragment(void)
         return err_code;
     }
 
-    NRF_LOG_INFO("BLE BCAST EXT ADV len=%u evts=%u",
-                 (unsigned)m_bcast_packet_len,
-                 (unsigned)SYSTEM_CONFIG_BCAST_ADV_EVENTS);
+    BB_DEBUG_LOG_INFO("BLE BCAST EXT ADV len=%u evts=%u",
+                      (unsigned)m_bcast_packet_len,
+                      (unsigned)SYSTEM_CONFIG_BCAST_ADV_EVENTS);
     return sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
 #else
     uint8_t manuf_data[BLE_BROADCAST_MANUF_DATA_MAX_SIZE];
@@ -288,10 +289,10 @@ static ret_code_t bcast_start_current_fragment(void)
         return err_code;
     }
 
-    NRF_LOG_INFO("BLE BCAST ADV fragment %u/%u len=%u",
-                 (unsigned)(m_bcast_frag_index + 1u),
-                 (unsigned)m_bcast_frag_count,
-                 (unsigned)m_bcast_packet_len);
+    BB_DEBUG_LOG_INFO("BLE BCAST ADV fragment %u/%u len=%u",
+                      (unsigned)(m_bcast_frag_index + 1u),
+                      (unsigned)m_bcast_frag_count,
+                      (unsigned)m_bcast_packet_len);
     return sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
 #endif
 }
@@ -326,7 +327,7 @@ static void bcast_advance_fragment(void)
     m_bcast_frag_index++;
     if (m_bcast_frag_index >= m_bcast_frag_count)
     {
-        NRF_LOG_INFO("BLE BCAST ADV burst complete");
+        BB_DEBUG_LOG_INFO("BLE BCAST ADV burst complete");
         bcast_restore_advertising();
         return;
     }
@@ -394,7 +395,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 {
     if (p_evt->type == BLE_NUS_EVT_RX_DATA)
     {
-        NRF_LOG_INFO("BLE Peripheral NUS RX: %u bytes", p_evt->params.rx_data.length);
+        BB_DEBUG_LOG_INFO("BLE Peripheral NUS RX: %u bytes", p_evt->params.rx_data.length);
         bsp_utils_led_activity_pulse();
         if (m_ble_rx_cb != NULL)
         {
@@ -499,7 +500,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
-            NRF_LOG_INFO("Connected");
+            BB_DEBUG_LOG_INFO("Connected");
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             m_is_advertising = false; // SoftDevice stops advertising automatically on connection
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
@@ -643,7 +644,7 @@ void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32
         ble_peripheral_init();
     }
     
-    NRF_LOG_INFO("MCU Requested BLE ADV Config Set: enable=%d, device_name=%s, serial_number=%u", enable, device_name, serial_number);
+    BB_DEBUG_LOG_INFO("MCU Requested BLE ADV Config Set: enable=%d, device_name=%s, serial_number=%u", enable, device_name, serial_number);
 
     if (m_bcast_active)
     {
@@ -694,8 +695,8 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
     if (!m_is_initialized || p_adv_status == NULL) return;
 
     const protobuf_ble_adv_status_t * status = (const protobuf_ble_adv_status_t *)p_adv_status;
-    NRF_LOG_INFO("MCU Requested BLE ADV Status Update: Bat=%d%%, Errs=%d", 
-                 (int)status->bat_soc_percent, (int)status->error_count);
+    BB_DEBUG_LOG_INFO("MCU Requested BLE ADV Status Update: Bat=%d%%, Errs=%d",
+                      (int)status->bat_soc_percent, (int)status->error_count);
 
     if (m_bcast_active || m_bcast_pending_start)
     {
@@ -705,7 +706,7 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
 
     if (!m_is_advertising)
     {
-        NRF_LOG_INFO("Advertising inactive; ADV status update skipped");
+        BB_DEBUG_LOG_INFO("Advertising inactive; ADV status update skipped");
         return;
     }
 
@@ -758,7 +759,7 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
     }
 
     m_adv_buffer_toggle = !m_adv_buffer_toggle;
-    NRF_LOG_INFO("BLE Advertising Data updated successfully (Active buffer: %d)", !m_adv_buffer_toggle);
+    BB_DEBUG_LOG_INFO("BLE Advertising Data updated successfully (Active buffer: %d)", !m_adv_buffer_toggle);
 }
 
 uint32_t ble_peripheral_broadcast_send(uint8_t const * p_data, uint16_t length)
@@ -853,7 +854,7 @@ uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
         return NRF_ERROR_NULL;
     }
 
-    NRF_LOG_INFO("Forwarding %u bytes over BLE...", length);
+    BB_DEBUG_LOG_INFO("Forwarding %u bytes over BLE...", length);
     
     uint16_t offset = 0;
     

@@ -22,6 +22,7 @@
 #include "../../../protocol/nanopb/pb_decode.h"
 #include "../../../protocol/protos/protocol.pb.h"
 #include "nrf_log.h"
+#include "bb_debug.h"
 #include "bb_transport.h"
 #include "app_timer.h"
 
@@ -153,7 +154,7 @@ ret_code_t bb_cmd_request_ble_adv_config(void)
         return NRF_ERROR_INTERNAL;
     }
 
-    NRF_LOG_INFO("Requesting BLE advertising config from MCU");
+    BB_DEBUG_LOG_INFO("Requesting BLE advertising config from MCU");
     m_last_ble_adv_config_request_tick = app_timer_cnt_get();
     return bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
 #else
@@ -206,7 +207,7 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
     // Look up the handler for this payload tag.
     if (cmd_idx < max_id_table) 
     {
-        NRF_LOG_INFO("bb_cmd_hdl: Received cmd_id=%u, looking up handler...", cmd_idx);
+        BB_DEBUG_LOG_INFO("bb_cmd_hdl: Received cmd_id=%u, looking up handler...", cmd_idx);
         handler = m_cmd_table[cmd_idx].cmd_hdl;
     }
 
@@ -312,7 +313,7 @@ static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_p
     
     ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
     m_ble_adv_config_received = true;
-    NRF_LOG_INFO("BLE advertising config received from MCU");
+    BB_DEBUG_LOG_INFO("BLE advertising config received from MCU");
 
     *p_action = BB_CMD_ACTION_NONE; 
 }
@@ -323,7 +324,7 @@ static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_p
 static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
     UNUSED_PARAMETER(p_out);
-    NRF_LOG_INFO("MCU sent BLE advertiser status update");
+    BB_DEBUG_LOG_INFO("MCU sent BLE advertiser status update");
     const protobuf_ble_adv_status_t * p_evt = &p_in->params.ble_adv_status;
 
     ble_peripheral_adv_status_update(p_evt);
@@ -333,7 +334,7 @@ static void handle_ble_adv_status(const protobuf_packet_t * p_in, protobuf_packe
 
 static void handle_device_information_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("MCU Requested Device Information");
+    BB_DEBUG_LOG_INFO("MCU Requested Device Information");
     p_out->which_params = protobuf_packet_t_ack_tag;
     p_out->params.ack.ack_seq = p_in->hdr.seq;
     p_out->params.ack.response = protobuf_PACKET_ACK_RESPONSE_ACK;
@@ -361,7 +362,7 @@ static void handle_ble_unimplemented(const protobuf_packet_t * p_in, protobuf_pa
 
 static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Scan Start");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Scan Start");
     const protobuf_ble_scan_start_t * p_req = &p_in->params.ble_scan_start;
     
     // Logic to start scanning goes here
@@ -377,7 +378,7 @@ static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packe
 }
 static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Scan Stop");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Scan Stop");
     
     // Logic to stop scanning goes here
     app_ble_central_scan_stop();
@@ -391,14 +392,14 @@ static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet
 
 static void handle_ble_scan_result(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC provided BLE Scan Result");
+    BB_DEBUG_LOG_INFO("PC provided BLE Scan Result");
     
     *p_action = BB_CMD_ACTION_NONE;
 }
 
 static void handle_ble_conn_params_get(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Conn Params Get");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Conn Params Get");
     
     uint16_t min_ms = 0, max_ms = 0, lat = 0, to_ms = 0;
     app_ble_central_conn_params_get(&min_ms, &max_ms, &lat, &to_ms);
@@ -415,7 +416,7 @@ static void handle_ble_conn_params_get(const protobuf_packet_t * p_in, protobuf_
 
 static void handle_ble_conn_params_set(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Conn Params Set");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Conn Params Set");
     const protobuf_ble_conn_params_t * p_params = &p_in->params.ble_conn_params_set.params;
     
     app_ble_central_conn_params_set(p_params->min_interval_ms,
@@ -435,13 +436,13 @@ static void handle_ble_conn_params_set(const protobuf_packet_t * p_in, protobuf_
 
 static void handle_ble_conn_params_resp(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Conn Params Resp");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Conn Params Resp");
     *p_action = BB_CMD_ACTION_NONE;
 }
 
 static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Connect");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Connect");
     const protobuf_ble_connect_t * p_req = &p_in->params.ble_connect;
     
     app_ble_central_connect(p_req->mac_address.bytes);
@@ -454,7 +455,7 @@ static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t
 
 static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
 {
-    NRF_LOG_INFO("PC Requested BLE Disconnect");
+    BB_DEBUG_LOG_INFO("PC Requested BLE Disconnect");
     
     app_ble_central_disconnect();
     
