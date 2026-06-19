@@ -48,12 +48,11 @@ READ_TIMEOUT_S = 0.05
 LOG_BOOTSTRAP_PACKET_GAP_S = 0.2
 LOG_POLL_PERIOD_S = 5.0
 LOG_ACK_RETRY_PERIOD_S = 1.0
-# Total send attempts for one log ACK, including the first send.
-LOG_LOG_ACK_MAX_SEND_ATTEMPTS = 1
+LOG_ACK_RETRY_MAX_RETRIES = 3
 # Total send attempts for one keepalive ACK, including the first send.
 LOG_KEEPALIVE_ACK_MAX_SEND_ATTEMPTS = 3
-LOG_ACK_SETTLE_TIMEOUT_S = 3.0
 LOG_IDLE_KEEPALIVE_S = 15.0
+SEND_KEEPALIVE_NONE = False
 LOG_RECV_TIMEOUT_S = 0.01
 LOG_END_SESSION_DELAY_S = 0.1
 LOG_FIRST_PACKET_TIMEOUT_S = 3.0
@@ -65,6 +64,8 @@ PACKET_TRACE_SEQ_WIDTH = 5
 PACKET_TRACE_ADDR_WIDTH = 13
 MAX_RECORD_LEN = 512
 EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
+# 
+SCAN_TIMEOUT_S = 3.0
 
 # Color codes
 COLOR_GREEN = "\033[32m"
@@ -442,6 +443,9 @@ class BleLogTester:
         self.stop_requested = False
 
     def _retry_pending_log_ack(self, now: float) -> None:
+        if not self.log_first_packet_seen:
+            return
+
         if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
             return
 
@@ -449,11 +453,12 @@ class BleLogTester:
             self._clear_pending_log_ack()
             return
 
-        if self.pending_log_ack_retries >= max(0, LOG_LOG_ACK_MAX_SEND_ATTEMPTS - 1):
-            self._clear_pending_log_ack()
+        last_ack_activity = max(self.pending_log_ack_sent_at, self.last_mcu_rx_time)
+        if now - last_ack_activity < LOG_ACK_RETRY_PERIOD_S:
             return
 
-        if now - self.pending_log_ack_sent_at < LOG_ACK_RETRY_PERIOD_S:
+        if LOG_ACK_RETRY_MAX_RETRIES > 0 and self.pending_log_ack_retries >= LOG_ACK_RETRY_MAX_RETRIES:
+            self._clear_pending_log_ack()
             return
 
         self.pending_log_ack_retries += 1
@@ -560,12 +565,7 @@ class BleLogTester:
                 if name != "ack":
                     self.latest_mcu_ackable_seq = int(pkt.hdr.seq)
                     self._clear_pending_none_reply_ack()
-
-                if name != "ack":
-                    self._send_ack_for_packet(pkt)
-                    if name == "log_data":
-                        ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
-                        self._track_log_ack(ack_pkt)
+                    self.pending_log_ack_retries = 0
         except (AttributeError, ValueError):
             pass
 
@@ -587,49 +587,15 @@ class BleLogTester:
                         self._clear_pending_none_reply_ack()
             except (AttributeError, ValueError):
                 pass
+            return
 
         if name == "log_data":
             self._handle_log_data_packet(pkt)
+            # Send single ACK and track it (aligned with test_pushing_log)
+            ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
+            self._send_packet(ack_pkt)
+            self._track_log_ack(ack_pkt)
             return
-
-            payload = bytes(pkt.log_data.data)
-            lines = self.log_parser.feed(payload)
-            self.rx_log_data_bytes += len(payload)
-            self.rx_log_records += len(lines)
-            for line in lines:
-                print(line)
-
-                # Strip ANSI escape codes for local logging
-                clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line)
-
-                if self.calibration and self.log_file is not None:
-                    self.log_file.write(clean_line + '\n')
-                    self.log_file.flush()
-
-                if self.record == "uwb" and self.uwb_file is not None:
-                    if "[ERROR]" in clean_line:
-                        self.frame_error_count += 1
-
-                    # Match primary distance: "[TAG] Distance: 6.652 m [A:4 RSSI:0dBm]"
-                    dist_match = re.search(r"Distance:\s+([\d.]+)\s+m\s+\[A:(\d+)\s+RSSI:(-?\d+)dBm\]", clean_line)
-                    if dist_match:
-                        dist, aid, rssi = dist_match.group(1), dist_match.group(2), dist_match.group(3)
-                        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                        self.uwb_file.write(f"{ts},distance,{aid},{dist},{rssi},,,, ,{self.frame_error_count}\n")
-                        self.uwb_file.flush()
-                        continue
-
-                    # Match position: "Tril Px=1.234m Py=5.678m Z=0.44m | Error: ±0.100m"
-                    pos_match = re.search(r"Tril Px=([\d.-]+)m Py=([\d.-]+)m Z=([\d.-]+)m\s+\|\s+Error:\s+.([\d.]+)", clean_line)
-                    if pos_match:
-                        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                        x, y, z, err = pos_match.group(1), pos_match.group(2), pos_match.group(3), pos_match.group(4)
-                        self.uwb_file.write(f"{ts},position,,, ,{x},{y},{z},{err},{self.frame_error_count}\n")
-                        self.uwb_file.flush()
-                    elif "[ERROR]" in clean_line:
-                        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                        self.uwb_file.write(f"{ts},error,,,,,,,,{self.frame_error_count}\n")
-                        self.uwb_file.flush()
 
         if name == "ble_status_resp":
             state = pkt.ble_status_resp.state
@@ -641,10 +607,22 @@ class BleLogTester:
                     print(f"{COLOR_RED}[WARNING] BLE disconnected. Peer closed connection or link timed out.{COLOR_RESET}")
             else:
                 print(f"\n{COLOR_CYAN}[!] BLE Status Change -> {state_name}{COLOR_RESET}")
+            try:
+                if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
+                    self._send_ack_for_packet(pkt)
+            except (AttributeError, ValueError):
+                pass
             return
 
         if self.verbose:
             print(f"[PKT] {name} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
+
+        # Transport ACK for other non-ack, non-log_data MCU packets
+        try:
+            if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
+                self._send_ack_for_packet(pkt)
+        except (AttributeError, ValueError):
+            pass
 
     def loop(self) -> None:
         while True:
@@ -676,7 +654,7 @@ class BleLogTester:
 
         # Keep-alive ping: only send if we haven't received anything from MCU for a while.
         # This completely avoids packet collisions while logs are actively streaming.
-        if now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
+        if SEND_KEEPALIVE_NONE and now - self.last_rx_time >= LOG_IDLE_KEEPALIVE_S:
             self._send_none()
             self.last_rx_time = now
 
@@ -700,7 +678,7 @@ def _device_uuid_text(p: pb.packet_t) -> str:
 
 
 def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
-                               src: int, central_dst: int, scan_timeout_s: float = 6.0,
+                               src: int, central_dst: int, scan_timeout_s: float = SCAN_TIMEOUT_S,
                                expected_mac: Optional[bytes] = None, target_name_filter: Optional[str] = None) -> Optional[Tuple[bytes, str]]:
     print("\n" + "=" * 58)
     print("  STEP 0: Auto-Scan & BLE Connection")
