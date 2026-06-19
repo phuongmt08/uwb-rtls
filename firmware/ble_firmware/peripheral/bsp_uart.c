@@ -50,9 +50,9 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
         .flow_control = APP_UART_FLOW_CONTROL_DISABLED,
         .use_parity   = false,
 #if defined (UART_PRESENT)
-        .baud_rate    = NRF_UART_BAUDRATE_115200
+        .baud_rate    = NRF_UART_BAUDRATE_230400
 #else
-        .baud_rate    = NRF_UARTE_BAUDRATE_115200
+        .baud_rate    = NRF_UARTE_BAUDRATE_230400
 #endif
     };
 
@@ -65,7 +65,7 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
 
     if (err_code == NRF_SUCCESS)
     {
-        BB_DEBUG_LOG_INFO("UART module initialized in interrupt mode (115200 8N1)");
+        BB_DEBUG_LOG_INFO("UART module initialized in interrupt mode (230400 8N1)");
     }
     
     return err_code;
