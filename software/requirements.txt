@@ -12,3 +12,4 @@ PyInstaller>=5.9.0           # Build executable (.exe)
 psutil>=5.9.0
 PyOpenGL>=3.1.7               # 3D visualization backend
 PyOpenGL_accelerate>=3.1.7    # OpenGL acceleration (optional but highly recommended)
+matplotlib>=3.8.0
