@@ -268,9 +268,17 @@ int main(void)
   }
 
   bsp_util_init();
-  if (bsp_imu_init() != BSP_IMU_OK)
+  if (cfg->device_type == DEVICE_TYPE_TAG)
   {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
+    if (bsp_imu_init() != BSP_IMU_OK)
+    {
+      RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
+    }
+  }
+  else
+  {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "IMU initialization skipped for non-tag device_type=%u",
+           (unsigned)cfg->device_type);
   }
 
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
@@ -284,15 +292,7 @@ int main(void)
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
 
-  if (cfg->uwb.role == DEVICE_ROLE_TAG)
-  {
-    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u",
-           TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
-  }
-
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Active config: CH=%u PRF=%u DR=%u PCode=%u",
          cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", cfg->uwb.tx_antenna_delay,
          cfg->uwb.rx_antenna_delay);
@@ -308,20 +308,6 @@ int main(void)
   sys_pm_init();
 
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-  /* Read DIP switch - ALWAYS OVERRIDES saved config */
-  uint8_t dip_value = bsp_io_dip_read();
-  if (dip_value == 0)
-  {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
-  }
-  else
-  {
-    sys_config_set_device_id(dip_value);
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-  }
-
-  cfg = sys_config_get();
-
   /* Initialize application based on role */
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {

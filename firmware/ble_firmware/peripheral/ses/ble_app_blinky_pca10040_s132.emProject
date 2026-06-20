@@ -146,5 +146,11 @@
   <configuration Name="Debug"
     c_preprocessor_definitions="DEBUG; DEBUG_NRF"
     gcc_optimization_level="None"/>
+  <configuration Name="Debug_Bypass_P005"
+    inherited_configurations="Debug"
+    c_preprocessor_definitions="BLE_RX_BYPASS_P005" />
+  <configuration Name="Release_Bypass_P005"
+    inherited_configurations="Release"
+    c_preprocessor_definitions="BLE_RX_BYPASS_P005" />
 
 </solution>

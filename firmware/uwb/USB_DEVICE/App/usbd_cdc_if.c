@@ -25,6 +25,7 @@
 
 #include <string.h>
 #include "serial/serial.h"
+#include "bsp_io.h"
 
 /* USER CODE END INCLUDE */
 
@@ -337,6 +338,7 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
+  bsp_io_usb_tx_complete();
   /* USER CODE END 13 */
   return result;
 }

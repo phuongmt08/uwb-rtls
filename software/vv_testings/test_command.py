@@ -26,17 +26,22 @@ def main() -> int:
     src = int(VvAddress.DEBUG)
     dst = int(VvAddress.BCAST)
 
-    all_ok = True
+    results: list[tuple[str, bool]] = []
     with VvTestSession(probe.port, baud=probe.baud, debug=True) as session:
-        all_ok &= test_time_sync.run(session, src, dst)
-        all_ok &= test_config.run(session, src, dst)
-        all_ok &= test_calibration.run(session, src, dst)
-        all_ok &= test_device.run(session, src, dst)
-        all_ok &= test_command_matrix.run(session, src, dst)
+        results.append(("time_sync", test_time_sync.run(session, src, dst)))
+        results.append(("config", test_config.run(session, src, dst)))
+        results.append(("calibration", test_calibration.run(session, src, dst)))
+        results.append(("device", test_device.run(session, src, dst)))
+        results.append(("mcu_command_selftest", test_command_matrix.run(session, src, dst)))
 
     print("\n=== FINAL RESULT ===")
-    print("TRANSPORT OK" if all_ok else "HAS NO-RX CASES")
-    print("Please review printed SET/GET payloads above to manually confirm behavior.")
+    pass_count = sum(1 for _, ok in results if ok)
+    fail_count = len(results) - pass_count
+    for name, ok in results:
+        print(f"{name:<22} {'PASS' if ok else 'FAIL'}")
+    print(f"pass={pass_count} fail={fail_count} total={len(results)}")
+    print("OVERALL PASS" if fail_count == 0 else "OVERALL FAIL")
+    all_ok = fail_count == 0
     return 0 if all_ok else 2
 
 

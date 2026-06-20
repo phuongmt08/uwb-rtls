@@ -158,5 +158,10 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);
 #endif
 
+/**
+ * @brief Release the USB TX busy state after a CDC transfer completes.
+ */
+void bsp_io_usb_tx_complete(void);
+
 #endif /* __BSP_IO_H */
 /* End of file -------------------------------------------------------- */

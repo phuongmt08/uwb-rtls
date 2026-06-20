@@ -86,7 +86,8 @@ static volatile uint8_t      s_led_blink_active   = 0;
 static uint32_t              s_led_blink_off_tick = 0;
 
 static uart_position_frame_t s_frame;
-static volatile uint8_t      s_tx_busy = 0;
+static volatile uint8_t      s_uart_tx_busy = 0;
+static volatile uint8_t      s_usb_tx_busy = 0;
 
 #if !ENABLE_SYS_FUSION
 uart_fusion_log_frame_t   	s_fusion_log_frame = {0};
@@ -315,7 +316,7 @@ bool bsp_io_dip_changed(void)
 
 bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *distance, float error)
 {
-  if (s_tx_busy)
+  if (s_uart_tx_busy)
     return BSP_ERR;  // hoặc queue lại
 
   s_frame.sof    = UART_SOF;
@@ -338,10 +339,10 @@ bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *dist
     }
   }
 
-  s_tx_busy = 1;
+  s_uart_tx_busy = 1;
   if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_frame, sizeof(s_frame)) != HAL_OK)
   {
-    s_tx_busy = 0;
+    s_uart_tx_busy = 0;
     return BSP_ERR;
   }
   return BSP_OK;
@@ -351,8 +352,13 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART1)
   {
-    s_tx_busy = 0;
+    s_uart_tx_busy = 0;
   }
+}
+
+void bsp_io_usb_tx_complete(void)
+{
+  s_usb_tx_busy = 0;
 }
 
 #if !ENABLE_SYS_FUSION
@@ -362,7 +368,7 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
   const double *fp_amp_norm, const double *fp_snr, 
   float dt)
 {
-  if (s_tx_busy)
+  if (s_usb_tx_busy)
     return BSP_ERR;  // hoặc queue lại
 
   s_fusion_log_frame.sof             = UART_SOF;
@@ -401,8 +407,10 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
     }
   }
 
+  s_usb_tx_busy = 1;
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_log_frame, sizeof(s_fusion_log_frame)) != HAL_OK)
   {
+    s_usb_tx_busy = 0;
     return BSP_ERR;
   }
   return BSP_OK;
@@ -412,7 +420,7 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 #if ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count)
 {
-  if (s_tx_busy)
+  if (s_usb_tx_busy)
     return BSP_ERR;  // UART transmission already in progress
 
   s_fusion_frame.sof             = UART_SOF;
@@ -428,13 +436,13 @@ bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float u
   s_fusion_frame.error_frame_cnt = err_frame_count;
 
   /* Mark as busy before starting transmission */
-  s_tx_busy = 1;
+  s_usb_tx_busy = 1;
   
   // if (HAL_UART_Transmit_IT(&huart1, (uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
   
   {
-    s_tx_busy = 0;  /* Clear busy flag on transmission failure */
+    s_usb_tx_busy = 0;  /* Clear busy flag on transmission failure */
     return BSP_ERR;
   }
   return BSP_OK;

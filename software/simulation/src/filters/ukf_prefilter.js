@@ -714,19 +714,10 @@ class MahalanobisPrefilter {
         const res = this.ukf.computeMahalanobis(d, anchor, this.tagHeight);
         const d2 = Number.isFinite(res.d2) ? res.d2 : Infinity;
 
-        let pass = false;
-        if (this.is_rejected[i]) {
-            if (d2 < this.T2_low) {
-                this.is_rejected[i] = false;
-                pass = true;
-            }
-        } else {
-            if (d2 > this.T2_high) {
-                this.is_rejected[i] = true;
-            } else {
-                pass = true;
-            }
-        }
+        // Stateless gating: if d2 <= T2_high, we accept it immediately.
+        // This completely prevents Hysteresis Lock (khóa trễ) where clean data remains rejected.
+        const pass = (d2 <= this.T2_high);
+        this.is_rejected[i] = !pass;
 
         if (pass) {
             this.reject_counts[i] = 0;
@@ -743,8 +734,10 @@ class MahalanobisPrefilter {
         if (acceptedCount >= targetCount) return [];
 
         const needed = targetCount - acceptedCount;
+        // Smart Rescue: Only rescue an anchor if it has been rejected consecutively for at least 5 frames
+        // This ensures we never rescue transient noise spikes, only correct data during filter lag
         const rescue = results
-            .filter(r => !r.pass && r.d2 !== null && Number.isFinite(r.d2) && r.d > 0.1)
+            .filter(r => !r.pass && r.d2 !== null && Number.isFinite(r.d2) && r.d > 0.1 && this.reject_counts[r.index] >= 5)
             .sort((a, b) => a.d2 - b.d2)
             .slice(0, needed);
 
@@ -765,7 +758,8 @@ class MahalanobisPrefilter {
         const residualNoise = Number.isFinite(residual) ? (residual * residual) / gate : 0.0;
         const scaledNoise = this.ukf.r_uwb * Math.max(this.rescue_noise_scale_min, result.d2 / gate);
         const noise = Math.max(this.ukf.r_uwb * this.rescue_noise_scale_min, residualNoise, scaledNoise);
-        return Math.min(Math.max(this.ukf.r_uwb, this.rescue_noise_max), noise);
+        // Corrected: ensure uncertainty is AT LEAST rescue_noise_max, allowed to go higher
+        return Math.max(this.rescue_noise_max, noise);
     }
 
     update(acceptedMeasurements) {

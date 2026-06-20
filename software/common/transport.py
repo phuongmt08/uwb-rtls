@@ -11,6 +11,7 @@ from . import protocol_pb2 as pb
 class VvAddress(IntEnum):
     NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
     MCU = int(pb.PACKET_ADDR_MCU)
+    VEHICLE = int(pb.PACKET_ADDR_VEHICLE)
     CENTRAL = int(pb.PACKET_ADDR_CENTRAL)
     PERIPHERAL = int(pb.PACKET_ADDR_PERIPHERAL)
     HOST = int(pb.PACKET_ADDR_HOST)

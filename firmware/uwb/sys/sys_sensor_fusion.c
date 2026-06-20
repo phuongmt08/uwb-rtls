@@ -129,12 +129,15 @@ static void configure_adv(network_core_t *stream);
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 {
-	CHECK_ERR((bsp_imu_init() == BSP_IMU_OK || p_ukf != NULL), SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR((bsp_imu_is_initialized() || bsp_imu_init() == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
 
 	bsp_imu_bias_t imu_bias;
 
 	CHECK_ERR((bsp_imu_get_bias_data(&imu_bias) == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
 
+	memset(&ukf, 0, sizeof(ukf));
+	yaw = 0.0f;
 	ukf.state.b_ax = imu_bias.bias_ax;
 	ukf.state.b_ay = imu_bias.bias_ay;
 	ukf.state.b_gz = imu_bias.bias_gz;
@@ -362,9 +365,14 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	return SYS_SENSOR_FUSION_OK;
 }
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf, float d0, float d1, float d2, uint8_t mask)
+sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
+                                                 float d0,
+                                                 float d1,
+                                                 float d2,
+                                                 const uint8_t anchor_ids[3])
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR(anchor_ids != NULL, SYS_SENSOR_FUSION_ERR);
 
     uint32_t sys_update_tick_ms = HAL_GetTick();
 	sys_update_count++;
@@ -414,12 +422,20 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
         0, 0, 0
     };
 
-    float ANCHOR_POS_TABLE[NUM_ANCHORS][2] = {
-        {ANCHOR_1_X, ANCHOR_1_Y},
-        {ANCHOR_2_X, ANCHOR_2_Y},
-        {ANCHOR_3_X, ANCHOR_3_Y},
-        {ANCHOR_4_X, ANCHOR_4_Y}
-    };
+    float selected_anchor_pos[NUM_UPDATE_NOISE][2] = {0};
+    const sys_config_t *cfg = sys_config_get();
+    for (uint8_t selected = 0U; selected < NUM_UPDATE_NOISE; selected++) {
+        bool found = false;
+        for (uint32_t i = 0U; i < cfg->anchor_count; i++) {
+            if (cfg->anchor_layout[i].anchor_id == anchor_ids[selected]) {
+                selected_anchor_pos[selected][0] = cfg->anchor_layout[i].x_m;
+                selected_anchor_pos[selected][1] = cfg->anchor_layout[i].y_m;
+                found = true;
+                break;
+            }
+        }
+        CHECK_ERR(found, SYS_SENSOR_FUSION_ERR);
+    }
 
     // if(m==0): 		x_s = x_aug
 	// else if(m<=M): 	x_s = x_aug + L_aug
@@ -444,17 +460,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
 
         // D_sigma[0][m] = sqrt((px-A1x)²+(py-A1y)²) + x_s[8] (noise term)
         float px = x_s[0], py = x_s[1];
-        int d_index = 0;
-        for(int anc = 0; anc < NUM_ANCHORS; anc++)
-        {
-            if(mask & (1 << anc))
-            {
-                D_sigma[d_index][m] = sqrtf((px - ANCHOR_POS_TABLE[anc][0]) * (px - ANCHOR_POS_TABLE[anc][0]) + 
-                                            (py - ANCHOR_POS_TABLE[anc][1]) * (py - ANCHOR_POS_TABLE[anc][1])) + 
-                                            x_s[8 + d_index];
-                d_index++;
-            }
-        }    
+        for (uint8_t d_index = 0U; d_index < NUM_UPDATE_NOISE; d_index++) {
+            float dx = px - selected_anchor_pos[d_index][0];
+            float dy = py - selected_anchor_pos[d_index][1];
+            D_sigma[d_index][m] = sqrtf(dx * dx + dy * dy) + x_s[8 + d_index];
+        }
     }
 
     // d_mean[i] = Σ Wm_M[m] * D_sigma[i][m]
@@ -636,11 +646,16 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
         s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
     }
 
+    const uint8_t selected_anchor_ids[3] = {
+        best_3_anchors[0].id,
+        best_3_anchors[1].id,
+        best_3_anchors[2].id
+    };
     if (sys_sensor_fusion_update(p_ukf,
                                  (float)best_3_anchors[0].distance,
                                  (float)best_3_anchors[1].distance,
                                  (float)best_3_anchors[2].distance,
-                                 selected_anchor_mask) != SYS_SENSOR_FUSION_OK) {
+                                 selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
         return false;
     }
 
@@ -829,6 +844,7 @@ static void reset_runtime_state(void)
 
 static void send_uart_snapshot(void)
 {
+#if ENABLE_SYS_FUSION
     if (!ukf.initialized) {
         return;
     }
@@ -844,6 +860,7 @@ static void send_uart_snapshot(void)
                                        s_latest_tril_y,
                                        raw_yaw,
                                        s_error_count);
+#endif
 }
 
 #if UKF_BLE_STREAM_TEST_ENABLE

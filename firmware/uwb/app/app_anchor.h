@@ -33,13 +33,15 @@ app_err_t app_anchor_init(void);
  */
 void app_anchor_process(void *arg);
 
-#if ENABLE_ANCHOR_AUTO_CALIB
 /**
- * @brief Handle button events in calibration mode
- * @param event Button event from bsp_io
+ * @brief Enable or disable anchor survey mode at runtime.
  */
-void app_anchor_on_button(bsp_io_button_event_t event);
-#endif
+void app_anchor_set_survey_active(bool active);
+
+/**
+ * @brief Read back whether anchor survey mode is active.
+ */
+bool app_anchor_is_survey_active(void);
 
 #endif /* __APP_ANCHOR_H */
 
