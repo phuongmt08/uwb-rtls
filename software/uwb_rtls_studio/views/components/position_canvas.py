@@ -110,6 +110,7 @@ class PositionCanvas(QWidget):
         self.snapped_grid_pt = None
         self.draw_object_shape = "polygon"
         self._object_draw_center = None
+        self.active_room_ids = set()
 
         # Floating Property Panel Integration
         self.property_panel = ZonePropertyPanel(self)
@@ -123,6 +124,14 @@ class PositionCanvas(QWidget):
     def set_geofences(self, zones):
         self.geofence_zones = zones
         self._wall_path_cache.clear()
+        self.update()
+
+    def set_active_room_ids(self, room_ids):
+        self.active_room_ids = {str(room_id) for room_id in (room_ids or []) if room_id}
+        self.update()
+
+    def set_active_room_id(self, room_id: str):
+        self.active_room_ids = {str(room_id)} if room_id else set()
         self.update()
 
     def set_edit_mode(self, mode):
@@ -141,7 +150,18 @@ class PositionCanvas(QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif mode == "edit_vertices":
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif mode == "insert_vertex":
+            self.setCursor(Qt.CursorShape.CrossCursor)
         self.update()
+
+    def begin_insert_vertex(self):
+        if not self.selected_zone_id:
+            return False
+        zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
+        if zone is None or len(zone.points) < 2:
+            return False
+        self.set_edit_mode("insert_vertex")
+        return True
 
     def _hit_test_zone(self, sx, sy, wx, wy):
         layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
@@ -372,6 +392,11 @@ class PositionCanvas(QWidget):
         proj_y = y1 + t * dy
         return math.hypot(px - proj_x, py - proj_y), t
 
+    def _edge_hit_distance_px(self, zone, default_px=10):
+        if self._is_open_wall(zone):
+            return max(default_px, 22)
+        return default_px
+
     def _find_edge_near_screen_pos(self, screen_x, screen_y, max_distance_px=10):
         layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
         sorted_for_hit = sorted(
@@ -389,9 +414,56 @@ class PositionCanvas(QWidget):
                 sx1, sy1 = self._world_to_screen(pt1[0], pt1[1])
                 sx2, sy2 = self._world_to_screen(pt2[0], pt2[1])
                 distance_px, t = self._distance_to_segment_px((screen_x, screen_y), (sx1, sy1), (sx2, sy2))
-                if distance_px <= max_distance_px and 0.05 <= t <= 0.95:
+                if distance_px <= self._edge_hit_distance_px(zone, max_distance_px) and 0.05 <= t <= 0.95:
                     return zone.id, idx
         return None
+
+    def _polygon_label_center(self, points):
+        pts = list(points or [])
+        if not pts:
+            return 0.0, 0.0
+        if len(pts) < 3:
+            return (
+                sum(point[0] for point in pts) / len(pts),
+                sum(point[1] for point in pts) / len(pts),
+            )
+        signed_area = 0.0
+        cx = 0.0
+        cy = 0.0
+        for idx, p1 in enumerate(pts):
+            p2 = pts[(idx + 1) % len(pts)]
+            cross = p1[0] * p2[1] - p2[0] * p1[1]
+            signed_area += cross
+            cx += (p1[0] + p2[0]) * cross
+            cy += (p1[1] + p2[1]) * cross
+        signed_area *= 0.5
+        if abs(signed_area) < 1e-9:
+            return (
+                sum(point[0] for point in pts) / len(pts),
+                sum(point[1] for point in pts) / len(pts),
+            )
+        return cx / (6.0 * signed_area), cy / (6.0 * signed_area)
+
+    def _draw_object_symbol(self, painter, zone, poly):
+        subtype = getattr(zone, "object_subtype", "generic")
+        if subtype != "stairs" or poly.isEmpty():
+            return
+        rect = poly.boundingRect()
+        painter.save()
+        direction = str(getattr(zone, "object_direction", "up")).lower()
+        painter.setPen(QPen(QColor(255, 251, 235), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        step_count = 6
+        if rect.width() >= rect.height():
+            for idx in range(1, step_count + 1):
+                x = rect.left() + rect.width() * idx / (step_count + 1)
+                painter.drawLine(int(x), int(rect.top() + 3), int(x), int(rect.bottom() - 3))
+        else:
+            for idx in range(1, step_count + 1):
+                y = rect.top() + rect.height() * idx / (step_count + 1)
+                painter.drawLine(int(rect.left() + 3), int(y), int(rect.right() - 3), int(y))
+        painter.setPen(QPen(QColor(251, 191, 36), 2))
+        painter.drawText(rect.adjusted(2, 2, -2, -2), Qt.AlignmentFlag.AlignCenter, "UP" if direction != "down" else "DN")
+        painter.restore()
 
     def _is_open_wall(self, zone) -> bool:
         return getattr(zone, "object_type", "zone") == "wall"
@@ -785,6 +857,23 @@ class PositionCanvas(QWidget):
             self.setCursor(Qt.CursorShape.SizeAllCursor)
             return
 
+        if self.edit_mode == "insert_vertex" and event.button() == Qt.MouseButton.LeftButton:
+            target_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
+            if target_zone is not None:
+                edge_hit = self._find_edge_near_screen_pos(pos.x(), pos.y(), max_distance_px=14)
+                if edge_hit and edge_hit[0] == target_zone.id:
+                    _zone_id, edge_idx = edge_hit
+                    insert_idx = edge_idx + 1
+                    target_zone.points.insert(insert_idx, (snapped_x, snapped_y))
+                    self.selected_vertex_idx = insert_idx
+                    self.edit_mode = "edit_vertices"
+                    self.zone_modified.emit(target_zone.id, target_zone.points)
+                    self.setCursor(Qt.CursorShape.SizeAllCursor)
+                    self.update()
+                    return
+            self.set_edit_mode("edit_vertices")
+            return
+
         if self.edit_mode == "draw" and event.button() == Qt.MouseButton.LeftButton:
             if self.draw_object_type == "object" and self.draw_object_shape == "circle":
                 if self._object_draw_center is None:
@@ -878,7 +967,7 @@ class PositionCanvas(QWidget):
                         sx1, sy1 = self._world_to_screen(pt1[0], pt1[1])
                         sx2, sy2 = self._world_to_screen(pt2[0], pt2[1])
                         distance_px, t = self._distance_to_segment_px((pos.x(), pos.y()), (sx1, sy1), (sx2, sy2))
-                        if distance_px <= 10 and 0.05 <= t <= 0.95:
+                        if distance_px <= self._edge_hit_distance_px(sel_zone) and 0.05 <= t <= 0.95:
                             self.edit_operation_started.emit()
                             if self._is_open_wall(sel_zone):
                                 clicked_zone_id = sel_zone.id
@@ -1812,8 +1901,26 @@ class PositionCanvas(QWidget):
                 painter.setPen(QPen(border_color, border_width, pen_style))
                 painter.setBrush(QBrush(fill_color))
                 painter.drawPolygon(poly)
+                if object_type == "room" and zone.id in self.active_room_ids:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor(34, 197, 94, 38))
+                    painter.drawPolygon(poly)
+                if object_type == "object":
+                    self._draw_object_symbol(painter, zone, poly)
                 if object_type == "zone" and zone.zone_type == "forbidden":
                     self._draw_forbidden_hatch(painter, poly, border_color)
+                if object_type == "room" and getattr(zone, "name", ""):
+                    label_x, label_y = self._polygon_label_center(zone.points)
+                    text_x, text_y = to_screen(label_x, label_y)
+                    label = str(zone.name)
+                    painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                    text_rect = painter.fontMetrics().boundingRect(label)
+                    text_rect.moveCenter(QPoint(int(text_x), int(text_y)))
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor(15, 23, 42, 190))
+                    painter.drawRoundedRect(text_rect.adjusted(-6, -3, 6, 3), 5, 5)
+                    painter.setPen(QColor(248, 250, 252))
+                    painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
 
             active_edge_idx = None
             if is_selected and self.selected_edge_idx is not None:

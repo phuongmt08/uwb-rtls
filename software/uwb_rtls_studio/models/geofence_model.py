@@ -25,6 +25,8 @@ class GeofenceZone:
     color: str = "#FF0000"  # Hex color string
     object_type: str = "zone"  # "zone" | "room" | "wall" | "object"
     shape_kind: str = "polygon"  # "polygon" | "circle" for generic objects
+    object_subtype: str = "generic"  # "generic" | "stairs" for map objects
+    object_direction: str = "up"  # "up" | "down" for stairs
     radius_m: float = 0.0  # Circle radius in meters when shape_kind == "circle"
     thickness_m: float = 0.1  # Wall thickness in meters.
     # Room-local coordinate frame. Geometry remains in scene coordinates.
@@ -56,11 +58,14 @@ class GeofenceZone:
 
     def to_dict(self) -> dict:
         height_m = max(0.0, self.max_z - self.min_z) if self.object_type in {"wall", "object"} else 0.0
+        object_subtype = self.object_subtype if self.object_subtype == "stairs" else "generic"
         return {
             "id": self.id,
             "name": self.name,
             "type": self.zone_type,
             "object_type": self.object_type,
+            "object_subtype": object_subtype if self.object_type == "object" else "generic",
+            "object_direction": self.object_direction if self.object_type == "object" else "up",
             "shape_kind": self.shape_kind if self.object_type == "object" else "polygon",
             "points": [{"x": p[0], "y": p[1]} for p in self.points],
             "min_z": self.min_z,
@@ -95,6 +100,13 @@ class GeofenceZone:
         elif height_m is not None and object_type in {"wall", "object"}:
             max_z = min_z + float(height_m)
 
+        object_subtype = str(data.get("object_subtype", "generic"))
+        if object_subtype != "stairs":
+            object_subtype = "generic"
+        object_direction = str(data.get("object_direction", "up"))
+        if object_direction not in {"up", "down"}:
+            object_direction = "up"
+
         return cls(
             id=data["id"],
             name=data["name"],
@@ -105,6 +117,8 @@ class GeofenceZone:
             speed_limit=float(data.get("speed_limit", 1.0)),
             color=data.get("color", "#FF0000"),
             object_type=object_type,
+            object_subtype=object_subtype,
+            object_direction=object_direction,
             shape_kind=str(data.get("shape_kind", "circle" if object_type == "object" and data.get("radius_m", 0.0) else "polygon")),
             radius_m=float(data.get("radius_m", 0.0)),
             thickness_m=float(data.get("thickness_m", data.get("wall_thickness_m", 0.1))),

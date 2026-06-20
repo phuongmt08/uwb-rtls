@@ -193,6 +193,18 @@ class LiveTrackingViewModel(QObject):
     def get_map_anchors(self) -> list:
         return self.geofence_repo.get_anchors()
 
+    def get_active_room_id(self) -> str:
+        return self.geofence_repo.get_active_room_id()
+
+    def set_active_room_id(self, room_id: str) -> None:
+        self.geofence_repo.set_active_room_id(room_id)
+
+    def get_active_room_ids(self) -> list[str]:
+        return self.geofence_repo.get_active_room_ids()
+
+    def set_active_room_ids(self, room_ids: list[str]) -> None:
+        self.geofence_repo.set_active_room_ids(room_ids)
+
     def _coerce_int_id(self, value, default: int = 0) -> int:
         if value is None or value == "":
             return default

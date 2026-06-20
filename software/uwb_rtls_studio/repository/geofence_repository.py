@@ -41,6 +41,32 @@ class GeofenceRepository:
             for idx, anchor in enumerate(anchors or [])
         ]
 
+    def get_active_room_ids(self) -> List[str]:
+        active_ids = self._meta.get("active_room_ids")
+        if isinstance(active_ids, list):
+            return [str(room_id) for room_id in active_ids if room_id]
+        legacy_id = str(self._meta.get("active_room_id") or "")
+        return [legacy_id] if legacy_id else []
+
+    def set_active_room_ids(self, room_ids: List[str]) -> None:
+        unique_ids = []
+        for room_id in room_ids or []:
+            room_id = str(room_id or "")
+            if room_id and room_id not in unique_ids:
+                unique_ids.append(room_id)
+        self._meta.pop("active_room_id", None)
+        if unique_ids:
+            self._meta["active_room_ids"] = unique_ids[:4]
+        else:
+            self._meta.pop("active_room_ids", None)
+
+    def get_active_room_id(self) -> str:
+        active_ids = self.get_active_room_ids()
+        return active_ids[0] if active_ids else ""
+
+    def set_active_room_id(self, room_id: str) -> None:
+        self.set_active_room_ids([room_id] if room_id else [])
+
     def _coerce_int_id(self, value, default: int = 0) -> int:
         if value is None or value == "":
             return default
@@ -128,6 +154,8 @@ class GeofenceRepository:
     def clear(self) -> None:
         self._zones.clear()
         self._anchors.clear()
+        self._meta.pop("active_room_id", None)
+        self._meta.pop("active_room_ids", None)
 
     def load(self, file_path: Optional[str] = None) -> bool:
         path = file_path or self.default_file_path

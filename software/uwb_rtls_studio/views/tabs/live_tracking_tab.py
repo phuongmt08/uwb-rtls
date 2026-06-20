@@ -979,7 +979,19 @@ class LiveTrackingTab(QWidget):
         objects = [zone for zone in zones if getattr(zone, "object_type", "zone") == "object"]
         rule_zones = [zone for zone in zones if getattr(zone, "object_type", "zone") == "zone"]
         if len(rooms) > 4:
-            errors.append("Firmware supports up to 4 Room Zones / anchor layouts.")
+            warnings.append("More than 4 Room Zones are allowed in the editor temporarily; verify firmware/runtime support before deployment.")
+        active_room_ids = self._vm.get_active_room_ids() if self._vm and hasattr(self._vm, "get_active_room_ids") else []
+        if len(active_room_ids) > 4:
+            errors.append("Only up to 4 active Room Zones are allowed.")
+        if active_room_ids:
+            for active_room_id in active_room_ids:
+                active_room = next((room for room in rooms if room.id == active_room_id), None)
+                if active_room is None:
+                    errors.append("Active Room Zone no longer exists.")
+                elif not self._room_has_anchor_layout(active_room_id):
+                    errors.append(f"Active Room Zone '{active_room.name}' needs at least 3 placed anchors.")
+        elif rooms:
+            warnings.append("No Active Room Zone is selected.")
         for zone in zones:
             object_type = getattr(zone, "object_type", "zone")
             point_count = len(getattr(zone, "points", []))
@@ -1030,6 +1042,7 @@ class LiveTrackingTab(QWidget):
         else:
             self.geofence_editor_widget.lbl_anchor_status.setText(f"{state} / Ready: {len(anchors)} anchors placed")
             self.geofence_editor_widget.lbl_anchor_status.setStyleSheet("color: #34D399; font-weight: bold;")
+        self._refresh_active_room_combo()
 
     def _refresh_room_anchor_table(self):
         table = getattr(self.geofence_editor_widget, "tbl_room_anchors", None)
@@ -1280,8 +1293,9 @@ class LiveTrackingTab(QWidget):
         if self.chk_enable_geofence.isChecked():
             file_path = self.cmb_user_map.itemData(index)
             if self._vm and file_path and os.path.exists(file_path):
-                self._vm.load_geofences(file_path)
-                self._canvas.set_geofences(self._vm.get_geofence_zones())
+                if self._vm.load_geofences(file_path):
+                    self._canvas.set_geofences(self._vm.get_geofence_zones())
+                    self._refresh_active_room_combo()
 
     def _setup_geofencing_ui(self):
         self.geofence_editor_widget = GeofenceEditorWidget(self)
@@ -1324,6 +1338,10 @@ class LiveTrackingTab(QWidget):
         editor.cmb_map_type.currentIndexChanged.connect(self._sync_map_height_visibility)
         if hasattr(editor, "cmb_object_shape"):
             editor.cmb_object_shape.currentIndexChanged.connect(self._sync_map_height_visibility)
+        if hasattr(editor, "cmb_object_subtype"):
+            editor.cmb_object_subtype.currentIndexChanged.connect(self._sync_map_height_visibility)
+        if hasattr(editor, "cmb_object_direction"):
+            editor.cmb_object_direction.currentIndexChanged.connect(self._sync_map_height_visibility)
         editor.cmb_zone_type.currentIndexChanged.connect(self._sync_rule_speed_visibility)
         editor.btn_apply_properties.clicked.connect(self._apply_zone_properties)
         editor.btn_save_map.clicked.connect(self._save_map)
@@ -1395,6 +1413,23 @@ class LiveTrackingTab(QWidget):
             editor.sb_object_radius.setSuffix(" m")
             editor.map_properties_form_layout.addRow(editor.lbl_object_shape, editor.cmb_object_shape)
             editor.map_properties_form_layout.addRow(editor.lbl_object_radius, editor.sb_object_radius)
+        if not hasattr(editor, "cmb_object_subtype"):
+            editor.cmb_object_subtype = QComboBox(editor.gb_map_properties)
+            editor.cmb_object_subtype.addItem("Generic", "generic")
+            editor.cmb_object_subtype.addItem("Stairs", "stairs")
+            editor.lbl_object_subtype = QLabel("Object kind", editor.gb_map_properties)
+            editor.map_properties_form_layout.addRow(editor.lbl_object_subtype, editor.cmb_object_subtype)
+        if not hasattr(editor, "cmb_object_direction"):
+            editor.cmb_object_direction = QComboBox(editor.gb_map_properties)
+            editor.cmb_object_direction.addItem("Up", "up")
+            editor.cmb_object_direction.addItem("Down", "down")
+            editor.lbl_object_direction = QLabel("Direction", editor.gb_map_properties)
+            editor.map_properties_form_layout.addRow(editor.lbl_object_direction, editor.cmb_object_direction)
+        if not hasattr(editor, "btn_insert_vertex"):
+            editor.btn_insert_vertex = QPushButton("Add Point on Edge", editor.gb_map_properties)
+            editor.btn_insert_vertex.setToolTip("Select a polygon, then click one of its edges to insert a new vertex.")
+            editor.map_properties_form_layout.addRow("Geometry", editor.btn_insert_vertex)
+            editor.btn_insert_vertex.clicked.connect(self._begin_insert_vertex)
         if not hasattr(editor, "lbl_map_geometry"):
             editor.lbl_map_geometry = QLabel(editor.tab_map_layout)
             editor.lbl_map_geometry.setWordWrap(True)
@@ -1418,7 +1453,7 @@ class LiveTrackingTab(QWidget):
 
         if hasattr(editor, "txt_map_name"):
             editor.txt_map_name.editingFinished.connect(commit_structure)
-        for widget_name in ("cmb_map_type", "cmb_wall_mode", "cmb_wall_host_room", "cmb_object_shape"):
+        for widget_name in ("cmb_map_type", "cmb_wall_mode", "cmb_wall_host_room", "cmb_object_shape", "cmb_object_subtype", "cmb_object_direction"):
             widget = getattr(editor, widget_name, None)
             if widget is not None:
                 widget.currentIndexChanged.connect(commit_structure)
@@ -1467,6 +1502,8 @@ class LiveTrackingTab(QWidget):
             "wall_mode": "cmb_wall_mode",
             "wall_host_room_id": "cmb_wall_host_room",
             "object_shape": "cmb_object_shape",
+            "object_subtype": "cmb_object_subtype",
+            "object_direction": "cmb_object_direction",
         }
         for key, widget_name in optional_combos.items():
             widget = getattr(editor, widget_name, None)
@@ -1522,7 +1559,7 @@ class LiveTrackingTab(QWidget):
             editor.cmb_zone_type,
             editor.sb_speed,
         ]
-        for widget_name in ("sb_wall_thickness", "cmb_wall_mode", "cmb_wall_host_room", "cmb_object_shape", "sb_object_radius"):
+        for widget_name in ("sb_wall_thickness", "cmb_wall_mode", "cmb_wall_host_room", "cmb_object_shape", "cmb_object_subtype", "cmb_object_direction", "sb_object_radius"):
             widget = getattr(editor, widget_name, None)
             if widget is not None:
                 widgets_to_block.append(widget)
@@ -1551,6 +1588,8 @@ class LiveTrackingTab(QWidget):
             self._refresh_wall_host_rooms(settings.get("wall_host_room_id"))
             self._set_combo_data_or_text(getattr(editor, "cmb_wall_host_room", None), settings.get("wall_host_room_id"))
             self._set_combo_data_or_text(getattr(editor, "cmb_object_shape", None), settings.get("object_shape"))
+            self._set_combo_data_or_text(getattr(editor, "cmb_object_subtype", None), settings.get("object_subtype"))
+            self._set_combo_data_or_text(getattr(editor, "cmb_object_direction", None), settings.get("object_direction"))
             if hasattr(editor, "sb_object_radius") and "object_radius_m" in settings:
                 editor.sb_object_radius.setValue(float(settings["object_radius_m"]))
         finally:
@@ -1599,21 +1638,38 @@ class LiveTrackingTab(QWidget):
             if hasattr(editor, "lbl_zone_geometry"):
                 editor.lbl_zone_geometry.setText("Select a rule zone to inspect dimensions.")
             return
+
         object_type = getattr(zone, "object_type", "zone")
         area, perimeter, edges = self._polygon_metrics(zone.points, closed=object_type != "wall")
-        edge_lines = "  ".join(f"S{i + 1}: {length:.2f} m @ {angle:.0f}°" for i, (length, angle) in enumerate(edges))
+        visible_edges = edges[:6]
+        edge_parts = [f"S{i + 1} {length:.2f}m @ {angle:.0f}deg" for i, (length, angle) in enumerate(visible_edges)]
+        if len(edges) > len(visible_edges):
+            edge_parts.append(f"+{len(edges) - len(visible_edges)} more")
+        edge_lines = "Edges: " + " | ".join(edge_parts) if edge_parts else ""
+
         if object_type == "wall":
-            text = (f"Length: {perimeter:.2f} m | Height: {max(0.0, zone.max_z - zone.min_z):.2f} m | "
-                    f"Thickness: {float(getattr(zone, 'thickness_m', 0.1)):.2f} m\n{edge_lines}")
+            text = (
+                f"Length {perimeter:.2f} m | Height {max(0.0, zone.max_z - zone.min_z):.2f} m | "
+                f"Thickness {float(getattr(zone, 'thickness_m', 0.1)):.2f} m"
+            )
+            if edge_lines:
+                text += f"\n{edge_lines}"
             editor.lbl_map_geometry.setText(text)
         elif object_type == "object":
             shape_kind = getattr(zone, "shape_kind", "polygon")
+            object_subtype = getattr(zone, "object_subtype", "generic")
             radius = float(getattr(zone, "radius_m", 0.0))
-            text = (f"Shape: {shape_kind.title()} | Height: {max(0.0, zone.max_z - zone.min_z):.2f} m | "
-                    f"Radius: {radius:.2f} m\nArea: {area:.2f} m² | Perimeter: {perimeter:.2f} m\n{edge_lines}")
+            text = (
+                f"{object_subtype.title()} | {shape_kind.title()} | H {max(0.0, zone.max_z - zone.min_z):.2f} m | R {radius:.2f} m\n"
+                f"Area {area:.2f} m2 | Perimeter {perimeter:.2f} m"
+            )
+            if edge_lines:
+                text += f"\n{edge_lines}"
             editor.lbl_map_geometry.setText(text)
         else:
-            text = f"Area: {area:.2f} m² | Perimeter: {perimeter:.2f} m\n{edge_lines}"
+            text = f"Area {area:.2f} m2 | Perimeter {perimeter:.2f} m"
+            if edge_lines:
+                text += f"\n{edge_lines}"
             target = editor.lbl_zone_geometry if object_type == "zone" else editor.lbl_map_geometry
             target.setText(text)
 
@@ -1634,6 +1690,76 @@ class LiveTrackingTab(QWidget):
             combo.setCurrentIndex(max(idx, 0))
         finally:
             combo.blockSignals(False)
+
+    def _room_has_anchor_layout(self, room_id: str, min_anchors: int = 3) -> bool:
+        if not room_id:
+            return False
+        anchors = self._annotate_anchor_membership(self._canvas.anchor_layout_for_device()) if self._vm else []
+        count = 0
+        for anchor in anchors:
+            if not anchor.get("placed", True):
+                continue
+            zone_ids = set(anchor.get("zone_ids", []))
+            if anchor.get("room_id") == room_id or anchor.get("zone_id") == room_id or room_id in zone_ids:
+                count += 1
+        return count >= min_anchors
+
+    def _refresh_active_room_combo(self):
+        editor = getattr(self, "geofence_editor_widget", None)
+        checks_layout = getattr(editor, "active_room_checks_layout", None)
+        if checks_layout is None:
+            return
+        active_ids = self._vm.get_active_room_ids() if self._vm and hasattr(self._vm, "get_active_room_ids") else []
+        if hasattr(self._canvas, "set_active_room_ids"):
+            self._canvas.set_active_room_ids(active_ids)
+        while checks_layout.count():
+            item = checks_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not self._vm:
+            return
+        for room in self._room_zones():
+            has_layout = self._room_has_anchor_layout(room.id)
+            check = QCheckBox(room.name + ("" if has_layout else " (needs anchors)"), editor.gb_anchor_layout)
+            check.setProperty("room_id", room.id)
+            check.setChecked(room.id in active_ids)
+            check.setEnabled(has_layout or room.id in active_ids)
+            check.toggled.connect(self._on_active_room_toggled)
+            checks_layout.addWidget(check)
+
+    def _on_active_room_toggled(self, checked):
+        if not self._vm:
+            return
+        check = self.sender()
+        room_id = check.property("room_id") if check is not None else ""
+        room_name = check.text().replace(" (needs anchors)", "") if check is not None else "Room Zone"
+        current_ids = self._vm.get_active_room_ids() if hasattr(self._vm, "get_active_room_ids") else []
+        if checked:
+            if room_id in current_ids:
+                return
+            if len(current_ids) >= 4:
+                QMessageBox.warning(self, "Active Room Limit", "Only up to 4 Room Zones can be active.")
+                check.blockSignals(True)
+                check.setChecked(False)
+                check.blockSignals(False)
+                return
+            if not self._room_has_anchor_layout(room_id):
+                QMessageBox.warning(
+                    self,
+                    "Active Room Requires Anchors",
+                    f"Add at least 3 placed anchors to '{room_name}' before making it active.",
+                )
+                check.blockSignals(True)
+                check.setChecked(False)
+                check.blockSignals(False)
+                return
+            current_ids.append(room_id)
+        else:
+            current_ids = [rid for rid in current_ids if rid != room_id]
+        self._vm.set_active_room_ids(current_ids)
+        if hasattr(self._canvas, "set_active_room_ids"):
+            self._canvas.set_active_room_ids(current_ids)
 
     def _setup_geofence_shortcuts(self):
         shortcuts = [
@@ -1729,6 +1855,14 @@ class LiveTrackingTab(QWidget):
             editor.anchor_layout_outer.setContentsMargins(8, 10, 8, 8)
             editor.anchor_layout_outer.setSpacing(6)
             editor.map_tab_layout.addWidget(editor.gb_anchor_layout)
+
+        if not hasattr(editor, "active_room_checks_layout"):
+            editor.lbl_active_room_zone = QLabel("Active rooms (max 4)", editor.gb_anchor_layout)
+            editor.lbl_active_room_zone.setToolTip("Tick up to 4 Room Zones for runtime use. Each active room needs at least 3 placed anchors.")
+            editor.anchor_layout_outer.addWidget(editor.lbl_active_room_zone)
+            editor.active_room_checks_layout = QVBoxLayout()
+            editor.active_room_checks_layout.setSpacing(2)
+            editor.anchor_layout_outer.addLayout(editor.active_room_checks_layout)
 
         # --- Anchor action buttons row: Add | Remove | Set Corner ---
         if not hasattr(editor, "btn_add_anchor"):
@@ -2261,7 +2395,7 @@ class LiveTrackingTab(QWidget):
         help_text = {
             "room": (
                 "Room Zone",
-                "Room Zone is the usable tracked area. Firmware supports up to 4 Room Zones, each with its own anchor layout.",
+                "Room Zone is the usable tracked area. The editor temporarily allows more than 4 rooms for layout work.",
             ),
             "wall": (
                 "Wall Shell",
@@ -2373,11 +2507,26 @@ class LiveTrackingTab(QWidget):
         if hasattr(self.geofence_editor_widget, "cmb_object_shape"):
             self.geofence_editor_widget.lbl_object_shape.setVisible(is_object)
             self.geofence_editor_widget.cmb_object_shape.setVisible(is_object)
-            is_circle = self.geofence_editor_widget.cmb_object_shape.currentData() == "circle"
+            object_subtype = self.geofence_editor_widget.cmb_object_subtype.currentData() if hasattr(self.geofence_editor_widget, "cmb_object_subtype") else "generic"
+            is_special_object = object_subtype == "stairs"
+            is_circle = self.geofence_editor_widget.cmb_object_shape.currentData() == "circle" and not is_special_object
             self.geofence_editor_widget.lbl_object_radius.setVisible(is_object and is_circle)
             self.geofence_editor_widget.sb_object_radius.setVisible(is_object and is_circle)
             if is_object and getattr(self._canvas, "draw_object_type", "") == "object":
-                self._canvas.set_draw_object_shape(self.geofence_editor_widget.cmb_object_shape.currentData() or "polygon")
+                shape_kind = "polygon" if is_special_object else (self.geofence_editor_widget.cmb_object_shape.currentData() or "polygon")
+                self._canvas.set_draw_object_shape(shape_kind)
+        if hasattr(self.geofence_editor_widget, "cmb_object_subtype"):
+            self.geofence_editor_widget.cmb_object_subtype.setVisible(is_object)
+            if hasattr(self.geofence_editor_widget, "lbl_object_subtype"):
+                self.geofence_editor_widget.lbl_object_subtype.setVisible(is_object)
+        if hasattr(self.geofence_editor_widget, "cmb_object_direction"):
+            object_subtype = self.geofence_editor_widget.cmb_object_subtype.currentData() if hasattr(self.geofence_editor_widget, "cmb_object_subtype") else "generic"
+            is_stairs = is_object and object_subtype == "stairs"
+            self.geofence_editor_widget.cmb_object_direction.setVisible(is_stairs)
+            if hasattr(self.geofence_editor_widget, "lbl_object_direction"):
+                self.geofence_editor_widget.lbl_object_direction.setVisible(is_stairs)
+        if hasattr(self.geofence_editor_widget, "btn_insert_vertex"):
+            self.geofence_editor_widget.btn_insert_vertex.setVisible(is_room or is_wall or is_object)
         if hasattr(self.geofence_editor_widget, "gb_anchor_layout"):
             self.geofence_editor_widget.gb_anchor_layout.setVisible(is_room)
         # Hide Rules tab (index 1) when viewing a Room or Wall in Structure tab
@@ -2395,6 +2544,16 @@ class LiveTrackingTab(QWidget):
         is_speed_limited = self.geofence_editor_widget.cmb_zone_type.currentIndex() == 0
         self.geofence_editor_widget.lbl_prop_speed.setVisible(is_speed_limited)
         self.geofence_editor_widget.sb_speed.setVisible(is_speed_limited)
+
+    def _begin_insert_vertex(self):
+        if not self._canvas.selected_zone_id:
+            QMessageBox.information(self, "Add Point", "Select a room, wall, or object first.")
+            return
+        self._push_undo_state("insert point")
+        if self._canvas.begin_insert_vertex():
+            self._set_canvas_tool_status("Add Point / Click an edge")
+        else:
+            QMessageBox.information(self, "Add Point", "Selected object has no edge to edit.")
 
     def _room_zones(self):
         if not self._vm:
@@ -2483,6 +2642,10 @@ class LiveTrackingTab(QWidget):
         elif object_type == "object":
             number = sum(1 for obj in objects if getattr(obj, "object_type", "zone") == "object") + 1
             object_shape = getattr(self.geofence_editor_widget, "cmb_object_shape", None).currentData() if hasattr(self.geofence_editor_widget, "cmb_object_shape") else "polygon"
+            object_subtype = getattr(self.geofence_editor_widget, "cmb_object_subtype", None).currentData() if hasattr(self.geofence_editor_widget, "cmb_object_subtype") else "generic"
+            object_direction = getattr(self.geofence_editor_widget, "cmb_object_direction", None).currentData() if hasattr(self.geofence_editor_widget, "cmb_object_direction") else "up"
+            if object_subtype == "stairs":
+                object_shape = "polygon"
             height = self.geofence_editor_widget.sb_map_height.value()
             radius = 0.0
             if object_shape == "circle" and points:
@@ -2491,7 +2654,7 @@ class LiveTrackingTab(QWidget):
                 radius = sum(math.hypot(pt[0] - center_x, pt[1] - center_y) for pt in points) / len(points)
             new_zone = GeofenceZone(
                 id=zone_id,
-                name=f"Object {number}",
+                name=f"Stairs {number}" if object_subtype == "stairs" else f"Object {number}",
                 zone_type="allowed",
                 points=points,
                 min_z=0.0,
@@ -2500,17 +2663,12 @@ class LiveTrackingTab(QWidget):
                 color="#F59E0B",
                 object_type="object",
                 shape_kind=object_shape,
+                object_subtype=object_subtype,
+                object_direction=object_direction,
                 radius_m=radius,
                 thickness_m=0.0,
             )
         else:
-            if object_type == "room" and sum(1 for obj in objects if getattr(obj, "object_type", "zone") == "room") >= 4:
-                QMessageBox.warning(
-                    self,
-                    "Room Zone Limit",
-                    "Firmware supports up to 4 Room Zones / anchor layouts. Delete or reuse an existing Room Zone first.",
-                )
-                return
             if object_type == "wall":
                 # Wall thickness is an explicit physical dimension in meters.
                 # It must not inherit the display grid major-cell size.
@@ -2547,6 +2705,7 @@ class LiveTrackingTab(QWidget):
         self._load_zone_properties_to_ui(new_zone)
         if object_type == "room":
             self._refresh_anchor_membership_from_canvas()
+            self._refresh_active_room_combo()
 
     def _load_zone_properties_to_ui(self, zone):
         object_type = getattr(zone, "object_type", "zone")
@@ -2588,6 +2747,12 @@ class LiveTrackingTab(QWidget):
                         mode_combo.setCurrentIndex(max(mode_idx, 0))
                 elif object_type == "object":
                     self.geofence_editor_widget.sb_map_height.setValue(max(0.1, zone.max_z - zone.min_z))
+                    if hasattr(self.geofence_editor_widget, "cmb_object_subtype"):
+                        subtype_idx = self.geofence_editor_widget.cmb_object_subtype.findData(getattr(zone, "object_subtype", "generic"))
+                        self.geofence_editor_widget.cmb_object_subtype.setCurrentIndex(max(subtype_idx, 0))
+                    if hasattr(self.geofence_editor_widget, "cmb_object_direction"):
+                        direction_idx = self.geofence_editor_widget.cmb_object_direction.findData(getattr(zone, "object_direction", "up"))
+                        self.geofence_editor_widget.cmb_object_direction.setCurrentIndex(max(direction_idx, 0))
                     if hasattr(self.geofence_editor_widget, "cmb_object_shape"):
                         shape_idx = self.geofence_editor_widget.cmb_object_shape.findData(getattr(zone, "shape_kind", "polygon"))
                         self.geofence_editor_widget.cmb_object_shape.setCurrentIndex(max(shape_idx, 0))
@@ -2677,6 +2842,10 @@ class LiveTrackingTab(QWidget):
         wall_mode_val = self.geofence_editor_widget.cmb_wall_mode.currentData() or "free_standing" if hasattr(self.geofence_editor_widget, "cmb_wall_mode") else "free_standing"
         host_room_val = self.geofence_editor_widget.cmb_wall_host_room.currentData() or None if hasattr(self.geofence_editor_widget, "cmb_wall_host_room") else None
         shape_kind_val = self.geofence_editor_widget.cmb_object_shape.currentData() if hasattr(self.geofence_editor_widget, "cmb_object_shape") else "polygon"
+        object_subtype_val = self.geofence_editor_widget.cmb_object_subtype.currentData() if hasattr(self.geofence_editor_widget, "cmb_object_subtype") else "generic"
+        object_direction_val = self.geofence_editor_widget.cmb_object_direction.currentData() if hasattr(self.geofence_editor_widget, "cmb_object_direction") else "up"
+        if object_subtype_val == "stairs":
+            shape_kind_val = "polygon"
         radius_val = float(self.geofence_editor_widget.sb_object_radius.value()) if shape_kind_val == "circle" and hasattr(self.geofence_editor_widget, "sb_object_radius") else 0.0
 
         for zone in target_zones:
@@ -2698,10 +2867,14 @@ class LiveTrackingTab(QWidget):
                 zone.wall_mode = "free_standing"
                 zone.host_room_id = None
                 zone.shape_kind = shape_kind_val
+                zone.object_subtype = object_subtype_val
+                zone.object_direction = object_direction_val
                 zone.radius_m = radius_val
             else:
                 zone.thickness_m = 0.0
                 zone.shape_kind = "polygon"
+                zone.object_subtype = "generic"
+                zone.object_direction = "up"
                 zone.radius_m = 0.0
             zone.speed_limit = 0.0
             default_color = "#F8FAFC" if object_type == "room" else "#F59E0B" if object_type == "object" else "#0F172A"
@@ -2715,6 +2888,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.update()
         if object_type == "room":
             self._refresh_anchor_membership_from_canvas()
+            self._refresh_active_room_combo()
         self._save_geofence_config()
 
     def _apply_zone_properties(self):
@@ -2831,6 +3005,8 @@ class LiveTrackingTab(QWidget):
         self._vm.add_geofence_zone(new_zone)
         self._canvas.set_geofences(self._vm.get_geofence_zones())
         self._canvas.set_selected_zone(new_zone.id)
+        if getattr(new_zone, "object_type", "zone") == "room":
+            self._refresh_active_room_combo()
 
     def _delete_selected_zone(self):
         if self._canvas.selected_anchor_idx is not None:
@@ -2849,6 +3025,10 @@ class LiveTrackingTab(QWidget):
         for selected_id in selected_ids:
             zones = self._vm.get_geofence_zones()
             deleted_zone = next((z for z in zones if z.id == selected_id), None)
+            if deleted_zone and getattr(deleted_zone, "object_type", "zone") == "room":
+                if hasattr(self._vm, "get_active_room_ids"):
+                    active_ids = [room_id for room_id in self._vm.get_active_room_ids() if room_id != deleted_zone.id]
+                    self._vm.set_active_room_ids(active_ids)
             self._vm.remove_geofence_zone(selected_id)
             if deleted_zone and getattr(deleted_zone, "object_type", "zone") == "room":
                 any_room_deleted = True
@@ -2859,6 +3039,7 @@ class LiveTrackingTab(QWidget):
         self.geofence_editor_widget.txt_map_name.clear()
         if any_room_deleted:
             self._refresh_anchor_membership_from_canvas()
+            self._refresh_active_room_combo()
 
     def _on_canvas_zone_selected(self, zone_id):
         if not zone_id:

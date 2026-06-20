@@ -90,7 +90,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; back
       <item>
        <widget class="QLabel" name="lbl_editor_subtitle">
         <property name="text">
-         <string>Workflow: wall shell -> usable Room Zone -> optional Rule Zone -> anchor layout. Firmware supports 4 Room Zones.</string>
+         <string>Workflow: wall shell -> usable Room Zone -> optional Rule Zone -> anchor layout. The editor temporarily allows more than 4 Room Zones.</string>
         </property>
         <property name="wordWrap">
          <bool>true</bool>
@@ -641,7 +641,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; back
              <string notr="true">color: #CBD5E1; font-size: 12px;</string>
             </property>
             <property name="text">
-             <string>Room Zone is the usable tracked area. Firmware supports up to 4 Room Zones and their anchor layouts.</string>
+             <string>Room Zone is the usable tracked area. The editor temporarily allows more than 4 Room Zones for layout work.</string>
             </property>
             <property name="wordWrap">
              <bool>true</bool>

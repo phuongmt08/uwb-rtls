@@ -292,6 +292,42 @@ if OPENGL_AVAILABLE:
             if draw_outlines:
                 self._draw_prism_outlines(points, min_z, max_z, edge_color, gl_options=gl_options)
 
+        def _draw_stair_blocks(self, points, min_z, max_z, color, edge_color, direction="up"):
+            if len(points or []) < 3:
+                return
+            direction = str(direction).lower()
+            min_x = min(point[0] for point in points)
+            max_x = max(point[0] for point in points)
+            min_y = min(point[1] for point in points)
+            max_y = max(point[1] for point in points)
+            if max_x <= min_x or max_y <= min_y:
+                return
+            step_count = 7
+            configured_height = max(0.15, float(max_z) - float(min_z))
+            total_height = configured_height
+            if direction == "down":
+                stair_min_z = float(min_z) - total_height
+                stair_max_z = float(min_z)
+            else:
+                stair_min_z = float(min_z)
+                stair_max_z = float(min_z) + total_height
+            riser = total_height / step_count
+            tread_slab = max(0.035, min(0.12, riser * 0.35))
+            along_x = (max_x - min_x) >= (max_y - min_y)
+            for idx in range(step_count):
+                if along_x:
+                    x1 = min_x + (max_x - min_x) * idx / step_count
+                    x2 = min_x + (max_x - min_x) * (idx + 1) / step_count
+                    footprint = [(x1, min_y), (x2, min_y), (x2, max_y), (x1, max_y)]
+                else:
+                    y1 = min_y + (max_y - min_y) * idx / step_count
+                    y2 = min_y + (max_y - min_y) * (idx + 1) / step_count
+                    footprint = [(min_x, y1), (max_x, y1), (max_x, y2), (min_x, y2)]
+                level_idx = idx + 1 if direction != "down" else step_count - idx
+                step_top = stair_min_z + (stair_max_z - stair_min_z) * level_idx / step_count
+                step_bottom = max(stair_min_z, step_top - tread_slab)
+                self._draw_prism_mesh(footprint, step_bottom, step_top, color, edge_color, gl_options='opaque', draw_outlines=True)
+
         def _room_by_id(self, room_id, zones):
             if not room_id:
                 return None
@@ -530,7 +566,8 @@ if OPENGL_AVAILABLE:
                         1.0
                     )
                 elif object_type == "object":
-                    hex_color = base_color_hex if base_color_hex else "#F59E0B"
+                    subtype = getattr(zone, "object_subtype", "generic")
+                    hex_color = base_color_hex if base_color_hex else ("#D97706" if subtype == "stairs" else "#F59E0B")
                     color = self._hex_to_rgba(hex_color, 1.0)
                     r, g, b, a = color
                     factor = 0.20  # Make it 20% lighter towards white
@@ -591,9 +628,13 @@ if OPENGL_AVAILABLE:
                             self._draw_prism_mesh(join_pts, zone.min_z, zone.max_z, color, edge_color, gl_options='opaque', draw_outlines=True)
                             
                 elif object_type == "object":
-                    # Objects (pillars/columns): drawn as opaque solid 3D prisms
+                    # Objects: generic solids plus stair map assets.
                     if len(zone.points) >= 3:
-                        self._draw_prism_mesh(zone.points, zone.min_z, zone.max_z, color, edge_color, gl_options='opaque', draw_outlines=True)
+                        subtype = getattr(zone, "object_subtype", "generic")
+                        if subtype == "stairs":
+                            self._draw_stair_blocks(zone.points, zone.min_z, zone.max_z, color, edge_color, getattr(zone, "object_direction", "up"))
+                        else:
+                            self._draw_prism_mesh(zone.points, zone.min_z, zone.max_z, color, edge_color, gl_options='opaque', draw_outlines=True)
                         
                 else:
                     # Rule Zones: translucent volume 0.5m tall, colour matches 2D zone
