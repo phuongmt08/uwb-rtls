@@ -27,10 +27,10 @@
 #define OBJECT_CODE                     LOG_OBJECT_CODE_NETWORK
 #define RESP_RETRY_MAX                  2
 #define RESP_RETRY_DELAY_MS             200
-#define WAIT_TIME_TO_RESEND_ACK_MS      30000u
+#define WAIT_TIME_TO_RESEND_ACK_MS      3000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
 #ifndef SENSOR_FUSION_STREAM_PERIOD_MS
-#define SENSOR_FUSION_STREAM_PERIOD_MS  100u
+#define SENSOR_FUSION_STREAM_PERIOD_MS  20u
 #endif
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);
@@ -1006,6 +1006,10 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
                 s_network_cmd.stream->serial_connection_active = false;
             }
+            s_log_tracker.waiting_ack = false;
+            s_log_tracker.log_len     = 0u;
+            s_log_tracker.tracker_id  = -1;
+            s_log_tracker.waiting_seq = 0;
             break;
 
         case protobuf_SESSION_END_REASON_RANGING_RESULTS:

@@ -93,7 +93,7 @@ static const bb_cmd_entry_t m_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_conn_params_resp_tag,          handle_ble_conn_params_resp,      "ble_conn_params_resp"),
     CMD_INFO(protobuf_packet_t_ble_scan_stop_tag,                 handle_ble_scan_stop,             "ble_scan_stop"),
     CMD_INFO(protobuf_packet_t_ble_scan_result_tag,               handle_ble_scan_result,           "ble_scan_result"),
-#else
+    #else
     CMD_INFO(protobuf_packet_t_ble_disconnect_tag,                handle_ble_unimplemented,         "ble_disconnect"),
     CMD_INFO(protobuf_packet_t_ble_connect_tag,                   handle_ble_unimplemented,         "ble_connect"),
     CMD_INFO(protobuf_packet_t_ble_scan_result_tag,               handle_ble_unimplemented,         "ble_scan_result"),
@@ -102,7 +102,7 @@ static const bb_cmd_entry_t m_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_conn_params_resp_tag,          handle_ble_unimplemented,         "ble_conn_params_resp"),
     CMD_INFO(protobuf_packet_t_ble_scan_start_tag,                handle_ble_unimplemented,         "ble_scan_start"),
     CMD_INFO(protobuf_packet_t_ble_scan_stop_tag,                 handle_ble_unimplemented,         "ble_scan_stop"),
-#endif /* !BLE_CENTRAL */
+    #endif /* !BLE_CENTRAL */
     CMD_INFO(protobuf_packet_t_device_information_get_tag, handle_device_information_get, "device_information_get"),
 };
 
@@ -291,14 +291,6 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
 
     // Tell the router to send this response back over serial.
     *p_action = BB_CMD_ACTION_SEND_SERIAL; 
-}
-
-static void handle_ble_ack(const protobuf_packet_t * p_in, protobuf_packet_t * p_out, bb_cmd_action_t * p_action)
-{
-    UNUSED_PARAMETER(p_in);
-    UNUSED_PARAMETER(p_out);
-    // ACKs from the MCU do not require any processing or response from the BLE module
-    *p_action = BB_CMD_ACTION_NONE;
 }
 
 /*================BLE_PERIPHERAL=================== */

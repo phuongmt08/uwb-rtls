@@ -43,7 +43,7 @@ static bb_packet_source_t m_target_source;
 volatile uint32_t g_bb_router_mcu_rx_total_count = 0;
 volatile uint32_t g_bb_router_mcu_rx_id_count[BB_ROUTER_MCU_BLE_PACKET_ID_COUNT] = {0};
 #if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
-static uint32_t m_last_mcu_rx_stats_log_tick;
+APP_TIMER_DEF(m_mcu_rx_stats_timer_id);
 #endif
 #endif
 
@@ -60,9 +60,10 @@ static void bb_router_state_forward_handle(void);
 #if defined(BLE_PERIPHERAL)
 static int bb_router_mcu_ble_packet_index(uint32_t cmd_id);
 #if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
-static void bb_router_mcu_rx_stats_log_process(void);
+static void bb_router_mcu_rx_stats_log_handler(void * p_context);
 #endif
 #endif
+
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bb_router_init(void)
@@ -79,7 +80,21 @@ ret_code_t bb_router_init(void)
     }
 
 #if defined(BLE_PERIPHERAL) && BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
-    m_last_mcu_rx_stats_log_tick = app_timer_cnt_get();
+    err_code = app_timer_create(&m_mcu_rx_stats_timer_id,
+                                APP_TIMER_MODE_REPEATED,
+                                bb_router_mcu_rx_stats_log_handler);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+
+    err_code = app_timer_start(m_mcu_rx_stats_timer_id,
+                               APP_TIMER_TICKS(DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS),
+                               NULL);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
 #endif
 
     return bb_cmd_hdl_init();
@@ -87,9 +102,6 @@ ret_code_t bb_router_init(void)
 
 void bb_router_process(void)
 {
-#if defined(BLE_PERIPHERAL) && BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
-    bb_router_mcu_rx_stats_log_process();
-#endif
 
     /* ---- Collapse state machine: process all ready states in one call ---- */
 
@@ -136,25 +148,17 @@ static int bb_router_mcu_ble_packet_index(uint32_t cmd_id)
 }
 
 #if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
-static void bb_router_mcu_rx_stats_log_process(void)
+static void bb_router_mcu_rx_stats_log_handler(void * p_context)
 {
-    uint32_t now = app_timer_cnt_get();
-    uint32_t elapsed_ticks = app_timer_cnt_diff_compute(now, m_last_mcu_rx_stats_log_tick);
-
-    if (elapsed_ticks < APP_TIMER_TICKS(DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS))
-    {
-        return;
-    }
-
-    m_last_mcu_rx_stats_log_tick = now;
-    BB_DEBUG_LOG_INFO("PERI: rx stats total=%u",
+    UNUSED_PARAMETER(p_context);
+    NRF_LOG_INFO("PERI: rx stats total=%u",
                  (unsigned)g_bb_router_mcu_rx_total_count);
-    BB_DEBUG_LOG_INFO("PERI: rx stats id3=%u id39=%u id40=%u id41=%u",
+    NRF_LOG_INFO("PERI: rx stats id3=%u id39=%u id40=%u id41=%u",
                  (unsigned)g_bb_router_mcu_rx_id_count[0],
                  (unsigned)g_bb_router_mcu_rx_id_count[1],
                  (unsigned)g_bb_router_mcu_rx_id_count[2],
                  (unsigned)g_bb_router_mcu_rx_id_count[3]);
-    BB_DEBUG_LOG_INFO("               id42=%u id43=%u id69=%u",
+    NRF_LOG_INFO("               id42=%u id43=%u id69=%u",
                  (unsigned)g_bb_router_mcu_rx_id_count[4],
                  (unsigned)g_bb_router_mcu_rx_id_count[5],
                  (unsigned)g_bb_router_mcu_rx_id_count[6]);
