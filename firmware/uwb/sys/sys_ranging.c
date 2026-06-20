@@ -25,14 +25,14 @@
 #define SPEED_OF_LIGHT        299702547.0
 #define DSTWR_MAX_INTERVAL_US 50000U
 
-/* Message type constants */
+/* DS-TWR message types */
 #define MW_DSTWR_MSG_TYPE_POLL   0xE1
 #define MW_DSTWR_MSG_TYPE_RESP   0xE2
 #define MW_DSTWR_MSG_TYPE_FINAL  0xE3
 #define MW_DSTWR_MSG_TYPE_RESULT 0xE4 /* Anchor sends distance to TAG */
-#define MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY 0xE5
 
-#define CALIB_PAIR_SUMMARY_SLOT_MS 20U
+#define CONTROL_MSG_SLOT_MS  100U
+#define CONTROL_MSG_MAX_SIZE 127U
 
 #define ANCHOR_SMART_DISCOVERY_ON_MS       70U
 #define ANCHOR_SMART_DISCOVERY_BALANCED_MS 120U
@@ -161,8 +161,14 @@ typedef struct __attribute__((packed))
   uint16_t fp_snr_q8;
 } result_msg_t;
 
-typedef char calib_pair_summary_fits_bsp_rx_event_t[
-  (sizeof(sys_calib_pair_summary_msg_t) <= 128U) ? 1 : -1
+typedef struct
+{
+  sys_uwb_control_msg_type_t type;
+  uint16_t                   size;
+} control_msg_desc_t;
+
+typedef char calib_pair_summary_fits_control_frame_t[
+  (sizeof(sys_calib_pair_summary_msg_t) <= CONTROL_MSG_MAX_SIZE) ? 1 : -1
 ];
 
 typedef struct
@@ -311,6 +317,12 @@ static struct
 } s_stats = { 0 };
 static anchor_smart_rx_state_t s_anchor_smart_rx = {0};
 static anchor_poll_rx_plan_t   s_anchor_poll_rx_plan = {0};
+
+static const control_msg_desc_t s_control_msg_descs[] = {
+  { SYS_UWB_CTRL_CALIB_PAIR_SUMMARY, sizeof(sys_calib_pair_summary_msg_t) },
+  { SYS_UWB_CTRL_ACK,                sizeof(sys_uwb_control_ack_msg_t) },
+  { SYS_UWB_CTRL_SURVEY_FINISH,      sizeof(sys_survey_finish_msg_t) },
+};
 
 /* Static guard */
 static bool s_ranging_busy = false;
@@ -472,19 +484,40 @@ static float calculate_distance(const dstwr_timestamps_t *ts)
   return tof_dw * (float) DWT_TIME_UNITS * (float) SPEED_OF_LIGHT;
 }
 
+static uint16_t control_msg_size(uint8_t type)
+{
+  const uint8_t desc_count =
+      (uint8_t)(sizeof(s_control_msg_descs) / sizeof(s_control_msg_descs[0]));
+
+  for (uint8_t i = 0U; i < desc_count; i++)
+  {
+    if ((uint8_t)s_control_msg_descs[i].type == type)
+    {
+      return s_control_msg_descs[i].size;
+    }
+  }
+  return 0U;
+}
+
 static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
 {
-  if (!data || data[0] != expected_type) return false;
-  uint16_t min_len = 0;
+  if (!data || data[0] != expected_type)
+  {
+    return false;
+  }
+
+  uint16_t min_len = control_msg_size(expected_type);
+  if (min_len != 0U)
+  {
+    return len >= min_len;
+  }
+
   switch (expected_type)
   {
   case MW_DSTWR_MSG_TYPE_POLL:   min_len = sizeof(poll_msg_t);   break;
   case MW_DSTWR_MSG_TYPE_RESP:   min_len = sizeof(resp_msg_t);   break;
   case MW_DSTWR_MSG_TYPE_FINAL:  min_len = sizeof(final_msg_t);  break;
   case MW_DSTWR_MSG_TYPE_RESULT: min_len = sizeof(result_msg_t); break;
-  case MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY:
-    min_len = sizeof(sys_calib_pair_summary_msg_t);
-    break;
   default: return false;
   }
   return len >= min_len;
@@ -549,6 +582,35 @@ static int hal_rx_wait_valid_msg_at(uint8_t  *buffer,
 
   *received_length = 0;
   return -1;
+}
+
+static sys_ranging_err_t hal_tx_immediate_wait_done(const void *data,
+                                                    uint16_t length,
+                                                    uint32_t timeout_ms)
+{
+  bsp_uwb_clear_event();
+  if (bsp_uwb_tx(data, length) != BSP_OK) {
+    return SYS_RANGING_ERR;
+  }
+
+  uint32_t start_ms = HAL_GetTick();
+  while ((HAL_GetTick() - start_ms) < timeout_ms) {
+    /*
+     * Summary exchange runs inside the UWB task while it owns the SPI mutex,
+     * so service the pending DW1000 IRQ here instead of waiting for the task
+     * loop to dispatch it.
+     */
+    bsp_uwb_dwt_isr();
+
+    bsp_uwb_event_t event;
+    while (bsp_uwb_get_event(&event)) {
+      if (event.type == BSP_UWB_EVENT_TX_DONE) {
+        return SYS_RANGING_OK;
+      }
+    }
+    __NOP();
+  }
+  return SYS_RANGING_ERR_TIMEOUT;
 }
 
 static void state_machine_reset(void)
@@ -1224,46 +1286,133 @@ sys_calib_status_t sys_ranging_get_calib_status(void)
   return s_calib_status;
 }
 
-sys_ranging_err_t sys_ranging_send_calib_pair_summary(const sys_calib_pair_summary_msg_t *summary,
-                                                      uint8_t slot_id)
+sys_ranging_err_t sys_ranging_control_send(sys_uwb_control_msg_type_t type,
+                                           const void *msg,
+                                           uint16_t msg_size,
+                                           uint8_t slot_id)
 {
-  if (!summary || slot_id == 0U || slot_id > SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS) {
-    return SYS_RANGING_ERR_PARAM;
-  }
-  if (summary->pair_count > SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS) {
+  uint16_t registered_size = control_msg_size((uint8_t)type);
+  if (!msg || registered_size == 0U || msg_size != registered_size ||
+      slot_id > MAX_ANCHORS_SUPPORTED)
+  {
     return SYS_RANGING_ERR_PARAM;
   }
 
-  sys_calib_pair_summary_msg_t msg = *summary;
-  msg.msg_type = MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY;
-
-  bsp_delay_ms((uint32_t)slot_id * CALIB_PAIR_SUMMARY_SLOT_MS);
-  if (bsp_uwb_tx(&msg, sizeof(msg)) != BSP_OK) {
-    return SYS_RANGING_ERR;
+  if (msg_size > CONTROL_MSG_MAX_SIZE)
+  {
+    return SYS_RANGING_ERR_PARAM;
   }
-  return SYS_RANGING_OK;
+
+  uint8_t tx_buf[CONTROL_MSG_MAX_SIZE] = { 0 };
+  memcpy(tx_buf, msg, msg_size);
+  tx_buf[0] = (uint8_t)type;
+  if (slot_id != 0U)
+  {
+    bsp_delay_ms((uint32_t)slot_id * CONTROL_MSG_SLOT_MS);
+  }
+
+  return hal_tx_immediate_wait_done(tx_buf, msg_size, 20U);
 }
 
-sys_ranging_err_t sys_ranging_poll_calib_pair_summary(sys_calib_pair_summary_msg_t *summary,
-                                                      uint32_t timeout_ms)
+sys_ranging_err_t sys_ranging_control_receive(sys_uwb_control_msg_type_t type,
+                                              void *msg,
+                                              uint16_t msg_size,
+                                              uint32_t timeout_ms)
 {
-  uint8_t rx_buf[sizeof(sys_calib_pair_summary_msg_t)] = {0};
   uint16_t rx_len = 0U;
-
-  if (!summary) {
+  uint16_t registered_size = control_msg_size((uint8_t)type);
+  if (!msg || registered_size == 0U || msg_size != registered_size)
+  {
     return SYS_RANGING_ERR_PARAM;
   }
 
-  if (hal_rx_wait_valid_msg_at(rx_buf, sizeof(rx_buf), &rx_len,
-                               MW_DSTWR_MSG_TYPE_CALIB_PAIR_SUMMARY,
+  if (hal_rx_wait_valid_msg_at((uint8_t *)msg, msg_size, &rx_len,
+                               (uint8_t)type,
                                timeout_ms * 1000U,
                                RX_WAIT_IMMEDIATE,
-                               RX_WAIT_NO_DELAYED_TS_DW) != 0) {
+                               RX_WAIT_NO_DELAYED_TS_DW) != 0)
+  {
     return SYS_RANGING_ERR_TIMEOUT;
   }
 
-  memcpy(summary, rx_buf, sizeof(*summary));
-  if (summary->pair_count > SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS) {
+  return (rx_len == msg_size) ? SYS_RANGING_OK : SYS_RANGING_ERR_PROTO;
+}
+
+sys_ranging_err_t sys_ranging_control_send_ack(uint8_t epoch_id,
+                                               uint8_t sender_id,
+                                               sys_uwb_control_msg_type_t acked_type,
+                                               uint8_t acked_value,
+                                               uint8_t slot_id)
+{
+  if (sender_id == 0U || acked_type == SYS_UWB_CTRL_ACK ||
+      control_msg_size((uint8_t)acked_type) == 0U)
+  {
+    return SYS_RANGING_ERR_PARAM;
+  }
+
+  const sys_uwb_control_ack_msg_t ack = {
+    .epoch_id = epoch_id,
+    .sender_id = sender_id,
+    .acked_msg_type = (uint8_t)acked_type,
+    .acked_value = acked_value,
+  };
+  return sys_ranging_control_send(SYS_UWB_CTRL_ACK, &ack, sizeof(ack), slot_id);
+}
+
+sys_ranging_err_t sys_ranging_control_receive_ack(sys_uwb_control_msg_type_t acked_type,
+                                                  sys_uwb_control_ack_msg_t *ack,
+                                                  uint32_t timeout_ms)
+{
+  if (acked_type == SYS_UWB_CTRL_ACK ||
+      control_msg_size((uint8_t)acked_type) == 0U)
+  {
+    return SYS_RANGING_ERR_PARAM;
+  }
+
+  sys_ranging_err_t err =
+      sys_ranging_control_receive(SYS_UWB_CTRL_ACK, ack, sizeof(*ack), timeout_ms);
+  if (err != SYS_RANGING_OK)
+  {
+    return err;
+  }
+
+  return (ack->acked_msg_type == (uint8_t)acked_type)
+           ? SYS_RANGING_OK
+           : SYS_RANGING_ERR_PROTO;
+}
+
+sys_ranging_err_t sys_ranging_control_send_wait_ack(sys_uwb_control_msg_type_t type,
+                                                    const void *msg,
+                                                    uint16_t msg_size,
+                                                    uint8_t slot_id,
+                                                    uint8_t expected_ack_sender,
+                                                    uint8_t expected_ack_value,
+                                                    uint32_t ack_timeout_ms)
+{
+  if (!msg || msg_size < 2U || expected_ack_sender == 0U ||
+      type == SYS_UWB_CTRL_ACK)
+  {
+    return SYS_RANGING_ERR_PARAM;
+  }
+
+  sys_ranging_err_t err = sys_ranging_control_send(type, msg, msg_size, slot_id);
+  if (err != SYS_RANGING_OK)
+  {
+    return err;
+  }
+
+  sys_uwb_control_ack_msg_t ack;
+  err = sys_ranging_control_receive_ack(type, &ack, ack_timeout_ms);
+  if (err != SYS_RANGING_OK)
+  {
+    return err;
+  }
+
+  const uint8_t *msg_bytes = (const uint8_t *)msg;
+  if (ack.epoch_id != msg_bytes[1] ||
+      ack.sender_id != expected_ack_sender ||
+      ack.acked_value != expected_ack_value)
+  {
     return SYS_RANGING_ERR_PROTO;
   }
 
@@ -1543,7 +1692,8 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               if (resp_mask == configured_mask) {
                   s_tag_diag.resp_all_configured++;
               }
-              if (s_sys_ranging_ev.num_responses < TAG_MIN_ANCHOR_SAMPLES) {
+              if (SYS_RANGING_REQUIRE_MIN_ANCHOR_SAMPLES &&
+                  s_sys_ranging_ev.num_responses < TAG_MIN_ANCHOR_SAMPLES) {
                   if (s_sys_ranging_ev.num_responses == 0) {
                       s_tag_diag.resp_none++;
                   } else {
@@ -1715,7 +1865,8 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               for (uint8_t i = 0; i < s_ctx.result_multi.count; i++) {
                   log_ranging_result(&s_ctx.result_multi.results[i], "TAG");
               }
-              if (s_ctx.result_multi.count < TAG_MIN_ANCHOR_SAMPLES) {
+              if (SYS_RANGING_REQUIRE_MIN_ANCHOR_SAMPLES &&
+                  s_ctx.result_multi.count < TAG_MIN_ANCHOR_SAMPLES) {
                   s_tag_diag.result_partial++;
 #if TAG_ABORT_ON_INSUFFICIENT_SAMPLES
                   RLOG_W(LOG_OBJECT_CODE_RANGING,

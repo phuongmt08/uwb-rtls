@@ -2,6 +2,7 @@ function updatePlots(res, samples, rawData) {
     const { 
         simPathRuled, simPathWLS, simPathTriplet, simPathUKF, simPathUKF_lpf, simPathUKF_plot,
         wlsInfo, bestTripletInfo,
+        tripletDebug,
         plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist,
         pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf,
         x_axis, total_time 
@@ -70,6 +71,124 @@ function updatePlots(res, samples, rawData) {
     Plotly.restyle('scores', { x: [[0, x_axis.length], [0, x_axis.length]], y: [[T2_high, T2_high], [T2_low, T2_low]] }, [4, 5]);
     Plotly.relayout('scores', { 'yaxis.autorange': true });
 
+    const debug = tripletDebug || {};
+    const debugArr = (name) => Array.isArray(debug[name]) ? debug[name] : x_axis.map(() => null);
+    const tripletName = (key) => key ? key.split(',').map(id => 'A' + id).join(',') : 'None';
+    const selectedKeys = debugArr('key');
+    const challengerKeys = debugArr('challengerKey');
+    const debugCustom = x_axis.map((_, i) => [
+        plotData.times[i],
+        tripletName(selectedKeys[i]),
+        debug.held && debug.held[i] ? 'held previous' : 'selected best',
+        tripletName(challengerKeys[i]),
+        debug.candidateCount && debug.candidateCount[i] ? debug.candidateCount[i] : 0,
+        debug.residual && Number.isFinite(debug.residual[i]) ? debug.residual[i] : null,
+        debug.avgD2 && Number.isFinite(debug.avgD2[i]) ? debug.avgD2[i] : null,
+        debug.challengerScore && Number.isFinite(debug.challengerScore[i]) ? debug.challengerScore[i] : null,
+        debug.healthPenalty && Number.isFinite(debug.healthPenalty[i]) ? debug.healthPenalty[i] : null,
+        debug.challengerHealthPenalty && Number.isFinite(debug.challengerHealthPenalty[i]) ? debug.challengerHealthPenalty[i] : null,
+        debug.ukfUsed && debug.ukfUsed[i] ? 'yes' : 'no',
+        debug.ukfKey && debug.ukfKey[i] ? tripletName(debug.ukfKey[i]) : 'None',
+        debug.score && Number.isFinite(debug.score[i]) ? debug.score[i] : null
+    ]);
+    const nestedDebugArr = (name, anchorIndex) => {
+        return Array.isArray(debug[name]) && Array.isArray(debug[name][anchorIndex])
+            ? debug[name][anchorIndex]
+            : x_axis.map(() => null);
+    };
+    const healthCustom = (anchorIndex) => x_axis.map((_, i) => [
+        plotData.times[i],
+        nestedDebugArr('rejectStreakByAnchor', anchorIndex)[i] || 0,
+        nestedDebugArr('rescueStreakByAnchor', anchorIndex)[i] || 0,
+        nestedDebugArr('rejectRateByAnchor', anchorIndex)[i],
+        nestedDebugArr('rescueRateByAnchor', anchorIndex)[i]
+    ]);
+    const heldX = [];
+    const heldY = [];
+    const heldCustom = [];
+    const heldFlags = debugArr('held');
+    const scores = debugArr('score');
+    const tripletAxis = tripletAxisData(anchors);
+    const noTripletY = -0.5;
+    const tripletValue = (key) => {
+        return Object.prototype.hasOwnProperty.call(tripletAxis.valueByKey, key)
+            ? tripletAxis.valueByKey[key]
+            : null;
+    };
+    const selectedY = selectedKeys.map(tripletValue);
+    const ukfUsedFlags = debugArr('ukfUsed');
+    const ukfY = selectedY.map((y, i) => ukfUsedFlags[i] && Number.isFinite(y) ? y : null);
+    const noUpdateX = [];
+    const noUpdateY = [];
+    const noUpdateCustom = [];
+    const heldTripletX = [];
+    const heldTripletY = [];
+    const heldTripletCustom = [];
+    selectedY.forEach((y, i) => {
+        if (!ukfUsedFlags[i]) {
+            noUpdateX.push(x_axis[i]);
+            noUpdateY.push(Number.isFinite(y) ? y : noTripletY);
+            noUpdateCustom.push(debugCustom[i]);
+        }
+        if (heldFlags[i] && Number.isFinite(y)) {
+            heldTripletX.push(x_axis[i]);
+            heldTripletY.push(y);
+            heldTripletCustom.push(debugCustom[i]);
+        }
+    });
+    heldFlags.forEach((held, i) => {
+        if (held && Number.isFinite(scores[i])) {
+            heldX.push(x_axis[i]);
+            heldY.push(scores[i]);
+            heldCustom.push(debugCustom[i]);
+        }
+    });
+    Plotly.restyle('triplet_selection', {
+        x: [x_axis, x_axis, noUpdateX, heldTripletX],
+        y: [selectedY, ukfY, noUpdateY, heldTripletY],
+        customdata: [debugCustom, debugCustom, noUpdateCustom, heldTripletCustom]
+    }, [0, 1, 2, 3]);
+    Plotly.relayout('triplet_selection', {
+        'yaxis.tickvals': [noTripletY].concat(tripletAxis.tickvals),
+        'yaxis.ticktext': ['None'].concat(tripletAxis.labels),
+        'yaxis.range': [-0.75, Math.max(0.75, tripletAxis.keys.length - 0.25)]
+    });
+
+    Plotly.restyle('triplet_debug', {
+        x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, x_axis, heldX],
+        y: [
+            debugArr('gdop'),
+            scores,
+            debugArr('healthPenalty'),
+            debugArr('d2Penalty'),
+            debugArr('fpPenalty'),
+            debugArr('residualPenalty'),
+            debugArr('distPenalty'),
+            debugArr('gdopPenalty'),
+            nestedDebugArr('healthByAnchor', 0),
+            nestedDebugArr('healthByAnchor', 1),
+            nestedDebugArr('healthByAnchor', 2),
+            nestedDebugArr('healthByAnchor', 3),
+            heldY
+        ],
+        customdata: [
+            debugCustom,
+            debugCustom,
+            debugCustom,
+            debugCustom,
+            debugCustom,
+            debugCustom,
+            debugCustom,
+            debugCustom,
+            healthCustom(0),
+            healthCustom(1),
+            healthCustom(2),
+            healthCustom(3),
+            heldCustom
+        ]
+    }, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    Plotly.relayout('triplet_debug', { 'yaxis.autorange': true });
+
     // 3. Other plots
     Plotly.restyle('accel', { 
         x: [x_axis, x_axis, x_axis, x_axis, x_axis],
@@ -133,7 +252,7 @@ function updatePlots(res, samples, rawData) {
             x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
             y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf],
             name: [
-                `Pos Error (Firmware) Mean: ${meanErr(pos_errors_fw)}m`,
+                `Pos Error (Trilateration) Mean: ${meanErr(pos_errors_fw)}m`,
                 `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
                 `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
                 `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,

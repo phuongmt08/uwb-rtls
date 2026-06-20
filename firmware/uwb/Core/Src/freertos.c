@@ -31,6 +31,7 @@
 #include "app_anchor.h"
 #include "app_tag.h"
 #include "ble/sys_ble_peripheral.h"
+#include "app_calib_master.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
 #include "bsp_imu.h"
@@ -75,11 +76,12 @@
 /* USER CODE BEGIN Variables */
 
 osMessageQueueId_t g_uwb_distance_queue;
+void app_rtos_request_sensor_fusion_reset(void);
 
 bool g_ranging_enabled = false;
 bool g_pm_ranging_blocked = false;
 
-/* Network objects — non-static so main.c can init via extern */
+/* Network objects â€” non-static so main.c can init via extern */
 network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
 
@@ -89,6 +91,7 @@ sys_sensor_fusion_data_t ukf_data;
 static mahalanobis_prefilter_t s_prefilter;
 
 static uint8_t s_last_selected_anchors_mask = 0U;
+static volatile bool s_fusion_reset_requested = false;
 #endif
 
 /* USER CODE END Variables */
@@ -103,7 +106,7 @@ const osThreadAttr_t UwbRanging_attributes = {
 osThreadId_t SensorFusionHandle;
 const osThreadAttr_t SensorFusion_attributes = {
   .name = "SensorFusion",
-  .stack_size = 1024 * 4,
+  .stack_size = 2048 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
 /* Definitions for Network */
@@ -172,6 +175,7 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 #if ENABLE_SYS_FUSION
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+static void sensor_fusion_reset_state(void);
 #endif
 /* USER CODE END FunctionPrototypes */
 
@@ -216,8 +220,8 @@ void MX_FREERTOS_Init(void) {
   g_io_btn_semHandle = osSemaphoreNew(1, 1, &g_io_btn_sem_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* Drain initial count to 0 — signal semaphores must start at 0 so tasks block */
-  osSemaphoreAcquire(g_uwb_isr_semHandle, 0);  /* UWB ISR → UwbRanging  */
+  /* Drain initial count to 0 â€” signal semaphores must start at 0 so tasks block */
+  osSemaphoreAcquire(g_uwb_isr_semHandle, 0);  /* UWB ISR â†’ UwbRanging  */
   osSemaphoreAcquire(g_logger_semHandle,   0);  /* logger signal           */
   osSemaphoreAcquire(g_io_btn_semHandle,   0);  /* button signal           */
   /* USER CODE END RTOS_SEMAPHORES */
@@ -288,6 +292,8 @@ void uwb_ranging_entry(void *argument)
 
   for (;;)
   {
+    app_tag_process_uwb_control(cfg);
+
     /* Calculate dynamic timeout based on UWB deadline to prevent missing FINAL TX slot */
     uint32_t wait_ms = 10;
     if (g_ranging_enabled && !g_pm_ranging_blocked)
@@ -325,7 +331,14 @@ void uwb_ranging_entry(void *argument)
         bsp_uwb_dwt_isr();
         if (cfg->uwb.role == DEVICE_ROLE_TAG)
         {
-          app_tag_process();
+          if (app_calib_master_should_run())
+          {
+            app_calib_master_process();
+          }
+          else
+          {
+            app_tag_process();
+          }
         }
         else
         {
@@ -343,7 +356,14 @@ void uwb_ranging_entry(void *argument)
     bsp_uwb_dwt_isr();
     if (cfg->uwb.role == DEVICE_ROLE_TAG)
     {
-      app_tag_process();
+      if (app_calib_master_should_run())
+      {
+        app_calib_master_process();
+      }
+      else
+      {
+        app_tag_process();
+      }
     }
     else
     {
@@ -382,12 +402,15 @@ void sensor_fusion_entry(void *argument)
     osDelay(20);
   }
 #else
-  /* Initialize positioning filters and prefilter */
+  /* Khá»Ÿi táº¡o bá»™ lá»c Ä‘á»‹nh vá»‹ vÃ  prefilter */
+  const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
   mw_filter_mahalanobis_init(&s_prefilter,
-                             MAHALANOBIS_PREFILTER_D2_RECOVER,
-                             MAHALANOBIS_PREFILTER_D2_REJECT,
-                             MAHALANOBIS_PREFILTER_R_BASE);
-  /* Khởi tạo bộ lọc định vị và prefilter */
+                             prefilter_cfg->recover_d2,
+                             prefilter_cfg->reject_d2,
+                             prefilter_cfg->r_base,
+                             prefilter_cfg->r_gate,
+                             prefilter_cfg->velocity_weight,
+                             prefilter_cfg->min_covariance);
   if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
   {
       RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
@@ -400,9 +423,17 @@ void sensor_fusion_entry(void *argument)
   {
     osDelay(20);
 
+    if (s_fusion_reset_requested)
+    {
+      s_fusion_reset_requested = false;
+      (void)osMessageQueueReset(g_uwb_distance_queue);
+      sensor_fusion_reset_state();
+      continue;
+    }
+
     if (sys_sensor_fusion_check_predict_flag())
     {
-      sys_sensor_fusion_predict(&ukf_data);
+      (void)sys_sensor_fusion_predict(&ukf_data);
     }
 
     {
@@ -412,18 +443,17 @@ void sensor_fusion_entry(void *argument)
         /* 1. Calculate dynamic dt for ranging if needed, and update logs */
 
         /* 2. Process, project to 2D, and Mahalanobis filter the ranges */
-        mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1];
+        mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
         uint8_t valid_count = 0;
-        for (uint8_t i = 0; i <= NUM_ANCHORS; i++) anchors_by_id[i].valid = false;
 
 			#if ENABLE_MAHALANOBIS_PREFILTER
         mw_tril_anchor_t prefilter_rejects[NUM_ANCHORS];
         uint8_t prefilter_reject_count = 0U;
 			#endif
 
-        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+        for (uint8_t i = 0; i < msg.count && i < MAX_ANCHORS_SUPPORTED; i++) {
             uint8_t aid = msg.anchor_ids[i];
-            if (aid < 1 || aid > NUM_ANCHORS) continue;
+            if (aid < 1 || aid > MAX_ANCHORS_SUPPORTED) continue;
 
             float d_raw = msg.distances[i];
 
@@ -454,9 +484,9 @@ void sensor_fusion_entry(void *argument)
             anchor_entry.id = aid;
             anchor_entry.valid = true;
             anchor_entry.r_adaptive = (double)r_adapt;
-            anchor_entry.fp_amp_norm = (double)msg.fp_amp_norm[aid - 1];
-            anchor_entry.fp_snr = (double)msg.fp_snr[aid - 1];
-            anchor_entry.quality_valid = true;
+            anchor_entry.fp_amp_norm = (double)msg.fp_amp_norm[i];
+            anchor_entry.fp_snr = (double)msg.fp_snr[i];
+            anchor_entry.quality_valid = (msg.quality_valid[i] != 0U);
             anchor_entry.selection_score = 0.0;
             anchor_entry.residual_rms = 0.0;
             anchor_entry.gdop_penalty = 0.0;
@@ -464,8 +494,15 @@ void sensor_fusion_entry(void *argument)
 
 #if ENABLE_MAHALANOBIS_PREFILTER
             bool pass = true;
-            if (sys_sensor_fusion_is_initialized())
+            const sys_prefilter_cfg_t *active_prefilter_cfg = sys_config_get_prefilter();
+            if (sys_sensor_fusion_is_initialized() && active_prefilter_cfg->enable)
             {
+                s_prefilter.T1 = active_prefilter_cfg->recover_d2;
+                s_prefilter.T2 = active_prefilter_cfg->reject_d2;
+                s_prefilter.R_base = active_prefilter_cfg->r_base;
+                s_prefilter.R_gate = active_prefilter_cfg->r_gate;
+                s_prefilter.velocity_weight = active_prefilter_cfg->velocity_weight;
+                s_prefilter.min_covariance = active_prefilter_cfg->min_covariance;
                 pass = mw_filter_mahalanobis_update(&s_prefilter,
                                                     aid - 1U,
                                                     d_used,
@@ -522,7 +559,7 @@ void sensor_fusion_entry(void *argument)
             if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
             for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
                 uint8_t aid = prefilter_rejects[i].id;
-                if (aid == 0U || aid > NUM_ANCHORS || anchors_by_id[aid].valid) {
+                if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED || anchors_by_id[aid].valid) {
                     continue;
                 }
                 anchors_by_id[aid] = prefilter_rejects[i];
@@ -540,7 +577,7 @@ void sensor_fusion_entry(void *argument)
         if (valid_count >= 3) {
             mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
             uint8_t compact_idx = 0;
-            for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+            for (uint8_t id = 1; id <= MAX_ANCHORS_SUPPORTED && compact_idx < NUM_ANCHORS; id++) {
                 if (anchors_by_id[id].valid) {
                     anchors_compact[compact_idx++] = anchors_by_id[id];
                 }
@@ -700,13 +737,36 @@ void io_entry(void *argument)
       break;
     }
     case BSP_IO_EVENT_DOUBLE_CLICK:
-      g_ranging_enabled = false;
-      bsp_uwb_idle();
-      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped");
+      if (cfg->uwb.role == DEVICE_ROLE_ANCHOR)
+      {
+        bool enable = !app_anchor_is_survey_active();
+        sys_ranging_abort();
+        bsp_uwb_idle();
+        app_anchor_set_survey_active(enable);
+        app_anchor_init();
+        g_ranging_enabled = true;
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION,
+               "[CALIB] Anchor survey %s",
+               enable ? "enabled" : "disabled");
+        break;
+      }
       break;
     case BSP_IO_EVENT_CLICK:
-      g_ranging_enabled = true;
-      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
+      if (cfg->uwb.role == DEVICE_ROLE_ANCHOR &&
+          app_anchor_is_survey_active())
+      {
+        break;
+      }
+      g_ranging_enabled = !g_ranging_enabled;
+      if (g_ranging_enabled)
+      {
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
+      }
+      else
+      {
+        bsp_uwb_idle();
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped");
+      }
       break;
     default:
       break;
@@ -777,6 +837,16 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+void app_rtos_set_ranging_enabled(bool enabled)
+{
+    g_ranging_enabled = enabled;
+}
+
+bool app_rtos_is_ranging_enabled(void)
+{
+    return g_ranging_enabled;
+}
+
 #if ENABLE_SYS_FUSION
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
@@ -808,6 +878,39 @@ static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out)
     }
     return false;
 }
+
+void app_rtos_request_sensor_fusion_reset(void)
+{
+    s_fusion_reset_requested = true;
+}
+
+static void sensor_fusion_reset_state(void)
+{
+    sys_sensor_fusion_clear_predict_flag();
+    sys_sensor_fusion_clear_update_flag();
+    s_last_selected_anchors_mask = 0U;
+
+    const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
+    mw_filter_mahalanobis_init(&s_prefilter,
+                               prefilter_cfg->recover_d2,
+                               prefilter_cfg->reject_d2,
+                               prefilter_cfg->r_base,
+                               prefilter_cfg->r_gate,
+                               prefilter_cfg->velocity_weight,
+                               prefilter_cfg->min_covariance);
+
+    if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
+    {
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialization failed");
+    }
+    else
+    {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
+    }
+}
+#else
+void app_rtos_request_sensor_fusion_reset(void)
+{
+}
 #endif
 /* USER CODE END Application */
-

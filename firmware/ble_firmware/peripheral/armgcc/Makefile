@@ -258,6 +258,12 @@ CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 CFLAGS += -fno-builtin -fshort-enums
 
+# Check if BLE_RX_BYPASS_P005 is requested
+ifdef BLE_RX_BYPASS_P005
+CFLAGS += -DBLE_RX_BYPASS_P005
+ASMFLAGS += -DBLE_RX_BYPASS_P005
+endif
+
 # C++ flags common to all targets
 CXXFLAGS += $(OPT)
 # Assembler flags common to all targets

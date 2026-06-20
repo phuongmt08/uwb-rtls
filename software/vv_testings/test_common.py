@@ -23,6 +23,13 @@ def has_ack_for_seq(packets: Iterable[pb.packet_t], seq: int) -> bool:
     return False
 
 
+def ack_for_seq(packets: Iterable[pb.packet_t], seq: int) -> pb.packet_t | None:
+    for pkt in packets:
+        if pkt.WhichOneof("params") == "ack" and pkt.ack.ack_seq == seq:
+            return pkt
+    return None
+
+
 def has_param(packets: Iterable[pb.packet_t], param_name: str) -> bool:
     for pkt in packets:
         if pkt.WhichOneof("params") == param_name:

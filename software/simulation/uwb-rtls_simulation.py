@@ -184,6 +184,9 @@ def parse_log(filepath):
                 m = pattern.search(line)
                 if m:
                     d = m.groupdict()
+                    counter_match = re.search(r"\(\s*(?P<frame>\d+)\s*/\s*(?P<tx>\d+)\s*\)", raw_line)
+                    frame_counter = int(counter_match.group('frame')) if counter_match else (len(data) + 1)
+                    tx_frame_cnt = int(counter_match.group('tx')) if counter_match else frame_counter
                     
                     def parse_float_list(s):
                         return [float(x.strip()) for x in (s or "").split(',') if x.strip()] or [0,0,0,0]
@@ -209,6 +212,8 @@ def parse_log(filepath):
                     data.append({
                         'line_no': line_no,
                         'raw_line': raw_line,
+                        'frame_counter': frame_counter,
+                        'tx_frame_cnt': tx_frame_cnt,
                         'type': d['type'],
                         'ax': float(d['ax']), 'ay': float(d['ay']), 'gz': float(d['gz']),
                         'px_fw': float(d['px']), 'py_fw': float(d['py']), 'dt': float(d['dt']),
@@ -242,11 +247,13 @@ def parse_path_csv_log(filepath):
             reader = csv.DictReader(f)
             for line_no, row in enumerate(reader, 2):
                 frame = safe_int(row.get('tx_frame_cnt'), len(data))
+                recorded_dt = safe_float(row.get('dt'), None)
                 if prev_frame is None:
-                    dt = 0.0
+                    dt = recorded_dt if recorded_dt is not None and recorded_dt > 0 else 0.0
                 else:
                     frame_delta = max(1, frame - prev_frame)
-                    dt = frame_delta / 100.0
+                    fallback_dt = frame_delta * 0.02
+                    dt = recorded_dt if recorded_dt is not None and recorded_dt > 0 else fallback_dt
                 prev_frame = frame
 
                 ukf_x = safe_float(row.get('ukf_x'))

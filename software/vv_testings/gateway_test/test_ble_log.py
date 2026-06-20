@@ -600,7 +600,7 @@ class BleLogTester:
         if name == "ble_status_resp":
             state = pkt.ble_status_resp.state
             state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})")
-            if pkt.ble_status_resp.HasField("disconnect_reason"):
+            if pkt.ble_status_resp.disconnect_reason != 0:
                 reason = pkt.ble_status_resp.disconnect_reason
                 print(f"\n{COLOR_YELLOW}[!] BLE Status Change -> {state_name} | disconnect_reason=0x{reason:02X}{COLOR_RESET}")
                 if state == pb.BLE_STATE_IDLE:
@@ -808,7 +808,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                         print(f"{COLOR_GREEN}[OK] BLE CONNECTION ESTABLISHED!{COLOR_RESET}")
                         connected = True
                         break
-                    elif state == pb.BLE_STATE_IDLE and p.ble_status_resp.HasField("disconnect_reason"):
+                    elif state == pb.BLE_STATE_IDLE and p.ble_status_resp.disconnect_reason != 0:
                         reason = p.ble_status_resp.disconnect_reason
                         print(f"  {COLOR_YELLOW}[WARNING] Connection attempt {attempt} failed. Reason: 0x{reason:02X}{COLOR_RESET}")
                         retry_needed = True

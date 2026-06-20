@@ -16,12 +16,15 @@
     #include "sys_logger.h"
     #include "sys_pm.h"
     #include "otp/otp.h"
+    #include "app_calib_master.h"
+    #include "app_rtos_handles.h"
 #else
     #include "sys_logger_bl.h"
     #include "otp/otp.h"
 
 #endif
 
+#include <math.h>
 #include <string.h>
 // clang-format off
 #define OBJECT_CODE                     LOG_OBJECT_CODE_NETWORK
@@ -50,6 +53,8 @@ typedef struct {
 static bool network_cmd_packet_handler(const protobuf_packet_t *pkt);
 static void network_cmd_retry_pending(void);
 static void network_cmd_send_packet(protobuf_packet_t *pkt);
+static void network_cmd_send_handler_ack(const protobuf_packet_t *pkt,
+                                         protobuf_packet_ack_response_t response);
 static void network_cmd_unimplemented(const protobuf_packet_t *pkt);
 static void network_cmd_none(const protobuf_packet_t *pkt);
 static void network_cmd_ack(const protobuf_packet_t *pkt);
@@ -91,10 +96,19 @@ static void network_cmd_ranging_stop(const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
+static void network_cmd_prefilter_cfg_get(const protobuf_packet_t *pkt);
+static void network_cmd_prefilter_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt);
 static void network_cmd_battery_info_get(const protobuf_packet_t *pkt);
 static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt);
+static void network_cmd_zone_switch(const protobuf_packet_t *pkt);
+static void network_cmd_zone_profile_set(const protobuf_packet_t *pkt);
+static void network_cmd_zone_profile_get(const protobuf_packet_t *pkt);
+static void network_cmd_calib_start(const protobuf_packet_t *pkt);
+static void network_cmd_calib_stop(const protobuf_packet_t *pkt);
+static void network_cmd_calib_status_get(const protobuf_packet_t *pkt);
+static void network_cmd_calib_candidate_apply(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
 static void network_cmd_end_session(const protobuf_packet_t *pkt);
 
@@ -112,6 +126,7 @@ typedef struct {
 } network_cmd_t;
 
 static network_cmd_t s_network_cmd;
+static bool s_handler_ack_sent = false;
 
 
 typedef struct {
@@ -241,11 +256,27 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,               "battery_info_resp"),  /* 60 */
     CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 61 */
 #endif /* !BOOTLOADER */
-    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 63 */
-    CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 64 */
-    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 65 */
 #ifndef BOOTLOADER
-    CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 66 */
+    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_calib_status_get,            "calib_status_get"),   /* 65 */
+#else
+    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 65 */
+#endif
+    CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 66 */
+    CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 67 */
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 68 */
+    CMD_INFO(protobuf_packet_t_prefilter_cfg_get_tag,         network_cmd_prefilter_cfg_get,           "prefilter_get"),      /* 75 */
+    CMD_INFO(protobuf_packet_t_prefilter_cfg_set_tag,         network_cmd_prefilter_cfg_set,           "prefilter_set"),      /* 76 */
+    CMD_INFO(protobuf_packet_t_prefilter_cfg_resp_tag,        network_cmd_unimplemented,               "prefilter_resp"),     /* 77 */
+    CMD_INFO(protobuf_packet_t_vehicle_control_tag,           network_cmd_unimplemented,               "vehicle_control"),    /* 78 */
+    CMD_INFO(protobuf_packet_t_vehicle_status_tag,            network_cmd_unimplemented,               "vehicle_status"),     /* 79 */
+    CMD_INFO(protobuf_packet_t_zone_switch_tag,               network_cmd_zone_switch,                 "zone_switch"),        /* 80 */
+    CMD_INFO(protobuf_packet_t_zone_profile_set_tag,          network_cmd_zone_profile_set,            "zone_profile_set"),   /* 81 */
+    CMD_INFO(protobuf_packet_t_zone_profile_get_tag,          network_cmd_zone_profile_get,            "zone_profile_get"),   /* 82 */
+    CMD_INFO(protobuf_packet_t_zone_profile_resp_tag,         network_cmd_unimplemented,               "zone_profile_resp"),  /* 83 */
+    CMD_INFO(protobuf_packet_t_calib_start_tag,               network_cmd_calib_start,                 "calib_start"),        /* 84 */
+    CMD_INFO(protobuf_packet_t_calib_stop_tag,                network_cmd_calib_stop,                  "calib_stop"),         /* 85 */
+    CMD_INFO(protobuf_packet_t_calib_candidate_apply_tag,     network_cmd_calib_candidate_apply,       "calib_candidate_apply"), /* 86 */
 #endif
     //      +=================================================+=======================================+========================+
 };
@@ -319,7 +350,7 @@ static void network_cmd_send_packet(protobuf_packet_t *pkt)
 static void network_cmd_unimplemented(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(s_network_cmd.stream && pkt);
-    network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED);
+    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_UNIMPLEMENTED);
     RLOG_W(OBJECT_CODE, "No command handler for payload tag=%u", (unsigned)pkt->which_params);
 }
 
@@ -705,6 +736,41 @@ static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt)
     network_cmd_config_save("calibration config");
 }
 
+static void network_cmd_prefilter_cfg_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
+    if (!prefilter_cfg) {
+        RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM, "Failed to get prefilter config");
+        return;
+    }
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_prefilter_cfg_resp_tag);
+    resp.params.prefilter_cfg_resp.has_config = true;
+    resp.params.prefilter_cfg_resp.config = *prefilter_cfg;
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_prefilter_cfg_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    if (!pkt->params.prefilter_cfg_set.has_config) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
+        return;
+    }
+
+    if (sys_config_set_prefilter(&pkt->params.prefilter_cfg_set.config) != 0) {
+        RLOG_W(OBJECT_CODE, "Invalid prefilter config received from host");
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
+        return;
+    }
+
+    network_cmd_config_save("prefilter config");
+}
+
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
@@ -732,17 +798,38 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
     CHECK_VOID(pkt);
 
     uint32_t count = pkt->params.anchor_layout_set.anchors_count;
-    if (count == 0 || count > SYS_CONFIG_MAX_ANCHORS) {
+    if (count != NUM_ANCHORS) {
         RLOG_W(OBJECT_CODE, "Invalid anchor layout count: %lu", count);
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
         return;
     }
 
-    if (sys_config_set_anchor_layout(pkt->params.anchor_layout_set.anchors, count) != 0) {
+    const sys_config_t *cfg = sys_config_get();
+    uint32_t zone_id = sys_config_get_active_zone_id();
+    if (cfg->calib.enable_tag_auto_calib || cfg->calib.enable_anchor_auto_calib) {
+        RLOG_W(OBJECT_CODE, "Anchor layout update rejected while calibration is active");
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+    protobuf_zone_profile_t profile = cfg->zone_profiles[zone_id - 1U];
+    profile.anchor_count = count;
+    profile.anchors_count = count;
+    memset(profile.anchors, 0, sizeof(profile.anchors));
+    memcpy(profile.anchors,
+           pkt->params.anchor_layout_set.anchors,
+           (size_t)count * sizeof(profile.anchors[0]));
+    if (!sys_config_zone_profile_valid(&profile)) {
         RLOG_W(OBJECT_CODE, "Invalid anchor layout received from host");
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
         return;
     }
 
-    network_cmd_config_save("anchor layout");
+    if (!app_rtos_request_active_zone_profile_update(&profile)) {
+        RLOG_W(OBJECT_CODE, "Anchor layout update rejected: UWB control busy");
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
 }
 
 static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt)
@@ -754,14 +841,14 @@ static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt)
 
     if (err == OTP_OK) {
         RLOG_W(OBJECT_CODE, "Factory OTP write accepted type=0x%02lX", (unsigned long)req->otp_type);
-        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
     } else {
         RLOG_W(OBJECT_CODE, "Factory OTP write rejected type=0x%02lX status=%d",
                (unsigned long)req->otp_type, (int)err);
-        network_core_send_ack(s_network_cmd.stream, pkt,
-                              err == OTP_ERR_INVALID_ARG ?
-                              protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE :
-                              protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        network_cmd_send_handler_ack(pkt,
+                                     err == OTP_ERR_INVALID_ARG ?
+                                     protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE :
+                                     protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
     }
 }
 
@@ -789,6 +876,191 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
     resp.params.battery_info_resp.error_mask       = pm_status.error_mask;
 
     network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_zone_switch(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    uint32_t zone_id = pkt->params.zone_switch.zone_id;
+    const sys_config_t *cfg = sys_config_get();
+    if (zone_id < 1U || zone_id > 4U ||
+        !sys_config_zone_profile_valid(&cfg->zone_profiles[zone_id - 1U]) ||
+        cfg->calib.enable_tag_auto_calib ||
+        cfg->calib.enable_anchor_auto_calib ||
+        !app_rtos_request_zone_switch(zone_id)) {
+        RLOG_W(OBJECT_CODE, "zone_switch rejected: unavailable/invalid zone_id %lu",
+               (unsigned long)zone_id);
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
+    RLOG_I(OBJECT_CODE, "zone_switch request zone_id=%lu registered.", (unsigned long)zone_id);
+    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+}
+
+static void network_cmd_zone_profile_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+    if (!pkt->params.zone_profile_set.has_profile) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
+        return;
+    }
+
+    const protobuf_zone_profile_t *prof = &pkt->params.zone_profile_set.profile;
+    uint32_t zone_id = prof->zone_id;
+    if (!sys_config_zone_profile_valid(prof)) {
+        RLOG_W(OBJECT_CODE,
+               "zone_profile_set rejected: zone=%lu preamble=%lu count=%lu",
+               (unsigned long)zone_id,
+               (unsigned long)prof->preamble_code,
+               (unsigned long)prof->anchors_count);
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
+    if (sys_config_get_active_zone_id() == zone_id) {
+        const sys_config_t *cfg = sys_config_get();
+        if (cfg->calib.enable_tag_auto_calib || cfg->calib.enable_anchor_auto_calib) {
+            network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+            return;
+        }
+        if (!app_rtos_request_active_zone_profile_update(prof)) {
+            network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+            return;
+        }
+    } else {
+        if (sys_config_set_zone_profile(prof) != 0) {
+            network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+            return;
+        }
+        network_cmd_config_save("zone_profile_set");
+    }
+
+    RLOG_I(OBJECT_CODE, "zone_profile_set: Zone %lu preamble=%lu anchors_count=%lu accepted.",
+           (unsigned long)zone_id, (unsigned long)prof->preamble_code, (unsigned long)prof->anchors_count);
+
+    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+}
+
+static void network_cmd_zone_profile_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+    sys_config_t *cfg = sys_config_get();
+    uint32_t zone_id = pkt->params.zone_profile_get.zone_id;
+    if (zone_id < 1 || zone_id > 4) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
+    protobuf_packet_t resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.hdr.addr.src = pkt->hdr.addr.dst;
+    resp.hdr.addr.dst = pkt->hdr.addr.src;
+    resp.hdr.seq = pkt->hdr.seq;
+    resp.which_params = protobuf_packet_t_zone_profile_resp_tag;
+    resp.params.zone_profile_resp.has_profile = true;
+    resp.params.zone_profile_resp.profile = cfg->zone_profiles[zone_id - 1];
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_calib_start(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+    const sys_config_t *cfg = sys_config_get();
+    if (cfg->uwb.role != DEVICE_ROLE_TAG) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
+    const protobuf_calib_start_t *req = &pkt->params.calib_start;
+    if (!req->reference_position_valid ||
+        !isfinite(req->tag_x_m) ||
+        !isfinite(req->tag_y_m) ||
+        !isfinite(req->tag_z_m)) {
+        RLOG_W(OBJECT_CODE, "calib_start rejected: explicit finite reference position required");
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
+        return;
+    }
+
+    uint32_t sample_target = pkt->params.calib_start.sample_target;
+    if (sample_target == 0U) {
+        sample_target = CALIB_ANCHOR_SAMPLES;
+    }
+    if (sample_target > SYS_CONFIG_CALIB_MAX_SAMPLES ||
+        !app_rtos_request_tag_calibration_start(sample_target,
+                                                req->tag_x_m,
+                                                req->tag_y_m,
+                                                req->tag_z_m)) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
+    RLOG_I(OBJECT_CODE,
+           "calib_start queued: samples=%lu reference=(%.3f,%.3f,%.3f)",
+           (unsigned long)sample_target,
+           req->tag_x_m,
+           req->tag_y_m,
+           req->tag_z_m);
+    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+}
+
+static void network_cmd_calib_stop(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+    if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+    bool queued = app_rtos_request_tag_calibration_stop();
+    RLOG_I(OBJECT_CODE, "calib_stop: request %s.", queued ? "queued" : "rejected");
+    network_cmd_send_handler_ack(pkt,
+                                 queued
+                                 ? protobuf_PACKET_ACK_RESPONSE_ACK
+                                 : protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+}
+
+static void network_cmd_calib_status_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    protobuf_packet_t resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.hdr.addr.src = pkt->hdr.addr.dst;
+    resp.hdr.addr.dst = pkt->hdr.addr.src;
+    resp.hdr.seq = pkt->hdr.seq;
+    resp.which_params = protobuf_packet_t_calib_status_resp_tag;
+
+    app_calib_master_fill_status(&resp.params.calib_status_resp);
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_calib_candidate_apply(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+    if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+    uint32_t mask = pkt->params.calib_candidate_apply.anchor_mask;
+    uint16_t tx_delay = 0U;
+    uint16_t rx_delay = 0U;
+    if (!app_calib_master_get_average_candidate(mask, &tx_delay, &rx_delay)) {
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+    RLOG_I(OBJECT_CODE,
+           "calib_candidate_apply queued mask=0x%02lX candidate_tx=%u candidate_rx=%u",
+           (unsigned long)mask,
+           tx_delay,
+           rx_delay);
+    bool queued = app_rtos_request_tag_calibration_apply(mask);
+    network_cmd_send_handler_ack(pkt,
+                                 queued
+                                 ? protobuf_PACKET_ACK_RESPONSE_ACK
+                                 : protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
 }
 
 #endif /* !BOOTLOADER */
@@ -848,7 +1120,7 @@ static void network_cmd_enter_to_bootloader(const protobuf_packet_t *pkt)
     RLOG_I(OBJECT_CODE, "Entering bootloader...");
 
     /* Send ACK blocks/inline so it reaches the host before we reboot */
-    network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
 
     /* Wait for transmission to finish (USB endpoint flush / UART complete) */
     bsp_delay_ms(100);
@@ -1116,7 +1388,7 @@ bool network_cmd_is_ble_host_active(void)
 bool network_cmd_set_ranging_enabled(bool enabled)
 {
     g_ranging_enabled = enabled;
-    return false;
+    return true;
 }
 
 bool network_cmd_is_ranging_enabled(void)
@@ -1168,9 +1440,19 @@ void network_cmd_dispatch(const protobuf_packet_t *pkt)
         return;
     }
 
+    s_handler_ack_sent = false;
     entry->cmd_hdl(pkt);
 
-    network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+    if (!s_handler_ack_sent) {
+        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+    }
+}
+
+static void network_cmd_send_handler_ack(const protobuf_packet_t *pkt,
+                                         protobuf_packet_ack_response_t response)
+{
+    s_handler_ack_sent = true;
+    network_core_send_ack(s_network_cmd.stream, pkt, response);
 }
 
 static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)

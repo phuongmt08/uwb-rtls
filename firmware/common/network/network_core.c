@@ -100,7 +100,7 @@ static bool network_core_send_ble_packet(network_core_t *core, stream_type_t tx_
     return network_core_encode_and_send(core, tx_stream, packet);
 }
 
-static stream_type_t network_core_dst_to_tx_stream(protobuf_device_addr_t dst)
+static stream_type_t network_core_dst_to_tx_stream(network_core_t *core, protobuf_device_addr_t dst)
 {
     switch (dst) {
         case protobuf_PACKET_ADDR_MCU:
@@ -109,6 +109,11 @@ static stream_type_t network_core_dst_to_tx_stream(protobuf_device_addr_t dst)
         case protobuf_PACKET_ADDR_CENTRAL:
         case protobuf_PACKET_ADDR_PERIPHERAL:
         case protobuf_PACKET_ADDR_HOST:
+            return STREAM_BLE_TX;
+        case protobuf_PACKET_ADDR_VEHICLE:
+            if (core && core->serial_connection_active) {
+                return STREAM_SERIAL_TX;
+            }
             return STREAM_BLE_TX;
         default:
             return STREAM_MAX;
@@ -148,7 +153,7 @@ static void network_core_forward_packet(network_core_t *core, stream_type_t in_s
         return;
     }
 
-    stream_type_t fwd = network_core_dst_to_tx_stream(dst);
+    stream_type_t fwd = network_core_dst_to_tx_stream(core, dst);
     if (fwd == STREAM_MAX) return;          /* unknown dst -> drop */
 
     /* Map in_stream to its tx equivalent to avoid bouncing */
@@ -316,7 +321,7 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
         return true;
     }
 
-    stream_type_t tx_stream = network_core_dst_to_tx_stream((protobuf_device_addr_t)dst);
+    stream_type_t tx_stream = network_core_dst_to_tx_stream(core, (protobuf_device_addr_t)dst);
     if (tx_stream == STREAM_MAX) {
         tx_stream = core->tx_stream;
     }

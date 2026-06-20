@@ -253,7 +253,7 @@ def _connect_selected_peripheral(
                     if state == pb.BLE_STATE_CONNECTED:
                         print("[OK] BLE CONNECTION ESTABLISHED!")
                         return True
-                    if state == pb.BLE_STATE_IDLE and resp.ble_status_resp.HasField("disconnect_reason"):
+                    if state == pb.BLE_STATE_IDLE and resp.ble_status_resp.disconnect_reason != 0:
                         reason = resp.ble_status_resp.disconnect_reason
                         print(f"  [WARNING] Connection attempt {attempt} failed. Reason: 0x{reason:02X}")
                         retry_needed = True
