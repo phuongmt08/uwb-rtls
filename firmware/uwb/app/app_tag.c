@@ -72,7 +72,6 @@ static uint8_t s_last_selected_anchors_mask = 0;
 #if !ENABLE_SYS_FUSION
 static vec2d_t s_latest_fusion_position = {.x = 0.0f, .y = 0.0f};
 static bool s_latest_fusion_position_valid = false;
-static uint8_t s_last_selected_anchors_mask = 0;
 static float s_latest_distances[NUM_ANCHORS] = {0};
 static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0};
 static double s_latest_fp_snr[NUM_ANCHORS] = {0};
@@ -82,6 +81,7 @@ static bool s_ukf_initialized = false;
 static ukf_init_filter_t s_ukf_init_filter;
 static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static uint32_t s_last_fusion_log_tick = 0U;
+sys_sensor_fusion_data_t ukf_data;
 #endif
 
 /* Private prototypes --------------------------------------------------- */
