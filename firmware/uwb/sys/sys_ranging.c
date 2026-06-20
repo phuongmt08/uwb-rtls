@@ -51,6 +51,10 @@
 #define ANCHOR_SMART_TRACK_REARM_GAP_MS    10U
 
 #define TAG_MIN_ANCHOR_SAMPLES             3U
+/* Temporary diagnostic mode: complete the ranging cycle even when fewer than
+ * TAG_MIN_ANCHOR_SAMPLES anchors respond. Keep the warnings so the degraded
+ * cycles remain visible in logs. Set to 1U to restore the original aborts. */
+#define TAG_ABORT_ON_INSUFFICIENT_SAMPLES  0U
 
 /* Software margin needed before programming DW1000 delayed TX.
  * Keep this separate from TDMA slot guard: slot guard protects adjacent slots,
@@ -1546,6 +1550,7 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                       s_tag_diag.resp_partial++;
                   }
                   s_ctx.result_multi.count = 0;
+#if TAG_ABORT_ON_INSUFFICIENT_SAMPLES
                   RLOG_W(LOG_OBJECT_CODE_RANGING,
                          "[TAG] RESP insufficient seq=%u resp=%u/%u min=%u resp_mask=0x%02X - abort before FINAL",
                          s_ctx.sequence_num,
@@ -1555,9 +1560,20 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                          resp_mask);
                   sys_ranging_abort();
                   return SYS_RANGING_ERR_PARTIAL;
+#else
+                  RLOG_W(LOG_OBJECT_CODE_RANGING,
+                         "[TAG] RESP insufficient seq=%u resp=%u/%u min=%u resp_mask=0x%02X - continuing to FINAL",
+                         s_ctx.sequence_num,
+                         s_sys_ranging_ev.num_responses,
+                         num_anchors,
+                         TAG_MIN_ANCHOR_SAMPLES,
+                         resp_mask);
+#endif
               }
               if (s_sys_ranging_ev.num_responses < num_anchors) {
-                  s_tag_diag.resp_partial++;
+                  if (s_sys_ranging_ev.num_responses >= TAG_MIN_ANCHOR_SAMPLES) {
+                      s_tag_diag.resp_partial++;
+                  }
                   /* Commented out to prevent blocking print from causing us to miss the FINAL TX slot */
                   /*
                   RLOG_W(LOG_OBJECT_CODE_RANGING,
@@ -1701,6 +1717,7 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
               }
               if (s_ctx.result_multi.count < TAG_MIN_ANCHOR_SAMPLES) {
                   s_tag_diag.result_partial++;
+#if TAG_ABORT_ON_INSUFFICIENT_SAMPLES
                   RLOG_W(LOG_OBJECT_CODE_RANGING,
                          "[TAG] RESULT insufficient seq=%u got=%u/%u resp_mask=0x%02X result_mask=0x%02X - abort cycle",
                          s_ctx.sequence_num,
@@ -1710,8 +1727,16 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
                          result_mask);
                   sys_ranging_abort();
                   return SYS_RANGING_ERR_PARTIAL;
-              }
-              if (s_ctx.result_multi.count < s_sys_ranging_ev.num_responses || result_mask != resp_mask) {
+#else
+                  RLOG_W(LOG_OBJECT_CODE_RANGING,
+                         "[TAG] RESULT insufficient seq=%u got=%u/%u resp_mask=0x%02X result_mask=0x%02X - completing partial cycle",
+                         s_ctx.sequence_num,
+                         s_ctx.result_multi.count,
+                         TAG_MIN_ANCHOR_SAMPLES,
+                         resp_mask,
+                         result_mask);
+#endif
+              } else if (s_ctx.result_multi.count < s_sys_ranging_ev.num_responses || result_mask != resp_mask) {
                   s_tag_diag.result_partial++;
                   RLOG_W(LOG_OBJECT_CODE_RANGING,
                          "[TAG] RESULT partial seq=%u result=%u/%u resp_mask=0x%02X result_mask=0x%02X",

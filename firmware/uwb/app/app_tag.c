@@ -495,6 +495,18 @@ static void process_ranging_results(sys_ranging_result_t *results, int num_succe
         }
     }
 
+    bsp_io_uart_send_fusion_log_data(0,
+                                         s_error_count,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+										 anchor_distances,
+                                         s_latest_fp_amp_norm,
+                                         s_latest_fp_snr,
+                                         0);
+
     /* Need at least 3 anchors for trilateration */
     if (valid_count < 3) {
         RLOG_I(LOG_OBJECT_CODE_TAG,
