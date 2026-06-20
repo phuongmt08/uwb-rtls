@@ -365,6 +365,9 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
+#if !ENABLE_SYS_FUSION
+	osThreadExit();
+#endif
 #if ENABLE_SYS_FUSION
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
@@ -589,8 +592,9 @@ void sensor_fusion_entry(void *argument)
       }
     }
   }
-  osThreadExit();
+
 #endif
+  osThreadExit();
 #endif
   /* USER CODE END sensor_fusion_entry */
 }

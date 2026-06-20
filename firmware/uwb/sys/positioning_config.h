@@ -268,7 +268,7 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  1
+#define ENABLE_SYS_FUSION  0
 #endif
 
 #ifndef SYS_FUSION_PREFILTER_ENABLED

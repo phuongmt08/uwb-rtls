@@ -24,7 +24,7 @@
 #define SYS_SENSOR_FUSION_PI 3.14159265358979323846f
 
 #ifndef UKF_BLE_STREAM_TEST_ENABLE
-#define UKF_BLE_STREAM_TEST_ENABLE true
+#define UKF_BLE_STREAM_TEST_ENABLE false
 #endif
 
 /* Public enumerate/structure ----------------------------------------- */
