@@ -244,6 +244,31 @@ class RangingModel(QObject):
         )
 
     @staticmethod
+    def _extract_room_frame_fields(payload) -> dict:
+        room_id = ""
+        for field_name in ("room_id", "active_room_id", "zone_id"):
+            value = getattr(payload, field_name, "")
+            if value not in (None, ""):
+                room_id = str(value)
+                break
+
+        def first_value(*names, default=None):
+            for name in names:
+                value = getattr(payload, name, None)
+                if value is not None:
+                    return value
+            return default
+
+        local_x = first_value("local_x_m", "pos_local_x_m", "ukf_local_x_m", "tril_local_x_m")
+        local_y = first_value("local_y_m", "pos_local_y_m", "ukf_local_y_m", "tril_local_y_m")
+        local_z = first_value("local_z_m", "pos_local_z_m", default=None)
+        return {
+            "room_id": room_id,
+            "local_x_m": float(local_x) if local_x is not None else None,
+            "local_y_m": float(local_y) if local_y is not None else None,
+            "local_z_m": float(local_z) if local_z is not None else None,
+        }
+    @staticmethod
     def _parse_anchor_distances(res) -> tuple[list[dict], int, dict[int, int]]:
         anchors = []
         anchor_mask = 0
@@ -269,6 +294,7 @@ class RangingModel(QObject):
         anchors, anchor_mask, distances_by_anchor = self._parse_anchor_distances(res)
 
         # Store in history buffer
+        room_frame = self._extract_room_frame_fields(res)
         sample = {
             "x_m": float(getattr(res, "pos_x_m", 0.0)),
             "y_m": float(getattr(res, "pos_y_m", 0.0)),
@@ -285,6 +311,10 @@ class RangingModel(QObject):
             "d3_mm": distances_by_anchor.get(3, ""),
             "d4_mm": distances_by_anchor.get(4, ""),
             "anchors": anchors,
+            "room_id": room_frame["room_id"],
+            "local_x_m": room_frame["local_x_m"],
+            "local_y_m": room_frame["local_y_m"],
+            "local_z_m": room_frame["local_z_m"],
         }
         self._position_history.append(sample)
 
@@ -314,6 +344,7 @@ class RangingModel(QObject):
         shared_app_state.ranging_stats = self._stats.copy()
 
     def _handle_sensor_fusion_result(self, res, seq: int = 0, packet_timestamp_ms: int = 0):
+        room_frame = self._extract_room_frame_fields(res)
         sample = {
             "ukf_x_m": float(getattr(res, "ukf_x_m", 0.0)),
             "ukf_y_m": float(getattr(res, "ukf_y_m", 0.0)),
@@ -327,6 +358,10 @@ class RangingModel(QObject):
             "received_at": time.time(),
             "source": "sensor_fusion",
             "seq": int(seq or 0),
+            "room_id": room_frame["room_id"],
+            "local_x_m": room_frame["local_x_m"],
+            "local_y_m": room_frame["local_y_m"],
+            "local_z_m": room_frame["local_z_m"],
         }
         self._handle_sensor_fusion_sample(sample)
 

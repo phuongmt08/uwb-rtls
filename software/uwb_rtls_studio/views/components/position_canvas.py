@@ -6,7 +6,7 @@
 import math
 import time
 from copy import deepcopy
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPointF, QPoint
+from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal, QPointF, QPoint, QRect
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -19,9 +19,10 @@ from PyQt6.QtGui import (
     QPolygonF,
     QPixmap,
     QCursor,
+    QDoubleValidator,
     QPolygon,
 )
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QLineEdit, QWidget
 from utils.config_dim import GRID_SPACING_M
 from views.components.zone_property_panel import ZonePropertyPanel
 
@@ -104,7 +105,24 @@ class PositionCanvas(QWidget):
         self.is_developer_mode = False
         self.snapped_grid_pt = None
         self.preview_25d = False
+        self.draw_object_shape = "polygon"
+        self._object_draw_center = None
+        self.active_room_ids = set()
         self._undo_stack = []
+        self._dimension_hitboxes = []
+        self._dimension_edit_target = None
+        self._dimension_edit_committing = False
+        self._dimension_editor = QLineEdit(self)
+        self._dimension_editor.setValidator(QDoubleValidator(0.01, 10000.0, 3, self._dimension_editor))
+        self._dimension_editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dimension_editor.setStyleSheet(
+            "QLineEdit { background: #0F172A; color: #22D3EE; border: 2px solid #22D3EE; "
+            "border-radius: 5px; padding: 2px 5px; font-weight: bold; }"
+        )
+        self._dimension_editor.returnPressed.connect(self._commit_dimension_edit)
+        self._dimension_editor.editingFinished.connect(self._commit_dimension_edit)
+        self._dimension_editor.installEventFilter(self)
+        self._dimension_editor.hide()
 
         # Floating Property Panel Integration
         self.property_panel = ZonePropertyPanel(self)
@@ -118,6 +136,83 @@ class PositionCanvas(QWidget):
 
     def set_geofences(self, zones):
         self.geofence_zones = zones
+        self.update()
+
+    def eventFilter(self, watched, event):
+        if watched is self._dimension_editor and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self._cancel_dimension_edit()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _dimension_hit_at(self, screen_x, screen_y):
+        point = QPoint(int(screen_x), int(screen_y))
+        for rect, zone_id, edge_idx, length in reversed(self._dimension_hitboxes):
+            if rect.contains(point):
+                return zone_id, edge_idx, length, rect
+        return None
+
+    def _begin_dimension_edit(self, zone_id, edge_idx, length, rect):
+        if self._dimension_editor.isVisible():
+            self._commit_dimension_edit()
+        self.set_selected_zone(zone_id)
+        self.zone_selected.emit(zone_id)
+        self.selected_edge_idx = edge_idx
+        self._dimension_edit_target = (zone_id, edge_idx)
+        editor_rect = rect.adjusted(-8, -5, 8, 5)
+        editor_rect.setWidth(max(editor_rect.width(), 72))
+        editor_rect.moveCenter(rect.center())
+        editor_rect.moveLeft(max(2, min(editor_rect.left(), self.width() - editor_rect.width() - 2)))
+        editor_rect.moveTop(max(2, min(editor_rect.top(), self.height() - editor_rect.height() - 2)))
+        self._dimension_editor.setGeometry(editor_rect)
+        self._dimension_editor.setText(f"{float(length):.3f}")
+        self._dimension_editor.selectAll()
+        self._dimension_editor.show()
+        self._dimension_editor.raise_()
+        self._dimension_editor.setFocus(Qt.FocusReason.MouseFocusReason)
+        self.update()
+
+    def _cancel_dimension_edit(self):
+        self._dimension_edit_target = None
+        self._dimension_editor.hide()
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.update()
+
+    def _commit_dimension_edit(self):
+        if self._dimension_edit_committing or not self._dimension_editor.isVisible():
+            return
+        self._dimension_edit_committing = True
+        try:
+            target = self._dimension_edit_target
+            text = self._dimension_editor.text().strip().replace(",", ".")
+            self._dimension_edit_target = None
+            self._dimension_editor.hide()
+            if target is None:
+                return
+            try:
+                length = float(text)
+            except ValueError:
+                return
+            if not math.isfinite(length) or length < 0.01:
+                return
+            zone_id, edge_idx = target
+            zone = next((item for item in self.geofence_zones if item.id == zone_id), None)
+            if zone is None or not (0 <= edge_idx < len(zone.points)):
+                return
+            pt1 = zone.points[edge_idx]
+            pt2 = zone.points[(edge_idx + 1) % len(zone.points)]
+            angle_deg = math.degrees(math.atan2(pt2[1] - pt1[1], pt2[0] - pt1[0]))
+            self.set_selected_zone(zone_id)
+            self.selected_edge_idx = edge_idx
+            self._push_undo_state()
+            self._on_panel_edge_changed(edge_idx, length, angle_deg)
+        finally:
+            self._dimension_edit_committing = False
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+            self.update()
+
+    def set_active_room_ids(self, room_ids):
+        self.active_room_ids = {str(room_id) for room_id in (room_ids or []) if room_id}
         self.update()
 
     def _push_undo_state(self):
@@ -161,6 +256,7 @@ class PositionCanvas(QWidget):
     def set_edit_mode(self, mode):
         self.edit_mode = mode
         self.current_draw_points.clear()
+        self._object_draw_center = None
         self.selected_vertex_idx = None
         self.selected_edge_idx = None
         self.dragging_anchor_idx = None
@@ -173,6 +269,8 @@ class PositionCanvas(QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif mode == "edit_vertices":
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif mode == "insert_vertex":
+            self.setCursor(Qt.CursorShape.CrossCursor)
         self.update()
 
     def set_selected_zone(self, zone_id):
@@ -234,12 +332,37 @@ class PositionCanvas(QWidget):
         self.update()
 
     def set_draw_object_type(self, object_type: str):
-        if object_type not in {"zone", "room", "wall", "anchor"}:
+        if object_type not in {"zone", "room", "wall", "object", "anchor"}:
             object_type = "zone"
         if self.draw_object_type != object_type:
             self.current_draw_points.clear()
+            self._object_draw_center = None
         self.draw_object_type = object_type
         self.update()
+
+    def set_draw_object_shape(self, shape_kind: str):
+        self.draw_object_shape = shape_kind if shape_kind in {"polygon", "circle"} else "polygon"
+        self._object_draw_center = None
+        self.current_draw_points.clear()
+        self.update()
+
+    def begin_insert_vertex(self):
+        zone = next((item for item in self.geofence_zones if item.id == self.selected_zone_id), None)
+        if zone is None or len(zone.points) < 2:
+            return False
+        self.set_edit_mode("insert_vertex")
+        return True
+
+    @staticmethod
+    def _circle_points(center_x, center_y, radius_m, segments=24):
+        radius_m = max(0.01, float(radius_m))
+        return [
+            (
+                center_x + math.cos(2.0 * math.pi * idx / segments) * radius_m,
+                center_y + math.sin(2.0 * math.pi * idx / segments) * radius_m,
+            )
+            for idx in range(max(8, int(segments)))
+        ]
 
     def set_25d_preview(self, enabled: bool):
         self.preview_25d = bool(enabled)
@@ -280,7 +403,7 @@ class PositionCanvas(QWidget):
         return math.hypot(px - proj_x, py - proj_y), t
 
     def _find_edge_near_screen_pos(self, screen_x, screen_y, max_distance_px=10):
-        layer_order = {"room": 0, "wall": 1, "zone": 2}
+        layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
         sorted_for_hit = sorted(
             self.geofence_zones,
             key=lambda z: layer_order.get(getattr(z, "object_type", "zone"), 3),
@@ -305,6 +428,180 @@ class PositionCanvas(QWidget):
         for pt in poly_points:
             poly.append(QPointF(pt[0], pt[1]))
         return poly.containsPoint(QPointF(wx, wy), Qt.FillRule.OddEvenFill)
+
+    def _room_by_id(self, room_id):
+        if not room_id:
+            return None
+        return next(
+            (
+                zone for zone in self.geofence_zones
+                if getattr(zone, "object_type", "zone") == "room" and zone.id == room_id
+            ),
+            None,
+        )
+
+    def _wall_outward_normal(self, zone, p1, p2):
+        """Return the outward unit normal for a boundary wall segment, or None."""
+        x1, y1 = p1
+        x2, y2 = p2
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            return None
+        nx = -dy / length
+        ny = dx / length
+        host_room = self._room_by_id(getattr(zone, "host_room_id", None))
+        if getattr(zone, "wall_mode", "free_standing") != "boundary_outside" or host_room is None:
+            return None
+        mid_x = (x1 + x2) * 0.5
+        mid_y = (y1 + y2) * 0.5
+        thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
+        epsilon = min(0.02, max(thickness * 0.25, 0.001))
+        plus_is_inside = self._is_inside_polygon(
+            host_room.points, mid_x + nx * epsilon, mid_y + ny * epsilon
+        )
+        return (-nx, -ny) if plus_is_inside else (nx, ny)
+
+    def _wall_segment_footprint(self, zone, p1, p2):
+        """Return one wall segment footprint in world coordinates."""
+        x1, y1 = p1
+        x2, y2 = p2
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.hypot(dx, dy)
+        thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
+        if length <= 1e-9 or thickness <= 0.0:
+            return []
+
+        outward = self._wall_outward_normal(zone, p1, p2)
+        if outward is not None:
+            outward_x, outward_y = outward
+            return [
+                (x1, y1),
+                (x2, y2),
+                (x2 + outward_x * thickness, y2 + outward_y * thickness),
+                (x1 + outward_x * thickness, y1 + outward_y * thickness),
+            ]
+
+        nx = -dy / length
+        ny = dx / length
+        half = thickness * 0.5
+        return [
+            (x1 + nx * half, y1 + ny * half),
+            (x2 + nx * half, y2 + ny * half),
+            (x2 - nx * half, y2 - ny * half),
+            (x1 - nx * half, y1 - ny * half),
+        ]
+
+    @staticmethod
+    def _line_intersection(a, direction_a, b, direction_b):
+        """Intersection of infinite 2D lines, or None when parallel."""
+        ax, ay = a
+        adx, ady = direction_a
+        bx, by = b
+        bdx, bdy = direction_b
+        denominator = adx * bdy - ady * bdx
+        if abs(denominator) <= 1e-9:
+            return None
+        cross = (bx - ax) * bdy - (by - ay) * bdx
+        scale = cross / denominator
+        return ax + scale * adx, ay + scale * ady
+
+    def _draw_forbidden_hatch(self, painter, poly, color):
+        """Draw diagonal hatching inside a forbidden zone polygon (from commit 05e6a86b)."""
+        from PyQt6.QtGui import QPainterPath
+        if poly.count() < 3:
+            return
+        hatch_color = QColor(color)
+        hatch_color.setAlpha(90)
+        bounds = poly.boundingRect().adjusted(-20, -20, 20, 20)
+        clip_path = QPainterPath()
+        clip_path.addPolygon(poly)
+        painter.save()
+        painter.setClipPath(clip_path)
+        painter.setPen(QPen(hatch_color, 1.0, Qt.PenStyle.SolidLine))
+        start = int(bounds.left() - bounds.height())
+        end = int(bounds.right() + bounds.height())
+        step = 14
+        x = start
+        while x <= end:
+            painter.drawLine(int(x), int(bounds.bottom()), int(x + bounds.height()), int(bounds.top()))
+            x += step
+        painter.restore()
+
+    def _wall_footprint_path(self, zone):
+        """Create one continuous wall footprint with closed, square/mitered corners in screen coordinates."""
+        points = list(getattr(zone, "points", []) or [])
+        thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
+        if len(points) < 2 or thickness <= 0.0:
+            return QPainterPath()
+
+        screen_points = [self._world_to_screen(pt[0], pt[1]) for pt in points]
+        
+        ref_x1, ref_y1 = self._world_to_screen(0.0, 0.0)
+        ref_x2, ref_y2 = self._world_to_screen(thickness, 0.0)
+        thickness_px = math.hypot(ref_x2 - ref_x1, ref_y2 - ref_y1)
+
+        mode = getattr(zone, "wall_mode", "free_standing")
+        if mode != "boundary_outside" or self._room_by_id(getattr(zone, "host_room_id", None)) is None:
+            from PyQt6.QtGui import QPainterPathStroker
+            centerline = QPainterPath(QPointF(screen_points[0][0], screen_points[0][1]))
+            for x, y in screen_points[1:]:
+                centerline.lineTo(x, y)
+            stroker = QPainterPathStroker()
+            stroker.setWidth(thickness_px)
+            stroker.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            stroker.setCapStyle(Qt.PenCapStyle.SquareCap)
+            return stroker.createStroke(centerline)
+
+        combined = QPainterPath()
+        for idx in range(len(points) - 1):
+            footprint = self._wall_segment_footprint(zone, points[idx], points[idx + 1])
+            if len(footprint) != 4:
+                continue
+            s_footprint = [self._world_to_screen(pt[0], pt[1]) for pt in footprint]
+            segment_path = QPainterPath(QPointF(s_footprint[0][0], s_footprint[0][1]))
+            for x, y in s_footprint[1:]:
+                segment_path.lineTo(x, y)
+            segment_path.closeSubpath()
+            combined = segment_path if combined.isEmpty() else combined.united(segment_path)
+
+        for idx in range(1, len(points) - 1):
+            previous_point = points[idx - 1]
+            vertex = points[idx]
+            next_point = points[idx + 1]
+            normal_a = self._wall_outward_normal(zone, previous_point, vertex)
+            normal_b = self._wall_outward_normal(zone, vertex, next_point)
+            if normal_a is None or normal_b is None:
+                continue
+            dot = normal_a[0] * normal_b[0] + normal_a[1] * normal_b[1]
+            if dot > 0.999:
+                continue
+            direction_a = (vertex[0] - previous_point[0], vertex[1] - previous_point[1])
+            direction_b = (next_point[0] - vertex[0], next_point[1] - vertex[1])
+            a = (vertex[0] + normal_a[0] * thickness, vertex[1] + normal_a[1] * thickness)
+            b = (vertex[0] + normal_b[0] * thickness, vertex[1] + normal_b[1] * thickness)
+            intersection = self._line_intersection(a, direction_a, b, direction_b)
+            if intersection is None:
+                intersection = (
+                    vertex[0] + (normal_a[0] + normal_b[0]) * thickness,
+                    vertex[1] + (normal_a[1] + normal_b[1]) * thickness,
+                )
+            
+            s_vertex = self._world_to_screen(vertex[0], vertex[1])
+            s_a = self._world_to_screen(a[0], a[1])
+            s_intersection = self._world_to_screen(intersection[0], intersection[1])
+            s_b = self._world_to_screen(b[0], b[1])
+
+            join_path = QPainterPath(QPointF(s_vertex[0], s_vertex[1]))
+            join_path.lineTo(s_a[0], s_a[1])
+            join_path.lineTo(s_intersection[0], s_intersection[1])
+            join_path.lineTo(s_b[0], s_b[1])
+            join_path.closeSubpath()
+            combined = combined.united(join_path)
+
+        return combined
 
     def update_position(self, position):
         current_time = time.time()
@@ -597,7 +894,7 @@ class PositionCanvas(QWidget):
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         
         # Check if double clicked inside any zone (reverse Z-order)
-        layer_order = {"room": 0, "wall": 1, "zone": 2}
+        layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
         sorted_for_click = sorted(
             self.geofence_zones,
             key=lambda z: layer_order.get(getattr(z, "object_type", "zone"), 3),
@@ -605,9 +902,16 @@ class PositionCanvas(QWidget):
         )
         clicked_zone = None
         for zone in sorted_for_click:
-            if self._is_inside_polygon(zone.points, world_x, world_y):
-                clicked_zone = zone
-                break
+            object_type = getattr(zone, "object_type", "zone")
+            if object_type == "wall":
+                path = self._wall_footprint_path(zone)
+                if not path.isEmpty() and path.contains(pos):
+                    clicked_zone = zone
+                    break
+            else:
+                if self._is_inside_polygon(zone.points, world_x, world_y):
+                    clicked_zone = zone
+                    break
                 
         if clicked_zone:
             self.edit_mode = "edit_vertices"
@@ -624,7 +928,30 @@ class PositionCanvas(QWidget):
         self.update()
 
     def wheelEvent(self, event):
-        factor = 0.85 if event.angleDelta().y() > 0 else 1.18
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+
+        modifiers = event.modifiers()
+        pan_step = self._view_range * 0.08
+        direction = 1.0 if delta > 0 else -1.0
+
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            self._view_cx -= direction * pan_step
+            self.update_property_panel_position()
+            self.update()
+            event.accept()
+            return
+
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            self._view_cy += direction * pan_step
+            self.update_property_panel_position()
+            self.update()
+            event.accept()
+            return
+
+        factor = 0.85 if delta > 0 else 1.18
         pos = event.position()
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         self._view_range *= factor
@@ -634,6 +961,7 @@ class PositionCanvas(QWidget):
         self._view_cy -= world_y_2 - world_y
         self.update_property_panel_position()
         self.update()
+        event.accept()
 
     def mousePressEvent(self, event):
         self.setFocus()
@@ -641,8 +969,45 @@ class PositionCanvas(QWidget):
             self.set_edit_mode("navigate")
 
         pos = event.position()
+        if event.button() == Qt.MouseButton.LeftButton:
+            dimension_hit = self._dimension_hit_at(pos.x(), pos.y())
+            if dimension_hit is not None:
+                self._begin_dimension_edit(*dimension_hit)
+                event.accept()
+                return
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
+
+        # Rule zones are the top visual layer. Select them before allowing the
+        # currently selected room/wall to capture a shared vertex or edge.
+        if self.edit_mode == "edit_vertices" and event.button() == Qt.MouseButton.LeftButton:
+            rule_zones = [
+                zone for zone in reversed(self.geofence_zones)
+                if getattr(zone, "object_type", "zone") == "zone"
+                and zone.id != self.selected_zone_id
+            ]
+            for zone in rule_zones:
+                hit_rule = self._is_inside_polygon(zone.points, world_x, world_y)
+                if not hit_rule:
+                    hit_rule = any(self._is_close(point, pos.x(), pos.y()) for point in zone.points)
+                if not hit_rule:
+                    for edge_idx in range(len(zone.points)):
+                        point_a = zone.points[edge_idx]
+                        point_b = zone.points[(edge_idx + 1) % len(zone.points)]
+                        screen_a = self._world_to_screen(point_a[0], point_a[1])
+                        screen_b = self._world_to_screen(point_b[0], point_b[1])
+                        distance_px, _ = self._distance_to_segment_px(
+                            (pos.x(), pos.y()), screen_a, screen_b
+                        )
+                        if distance_px <= 10:
+                            hit_rule = True
+                            break
+                if hit_rule:
+                    self.set_selected_zone(zone.id)
+                    self.zone_selected.emit(zone.id)
+                    self.update()
+                    event.accept()
+                    return
 
         if self._origin_pick_room_id is not None:
             if event.button() == Qt.MouseButton.RightButton:
@@ -667,7 +1032,37 @@ class PositionCanvas(QWidget):
             self.setCursor(Qt.CursorShape.SizeAllCursor)
             return
 
+        if self.edit_mode == "insert_vertex" and event.button() == Qt.MouseButton.LeftButton:
+            target = next((zone for zone in self.geofence_zones if zone.id == self.selected_zone_id), None)
+            edge_hit = self._find_edge_near_screen_pos(pos.x(), pos.y(), max_distance_px=14)
+            if target is not None and edge_hit and edge_hit[0] == target.id:
+                insert_idx = edge_hit[1] + 1
+                self._push_undo_state()
+                target.points.insert(insert_idx, (snapped_x, snapped_y))
+                self.selected_vertex_idx = insert_idx
+                self.edit_mode = "edit_vertices"
+                self.zone_modified.emit(target.id, target.points)
+                self.update()
+                return
+            self.set_edit_mode("edit_vertices")
+            return
+
         if self.edit_mode == "draw" and event.button() == Qt.MouseButton.LeftButton:
+            if self.draw_object_type == "object" and self.draw_object_shape == "circle":
+                if self._object_draw_center is None:
+                    self._object_draw_center = (snapped_x, snapped_y)
+                    self.current_draw_points = [self._object_draw_center]
+                    self.update()
+                    return
+                radius_m = math.hypot(snapped_x - self._object_draw_center[0], snapped_y - self._object_draw_center[1])
+                if radius_m >= 0.01:
+                    self._push_undo_state()
+                    points = self._circle_points(self._object_draw_center[0], self._object_draw_center[1], radius_m)
+                    self.current_draw_points.clear()
+                    self._object_draw_center = None
+                    self.polygon_completed.emit(points)
+                self.update()
+                return
             # Check if clicked near the first point to close the polygon
             if self.current_draw_points and self._is_close(self.current_draw_points[0], pos.x(), pos.y()):
                 if len(self.current_draw_points) >= 3:
@@ -684,6 +1079,7 @@ class PositionCanvas(QWidget):
         elif self.edit_mode == "draw" and event.button() == Qt.MouseButton.RightButton:
             # Cancel drawing
             self.current_draw_points.clear()
+            self._object_draw_center = None
             self.update()
             return
 
@@ -722,7 +1118,7 @@ class PositionCanvas(QWidget):
                             return
 
             # Sort zones by reverse Z-order for click priority (upper layer first)
-            layer_order = {"room": 0, "wall": 1, "zone": 2}
+            layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
             sorted_for_click = sorted(
                 self.geofence_zones,
                 key=lambda z: layer_order.get(getattr(z, "object_type", "zone"), 3),
@@ -756,13 +1152,22 @@ class PositionCanvas(QWidget):
                     self.update()
                     return
 
-            # Check if clicked INSIDE any zone polygon
+            # Check if clicked INSIDE any zone polygon (walls checked by footprint body)
             for zone in sorted_for_click:
-                if self._is_inside_polygon(zone.points, world_x, world_y):
-                    self.set_selected_zone(zone.id)
-                    self.zone_selected.emit(zone.id)
-                    self.update()
-                    return
+                object_type = getattr(zone, "object_type", "zone")
+                if object_type == "wall":
+                    path = self._wall_footprint_path(zone)
+                    if not path.isEmpty() and path.contains(pos):
+                        self.set_selected_zone(zone.id)
+                        self.zone_selected.emit(zone.id)
+                        self.update()
+                        return
+                else:
+                    if self._is_inside_polygon(zone.points, world_x, world_y):
+                        self.set_selected_zone(zone.id)
+                        self.zone_selected.emit(zone.id)
+                        self.update()
+                        return
 
             # Clicked empty space: clear selection
             if self.selected_zone_id:
@@ -789,6 +1194,12 @@ class PositionCanvas(QWidget):
             self.set_edit_mode("navigate")
 
         pos = event.position()
+        if self._dimension_editor.isVisible():
+            return
+        if self._dimension_hit_at(pos.x(), pos.y()) is not None:
+            self.hovered_edge = None
+            self.setCursor(Qt.CursorShape.IBeamCursor)
+            return
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
         if self._origin_pick_room_id is not None:
@@ -1282,7 +1693,7 @@ class PositionCanvas(QWidget):
                 painter.drawEllipse(int(snap_x - 4), int(snap_y - 4), 8, 8)
 
         # 8. Draw map objects and rule zones
-        layer_order = {"room": 0, "wall": 1, "zone": 2}
+        layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
         sorted_zones = sorted(
             self.geofence_zones,
             key=lambda z: layer_order.get(getattr(z, "object_type", "zone"), 3),
@@ -1326,36 +1737,91 @@ class PositionCanvas(QWidget):
                 poly.append(QPointF(sx, sy))
 
             object_type = getattr(zone, "object_type", "zone")
+            # ── visual style from 05e6a86b ──────────────────────────────────
             if object_type == "room":
-                base_color = zone.color.replace("_semi", "")
-                is_semi = zone.color.endswith("_semi")
-                fill_color = QColor(base_color)
-                fill_color.setAlpha(35 if is_semi else 88)
-                border_color = QColor(203, 213, 225)
+                base_color = str(zone.color).replace("_semi", "") if getattr(zone, "color", "") else "#1D4ED8"
+                fill_color = QColor(base_color if base_color.startswith("#") else "#1D4ED8")
+                fill_color.setAlpha(34)
+                border_color = QColor("#7DD3FC")
+                pen_style = Qt.PenStyle.SolidLine
+                border_width = 2.0
             elif object_type == "wall":
-                fill_color = QColor(zone.color)
-                fill_color.setAlpha(200)
-                border_color = QColor(0, 0, 0)
+                fill_color = QColor(zone.color if getattr(zone, "color", "").startswith("#") else "#111827")
+                fill_color.setAlpha(225)
+                border_color = QColor("#CBD5E1")
+                pen_style = Qt.PenStyle.SolidLine
+                border_width = 3.0
+            elif object_type == "object":
+                fill_color = QColor(zone.color if getattr(zone, "color", "").startswith("#") else "#F59E0B")
+                fill_color.setAlpha(110)
+                border_color = QColor("#FDBA74")
+                pen_style = Qt.PenStyle.SolidLine
+                border_width = 2.0
             elif zone.zone_type == "forbidden":
-                fill_color = QColor(zone.color)
-                fill_color.setAlpha(55)
-                border_color = QColor(zone.color)
-            else:
-                fill_color = QColor(zone.color)
-                fill_color.setAlpha(55)
-                border_color = QColor(zone.color)
+                fill_color = QColor(zone.color if getattr(zone, "color", "").startswith("#") else "#EF4444")
+                fill_color.setAlpha(72)
+                border_color = QColor("#F87171")
+                pen_style = Qt.PenStyle.SolidLine
+                border_width = 2.0
+            else:  # allowed zone
+                fill_color = QColor(zone.color if getattr(zone, "color", "").startswith("#") else "#22C55E")
+                fill_color.setAlpha(58)
+                border_color = QColor("#4ADE80")
+                pen_style = Qt.PenStyle.DashLine
+                border_width = 2.0
 
             is_selected = (zone.id == self.selected_zone_id)
-            border_width = 3 if is_selected else 1.5
-            pen_style = Qt.PenStyle.SolidLine if is_selected or object_type in {"room", "wall"} else Qt.PenStyle.DashLine
+            if is_selected:
+                border_color = QColor("#FACC15")
+                border_width += 1.2
 
-            object_height = max(0.0, zone.max_z - zone.min_z) if object_type == "wall" else 0.0
-            if self.preview_25d and object_type == "wall" and object_height > 0 and len(zone.points) >= 3:
+            object_height = max(0.0, zone.max_z - zone.min_z) if object_type in {"wall", "object"} else 0.0
+            if object_type == "wall" and not (self.preview_25d and object_height > 0 and len(zone.points) >= 3):
+                path = self._wall_footprint_path(zone)
+                if not path.isEmpty():
+                    painter.fillPath(path, QBrush(fill_color))
+                    painter.strokePath(path, QPen(border_color, border_width, pen_style))
+            elif self.preview_25d and object_type in {"wall", "object"} and object_height > 0 and len(zone.points) >= 3:
                 draw_extruded_polygon(poly, fill_color, border_color, object_height)
             else:
                 painter.setPen(QPen(border_color, border_width, pen_style))
                 painter.setBrush(QBrush(fill_color))
                 painter.drawPolygon(poly)
+
+            if object_type == "room" and zone.id in self.active_room_ids:
+                # Subtle green active room overlay matching 05e6a86b
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(34, 197, 94, 38))
+                painter.drawPolygon(poly)
+            if object_type == "zone" and zone.zone_type == "forbidden":
+                # Diagonal hatch pattern for forbidden zones
+                self._draw_forbidden_hatch(painter, poly, border_color)
+            if object_type == "object" and getattr(zone, "object_subtype", "generic") == "stairs":
+                rect = poly.boundingRect()
+                direction_str = getattr(zone, "object_direction", "up")
+                label_text = "UP" if direction_str != "down" else "DN"
+                # Step lines
+                step_color = QColor("#FFF7ED")
+                step_color.setAlpha(180)
+                painter.setPen(QPen(step_color, 1.5))
+                steps = 7
+                if rect.width() >= rect.height():
+                    for idx in range(1, steps):
+                        x = rect.left() + rect.width() * idx / steps
+                        painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
+                else:
+                    for idx in range(1, steps):
+                        y = rect.top() + rect.height() * idx / steps
+                        painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+                # Direction label
+                painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                lbl_rect = painter.fontMetrics().boundingRect(label_text)
+                lbl_rect.moveCenter(rect.center().toPoint())
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(15, 23, 42, 190))
+                painter.drawRoundedRect(lbl_rect.adjusted(-5, -2, 5, 2), 4, 4)
+                painter.setPen(QColor("#FDE68A"))
+                painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter, label_text)
 
             if len(zone.points) >= 3:
                 cx = sum(p[0] for p in zone.points) / len(zone.points)
@@ -1407,41 +1873,71 @@ class PositionCanvas(QWidget):
             draw_colors = {
                 "room": QColor(248, 250, 252, 210),
                 "wall": QColor(148, 163, 184, 220),
+                "object": QColor(245, 158, 11, 225),
                 "zone": QColor(234, 179, 8, 220),
             }
             active_color = draw_colors.get(self.draw_object_type, QColor(234, 179, 8, 220))
             painter.setPen(QPen(active_color, 2, Qt.PenStyle.SolidLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
-            # Draw lines between existing points
-            if len(self.current_draw_points) > 1:
-                for idx in range(len(self.current_draw_points) - 1):
-                    x1, y1 = to_screen(self.current_draw_points[idx][0], self.current_draw_points[idx][1])
-                    x2, y2 = to_screen(self.current_draw_points[idx+1][0], self.current_draw_points[idx+1][1])
-                    painter.drawLine(x1, y1, x2, y2)
-
-            # Draw dashed line to current mouse position
-            if self.mouse_world_pos:
-                last_pt = self.current_draw_points[-1]
-                x1, y1 = to_screen(last_pt[0], last_pt[1])
-                x2, y2 = to_screen(self.mouse_world_pos[0], self.mouse_world_pos[1])
-                preview_color = QColor(active_color)
-                preview_color.setAlpha(145)
-                painter.setPen(QPen(preview_color, 1.5, Qt.PenStyle.DashLine))
-                painter.drawLine(x1, y1, x2, y2)
-
-            # Draw vertices
-            for pt in self.current_draw_points:
-                sx, sy = to_screen(pt[0], pt[1])
+            handled_circle_preview = False
+            if self.draw_object_type == "object" and self.draw_object_shape == "circle" and len(self.current_draw_points) == 1:
+                center_x, center_y = self.current_draw_points[0]
+                sx, sy = to_screen(center_x, center_y)
+                if self.mouse_world_pos:
+                    mx, my = self.mouse_world_pos
+                    radius = math.hypot(mx - center_x, my - center_y)
+                    edge_x, edge_y = to_screen(mx, my)
+                    painter.setPen(QPen(QColor(active_color.red(), active_color.green(), active_color.blue(), 180), 1.6, Qt.PenStyle.DashLine))
+                    painter.drawLine(sx, sy, edge_x, edge_y)
+                    pixel_radius = math.hypot(edge_x - sx, edge_y - sy)
+                    painter.setBrush(QColor(active_color.red(), active_color.green(), active_color.blue(), 36))
+                    painter.drawEllipse(int(sx - pixel_radius), int(sy - pixel_radius), int(pixel_radius * 2), int(pixel_radius * 2))
+                    label = f"{radius:.2f} m"
+                    painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+                    text_rect = painter.fontMetrics().boundingRect(label)
+                    text_rect.translate(int((sx + edge_x) / 2 - text_rect.width() / 2), int((sy + edge_y) / 2 - text_rect.height() / 2))
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor(15, 23, 42, 220))
+                    painter.drawRoundedRect(text_rect.adjusted(-4, -2, 4, 2), 4, 4)
+                    painter.setPen(QColor(226, 232, 240))
+                    painter.drawText(text_rect.x(), text_rect.y() + text_rect.height() - 3, label)
                 painter.setPen(QPen(QColor(255, 255, 255), 1.5))
                 painter.setBrush(active_color)
                 painter.drawEllipse(int(sx - 4), int(sy - 4), 8, 8)
+                handled_circle_preview = True
+
+            if not handled_circle_preview:
+                # Draw lines between existing points
+                if len(self.current_draw_points) > 1:
+                    for idx in range(len(self.current_draw_points) - 1):
+                        x1, y1 = to_screen(self.current_draw_points[idx][0], self.current_draw_points[idx][1])
+                        x2, y2 = to_screen(self.current_draw_points[idx+1][0], self.current_draw_points[idx+1][1])
+                        painter.drawLine(x1, y1, x2, y2)
+
+                # Draw dashed line to current mouse position
+                if self.mouse_world_pos:
+                    last_pt = self.current_draw_points[-1]
+                    x1, y1 = to_screen(last_pt[0], last_pt[1])
+                    x2, y2 = to_screen(self.mouse_world_pos[0], self.mouse_world_pos[1])
+                    preview_color = QColor(active_color)
+                    preview_color.setAlpha(145)
+                    painter.setPen(QPen(preview_color, 1.5, Qt.PenStyle.DashLine))
+                    painter.drawLine(x1, y1, x2, y2)
+
+                # Draw vertices
+                for pt in self.current_draw_points:
+                    sx, sy = to_screen(pt[0], pt[1])
+                    painter.setPen(QPen(QColor(255, 255, 255), 1.5))
+                    painter.setBrush(active_color)
+                    painter.drawEllipse(int(sx - 4), int(sy - 4), 8, 8)
 
         if self.dim_tracking_view:
             self._draw_anchor_layer(painter, to_screen, draw_connections=False)
 
         # --- 11. Draw edge lengths and vertex coordinates ---
-        def draw_dimensions(points, is_closed=True):
+        self._dimension_hitboxes = []
+        def draw_dimensions(points, is_closed=True, zone=None):
             if not points:
                 return
             n = len(points)
@@ -1467,16 +1963,19 @@ class PositionCanvas(QWidget):
                 
                 painter.setPen(QColor(34, 211, 238)) # Cyan-400 for length
                 painter.drawText(text_rect.x(), text_rect.y() + text_rect.height() - 3, length_text)
+                if zone is not None:
+                    hit_rect = text_rect.adjusted(-8, -6, 8, 6)
+                    self._dimension_hitboxes.append((QRect(hit_rect), zone.id, i, length))
 
         if self.is_developer_mode:
             for zone in self.geofence_zones:
-                draw_dimensions(zone.points, is_closed=True)
+                draw_dimensions(zone.points, is_closed=True, zone=zone)
             if self.edit_mode == "draw" and self.current_draw_points:
                 draw_dimensions(self.current_draw_points, is_closed=False)
         elif self.selected_zone_id:
             sel_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
             if sel_zone:
-                draw_dimensions(sel_zone.points, is_closed=True)
+                draw_dimensions(sel_zone.points, is_closed=True, zone=sel_zone)
 
         # --- Scale Bar (bottom-left corner) ---
         if self._show_scale_bar:
@@ -1552,6 +2051,18 @@ class PositionCanvas(QWidget):
             zone.speed_limit = float(value)
         elif prop_name == "thickness":
             zone.thickness = float(value)
+        elif prop_name == "shape_kind":
+            zone.shape_kind = str(value)
+        elif prop_name == "object_subtype":
+            zone.object_subtype = str(value)
+            if zone.object_subtype == "stairs":
+                zone.shape_kind = "polygon"
+        elif prop_name == "object_direction":
+            zone.object_direction = str(value)
+        elif prop_name == "wall_mode":
+            zone.wall_mode = str(value)
+        elif prop_name == "host_room_id":
+            zone.host_room_id = str(value) if value else None
 
         self.zone_properties_updated.emit(zone.id, {prop_name: value})
         self.update()

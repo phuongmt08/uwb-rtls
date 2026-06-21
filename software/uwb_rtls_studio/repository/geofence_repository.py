@@ -42,6 +42,25 @@ class GeofenceRepository:
             for idx, anchor in enumerate(anchors or [])
         ]
 
+    def get_active_room_ids(self) -> List[str]:
+        active_ids = self._meta.get("active_room_ids")
+        if isinstance(active_ids, list):
+            return [str(room_id) for room_id in active_ids if room_id][:4]
+        legacy_id = str(self._meta.get("active_room_id") or "")
+        return [legacy_id] if legacy_id else []
+
+    def set_active_room_ids(self, room_ids: List[str]) -> None:
+        unique_ids = []
+        for room_id in room_ids or []:
+            normalized = str(room_id or "")
+            if normalized and normalized not in unique_ids:
+                unique_ids.append(normalized)
+        self._meta.pop("active_room_id", None)
+        if unique_ids:
+            self._meta["active_room_ids"] = unique_ids[:4]
+        else:
+            self._meta.pop("active_room_ids", None)
+
     def _coerce_int_id(self, value, default: int = 0) -> int:
         if value is None or value == "":
             return default
@@ -73,6 +92,9 @@ class GeofenceRepository:
             "zone_name": anchor.get("zone_name", ""),
             "zone_ids": list(anchor.get("zone_ids", [])),
             "zone_names": list(anchor.get("zone_names", [])),
+            "room_id": anchor.get("room_id", anchor.get("zone_id", "")),
+            "local_x_m": float(anchor.get("local_x_m", anchor.get("x_m", anchor.get("x", 0.0)))),
+            "local_y_m": float(anchor.get("local_y_m", anchor.get("y_m", anchor.get("y", 0.0)))),
             "x_m": float(anchor.get("x_m", anchor.get("x", 0.0))),
             "y_m": float(anchor.get("y_m", anchor.get("y", 0.0))),
             "z_m": float(anchor.get("z_m", anchor.get("z", 0.0))),
@@ -86,9 +108,10 @@ class GeofenceRepository:
             zone = GeofenceZone.from_dict(g_data)
             self._zones[zone.id] = zone
 
-    def _split_zones(self) -> tuple[list[dict], list[dict], list[dict]]:
+    def _split_zones(self) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
         rooms = []
         walls = []
+        objects = []
         rule_zones = []
         for zone in self._zones.values():
             data = zone.to_dict()
@@ -97,9 +120,11 @@ class GeofenceRepository:
                 rooms.append(data)
             elif object_type == "wall":
                 walls.append(data)
+            elif object_type == "object":
+                objects.append(data)
             elif object_type == "zone":
                 rule_zones.append(data)
-        return rooms, walls, rule_zones
+        return rooms, walls, objects, rule_zones
 
     def add_zone(self, zone: GeofenceZone) -> None:
         self._zones[zone.id] = zone
@@ -115,6 +140,8 @@ class GeofenceRepository:
     def clear(self) -> None:
         self._zones.clear()
         self._anchors.clear()
+        self._meta.pop("active_room_id", None)
+        self._meta.pop("active_room_ids", None)
 
     def load(self, file_path: Optional[str] = None) -> bool:
         path = file_path or self.default_file_path
@@ -135,6 +162,7 @@ class GeofenceRepository:
             if isinstance(map_objects, dict):
                 self._load_zone_list(map_objects.get("rooms", []))
                 self._load_zone_list(map_objects.get("walls", []))
+                self._load_zone_list(map_objects.get("objects", []))
                 anchor_items = map_objects.get("anchors", data.get("anchors", []))
             else:
                 anchor_items = data.get("anchors", [])
@@ -164,17 +192,20 @@ class GeofenceRepository:
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         try:
-            rooms, walls, rule_zones = self._split_zones()
+            rooms, walls, objects, rule_zones = self._split_zones()
             anchors = [dict(anchor) for anchor in self._anchors]
+            meta = dict(self._meta)
+            meta.update({
+                "name": self._meta.get("name", "Virtual_Map_Config"),
+                "version": 2,
+                "schema": "uwb_rtls_geofence_map",
+            })
             data = {
-                "meta": {
-                    "name": self._meta.get("name", "Virtual_Map_Config"),
-                    "version": 2,
-                    "schema": "uwb_rtls_geofence_map",
-                },
+                "meta": meta,
                 "map_objects": {
                     "rooms": rooms,
                     "walls": walls,
+                    "objects": objects,
                     "anchors": anchors,
                     "gateways": [],
                 },

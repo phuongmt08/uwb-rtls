@@ -572,7 +572,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
                 </item>
                 <item>
                  <property name="text">
-                  <string>Forbidden</string>
+                  <string>Banned (No Entry)</string>
                  </property>
                 </item>
                </widget>
