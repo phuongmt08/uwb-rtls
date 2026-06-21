@@ -24,6 +24,8 @@
 import sys
 import os
 import logging
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

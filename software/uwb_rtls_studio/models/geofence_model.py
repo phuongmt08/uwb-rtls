@@ -24,6 +24,9 @@ class GeofenceZone:
     speed_limit: float = 1.0  # Max speed inside this zone (m/s)
     color: str = "#FF0000"  # Hex color string
     object_type: str = "zone"  # "zone" | "room" | "wall"
+    thickness: float = 0.2  # Wall thickness metadata in meters
+    origin_vertex_idx: Optional[int] = None
+    local_frame_yaw_deg: float = 0.0
 
     def to_dict(self) -> dict:
         height_m = max(0.0, self.max_z - self.min_z) if self.object_type == "wall" else 0.0
@@ -38,6 +41,9 @@ class GeofenceZone:
             "height_m": height_m,
             "speed_limit": self.speed_limit,
             "color": self.color,
+            "thickness": self.thickness,
+            "origin_vertex_idx": self.origin_vertex_idx if self.object_type == "room" else None,
+            "local_frame_yaw_deg": self.local_frame_yaw_deg if self.object_type == "room" else 0.0,
         }
 
     @classmethod
@@ -69,6 +75,12 @@ class GeofenceZone:
             speed_limit=float(data.get("speed_limit", 1.0)),
             color=data.get("color", "#FF0000"),
             object_type=object_type,
+            thickness=float(data.get("thickness", 0.2)),
+            origin_vertex_idx=(
+                int(data["origin_vertex_idx"])
+                if data.get("origin_vertex_idx") is not None else None
+            ),
+            local_frame_yaw_deg=float(data.get("local_frame_yaw_deg", 0.0)),
         )
 
     def contains(self, x: float, y: float, z: float) -> bool:

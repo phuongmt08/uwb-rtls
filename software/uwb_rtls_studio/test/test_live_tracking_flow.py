@@ -13,6 +13,8 @@ import sys
 import os
 import time
 import math
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
 from PyQt6.QtCore import QObject, QTimer
 
 # Add paths to make sure common and studio packages are importable

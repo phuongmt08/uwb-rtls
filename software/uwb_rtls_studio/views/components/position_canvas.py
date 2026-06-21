@@ -36,6 +36,7 @@ class PositionCanvas(QWidget):
     anchor_selected = pyqtSignal(int)     # index in anchors list, -1 means none
     anchor_layout_edited = pyqtSignal(list)
     zones_undo_remove_requested = pyqtSignal(list)
+    room_origin_vertex_picked = pyqtSignal(str, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +89,9 @@ class PositionCanvas(QWidget):
         self._edge_drag_original_points = None
         self.mouse_world_pos = (0.0, 0.0)
         self.dim_tracking_view = False
+        self._room_origins = {}
+        self._origin_pick_room_id = None
+        self._origin_pick_hover_idx = None
 
         # Snap & preview grid settings
         self._grid_spacing = GRID_SPACING_M  # meters (configured in config.py)
@@ -104,6 +108,7 @@ class PositionCanvas(QWidget):
 
         # Floating Property Panel Integration
         self.property_panel = ZonePropertyPanel(self)
+        self.property_panel_enabled = False
         self.property_panel.hide()
         self.property_panel.closed.connect(self._close_property_panel)
         self.property_panel.property_changed.connect(self._on_panel_property_changed)
@@ -175,12 +180,48 @@ class PositionCanvas(QWidget):
         if zone_id:
             self.selected_anchor_idx = None
             self.anchor_selected.emit(-1)
-        if zone_id:
+        if zone_id and self.property_panel_enabled:
             self.show_property_panel(zone_id)
         else:
             self.property_panel.hide()
         self.update()
 
+    def set_room_origin(self, room_id, point):
+        if point is None:
+            self._room_origins.pop(room_id, None)
+        else:
+            self._room_origins[room_id] = tuple(point)
+        self.update()
+
+    def begin_room_origin_pick(self, room_id):
+        room = next(
+            (zone for zone in self.geofence_zones if zone.id == room_id and getattr(zone, "object_type", "zone") == "room"),
+            None,
+        )
+        if room is None or len(room.points) < 3:
+            return False
+        self._origin_pick_room_id = room_id
+        self._origin_pick_hover_idx = None
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.update()
+        return True
+
+    def cancel_room_origin_pick(self):
+        self._origin_pick_room_id = None
+        self._origin_pick_hover_idx = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+
+    def _origin_vertex_at(self, screen_x, screen_y):
+        if not self._origin_pick_room_id:
+            return None
+        room = next((zone for zone in self.geofence_zones if zone.id == self._origin_pick_room_id), None)
+        if room is None:
+            return None
+        for index, point in enumerate(room.points):
+            if self._is_close(point, screen_x, screen_y, threshold_px=14):
+                return index
+        return None
     def set_grid_spacing(self, spacing_m: float):
         """Set grid line spacing in meters."""
         self.set_grid_settings(spacing_m, self._grid_subdivisions)
@@ -324,6 +365,9 @@ class PositionCanvas(QWidget):
                     "zone_name": anchor.get("zone_name", ""),
                     "zone_ids": list(anchor.get("zone_ids", [])),
                     "zone_names": list(anchor.get("zone_names", [])),
+                    "room_id": anchor.get("room_id", anchor.get("zone_id", "")),
+                    "local_x_m": float(anchor.get("local_x_m", anchor.get("x", anchor.get("x_m", 0.0)))),
+                    "local_y_m": float(anchor.get("local_y_m", anchor.get("y", anchor.get("y_m", 0.0)))),
                     "placed": bool(anchor.get("placed", True)),
                     "is_scanned": bool(anchor.get("is_scanned", anchor.get("scan_seen", False))),
                     "sync_state": anchor.get("sync_state", "synced"),
@@ -341,6 +385,8 @@ class PositionCanvas(QWidget):
         return [
             {
                 "anchor_id": self._coerce_int_id(anchor.get("anchor_id"), idx),
+                "x": float(anchor.get("x", 0.0)),
+                "y": float(anchor.get("y", 0.0)),
                 "x_m": float(anchor.get("x", 0.0)),
                 "y_m": float(anchor.get("y", 0.0)),
                 "z_m": float(anchor.get("z", 0.0)),
@@ -353,6 +399,9 @@ class PositionCanvas(QWidget):
                 "zone_name": anchor.get("zone_name", ""),
                 "zone_ids": list(anchor.get("zone_ids", [])),
                 "zone_names": list(anchor.get("zone_names", [])),
+                "room_id": anchor.get("room_id", anchor.get("zone_id", "")),
+                "local_x_m": float(anchor.get("local_x_m", anchor.get("x", anchor.get("x_m", 0.0)))),
+                "local_y_m": float(anchor.get("local_y_m", anchor.get("y", anchor.get("y_m", 0.0)))),
                 "placed": bool(anchor.get("placed", True)),
                 "is_scanned": bool(anchor.get("is_scanned", False)),
                 "sync_state": anchor.get("sync_state", "draft"),
@@ -413,6 +462,9 @@ class PositionCanvas(QWidget):
                     "zone_name": template.get("zone_name", ""),
                     "zone_ids": list(template.get("zone_ids", [])),
                     "zone_names": list(template.get("zone_names", [])),
+                    "room_id": template.get("room_id", template.get("zone_id", "")),
+                    "local_x_m": float(template.get("local_x_m", world_x)),
+                    "local_y_m": float(template.get("local_y_m", world_y)),
                     "placed": True,
                     "is_scanned": bool(template.get("is_scanned", template.get("scan_seen", False))),
                     "sync_state": "draft",
@@ -592,6 +644,17 @@ class PositionCanvas(QWidget):
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
 
+        if self._origin_pick_room_id is not None:
+            if event.button() == Qt.MouseButton.RightButton:
+                self.cancel_room_origin_pick()
+                return
+            if event.button() == Qt.MouseButton.LeftButton:
+                vertex_idx = self._origin_vertex_at(pos.x(), pos.y())
+                if vertex_idx is not None:
+                    room_id = self._origin_pick_room_id
+                    self.cancel_room_origin_pick()
+                    self.room_origin_vertex_picked.emit(room_id, vertex_idx)
+                return
         if self.edit_mode == "draw" and self.draw_object_type == "anchor" and event.button() == Qt.MouseButton.LeftButton:
             hit_anchor_idx = self._anchor_at_screen_pos(pos.x(), pos.y())
             if hit_anchor_idx is not None:
@@ -728,6 +791,15 @@ class PositionCanvas(QWidget):
         pos = event.position()
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
+        if self._origin_pick_room_id is not None:
+            self._origin_pick_hover_idx = self._origin_vertex_at(pos.x(), pos.y())
+            self.setCursor(
+                Qt.CursorShape.PointingHandCursor
+                if self._origin_pick_hover_idx is not None
+                else Qt.CursorShape.CrossCursor
+            )
+            self.update()
+            return
         if self.edit_mode in {"draw", "edit_vertices"}:
             self.mouse_world_pos = (snapped_x, snapped_y)
             self.snapped_grid_pt = (snapped_x, snapped_y)
@@ -1015,6 +1087,14 @@ class PositionCanvas(QWidget):
                 width,
                 height,
             )
+
+        for room_id, point in self._room_origins.items():
+            origin_x, origin_y = to_screen(point[0], point[1])
+            painter.setPen(QPen(QColor("#F8FAFC"), 2))
+            painter.setBrush(QColor("#EF4444"))
+            painter.drawEllipse(origin_x - 7, origin_y - 7, 14, 14)
+            painter.setPen(QColor("#FCA5A5"))
+            painter.drawText(origin_x + 10, origin_y - 8, "Local (0,0)")
 
         # 1. Draw Fusion History Trail (UKF, solid sky blue)
         if len(self.fusion_history) > 1:
@@ -1470,6 +1550,8 @@ class PositionCanvas(QWidget):
             zone.max_z = float(value)
         elif prop_name == "speed_limit":
             zone.speed_limit = float(value)
+        elif prop_name == "thickness":
+            zone.thickness = float(value)
 
         self.zone_properties_updated.emit(zone.id, {prop_name: value})
         self.update()

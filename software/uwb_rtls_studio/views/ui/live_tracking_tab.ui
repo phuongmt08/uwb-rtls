@@ -1109,7 +1109,7 @@ QToolButton:hover { background: rgba(30, 41, 59, 245); border-color: #FDE047; }
 QToolButton:pressed { background: rgba(15, 23, 42, 245); }</string>
    </property>
    <property name="text">
-    <string>2.5D Preview</string>
+    <string>2D</string>
    </property>
    <property name="toolButtonStyle">
     <enum>Qt::ToolButtonTextOnly</enum>

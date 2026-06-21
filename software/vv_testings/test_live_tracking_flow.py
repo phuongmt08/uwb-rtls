@@ -13,6 +13,8 @@ import sys
 import os
 import time
 import math
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 # Add paths to make sure common and studio packages are importable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

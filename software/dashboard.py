@@ -14,6 +14,8 @@ import socket
 import struct
 import math
 import os
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
