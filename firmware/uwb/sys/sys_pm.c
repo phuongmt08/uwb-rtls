@@ -219,17 +219,8 @@ void sys_pm_process(void)
         s_pm_status.remaining_min       = 0;
     }
 
-    // IMU Sensor Telemetry
-    if (sys_pm_imu_required() && (s_pm_status.init_mask & PM_INIT_IMU_BIT)) {
-        float imu_temp = 0.0f;
-        if (bsp_imu_get_temp(&imu_temp) == BSP_IMU_OK) {
-            s_pm_status.values[PM_CH_IMU_TEMP] = imu_temp;
-        } else {
-            s_pm_status.values[PM_CH_IMU_TEMP] = 30.0f; /* Normal fallback if not active */
-        }
-    } else {
-        s_pm_status.values[PM_CH_IMU_TEMP] = 30.0f;
-    }
+    // IMU Sensor Telemetry (Temporarily disabled to avoid SPI mutex conflicts)
+    s_pm_status.values[PM_CH_IMU_TEMP] = 30.0f;
 
     /* 3. Threshold Monitoring & Alerting (Skip uninitialized channels) */
     for (int i = 0; i < PM_CH_MAX; i++) {
