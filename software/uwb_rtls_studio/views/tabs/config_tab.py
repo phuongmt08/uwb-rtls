@@ -41,8 +41,7 @@ class ConfigTab(QWidget):
         super().__init__(parent)
         self._is_developer = is_developer
         self._vm = None
-
-        # Track the active device identity to refine layout read/write behavior
+        # Initialize state before UI wiring can trigger callbacks.
         self._current_role = 1  # Default: Tag
         self._current_device_id = 0
         self._last_anchor_layout = []
@@ -632,6 +631,8 @@ class ConfigTab(QWidget):
         self._apply_target_to_ui(target)
 
     def _apply_target_to_ui(self, target: dict):
+        if not hasattr(self, "_last_anchor_layout"):
+            self._last_anchor_layout = []
         role = int(target.get("role") or 1)
         device_id = int(target.get("device_id") or 1)
         role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}

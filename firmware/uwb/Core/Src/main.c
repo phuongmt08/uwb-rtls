@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_anchor.h"
 #include "app_tag.h"
+#include "ble/sys_ble_peripheral.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -38,6 +39,9 @@
 #include "sys_config.h"
 #include "sys_flash_storage.h"
 #include "sys_logger.h"
+#ifdef HAVE_BLE_PERIPHERAL
+#include "ble/sys_ble_peripheral.h"
+#endif
 //#include "sys_task.h" /* Deprecated */
 #include "sys_pm.h"
 #include "app_rtos_handles.h"
@@ -233,6 +237,7 @@ int main(void)
   sys_config_init();
   sys_config_t *cfg = sys_config_get();
 
+  bool network_stack_ready = false;
   serial_init();
   if (!network_core_init(&g_network_core, protobuf_PACKET_ADDR_MCU, g_network_rx_buf, sizeof(g_network_rx_buf)))
   {
@@ -244,13 +249,36 @@ int main(void)
   }
   else
   {
+    network_stack_ready = true;
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Network command stack ready");
+#ifdef HAVE_BLE_PERIPHERAL
+    if (!sys_ble_peripheral_init(&g_network_core))
+    {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "sys_ble_peripheral_init failed");
+    }
+    else
+    {
+      sys_ble_peripheral_set_config();
+      if (!sys_ble_peripheral_enable(true))
+      {
+        RLOG_W(LOG_OBJECT_CODE_APPLICATION, "BLE peripheral enable request failed");
+      }
+    }
+#endif
   }
 
   bsp_util_init();
-  if (bsp_imu_init() != BSP_IMU_OK)
+  if (cfg->device_type == DEVICE_TYPE_TAG)
   {
-    RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
+    if (bsp_imu_init() != BSP_IMU_OK)
+    {
+      RLOG_W(LOG_OBJECT_CODE_APPLICATION, "IMU initialization failed");
+    }
+  }
+  else
+  {
+    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "IMU initialization skipped for non-tag device_type=%u",
+           (unsigned)cfg->device_type);
   }
 
 #if TEST_SEND_POS && TEST_DISABLE_RANGING
@@ -264,15 +292,7 @@ int main(void)
     RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT, "DW1000 initialization failed!");
   }
 
-  if (cfg->uwb.role == DEVICE_ROLE_TAG)
-  {
-    cfg->uwb.tx_antenna_delay = TAG_FACTORY_TX_ANT_DLY;
-    cfg->uwb.rx_antenna_delay = TAG_FACTORY_RX_ANT_DLY;
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Force TAG antenna delay to factory default: TX=%u RX=%u",
-           TAG_FACTORY_TX_ANT_DLY, TAG_FACTORY_RX_ANT_DLY);
-  }
-
-  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Loaded from flash: CH=%u PRF=%u DR=%u PCode=%u",
+  RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Active config: CH=%u PRF=%u DR=%u PCode=%u",
          cfg->uwb.uwb_channel, cfg->uwb.uwb_prf, cfg->uwb.uwb_data_rate, cfg->uwb.uwb_preamble_code);
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", cfg->uwb.tx_antenna_delay,
          cfg->uwb.rx_antenna_delay);
@@ -288,20 +308,6 @@ int main(void)
   sys_pm_init();
 
 #if !(TEST_SEND_POS && TEST_DISABLE_RANGING)
-  /* Read DIP switch - ALWAYS OVERRIDES saved config */
-  uint8_t dip_value = bsp_io_dip_read();
-  if (dip_value == 0)
-  {
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=0] Using saved Device ID: %u", cfg->uwb.device_id);
-  }
-  else
-  {
-    sys_config_set_device_id(dip_value);
-    RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[DIP=%u] Device ID FORCED to: %u", dip_value, dip_value);
-  }
-
-  cfg = sys_config_get();
-
   /* Initialize application based on role */
   if (cfg->uwb.role == DEVICE_ROLE_TAG)
   {
@@ -314,6 +320,19 @@ int main(void)
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
 #endif
+
+  if (network_stack_ready)
+  {
+    if (sys_ble_peripheral_init(&g_network_core))
+    {
+      sys_ble_peripheral_set_config();
+      sys_ble_peripheral_enable(true);
+    }
+    else
+    {
+      RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_NOT_INIT, "BLE peripheral init failed");
+    }
+  }
 #ifdef DEVELOPER_MODE
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "DEVELOPER MODE ENABLED: Verbose");
   // Configure SystemView here; recording starts after the scheduler is running.

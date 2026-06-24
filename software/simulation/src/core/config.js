@@ -15,8 +15,12 @@ const SIM_CONFIG = {
         DEFAULT_R_GATE: 0.10,
         TRIPLET_W_D2: 0.35,
         TRIPLET_W_FP: 0.15,
-        TRIPLET_W_GDOP: 0.20,
         TRIPLET_W_RESIDUAL: 0.30,
+        TRIPLET_W_DIST: 0.25,
+        TRIPLET_W_HEALTH: 0.25,
+        TRIPLET_SWITCH_MARGIN: 0.12,
+        TRIPLET_SWITCH_SCORE_EPS: 0.02,
+        ANCHOR_HEALTH_ALPHA: 0.18,
         FP_AMP_GOOD: 40.0,
         FP_AMP_WEIGHT_FLOOR: 0.25,
         RESCUE_SORT_WEIGHT: 0.35,
@@ -39,7 +43,11 @@ const SIM_CONFIG = {
         DEFAULT_ZUPT_ACC: 0.15,
         DEFAULT_ZUPT_GYR: 0.05,
         DEFAULT_ENABLE_LPF: true,
-        DEFAULT_LPF_CUTOFF_HZ: 2.0
+        DEFAULT_LPF_CUTOFF_HZ: 2.0,
+        DEFAULT_FILTER_ORDER: 2,
+        MIN_FILTER_ORDER: 1,
+        MAX_FILTER_ORDER: 6,
+        CUTOFF_NYQUIST_MARGIN: 0.95
     },
 
     // --- Visualization ---

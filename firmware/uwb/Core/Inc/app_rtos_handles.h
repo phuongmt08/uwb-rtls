@@ -7,6 +7,7 @@
 #define APP_RTOS_HANDLES_H
 
 #include "cmsis_os.h"
+#include "protos/protocol.pb.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -39,6 +40,7 @@ typedef struct {
     uint8_t anchor_ids[8];    /**< Anchor IDs corresponding to each distance */
     float   fp_amp_norm[8];   /**< First path amplitude normalized */
     float   fp_snr[8];        /**< First path SNR */
+    uint8_t quality_valid[8]; /**< Non-zero when FP quality metrics are valid */
     uint8_t count;            /**< Number of valid distance entries */
     uint8_t mask;             /**< Active anchor mask (valid ranging) */
 } uwb_distance_msg_t;
@@ -50,5 +52,14 @@ extern osMessageQueueId_t g_uwb_distance_queue;
 
 void app_rtos_set_ranging_enabled(bool enabled);
 bool app_rtos_is_ranging_enabled(void);
+void app_rtos_request_sensor_fusion_reset(void);
+bool app_rtos_request_zone_switch(uint32_t zone_id);
+bool app_rtos_request_active_zone_profile_update(const protobuf_zone_profile_t *profile);
+bool app_rtos_request_tag_calibration_start(uint32_t sample_target,
+                                            float tag_x_m,
+                                            float tag_y_m,
+                                            float tag_z_m);
+bool app_rtos_request_tag_calibration_stop(void);
+bool app_rtos_request_tag_calibration_apply(uint32_t anchor_mask);
 
 #endif /* APP_RTOS_HANDLES_H */

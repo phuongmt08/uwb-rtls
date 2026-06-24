@@ -100,7 +100,7 @@
 ===============================================================================
 """
 import logging
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from repository.session_browser import SessionBrowser
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,9 @@ class LogViewModel(QObject):
         self._log_model = log_model
         self._session_run_manager = session_run_manager
         self._live_logs = []
+        self._log_poll_timer = QTimer(self)
+        self._log_poll_timer.setInterval(500)
+        self._log_poll_timer.timeout.connect(self._poll_log_timeout)
         if self._log_model:
             self._log_model.log_entry_added.connect(self._on_model_log_entry)
 
@@ -132,6 +135,10 @@ class LogViewModel(QObject):
     def clear_session_logs(self):
         if self._log_model:
             self._log_model.clear_session_logs()
+
+    def set_developer_mode(self, enabled: bool):
+        if self._log_model and hasattr(self._log_model, "set_developer_mode"):
+            self._log_model.set_developer_mode(enabled)
 
     def _on_model_log_entry(self, entry: dict):
         if self._session_run_manager:
@@ -164,18 +171,10 @@ class LogViewModel(QObject):
         self.log_filtered.emit(0)
 
     def clear_log_session(self):
-        """Stop firmware log stream, end the current log run, persist it, and clear live logs.
-
-        Flow:
-          1. send log_clear → device acknowledges end of log stream (LOG_TYPE_DEVICE_LOG)
-          2. close_log_run  → persist buffered logs + send end_session(SESSION_END_REASON_LOG_DATA)
-          3. clear UI buffers
-        """
-        # Step 1: Tell firmware to stop streaming logs (sends log_clear message)
+        """Stop firmware logging, persist the run, send LOG_DATA end reason, and clear live logs."""
         if self._log_model and hasattr(self._log_model, "stop_log_stream"):
             self._log_model.stop_log_stream()
 
-        # Step 2: Persist run + send end_session with reason
         if self._session_run_manager:
             self._session_run_manager.close_log_run(send_end=True, clear_buffers=False)
             self.refresh_sessions()
@@ -274,4 +273,14 @@ class LogViewModel(QObject):
         if self._session_run_manager:
             self._session_run_manager.open_log_run()
         if self._log_model:
-            self._log_model.request_log_stream(force=True)
+            if self._log_model.request_log_stream(force=True):
+                self._log_poll_timer.start()
+
+    def send_host_log_packet(self, packet_name: str, **params) -> dict:
+        if not self._log_model:
+            return {"ok": False, "error": "Log model is not available"}
+        return self._log_model.send_host_log_packet(packet_name, **params)
+
+    def _poll_log_timeout(self):
+        if self._log_model and self._log_model.poll_log_timeout():
+            return

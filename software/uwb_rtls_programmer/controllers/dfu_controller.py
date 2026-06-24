@@ -26,11 +26,23 @@ def kill_competing_processes(log_cb):
 
     try:
         current_pid = os.getpid()
+        ignore_pids = {current_pid}
+        try:
+            curr = psutil.Process(current_pid)
+            while True:
+                parent = curr.parent()
+                if parent is None:
+                    break
+                ignore_pids.add(parent.pid)
+                curr = parent
+        except Exception:
+            pass
+
         killed = 0
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
             try:
                 pid = proc.info['pid']
-                if pid == current_pid:
+                if pid in ignore_pids:
                     continue
                 name = (proc.info['name'] or '').lower()
                 cmdline = proc.info['cmdline'] or []
@@ -57,6 +69,7 @@ def kill_competing_processes(log_cb):
             time.sleep(0.5)
     except Exception as e:
         log_cb(f"[WARN] Could not check/kill competing processes: {e}")
+
 
 class DfuController(QObject):
     def __init__(self, view: DfuTab, signals: WorkerSignals, config: ConfigService, main_ctrl):

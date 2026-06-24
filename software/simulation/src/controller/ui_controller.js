@@ -15,12 +15,17 @@ function initSimulation() {
         simWorker.onmessage = function(e) {
             const res = e.data;
             latestSimulationResult = res;
+            const isPathCsv = rawData.log_format === 'path_csv';
             latestTrajectoryPaths = {
-                firmware: { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) },
+                firmware: isPathCsv
+                    ? { x: rawData.tril_path.x.slice(0, res.x_axis.length), y: rawData.tril_path.y.slice(0, res.x_axis.length) }
+                    : { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) },
                 rules: res.simPathRuled,
                 wls: res.simPathWLS,
                 triplet: res.simPathTriplet,
-                ukf: res.simPathUKF,
+                ukf: isPathCsv
+                    ? { x: rawData.fw_path.x.slice(0, res.x_axis.length), y: rawData.fw_path.y.slice(0, res.x_axis.length) }
+                    : res.simPathUKF,
                 ukf_lpf: res.simPathUKF_lpf
             };
             latestTotalTime = res.total_time;
@@ -44,6 +49,15 @@ function runSimulation() {
     if (!simWorker) return;
     anchors = readAnchorsFromInputs();
     const rescueNoiseMax = Math.min(5.0, Math.max(0.01, parseFloat(document.getElementById('r_range').value)));
+    const imuTiming = estimateImuTiming(rawData.all_entries);
+    const cutoffLimit = Math.max(0.05, imuTiming.nyquist_hz * SIM_CONFIG.IMU.CUTOFF_NYQUIST_MARGIN);
+    const cutoffInputValue = parseFloat(document.getElementById('imu_lpf_cutoff_range').value);
+    const requestedCutoff = Number.isFinite(cutoffInputValue) ? cutoffInputValue : SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ;
+    const imuCutoffHz = Math.min(Math.max(0.05, requestedCutoff), cutoffLimit);
+    const imuFilterOrder = Math.min(
+        SIM_CONFIG.IMU.MAX_FILTER_ORDER,
+        Math.max(SIM_CONFIG.IMU.MIN_FILTER_ORDER, parseInt(document.getElementById('imu_filter_order_range').value) || SIM_CONFIG.IMU.DEFAULT_FILTER_ORDER)
+    );
 
     const params = {
         T2_high: parseFloat(document.getElementById('t2_high_range').value),
@@ -52,10 +66,13 @@ function runSimulation() {
         rescue_min_anchors: parseInt(document.getElementById('win_range').value),
         zupt_acc: parseFloat(document.getElementById('zupt_acc_range').value),
         zupt_gyr: parseFloat(document.getElementById('zupt_gyr_range').value),
-        enable_smoother: document.getElementById('enable_smoother').checked,
+
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
         enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
-        imu_lpf_cutoff_hz: parseFloat(document.getElementById('imu_lpf_cutoff_range').value),
+        imu_lpf_cutoff_hz: imuCutoffHz,
+        imu_filter_order: imuFilterOrder,
+        imu_sample_rate_hz: imuTiming.sample_rate_hz,
+        imu_nyquist_hz: imuTiming.nyquist_hz,
 
         // Add UKF Parameters
         ukf_alpha: parseFloat(document.getElementById('ukf_alpha_range').value),
@@ -68,9 +85,11 @@ function runSimulation() {
         triplet_weights: {
             d2: parseFloat(document.getElementById('triplet_w_d2_range').value),
             fp_amp: parseFloat(document.getElementById('triplet_w_fp_range').value),
-            gdop: parseFloat(document.getElementById('triplet_w_gdop_range').value),
-            residual: parseFloat(document.getElementById('triplet_w_resid_range').value)
-        }
+            residual: parseFloat(document.getElementById('triplet_w_resid_range').value),
+            dist: parseFloat(document.getElementById('triplet_w_dist_range').value)
+        },
+        triplet_switch_margin: parseFloat(document.getElementById('triplet_switch_margin_range').value),
+        triplet_switch_score_eps: parseFloat(document.getElementById('triplet_switch_eps_range').value)
     };
 
     let max_samples = parseInt(document.getElementById('max_samples_range').value);
@@ -84,6 +103,14 @@ function runSimulation() {
     document.getElementById('zupt_acc_val').innerText = params.zupt_acc;
     document.getElementById('zupt_gyr_val').innerText = params.zupt_gyr;
     document.getElementById('imu_lpf_cutoff_val').innerText = params.imu_lpf_cutoff_hz.toFixed(2);
+    document.getElementById('imu_filter_order_val').innerText = params.imu_filter_order;
+    document.getElementById('imu_filter_nyquist_val').innerText = Number.isFinite(params.imu_nyquist_hz) ? params.imu_nyquist_hz.toFixed(2) : '--';
+    document.getElementById('imu_lpf_cutoff_range').max = cutoffLimit.toFixed(2);
+    document.getElementById('imu_lpf_cutoff_input').max = cutoffLimit.toFixed(2);
+    if (requestedCutoff !== imuCutoffHz) {
+        document.getElementById('imu_lpf_cutoff_range').value = imuCutoffHz;
+        document.getElementById('imu_lpf_cutoff_input').value = imuCutoffHz.toFixed(2);
+    }
 
     // Update UKF value labels
     document.getElementById('ukf_alpha_val').innerText = params.ukf_alpha;
@@ -95,8 +122,10 @@ function runSimulation() {
     document.getElementById('ukf_rgate_val').innerText = params.r_gate.toFixed(3);
     document.getElementById('triplet_w_d2_val').innerText = params.triplet_weights.d2.toFixed(0);
     document.getElementById('triplet_w_fp_val').innerText = params.triplet_weights.fp_amp.toFixed(0);
-    document.getElementById('triplet_w_gdop_val').innerText = params.triplet_weights.gdop.toFixed(0);
     document.getElementById('triplet_w_resid_val').innerText = params.triplet_weights.residual.toFixed(0);
+    document.getElementById('triplet_w_dist_val').innerText = params.triplet_weights.dist.toFixed(0);
+    document.getElementById('triplet_switch_margin_val').innerText = params.triplet_switch_margin.toFixed(2);
+    document.getElementById('triplet_switch_eps_val').innerText = params.triplet_switch_score_eps.toFixed(3);
 
     const maxRangeElem = document.getElementById('max_samples_range');
     document.getElementById('max_samples_val').innerText = (max_samples >= parseInt(maxRangeElem.max)) ? "All" : max_samples;
@@ -129,24 +158,28 @@ function openReplayPage() {
     }
     const imuLpfCutoffInput = document.getElementById('imu_lpf_cutoff_range');
     const enableImuLpfInput = document.getElementById('enable_imu_lpf');
+    const imuFilterOrderInput = document.getElementById('imu_filter_order_range');
+    const isPathCsv = rawData.log_format === 'path_csv';
 
     // Package data for replay
     const replayData = {
         anchors: anchors,
         groundTruth: activeGroundTruth,
         firmwarePath: latestTrajectoryPaths.firmware,
-        ukfPath: latestSimulationResult.simPathUKF_plot, // 6Hz aligned
+        ukfPath: isPathCsv ? latestTrajectoryPaths.ukf : latestSimulationResult.simPathUKF_plot, // 6Hz aligned
         ukfLpfPath: latestSimulationResult.simPathUKF_lpf_plot,
         ukfModes: latestSimulationResult.simPathUKF_modes, // 6Hz predict vs update modes
         ukfLpfModes: latestSimulationResult.simPathUKF_lpf_modes,
         // 20Hz UKF data for predict/update breadcrumb visualization
-        ukfPath20Hz: latestSimulationResult.simPathUKF, // 20Hz full resolution
+        ukfPath20Hz: isPathCsv ? latestTrajectoryPaths.ukf : latestSimulationResult.simPathUKF, // 20Hz full resolution
         ukfLpfPath20Hz: latestSimulationResult.simPathUKF_lpf,
         ukfModes20Hz: latestSimulationResult.simPathUKF_allModes, // 20Hz: 0=Predict, 1=Update
         ukfTimes20Hz: latestSimulationResult.simPathUKF_allTimes, // 20Hz timestamps
         imuLpfConfig: {
             enabled: enableImuLpfInput ? enableImuLpfInput.checked : true,
-            cutoff_hz: imuLpfCutoffInput ? parseFloat(imuLpfCutoffInput.value) : null
+            cutoff_hz: imuLpfCutoffInput ? parseFloat(imuLpfCutoffInput.value) : null,
+            order: imuFilterOrderInput ? parseInt(imuFilterOrderInput.value) : SIM_CONFIG.IMU.DEFAULT_FILTER_ORDER,
+            type: 'butterworth'
         },
         tripletPath: latestTrajectoryPaths.triplet,
         wlsPath: latestTrajectoryPaths.wls,
@@ -162,3 +195,23 @@ function openReplayPage() {
 
 // Override global update for compatibility with existing UI attributes (onchange="update()")
 window.update = requestUpdate;
+
+function estimateImuTiming(entries) {
+    const dts = [];
+    (entries || []).forEach(entry => {
+        if (entry && entry.type === 'Predict' && Number.isFinite(entry.dt) && entry.dt > 0) {
+            dts.push(entry.dt);
+        }
+    });
+    if (!dts.length) {
+        const fallbackFs = 2 * (SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ / SIM_CONFIG.IMU.CUTOFF_NYQUIST_MARGIN);
+        return { sample_rate_hz: fallbackFs, nyquist_hz: fallbackFs / 2 };
+    }
+    dts.sort((a, b) => a - b);
+    const medianDt = dts[Math.floor(dts.length / 2)];
+    const sampleRateHz = medianDt > 0 ? 1 / medianDt : 0;
+    return {
+        sample_rate_hz: sampleRateHz,
+        nyquist_hz: sampleRateHz / 2
+    };
+}

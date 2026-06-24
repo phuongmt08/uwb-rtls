@@ -88,19 +88,19 @@
                         <input type="checkbox" id="enable_smoother" onchange="update()"> <span style="color: #475569;">Enable Distance Smoothing (Alpha: 0.25, Jump Limit: 0.3m)</span>
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; text-transform:none; background: #f0f9ff; padding: 10px; border-radius: 8px; margin: 0;">
-                        <input type="checkbox" id="enable_imu_lpf" checked onchange="update()"> <span style="color: #075985;">Enable IMU LPF branch (adds LPF data, does not replace raw IMU)</span>
+                        <input type="checkbox" id="enable_imu_lpf" checked onchange="update()"> <span style="color: #075985;">Enable IMU Butterworth filter for UKF predict</span>
                     </label>
                 </div>
                 
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <div class="control-item" style="flex-grow: 1;">
                         <select id="export_path_select" onchange="updatePositionRateDisplay()" style="padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.85rem; width: 100%;">
-                            <option value="firmware">Export: Firmware Path</option>
+                            <option value="firmware">Export: Trilateration Path</option>
                             <option value="rules">Export: Simulated Path (Rules)</option>
                             <option value="wls">Export: Simulated Path (Multilateration)</option>
                             <option value="triplet">Export: Simulated Path (Best Triplet)</option>
                             <option value="ukf" selected>Export: Simulated Path (UKF Fusion)</option>
-                            <option value="ukf_lpf">Export: Simulated Path (UKF Fusion + IMU LPF)</option>
+                            <option value="ukf_lpf">Export: Simulated Path (UKF Fusion + IMU Butterworth)</option>
                         </select>
                     </div>
                     <button onclick="exportTrajectoryCsv()" style="background: #8b5cf6; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Export CSV</button>
@@ -112,7 +112,7 @@
                     <button onclick="clearDefaults()" style="flex: 1; background: #ef4444; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Clear Defaults</button>
                 </div>
                 
-                <div id="position_rate_info" style="font-size: 0.85rem; color: #1e293b; font-weight: 600; padding: 5px; text-align: right;">Position Hz: --</div>
+                <div id="position_rate_info" style="font-size: 0.85rem; color: #1e293b; font-weight: 600; padding: 5px; text-align: right;">Log Statistics: --</div>
             </div>
         </div>
 
@@ -174,10 +174,19 @@
             </div>
             <div class="control-group">
                 <div class="control-item">
-                    <label>IMU LPF Cutoff (Hz): <span id="imu_lpf_cutoff_val" class="val">2.00</span></label>
+                    <label>IMU Butterworth Cutoff (Hz): <span id="imu_lpf_cutoff_val" class="val">2.00</span> <span style="color:#64748b;">| Nyquist: <span id="imu_filter_nyquist_val">--</span> Hz</span></label>
                     <div style="display:flex; gap:10px; align-items:center;">
                         <input type="range" id="imu_lpf_cutoff_range" min="0.05" max="20.0" step="0.05" value="2.0" style="flex-grow:1" oninput="update()">
                         <input type="number" id="imu_lpf_cutoff_input" min="0.05" max="20.0" step="0.05" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="2.0" onchange="update()">
+                    </div>
+                </div>
+            </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>IMU Butterworth Order: <span id="imu_filter_order_val" class="val">2</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="imu_filter_order_range" min="1" max="6" step="1" value="2" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="imu_filter_order_input" min="1" max="6" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="2" onchange="update()">
                     </div>
                 </div>
             </div>
@@ -294,10 +303,10 @@
             </div>
             <div class="control-group">
                 <div class="control-item">
-                    <label>GDOP Weight (%): <span id="triplet_w_gdop_val" class="val">20</span></label>
+                    <label>Distance Weight (%): <span id="triplet_w_dist_val" class="val">25</span></label>
                     <div style="display:flex; gap:10px; align-items:center;">
-                        <input type="range" id="triplet_w_gdop_range" min="0" max="100" step="1" value="20" style="flex-grow:1" oninput="update()">
-                        <input type="number" id="triplet_w_gdop_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="20" onchange="update()">
+                        <input type="range" id="triplet_w_dist_range" min="0" max="100" step="1" value="25" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_w_dist_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="25" onchange="update()">
                     </div>
                 </div>
             </div>
@@ -307,6 +316,24 @@
                     <div style="display:flex; gap:10px; align-items:center;">
                         <input type="range" id="triplet_w_resid_range" min="0" max="100" step="1" value="30" style="flex-grow:1" oninput="update()">
                         <input type="number" id="triplet_w_resid_input" min="0" max="100" step="1" style="width:50px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="30" onchange="update()">
+                    </div>
+                </div>
+            </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>Switch Margin: <span id="triplet_switch_margin_val" class="val">0.12</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="triplet_switch_margin_range" min="0" max="0.50" step="0.01" value="0.12" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_switch_margin_input" min="0" max="0.50" step="0.01" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="0.12" onchange="update()">
+                    </div>
+                </div>
+            </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>Switch Eps: <span id="triplet_switch_eps_val" class="val">0.020</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="triplet_switch_eps_range" min="0" max="0.20" step="0.005" value="0.02" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="triplet_switch_eps_input" min="0" max="0.20" step="0.005" style="width:60px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="0.02" onchange="update()">
                     </div>
                 </div>
             </div>
@@ -321,6 +348,14 @@
         <h3 class="plot-title">Mahalanobis D2 Scores (gated by UKF prediction & innovation covariance)</h3>
         <div id="scores" class="plot-md"></div>
         <div id="d2_distance_stats" class="stats-grid"></div>
+    </div>
+    <div class="card">
+        <h3 class="plot-title">Triplet Selection Timeline</h3>
+        <div id="triplet_selection" class="plot-md"></div>
+    </div>
+    <div class="card">
+        <h3 class="plot-title">Triplet Debug (GDOP diagnostic, score & penalties)</h3>
+        <div id="triplet_debug" class="plot-md"></div>
     </div>
     <div class="card"><h3 class="plot-title">IMU Acceleration</h3><div id="accel" class="plot-md"></div></div>
     <div class="card"><h3 class="plot-title">IMU Acceleration Frequency Spectrum</h3><div id="accel_spectrum" class="plot-md"></div></div>
@@ -373,6 +408,7 @@ __APP_JS_BUNDLE__
         syncInput('zupt_acc_range', 'zupt_acc_input');
         syncInput('zupt_gyr_range', 'zupt_gyr_input');
         syncInput('imu_lpf_cutoff_range', 'imu_lpf_cutoff_input');
+        syncInput('imu_filter_order_range', 'imu_filter_order_input');
         syncInput('max_samples_range', 'max_samples_input');
         
         // Sync UKF Inputs
@@ -387,8 +423,10 @@ __APP_JS_BUNDLE__
         // Sync Triplet Weight Inputs
         syncInput('triplet_w_d2_range', 'triplet_w_d2_input');
         syncInput('triplet_w_fp_range', 'triplet_w_fp_input');
-        syncInput('triplet_w_gdop_range', 'triplet_w_gdop_input');
         syncInput('triplet_w_resid_range', 'triplet_w_resid_input');
+        syncInput('triplet_w_dist_range', 'triplet_w_dist_input');
+        syncInput('triplet_switch_margin_range', 'triplet_switch_margin_input');
+        syncInput('triplet_switch_eps_range', 'triplet_switch_eps_input');
         
         // Sync Tag Height Input
         syncInput('tag_height_range', 'tag_height_input');

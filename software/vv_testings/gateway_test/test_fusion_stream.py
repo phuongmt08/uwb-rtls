@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import msvcrt
 import sys
 import time
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
+from common import protocol_pb2 as pb
 from common.commands import CommandFactory
 from common.transport import VvAddress
 from vv_test_session import VvTestSession
@@ -16,12 +19,16 @@ from serial.tools import list_ports
 
 
 DEFAULT_BAUD = 115200
-DEFAULT_SCAN_TIMEOUT_S = 12.0
+DEFAULT_SCAN_TIMEOUT_S = 6.0
 DEFAULT_CONNECT_TIMEOUT_S = 15.0
 DEFAULT_SRC = int(VvAddress.HOST)
 DEFAULT_MCU_DST = int(VvAddress.MCU)
 DEFAULT_CENTRAL_DST = int(VvAddress.CENTRAL)
-TARGET_NAME_PREFIXES = ("UWB", "TAG", "ANCHOR", "NUS", "RTLS")
+TARGET_NAME_PREFIXES = ("UWB", "TAG", "ANCHOR", "NUS", "RTLS", "NODE")
+DEFAULT_EXPECTED_HZ = 100.0
+STREAM_RECV_TIMEOUT_S = 0.05
+STREAM_STAT_PERIOD_S = 1.0
+STOP_SESSION_DELAY_S = 0.2
 
 
 def _mac_to_str(mac: bytes) -> str:
@@ -36,17 +43,6 @@ def _parse_mac(mac: str) -> bytes:
         return bytes(reversed([int(part, 16) for part in parts]))
     except ValueError as exc:
         raise argparse.ArgumentTypeError("MAC contains non-hex byte") from exc
-
-
-def _print_stream(pkt) -> None:
-    s = pkt.sensor_fusion_result
-    print(
-        "sensor_fusion_result "
-        f"t={s.timestamp_ms} "
-        f"ukf=({s.ukf_x_m:.3f},{s.ukf_y_m:.3f},{s.ukf_yaw_deg:.2f}) "
-        f"tril=({s.tril_x_m:.3f},{s.tril_y_m:.3f}) "
-        f"yaw={s.yaw_deg:.2f} err={s.error_count}"
-    )
 
 
 def _score_dongle_port(port_info: list_ports.ListPortInfo) -> int:
@@ -73,19 +69,34 @@ def _score_dongle_port(port_info: list_ports.ListPortInfo) -> int:
 def _auto_select_dongle_port() -> str | None:
     ports = list(list_ports.comports())
     ports.sort(key=_score_dongle_port, reverse=True)
-
     for port_info in ports:
-        if _score_dongle_port(port_info) <= 0:
-            continue
-        return port_info.device
-
+        if _score_dongle_port(port_info) > 0:
+            return port_info.device
     return None
+
+
+def _ble_state_name(session: VvTestSession, state: int) -> str:
+    enum = session.proto.pb.DESCRIPTOR.enum_types_by_name.get("ble_state_t")
+    value = enum.values_by_number.get(state) if enum is not None else None
+    return value.name if value is not None else f"BLE_STATE_UNKNOWN({state})"
+
+
+def _device_uuid_text(pkt) -> str:
+    scan = pkt.ble_scan_result
+    if hasattr(scan, "uuid") and scan.uuid:
+        return bytes(scan.uuid).hex().upper()
+    return ""
 
 
 def _drain_stale_packets(session: VvTestSession, verbose: bool) -> None:
     packets = session.recv_packets(timeout_s=0.15)
     if verbose and packets:
         print(f"drained {len(packets)} stale packet(s)")
+
+
+def _build_device_information_get(session: VvTestSession) -> pb.packet_t:
+    factory = CommandFactory()
+    return factory.device_information_get(DEFAULT_SRC, DEFAULT_MCU_DST, session.proto.next_seq())
 
 
 def _send_ranging_cmd(session: VvTestSession, start: bool, verbose: bool) -> None:
@@ -100,52 +111,6 @@ def _send_ranging_cmd(session: VvTestSession, start: bool, verbose: bool) -> Non
         print("TX ranging_start" if start else "TX ranging_stop")
 
 
-def _send_device_information_get(session: VvTestSession, verbose: bool) -> bool:
-    factory = CommandFactory()
-    pkt = factory.device_information_get(DEFAULT_SRC, DEFAULT_MCU_DST, session.proto.next_seq())
-
-    print("\n-- STEP 2: Get MCU device information --")
-    print(
-        "TX device_information_get "
-        f"src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}"
-    )
-    session.send_packet(pkt)
-
-    deadline = time.time() + 2.0
-    while time.time() < deadline:
-        for resp in session.recv_packets(timeout_s=0.1):
-            msg = resp.WhichOneof("params")
-            if msg == "device_information_resp":
-                info = resp.device_information_resp
-                print(
-                    "MCU device_information_resp "
-                    f"serial={info.serial_number} "
-                    f"type={info.device_type} role={info.role} hw={info.hw_version}"
-                )
-                return True
-            if msg == "ack":
-                print(
-                    "RX ack "
-                    f"src={resp.hdr.addr.src} dst={resp.hdr.addr.dst} "
-                    f"seq={resp.hdr.seq} ack_seq={resp.ack.ack_seq} "
-                    f"response={resp.ack.response}"
-                )
-            else:
-                print(
-                    f"RX {msg} "
-                    f"src={resp.hdr.addr.src} dst={resp.hdr.addr.dst} seq={resp.hdr.seq}"
-                )
-
-    print("WARNING: no device_information_resp from MCU")
-    return False
-
-
-def _ble_state_name(session: VvTestSession, state: int) -> str:
-    enum = session.proto.pb.DESCRIPTOR.enum_types_by_name.get("ble_state_t")
-    value = enum.values_by_number.get(state) if enum is not None else None
-    return value.name if value is not None else f"BLE_STATE_UNKNOWN({state})"
-
-
 def _scan_for_peripheral(
     session: VvTestSession,
     factory: CommandFactory,
@@ -153,7 +118,7 @@ def _scan_for_peripheral(
     target_mac: bytes | None,
     name_filter: str | None,
     verbose: bool,
-) -> bytes | None:
+) -> Optional[Tuple[bytes, str]]:
     print("\n-- STEP 1A: BLE scan peripheral --")
     print("[+] Sending BLE Scan Start command...")
     scan = factory.ble_scan_start(DEFAULT_SRC, DEFAULT_CENTRAL_DST, session.proto.next_seq())
@@ -170,57 +135,91 @@ def _scan_for_peripheral(
     else:
         print("[+] Scanning for target UWB Peripheral devices...")
 
-    target: bytes | None = None
+    discovered: Dict[bytes, Tuple[str, int, str]] = {}
     deadline = time.time() + scan_timeout_s
     name_filter_lower = name_filter.lower() if name_filter else None
 
     while time.time() < deadline:
-        pkts = session.recv_packets(timeout_s=0.1)
-        for pkt in pkts:
+        for pkt in session.recv_packets(timeout_s=0.1):
             msg = pkt.WhichOneof("params")
             if msg == "ble_scan_result":
                 scan_result = pkt.ble_scan_result
                 mac = bytes(scan_result.mac_address)
-                mac_str = _mac_to_str(mac)
                 dev_name = scan_result.name or ""
                 rssi = scan_result.rssi_dbm
-                print(f"  [Scan] Found: {mac_str} ('{dev_name}') | RSSI: {rssi} dBm")
+                uuid_text = _device_uuid_text(pkt)
 
-                if target_mac is not None:
-                    if mac == target_mac:
-                        target = mac
-                        print(f"\n[+] FOUND TARGET MAC: '{dev_name}' ({mac_str})")
-                        break
-                elif name_filter_lower:
-                    if name_filter_lower in dev_name.lower():
-                        target = mac
-                        print(f"\n[+] FOUND TARGET NAME: '{dev_name}' ({mac_str})")
-                        break
-                else:
-                    if any(prefix in dev_name.upper() for prefix in TARGET_NAME_PREFIXES):
-                        target = mac
-                        print(f"\n[+] FOUND TARGET DEVICE: '{dev_name}' ({mac_str})")
-                        break
-                    target = mac
-                    print(f"\n[+] FOUND UUID-MATCHED DEVICE: '{dev_name}' ({mac_str})")
-                    break
+                if mac not in discovered:
+                    matched = False
+                    if target_mac is not None:
+                        matched = (mac == target_mac)
+                    else:
+                        name_upper = dev_name.upper()
+                        uuid_upper = uuid_text.upper()
+                        if name_filter_lower:
+                            matched = name_filter_lower in dev_name.lower() or name_filter_lower in uuid_upper.lower()
+                        else:
+                            matched = any(prefix in name_upper for prefix in TARGET_NAME_PREFIXES) or bool(uuid_text)
+
+                    if matched:
+                        discovered[mac] = (dev_name, rssi, uuid_text)
+                        uuid_part = f" | UUID: {uuid_text}" if uuid_text else ""
+                        print(f"  [Scan] Found: {_mac_to_str(mac)} ('{dev_name}'){uuid_part} | RSSI: {rssi} dBm")
             elif msg == "ble_status_resp" and verbose:
                 print(f"  [Status] {_ble_state_name(session, pkt.ble_status_resp.state)}")
             elif verbose:
                 print(f"  [RX] {msg} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
 
-        if target:
-            break
-
-    if not target:
-        print("\n[FAIL] No target UWB Peripheral device found within scan timeout.")
-        session.send_packet(factory.ble_scan_stop(DEFAULT_SRC, DEFAULT_CENTRAL_DST, session.proto.next_seq()))
-        return None
-
     print("[-] Stopping BLE Scan...")
     session.send_packet(factory.ble_scan_stop(DEFAULT_SRC, DEFAULT_CENTRAL_DST, session.proto.next_seq()))
     time.sleep(0.5)
-    return target
+
+    if not discovered:
+        print("\n[FAIL] No target UWB Peripheral device found within scan timeout.")
+        return None
+
+    device_list = list(discovered.items())
+    if len(device_list) == 1:
+        selected_mac, (selected_name, _, _) = device_list[0]
+        print(f"\n[+] Automatically selecting the only found device: '{selected_name}' ({_mac_to_str(selected_mac)})")
+        return selected_mac, selected_name
+
+    print("\n--- DISCOVERED BLE DEVICES ---")
+    for idx, (mac_bytes, (name, rssi, uuid_text)) in enumerate(device_list, 1):
+        uuid_part = f" | UUID: {uuid_text}" if uuid_text else ""
+        print(f"  [{idx}] {_mac_to_str(mac_bytes)} | Name: '{name}'{uuid_part} | RSSI: {rssi:4d} dBm")
+    print("------------------------------")
+
+    while True:
+        try:
+            choice = input(f"Enter device index (1-{len(device_list)}) or MAC [default first device]: ").strip()
+            if not choice:
+                selected_mac, (selected_name, _, _) = device_list[0]
+                return selected_mac, selected_name
+
+            if choice.isdigit():
+                choice_idx = int(choice)
+                if 1 <= choice_idx <= len(device_list):
+                    selected_mac, (selected_name, _, _) = device_list[choice_idx - 1]
+                    return selected_mac, selected_name
+                print(f"Invalid index. Please enter a number between 1 and {len(device_list)}.")
+                continue
+
+            if ":" in choice:
+                mac_input = choice.upper()
+                normalized = bytes(reversed([int(x, 16) for x in mac_input.split(":")]))
+                if normalized in discovered:
+                    selected_name = discovered[normalized][0]
+                    return normalized, selected_name
+                print("Invalid MAC. Please enter one of the discovered devices.")
+                continue
+
+            print("Invalid input. Please enter a device index or MAC address in format AA:BB:CC:DD:EE:FF.")
+        except ValueError:
+            print("Invalid input. Please enter a device index or MAC address in format AA:BB:CC:DD:EE:FF.")
+        except KeyboardInterrupt:
+            print("\n[ABORT] User cancelled device selection.")
+            return None
 
 
 def _connect_selected_peripheral(
@@ -245,18 +244,16 @@ def _connect_selected_peripheral(
         retry_needed = False
 
         while time.time() < deadline:
-            pkts = session.recv_packets(timeout_s=0.1)
-            for resp in pkts:
+            for resp in session.recv_packets(timeout_s=0.1):
                 msg = resp.WhichOneof("params")
                 if msg == "ble_status_resp":
                     state = resp.ble_status_resp.state
-                    state_name = _ble_state_name(session, state)
                     if verbose:
-                        print(f"  [Status] {state_name}")
-                    if state == session.proto.pb.BLE_STATE_CONNECTED:
+                        print(f"  [Status] {_ble_state_name(session, state)}")
+                    if state == pb.BLE_STATE_CONNECTED:
                         print("[OK] BLE CONNECTION ESTABLISHED!")
                         return True
-                    if state == session.proto.pb.BLE_STATE_IDLE and resp.ble_status_resp.HasField("disconnect_reason"):
+                    if state == pb.BLE_STATE_IDLE and resp.ble_status_resp.disconnect_reason != 0:
                         reason = resp.ble_status_resp.disconnect_reason
                         print(f"  [WARNING] Connection attempt {attempt} failed. Reason: 0x{reason:02X}")
                         retry_needed = True
@@ -283,13 +280,115 @@ def _connect_peripheral(
     verbose: bool,
 ) -> bool:
     factory = CommandFactory()
-
     _drain_stale_packets(session, verbose)
     target = _scan_for_peripheral(session, factory, scan_timeout_s, target_mac, name_filter, verbose)
     if target is None:
         return False
 
-    return _connect_selected_peripheral(session, factory, target, connect_timeout_s, verbose)
+    selected_mac, _ = target
+    if not _connect_selected_peripheral(session, factory, selected_mac, connect_timeout_s, verbose):
+        return False
+
+    session.send_packet(factory.ble_scan_stop(DEFAULT_SRC, DEFAULT_CENTRAL_DST, session.proto.next_seq()))
+    time.sleep(0.2)
+    return True
+
+
+def _poll_stop_hotkey() -> bool:
+    while msvcrt.kbhit():
+        ch = msvcrt.getwch()
+        if ch in ("q", "Q"):
+            return True
+    return False
+
+
+def _run_stream(session: VvTestSession, seconds: float, verbose: bool, control_ranging: bool) -> bool:
+    success = False
+    for attempt in range(1, 4):
+        pkt = _build_device_information_get(session)
+        session.send_packet(pkt)
+        if verbose:
+            print(f"TX device_information_get seq={pkt.hdr.seq}")
+
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            for resp in session.recv_packets(timeout_s=0.1):
+                msg = resp.WhichOneof("params")
+                if msg == "device_information_resp":
+                    info = resp.device_information_resp
+                    print(
+                        "MCU device_information_resp "
+                        f"serial={info.serial_number} type={info.device_type} role={info.role} hw={info.hw_version}"
+                    )
+                    success = True
+                    break
+                if verbose:
+                    print(f"RX {msg} src={resp.hdr.addr.src} dst={resp.hdr.addr.dst} seq={resp.hdr.seq}")
+            if success:
+                break
+        if success:
+            break
+        if attempt < 3:
+            print(f"Retrying device_information_get (attempt {attempt + 1}/3)...")
+            time.sleep(0.5)
+
+    if not success:
+        print("ERROR: Failed to get MCU device information and set ble_connection_active flag.")
+        return False
+
+    if control_ranging:
+        print("\n-- STEP 3: Start MCU ranging --")
+        _send_ranging_cmd(session, start=True, verbose=verbose)
+        time.sleep(0.2)
+
+    print("\n-- STEP 4: Listen fusion stream from dongle USB --")
+    print("[HOTKEY] Press 'q' to stop stream.")
+
+    pkt_count = 0
+    stream_start = time.time()
+    last_stat = stream_start
+    last_rx_time = None
+    deadline = stream_start + seconds
+
+    try:
+        while time.time() < deadline:
+            if _poll_stop_hotkey():
+                break
+
+            now = time.time()
+            for pkt in session.recv_packets(timeout_s=STREAM_RECV_TIMEOUT_S):
+                name = pkt.WhichOneof("params")
+                if name == "sensor_fusion_result":
+                    pkt_count += 1
+                    dt_s = (now - last_rx_time) if last_rx_time is not None else 0.0
+                    last_rx_time = now
+                    s = pkt.sensor_fusion_result
+                    print(
+                        f"[RX] count={pkt_count} dt={dt_s:.3f}s "
+                        f"t={s.timestamp_ms} "
+                        f"ukf=({s.ukf_x_m:.3f},{s.ukf_y_m:.3f},{s.ukf_yaw_deg:.2f}) "
+                        f"tril=({s.tril_x_m:.3f},{s.tril_y_m:.3f}) "
+                        f"yaw={s.yaw_deg:.2f} err={s.ranging_error_count}",
+                        flush=True,
+                    )
+                elif verbose:
+                    print(f"RX {name} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
+
+            if now - last_stat >= STREAM_STAT_PERIOD_S:
+                elapsed = max(now - stream_start, 0.001)
+                hz = pkt_count / elapsed
+                print(f"[STAT] received={pkt_count} dt={elapsed:.2f}s rate={hz:.2f}Hz")
+                last_stat = now
+    except KeyboardInterrupt:
+        print("\n[!] User interrupted with Ctrl+C")
+    finally:
+        if control_ranging:
+            _send_ranging_cmd(session, start=False, verbose=verbose)
+            time.sleep(STOP_SESSION_DELAY_S)
+
+    elapsed = max(time.time() - stream_start, 0.001)
+    print(f"[DONE] received={pkt_count} dt={elapsed:.2f}s rate={(pkt_count / elapsed):.2f}Hz")
+    return pkt_count > 0
 
 
 def run(
@@ -317,64 +416,16 @@ def run(
         ):
             return False
 
-    _send_device_information_get(session, verbose)
-
-    if control_ranging:
-        print("\n-- STEP 3: Start MCU ranging --")
-        _send_ranging_cmd(session, start=True, verbose=verbose)
-        time.sleep(0.2)
-
-    print("\n-- STEP 4: Listen fusion stream from dongle USB --")
-    print(f"Listening on dongle USB for sensor_fusion_result for {seconds:.1f}s...")
-    deadline = time.time() + seconds
-    stream_packets = []
-
-    while time.time() < deadline:
-        for pkt in session.recv_packets(timeout_s=0.1):
-            name = pkt.WhichOneof("params")
-            if name == "sensor_fusion_result":
-                stream_packets.append(pkt)
-                if verbose:
-                    _print_stream(pkt)
-            elif verbose:
-                print(f"RX {name} src={pkt.hdr.addr.src} dst={pkt.hdr.addr.dst} seq={pkt.hdr.seq}")
-
-    if control_ranging:
-        _send_ranging_cmd(session, start=False, verbose=verbose)
-
-    if not stream_packets:
-        print("ERROR: no sensor_fusion_result packets received from dongle USB")
-        print("Check: central connected to peripheral, MCU ranging enabled, and MCU stream dst=HOST.")
-        return False
-
-    timestamps = [p.sensor_fusion_result.timestamp_ms for p in stream_packets]
-    monotonic = all(b >= a for a, b in zip(timestamps, timestamps[1:]))
-    duration_s = max(seconds, 0.001)
-    observed_hz = len(stream_packets) / duration_s
-
-    first = stream_packets[0].sensor_fusion_result
-    last = stream_packets[-1].sensor_fusion_result
-    print(
-        f"received={len(stream_packets)} rate={observed_hz:.2f}Hz "
-        f"first_t={first.timestamp_ms} last_t={last.timestamp_ms}"
-    )
-
-    if not monotonic:
-        print("ERROR: sensor_fusion_result timestamp_ms is not monotonic")
-        return False
-
-    if observed_hz > 15.0:
-        print("ERROR: sensor_fusion_result rate is higher than expected low-rate app telemetry")
-        return False
-
-    return True
+    return _run_stream(session, seconds, verbose, control_ranging)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Listen for MCU sensor_fusion_result packets forwarded by the BLE central dongle over USB CDC.")
+    parser = argparse.ArgumentParser(
+        description="Listen for MCU sensor_fusion_result packets forwarded by the BLE central dongle over USB CDC."
+    )
     parser.add_argument("--port", help="Central dongle COM port, e.g. COM28. If omitted, a USB/J-Link-like port is selected.")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD)
-    parser.add_argument("--seconds", type=float, default=10.0)
+    parser.add_argument("--seconds", type=float, default=3600.0, help="Stream duration; q stops earlier.")
     parser.add_argument("--scan-timeout", type=float, default=DEFAULT_SCAN_TIMEOUT_S)
     parser.add_argument("--connect-timeout", type=float, default=DEFAULT_CONNECT_TIMEOUT_S)
     parser.add_argument("--mac", type=_parse_mac, help="Peripheral MAC to connect, printed as AA:BB:CC:DD:EE:FF.")

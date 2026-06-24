@@ -13,6 +13,21 @@
 #include <stdbool.h>
 #include "sdk_errors.h"
 
+#define BB_ROUTER_MCU_BLE_PACKET_ID_COUNT 7
+
+/*
+ * Peripheral RX counters for MCU <-> BLE packets by array index:
+ * [0] cmd_id 3:  protobuf_packet_t_ack_tag
+ * [1] cmd_id 39: protobuf_packet_t_ble_adv_config_set_tag
+ * [2] cmd_id 40: protobuf_packet_t_ble_status_get_tag
+ * [3] cmd_id 41: protobuf_packet_t_ble_status_resp_tag
+ * [4] cmd_id 42: protobuf_packet_t_ble_adv_status_tag
+ * [5] cmd_id 43: protobuf_packet_t_log_data_tag
+ * [6] cmd_id 69: protobuf_packet_t_ble_adv_config_request_tag
+ */
+extern volatile uint32_t g_bb_router_mcu_rx_total_count;
+extern volatile uint32_t g_bb_router_mcu_rx_id_count[BB_ROUTER_MCU_BLE_PACKET_ID_COUNT];
+
 /**
  * @brief Error codes returned by the routing pipeline.
  */

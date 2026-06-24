@@ -78,6 +78,7 @@ SRC_FILES += \
   $(PROJ_DIR)/../ble_common/boards.c \
   $(COMMON_DIR)/logger.c \
   $(COMMON_DIR)/hdlc.c \
+  $(COMMON_DIR)/ble_broadcast.c \
   $(COMMON_DIR)/ble_bridge/bb_cmd_hdl.c \
   $(COMMON_DIR)/ble_bridge/bb_router.c \
   $(COMMON_DIR)/ble_bridge/bb_transport.c \
@@ -256,6 +257,12 @@ CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 # keep every function in a separate section, this allows linker to discard unused ones
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 CFLAGS += -fno-builtin -fshort-enums
+
+# Check if BLE_RX_BYPASS_P005 is requested
+ifdef BLE_RX_BYPASS_P005
+CFLAGS += -DBLE_RX_BYPASS_P005
+ASMFLAGS += -DBLE_RX_BYPASS_P005
+endif
 
 # C++ flags common to all targets
 CXXFLAGS += $(OPT)

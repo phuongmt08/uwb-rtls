@@ -188,7 +188,7 @@ class ModernPositionCanvas(QWidget):
         self.anchors = []
         self.history = []
         self.tril_history = []
-        self.max_history = 30
+        self.max_history = 10000
         
         # Throttle updates
         self.last_update_time = 0
@@ -530,9 +530,9 @@ class MainWindow(QMainWindow):
         
         self.anchors = [
             {'x': 0.0, 'y': 0.0, 'label': 'A0'},
-            {'x': 5.0, 'y': 0.0, 'label': 'A1'},
-            {'x': 5.0, 'y': 5.0, 'label': 'A2'},
-            {'x': 0.0, 'y': 5.0, 'label': 'A3'},
+            {'x': 10.76, 'y': 0.0, 'label': 'A1'},
+            {'x': 0.0, 'y': 13.2, 'label': 'A2'},
+            {'x': 10.76, 'y': 13.2, 'label': 'A3'},
         ]
         
         self.position = {
@@ -998,6 +998,8 @@ class MainWindow(QMainWindow):
             filename = os.path.join(log_dir, datetime.now().strftime("uwb_data_%Y%m%d_%H%M%S.csv"))
             try:
                 self.record_file = open(filename, "a", encoding="utf-8")
+                # Write CSV Header
+                self.record_file.write("tx_frame_cnt,anchor_mask,ukf_x,ukf_y,ukf_yaw,tril_x,tril_y,yaw,error_frame_cnt,dt\n")
                 self.record_start_time = time.time()
                 self.record_last_time = None
                 self.record_line_no = 0
@@ -1057,22 +1059,15 @@ class MainWindow(QMainWindow):
 
             tx_frame_cnt = int(position.get('tx_frame_cnt', self.record_line_no))
             anchor_mask = int(position.get('anchor_mask', 0))
+            ukf_x = float(position.get('ukf_x', 0.0))
+            ukf_y = float(position.get('ukf_y', 0.0))
+            ukf_yaw = float(position.get('ukf_yaw', 0.0))
+            tril_x = float(position.get('tril_x', 0.0))
+            tril_y = float(position.get('tril_y', 0.0))
+            yaw = float(position.get('yaw', 0.0))
             error_frame_cnt = int(position.get('error_frame_cnt', 0))
 
-            log_str = (
-                f"({self.record_line_no:4d}/{tx_frame_cnt:4d}) Update  "
-                f"ax: {0.0: .6f} ay: {0.0: .6f} gz: {0.0: .6f} "
-                f"px: {position.get('ukf_x', 0): .6f} "
-                f"py: {position.get('ukf_y', 0): .6f} "
-                f"dt: {dt: .6f} mask: {anchor_mask} "
-                f"d1: {0.0: .6f} d2: {0.0: .6f} "
-                f"d3: {0.0: .6f} d4: {0.0: .6f} "
-                f"err: {error_frame_cnt} "
-                f"amp1: {0.0: .6f} amp2: {0.0: .6f} "
-                f"amp3: {0.0: .6f} amp4: {0.0: .6f} "
-                f"snr1: {0.0: .6f} snr2: {0.0: .6f} "
-                f"snr3: {0.0: .6f} snr4: {0.0: .6f}"
-            )
+            log_str = f"{tx_frame_cnt},{anchor_mask},{ukf_x:.6f},{ukf_y:.6f},{ukf_yaw:.6f},{tril_x:.6f},{tril_y:.6f},{yaw:.6f},{error_frame_cnt},{dt:.6f}"
                 
             self.record_file.write(log_str + "\n")
             self.record_file.flush()

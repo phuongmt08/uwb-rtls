@@ -1,5 +1,5 @@
 let ruleCounter = 0;
-const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 5;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 8;
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -282,27 +282,67 @@ function getRateStatsFromDt(entries, types) {
     };
 }
 
+function countTrilaterationUpdates(entries, isPathCsv) {
+    let count = 0;
+    let prevX = null;
+    let prevY = null;
+    
+    entries.forEach(entry => {
+        if (entry.type === 'Update') {
+            const x = isPathCsv ? entry.tril_x : entry.px_fw;
+            const y = isPathCsv ? entry.tril_y : entry.py_fw;
+            if (x !== undefined && y !== undefined && (x !== prevX || y !== prevY)) {
+                count++;
+                prevX = x;
+                prevY = y;
+            }
+        }
+    });
+    return count;
+}
+
+function countRangingErrorDelta(entries) {
+    let total = 0;
+    let prev = null;
+
+    entries.forEach(entry => {
+        const err = Number(entry.err);
+        if (!Number.isFinite(err) || err < 0) return;
+
+        if (prev !== null) {
+            total += err >= prev ? (err - prev) : err;
+        }
+        prev = err;
+    });
+
+    return total;
+}
+
 function updatePositionRateDisplay(totalTimeOverride) {
     if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
-    const select = document.getElementById('export_path_select');
-    const selected = select ? select.value : 'rules';
-    const path = latestTrajectoryPaths[selected] || latestTrajectoryPaths.firmware;
-    const validCount = countValidPositions(path);
-    const totalCount = path && path.x ? path.x.length : 0;
+    const isPathCsv = rawData.log_format === 'path_csv';
     const processedCount = latestSimulationResult && latestSimulationResult.simPathUKF_allTimes
         ? latestSimulationResult.simPathUKF_allTimes.length
         : rawData.all_entries.length;
-    const entriesForRate = rawData.all_entries.slice(0, processedCount);
-    const predictRate = getRateStatsFromDt(entriesForRate, ['Predict']);
-    const updateRate = getRateStatsFromDt(entriesForRate, ['Update']);
-    const allRate = getRateStatsFromDt(entriesForRate, ['Predict', 'Update']);
-    const exportRate = selected === 'firmware' || selected === 'rules' || selected === 'wls' || selected === 'triplet'
-        ? updateRate
-        : allRate;
-    const label = select ? select.options[select.selectedIndex].text : 'Trajectory';
+        
+    const duration = Number.isFinite(totalTimeOverride) ? totalTimeOverride : latestTotalTime;
+    const entries = rawData.all_entries.slice(0, processedCount);
+    
+    const trilUpdates = countTrilaterationUpdates(entries, isPathCsv);
+    const predictCount = entries.filter(e => e.type === 'Predict').length;
+    const updateCount = entries.filter(e => e.type === 'Update').length;
+    const errorCount = countRangingErrorDelta(entries);
+    const rangingAttempts = updateCount + errorCount;
+    
+    const trilHz = duration > 0 ? (trilUpdates / duration).toFixed(2) : "0.00";
+    const predictHz = duration > 0 ? (predictCount / duration).toFixed(2) : "0.00";
+    const updateHz = duration > 0 ? (updateCount / duration).toFixed(2) : "0.00";
+    const attemptHz = duration > 0 ? (rangingAttempts / duration).toFixed(2) : "0.00";
+    const errorPct = rangingAttempts > 0 ? (100 * errorCount / rangingAttempts).toFixed(2) : "0.00";
+    
     const elem = document.getElementById('position_rate_info');
     if (elem) {
-        elem.textContent = `${label}: ${exportRate.hz.toFixed(2)} Hz (${validCount}/${totalCount} points) | Predict: ${predictRate.hz.toFixed(2)} Hz | Update: ${updateRate.hz.toFixed(2)} Hz`;
+        elem.textContent = `Duration: ${duration.toFixed(2)}s | Trilateration: ${trilUpdates} (${trilHz} Hz) | Predict: ${predictCount} (${predictHz} Hz) | Update: ${updateCount} (${updateHz} Hz) | Attempt: ${rangingAttempts} (${attemptHz} Hz) | Error: ${errorCount} (${errorPct}%)`;
     }
 }
 
@@ -370,6 +410,7 @@ function saveDefaults() {
         enable_mahalanobis: document.getElementById('enable_mahalanobis').checked,
         enable_imu_lpf: document.getElementById('enable_imu_lpf').checked,
         imu_lpf_cutoff_hz: document.getElementById('imu_lpf_cutoff_input').value,
+        imu_filter_order: document.getElementById('imu_filter_order_input').value,
         groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
         anchors: readAnchorsFromInputs(),
         rules: [],
@@ -385,8 +426,10 @@ function saveDefaults() {
         r_gate: document.getElementById('ukf_rgate_input').value,
         triplet_w_d2: document.getElementById('triplet_w_d2_input').value,
         triplet_w_fp: document.getElementById('triplet_w_fp_input').value,
-        triplet_w_gdop: document.getElementById('triplet_w_gdop_input').value,
-        triplet_w_resid: document.getElementById('triplet_w_resid_input').value
+        triplet_w_resid: document.getElementById('triplet_w_resid_input').value,
+        triplet_w_dist: document.getElementById('triplet_w_dist_input').value,
+        triplet_switch_margin: document.getElementById('triplet_switch_margin_input').value,
+        triplet_switch_eps: document.getElementById('triplet_switch_eps_input').value
     };
     const ruleDivs = document.getElementById('rules_container').children;
     for (let i = 0; i < ruleDivs.length; i++) {
@@ -453,11 +496,12 @@ function loadDefaults() {
                 document.getElementById('max_samples_range').value = config.max_samples;
                 document.getElementById('max_samples_val').innerText = config.max_samples;
             }
-            if (loadTuning && config.enable_smoother !== undefined) {
-                document.getElementById('enable_smoother').checked = config.enable_smoother;
-            }
+
             if (loadTuning && config.enable_mahalanobis !== undefined) {
                 document.getElementById('enable_mahalanobis').checked = config.enable_mahalanobis;
+            }
+            if (loadTuning && config.enable_smoother !== undefined) {
+                document.getElementById('enable_smoother').checked = config.enable_smoother;
             }
             if (loadTuning && config.enable_imu_lpf !== undefined) {
                 document.getElementById('enable_imu_lpf').checked = config.enable_imu_lpf;
@@ -466,6 +510,12 @@ function loadDefaults() {
                 document.getElementById('imu_lpf_cutoff_input').value = config.imu_lpf_cutoff_hz;
                 document.getElementById('imu_lpf_cutoff_range').value = config.imu_lpf_cutoff_hz;
                 document.getElementById('imu_lpf_cutoff_val').innerText = parseFloat(config.imu_lpf_cutoff_hz).toFixed(2);
+            }
+            if (loadTuning && config.imu_filter_order) {
+                const order = Math.min(SIM_CONFIG.IMU.MAX_FILTER_ORDER, Math.max(SIM_CONFIG.IMU.MIN_FILTER_ORDER, parseInt(config.imu_filter_order)));
+                document.getElementById('imu_filter_order_input').value = order;
+                document.getElementById('imu_filter_order_range').value = order;
+                document.getElementById('imu_filter_order_val').innerText = order;
             }
             if (loadTuning && config.tag_height) {
                 document.getElementById('tag_height_input').value = config.tag_height;
@@ -527,15 +577,25 @@ function loadDefaults() {
                 document.getElementById('triplet_w_fp_range').value = config.triplet_w_fp;
                 document.getElementById('triplet_w_fp_val').innerText = config.triplet_w_fp;
             }
-            if (loadTuning && config.triplet_w_gdop !== undefined) {
-                document.getElementById('triplet_w_gdop_input').value = config.triplet_w_gdop;
-                document.getElementById('triplet_w_gdop_range').value = config.triplet_w_gdop;
-                document.getElementById('triplet_w_gdop_val').innerText = config.triplet_w_gdop;
-            }
             if (loadTuning && config.triplet_w_resid !== undefined) {
                 document.getElementById('triplet_w_resid_input').value = config.triplet_w_resid;
                 document.getElementById('triplet_w_resid_range').value = config.triplet_w_resid;
                 document.getElementById('triplet_w_resid_val').innerText = config.triplet_w_resid;
+            }
+            if (loadTuning && config.triplet_w_dist !== undefined) {
+                document.getElementById('triplet_w_dist_input').value = config.triplet_w_dist;
+                document.getElementById('triplet_w_dist_range').value = config.triplet_w_dist;
+                document.getElementById('triplet_w_dist_val').innerText = config.triplet_w_dist;
+            }
+            if (loadTuning && config.triplet_switch_margin !== undefined) {
+                document.getElementById('triplet_switch_margin_input').value = config.triplet_switch_margin;
+                document.getElementById('triplet_switch_margin_range').value = config.triplet_switch_margin;
+                document.getElementById('triplet_switch_margin_val').innerText = parseFloat(config.triplet_switch_margin).toFixed(2);
+            }
+            if (loadTuning && config.triplet_switch_eps !== undefined) {
+                document.getElementById('triplet_switch_eps_input').value = config.triplet_switch_eps;
+                document.getElementById('triplet_switch_eps_range').value = config.triplet_switch_eps;
+                document.getElementById('triplet_switch_eps_val').innerText = parseFloat(config.triplet_switch_eps).toFixed(3);
             }
 
             if (loadTuning && config.rules && config.rules.length > 0) {

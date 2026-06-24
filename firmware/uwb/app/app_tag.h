@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include "common.h"
 #include "positioning_config.h"
+#include "sys_config.h"
 
 #if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
@@ -34,6 +35,11 @@ app_err_t app_tag_init(void);
 void app_tag_process(void);
 
 /**
+ * @brief Process queued UWB control requests on the UwbRanging task context.
+ */
+void app_tag_process_uwb_control(sys_config_t *cfg);
+
+/**
  * @brief Get current ranging error frame count owned by the Tag ranging flow.
  * @return Current ranging error count.
  */
@@ -43,6 +49,14 @@ uint32_t app_tag_get_ranging_error_count(void);
  * @brief Reset the sensor fusion filters, flags, and states when ranging stops.
  */
 void app_tag_reset_fusion(void);
+
+/**
+ * @brief Read the latest tag position estimate if available.
+ * @param x_m Output X coordinate in meters.
+ * @param y_m Output Y coordinate in meters.
+ * @return true when a valid position is available.
+ */
+bool app_tag_get_latest_position(float *x_m, float *y_m);
 
 #if ENABLE_SYS_FUSION
 extern sys_sensor_fusion_data_t ukf_data;

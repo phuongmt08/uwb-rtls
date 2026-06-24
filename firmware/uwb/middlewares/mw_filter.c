@@ -47,7 +47,9 @@ float mw_filter_median_update(median_filter_1d_t *med, float new_val)
 }
 
 void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
-                                float T1, float T2, float anchor_R_base)
+                                float T1, float T2, float anchor_R_base,
+                                float R_gate, float velocity_weight,
+                                float min_covariance)
 {
     if (!ctx) return;
     for (uint8_t i = 0; i < 8; i++) {
@@ -56,6 +58,9 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
     ctx->T1 = T1;
     ctx->T2 = T2;
     ctx->R_base = anchor_R_base;
+    ctx->R_gate = R_gate;
+    ctx->velocity_weight = velocity_weight;
+    ctx->min_covariance = min_covariance;
     ctx->initialized = true;
 }
 
@@ -89,8 +94,8 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     float d_pred = sqrtf((dx * dx) + (dy * dy) + (dz * dz));
 #endif
     float vel_mag = sqrtf(vx * vx + vy * vy + vz * vz);
-    const float k_vel = MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
-    float S = MAHALANOBIS_PREFILTER_R_GATE + (k_vel * vel_mag);
+    const float k_vel = ctx->velocity_weight;
+    float S = ctx->R_gate + (k_vel * vel_mag);
     if (!isfinite(d_pred) || !isfinite(S)) {
         if (d_out) *d_out = d_raw;
         if (d2_score) *d2_score = INFINITY;
@@ -98,8 +103,8 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
         state->rejected = true;
         return false;
     }
-    if (S < MAHALANOBIS_PREFILTER_MIN_COVARIANCE) {
-        S = MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
+    if (S < ctx->min_covariance) {
+        S = ctx->min_covariance;
     }
 
     float r = d_raw - d_pred;

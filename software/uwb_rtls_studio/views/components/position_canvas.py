@@ -55,7 +55,8 @@ class PositionCanvas(QWidget):
         ]
         self.history = []
         self.fusion_history = []
-        self.max_history = 300
+        self.tril_history = []
+        self.max_history = 10000
 
         self.last_update_time = 0.0
         self._last_update_by_source = {}
@@ -617,6 +618,12 @@ class PositionCanvas(QWidget):
             self.fusion_history.append((position["x"], position["y"]))
             if len(self.fusion_history) > self.max_history:
                 self.fusion_history.pop(0)
+            tril_x = position.get("tril_x")
+            tril_y = position.get("tril_y")
+            if tril_x is not None and tril_y is not None:
+                self.tril_history.append((float(tril_x), float(tril_y)))
+                if len(self.tril_history) > self.max_history:
+                    self.tril_history.pop(0)
             self.update()
             return
 
@@ -814,6 +821,7 @@ class PositionCanvas(QWidget):
     def clear_trail(self):
         self.history.clear()
         self.fusion_history.clear()
+        self.tril_history.clear()
         self._last_update_by_source.clear()
         self.fusion_position = None
         self.update()
@@ -1515,24 +1523,26 @@ class PositionCanvas(QWidget):
                 x2, y2 = to_screen(self.fusion_history[idx + 1][0], self.fusion_history[idx + 1][1])
                 painter.drawLine(x1, y1, x2, y2)
 
-        # 2. Draw History Trail (Ranging/Trilateration, dashed orange)
-        if len(self.history) > 1:
-            painter.setPen(QPen(QColor(249, 115, 22, 180), 2, Qt.PenStyle.DashLine))
-            for idx in range(len(self.history) - 1):
-                x1, y1 = to_screen(self.history[idx][0], self.history[idx][1])
-                x2, y2 = to_screen(self.history[idx + 1][0], self.history[idx + 1][1])
-                painter.drawLine(x1, y1, x2, y2)
+        # 2. Draw Trilateration history as dots
+        if self.tril_history:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(251, 146, 60, 180))
+            for xw, yw in self.tril_history:
+                sx, sy = to_screen(xw, yw)
+                painter.drawEllipse(sx - 2, sy - 2, 4, 4)
 
         # 3-4. Draw active anchors in normal tracking mode. Editor mode redraws
         # anchors later so the dim/grid overlay does not hide newly placed ones.
         if not self.dim_tracking_view:
             self._draw_anchor_layer(painter, to_screen, draw_connections=True)
 
-        # 5. Draw Trilateration Marker (orange circle with crosshair) ONLY when Sensor Fusion is active
+        # 5. Draw Trilateration Marker (orange circle with crosshair)
         if self.fusion_position is not None:
-            tril_x, tril_y = to_screen(self.position["x"], self.position["y"])
-            painter.setPen(QPen(QColor(249, 115, 22), 2))
-            painter.setBrush(QColor(249, 115, 22, 80))
+            tril_world_x = self.fusion_position.get("tril_x", self.fusion_position["x"])
+            tril_world_y = self.fusion_position.get("tril_y", self.fusion_position["y"])
+            tril_x, tril_y = to_screen(tril_world_x, tril_world_y)
+            painter.setPen(QPen(QColor(251, 146, 60), 2))
+            painter.setBrush(QColor(251, 146, 60, 80))
             painter.drawEllipse(tril_x - 8, tril_y - 8, 16, 16)
             painter.drawLine(tril_x - 12, tril_y, tril_x + 12, tril_y)
             painter.drawLine(tril_x, tril_y - 12, tril_x, tril_y + 12)
@@ -1548,13 +1558,18 @@ class PositionCanvas(QWidget):
             painter.setBrush(QColor(239, 68, 68, 20))
             painter.drawEllipse(active_x - error_radius, active_y - error_radius, error_radius * 2, error_radius * 2)
 
+        # UKF center marker as a small dot
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(96, 165, 250))
+        painter.drawEllipse(active_x - 3, active_y - 3, 6, 6)
+
         # Draw the directional arrow
         painter.save()
         painter.translate(active_x, active_y)
         painter.rotate(-active_tag.get("yaw", 0))
         painter.setPen(
             QPen(
-                QColor(14, 165, 233),  # Sky blue color border for the arrow
+                QColor(37, 99, 235),  # Blue-600
                 2,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
@@ -1562,8 +1577,8 @@ class PositionCanvas(QWidget):
             )
         )
         gradient = QLinearGradient(0, -12, 0, 10)
-        gradient.setColorAt(0, QColor(56, 189, 248))  # sky blue gradient
-        gradient.setColorAt(1, QColor(14, 165, 233))
+        gradient.setColorAt(0, QColor(96, 165, 250))
+        gradient.setColorAt(1, QColor(37, 99, 235))
         painter.setBrush(gradient)
         path = QPainterPath()
         path.moveTo(14, 0)
@@ -1579,8 +1594,8 @@ class PositionCanvas(QWidget):
 
         # Tag glow effect (sky blue)
         glow_gradient = QRadialGradient(active_x, active_y, 18)
-        glow_gradient.setColorAt(0, QColor(56, 189, 248, 60))
-        glow_gradient.setColorAt(1, QColor(56, 189, 248, 0))
+        glow_gradient.setColorAt(0, QColor(96, 165, 250, 60))
+        glow_gradient.setColorAt(1, QColor(96, 165, 250, 0))
         painter.setBrush(glow_gradient)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(active_x - 18, active_y - 18, 36, 36)

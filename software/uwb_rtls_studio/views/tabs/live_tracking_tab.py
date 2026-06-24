@@ -958,6 +958,8 @@ class LiveTrackingTab(QWidget):
             "z": self._last_z,
             "error": self._last_rms,
             "yaw": yaw,
+            "tril_x": tril_x,
+            "tril_y": tril_y,
             "source": "sensor_fusion",
         }
         self._canvas.update_position(position)
