@@ -837,6 +837,15 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+void vApplicationIdleHook(void)
+{
+#if APP_IDLE_SLEEP_ENABLE
+    __DSB();
+    __WFI();
+    __ISB();
+#endif
+}
+
 void app_rtos_set_ranging_enabled(bool enabled)
 {
     g_ranging_enabled = enabled;

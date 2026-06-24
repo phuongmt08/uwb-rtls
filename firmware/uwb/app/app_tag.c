@@ -99,7 +99,6 @@ static uint32_t s_last_fusion_log_tick = 0U;
 
 #if ENABLE_SYS_FUSION
 static vec2d_t s_last_position = {.x = 0.0f, .y = 0.0f};
-static bool s_position_valid = false;
 #endif
 
 static volatile app_tag_uwb_control_op_t s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
@@ -112,12 +111,20 @@ static float s_control_tag_y_m = 0.0f;
 static float s_control_tag_z_m = 0.0f;
 static uint32_t s_zone_switch_tick = 0U;
 static bool s_zone_switch_pending_save = false;
+#if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+static uint32_t s_zone_switch_stress_last_request_tick = 0U;
+static uint32_t s_zone_switch_stress_last_complete_tick = 0U;
+static uint32_t s_zone_switch_stress_count = 0U;
+static uint32_t s_zone_switch_stress_fail_count = 0U;
+static uint32_t s_zone_switch_stress_last_warn_tick = 0U;
+#endif
 
 /* Private prototypes --------------------------------------------------- */
 #if !ENABLE_SYS_FUSION
 static void init_filters(void);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out);
 static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
 #endif
 static bool process_ranging_results(sys_ranging_result_t *results, int num_success);
@@ -133,6 +140,10 @@ static void finish_failed_ranging_cycle(sys_ranging_err_t err,
 static bool queue_uwb_control_request(app_tag_uwb_control_op_t op);
 static void reset_app_after_radio_reconfigure(sys_config_t *cfg);
 static void persist_stable_zone_switch(sys_config_t *cfg);
+#if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+static bool find_next_stress_zone(const sys_config_t *cfg, uint32_t current_zone, uint32_t *next_zone);
+static void schedule_zone_switch_stress_test(sys_config_t *cfg);
+#endif
 #if !ENABLE_SYS_FUSION
 static void record_fusion_log_update_timing(void);
 static void send_fusion_log_snapshot(void);
@@ -248,9 +259,70 @@ static void persist_stable_zone_switch(sys_config_t *cfg)
     }
 }
 
+#if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+static bool find_next_stress_zone(const sys_config_t *cfg, uint32_t current_zone, uint32_t *next_zone)
+{
+    if (!cfg || !next_zone) {
+        return false;
+    }
+
+    for (uint32_t step = 1U; step <= 4U; step++) {
+        uint32_t candidate = ((current_zone + step - 1U) % 4U) + 1U;
+        if (candidate != current_zone &&
+            sys_config_zone_profile_valid(&cfg->zone_profiles[candidate - 1U])) {
+            *next_zone = candidate;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void schedule_zone_switch_stress_test(sys_config_t *cfg)
+{
+    if (!cfg ||
+        cfg->calib.enable_tag_auto_calib ||
+        cfg->calib.enable_anchor_auto_calib ||
+        s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+        return;
+    }
+
+    uint32_t now = HAL_GetTick();
+    if (s_zone_switch_stress_last_request_tick != 0U &&
+        (now - s_zone_switch_stress_last_request_tick) < SYS_ZONE_SWITCH_STRESS_INTERVAL_MS) {
+        return;
+    }
+
+    uint32_t current_zone = sys_config_get_active_zone_id();
+    uint32_t next_zone = 0U;
+    if (!find_next_stress_zone(cfg, current_zone, &next_zone)) {
+        if ((now - s_zone_switch_stress_last_warn_tick) >= 2000U) {
+            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+                   "[UWB][ZONE_STRESS] No alternate valid zone profile from active Zone %lu",
+                   (unsigned long)current_zone);
+            s_zone_switch_stress_last_warn_tick = now;
+        }
+        return;
+    }
+
+    s_control_zone_id = next_zone;
+    s_zone_switch_stress_last_request_tick = now;
+    if (queue_uwb_control_request(APP_TAG_UWB_CONTROL_SWITCH_ZONE)) {
+        RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER,
+               "[UWB][ZONE_STRESS] request #%lu Zone %lu -> %lu",
+               (unsigned long)(s_zone_switch_stress_count + 1U),
+               (unsigned long)current_zone,
+               (unsigned long)next_zone);
+    }
+}
+#endif
+
 void app_tag_process_uwb_control(sys_config_t *cfg)
 {
     persist_stable_zone_switch(cfg);
+#if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+    schedule_zone_switch_stress_test(cfg);
+#endif
 
     app_tag_uwb_control_op_t op = s_uwb_control_op;
     if (op == APP_TAG_UWB_CONTROL_NONE || !cfg) {
@@ -280,6 +352,7 @@ void app_tag_process_uwb_control(sys_config_t *cfg)
 
     if (op == APP_TAG_UWB_CONTROL_SWITCH_ZONE) {
         uint32_t old_zone_id = sys_config_get_active_zone_id();
+        uint32_t switch_start_tick = HAL_GetTick();
         sys_ranging_abort();
         bsp_uwb_idle();
 
@@ -291,14 +364,33 @@ void app_tag_process_uwb_control(sys_config_t *cfg)
             s_zone_switch_tick = HAL_GetTick();
             s_zone_switch_pending_save = true;
             RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER,
-                   "[UWB] Zone switch to %lu complete: preamble=%lu anchors=%lu",
+                   "[UWB] Zone switch to %lu complete: preamble=%lu anchors=%lu latency=%lums",
                    (unsigned long)zone_id,
                    (unsigned long)cfg->uwb.uwb_preamble_code,
-                   (unsigned long)cfg->anchor_count);
+                   (unsigned long)cfg->anchor_count,
+                   (unsigned long)(s_zone_switch_tick - switch_start_tick));
+#if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+            s_zone_switch_stress_count++;
+            uint32_t complete_gap_ms = (s_zone_switch_stress_last_complete_tick == 0U)
+                                       ? 0U
+                                       : (s_zone_switch_tick - s_zone_switch_stress_last_complete_tick);
+            s_zone_switch_stress_last_complete_tick = s_zone_switch_tick;
+            RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER,
+                   "[UWB][ZONE_STRESS] done #%lu %lu->%lu latency=%lums complete_gap=%lums fail=%lu",
+                   (unsigned long)s_zone_switch_stress_count,
+                   (unsigned long)old_zone_id,
+                   (unsigned long)zone_id,
+                   (unsigned long)(s_zone_switch_tick - switch_start_tick),
+                   (unsigned long)complete_gap_ms,
+                   (unsigned long)s_zone_switch_stress_fail_count);
+#endif
         } else {
             (void)sys_config_apply_zone_profile(old_zone_id);
             (void)bsp_uwb_configure(&cfg->uwb);
             reset_app_after_radio_reconfigure(cfg);
+#if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+            s_zone_switch_stress_fail_count++;
+#endif
             RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_HAL,
                    "[UWB] Zone switch to %lu failed; restored Zone %lu",
                    (unsigned long)zone_id,
@@ -482,6 +574,23 @@ static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out)
     }
     return false;
 }
+
+static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out)
+{
+    if (!slot_out) {
+        return false;
+    }
+
+    sys_config_t *cfg = sys_config_get();
+    uint32_t count = (cfg->anchor_count > NUM_ANCHORS) ? NUM_ANCHORS : cfg->anchor_count;
+    for (uint32_t i = 0; i < count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == aid) {
+            *slot_out = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
 #endif
 
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors)
@@ -657,7 +766,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_error_count = 0;
     return true;
 #else
-    mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1] = {0};
+    mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
     uint8_t valid_count = 0;
 
     float anchor_distances[NUM_ANCHORS] = {0.0f};
@@ -670,8 +779,14 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     for (int i = 0; i < num_success; i++) {
         sys_ranging_result_t *r = &results[i];
         uint8_t aid = r->anchor_id;
-        if (aid < 1 || aid > NUM_ANCHORS) continue;
-        anchor_distances[aid - 1] = r->distance_m;
+        if (aid < 1 || aid > MAX_ANCHORS_SUPPORTED) continue;
+
+        uint8_t anchor_slot = 0U;
+        if (!get_anchor_slot(aid, &anchor_slot)) {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u not in active layout", aid);
+            continue;
+        }
+        anchor_distances[anchor_slot] = r->distance_m;
 
         if (!r->valid) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -696,7 +811,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)", aid, d_used, (float)dz);
             continue;
         }
-        anchor_distances[aid - 1] = (float)r2d;
+        anchor_distances[anchor_slot] = (float)r2d;
         d_used = (float)r2d;
 
         mw_tril_anchor_t anchor_entry = {0};
@@ -787,7 +902,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
         for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
             uint8_t aid = prefilter_rejects[i].id;
-            if (aid == 0U || aid > NUM_ANCHORS || anchors_by_id[aid].valid) {
+            if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED || anchors_by_id[aid].valid) {
                 continue;
             }
             anchors_by_id[aid] = prefilter_rejects[i];
@@ -802,9 +917,12 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 
-    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
-        if (anchors_by_id[id].valid) {
-            anchor_distances[id - 1] = anchors_by_id[id].distance;
+    const sys_config_t *cfg = sys_config_get();
+    uint32_t active_count = (cfg->anchor_count > NUM_ANCHORS) ? NUM_ANCHORS : cfg->anchor_count;
+    for (uint32_t slot = 0U; slot < active_count; slot++) {
+        uint8_t aid = (uint8_t)cfg->anchor_layout[slot].anchor_id;
+        if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED && anchors_by_id[aid].valid) {
+            anchor_distances[slot] = anchors_by_id[aid].distance;
         }
     }
 
@@ -834,9 +952,10 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
     uint8_t compact_idx = 0;
     
-    for (uint8_t id = 1; id <= NUM_ANCHORS && compact_idx < NUM_ANCHORS; id++) {
-        if (anchors_by_id[id].valid) {
-            anchors_compact[compact_idx++] = anchors_by_id[id];
+    for (uint32_t slot = 0U; slot < active_count && compact_idx < NUM_ANCHORS; slot++) {
+        uint8_t aid = (uint8_t)cfg->anchor_layout[slot].anchor_id;
+        if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED && anchors_by_id[aid].valid) {
+            anchors_compact[compact_idx++] = anchors_by_id[aid];
         }
     }
 
@@ -887,13 +1006,17 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
             RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
 
             for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
-            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
-            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
+            uint8_t slot = 0U;
+            if (get_anchor_slot(best_3_anchors[0].id, &slot)) s_latest_distances[slot] = init_d0;
+            if (get_anchor_slot(best_3_anchors[1].id, &slot)) s_latest_distances[slot] = init_d1;
+            if (get_anchor_slot(best_3_anchors[2].id, &slot)) s_latest_distances[slot] = init_d2;
 
-            for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-                s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
-                s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+            for (uint32_t active_slot = 0U; active_slot < active_count; active_slot++) {
+                uint8_t aid = (uint8_t)cfg->anchor_layout[active_slot].anchor_id;
+                if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
+                    s_latest_fp_amp_norm[active_slot] = anchors_by_id[aid].fp_amp_norm;
+                    s_latest_fp_snr[active_slot] = anchors_by_id[aid].fp_snr;
+                }
             }
 
             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
@@ -921,7 +1044,10 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
         for(int i=0; i<compact_idx; i++)
         {
-            s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
+            uint8_t slot = 0U;
+            if (get_anchor_slot(anchors_compact[i].id, &slot)) {
+                s_latest_distances[slot] = (float)anchors_compact[i].distance;
+            }
         }
 
     	/* ==== STEP 3: Trilateration ==== */
@@ -941,9 +1067,12 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
 		for (uint8_t i = 0; i < 3; i++) {
 			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
 		}
-        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-            s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
-            s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+        for (uint32_t active_slot = 0U; active_slot < active_count; active_slot++) {
+            uint8_t aid = (uint8_t)cfg->anchor_layout[active_slot].anchor_id;
+            if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
+                s_latest_fp_amp_norm[active_slot] = anchors_by_id[aid].fp_amp_norm;
+                s_latest_fp_snr[active_slot] = anchors_by_id[aid].fp_snr;
+            }
         }
 
         const uint8_t selected_anchor_ids[3] = {
