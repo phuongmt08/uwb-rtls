@@ -581,6 +581,23 @@ bool sys_sensor_fusion_is_initialized(void)
     return ukf.initialized;
 }
 
+static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out)
+{
+    if (!slot_out) {
+        return false;
+    }
+
+    const sys_config_t *cfg = sys_config_get();
+    uint32_t count = (cfg->anchor_count > NUM_ANCHORS) ? NUM_ANCHORS : cfg->anchor_count;
+    for (uint32_t i = 0U; i < count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == aid) {
+            *slot_out = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_ukf,
                                                   const vec2d_t *tril_position,
                                                   const mw_tril_anchor_t best_3_anchors[3],
@@ -594,6 +611,8 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
     s_last_selected_anchors_mask = selected_anchor_mask;
     s_latest_tril_x = (float)tril_position->x;
     s_latest_tril_y = (float)tril_position->y;
+    const sys_config_t *cfg = sys_config_get();
+    uint32_t active_count = (cfg->anchor_count > NUM_ANCHORS) ? NUM_ANCHORS : cfg->anchor_count;
 
     if (!ukf.initialized)
     {
@@ -626,6 +645,14 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
             uint8_t layout_idx = 0U;
             if (active_anchor_index_for_id(best_3_anchors[k].id, &layout_idx)) {
                 s_latest_distances[layout_idx] = init_distances[k];
+            }
+        }
+
+        for (uint32_t active_slot = 0U; active_slot < active_count; active_slot++) {
+            uint8_t aid = (uint8_t)cfg->anchor_layout[active_slot].anchor_id;
+            if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
+                s_latest_fp_amp_norm[active_slot] = anchors_by_id[aid].fp_amp_norm;
+                s_latest_fp_snr[active_slot] = anchors_by_id[aid].fp_snr;
             }
         }
         snapshot_latest_anchor_metrics(anchors_by_id);

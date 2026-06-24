@@ -127,6 +127,22 @@
  * operation can consume partial ranging results. */
 #define SYS_RANGING_REQUIRE_MIN_ANCHOR_SAMPLES  0
 
+/* ===================================================================
+ * ZONE SWITCH STRESS TEST
+ * =================================================================== */
+
+/* 0 = normal runtime
+ * 1 = repeatedly switch between valid zone profiles to measure radio
+ *     reconfiguration latency and ranging timing disturbance. Keep this
+ *     disabled outside bench testing. */
+#ifndef SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+#define SYS_ZONE_SWITCH_STRESS_TEST_ENABLE       0
+#endif
+
+#ifndef SYS_ZONE_SWITCH_STRESS_INTERVAL_MS
+#define SYS_ZONE_SWITCH_STRESS_INTERVAL_MS       500U
+#endif
+
 /* Zone 1 Defaults */
 #define ZONE_1_ANCHOR_1_ID   1
 #define ZONE_1_ANCHOR_1_X    0.7f

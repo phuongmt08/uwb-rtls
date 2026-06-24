@@ -79,6 +79,14 @@ static void power_management_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+static void idle_state_handle(void)
+{
+    if (NRF_LOG_PROCESS() == false)
+    {
+        nrf_pwr_mgmt_run();
+    }
+}
+
 /**@brief Function for application main entry.
  */
 int main(void)
@@ -105,5 +113,6 @@ int main(void)
     {
         bb_router_process();
         bb_cmd_ble_adv_config_request_process();
+        idle_state_handle();
     }
 }
