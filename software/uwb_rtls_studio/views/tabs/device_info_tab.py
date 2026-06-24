@@ -12,6 +12,7 @@ Layout: Split-screen
 Background polling: ViewModel tự động gửi GET commands mỗi 2s (không cần nút Refresh).
 """
 import os
+import time
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QGridLayout, QProgressBar, QFrame, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -30,6 +31,7 @@ class DeviceInfoTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._vm = None
+        self._is_developer_mode = False
 
         # ── Load UI from .ui file ──
         uic.loadUi(UI_FILE, self)
@@ -110,7 +112,7 @@ class DeviceInfoTab(QWidget):
         self._adv_table.setColumnWidth(4, 90)   # Status
         self._adv_table.setColumnWidth(5, 90)   # Warn
         self._adv_table.setColumnWidth(6, 90)   # Error
-        self._adv_table.setColumnWidth(7, 65)   # Action (Connect button)
+        self._adv_table.setColumnWidth(7, 145)   # Action (Connect + Set Time buttons)
 
     def set_viewmodel(self, vm):
         self._vm = vm
@@ -120,8 +122,15 @@ class DeviceInfoTab(QWidget):
         self._vm.advertising_devices_updated.connect(self._on_advertising_devices)
         if hasattr(self._vm, 'time_sync_updated'):
             self._vm.time_sync_updated.connect(self._on_time_sync_updated)
+        if hasattr(self._vm, 'set_developer_mode'):
+            self._vm.set_developer_mode(self._is_developer_mode)
 
     # ── View Updaters ────────────────────────────────────────────────
+    def set_developer_mode(self, enabled: bool):
+        self._is_developer_mode = bool(enabled)
+        if self._vm and hasattr(self._vm, "set_developer_mode"):
+            self._vm.set_developer_mode(self._is_developer_mode)
+
     def _on_device_info(self, info: dict):
         for k, v in info.items():
             lbl = f"{k}:"
@@ -210,7 +219,14 @@ class DeviceInfoTab(QWidget):
             self._adv_table.setItem(i, 2, QTableWidgetItem(f"{bat}%" if bat is not None else "-"))
 
             t_ms = dev.get("local_timestamp_ms")
-            self._adv_table.setItem(i, 3, QTableWidgetItem(str(t_ms) if t_ms is not None else "-"))
+            if t_ms is not None and t_ms > 0:
+                try:
+                    t_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_ms / 1000.0))
+                except Exception:
+                    t_str = str(t_ms)
+            else:
+                t_str = "-"
+            self._adv_table.setItem(i, 3, QTableWidgetItem(t_str))
 
             st_flags = dev.get("status_flags")
             self._adv_table.setItem(i, 4, QTableWidgetItem(f"0x{st_flags:X}" if st_flags is not None else "-"))
@@ -227,10 +243,29 @@ class DeviceInfoTab(QWidget):
             uic.loadUi(row_ui_path, widget)
             widget.btn_connect.clicked.connect(lambda checked, m=dev["mac"]: self._vm.connect_device(m))
             
+            # Create and style Set Time button
+            btn_set_time = QPushButton("Set Time")
+            btn_set_time.setMinimumSize(65, 22)
+            btn_set_time.setMaximumSize(65, 22)
+            btn_set_time.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_set_time.setStyleSheet(
+                "QPushButton { background: #2563EB; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                "QPushButton:hover { background: #3B82F6; } "
+                "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+            )
+            btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
+            
+            # Disable Set Time if d_id is None
+            if d_id is None:
+                btn_set_time.setEnabled(False)
+                
+            widget.layout().addWidget(btn_set_time)
+            
             # Disable connect button if we are currently connecting to this device
             if self._vm.model._pending_connect_mac == dev["mac"]:
                 widget.btn_connect.setText("Connecting...")
                 widget.btn_connect.setEnabled(False)
+                btn_set_time.setEnabled(False)
             
             self._adv_table.setCellWidget(i, 7, widget)
 

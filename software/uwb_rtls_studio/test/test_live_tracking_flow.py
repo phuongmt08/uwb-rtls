@@ -4,8 +4,8 @@
 ===============================================================================
   File        : software/uwb_rtls_studio/test/test_live_tracking_flow.py
   Description : Integration test script for verifying ranging and fusion stream.
-                Supports real device testing (USE_REAL_DEVICE = 1) and
-                automated mock GUI visualization testing (USE_REAL_DEVICE = 0).
+                Uses shared UWB_RTLS_TEST_MODE macro:
+                1 = mock GUI without hardware, 0 = real dongle/device flow.
 ===============================================================================
 """
 from __future__ import annotations
@@ -22,11 +22,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))) 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))   # software
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))) # root
 
-# --- TEST SETTING MACRO ---
-# Set to 1 to test with a real dongle and tag connected to PC.
-# Set to 0 to run automated GUI mocking tests without hardware.
-USE_REAL_DEVICE = 0
-# --------------------------
+from utils.runtime_mode import is_test_mode, mode_label
+
+TEST_MODE = is_test_mode()
 
 from common.transport import VvAddress, VvProtocol
 from common.commands import CommandFactory
@@ -52,7 +50,7 @@ def make_anchor_layout_resp(src: int, dst: int, seq: int) -> any:
     return pkt
 
 # =============================================================================
-# REAL DEVICE TEST FLOW (USE_REAL_DEVICE = 1)
+# REAL DEVICE TEST FLOW (UWB_RTLS_TEST_MODE = 0)
 # =============================================================================
 def run_real_device_test():
     from vv_testings.vv_test_session import VvTestSession
@@ -127,7 +125,7 @@ def run_real_device_test():
         print("[SUCCESS] Ranging stopped. Real device test completed successfully.")
 
 # =============================================================================
-# MOCK GUI DEVICE SIMULATION TEST FLOW (USE_REAL_DEVICE = 0)
+# MOCK GUI DEVICE SIMULATION TEST FLOW (UWB_RTLS_TEST_MODE = 1)
 # =============================================================================
 class MockSerialDevice(QObject):
     """Simulates UWB Tag/MCU device firmware over SerialService signals"""
@@ -304,10 +302,8 @@ class MockSerialDevice(QObject):
 
 
 def run_mock_gui_test():
-    # 1. Set environment variable to bypass popups (skip Dongle and Scan dialogs)
-    os.environ["UWB_RTLS_BYPASS_POPUPS"] = "1"
     print("\n=== STARTING AUTOMATED MOCK GUI TEST ===")
-    print("[INFO] Bypassing connection dialog popups. Skipped to MainWindow.")
+    print("[INFO] Shared macro is TEST/MOCK. Skipped to MainWindow without dongle/scan popups.")
 
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     
@@ -449,7 +445,8 @@ def run_mock_gui_test():
 # MAIN SCRIPT ENTRY
 # =============================================================================
 if __name__ == "__main__":
-    if USE_REAL_DEVICE:
-        run_real_device_test()
-    else:
+    print(f"[MODE] {mode_label()}")
+    if TEST_MODE:
         run_mock_gui_test()
+    else:
+        run_real_device_test()

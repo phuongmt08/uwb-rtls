@@ -39,6 +39,44 @@ from PyQt6.QtGui import QFont
 from utils.logging_config import setup_logging
 setup_logging()
 
+from utils.runtime_mode import is_test_mode, mock_device_identity, seed_mock_app_state
+
+TEST_MODE = is_test_mode()
+
+class _SignalStub:
+    def connect(self, *args, **kwargs):
+        return None
+
+    def emit(self, *args, **kwargs):
+        return None
+
+
+class MockSerialService:
+    """No-op serial shim for offline UI debugging without dongle/COM."""
+
+    def __init__(self):
+        self.connection_lost = _SignalStub()
+        self.error_occurred = _SignalStub()
+        self.data_received = _SignalStub()
+        self._open = False
+
+    @property
+    def is_open(self):
+        return self._open
+
+    @property
+    def port_name(self):
+        return "MOCK"
+
+    def open(self, port: str):
+        self._open = True
+
+    def write(self, data: bytes):
+        return None
+
+    def close(self):
+        self._open = False
+
 def main():
     # High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
@@ -59,7 +97,7 @@ def main():
     from services.serial_service import SerialService
     from services.protocol_service import ProtocolService
 
-    serial_service = SerialService()
+    serial_service = MockSerialService() if TEST_MODE else SerialService()
     protocol_service = ProtocolService(serial_service)
 
     from repository.telemetry_repository import TelemetryRepository
@@ -109,15 +147,13 @@ def main():
     dongle_model = DongleModel(serial_service, protocol_service)
     dongle_vm = DongleViewModel(dongle_model)
 
-    # Development-only bypass. Default production flow shows dongle/scan popups. Macro ON/OFF popups
-    # Set env var UWB_RTLS_BYPASS_POPUPS = 1 to skip straight to main window with mock device.
-    BYPASS_POPUPS = os.getenv("UWB_RTLS_BYPASS_POPUPS", "1").strip().lower() in {"1", "true", "yes", "on"}
-
     # Vòng lặp cho Connection Flow
     connected_name = ""
     connected_mac = ""
 
-    if not BYPASS_POPUPS:
+    if TEST_MODE:
+        connected_name, connected_mac = mock_device_identity()
+    else:
         while True:
             dongle_popup = DonglePopup(dongle_vm)
             if dongle_popup.exec() != 1:  # 1 = QDialog.DialogCode.Accepted
@@ -148,10 +184,6 @@ def main():
                 continue
             else:
                 sys.exit(0)
-    else:
-        # Default fallback values for development/testing when popups are bypassed
-        connected_name = "Mock Device"
-        connected_mac = "00:11:22:33:44:55"
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 4: Main Window
@@ -224,6 +256,10 @@ def main():
     # Seed the connected device info so the tab shows it immediately
     if connected_name and connected_mac:
         device_info_vm.set_connected_device(connected_name, connected_mac)
+
+        if TEST_MODE:
+            from utils.app_state import shared_app_state
+            seed_mock_app_state(shared_app_state, connected_name, connected_mac)
 
     window = MainWindow(
         live_tracking_vm=live_tracking_vm,

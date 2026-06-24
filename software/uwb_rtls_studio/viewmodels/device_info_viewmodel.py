@@ -62,6 +62,9 @@ class DeviceInfoViewModel(QObject):
         self._ble_scan_repo = ble_scan_repo
         self._telemetry_model = telemetry_model
         self._last_telemetry: dict = {}
+        self._is_developer_mode = False
+        self._last_rtos_resource: dict = {}
+        self._last_rtos_tasks: list[dict] = []
 
         # ── Bind Model signals → ViewModel presentation ─────────────
         self.model.device_info_parsed.connect(self._on_device_info_parsed)
@@ -84,6 +87,7 @@ class DeviceInfoViewModel(QObject):
 
         from utils.app_state import shared_app_state
         shared_app_state.rtos_resource_changed.connect(self._on_rtos_resource_changed)
+        shared_app_state.rtos_task_stats_changed.connect(self._on_rtos_task_stats_changed)
 
         # ── Handle Dongle Connection Lifecycle ───────────────────────
         if self.dongle_model:
@@ -116,6 +120,10 @@ class DeviceInfoViewModel(QObject):
         """Called by View when user clicks Connect on a scanned device."""
         self.model.connect_device(mac_hex)
 
+    def send_time_sync_adv(self, device_type: int, device_id: int):
+        """Forward time sync advertising set command to the model."""
+        self.model.send_time_sync_adv(device_type, device_id)
+
     def request_end_session(self, reason: int = 0):
         """Forward session shutdown request to the model command path."""
         # BE/API: session shutdown from Device Info flow.
@@ -129,6 +137,10 @@ class DeviceInfoViewModel(QObject):
 
 
     # ═══════════════════════════════════════════════════════════════════
+    def set_developer_mode(self, enabled: bool):
+        self._is_developer_mode = bool(enabled)
+        self._emit_rtos_telemetry()
+
     #  DONGLE LIFECYCLE
     # ═══════════════════════════════════════════════════════════════════
 
@@ -174,44 +186,156 @@ class DeviceInfoViewModel(QObject):
             }
         self._last_telemetry.update(formatted_data)
         self.telemetry_updated.emit(self._last_telemetry.copy())
-        return
-        formatted_data = {
-            "bat_soc_percent": data.get("bat_soc_percent", 0),
-            "bat_voltage_str": f"{data.get('bat_voltage_mv', 0) / 1000.0:.2f}V",
-            "remaining_str": f"{data.get('remaining_min', 0)} min",
-            "charging_str": "Yes" if data.get("is_charging") else "No",
-            "mcu_temp_str": f"{data.get('mcu_temp_c', 0):.1f} °C",
-            "uwb_temp_str": f"{data.get('uwb_temp_c', 0):.1f} °C",
-            "imu_temp_str": f"{data.get('imu_temp_c', 0):.1f} °C",
-            "vdda_str": f"{data.get('vdda_mv', 0) / 1000.0:.2f}V",
-            "uwb_vbat_str": f"{data.get('uwb_vbat_mv', 0) / 1000.0:.2f}V",
-            "heap_usage": data.get("heap_usage", "-"),
-            "stack_usage": data.get("stack_usage", "-"),
-            "cpu_usage": data.get("cpu_usage", "-")
-        }
-        self._last_telemetry.update(formatted_data)
-        self.telemetry_updated.emit(self._last_telemetry.copy())
 
     def _on_rtos_resource_changed(self, data: dict):
-        """Merge RTOS diagnostics into the telemetry panel without clearing battery data."""
+        """Merge RTOS resource data into the telemetry panel without clearing battery data."""
+        self._last_rtos_resource = dict(data or {})
         if self._telemetry_model:
-            self._telemetry_model.handle_rtos_resource(data)
+            self._telemetry_model.handle_rtos_resource(self._last_rtos_resource)
+        self._emit_rtos_telemetry()
+
+    def _on_rtos_task_stats_changed(self, tasks: list):
+        """Merge RTOS per-task stats into the telemetry panel without polling UI code."""
+        self._last_rtos_tasks = [dict(item) for item in (tasks or [])]
+        if self._telemetry_model:
+            self._telemetry_model.handle_rtos_task_stats(self._last_rtos_tasks)
+        self._emit_rtos_telemetry()
+
+    def _emit_rtos_telemetry(self):
+        if self._telemetry_model:
             self._last_telemetry.update(self._telemetry_model.display_snapshot())
-        else:
-            cpu = data.get("cpu_busy_percent")
-            self._last_telemetry.update({
-                "heap_usage": self._format_bytes(data.get("heap_free_bytes")),
-                "stack_usage": self._format_bytes(data.get("min_stack_free_bytes")),
-                "cpu_usage": f"{float(cpu):.1f}%" if cpu is not None else "--",
-            })
-        self.telemetry_updated.emit(self._last_telemetry.copy())
-        return
+
         self._last_telemetry.update({
-            "heap_usage": self._format_bytes(data.get("heap_free_bytes")),
-            "stack_usage": self._format_bytes(data.get("min_stack_free_bytes")),
-            "cpu_usage": f"{data.get('cpu_busy_percent', 0.0):.1f}%",
+            "heap_usage": self._format_rtos_heap(),
+            "stack_usage": self._format_rtos_stack(),
+            "cpu_usage": self._format_rtos_cpu(),
         })
         self.telemetry_updated.emit(self._last_telemetry.copy())
+
+    def _format_rtos_heap(self) -> str:
+        data = self._last_rtos_resource
+        if not data:
+            return "--"
+
+        free_bytes = data.get("heap_free_bytes")
+        min_free = data.get("heap_min_ever_free_bytes")
+        total = data.get("heap_total_bytes")
+
+        if self._is_developer_mode:
+            parts = []
+            if total is not None and free_bytes is not None:
+                used = max(0, int(total) - int(free_bytes))
+                current_pct = (used / int(total) * 100.0) if int(total) else 0.0
+                parts.append(f"used={current_pct:.1f}% ({used}/{int(total)} B)")
+                if min_free is not None:
+                    peak_used = max(0, int(total) - int(min_free))
+                    peak_pct = (peak_used / int(total) * 100.0) if int(total) else 0.0
+                    parts.append(f"peak={peak_pct:.1f}%")
+            else:
+                parts.append(f"free={self._format_bytes(free_bytes)}")
+                parts.append(f"min_ever_free={self._format_bytes(min_free)}")
+            parts.append(f"sample={int(data.get('sample_window_ms', 0))} ms")
+            parts.append(f"tasks={int(data.get('task_count', 0))}")
+            parts.append(f"health=0x{int(data.get('health_flags', 0)):X}")
+            return " | ".join(parts)
+
+        if total is not None and free_bytes is not None:
+            used = max(0, int(total) - int(free_bytes))
+            pct = (used / int(total) * 100.0) if int(total) else 0.0
+            return f"Used {pct:.1f}% ({used}/{int(total)} B)"
+        return f"Free {self._format_bytes(free_bytes)}"
+
+    def _format_rtos_stack(self) -> str:
+        tasks = self._last_rtos_tasks
+        resource = self._last_rtos_resource
+        if not tasks and not resource:
+            return "--"
+
+        stack_values = [int(t.get("stack_min_free_bytes", 0)) for t in tasks]
+        percent_mode = bool(stack_values) and max(stack_values) <= 100
+
+        if self._is_developer_mode:
+            parts = []
+            min_free = resource.get("min_stack_free_bytes")
+            min_task = resource.get("min_stack_task_id")
+            if min_free is not None:
+                label = f"min_free={self._format_bytes(min_free)}"
+                if min_task is not None:
+                    label += f" task={int(min_task)}"
+                parts.append(label)
+            if stack_values:
+                avg = sum(stack_values) / len(stack_values)
+                parts.append(f"avg={self._format_stack_value(avg, percent_mode)}")
+                parts.extend(
+                    f"{self._task_label(task)}:{self._format_stack_value(task.get('stack_min_free_bytes'), percent_mode)}"
+                    for task in tasks
+                )
+            return " | ".join(parts) if parts else "--"
+
+        if stack_values:
+            avg = sum(stack_values) / len(stack_values)
+            if percent_mode:
+                return f"Avg {avg:.1f}%"
+            return f"Avg free {self._format_bytes(avg)}"
+        return self._format_bytes(resource.get("min_stack_free_bytes"))
+
+    def _format_rtos_cpu(self) -> str:
+        tasks = self._last_rtos_tasks
+        resource = self._last_rtos_resource
+        active_cpu = self._active_cpu_percent(tasks, resource)
+
+        if self._is_developer_mode:
+            parts = []
+            resource_cpu = resource.get("cpu_busy_percent")
+            if resource_cpu is not None:
+                parts.append(f"busy={float(resource_cpu):.1f}%")
+            if active_cpu is not None:
+                parts.append(f"active={float(active_cpu):.1f}%")
+            parts.extend(
+                f"{self._task_label(task)}:{self._task_cpu_percent(task):.1f}%"
+                for task in tasks
+            )
+            return " | ".join(parts) if parts else "--"
+
+        if active_cpu is not None:
+            return f"{float(active_cpu):.1f}%"
+        resource_cpu = resource.get("cpu_busy_percent")
+        return f"{float(resource_cpu):.1f}%" if resource_cpu is not None else "--"
+
+    @classmethod
+    def _active_cpu_percent(cls, tasks: list[dict], resource: dict):
+        idle_values = [cls._task_cpu_percent(task) for task in tasks if cls._is_idle_task(task)]
+        if idle_values:
+            return max(0.0, min(100.0, 100.0 - sum(idle_values)))
+
+        non_idle = [cls._task_cpu_percent(task) for task in tasks if not cls._is_idle_task(task)]
+        if non_idle:
+            return max(0.0, min(100.0, sum(non_idle)))
+        return resource.get("cpu_busy_percent")
+
+    @staticmethod
+    def _task_cpu_percent(task: dict) -> float:
+        if task.get("cpu_percent") is not None:
+            return float(task.get("cpu_percent"))
+        return float(task.get("cpu_permille", 0)) / 10.0
+
+    @staticmethod
+    def _is_idle_task(task: dict) -> bool:
+        name = str(task.get("name", "")).strip().lower()
+        return name in {"idle", "tskidle", "idle task"} or "idle" in name
+
+    @staticmethod
+    def _task_label(task: dict) -> str:
+        name = str(task.get("name", "")).strip()
+        return name or f"T{int(task.get('task_id', 0))}"
+
+    def _format_stack_value(self, value, percent_mode: bool) -> str:
+        if value is None:
+            return "--"
+        value = float(value)
+        if percent_mode:
+            return f"{value:.1f}%"
+        return self._format_bytes(value)
 
     @staticmethod
     def _format_bytes(value):
@@ -290,8 +414,8 @@ class DeviceInfoViewModel(QObject):
         except Exception:
             dt_str = "Invalid Time"
 
-        # is_syncing = correction was just sent
-        self.time_sync_updated.emit(dt_str, is_synced, was_corrected)
+        # Only show Syncing while correction is still outside the accepted threshold.
+        self.time_sync_updated.emit(dt_str, is_synced, was_corrected and not is_synced)
 
     def _on_scan_data_updated(self, merged_list: list):
         """Forward scan data to View with scanning state from Model."""

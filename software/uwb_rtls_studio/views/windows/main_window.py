@@ -99,6 +99,8 @@ class MainWindow(QMainWindow):
         if self._log_vm:
             self._tab_log.set_viewmodel(self._log_vm)
 
+        if hasattr(self._tab_device, "set_developer_mode"):
+            self._tab_device.set_developer_mode(False)
         self._tab_config.set_developer_mode(False)
         self._tab_log.set_developer_mode(False)
         self._tab_tracking.set_developer_mode(False)
@@ -298,7 +300,9 @@ class MainWindow(QMainWindow):
         self.tabs.setTabVisible(self._spatial_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._tracking_tab_index, not self._is_developer)
 
-        # Update config, log, and tracking tabs
+        # Update config, log, device info, and tracking tabs
+        if hasattr(self._tab_device, "set_developer_mode"):
+            self._tab_device.set_developer_mode(self._is_developer)
         self._tab_config.set_developer_mode(self._is_developer)
         self._tab_log.set_developer_mode(self._is_developer)
         self._tab_tracking.set_developer_mode(False)

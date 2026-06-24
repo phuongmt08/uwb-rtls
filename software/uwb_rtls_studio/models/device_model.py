@@ -80,6 +80,14 @@ class DeviceModel(QObject):
         self._connected_grace_until = 0.0
         self._session_start_scheduled = False
         self._pending_target_operation = None
+        self._time_sync_correcting = False
+        self._time_sync_retry_count = 0
+        self._time_sync_max_retries = 3
+        self._time_sync_cooldown_until = 0.0
+        self._time_sync_verify_delay_ms = 200
+        self._time_sync_retry_base_delay_ms = 500
+        self._time_sync_cooldown_s = 10.0
+
 
         # Advertising devices storage
         self._adv_devices = {}                  # mac_hex -> scan fields
@@ -100,6 +108,14 @@ class DeviceModel(QObject):
         self._session_bootstrap_timer = QTimer(self)
         self._session_bootstrap_timer.setSingleShot(True)
         self._session_bootstrap_timer.timeout.connect(self._run_scheduled_session_start)
+
+        self._time_sync_verify_timer = QTimer(self)
+        self._time_sync_verify_timer.setSingleShot(True)
+        self._time_sync_verify_timer.timeout.connect(self._queue_time_sync_verify)
+
+        self._time_sync_retry_timer = QTimer(self)
+        self._time_sync_retry_timer.setSingleShot(True)
+        self._time_sync_retry_timer.timeout.connect(self._queue_time_sync_set)
 
         # ── Serial Connection Lost Listener ─────────────────────────
         self._protocol._serial.connection_lost.connect(self.on_connection_lost)
@@ -137,17 +153,17 @@ class DeviceModel(QObject):
         # BE/API: BLE lifecycle action owned by Device Info flow.
         return self._send_command("ble_disconnect", dst_addr=VvAddress.CENTRAL, reason=reason)
 
-    def request_anchor_layout(self):
+    def request_anchor_layout(self, force: bool = False):
         # BE/API: legacy backend helper for Config/Calibration orchestration.
-        return self._request_query("anchor_layout_get", dst_addr=VvAddress.MCU)
+        return self._request_query("anchor_layout_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
 
     def set_anchor_layout(self, anchors: list):
         # BE/API: legacy backend helper for Config/Calibration orchestration.
         return self._send_command("anchor_layout_set", dst_addr=VvAddress.MCU, anchors=anchors)
 
-    def request_ranging_config(self):
+    def request_ranging_config(self, force: bool = False):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
+        return self._request_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
 
     def set_ranging_config(self, period_ms: int, timeout_ms: int):
         # BE/API: legacy backend helper for Config tab orchestration.
@@ -162,33 +178,41 @@ class DeviceModel(QObject):
             timeout_ms=timeout_ms,
         )
 
-    def request_sys_config(self):
+    def request_sys_config(self, force: bool = False):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("sys_config_get", dst_addr=VvAddress.MCU)
+        return self._request_query("sys_config_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
 
     def set_sys_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
         return self._send_command("sys_config_set", dst_addr=VvAddress.MCU, **kwargs)
 
-    def request_sensor_fusion_config(self):
+    def request_sensor_fusion_config(self, force: bool = False):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU)
+        return self._request_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
 
     def set_sensor_fusion_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
         return self._send_command("sensor_fusion_cfg_set", dst_addr=VvAddress.MCU, **kwargs)
 
-    def request_pos_calib_config(self):
+    def request_pos_calib_config(self, force: bool = False):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU)
+        return self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
 
     def set_pos_calib_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
         return self._send_command("pos_calib_cfg_set", dst_addr=VvAddress.MCU, **kwargs)
 
-    def request_ble_conn_params(self):
+    def request_ble_conn_params(self, force: bool = False):
         # BE/API: backend helper for Device Info BLE connection parameters.
-        return self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL)
+        return self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None)
+
+    def request_rtos_resource(self, force: bool = False):
+        # BE/API: MCU RTOS heap/CPU/stack resource snapshot for Device Info.
+        return self._request_query("rtos_resource_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+
+    def request_rtos_task_stats(self, force: bool = False):
+        # BE/API: MCU per-task CPU/stack snapshot for Device Info.
+        return self._request_query("rtos_task_stats_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
 
     def set_ble_conn_params(
         self,
@@ -206,6 +230,21 @@ class DeviceModel(QObject):
             slave_latency=slave_latency,
             sup_timeout_ms=sup_timeout_ms,
         )
+
+    def set_ble_adv_config(self, enable: bool, serial_number: int, device_name: str):
+        # BE/API: update peripheral BLE advertising payload/config.
+        return self._send_command(
+            "ble_adv_config_set",
+            dst_addr=VvAddress.PERIPHERAL,
+            enable=enable,
+            serial_number=serial_number,
+            device_name=device_name,
+        )
+
+    def set_host_transport(self, transport: int):
+        # BE/API: select MCU host transport without touching flash/FOTA flows.
+        return self._send_command("host_transport_set", dst_addr=VvAddress.MCU, transport=transport)
+
 
     def request_device_reset(self):
         # BE/API: lifecycle action exposed to Config tab.
@@ -310,6 +349,7 @@ class DeviceModel(QObject):
         self._log_stream_requested = False
         self._connected_grace_until = time.monotonic() + 1.5
         self._session_start_scheduled = False
+        self._reset_time_sync_flow()
         self.connection_state_changed.emit({
             "name": name, "mac": mac, "status": "Connected", "SwitchToLogTab": True
         })
@@ -351,7 +391,7 @@ class DeviceModel(QObject):
         
         # BE/API: session bootstrap queries owned by Device Info.
         self._request_query("device_information_get", dst_addr=VvAddress.MCU)
-        self._sync_host_time_once()
+        self._start_time_sync_correction(reason="session_start")
 
         # Load the connected device configuration once. Repository signals
         # remain the source of all response-driven UI updates.
@@ -365,30 +405,110 @@ class DeviceModel(QObject):
         self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL)
         return True
 
-    def _sync_host_time_once(self):
-        """Set host time after connect, then verify it with one GET."""
+    def _start_time_sync_correction(self, reason: str = "manual") -> bool:
+        """Queue a bounded time correction flow without bypassing other API work."""
+        if not self._connected_mac:
+            return False
+        if self._time_sync_correcting:
+            log.debug("Time sync correction already active; reason=%s ignored.", reason)
+            return False
+        now = time.monotonic()
+        if now < self._time_sync_cooldown_until:
+            log.warning("Time sync correction cooling down; reason=%s skipped.", reason)
+            return False
+        self._time_sync_correcting = True
+        self._time_sync_retry_count = 0
+        log.info("Starting time sync correction flow: %s", reason)
+        self._queue_time_sync_set()
+        return True
+
+    def _queue_time_sync_set(self):
+        if not self._connected_mac:
+            self._reset_time_sync_flow()
+            return False
+
         host_time_ms = int(time.time() * 1000)
+        tz_offset_min = self._host_timezone_offset_min()
+        self._request_query(
+            "time_sync_set",
+            dst_addr=VvAddress.MCU,
+            cache_ttl_s=0.0,
+            force=True,
+            unix_time_ms=host_time_ms,
+            timezone_offset=tz_offset_min,
+        )
+        self._time_sync_verify_timer.start(self._time_sync_verify_delay_ms)
+        return True
+
+    def _queue_time_sync_verify(self):
+        if not self._connected_mac:
+            self._reset_time_sync_flow()
+            return False
+        self._request_query("time_sync_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
+        return True
+
+    def _host_timezone_offset_min(self) -> int:
         local_time_struct = time.localtime()
         timezone_offset = getattr(time, "timezone", 0)
         if getattr(time, "daylight", 0) and local_time_struct.tm_isdst:
             timezone_offset = getattr(time, "altzone", timezone_offset)
-        tz_offset_min = int((-timezone_offset) / 60)
+        return int((-timezone_offset) / 60)
 
-        self._send_command(
-            "time_sync_set",
+    def send_time_sync_adv(self, device_type: int, device_id: int) -> bool:
+        """Send a time sync advertising set command to a specific device."""
+        host_time_ms = int(time.time() * 1000)
+        tz_offset_min = self._host_timezone_offset_min()
+        log.info("Sending time_sync_adv_set to MCU: type=%d, id=%d, time=%d, tz=%d",
+                 device_type, device_id, host_time_ms, tz_offset_min)
+        return self._send_command(
+            "time_sync_adv_set",
             dst_addr=VvAddress.MCU,
+            device_type=device_type,
+            device_id=device_id,
             unix_time_ms=host_time_ms,
             timezone_offset=tz_offset_min,
         )
-        QTimer.singleShot(
-            200,
-            lambda: self._request_query(
-                "time_sync_get",
-                dst_addr=VvAddress.MCU,
-                cache_ttl_s=0.0,
-                force=True,
-            ),
+
+
+    def _reset_time_sync_flow(self) -> None:
+        self._time_sync_correcting = False
+        self._time_sync_retry_count = 0
+        if hasattr(self, "_time_sync_verify_timer"):
+            self._time_sync_verify_timer.stop()
+        if hasattr(self, "_time_sync_retry_timer"):
+            self._time_sync_retry_timer.stop()
+
+    def _handle_time_sync_drift(self, time_diff_ms: int) -> None:
+        if not self._connected_mac:
+            self._reset_time_sync_flow()
+            return
+
+        if not self._time_sync_correcting:
+            self._start_time_sync_correction(reason=f"event drift {time_diff_ms}ms")
+            return
+
+        self._time_sync_verify_timer.stop()
+        self._time_sync_retry_count += 1
+        if self._time_sync_retry_count > self._time_sync_max_retries:
+            self._reset_time_sync_flow()
+            self._time_sync_cooldown_until = time.monotonic() + self._time_sync_cooldown_s
+            log.warning(
+                "Time sync still out of threshold after %d retries; cooling down for %.1fs.",
+                self._time_sync_max_retries,
+                self._time_sync_cooldown_s,
+            )
+            return
+
+        delay_ms = self._time_sync_retry_base_delay_ms * (2 ** (self._time_sync_retry_count - 1))
+        log.warning(
+            "Time sync drift %dms exceeds threshold %dms; retry %d/%d in %dms.",
+            time_diff_ms,
+            TIME_SYNC_THRESHOLD_MS,
+            self._time_sync_retry_count,
+            self._time_sync_max_retries,
+            delay_ms,
         )
+        self._time_sync_retry_timer.start(delay_ms)
 
     def request_session_start_events(self, force: bool = False):
         """Trigger session-start data events that should be fetched once per connection."""
@@ -403,6 +523,9 @@ class DeviceModel(QObject):
         self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
         # BE/API: Device Info BLE connection parameter snapshot.
         self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+        # BE/API: MCU RTOS diagnostics snapshot. Responses are parsed by DiagnosticsRepository.
+        self._request_query("rtos_resource_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
+        self._request_query("rtos_task_stats_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
         return True
 
     def request_log_stream(self, force: bool = False):
@@ -495,6 +618,7 @@ class DeviceModel(QObject):
             self._connected_grace_until = 0.0
             self._ble_status_timer.stop()
             self._session_bootstrap_timer.stop()
+            self._reset_time_sync_flow()
             delay_ms = 150 # Reduced delay
 
         # 2) Stop scan
@@ -551,6 +675,7 @@ class DeviceModel(QObject):
         self._prune_timer.stop()
         self._ble_status_timer.stop()
         self._session_bootstrap_timer.stop()
+        self._reset_time_sync_flow()
         self._pending_target_operation = None
 
         self.connection_state_changed.emit({
@@ -715,6 +840,7 @@ class DeviceModel(QObject):
             shared_app_state.connected_device = {}
             self._ble_status_timer.stop()
             self._session_bootstrap_timer.stop()
+            self._reset_time_sync_flow()
             self._pending_target_operation = None
             self.connection_state_changed.emit({
                 "name": "-", "mac": "-", "status": "Disconnected"
@@ -743,20 +869,15 @@ class DeviceModel(QObject):
             })
 
     def _handle_time_sync(self, resp):
-        """Publish the event-driven time-sync response."""
+        """Publish event-driven time state and correct drift only when needed."""
         dev_time_ms = getattr(resp, 'unix_time_ms', 0)
         host_time_ms = int(time.time() * 1000)
-
-        # Calculate timezone offset
-        local_time_struct = time.localtime()
-        timezone_offset = getattr(time, 'timezone', 0)
-        if getattr(time, 'daylight', 0) and local_time_struct.tm_isdst:
-            timezone_offset = getattr(time, 'altzone', timezone_offset)
-        tz_offset_sec = -timezone_offset
-        tz_offset_min = int(tz_offset_sec / 60)
+        tz_offset_min = self._host_timezone_offset_min()
+        tz_offset_sec = tz_offset_min * 60
 
         time_diff_ms = abs(host_time_ms - dev_time_ms)
         is_synced = time_diff_ms <= TIME_SYNC_THRESHOLD_MS
+        was_corrected = self._time_sync_correcting
 
         self.time_sync_result.emit({
             "dev_time_ms": dev_time_ms,
@@ -765,8 +886,17 @@ class DeviceModel(QObject):
             "tz_offset_min": tz_offset_min,
             "time_diff_ms": time_diff_ms,
             "is_synced": is_synced,
-            "was_corrected": False,
+            "was_corrected": was_corrected,
         })
+
+        if is_synced:
+            if self._time_sync_correcting:
+                log.info("Time sync verified: drift=%dms <= threshold=%dms.", time_diff_ms, TIME_SYNC_THRESHOLD_MS)
+            self._reset_time_sync_flow()
+            return
+
+        log.warning("Time sync out of threshold: drift=%dms > threshold=%dms.", time_diff_ms, TIME_SYNC_THRESHOLD_MS)
+        self._handle_time_sync_drift(time_diff_ms)
 
     def _handle_sys_config(self, resp):
         if not resp.HasField("config"):
@@ -787,6 +917,12 @@ class DeviceModel(QObject):
             "tx_power": cfg.tx_power,
             "anchor_list": cfg.anchor_list,
             "power_mode": cfg.power_mode,
+            "uwb_preamble_len": cfg.uwb_preamble_len,
+            "uwb_rx_pac": cfg.uwb_rx_pac,
+            "uwb_ns_sfd": cfg.uwb_ns_sfd,
+            "uwb_phr_mode": cfg.uwb_phr_mode,
+            "smart_tx_power": cfg.smart_tx_power,
+            "pg_delay": cfg.pg_delay,
         }
         self.sys_config_parsed.emit(cfg_dict)
 
@@ -843,6 +979,16 @@ class DeviceModel(QObject):
             "max_std_m": cfg.max_std_m,
             "damping": cfg.damping,
             "iterations": cfg.iterations,
+            "last_pair_error_mean_m": cfg.last_pair_error_mean_m,
+            "iterations_taken": cfg.iterations_taken,
+            "last_pair_error_spread_m": cfg.last_pair_error_spread_m,
+            "last_pair_std_mean_m": cfg.last_pair_std_mean_m,
+            "last_usable_pair_count": cfg.last_usable_pair_count,
+            "last_rejected_pair_count": cfg.last_rejected_pair_count,
+            "rejected_batch_count": cfg.rejected_batch_count,
+            "last_pair_error_rms_m": cfg.last_pair_error_rms_m,
+            "last_pair_error_max_abs_m": cfg.last_pair_error_max_abs_m,
+            "last_pair_error_mean_abs_m": cfg.last_pair_error_mean_abs_m,
         }
         self.pos_calib_cfg_parsed.emit(cfg_dict)
 
