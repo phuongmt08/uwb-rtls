@@ -1085,17 +1085,7 @@ static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
 
 static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt)
 {
-    CHECK_VOID(pkt && s_network_cmd.stream);
-
-    uint8_t dst = protobuf_PACKET_ADDR_PERIPHERAL;
-    if (pkt->has_hdr && pkt->hdr.has_addr) {
-        dst = (uint8_t)pkt->hdr.addr.src;
-    }
-
-    RLOG_I(OBJECT_CODE, "Received BLE adv config request from 0x%02X", (unsigned)dst);
-    if (!sys_ble_peripheral_send_config(dst)) {
-        RLOG_W(OBJECT_CODE, "Failed to send BLE adv config to 0x%02X", (unsigned)dst);
-    }
+	sys_ble_peripheral_set_config();
 }
 #endif
 

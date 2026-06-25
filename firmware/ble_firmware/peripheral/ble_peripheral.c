@@ -654,25 +654,31 @@ void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32
 
     if (enable)
     {
-        if (!m_is_advertising)
+        bool restart_advertising = m_is_advertising;
+        if (restart_advertising)
         {
-            ble_gap_conn_sec_mode_t sec_mode;
-            BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
-            
-            if (device_name != NULL && strlen(device_name) > 0)
-            {
-                sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)device_name, strlen(device_name));
-            }
-            else
-            {
-                char auto_name[30];
-                snprintf(auto_name, sizeof(auto_name), "%s%02X", SYSTEM_CONFIG_DEVICE_PREFIX, (unsigned int)serial_number);
-                sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)auto_name, strlen(auto_name));            
-            }
-            
-            // Re-encode advertisement data to reflect new device name
-            advertising_init();
+            ble_peripheral_advertising_stop();
+        }
 
+        ble_gap_conn_sec_mode_t sec_mode;
+        BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
+
+        if (device_name != NULL && strlen(device_name) > 0)
+        {
+            sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)device_name, strlen(device_name));
+        }
+        else
+        {
+            char auto_name[30];
+            snprintf(auto_name, sizeof(auto_name), "%s%02X", SYSTEM_CONFIG_DEVICE_PREFIX, (unsigned int)serial_number);
+            sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)auto_name, strlen(auto_name));
+        }
+
+        // Re-encode advertisement data to reflect the latest device name.
+        advertising_init();
+
+        if (m_conn_handle == BLE_CONN_HANDLE_INVALID)
+        {
             ble_peripheral_advertising_start();
         }
     }
