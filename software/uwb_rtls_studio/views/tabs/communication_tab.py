@@ -1356,20 +1356,32 @@ class CommunicationTab(QWidget):
                 return f"{value:.4f}"
             return str(value)
 
+        def _is_repeated_field(fd) -> bool:
+            label = getattr(fd, "label", None)
+            if label is not None:
+                repeated_label = getattr(type(fd), "LABEL_REPEATED", 3)
+                return label == repeated_label
+            return bool(getattr(fd, "is_repeated", False))
+
+        def _is_message_field(fd) -> bool:
+            field_type = getattr(fd, "type", None)
+            message_type = getattr(type(fd), "TYPE_MESSAGE", 11)
+            return field_type == message_type
+
         def _flatten_fields(value, prefix: str = "") -> list[str]:
             if hasattr(value, "ListFields"):
                 parts: list[str] = []
                 for fd, subval in value.ListFields():
                     field_prefix = f"{prefix}{fd.name}"
-                    if fd.label == fd.LABEL_REPEATED:
-                        if fd.type == fd.TYPE_MESSAGE:
+                    if _is_repeated_field(fd):
+                        if _is_message_field(fd):
                             for idx, entry in enumerate(subval):
                                 parts.extend(_flatten_fields(entry, f"{field_prefix}[{idx}]."))
                         else:
                             parts.append(f"{field_prefix}: [{', '.join(_scalar_to_text(v) for v in subval)}]")
-                    elif fd.type == fd.TYPE_MESSAGE:
+                    elif _is_message_field(fd):
                         nested = _flatten_fields(subval, f"{field_prefix}.")
-                        parts.extend(nested or [f"{field_prefix}: {{}}"] )
+                        parts.extend(nested or [f"{field_prefix}: {{}}"])
                     else:
                         parts.append(f"{field_prefix}: {_scalar_to_text(subval)}")
                 return parts
