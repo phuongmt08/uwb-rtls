@@ -387,11 +387,14 @@ class DeviceInfoViewModel(QObject):
         })
 
     def _on_connection_state_changed(self, info: dict):
-        """Model reports connection state change → emit to View."""
-        self.device_info_updated.emit({
+        """Model reports connection state change -> emit a complete UI snapshot."""
+        payload = {
             "Status": info.get("status", "-"),
             "SwitchToLogTab": info.get("SwitchToLogTab", False),
-        })
+            "Device Name": info.get("name", self.model.connected_name or "-"),
+            "MAC Address": info.get("mac", self.model.connected_mac or "-"),
+        }
+        self.device_info_updated.emit(payload)
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
             self.model.schedule_session_start(delay_ms=1500, force=True)
 

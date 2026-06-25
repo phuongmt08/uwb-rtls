@@ -25,7 +25,15 @@ import sys
 import os
 import logging
 import signal
-signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
+def _force_exit(_signum, _frame):
+    os._exit(130)
+
+
+signal.signal(signal.SIGINT, _force_exit)
+if hasattr(signal, "SIGTERM"):
+    signal.signal(signal.SIGTERM, _force_exit)
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -579,8 +587,6 @@ def main():
 
     # Keep connected identity in the model for command/session routing only.
     # Device-data fields stay blank until a real protocol response is parsed.
-    if connected_name and connected_mac:
-        device_info_vm.set_connected_device(connected_name, connected_mac)
 
     if TEST_MODE:
         serial_service.open("COM_MOCK")
@@ -596,6 +602,9 @@ def main():
         serial_service=serial_service,
         protocol_service=protocol_service
     )
+    if connected_name and connected_mac:
+        device_info_vm.set_connected_device(connected_name, connected_mac)
+
     window.showMaximized()
 
     # Initialize device data after UI is fully ready

@@ -11,7 +11,7 @@
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QProgressBar, QMessageBox
+    QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
@@ -274,7 +274,7 @@ class ScanPopup(QDialog):
         self.reject()
 
     def _on_dongle_disconnected(self, msg: str):
-        QMessageBox.warning(self, "Disconnected", msg)
+        self._log.setText(msg)
         self._vm.cleanup()
         self.done(2)  # Return custom code for disconnect
 

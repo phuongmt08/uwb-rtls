@@ -689,6 +689,8 @@ class DeviceModel(QObject):
     # ═══════════════════════════════════════════════════════════════════
 
     def _on_packet(self, param_name: str, pkt):
+        if shared_app_state.manual_test_mode_enabled:
+            return
         if param_name == "device_information_resp":
             self._handle_device_info(pkt.device_information_resp)
         elif param_name == "battery_info_resp":

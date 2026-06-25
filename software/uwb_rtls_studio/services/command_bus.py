@@ -64,10 +64,9 @@ class CommandBus(QObject):
         pending request already covers the caller's need.
         """
         manual_bypass = kwargs.pop("manual_bypass", False)
-        if getattr(self, "manual_test_mode_enabled", False):
-            if not command_name.startswith("ble_") and not manual_bypass:
-                log.debug("Command blocked by manual test mode: %s", command_name)
-                return False
+        if getattr(self, "manual_test_mode_enabled", False) and not manual_bypass:
+            log.debug("Command blocked by manual test mode: %s", command_name)
+            return False
 
         if not is_command_enabled(command_name):
             log.info("Command skipped by flag: %s", command_name)
@@ -102,10 +101,9 @@ class CommandBus(QObject):
 
     def send(self, command_name: str, dst_addr: int | None = None, **kwargs: Any):
         manual_bypass = kwargs.pop("manual_bypass", False)
-        if getattr(self, "manual_test_mode_enabled", False):
-            if not command_name.startswith("ble_") and not manual_bypass:
-                log.debug("Command blocked by manual test mode: %s", command_name)
-                return None
+        if getattr(self, "manual_test_mode_enabled", False) and not manual_bypass:
+            log.debug("Command blocked by manual test mode: %s", command_name)
+            return None
 
         if not is_command_enabled(command_name):
             log.info("Command skipped by flag: %s", command_name)

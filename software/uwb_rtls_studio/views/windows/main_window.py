@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         self._is_developer = False
         self._session_active = False
         self._session_seconds = 0
+        self._reconnect_popup = None
 
         # -- Load UI from .ui file --
         uic.loadUi(UI_FILE, self)
@@ -69,10 +70,11 @@ class MainWindow(QMainWindow):
         # -- Connect signals --
         self._connect_signals()
 
-        # Init session timer but do not start it yet
+        # Init session timer
         self._session_timer = QTimer(self)
         self._session_timer.timeout.connect(self._tick_session)
         self._set_session_button_active(False)
+        self._begin_session(initial=True)
 
     def _setup_tabs(self):
         """Setup viewmodels for pre-loaded tabs from .ui"""
@@ -220,56 +222,44 @@ class MainWindow(QMainWindow):
         self._status_rms.setText(f"\U0001F4CA RMS: {rms:.3f} m")
 
     def _on_device_changed(self, info: dict):
-        name = info.get("Device Name")
-        status_text = info.get("Status", "Connected")
+        status_text = info.get("Status")
+        name = info.get("Device Name") or info.get("name") or "-"
 
         if name and name != "Unknown" and name != "-":
             self.device_badge.setText(f"\u25CF {name}")
-
-            if status_text == "Connecting":
-                self._status_conn.setText(f"\u23F3 Connecting: {name}")
-                self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
-                self._status_rate.setText("\U0001F504 ---")
-
-                # Stop session timer while connecting
-                self._session_active = False
-                self._session_timer.stop()
-                self._status_session.setText("\u23F2 Session: 00:00:00")
-                self._status_session.setStyleSheet("color: #94A3B8;")
-                self._set_session_button_active(False)
-            elif status_text == "Disconnecting":
-                self._status_conn.setText(f"\U0001F6D1 Disconnecting: {name}")
-                self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
-                self._status_rate.setText("\U0001F504 ---")
-                self._session_active = False
-                self._session_timer.stop()
-                self._set_session_button_active(False)
-            elif status_text == "Disconnected":
-                self._status_conn.setText(f"\U0001F534 Disconnected: {name}")
-                self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
-                self._status_rate.setText("\U0001F504 ---")
-                self._session_active = False
-                self._session_timer.stop()
-                self._set_session_button_active(False)
-            else:
-                self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
-                self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
-                self._status_rate.setText("\U0001F504 30 FPS")  # Target FPS
-
-                # Start session timer if not active
-                if not self._session_active:
-                    self._session_active = True
-                    self._session_seconds = 0
-                    if self._log_vm:
-                        self._log_vm.clear_session_logs()
-                    if self._main_vm:
-                        try:
-                            self._main_vm.start_session()
-                        except Exception:
-                            pass
-                    self._session_timer.start(1000)
-                    self._set_session_button_active(True)
         else:
+            self.device_badge.setText("\u25CF -")
+
+        if status_text == "Connecting":
+            self._status_conn.setText(f"\u23F3 Connecting: {name}")
+            self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
+            self._status_rate.setText("\U0001F504 ---")
+            return
+
+        if status_text == "Disconnecting":
+            self._status_conn.setText(f"\U0001F6D1 Disconnecting: {name}")
+            self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
+            self._status_rate.setText("\U0001F504 ---")
+            return
+
+        if status_text == "Disconnected":
+            label_name = name if name and name != "-" else "-"
+            self._status_conn.setText(f"\U0001F534 Disconnected: {label_name}")
+            self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
+            self._status_bat.setText("\U0001F50B ---")
+            self._status_bat.setStyleSheet("color: #94A3B8;")
+            self._status_rssi.setText("\U0001F4E1 RSSI: ---")
+            self._status_rms.setText("\U0001F4CA RMS: ---")
+            self._status_rate.setText("\U0001F504 ---")
+            return
+
+        if status_text == "Connected":
+            self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
+            self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
+            self._status_rate.setText("\U0001F504 30 FPS")
+            return
+
+        if not info:
             self.device_badge.setText("\u25CF -")
             self._status_conn.setText("\U0001F534 Disconnected")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -279,17 +269,30 @@ class MainWindow(QMainWindow):
             self._status_rms.setText("\U0001F4CA RMS: ---")
             self._status_rate.setText("\U0001F504 ---")
 
-            # Stop session timer
-            self._session_active = False
-            self._session_timer.stop()
-            self._status_session.setText("\u23F2 Session: 00:00:00")
-            self._status_session.setStyleSheet("color: #94A3B8;")
-            self._set_session_button_active(False)
-
     def _make_separator(self):
         sep = QLabel("|")
         sep.setStyleSheet("color: #334155; background: transparent;")
         return sep
+
+    def _begin_session(self, initial: bool = False):
+        if self._session_active:
+            return True
+        if self._main_vm:
+            try:
+                self._main_vm.start_session()
+            except Exception as exc:
+                if not initial:
+                    QMessageBox.warning(self, "Session Start Failed", str(exc))
+                return False
+        self._session_active = True
+        self._session_seconds = 0
+        if self._log_vm:
+            self._log_vm.clear_session_logs()
+        self._status_session.setText("\u23F2 Session: 00:00:00")
+        self._status_session.setStyleSheet("color: #10B981;")
+        self._session_timer.start(1000)
+        self._set_session_button_active(True)
+        return True
 
     def _on_mode_item_pressed(self, model_index):
         """Apply a popup mode selection on the first click."""
@@ -347,18 +350,7 @@ class MainWindow(QMainWindow):
 
     def _on_end_session(self):
         if not self._session_active:
-            if self._main_vm:
-                try:
-                    self._main_vm.start_session()
-                except Exception as exc:
-                    QMessageBox.warning(self, "Session Start Failed", str(exc))
-                    return
-            self._session_active = True
-            self._session_seconds = 0
-            if self._log_vm:
-                self._log_vm.clear_session_logs()
-            self._session_timer.start(1000)
-            self._set_session_button_active(True)
+            self._begin_session(initial=False)
             return
 
         reply = QMessageBox.question(
@@ -473,34 +465,26 @@ class MainWindow(QMainWindow):
         logger = logging.getLogger(__name__)
         logger.warning("MainWindow: Dongle disconnected!")
 
-        # Show warning notification popup
-        QMessageBox.warning(
-            self,
-            "Dongle Disconnected",
-            "Dongle was disconnected! Please check the USB connection.",
-            QMessageBox.StandardButton.Ok
-        )
+        if self._reconnect_popup is not None:
+            return
 
-        # Pop dongle detect popup
         from views.popups.dongle_popup import DonglePopup
         if self._dongle_vm:
-            # Temporarily disconnect to avoid multiple popups
             try:
                 self._serial_service.connection_lost.disconnect(self._on_dongle_disconnected)
             except Exception:
                 pass
 
-            dongle_popup = DonglePopup(self._dongle_vm, parent=self)
-            res = dongle_popup.exec()
+            self._reconnect_popup = DonglePopup(self._dongle_vm, parent=self)
+            res = self._reconnect_popup.exec()
+            self._reconnect_popup = None
 
-            # Reconnect signal after popup closes
             try:
                 self._serial_service.connection_lost.connect(self._on_dongle_disconnected)
             except Exception:
                 pass
 
             if res != 1:
-                # User cancelled -> Close main window / exit app
                 self.close()
 
     def closeEvent(self, event):

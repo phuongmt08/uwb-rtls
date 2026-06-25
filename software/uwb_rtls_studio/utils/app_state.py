@@ -108,6 +108,7 @@ class SharedAppState(QObject):
     pos_calib_cfg_changed = pyqtSignal(dict)       # Auto calibration parameters
     rtos_resource_changed = pyqtSignal(dict)       # CPU, heap, stack, task count, health flags
     rtos_task_stats_changed = pyqtSignal(list)     # Per-task CPU and stack snapshots
+    manual_test_mode_changed = pyqtSignal(bool)    # Communication tab test-mode gate
 
     # Job State Machine signal
     # Params: job_name, status, progress (0-100), retries, error_msg
@@ -141,6 +142,7 @@ class SharedAppState(QObject):
         self._pos_calib_cfg: Dict[str, Any] = {}
         self._rtos_resource: Dict[str, Any] = {}
         self._rtos_task_stats: List[Dict[str, Any]] = []
+        self._manual_test_mode_enabled = False
 
         # Job State Machine storage
         self._jobs: Dict[str, Dict[str, Any]] = {}
@@ -266,6 +268,17 @@ class SharedAppState(QObject):
     def rtos_resource(self, val: Dict[str, Any]) -> None:
         self._rtos_resource = val.copy()
         self.rtos_resource_changed.emit(self._rtos_resource)
+
+    @property
+    def manual_test_mode_enabled(self) -> bool:
+        return self._manual_test_mode_enabled
+
+    @manual_test_mode_enabled.setter
+    def manual_test_mode_enabled(self, val: bool) -> None:
+        enabled = bool(val)
+        if self._manual_test_mode_enabled != enabled:
+            self._manual_test_mode_enabled = enabled
+            self.manual_test_mode_changed.emit(enabled)
 
     @property
     def rtos_task_stats(self) -> List[Dict[str, Any]]:

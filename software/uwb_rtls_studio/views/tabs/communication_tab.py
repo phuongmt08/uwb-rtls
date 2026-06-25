@@ -10,7 +10,7 @@
                           through the protocol service.  Nothing is sent here.
     2. 🧪 Packet Tester — Manual packet sender / response inspector.
                           Activating "Manual Test Mode" blocks background
-                          auto-queries (except BLE) so the user can test
+                          auto-queries so the user can test
                           individual packets with a real dongle + hardware.
 
   Thread Model:
@@ -491,6 +491,15 @@ class CommunicationTab(QWidget):
             ("── Log Commands ──────────────────", None),
             ("log_data",                "log_data"),
             ("log_clear",               "log_clear"),
+            ("BLE Commands",           None),
+            ("ble_status_get",          "ble_status_get"),
+            ("ble_conn_params_get",     "ble_conn_params_get"),
+            ("ble_conn_params_set",     "ble_conn_params_set"),
+            ("ble_scan_start",          "ble_scan_start"),
+            ("ble_scan_stop",           "ble_scan_stop"),
+            ("ble_connect",             "ble_connect"),
+            ("ble_disconnect",          "ble_disconnect"),
+            ("ble_adv_config_set",      "ble_adv_config_set"),
             ("── Special ───────────────────────", None),
             ("none (keep-alive ping)",  "none"),
         ]
@@ -559,6 +568,61 @@ class CommunicationTab(QWidget):
         self.f_timeout_ms.setPlaceholderText("Response timeout in ms")
         add("timeout_ms", "Timeout ms:", self.f_timeout_ms)
 
+        # BLE test fields
+        self.f_ble_mac = QLineEdit(self.tester_control_group)
+        self.f_ble_mac.setPlaceholderText("AA:BB:CC:DD:EE:FF")
+        add("mac_address", "BLE MAC:", self.f_ble_mac)
+
+        self.f_ble_reason = QLineEdit(self.tester_control_group)
+        self.f_ble_reason.setText("0")
+        self.f_ble_reason.setPlaceholderText("Disconnect reason")
+        add("reason", "Reason:", self.f_ble_reason)
+
+        self.f_ble_min_interval_ms = QLineEdit(self.tester_control_group)
+        self.f_ble_min_interval_ms.setText("15")
+        add("min_interval_ms", "Min interval ms:", self.f_ble_min_interval_ms)
+
+        self.f_ble_max_interval_ms = QLineEdit(self.tester_control_group)
+        self.f_ble_max_interval_ms.setText("30")
+        add("max_interval_ms", "Max interval ms:", self.f_ble_max_interval_ms)
+
+        self.f_ble_slave_latency = QLineEdit(self.tester_control_group)
+        self.f_ble_slave_latency.setText("0")
+        add("slave_latency", "Slave latency:", self.f_ble_slave_latency)
+
+        self.f_ble_sup_timeout_ms = QLineEdit(self.tester_control_group)
+        self.f_ble_sup_timeout_ms.setText("4000")
+        add("sup_timeout_ms", "Supervision timeout ms:", self.f_ble_sup_timeout_ms)
+
+        self.f_ble_scan_duration_ms = QLineEdit(self.tester_control_group)
+        self.f_ble_scan_duration_ms.setText("5000")
+        add("duration_ms", "Scan duration ms:", self.f_ble_scan_duration_ms)
+
+        self.f_ble_scan_interval_ms = QLineEdit(self.tester_control_group)
+        self.f_ble_scan_interval_ms.setText("160")
+        add("interval_ms", "Scan interval ms:", self.f_ble_scan_interval_ms)
+
+        self.f_ble_scan_window_ms = QLineEdit(self.tester_control_group)
+        self.f_ble_scan_window_ms.setText("80")
+        add("window_ms", "Scan window ms:", self.f_ble_scan_window_ms)
+
+        self.f_ble_active_scanning = QComboBox(self.tester_control_group)
+        self.f_ble_active_scanning.addItem("True", True)
+        self.f_ble_active_scanning.addItem("False", False)
+        add("active_scanning", "Active scanning:", self.f_ble_active_scanning)
+
+        self.f_ble_adv_enable = QComboBox(self.tester_control_group)
+        self.f_ble_adv_enable.addItem("True", True)
+        self.f_ble_adv_enable.addItem("False", False)
+        add("enable", "Adv enable:", self.f_ble_adv_enable)
+
+        self.f_ble_adv_serial = QLineEdit(self.tester_control_group)
+        self.f_ble_adv_serial.setText("0")
+        add("serial_number", "Serial number:", self.f_ble_adv_serial)
+
+        self.f_ble_adv_name = QLineEdit(self.tester_control_group)
+        self.f_ble_adv_name.setPlaceholderText("Device name")
+        add("device_name", "Device name:", self.f_ble_adv_name)
         # log_data / log_clear
         self.f_log_type = QComboBox(self.tester_control_group)
         self.f_log_type.addItem("DEVICE_LOG (1)", 1)
@@ -587,6 +651,11 @@ class CommunicationTab(QWidget):
         "time_sync_set":       {"unix_time_ms", "timezone_offset"},
         "sys_config_set":      {"role", "device_id", "ranging_period_ms", "rx_timeout_ms", "uwb_channel"},
         "sys_ranging_cfg_set": {"period_ms", "timeout_ms"},
+        "ble_connect":         {"mac_address"},
+        "ble_disconnect":      {"reason"},
+        "ble_conn_params_set": {"min_interval_ms", "max_interval_ms", "slave_latency", "sup_timeout_ms"},
+        "ble_scan_start":      {"duration_ms", "interval_ms", "window_ms", "active_scanning"},
+        "ble_adv_config_set":  {"enable", "serial_number", "device_name"},
         "log_data":            {"log_type", "log_data_payload"},
         "log_clear":           {"log_type", "log_offset", "log_length"},
     }
@@ -629,6 +698,8 @@ class CommunicationTab(QWidget):
     def disable_manual_test_mode(self) -> None:
         if hasattr(self, "btn_toggle_manual_test"):
             self.btn_toggle_manual_test.setChecked(False)
+        from utils.app_state import shared_app_state
+        shared_app_state.manual_test_mode_enabled = False
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Sub-tab switch
@@ -644,11 +715,13 @@ class CommunicationTab(QWidget):
 
     def _on_manual_test_toggled(self, checked: bool) -> None:
         from services.command_bus import shared_command_bus  # local import (avoid circular)
+        from utils.app_state import shared_app_state
+        shared_app_state.manual_test_mode_enabled = checked
         if shared_command_bus:
             shared_command_bus.manual_test_mode_enabled = checked
             if checked:
                 self.tester_status_label.setText(
-                    "⚠ Test Mode ACTIVE — background queries blocked (BLE allowed)"
+                    "⚠ Test Mode ACTIVE — background traffic blocked"
                 )
                 self.tester_status_label.setStyleSheet("color: #F59E0B; font-weight: bold;")
             else:
@@ -676,15 +749,13 @@ class CommunicationTab(QWidget):
         hdr = getattr(pkt, "hdr", None)
         addr = getattr(hdr, "addr", None)
         dst_addr = getattr(addr, "dst", 0)
-        seq      = getattr(hdr, "seq", 0)
-        dst_str  = self._addr_name(dst_addr)
-        details  = self._format_pkt(param_name, pkt)
+        seq = int(getattr(hdr, "seq", 0) or 0)
+        dst_str = self._addr_name(dst_addr)
+        details = self._format_pkt(param_name, pkt)
 
-        # Tag seq immediately if we are inside a manual send
         if self._manual_send_active:
             self._tester_seqs.add(seq)
 
-        # ── Update black box (Current Transmission)
         self.monitor_detail_text.setPlainText(
             f"DIRECTION : SENT (TX)\n"
             f"Time      : {timestamp}\n"
@@ -695,7 +766,6 @@ class CommunicationTab(QWidget):
             f"\nParameters:\n{details.replace(', ', chr(10))}"
         )
 
-        # ── Live Monitor: always show every sent packet
         self._add_sent_row(
             self.monitor_sent_table,
             self.monitor_received_table,
@@ -703,7 +773,6 @@ class CommunicationTab(QWidget):
             seq, timestamp, dst_str, param_name, details,
         )
 
-        # ── Packet Tester: only show packets triggered by _send_manual_packet
         if seq in self._tester_seqs:
             self._add_sent_row(
                 self.tester_sent_table,
@@ -719,50 +788,51 @@ class CommunicationTab(QWidget):
         hdr = getattr(pkt, "hdr", None)
         addr = getattr(hdr, "addr", None)
         src_addr = getattr(addr, "src", 0)
-        seq      = getattr(hdr, "seq", 0)
-        src_str  = self._addr_name(src_addr)
-        details  = self._format_pkt(param_name, pkt)
+        seq = int(getattr(hdr, "seq", 0) or 0)
+        src_str = self._addr_name(src_addr)
+        details = self._format_pkt(param_name, pkt)
+        match_seq = int(getattr(getattr(pkt, "ack", None), "ack_seq", seq) or seq) if param_name == "ack" else seq
 
-        # ── Update black box with the latest received response
-        self.monitor_detail_text.append(
+        response_detail = (
             f"\nDIRECTION : RECEIVED (RX)\n"
             f"Time      : {timestamp}\n"
             f"Packet    : {param_name}\n"
             f"Seq       : {seq}  (0x{seq:04X})\n"
+        )
+        if param_name == "ack":
+            response_detail += f"Ack Seq   : {match_seq}  (0x{match_seq:04X})\n"
+        response_detail += (
             f"Src       : {src_str}\n"
             f"Dst       : HOST (0x02)\n"
             f"\nDecoded Data:\n{details.replace(', ', chr(10))}"
         )
-        # Keep detail box from growing unboundedly (≈ last 200 lines)
+        self.monitor_detail_text.append(response_detail)
+
         doc = self.monitor_detail_text.document()
         if doc.blockCount() > 250:
-            # Trim: keep only the last 200 lines to avoid O(n) cursor loop
             full_text = self.monitor_detail_text.toPlainText()
             lines = full_text.split("\n")
             if len(lines) > 200:
                 trimmed = "\n".join(lines[-200:])
                 self.monitor_detail_text.setPlainText(trimmed)
-                # Scroll to bottom after trim
                 self.monitor_detail_text.moveCursor(QTextCursor.MoveOperation.End)
 
-        # ── Live Monitor: fill in the matching Received column
         self._fill_recv_row(
             self.monitor_sent_table,
             self.monitor_received_table,
             self._monitor_seq_to_row,
-            seq, timestamp, src_str, param_name, details,
+            match_seq, timestamp, src_str, param_name, details,
         )
 
-        # ── Packet Tester: fill correlated row IF this seq was a manual send
-        if seq in self._tester_seqs:
+        if match_seq in self._tester_seqs:
             self._fill_recv_row(
                 self.tester_sent_table,
                 self.tester_received_table,
                 self._tester_seq_to_row,
-                seq, timestamp, src_str, param_name, details,
+                match_seq, timestamp, src_str, param_name, details,
             )
             self._tester_seqs.discard(seq)
-            self.tester_status_label.setText(f"✓ Response received — seq={seq}")
+            self.tester_status_label.setText(f"✓ Response received — seq={match_seq}")
             self.tester_status_label.setStyleSheet("color: #10B981;")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -993,6 +1063,29 @@ class CommunicationTab(QWidget):
             params["log_type"] = int(self.f_log_type.currentData())
             params["data"]     = self._parse_bytes(self.f_log_data.text())
 
+        elif packet_name == "ble_connect":
+            params["mac_address"] = self._parse_mac_bytes(self.f_ble_mac.text())
+
+        elif packet_name == "ble_disconnect":
+            params["reason"] = self._parse_int(self.f_ble_reason.text().strip() or "0", "reason")
+
+        elif packet_name == "ble_conn_params_set":
+            params["min_interval_ms"] = self._parse_int(self.f_ble_min_interval_ms.text().strip() or "15", "min_interval_ms")
+            params["max_interval_ms"] = self._parse_int(self.f_ble_max_interval_ms.text().strip() or "30", "max_interval_ms")
+            params["slave_latency"] = self._parse_int(self.f_ble_slave_latency.text().strip() or "0", "slave_latency")
+            params["sup_timeout_ms"] = self._parse_int(self.f_ble_sup_timeout_ms.text().strip() or "4000", "sup_timeout_ms")
+
+        elif packet_name == "ble_scan_start":
+            params["duration_ms"] = self._parse_int(self.f_ble_scan_duration_ms.text().strip() or "5000", "duration_ms")
+            params["interval_ms"] = self._parse_int(self.f_ble_scan_interval_ms.text().strip() or "160", "interval_ms")
+            params["window_ms"] = self._parse_int(self.f_ble_scan_window_ms.text().strip() or "80", "window_ms")
+            params["active_scanning"] = bool(self.f_ble_active_scanning.currentData())
+
+        elif packet_name == "ble_adv_config_set":
+            params["enable"] = bool(self.f_ble_adv_enable.currentData())
+            params["serial_number"] = self._parse_int(self.f_ble_adv_serial.text().strip() or "0", "serial_number")
+            params["device_name"] = self.f_ble_adv_name.text().strip()
+
         elif packet_name == "log_clear":
             params["log_type"] = int(self.f_log_type.currentData())
             params["offset"]   = self._parse_int(self.f_log_offset.text().strip() or "0", "offset")
@@ -1032,6 +1125,16 @@ class CommunicationTab(QWidget):
         except ValueError:
             return raw.encode()
 
+    @staticmethod
+    def _parse_mac_bytes(text: str) -> bytes:
+        raw = (text or "").strip()
+        normalized = raw.replace(":", "").replace("-", "").replace(" ", "")
+        if len(normalized) != 12:
+            raise ValueError("mac_address must have exactly 6 bytes")
+        try:
+            return bytes.fromhex(normalized)
+        except ValueError as exc:
+            raise ValueError("mac_address must be valid hex") from exc
     # ─────────────────────────────────────────────────────────────────────────
     #  Simulation (no dongle)
     # ─────────────────────────────────────────────────────────────────────────

@@ -129,6 +129,8 @@ class ProtocolService(QObject):
             # Special handling cho ACK
             if param == "ack":
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
+                self.packet_received.emit(param, pkt)
+                log.debug("RX: %s seq=%d ack_seq=%d", param, pkt.hdr.seq, pkt.ack.ack_seq)
                 continue
 
             if self._packet_repository:
