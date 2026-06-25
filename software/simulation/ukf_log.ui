@@ -14,7 +14,7 @@
    <string>Robot Control Panel</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,3,3">
+   <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,1,3">
     <item>
      <widget class="QFrame" name="frame_controlPanel">
       <property name="frameShape">
@@ -23,7 +23,7 @@
       <property name="frameShadow">
        <enum>QFrame::Raised</enum>
       </property>
-      <layout class="QVBoxLayout" name="verticalLayout" stretch="1,1,3">
+      <layout class="QVBoxLayout" name="verticalLayout" stretch="1,1,3,0">
        <item>
         <widget class="QGroupBox" name="groupBox_connect">
          <property name="font">
@@ -99,7 +99,7 @@
           <string>Đồ thị</string>
          </property>
          <layout class="QGridLayout" name="gridLayout_4">
-          <item row="0" column="0">
+         <item row="0" column="0">
            <widget class="QPushButton" name="pushButton_clearGraph">
             <property name="font">
              <font>
@@ -110,6 +110,23 @@
             </property>
             <property name="text">
              <string>Clear graph</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QCheckBox" name="checkBox_graphDSliding">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>50</weight>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="text">
+             <string>graph_d sliding window (100 samples)</string>
+            </property>
+            <property name="checked">
+             <bool>false</bool>
             </property>
            </widget>
           </item>

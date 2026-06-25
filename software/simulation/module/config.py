@@ -160,7 +160,7 @@ UART_SOF = 0xAA
 GROUND_TRUTH_D1 = 4.88 * np.sqrt(2)
 GROUND_TRUTH_D2 = 4.88 * np.sqrt(2)
 GROUND_TRUTH_D3 = 4.88 * np.sqrt(2)
-GROUND_TRUTH_D4 = 3.45
+GROUND_TRUTH_D4 = 5.78
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
