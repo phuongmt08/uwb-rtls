@@ -341,6 +341,7 @@ class DeviceModel(QObject):
 
     def set_connected_device(self, name: str, mac: str):
         """Called by main.py / ViewModel after ScanPopup to seed initial state."""
+        shared_app_state.clear_device_session_state()
         self._connected_mac = mac
         self._connected_name = name
         self._connection_status = "Connected"
@@ -663,6 +664,7 @@ class DeviceModel(QObject):
     def on_connection_lost(self):
         """Called when dongle is physically disconnected."""
         log.warning("Dongle physically disconnected!")
+        shared_app_state.clear_device_session_state()
         self._connected_mac = ""
         self._connected_name = ""
         self._connection_status = "Disconnected"

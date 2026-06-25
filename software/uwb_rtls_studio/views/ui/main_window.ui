@@ -293,6 +293,11 @@ QTabBar::tab:hover:!selected { background: #302852; color: #F5F3FF; }</string>
         <string>📋 Log &amp; History</string>
        </attribute>
       </widget>
+      <widget class="CommunicationTab" name="tab_communication">
+       <attribute name="title">
+        <string>📡 Communication</string>
+       </attribute>
+      </widget>
      </widget>
     </item>
    </layout>
@@ -339,6 +344,12 @@ QStatusBar QLabel { background: transparent; }</string>
    <class>LogTab</class>
    <extends>QWidget</extends>
    <header>views.tabs.log_tab</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>CommunicationTab</class>
+   <extends>QWidget</extends>
+   <header>views.tabs.communication_tab</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

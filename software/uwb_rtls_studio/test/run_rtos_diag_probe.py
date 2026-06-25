@@ -85,7 +85,61 @@ def run(port: str | None, baud: int, interval_s: float, repeat: bool, dry_run: b
     repo = DiagnosticsRepository()
 
     if is_test_mode():
-        return run_mock()
+        import socket
+        print("[TEST MODE] Connecting to GUI App TCP Server on 127.0.0.1:9999...")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(("127.0.0.1", 9999))
+            print("Connected to GUI App. Sending RTOS diagnostic queries...")
+        except Exception as e:
+            print(f"Could not connect to GUI App: {e}")
+            print("Running local mock fallback...")
+            return run_mock()
+        
+        try:
+            seq = 1
+            while True:
+                for cmd_name in ("rtos_resource_get", "rtos_task_stats_get"):
+                    pkt = getattr(factory, cmd_name)(VvAddress.HOST, VvAddress.MCU, seq)
+                    seq += 1
+                    sock.sendall(proto.wrap_packet(pkt))
+                    print(f"TX {cmd_name}")
+
+                deadline = time.time() + max(1.0, interval_s)
+                got_resource = None
+                got_tasks = None
+
+                while time.time() < deadline and (got_resource is None or got_tasks is None):
+                    data = sock.recv(1024)
+                    if not data:
+                        break
+                    try:
+                        packets = proto.decode_from_frames(data)
+                    except Exception as exc:
+                        print(f"decode error: {exc}")
+                        continue
+                    for pkt in packets:
+                        param = pkt.WhichOneof("params")
+                        if param == "rtos_resource_resp":
+                            got_resource = repo.parse_rtos_resource(pkt.rtos_resource_resp)
+                            print("RX rtos_resource_resp", json.dumps(got_resource, ensure_ascii=False))
+                        elif param == "rtos_task_stats_resp":
+                            got_tasks = repo.parse_rtos_task_stats(pkt.rtos_task_stats_resp)
+                            print("RX rtos_task_stats_resp")
+                            for task in got_tasks:
+                                print(" ", _fmt_task(task))
+
+                if got_resource or got_tasks:
+                    summary = build_summary(got_resource or {}, got_tasks or [])
+                    print("SUMMARY", json.dumps(summary, ensure_ascii=False))
+
+                if not repeat:
+                    break
+                time.sleep(interval_s)
+        finally:
+            sock.close()
+            print("Closed connection")
+        return 0
 
     if dry_run:
         for name in ("rtos_resource_get", "rtos_task_stats_get"):

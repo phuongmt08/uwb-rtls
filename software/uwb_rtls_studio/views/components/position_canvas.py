@@ -46,13 +46,9 @@ class PositionCanvas(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.position = {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "error": 0.0}
+        self.has_position = False
         self.fusion_position = None
-        self.anchors = [
-            {"anchor_id": 0, "x": 0.0, "y": 0.0, "z": 0.0, "label": "A0"},
-            {"anchor_id": 1, "x": 10.76, "y": 0.0, "z": 0.0, "label": "A1"},
-            {"anchor_id": 2, "x": 0.0, "y": 13.2, "z": 0.0, "label": "A2"},
-            {"anchor_id": 3, "x": 10.76, "y": 13.2, "z": 0.0, "label": "A3"},
-        ]
+        self.anchors = []
         self.history = []
         self.fusion_history = []
         self.tril_history = []
@@ -613,6 +609,7 @@ class PositionCanvas(QWidget):
 
         self.last_update_time = current_time
         self._last_update_by_source[source] = current_time
+        self.has_position = True
         if source == "sensor_fusion":
             self.fusion_position = position
             self.fusion_history.append((position["x"], position["y"]))
@@ -824,11 +821,15 @@ class PositionCanvas(QWidget):
         self.tril_history.clear()
         self._last_update_by_source.clear()
         self.fusion_position = None
+        self.has_position = False
         self.update()
 
     def auto_fit(self):
-        pts_x = [a["x"] for a in self.anchors] + [self.position["x"]]
-        pts_y = [a["y"] for a in self.anchors] + [self.position["y"]]
+        pts_x = [a["x"] for a in self.anchors]
+        pts_y = [a["y"] for a in self.anchors]
+        if self.has_position:
+            pts_x.append(self.position["x"])
+            pts_y.append(self.position["y"])
         if self.fusion_position is not None:
             pts_x.append(self.fusion_position["x"])
             pts_y.append(self.fusion_position["y"])

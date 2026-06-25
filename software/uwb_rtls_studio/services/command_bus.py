@@ -46,6 +46,7 @@ class CommandBus(QObject):
         self._catalog = CommandCatalog()
         self._cache: dict[str, tuple[float, object]] = {}
         self._pending: dict[str, float] = {}
+        self.manual_test_mode_enabled = False
         self._protocol.packet_received.connect(self._on_packet_received)
 
     def request(
@@ -62,6 +63,12 @@ class CommandBus(QObject):
         Returns True when a new command is enqueued, False when a fresh cache or
         pending request already covers the caller's need.
         """
+        manual_bypass = kwargs.pop("manual_bypass", False)
+        if getattr(self, "manual_test_mode_enabled", False):
+            if not command_name.startswith("ble_") and not manual_bypass:
+                log.debug("Command blocked by manual test mode: %s", command_name)
+                return False
+
         if not is_command_enabled(command_name):
             log.info("Command skipped by flag: %s", command_name)
             return False
@@ -72,7 +79,7 @@ class CommandBus(QObject):
         except KeyError:
             expected_response = ""
         if not expected_response:
-            self.send(command_name, dst_addr=dst_addr, **kwargs)
+            self.send(command_name, dst_addr=dst_addr, manual_bypass=manual_bypass, **kwargs)
             return True
 
         now = time.monotonic()
@@ -94,6 +101,12 @@ class CommandBus(QObject):
         return True
 
     def send(self, command_name: str, dst_addr: int | None = None, **kwargs: Any):
+        manual_bypass = kwargs.pop("manual_bypass", False)
+        if getattr(self, "manual_test_mode_enabled", False):
+            if not command_name.startswith("ble_") and not manual_bypass:
+                log.debug("Command blocked by manual test mode: %s", command_name)
+                return None
+
         if not is_command_enabled(command_name):
             log.info("Command skipped by flag: %s", command_name)
             return None

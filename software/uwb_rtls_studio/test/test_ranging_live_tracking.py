@@ -194,16 +194,39 @@ def test_ranging_status_response_parses_success_rate():
 
 class TcpSerialAdapter:
     def __init__(self, host: str, port: int):
-        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._server.bind((host, port))
-        self._server.listen(1)
-        self._conn = None
+        from utils.runtime_mode import is_test_mode
+        import time
         self.is_open = False
         self.host = host
         self.port = port
+        self._server = None
+        self._conn = None
+
+        if is_test_mode():
+            # Test mode: connect as a client to GUI TCP Server
+            self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print(f"[Simulator TCP Client] Connecting to GUI App on {host}:{port}...")
+            while True:
+                try:
+                    self._conn.connect((host, port))
+                    self._conn.settimeout(0.05)
+                    self.is_open = True
+                    print(f"[Simulator TCP Client] Connected to GUI App")
+                    break
+                except ConnectionRefusedError:
+                    print(f"⏳ Waiting for GUI App TCP server on {host}:{port}...")
+                    time.sleep(1.0)
+        else:
+            # Real mode: bind as server
+            self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._server.bind((host, port))
+            self._server.listen(1)
 
     def accept(self):
+        from utils.runtime_mode import is_test_mode
+        if is_test_mode():
+            return  # already connected as client
         print(f"[Simulator] Waiting for host connection on {self.host}:{self.port} ...")
         self._conn, addr = self._server.accept()
         self._conn.settimeout(0.05)
@@ -243,10 +266,12 @@ class TcpSerialAdapter:
             except OSError:
                 pass
             self._conn = None
-        try:
-            self._server.close()
-        except OSError:
-            pass
+        if self._server is not None:
+            try:
+                self._server.close()
+            except OSError:
+                pass
+            self._server = None
 
 
 class ComSerialAdapter:

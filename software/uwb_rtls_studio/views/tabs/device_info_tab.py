@@ -39,6 +39,7 @@ class DeviceInfoTab(QWidget):
         # ── Post-load setup ──
         self._setup_mappings()
         self._setup_table()
+        self._reset_display_fields()
 
     def _setup_mappings(self):
         """Map label keys to widget references for data updates."""
@@ -103,6 +104,24 @@ class DeviceInfoTab(QWidget):
         # Advertising table
         self._adv_table = self.adv_table
 
+    def _reset_display_fields(self):
+        """Show no device data until a parsed response reaches the View."""
+        for group in (
+            self._dev_values,
+            self._ble_values,
+            self._bat_info_labels,
+            self._temp_labels,
+            self._volt_labels,
+            self._sys_labels,
+        ):
+            for label in group.values():
+                label.setText("-")
+        self._bat_pct.setText("-")
+        self._bat_bar.setValue(0)
+        self._time_local.setText("-")
+        self._time_status.setText("-")
+        self._adv_table.setRowCount(0)
+
     def _setup_table(self):
         """Configure the advertising devices table header sizing."""
         self._adv_table.setColumnWidth(0, 150)  # Device
@@ -132,10 +151,15 @@ class DeviceInfoTab(QWidget):
             self._vm.set_developer_mode(self._is_developer_mode)
 
     def _on_device_info(self, info: dict):
+        if "Status" in info:
+            if info["Status"] in ("Disconnected", "Connecting", "Connected"):
+                self._reset_display_fields()
+            return
+
         for k, v in info.items():
             lbl = f"{k}:"
             if lbl in self._dev_values:
-                self._dev_values[lbl].setText(str(v))
+                self._dev_values[lbl].setText(str(v) if v not in (None, "") else "-")
 
     def _on_ble_info(self, info: dict):
         rssi = info.get("rssi_dbm")
@@ -161,7 +185,7 @@ class DeviceInfoTab(QWidget):
     def _on_telemetry_updated(self, data: dict):
         pct = data.get("bat_soc_percent")
         if pct is None:
-            self._bat_pct.setText("--")
+            self._bat_pct.setText("-")
             self._bat_bar.setValue(0)
             color = "#94A3B8"
         else:
@@ -171,23 +195,23 @@ class DeviceInfoTab(QWidget):
             color = "#10B981" if pct > 30 else "#EF4444"
         self._bat_pct.setStyleSheet(f"color: {color}; background: transparent;")
 
-        self._bat_info_labels["Voltage:"].setText(data.get("bat_voltage_str", "--"))
-        self._bat_info_labels["Remaining:"].setText(data.get("remaining_str", "--"))
-        self._bat_info_labels["Charging:"].setText(data.get("charging_str", "--"))
+        self._bat_info_labels["Voltage:"].setText(data.get("bat_voltage_str", "-"))
+        self._bat_info_labels["Remaining:"].setText(data.get("remaining_str", "-"))
+        self._bat_info_labels["Charging:"].setText(data.get("charging_str", "-"))
 
-        self._temp_labels["MCU:"].setText(data.get("mcu_temp_str", "--"))
-        self._temp_labels["UWB Chip:"].setText(data.get("uwb_temp_str", "--"))
-        self._temp_labels["IMU:"].setText(data.get("imu_temp_str", "--"))
+        self._temp_labels["MCU:"].setText(data.get("mcu_temp_str", "-"))
+        self._temp_labels["UWB Chip:"].setText(data.get("uwb_temp_str", "-"))
+        self._temp_labels["IMU:"].setText(data.get("imu_temp_str", "-"))
 
-        self._volt_labels["VDDA:"].setText(data.get("vdda_str", "--"))
-        self._volt_labels["UWB VBAT:"].setText(data.get("uwb_vbat_str", "--"))
+        self._volt_labels["VDDA:"].setText(data.get("vdda_str", "-"))
+        self._volt_labels["UWB VBAT:"].setText(data.get("uwb_vbat_str", "-"))
 
-        self._sys_labels["HEAP:"].setText(data.get("heap_usage", "--"))
-        self._sys_labels["STACK:"].setText(data.get("stack_usage", "--"))
-        self._sys_labels["CPU:"].setText(data.get("cpu_usage", "--"))
+        self._sys_labels["HEAP:"].setText(data.get("heap_usage", "-"))
+        self._sys_labels["STACK:"].setText(data.get("stack_usage", "-"))
+        self._sys_labels["CPU:"].setText(data.get("cpu_usage", "-"))
 
     def _on_time_sync_updated(self, local_time: str, is_synced: bool, is_syncing: bool):
-        self._time_local.setText(local_time)
+        self._time_local.setText(local_time or "-")
         if is_syncing:
             self._time_status.setText("Syncing time...")
             self._time_status.setStyleSheet("color: #EAB308; background: transparent; font-size: 12px; font-weight: bold;")

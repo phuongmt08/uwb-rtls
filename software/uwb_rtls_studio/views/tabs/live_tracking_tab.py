@@ -569,6 +569,9 @@ class LiveTrackingTab(QWidget):
 
         uic.loadUi(UI_FILE, self)
         self._setup_dynamic_metrics()
+        self._clear_live_metrics()
+        self.uptime_label.setText("-")
+        self._render_stats()
 
         self._canvas = self.position_canvas
         self._canvas.parent_tab = self
@@ -700,8 +703,8 @@ class LiveTrackingTab(QWidget):
         if label_widget:
             unit = getattr(label_widget, "unit", "")
             unit_space = " " if unit else ""
-            if value is None or value == "--":
-                label_widget.setText("--")
+            if value is None or value in ("--", "-"):
+                label_widget.setText("-")
             elif isinstance(value, str):
                 label_widget.setText(f"{value}{unit_space}{unit}")
             else:
@@ -720,7 +723,7 @@ class LiveTrackingTab(QWidget):
         for w in widgets:
             label_widget = getattr(self, w, None)
             if label_widget:
-                label_widget.setText("--")
+                label_widget.setText("-")
         self._last_anchor_mask = 0
 
     def _setup_dynamic_metrics(self):
@@ -827,9 +830,6 @@ class LiveTrackingTab(QWidget):
         self._sync_room_origins(self._vm.get_geofence_zones())
         
         current_layout = getattr(self._vm, "current_anchor_layout", [])
-        if not current_layout:
-            self._vm.update_anchor_layout_from_map(DEFAULT_ANCHOR_LAYOUT)
-            current_layout = getattr(self._vm, "current_anchor_layout", [])
         if current_layout:
             self._on_anchor_layout_updated(current_layout)
 
@@ -888,22 +888,22 @@ class LiveTrackingTab(QWidget):
         self._map_3d.update_position(position)
 
         # Update Frame and Counters
-        seq = 0
+        seq = None
         anchor_mask = 0
-        timestamp_ms = 0
+        timestamp_ms = None
         if self._vm and self._vm.model._position_history:
             last_sample = self._vm.model._position_history[-1]
-            seq = last_sample.get("seq", 0)
+            seq = last_sample.get("seq")
             anchor_mask = last_sample.get("anchor_mask", 0)
-            timestamp_ms = last_sample.get("timestamp_ms", 0)
+            timestamp_ms = last_sample.get("timestamp_ms")
             self._last_anchor_mask = anchor_mask
 
         self._set_metric_value(self.sof_label, "0xAA")
-        self._set_metric_value(self.length_label, 33, "{:d}") # ranging_result size mock
+        self._set_metric_value(self.length_label, None, "{:d}")
         if anchor_mask:
             self._set_metric_value(self.anchor_mask_label, f"0x{anchor_mask:02X} ({anchor_mask:08b})")
         else:
-            self._set_metric_value(self.anchor_mask_label, "--")
+            self._set_metric_value(self.anchor_mask_label, "-")
         
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
@@ -967,13 +967,13 @@ class LiveTrackingTab(QWidget):
 
         # Update Frame and Counters
         self._set_metric_value(self.sof_label, "0xAA")
-        self._set_metric_value(self.length_label, 33, "{:d}") # payload_size
+        self._set_metric_value(self.length_label, data.get("payload_size"), "{:d}")
         
         anchor_mask = getattr(self, "_last_anchor_mask", 0)
         if anchor_mask:
             self._set_metric_value(self.anchor_mask_label, f"0x{anchor_mask:02X} ({anchor_mask:08b})")
         else:
-            self._set_metric_value(self.anchor_mask_label, "--")
+            self._set_metric_value(self.anchor_mask_label, "-")
 
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
@@ -1014,10 +1014,14 @@ class LiveTrackingTab(QWidget):
         if not self._is_ranging:
             return
 
+        if not self._last_stats and self._frame_count == 0:
+            self.uptime_label.setText("-")
+            self._render_stats()
+            return
+
         uptime = int(time.time() - self._start_time)
         self.uptime_label.setText(f"{uptime}s")
         self._render_stats()
-
     def _on_stats_updated(self, stats: dict):
         self._last_stats = stats.copy()
         self._render_stats()
@@ -1025,15 +1029,15 @@ class LiveTrackingTab(QWidget):
     def _render_stats(self):
         stats = self._last_stats
         if not stats and self._frame_count == 0:
-            self.frames_label.setText("--")
-            self.fps_label.setText("--")
-            self.success_label.setText("--")
-            self.failed_label.setText("--")
-            self.timeout_label.setText("--")
-            self.period_label.setText("--")
-            self.success_rate_label.setText("--")
-            self.avg_rssi_label.setText("--")
-            self.last_range_time_label.setText("--")
+            self.frames_label.setText("-")
+            self.fps_label.setText("-")
+            self.success_label.setText("-")
+            self.failed_label.setText("-")
+            self.timeout_label.setText("-")
+            self.period_label.setText("-")
+            self.success_rate_label.setText("-")
+            self.avg_rssi_label.setText("-")
+            self.last_range_time_label.setText("-")
             return
         total = int(stats.get("total_count", stats.get("ranging_total_count", self._frame_count)))
         success = int(stats.get("success_count", stats.get("ranging_success_count", 0)))
@@ -1050,16 +1054,16 @@ class LiveTrackingTab(QWidget):
         self.failed_label.setText(str(failed))
         self.timeout_label.setText(str(timeout))
         self.period_label.setText(
-            f"{int(stats['ranging_period_ms'])} ms" if "ranging_period_ms" in stats else "--"
+            f"{int(stats['ranging_period_ms'])} ms" if "ranging_period_ms" in stats else "-"
         )
         self.success_rate_label.setText(
-            f"{float(stats['success_rate_percent']):.1f}%" if "success_rate_percent" in stats else "--"
+            f"{float(stats['success_rate_percent']):.1f}%" if "success_rate_percent" in stats else "-"
         )
         self.avg_rssi_label.setText(
-            f"{int(stats['last_avg_rssi_dbm'])} dBm" if "last_avg_rssi_dbm" in stats else "--"
+            f"{int(stats['last_avg_rssi_dbm'])} dBm" if "last_avg_rssi_dbm" in stats else "-"
         )
         self.last_range_time_label.setText(
-            f"{int(stats['last_ranging_time_ms'])} ms" if "last_ranging_time_ms" in stats else "--"
+            f"{int(stats['last_ranging_time_ms'])} ms" if "last_ranging_time_ms" in stats else "-"
         )
 
     def set_anchors(self, anchors):

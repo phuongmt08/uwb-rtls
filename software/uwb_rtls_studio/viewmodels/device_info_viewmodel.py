@@ -103,17 +103,14 @@ class DeviceInfoViewModel(QObject):
         Triggers initial telemetry and session start events for the connected device.
         """
         if self.model.is_connected:
-            self.device_info_updated.emit({
-                "Device Name": self.model.connected_name,
-                "MAC Address": self.model.connected_mac,
-            })
             self.model.schedule_session_start(delay_ms=1500, force=True)
+
     # ═══════════════════════════════════════════════════════════════════
     #  PUBLIC METHODS (called by main.py or View)
     # ═══════════════════════════════════════════════════════════════════
 
     def set_connected_device(self, name: str, mac: str):
-        """Called by main.py after ScanPopup finishes, to seed initial device info."""
+        """Called by main.py after ScanPopup finishes, for command/session routing."""
         self.model.set_connected_device(name, mac)
 
     def connect_device(self, mac_hex: str):
@@ -180,9 +177,9 @@ class DeviceInfoViewModel(QObject):
                 "imu_temp_str": self._format_temp(data.get("imu_temp_c")),
                 "vdda_str": self._format_voltage(data.get("vdda_mv")),
                 "uwb_vbat_str": self._format_voltage(data.get("uwb_vbat_mv")),
-                "heap_usage": data.get("heap_usage", "--"),
-                "stack_usage": data.get("stack_usage", "--"),
-                "cpu_usage": data.get("cpu_usage", "--")
+                "heap_usage": data.get("heap_usage", "-"),
+                "stack_usage": data.get("stack_usage", "-"),
+                "cpu_usage": data.get("cpu_usage", "-")
             }
         self._last_telemetry.update(formatted_data)
         self.telemetry_updated.emit(self._last_telemetry.copy())
@@ -215,7 +212,7 @@ class DeviceInfoViewModel(QObject):
     def _format_rtos_heap(self) -> str:
         data = self._last_rtos_resource
         if not data:
-            return "--"
+            return "-"
 
         free_bytes = data.get("heap_free_bytes")
         min_free = data.get("heap_min_ever_free_bytes")
@@ -249,7 +246,7 @@ class DeviceInfoViewModel(QObject):
         tasks = self._last_rtos_tasks
         resource = self._last_rtos_resource
         if not tasks and not resource:
-            return "--"
+            return "-"
 
         stack_values = [int(t.get("stack_min_free_bytes", 0)) for t in tasks]
         percent_mode = bool(stack_values) and max(stack_values) <= 100
@@ -270,7 +267,7 @@ class DeviceInfoViewModel(QObject):
                     f"{self._task_label(task)}:{self._format_stack_value(task.get('stack_min_free_bytes'), percent_mode)}"
                     for task in tasks
                 )
-            return " | ".join(parts) if parts else "--"
+            return " | ".join(parts) if parts else "-"
 
         if stack_values:
             avg = sum(stack_values) / len(stack_values)
@@ -295,12 +292,12 @@ class DeviceInfoViewModel(QObject):
                 f"{self._task_label(task)}:{self._task_cpu_percent(task):.1f}%"
                 for task in tasks
             )
-            return " | ".join(parts) if parts else "--"
+            return " | ".join(parts) if parts else "-"
 
         if active_cpu is not None:
             return f"{float(active_cpu):.1f}%"
         resource_cpu = resource.get("cpu_busy_percent")
-        return f"{float(resource_cpu):.1f}%" if resource_cpu is not None else "--"
+        return f"{float(resource_cpu):.1f}%" if resource_cpu is not None else "-"
 
     @classmethod
     def _active_cpu_percent(cls, tasks: list[dict], resource: dict):
@@ -331,7 +328,7 @@ class DeviceInfoViewModel(QObject):
 
     def _format_stack_value(self, value, percent_mode: bool) -> str:
         if value is None:
-            return "--"
+            return "-"
         value = float(value)
         if percent_mode:
             return f"{value:.1f}%"
@@ -340,11 +337,11 @@ class DeviceInfoViewModel(QObject):
     @staticmethod
     def _format_bytes(value):
         if value is None:
-            return "--"
+            return "-"
         try:
             value = int(value)
         except (TypeError, ValueError):
-            return "--"
+            return "-"
         if value >= 1024:
             return f"{value / 1024.0:.1f} KB"
         return f"{value} B"
@@ -352,25 +349,25 @@ class DeviceInfoViewModel(QObject):
     @staticmethod
     def _format_voltage(value):
         if value is None:
-            return "--"
+            return "-"
         return f"{float(value) / 1000.0:.2f}V"
 
     @staticmethod
     def _format_remaining(value):
         if value is None:
-            return "--"
+            return "-"
         return f"{int(value)} min"
 
     @staticmethod
     def _format_bool(value):
         if value is None:
-            return "--"
+            return "-"
         return "Yes" if bool(value) else "No"
 
     @staticmethod
     def _format_temp(value):
         if value is None:
-            return "--"
+            return "-"
         return f"{float(value):.1f} C"
 
     def _on_ble_status_parsed(self, info: dict):
@@ -392,12 +389,9 @@ class DeviceInfoViewModel(QObject):
     def _on_connection_state_changed(self, info: dict):
         """Model reports connection state change → emit to View."""
         self.device_info_updated.emit({
-            "Device Name": info.get("name", "-"),
-            "MAC Address": info.get("mac", "-"),
-            "Status": info.get("status", "Unknown"),
+            "Status": info.get("status", "-"),
             "SwitchToLogTab": info.get("SwitchToLogTab", False),
         })
-
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
             self.model.schedule_session_start(delay_ms=1500, force=True)
 

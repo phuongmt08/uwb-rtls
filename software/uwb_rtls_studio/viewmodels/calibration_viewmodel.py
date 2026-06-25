@@ -59,6 +59,10 @@ class CalibrationViewModel(QObject):
         self._model.pos_calib_cfg_parsed.connect(self._on_pos_calib_cfg_parsed)
 
     @property
+    def model(self):
+        return self._model
+
+    @property
     def latest_status(self) -> dict:
         return self._latest_status.copy()
 

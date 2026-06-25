@@ -216,6 +216,12 @@ class QueryQueueManager(QObject):
                         tx.seq = sent_pkt.hdr.seq
                     elif isinstance(sent_pkt, int):
                         tx.seq = sent_pkt
+                else:
+                    # Packet was blocked/skipped by CommandBus (e.g. manual test mode or flag disabled)
+                    # We mark it failed immediately without waiting for a non-existent timeout
+                    tx.status = QueryState.FAILED
+                    self._request_send_next()
+                    return
             except Exception as e:
                 log.error(f"Failed to send query packet: {e}")
                 tx.status = QueryState.FAILED

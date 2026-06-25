@@ -276,6 +276,37 @@ class SharedAppState(QObject):
         self._rtos_task_stats = [item.copy() for item in val]
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
+    def clear_device_session_state(self) -> None:
+        """Clear all device-specific configurations and telemetry states."""
+        self._connected_device = {}
+        self._battery_info = {}
+        self._ble_status = {}
+        self._ranging_active = False
+        self._ranging_stats = {}
+        self._calib_status = {}
+        self._anchor_layout = []
+        self._sys_config = {}
+        self._sys_ranging_cfg = {}
+        self._sensor_fusion_cfg = {}
+        self._pos_calib_cfg = {}
+        self._rtos_resource = {}
+        self._rtos_task_stats = []
+
+        # Emit the changes so that the Views are notified
+        self.connected_device_changed.emit(self._connected_device)
+        self.battery_info_changed.emit(self._battery_info)
+        self.ble_status_changed.emit(self._ble_status)
+        self.ranging_active_changed.emit(self._ranging_active)
+        self.ranging_stats_changed.emit(self._ranging_stats)
+        self.calib_status_changed.emit(self._calib_status)
+        self.anchor_layout_changed.emit(self._anchor_layout)
+        self.sys_config_changed.emit(self._sys_config)
+        self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
+        self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
+        self.pos_calib_cfg_changed.emit(self._pos_calib_cfg)
+        self.rtos_resource_changed.emit(self._rtos_resource)
+        self.rtos_task_stats_changed.emit(self.rtos_task_stats)
+
     # ── Global Query Queue Management (Retry/Timeout logic) ─────────
 
     def init_query_manager(self, send_packet_fn: Callable[[str, int, Dict[str, Any]], Any]) -> None:

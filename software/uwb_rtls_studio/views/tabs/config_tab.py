@@ -137,6 +137,7 @@ class ConfigTab(QWidget):
 
         # Apply initial mode layout
         self.set_developer_mode(self._is_developer)
+        self._reset_display_fields()
 
     def _setup_host_transport_group(self):
         self.host_group = QGroupBox("Host Transport Interface")
@@ -320,20 +321,20 @@ class ConfigTab(QWidget):
                 row = self.anchor_table.rowCount()
                 self.anchor_table.insertRow(row)
                 self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{idx}"))
-                self.anchor_table.setItem(row, 1, QTableWidgetItem("--"))
-                self.anchor_table.setItem(row, 2, QTableWidgetItem("--"))
-                self.anchor_table.setItem(row, 3, QTableWidgetItem("--"))
+                self.anchor_table.setItem(row, 1, QTableWidgetItem("-"))
+                self.anchor_table.setItem(row, 2, QTableWidgetItem("-"))
+                self.anchor_table.setItem(row, 3, QTableWidgetItem("-"))
         finally:
             self.anchor_table.blockSignals(False)
 
     @staticmethod
     def _coord_text(value):
         if value is None:
-            return "--"
+            return "-"
         try:
             return format_coord(float(value))
         except (TypeError, ValueError):
-            return "--"
+            return "-"
 
     def _add_anchor(self):
         self.anchor_table.blockSignals(True)
@@ -525,7 +526,108 @@ class ConfigTab(QWidget):
         self.btn_bootloader.clicked.connect(self._vm.enter_bootloader)
         self.btn_set_ble.clicked.connect(self._on_set_ble_clicked)
         self.btn_apply_host_transport.clicked.connect(self._on_apply_host_transport_clicked)
+        if hasattr(self._vm.model, "connection_state_changed"):
+            self._vm.model.connection_state_changed.connect(self._on_connection_state_changed)
         self._vm.emit_current_state()
+
+    def _on_connection_state_changed(self, info: dict):
+        if info.get("status") in ("Disconnected", "Connecting", "Connected"):
+            self._reset_display_fields()
+
+    def _reset_display_fields(self):
+        """Show placeholder '-' for all fields initially or when disconnected."""
+        from utils.helpers import set_widget_placeholder
+        
+        # Reset UWB Configuration widgets
+        set_widget_placeholder(self.val_channel)
+        set_widget_placeholder(self.val_role)
+        set_widget_placeholder(self.val_datarate)
+        set_widget_placeholder(self.val_prf)
+        set_widget_placeholder(self.val_deviceid)
+        set_widget_placeholder(self.tx_delay_spin)
+        set_widget_placeholder(self.rx_delay_spin)
+        set_widget_placeholder(self.tx_power_spin)
+        set_widget_placeholder(self.preamble_spin)
+        
+        if self._has_widget("val_preamble_len"):
+            set_widget_placeholder(self.val_preamble_len)
+        if self._has_widget("val_rx_pac"):
+            set_widget_placeholder(self.val_rx_pac)
+        if self._has_widget("val_ns_sfd"):
+            set_widget_placeholder(self.val_ns_sfd)
+        if self._has_widget("val_phr_mode"):
+            set_widget_placeholder(self.val_phr_mode)
+        if self._has_widget("chk_smart_tx_power"):
+            set_widget_placeholder(self.chk_smart_tx_power)
+        if self._has_widget("val_pg_delay"):
+            set_widget_placeholder(self.val_pg_delay)
+            
+        # Reset Ranging widgets
+        set_widget_placeholder(self.rng_period_spin)
+        set_widget_placeholder(self.rx_timeout_spin)
+        
+        # Reset Sensor Fusion (UKF) Configuration widgets
+        set_widget_placeholder(self.alpha_spin)
+        set_widget_placeholder(self.beta_spin)
+        set_widget_placeholder(self.kappa_spin)
+        set_widget_placeholder(self.q_accel_spin)
+        set_widget_placeholder(self.q_gyro_spin)
+        set_widget_placeholder(self.r_uwb_spin)
+        if self._has_widget("init_p_px_spin"):
+            set_widget_placeholder(self.init_p_px_spin)
+        if self._has_widget("init_p_py_spin"):
+            set_widget_placeholder(self.init_p_py_spin)
+        if self._has_widget("init_p_vx_spin"):
+            set_widget_placeholder(self.init_p_vx_spin)
+        if self._has_widget("init_p_vy_spin"):
+            set_widget_placeholder(self.init_p_vy_spin)
+        if self._has_widget("init_p_theta_spin"):
+            set_widget_placeholder(self.init_p_theta_spin)
+        if self._has_widget("init_p_bias_ax_spin"):
+            set_widget_placeholder(self.init_p_bias_ax_spin)
+        if self._has_widget("init_p_bias_ay_spin"):
+            set_widget_placeholder(self.init_p_bias_ay_spin)
+        if self._has_widget("init_p_bias_gz_spin"):
+            set_widget_placeholder(self.init_p_bias_gz_spin)
+            
+        # Reset Position Auto-Calibration widgets
+        if self._has_widget("chk_enable_anchor_calib"):
+            set_widget_placeholder(self.chk_enable_anchor_calib)
+        if self._has_widget("chk_enable_tag_calib"):
+            set_widget_placeholder(self.chk_enable_tag_calib)
+        if self._has_widget("pos_ref_dist_spin"):
+            set_widget_placeholder(self.pos_ref_dist_spin)
+        if self._has_widget("pos_tag_height_spin"):
+            set_widget_placeholder(self.pos_tag_height_spin)
+        if self._has_widget("pos_anchor_height_spin"):
+            set_widget_placeholder(self.pos_anchor_height_spin)
+        if self._has_widget("pos_calib_anchor_spin"):
+            set_widget_placeholder(self.pos_calib_anchor_spin)
+        if self._has_widget("pos_samples_spin"):
+            set_widget_placeholder(self.pos_samples_spin)
+        if self._has_widget("pos_err_thresh_spin"):
+            set_widget_placeholder(self.pos_err_thresh_spin)
+        if self._has_widget("pos_min_delta_spin"):
+            set_widget_placeholder(self.pos_min_delta_spin)
+        if self._has_widget("pos_max_rounds_spin"):
+            set_widget_placeholder(self.pos_max_rounds_spin)
+        if self._has_widget("pos_max_std_spin"):
+            set_widget_placeholder(self.pos_max_std_spin)
+        if self._has_widget("pos_damping_spin"):
+            set_widget_placeholder(self.pos_damping_spin)
+        if self._has_widget("pos_iterations_spin"):
+            set_widget_placeholder(self.pos_iterations_spin)
+            
+        # Reset BLE widgets
+        set_widget_placeholder(self.chk_enable_ble)
+        set_widget_placeholder(self.txt_ble_name)
+        set_widget_placeholder(self.spin_ble_min_int)
+        set_widget_placeholder(self.spin_ble_max_int)
+        set_widget_placeholder(self.spin_ble_latency)
+        set_widget_placeholder(self.spin_ble_timeout)
+        
+        # Reset Anchor Layout table placeholders
+        self._set_anchor_placeholders()
 
     def _setup_view_toggle(self):
         self.btn_view_table.clicked.connect(self._show_table_view)
@@ -705,10 +807,21 @@ class ConfigTab(QWidget):
         self._vm.set_host_transport(transport_map.get(self.combo_host_transport.currentText(), 1))
 
     def _on_ble_conn_params_loaded(self, cfg: dict):
-        self._set_value_if_present("spin_ble_min_int", cfg.get("min_interval_ms", self.spin_ble_min_int.value()))
-        self._set_value_if_present("spin_ble_max_int", cfg.get("max_interval_ms", self.spin_ble_max_int.value()))
-        self._set_value_if_present("spin_ble_latency", cfg.get("slave_latency", self.spin_ble_latency.value()))
-        self._set_value_if_present("spin_ble_timeout", cfg.get("sup_timeout_ms", self.spin_ble_timeout.value()))
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not cfg:
+            set_widget_placeholder(self.chk_enable_ble)
+            set_widget_placeholder(self.txt_ble_name)
+            set_widget_placeholder(self.spin_ble_min_int)
+            set_widget_placeholder(self.spin_ble_max_int)
+            set_widget_placeholder(self.spin_ble_latency)
+            set_widget_placeholder(self.spin_ble_timeout)
+            return
+        set_widget_value(self.chk_enable_ble, cfg.get("advertising_enabled", True))
+        set_widget_value(self.txt_ble_name, cfg.get("device_name", ""))
+        set_widget_value(self.spin_ble_min_int, cfg.get("min_interval_ms", 20))
+        set_widget_value(self.spin_ble_max_int, cfg.get("max_interval_ms", 40))
+        set_widget_value(self.spin_ble_latency, cfg.get("slave_latency", 0))
+        set_widget_value(self.spin_ble_timeout, cfg.get("sup_timeout_ms", 3000))
 
     def _on_set_ble_clicked(self):
         if not self._vm:
@@ -1013,41 +1126,65 @@ class ConfigTab(QWidget):
         self.visual_widget.set_anchors(current_anchors)
 
     def _on_sys_config_loaded(self, cfg):
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not cfg:
+            set_widget_placeholder(self.val_channel)
+            set_widget_placeholder(self.val_role)
+            set_widget_placeholder(self.val_datarate)
+            set_widget_placeholder(self.val_prf)
+            set_widget_placeholder(self.val_deviceid)
+            set_widget_placeholder(self.tx_delay_spin)
+            set_widget_placeholder(self.rx_delay_spin)
+            set_widget_placeholder(self.tx_power_spin)
+            set_widget_placeholder(self.preamble_spin)
+            if self._has_widget("val_preamble_len"):
+                set_widget_placeholder(self.val_preamble_len)
+            if self._has_widget("val_rx_pac"):
+                set_widget_placeholder(self.val_rx_pac)
+            if self._has_widget("val_ns_sfd"):
+                set_widget_placeholder(self.val_ns_sfd)
+            if self._has_widget("val_phr_mode"):
+                set_widget_placeholder(self.val_phr_mode)
+            if self._has_widget("chk_smart_tx_power"):
+                set_widget_placeholder(self.chk_smart_tx_power)
+            if self._has_widget("val_pg_delay"):
+                set_widget_placeholder(self.val_pg_delay)
+            return
+
         # Save active device role and ID
         self._current_role = cfg.get("role", 1)
         self._current_device_id = cfg.get("device_id", 0)
 
         # Map channel
         chan = str(cfg.get("uwb_channel", 5))
-        self.val_channel.setCurrentText(chan)
+        set_widget_value(self.val_channel, chan)
 
         # Map role (1 = Tag, 2 = Anchor, 3 = Gateway)
         role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}
         role = role_map.get(self._current_role, "Tag")
-        self.val_role.setCurrentText(role)
+        set_widget_value(self.val_role, role)
 
         # Map data rate (1 = 110kbps, 2 = 850kbps, 3 = 6.8Mbps)
-        # Wait, the enum values in protobuf might be different, let's map integers or strings
         rate_val = cfg.get("uwb_data_rate", 3)
         rate_map = {1: "110 kbps", 2: "850 kbps", 3: "6.8 Mbps", 110: "110 kbps", 850: "850 kbps", 6800: "6.8 Mbps"}
         rate = rate_map.get(rate_val, "6.8 Mbps")
-        self.val_datarate.setCurrentText(rate)
+        set_widget_value(self.val_datarate, rate)
 
         # Map PRF (1 = 16MHz, 2 = 64MHz)
         prf_val = cfg.get("uwb_prf", 2)
         prf_map = {1: "16 MHz", 2: "64 MHz", 16: "16 MHz", 64: "64 MHz"}
         prf = prf_map.get(prf_val, "64 MHz")
-        self.val_prf.setCurrentText(prf)
+        set_widget_value(self.val_prf, prf)
 
         # Map Device ID
         dev_id = f"0x{cfg.get('device_id', 1):04X}"
-        self.val_deviceid.setCurrentText(dev_id)
+        set_widget_value(self.val_deviceid, dev_id)
 
         # Map Advanced delay & power
-        self.tx_delay_spin.setValue(cfg.get("tx_antenna_delay", 16436))
-        self.rx_delay_spin.setValue(cfg.get("rx_antenna_delay", 16436))
-        self.tx_power_spin.setValue(cfg.get("tx_power", 0))
-        self.preamble_spin.setValue(cfg.get("uwb_preamble_code", 10))
+        set_widget_value(self.tx_delay_spin, cfg.get("tx_antenna_delay", 16436))
+        set_widget_value(self.rx_delay_spin, cfg.get("rx_antenna_delay", 16436))
+        set_widget_value(self.tx_power_spin, cfg.get("tx_power", 0))
+        set_widget_value(self.preamble_spin, cfg.get("uwb_preamble_code", 10))
 
         # Map the 6 developer-mode UWB fields
         preamble_len_rev = {
@@ -1062,61 +1199,101 @@ class ConfigTab(QWidget):
         }
         preamble_len_val = cfg.get("uwb_preamble_len", 0x34)
         if self._has_widget("val_preamble_len"):
-            self.val_preamble_len.setCurrentText(preamble_len_rev.get(preamble_len_val, "4096 symbols"))
+            set_widget_value(self.val_preamble_len, preamble_len_rev.get(preamble_len_val, "4096 symbols"))
 
         pac_rev = {0: "8", 1: "16", 2: "32", 3: "64"}
         pac_val = cfg.get("uwb_rx_pac", 0)
         if self._has_widget("val_rx_pac"):
-            self.val_rx_pac.setCurrentText(pac_rev.get(pac_val, "8"))
+            set_widget_value(self.val_rx_pac, pac_rev.get(pac_val, "8"))
 
         sfd_rev = {0: "Standard", 1: "Non-standard"}
         sfd_val = cfg.get("uwb_ns_sfd", 0)
         if self._has_widget("val_ns_sfd"):
-            self.val_ns_sfd.setCurrentText(sfd_rev.get(sfd_val, "Standard"))
+            set_widget_value(self.val_ns_sfd, sfd_rev.get(sfd_val, "Standard"))
 
         phr_rev = {0: "Standard", 1: "Extended"}
         phr_val = cfg.get("uwb_phr_mode", 0)
         if self._has_widget("val_phr_mode"):
-            self.val_phr_mode.setCurrentText(phr_rev.get(phr_val, "Standard"))
-        self._set_checked_if_present("chk_smart_tx_power", cfg.get("smart_tx_power", False))
-        self._set_value_if_present("val_pg_delay", cfg.get("pg_delay", 193))
+            set_widget_value(self.val_phr_mode, phr_rev.get(phr_val, "Standard"))
+        
+        if self._has_widget("chk_smart_tx_power"):
+            set_widget_value(self.chk_smart_tx_power, cfg.get("smart_tx_power", False))
+        if self._has_widget("val_pg_delay"):
+            set_widget_value(self.val_pg_delay, cfg.get("pg_delay", 193))
+            
         if self._last_anchor_layout:
             self._apply_anchor_layout_to_table()
 
     def _on_sys_ranging_cfg_loaded(self, cfg):
-        self.rng_period_spin.setValue(cfg.get("ranging_period_ms", 100))
-        self.rx_timeout_spin.setValue(cfg.get("rx_timeout_ms", 70))
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not cfg:
+            set_widget_placeholder(self.rng_period_spin)
+            set_widget_placeholder(self.rx_timeout_spin)
+            return
+        set_widget_value(self.rng_period_spin, cfg.get("ranging_period_ms", 100))
+        set_widget_value(self.rx_timeout_spin, cfg.get("rx_timeout_ms", 70))
 
     def _on_sensor_fusion_cfg_loaded(self, cfg):
-        self.alpha_spin.setValue(cfg.get("alpha", 0.001))
-        self.beta_spin.setValue(cfg.get("beta", 2.0))
-        self.kappa_spin.setValue(cfg.get("kappa", 0.0))
-        self.q_accel_spin.setValue(cfg.get("q_a", 0.1))
-        self.q_gyro_spin.setValue(cfg.get("q_g", 0.01))
-        self.r_uwb_spin.setValue(cfg.get("r_uwb", 0.05))
-        self._set_value_if_present("init_p_px_spin", cfg.get("init_p_px", 1.0))
-        self._set_value_if_present("init_p_py_spin", cfg.get("init_p_py", 1.0))
-        self._set_value_if_present("init_p_vx_spin", cfg.get("init_p_vx", 0.1))
-        self._set_value_if_present("init_p_vy_spin", cfg.get("init_p_vy", 0.1))
-        self._set_value_if_present("init_p_theta_spin", cfg.get("init_p_theta", 0.1))
-        self._set_value_if_present("init_p_bias_ax_spin", cfg.get("init_p_bias_ax", 0.01))
-        self._set_value_if_present("init_p_bias_ay_spin", cfg.get("init_p_bias_ay", 0.01))
-        self._set_value_if_present("init_p_bias_gz_spin", cfg.get("init_p_bias_gz", 0.01))
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not cfg:
+            set_widget_placeholder(self.alpha_spin)
+            set_widget_placeholder(self.beta_spin)
+            set_widget_placeholder(self.kappa_spin)
+            set_widget_placeholder(self.q_accel_spin)
+            set_widget_placeholder(self.q_gyro_spin)
+            set_widget_placeholder(self.r_uwb_spin)
+            for widget_name in ("init_p_px_spin", "init_p_py_spin", "init_p_vx_spin", "init_p_vy_spin", 
+                                "init_p_theta_spin", "init_p_bias_ax_spin", "init_p_bias_ay_spin", "init_p_bias_gz_spin"):
+                if self._has_widget(widget_name):
+                    set_widget_placeholder(getattr(self, widget_name))
+            return
+        set_widget_value(self.alpha_spin, cfg.get("alpha", 0.001))
+        set_widget_value(self.beta_spin, cfg.get("beta", 2.0))
+        set_widget_value(self.kappa_spin, cfg.get("kappa", 0.0))
+        set_widget_value(self.q_accel_spin, cfg.get("q_a", 0.1))
+        set_widget_value(self.q_gyro_spin, cfg.get("q_g", 0.01))
+        set_widget_value(self.r_uwb_spin, cfg.get("r_uwb", 0.05))
+        for key in ("init_p_px", "init_p_py", "init_p_vx", "init_p_vy", "init_p_theta", "init_p_bias_ax", "init_p_bias_ay", "init_p_bias_gz"):
+            widget_name = f"{key}_spin"
+            if self._has_widget(widget_name):
+                set_widget_value(getattr(self, widget_name), cfg.get(key))
 
     def _on_pos_calib_cfg_loaded(self, cfg):
-        self._set_checked_if_present("chk_enable_anchor_calib", cfg.get("enable_anchor_auto_calib", True))
-        self._set_checked_if_present("chk_enable_tag_calib", cfg.get("enable_tag_auto_calib", True))
-        self._set_value_if_present("pos_ref_dist_spin", cfg.get("ref_distance_xy_m", 2.0))
-        self._set_value_if_present("pos_tag_height_spin", cfg.get("tag_height_m", 1.0))
-        self._set_value_if_present("pos_anchor_height_spin", cfg.get("anchor_height_m", 2.5))
-        self._set_value_if_present("pos_calib_anchor_spin", cfg.get("calib_anchor_id", 1))
-        self._set_value_if_present("pos_samples_spin", cfg.get("samples", 10))
-        self._set_value_if_present("pos_err_thresh_spin", cfg.get("error_threshold_m", 0.3))
-        self._set_value_if_present("pos_min_delta_spin", cfg.get("min_delta_step", 1))
-        self._set_value_if_present("pos_max_rounds_spin", cfg.get("max_rounds", 10))
-        self._set_value_if_present("pos_max_std_spin", cfg.get("max_std_m", 0.2))
-        self._set_value_if_present("pos_damping_spin", cfg.get("damping", 0.1))
-        self._set_value_if_present("pos_iterations_spin", cfg.get("iterations", 100))
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not cfg:
+            for widget_name in ("chk_enable_anchor_calib", "chk_enable_tag_calib", "pos_ref_dist_spin",
+                                "pos_tag_height_spin", "pos_anchor_height_spin", "pos_calib_anchor_spin",
+                                "pos_samples_spin", "pos_err_thresh_spin", "pos_min_delta_spin",
+                                "pos_max_rounds_spin", "pos_max_std_spin", "pos_damping_spin", "pos_iterations_spin"):
+                if self._has_widget(widget_name):
+                    set_widget_placeholder(getattr(self, widget_name))
+            return
+        if self._has_widget("chk_enable_anchor_calib"):
+            set_widget_value(self.chk_enable_anchor_calib, cfg.get("enable_anchor_auto_calib", True))
+        if self._has_widget("chk_enable_tag_calib"):
+            set_widget_value(self.chk_enable_tag_calib, cfg.get("enable_tag_auto_calib", True))
+        if self._has_widget("pos_ref_dist_spin"):
+            set_widget_value(self.pos_ref_dist_spin, cfg.get("ref_distance_xy_m", 2.0))
+        if self._has_widget("pos_tag_height_spin"):
+            set_widget_value(self.pos_tag_height_spin, cfg.get("tag_height_m", 1.0))
+        if self._has_widget("pos_anchor_height_spin"):
+            set_widget_value(self.pos_anchor_height_spin, cfg.get("anchor_height_m", 2.5))
+        if self._has_widget("pos_calib_anchor_spin"):
+            set_widget_value(self.pos_calib_anchor_spin, cfg.get("calib_anchor_id", 1))
+        if self._has_widget("pos_samples_spin"):
+            set_widget_value(self.pos_samples_spin, cfg.get("samples", 10))
+        if self._has_widget("pos_err_thresh_spin"):
+            set_widget_value(self.pos_err_thresh_spin, cfg.get("error_threshold_m", 0.3))
+        if self._has_widget("pos_min_delta_spin"):
+            set_widget_value(self.pos_min_delta_spin, cfg.get("min_delta_step", 1))
+        if self._has_widget("pos_max_rounds_spin"):
+            set_widget_value(self.pos_max_rounds_spin, cfg.get("max_rounds", 10))
+        if self._has_widget("pos_max_std_spin"):
+            set_widget_value(self.pos_max_std_spin, cfg.get("max_std_m", 0.2))
+        if self._has_widget("pos_damping_spin"):
+            set_widget_value(self.pos_damping_spin, cfg.get("damping", 0.1))
+        if self._has_widget("pos_iterations_spin"):
+            set_widget_value(self.pos_iterations_spin, cfg.get("iterations", 100))
 
     def _on_host_transport_changed(self, index):
         index = max(0, int(index))

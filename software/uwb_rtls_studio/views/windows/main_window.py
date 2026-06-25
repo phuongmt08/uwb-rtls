@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
         log_vm=None,
         main_vm=None,
         serial_service=None,
+        protocol_service=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
         self._log_vm = log_vm
         self._main_vm = main_vm
         self._serial_service = serial_service
+        self._protocol_service = protocol_service
         self._is_developer = False
         self._session_active = False
         self._session_seconds = 0
@@ -81,6 +83,10 @@ class MainWindow(QMainWindow):
         self._tab_config = self.tab_config
         self._tab_calibration = self.tab_calibration
         self._tab_log = self.tab_log
+        self._tab_communication = self.tab_communication
+
+        if hasattr(self._tab_communication, "set_protocol_service"):
+            self._tab_communication.set_protocol_service(self._protocol_service)
 
         if self._device_info_vm:
             self._tab_device.set_viewmodel(self._device_info_vm)
@@ -105,16 +111,20 @@ class MainWindow(QMainWindow):
         self._tab_log.set_developer_mode(False)
         self._tab_tracking.set_developer_mode(False)
         self._tab_spatial_constraints.set_developer_mode(True)
+        if hasattr(self._tab_communication, "set_developer_mode"):
+            self._tab_communication.set_developer_mode(False)
 
         # Get index for calibration and spatial constraints tabs
         self._calib_tab_index = self.tabs.indexOf(self._tab_calibration)
         self._spatial_tab_index = self.tabs.indexOf(self._tab_spatial_constraints)
         self._tracking_tab_index = self.tabs.indexOf(self._tab_tracking)
+        self._communication_tab_index = self.tabs.indexOf(self._tab_communication)
 
         # Hide calibration and spatial constraints tabs in User mode
         self.tabs.setTabVisible(self._calib_tab_index, False)
         self.tabs.setTabVisible(self._spatial_tab_index, False)
         self.tabs.setTabVisible(self._tracking_tab_index, True)
+        self.tabs.setTabVisible(self._communication_tab_index, False)
 
         # Initialize active tab title
         self._on_tab_changed(self.tabs.currentIndex())
@@ -295,18 +305,23 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, index):
         self._is_developer = (index == 1)
 
-        # Toggle calibration and spatial constraints tabs visibility
+        # Toggle calibration, spatial constraints and communication tabs visibility
         self.tabs.setTabVisible(self._calib_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._spatial_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._tracking_tab_index, not self._is_developer)
+        self.tabs.setTabVisible(self._communication_tab_index, self._is_developer)
 
-        # Update config, log, device info, and tracking tabs
+        # Update config, log, device info, tracking and communication tabs
         if hasattr(self._tab_device, "set_developer_mode"):
             self._tab_device.set_developer_mode(self._is_developer)
         self._tab_config.set_developer_mode(self._is_developer)
         self._tab_log.set_developer_mode(self._is_developer)
         self._tab_tracking.set_developer_mode(False)
         self._tab_spatial_constraints.set_developer_mode(True)
+        if hasattr(self._tab_communication, "set_developer_mode"):
+            self._tab_communication.set_developer_mode(self._is_developer)
+            if not self._is_developer and hasattr(self._tab_communication, "disable_manual_test_mode"):
+                self._tab_communication.disable_manual_test_mode()
 
         # Update status bar and active tab
         if self._is_developer:
