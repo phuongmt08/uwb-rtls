@@ -26,6 +26,7 @@ class RawPacketStore:
         self._runtime_dir = Path(__file__).resolve().parent / "runtime"
         self._serial_file = self._runtime_dir / "raw_serial_chunks.jsonl"
         self._packet_file = self._runtime_dir / "raw_packets.jsonl"
+        self._parsed_file = self._runtime_dir / "parsed_packets.jsonl"
         self._prepare_runtime_capture()
 
     def append(self, packet: RawPacket) -> None:
@@ -100,6 +101,7 @@ class RawPacketStore:
         self._runtime_dir.mkdir(parents=True, exist_ok=True)
         self._serial_file.write_text("", encoding="utf-8")
         self._packet_file.write_text("", encoding="utf-8")
+        self._parsed_file.write_text("", encoding="utf-8")
 
     def _append_serial_chunk_to_disk(self, chunk: RawSerialChunk) -> None:
         record = {
@@ -124,6 +126,16 @@ class RawPacketStore:
         if gap:
             record["seq_gap"] = gap
         self._append_jsonl(self._packet_file, record)
+
+        parsed_record = {
+            "received_at": packet.received_at,
+            "param_name": packet.param_name,
+            "src_addr": packet.src_addr,
+            "dst_addr": packet.dst_addr,
+            "seq": packet.seq,
+            "parsed_data": packet.parsed_dict if packet.parsed_dict is not None else {},
+        }
+        self._append_jsonl(self._parsed_file, parsed_record)
 
     def _append_jsonl(self, path: Path, record: dict) -> None:
         with path.open("a", encoding="utf-8") as handle:

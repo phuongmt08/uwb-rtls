@@ -29,9 +29,18 @@ class RawPacket:
     dst_addr: int
     seq: int
     received_at: float
+    parsed_dict: dict | None = None
 
     @classmethod
     def from_proto(cls, param_name: str, packet, received_at: float | None = None) -> "RawPacket":
+        from google.protobuf.json_format import MessageToDict
+        try:
+            one = packet.WhichOneof("params")
+            payload_msg = getattr(packet, one, packet) if one else packet
+            parsed_dict = MessageToDict(payload_msg, preserving_proto_field_name=True)
+        except Exception:
+            parsed_dict = {}
+
         return cls(
             param_name=param_name,
             payload=packet.SerializeToString(),
@@ -39,4 +48,6 @@ class RawPacket:
             dst_addr=int(packet.hdr.addr.dst),
             seq=int(packet.hdr.seq),
             received_at=received_at if received_at is not None else time(),
+            parsed_dict=parsed_dict,
         )
+

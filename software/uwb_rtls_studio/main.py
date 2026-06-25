@@ -47,6 +47,11 @@ from PyQt6.QtGui import QFont
 from utils.logging_config import setup_logging
 setup_logging()
 
+# Initialize raw packet capture files at app startup so the runtime JSONL files
+# exist immediately, even before the first packet arrives.
+from data.raw_packet_store import shared_raw_packet_store
+shared_raw_packet_store.stats()
+
 from utils.runtime_mode import is_test_mode, mock_device_identity
 
 TEST_MODE = is_test_mode()
@@ -600,7 +605,8 @@ def main():
         log_vm=log_vm,
         main_vm=main_vm,
         serial_service=serial_service,
-        protocol_service=protocol_service
+        protocol_service=protocol_service,
+        command_bus=command_bus,
     )
     if connected_name and connected_mac:
         device_info_vm.set_connected_device(connected_name, connected_mac)

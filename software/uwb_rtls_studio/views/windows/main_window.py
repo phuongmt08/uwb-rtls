@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         main_vm=None,
         serial_service=None,
         protocol_service=None,
+        command_bus=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         self._main_vm = main_vm
         self._serial_service = serial_service
         self._protocol_service = protocol_service
+        self._command_bus = command_bus
         self._is_developer = False
         self._session_active = False
         self._session_seconds = 0
@@ -469,23 +471,68 @@ class MainWindow(QMainWindow):
             return
 
         from views.popups.dongle_popup import DonglePopup
-        if self._dongle_vm:
-            try:
-                self._serial_service.connection_lost.disconnect(self._on_dongle_disconnected)
-            except Exception:
-                pass
+        from models.scan_model import ScanModel
+        from viewmodels.scan_viewmodel import ScanViewModel
+        from views.popups.scan_popup import ScanPopup
+        from utils.app_state import shared_app_state
 
-            self._reconnect_popup = DonglePopup(self._dongle_vm, parent=self)
-            res = self._reconnect_popup.exec()
+        if not self._dongle_vm:
+            return
+
+        try:
+            self._serial_service.connection_lost.disconnect(self._on_dongle_disconnected)
+        except Exception:
+            pass
+
+        try:
+            while True:
+                self._reconnect_popup = DonglePopup(self._dongle_vm, parent=self)
+                dongle_res = self._reconnect_popup.exec()
+                self._reconnect_popup = None
+
+                if dongle_res != 1:
+                    self.close()
+                    return
+
+                shared_app_state.clear_device_session_state()
+
+                scan_model = ScanModel(
+                    self._protocol_service,
+                    self._serial_service,
+                    command_bus=self._command_bus,
+                )
+                scan_vm = ScanViewModel(scan_model)
+                scan_popup = ScanPopup(scan_vm, parent=self)
+
+                scan_res = scan_popup.exec()
+                connected_mac = scan_model.connected_mac
+                connected_name = ""
+                if connected_mac and connected_mac in scan_model._devices:
+                    dev = scan_model._devices[connected_mac]
+                    connected_name = dev.get("name", "")
+
+                scan_model.cleanup()
+                try:
+                    self._protocol_service.packet_received.disconnect(scan_model._on_packet)
+                except TypeError:
+                    pass
+
+                if scan_res == 1 and connected_mac:
+                    if self._device_info_vm:
+                        self._device_info_vm.set_connected_device(connected_name, connected_mac)
+                    return
+
+                if scan_res == 2:
+                    continue
+
+                self.close()
+                return
+        finally:
             self._reconnect_popup = None
-
             try:
                 self._serial_service.connection_lost.connect(self._on_dongle_disconnected)
             except Exception:
                 pass
-
-            if res != 1:
-                self.close()
 
     def closeEvent(self, event):
         """Handle app close - confirmation popup and shutdown sequence."""

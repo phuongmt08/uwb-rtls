@@ -43,7 +43,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QPushButton, QComboBox, QLineEdit, QSplitter,
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QTabWidget, QFormLayout, QAbstractItemView, QTextEdit,
+    QTabWidget, QFormLayout, QAbstractItemView, QTextEdit, QDialog,
     QSizePolicy,
 )
 from PyQt6.QtCore import (
@@ -147,6 +147,7 @@ class CommunicationTab(QWidget):
         # seq → table row index for correlated display
         self._monitor_seq_to_row: dict[int, int] = {}
         self._tester_seq_to_row: dict[int, int] = {}
+        self._decode_popups: list[QDialog] = []
 
         # Load UI skeleton from .ui file (provides main_layout QVBoxLayout)
         _ui_path = os.path.join(os.path.dirname(__file__), "..", "ui", "communication_tab.ui")
@@ -266,6 +267,8 @@ class CommunicationTab(QWidget):
         )
         self.monitor_sent_table.itemSelectionChanged.connect(self._sync_monitor_sel_sent)
         self.monitor_received_table.itemSelectionChanged.connect(self._sync_monitor_sel_recv)
+        self.monitor_sent_table.cellClicked.connect(self._on_monitor_sent_cell_clicked)
+        self.monitor_received_table.cellClicked.connect(self._on_monitor_received_cell_clicked)
 
     # ── Packet Tester ─────────────────────────────────────────────────────────
 
@@ -387,6 +390,8 @@ class CommunicationTab(QWidget):
         )
         self.tester_sent_table.itemSelectionChanged.connect(self._sync_tester_sel_sent)
         self.tester_received_table.itemSelectionChanged.connect(self._sync_tester_sel_recv)
+        self.tester_sent_table.cellClicked.connect(self._on_tester_sent_cell_clicked)
+        self.tester_received_table.cellClicked.connect(self._on_tester_received_cell_clicked)
 
         # Trigger initial field visibility
         self._update_tester_fields()
@@ -855,14 +860,18 @@ class CommunicationTab(QWidget):
                 self._tester_seq_to_row,
                 match_seq, timestamp, src_str, dst_str, param_name, details,
             )
-            self._tester_seqs.discard(match_seq)
-            if seq != match_seq:
-                self._tester_seqs.discard(seq)
-            if self._manual_send_expected_seq == match_seq:
-                self._manual_send_expected_seq = None
-                self._manual_send_expected_name = None
-            self.tester_status_label.setText(f"Response received - seq={match_seq}")
-            self.tester_status_label.setStyleSheet("color: #10B981;")
+            if param_name == "ack":
+                self.tester_status_label.setText(f"ACK received - seq={match_seq}")
+                self.tester_status_label.setStyleSheet("color: #22D3EE;")
+            else:
+                self._tester_seqs.discard(match_seq)
+                if seq != match_seq:
+                    self._tester_seqs.discard(seq)
+                if self._manual_send_expected_seq == match_seq:
+                    self._manual_send_expected_seq = None
+                    self._manual_send_expected_name = None
+                self.tester_status_label.setText(f"Response received - seq={match_seq}")
+                self.tester_status_label.setStyleSheet("color: #10B981;")
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Correlated table row helpers
@@ -915,12 +924,18 @@ class CommunicationTab(QWidget):
 
         if row is not None:
             # Update existing correlated row (matching Sent entry)
+            existing_resp = recv_table.item(row, 4).text().strip() if recv_table.item(row, 4) else ""
+            existing_details = recv_table.item(row, 5).data(Qt.ItemDataRole.UserRole) if recv_table.item(row, 5) else ""
+            if resp == "ack" and existing_resp and existing_resp != "ack" and existing_details:
+                return
             recv_table.setItem(row, 0, self._make_item(timestamp))
             recv_table.setItem(row, 1, self._make_item(src))
             recv_table.setItem(row, 2, self._make_item(dst))
             recv_table.setItem(row, 3, self._make_item(str(seq)))
             recv_table.setItem(row, 4, self._make_item(resp))
             data_item = self._make_item(details)
+            data_item.setData(Qt.ItemDataRole.UserRole, details)
+            data_item.setToolTip("Click to view full decoded fields")
             data_item.setForeground(QColor("#10B981"))  # green = valid data received
             recv_table.setItem(row, 5, data_item)
             recv_table.scrollToBottom()
@@ -937,6 +952,8 @@ class CommunicationTab(QWidget):
             recv_table.setItem(row, 3, self._make_item(str(seq)))
             recv_table.setItem(row, 4, self._make_item(resp))
             data_item = self._make_item(details)
+            data_item.setData(Qt.ItemDataRole.UserRole, details)
+            data_item.setToolTip("Click to view full decoded fields")
             data_item.setForeground(QColor("#10B981"))
             recv_table.setItem(row, 5, data_item)
             sent_table.scrollToBottom()
@@ -986,6 +1003,57 @@ class CommunicationTab(QWidget):
             self.tester_sent_table.blockSignals(True)
             self.tester_sent_table.setCurrentCell(row, 0)
             self.tester_sent_table.blockSignals(False)
+
+    def _on_monitor_received_cell_clicked(self, row: int, column: int) -> None:
+        self._show_decoded_popup(self.monitor_received_table, row, column, "Received Packet Fields")
+
+    def _on_monitor_sent_cell_clicked(self, row: int, column: int) -> None:
+        self._show_decoded_popup(self.monitor_sent_table, row, column, "Sent Packet Parameters")
+
+    def _on_tester_received_cell_clicked(self, row: int, column: int) -> None:
+        self._show_decoded_popup(self.tester_received_table, row, column, "Test Packet Fields")
+
+    def _on_tester_sent_cell_clicked(self, row: int, column: int) -> None:
+        self._show_decoded_popup(self.tester_sent_table, row, column, "Test Sent Packet Parameters")
+
+    def _show_decoded_popup(self, table: QTableWidget, row: int, column: int, title: str) -> None:
+        if column != 5 or row < 0:
+            return
+        item = table.item(row, column)
+        if item is None:
+            return
+        details = item.data(Qt.ItemDataRole.UserRole) or item.text().strip()
+        if not details:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(720, 420)
+        layout = QVBoxLayout(dialog)
+
+        text = QTextEdit(dialog)
+        text.setReadOnly(True)
+        text.setPlainText(details.replace(", ", "\n"))
+        text.setStyleSheet("""
+            QTextEdit {
+                background-color: #05080E; color: #22D3EE;
+                border: 1px solid #334155;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 13px; border-radius: 4px; padding: 6px;
+            }
+        """)
+        layout.addWidget(text)
+
+        close_btn = QPushButton("Close", dialog)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+        self._decode_popups.append(dialog)
+        try:
+            dialog.exec()
+        finally:
+            if dialog in self._decode_popups:
+                self._decode_popups.remove(dialog)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Clear actions
@@ -1281,6 +1349,32 @@ class CommunicationTab(QWidget):
     @staticmethod
     def _format_pkt(param_name: str, pkt) -> str:
         """Extract human-readable field summary from a protobuf packet_t."""
+        def _scalar_to_text(value) -> str:
+            if isinstance(value, bytes):
+                return "0x" + value.hex().upper()
+            if isinstance(value, float):
+                return f"{value:.4f}"
+            return str(value)
+
+        def _flatten_fields(value, prefix: str = "") -> list[str]:
+            if hasattr(value, "ListFields"):
+                parts: list[str] = []
+                for fd, subval in value.ListFields():
+                    field_prefix = f"{prefix}{fd.name}"
+                    if fd.label == fd.LABEL_REPEATED:
+                        if fd.type == fd.TYPE_MESSAGE:
+                            for idx, entry in enumerate(subval):
+                                parts.extend(_flatten_fields(entry, f"{field_prefix}[{idx}]."))
+                        else:
+                            parts.append(f"{field_prefix}: [{', '.join(_scalar_to_text(v) for v in subval)}]")
+                    elif fd.type == fd.TYPE_MESSAGE:
+                        nested = _flatten_fields(subval, f"{field_prefix}.")
+                        parts.extend(nested or [f"{field_prefix}: {{}}"] )
+                    else:
+                        parts.append(f"{field_prefix}: {_scalar_to_text(subval)}")
+                return parts
+            return [f"{prefix.rstrip('.')}: {_scalar_to_text(value)}"] if prefix else [_scalar_to_text(value)]
+
         if pkt is None:
             return ""
         payload = None
@@ -1292,15 +1386,7 @@ class CommunicationTab(QWidget):
             payload = pkt
 
         if hasattr(payload, "ListFields"):
-            parts = []
-            for fd, val in payload.ListFields():
-                if isinstance(val, bytes):
-                    val_s = "0x" + val.hex().upper()
-                elif isinstance(val, float):
-                    val_s = f"{val:.4f}"
-                else:
-                    val_s = str(val)
-                parts.append(f"{fd.name}: {val_s}")
+            parts = _flatten_fields(payload)
             return ", ".join(parts) if parts else "no fields"
 
         return str(payload)

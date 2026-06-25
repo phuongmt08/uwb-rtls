@@ -143,9 +143,8 @@ class DeviceInfoViewModel(QObject):
 
     def _on_dongle_reconnected(self, info_dict: dict):
         """Dongle auto-reconnected and verified."""
-        log.info("Dongle auto-reconnected and verified.")
         if info_dict.get("verified"):
-            self.model.start_scan()
+            log.info("Dongle reconnected; MainWindow will reopen reconnect popups.")
 
     # ═══════════════════════════════════════════════════════════════════
     #  PRESENTATION LOGIC (Model signal → format → UI signal)

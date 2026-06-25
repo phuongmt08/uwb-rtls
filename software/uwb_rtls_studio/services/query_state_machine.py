@@ -261,3 +261,12 @@ class QueryQueueManager(QObject):
                 )
 
         self._request_send_next()
+
+    def reset(self) -> None:
+        """Clear the queue and stop any active timeouts/transactions."""
+        with self.lock:
+            self.timer.stop()
+            self.queue.clear()
+            self.current_transaction = None
+            self.is_running = False
+            log.info("QueryQueueManager reset successfully.")

@@ -126,6 +126,12 @@ class CommandBus(QObject):
         self._pending.pop(param_name, None)
         self.response_received.emit(param_name, pkt)
 
+    def reset(self) -> None:
+        """Clear cache and pending command tracking."""
+        self._cache.clear()
+        self._pending.clear()
+        log.info("CommandBus reset cache.")
+
 
 shared_command_bus: CommandBus | None = None
 

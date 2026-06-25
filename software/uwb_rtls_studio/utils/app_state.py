@@ -291,6 +291,14 @@ class SharedAppState(QObject):
 
     def clear_device_session_state(self) -> None:
         """Clear all device-specific configurations and telemetry states."""
+        if hasattr(self, '_query_manager') and self._query_manager:
+            self._query_manager.reset()
+        try:
+            from services.command_bus import shared_command_bus
+            if shared_command_bus:
+                shared_command_bus.reset()
+        except Exception:
+            pass
         self._connected_device = {}
         self._battery_info = {}
         self._ble_status = {}
