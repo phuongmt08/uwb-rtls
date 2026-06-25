@@ -36,6 +36,8 @@ import time
 import json
 import logging
 
+from common.transport import VvAddress
+
 from PyQt6 import uic
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
@@ -136,6 +138,11 @@ class CommunicationTab(QWidget):
         # (needed because packet_sent is a Direct Connection on same thread
         #  → _on_packet_sent fires BEFORE _send_manual_packet returns pkt)
         self._manual_send_active: bool = False
+        self._manual_send_in_flight: bool = False
+        self._manual_send_expected_name: str | None = None
+        self._manual_send_expected_seq: int | None = None
+        self._last_manual_send_sig: tuple | None = None
+        self._last_manual_send_at: float = 0.0
 
         # seq → table row index for correlated display
         self._monitor_seq_to_row: dict[int, int] = {}
@@ -292,14 +299,14 @@ class CommunicationTab(QWidget):
 
         hdr.addWidget(QLabel("Src:", self.tester_control_group))
         self.tester_src_select = QComboBox(self.tester_control_group)
-        self.tester_src_select.addItem("HOST (0x02)", 2)
+        self.tester_src_select.addItem(self._addr_name(int(VvAddress.HOST)), int(VvAddress.HOST))
         hdr.addWidget(self.tester_src_select, 1)
 
         hdr.addWidget(QLabel("Dst:", self.tester_control_group))
         self.tester_dst_select = QComboBox(self.tester_control_group)
-        self.tester_dst_select.addItem("MCU (0x01)", 1)
-        self.tester_dst_select.addItem("CENTRAL (0x03)", 3)
-        self.tester_dst_select.addItem("PERIPHERAL (0x04)", 4)
+        self.tester_dst_select.addItem(self._addr_name(int(VvAddress.MCU)), int(VvAddress.MCU))
+        self.tester_dst_select.addItem(self._addr_name(int(VvAddress.CENTRAL)), int(VvAddress.CENTRAL))
+        self.tester_dst_select.addItem(self._addr_name(int(VvAddress.PERIPHERAL)), int(VvAddress.PERIPHERAL))
         hdr.addWidget(self.tester_dst_select, 1)
         ctrl_layout.addLayout(hdr)
 
@@ -332,6 +339,8 @@ class CommunicationTab(QWidget):
             QPushButton:hover { background-color: #22D3EE; color: #0F172A; }
             QPushButton:pressed { background-color: #0891B2; color: #F8FAFC; }
         """)
+        self.btn_send_packet.setAutoDefault(False)
+        self.btn_send_packet.setDefault(False)
         self.btn_send_packet.clicked.connect(self._send_manual_packet)
         action_row.addWidget(self.btn_send_packet, 0)
 
@@ -412,7 +421,7 @@ class CommunicationTab(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _configure_table(self, table: QTableWidget, *, is_sent: bool) -> None:
-        table.setColumnCount(5)
+        table.setColumnCount(6)
         table.verticalHeader().setDefaultSectionSize(26)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -420,11 +429,11 @@ class CommunicationTab(QWidget):
         table.setAlternatingRowColors(False)
 
         if is_sent:
-            headers = ["Time", "Dst", "Seq", "Command", "Parameters"]
+            headers = ["Time", "Src", "Dst", "Seq", "Command", "Parameters"]
             accent = "#F59E0B"
             sel_bg = "rgba(245,158,11,0.2)"
         else:
-            headers = ["Time", "Src", "Seq", "Response", "Decoded Data"]
+            headers = ["Time", "Src", "Dst", "Seq", "Response", "Decoded Data"]
             accent = "#EF4444"
             sel_bg = "rgba(239,68,68,0.2)"
 
@@ -442,14 +451,13 @@ class CommunicationTab(QWidget):
             QTableWidget::item:selected {{ background-color: {sel_bg}; color: #FFFFFF; }}
         """)
 
-        # Column widths
-        # 0 Time  | 1 Dst/Src | 2 Seq | 3 Command/Response | 4 Details (stretch)
-        table.setColumnWidth(0, 190)
-        table.setColumnWidth(1, 100)
-        table.setColumnWidth(2, 70)
-        table.setColumnWidth(3, 160)
+        table.setColumnWidth(0, 150)
+        table.setColumnWidth(1, 105)
+        table.setColumnWidth(2, 105)
+        table.setColumnWidth(3, 70)
+        table.setColumnWidth(4, 160)
         hdr = table.horizontalHeader()
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Packet list & tester parameter fields
@@ -686,8 +694,14 @@ class CommunicationTab(QWidget):
         self._protocol_service = protocol_service
 
         if protocol_service:
-            protocol_service.packet_received.connect(self._on_packet_received)
-            protocol_service.packet_sent.connect(self._on_packet_sent)
+            protocol_service.packet_received.connect(
+                self._on_packet_received,
+                Qt.ConnectionType.UniqueConnection,
+            )
+            protocol_service.packet_sent.connect(
+                self._on_packet_sent,
+                Qt.ConnectionType.UniqueConnection,
+            )
             log.debug("CommunicationTab: connected to ProtocolService signals.")
 
     def set_developer_mode(self, enabled: bool) -> None:
@@ -748,20 +762,28 @@ class CommunicationTab(QWidget):
         timestamp = time.strftime("%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}"
         hdr = getattr(pkt, "hdr", None)
         addr = getattr(hdr, "addr", None)
-        dst_addr = getattr(addr, "dst", 0)
+        src_addr = int(getattr(addr, "src", 0) or 0)
+        dst_addr = int(getattr(addr, "dst", 0) or 0)
         seq = int(getattr(hdr, "seq", 0) or 0)
+        src_str = self._addr_name(src_addr)
         dst_str = self._addr_name(dst_addr)
         details = self._format_pkt(param_name, pkt)
 
-        if self._manual_send_active:
-            self._tester_seqs.add(seq)
+        is_current_manual_send = False
+        if self._manual_send_active and self._manual_send_expected_seq is None:
+            if param_name == self._manual_send_expected_name:
+                self._manual_send_expected_seq = seq
+                self._tester_seqs.add(seq)
+                is_current_manual_send = True
+        elif self._manual_send_expected_seq == seq:
+            is_current_manual_send = True
 
         self.monitor_detail_text.setPlainText(
             f"DIRECTION : SENT (TX)\n"
             f"Time      : {timestamp}\n"
             f"Packet    : {param_name}\n"
             f"Seq       : {seq}  (0x{seq:04X})\n"
-            f"Src       : HOST (0x02)\n"
+            f"Src       : {src_str}\n"
             f"Dst       : {dst_str}\n"
             f"\nParameters:\n{details.replace(', ', chr(10))}"
         )
@@ -770,15 +792,15 @@ class CommunicationTab(QWidget):
             self.monitor_sent_table,
             self.monitor_received_table,
             self._monitor_seq_to_row,
-            seq, timestamp, dst_str, param_name, details,
+            seq, timestamp, src_str, dst_str, param_name, details,
         )
 
-        if seq in self._tester_seqs:
+        if is_current_manual_send or seq in self._tester_seqs:
             self._add_sent_row(
                 self.tester_sent_table,
                 self.tester_received_table,
                 self._tester_seq_to_row,
-                seq, timestamp, dst_str, param_name, details,
+                seq, timestamp, src_str, dst_str, param_name, details,
             )
 
     @pyqtSlot(str, object)
@@ -787,9 +809,11 @@ class CommunicationTab(QWidget):
         timestamp = time.strftime("%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}"
         hdr = getattr(pkt, "hdr", None)
         addr = getattr(hdr, "addr", None)
-        src_addr = getattr(addr, "src", 0)
+        src_addr = int(getattr(addr, "src", 0) or 0)
+        dst_addr = int(getattr(addr, "dst", 0) or 0)
         seq = int(getattr(hdr, "seq", 0) or 0)
         src_str = self._addr_name(src_addr)
+        dst_str = self._addr_name(dst_addr)
         details = self._format_pkt(param_name, pkt)
         match_seq = int(getattr(getattr(pkt, "ack", None), "ack_seq", seq) or seq) if param_name == "ack" else seq
 
@@ -803,7 +827,7 @@ class CommunicationTab(QWidget):
             response_detail += f"Ack Seq   : {match_seq}  (0x{match_seq:04X})\n"
         response_detail += (
             f"Src       : {src_str}\n"
-            f"Dst       : HOST (0x02)\n"
+            f"Dst       : {dst_str}\n"
             f"\nDecoded Data:\n{details.replace(', ', chr(10))}"
         )
         self.monitor_detail_text.append(response_detail)
@@ -821,7 +845,7 @@ class CommunicationTab(QWidget):
             self.monitor_sent_table,
             self.monitor_received_table,
             self._monitor_seq_to_row,
-            match_seq, timestamp, src_str, param_name, details,
+            match_seq, timestamp, src_str, dst_str, param_name, details,
         )
 
         if match_seq in self._tester_seqs:
@@ -829,10 +853,15 @@ class CommunicationTab(QWidget):
                 self.tester_sent_table,
                 self.tester_received_table,
                 self._tester_seq_to_row,
-                match_seq, timestamp, src_str, param_name, details,
+                match_seq, timestamp, src_str, dst_str, param_name, details,
             )
-            self._tester_seqs.discard(seq)
-            self.tester_status_label.setText(f"✓ Response received — seq={match_seq}")
+            self._tester_seqs.discard(match_seq)
+            if seq != match_seq:
+                self._tester_seqs.discard(seq)
+            if self._manual_send_expected_seq == match_seq:
+                self._manual_send_expected_seq = None
+                self._manual_send_expected_name = None
+            self.tester_status_label.setText(f"Response received - seq={match_seq}")
             self.tester_status_label.setStyleSheet("color: #10B981;")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -846,6 +875,7 @@ class CommunicationTab(QWidget):
         seq_to_row: dict,
         seq: int,
         timestamp: str,
+        src: str,
         dst: str,
         cmd: str,
         details: str,
@@ -856,10 +886,10 @@ class CommunicationTab(QWidget):
         recv_table.insertRow(row)
 
         # Sent side
-        self._set_row(sent_table, row, [timestamp, dst, str(seq), cmd, details])
+        self._set_row(sent_table, row, [timestamp, src, dst, str(seq), cmd, details])
 
         # Received side — placeholders (will be filled when response arrives)
-        for col in range(5):
+        for col in range(6):
             item = QTableWidgetItem("")
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             recv_table.setItem(row, col, item)
@@ -876,6 +906,7 @@ class CommunicationTab(QWidget):
         seq: int,
         timestamp: str,
         src: str,
+        dst: str,
         resp: str,
         details: str,
     ) -> None:
@@ -886,26 +917,28 @@ class CommunicationTab(QWidget):
             # Update existing correlated row (matching Sent entry)
             recv_table.setItem(row, 0, self._make_item(timestamp))
             recv_table.setItem(row, 1, self._make_item(src))
-            recv_table.setItem(row, 2, self._make_item(str(seq)))
-            recv_table.setItem(row, 3, self._make_item(resp))
+            recv_table.setItem(row, 2, self._make_item(dst))
+            recv_table.setItem(row, 3, self._make_item(str(seq)))
+            recv_table.setItem(row, 4, self._make_item(resp))
             data_item = self._make_item(details)
             data_item.setForeground(QColor("#10B981"))  # green = valid data received
-            recv_table.setItem(row, 4, data_item)
+            recv_table.setItem(row, 5, data_item)
             recv_table.scrollToBottom()
         else:
             # Unsolicited / pushed-by-device packet — no matching sent entry
             row = sent_table.rowCount()
             sent_table.insertRow(row)
             recv_table.insertRow(row)
-            for col in range(5):
+            for col in range(6):
                 sent_table.setItem(row, col, self._make_item(""))
             recv_table.setItem(row, 0, self._make_item(timestamp))
             recv_table.setItem(row, 1, self._make_item(src))
-            recv_table.setItem(row, 2, self._make_item(str(seq)))
-            recv_table.setItem(row, 3, self._make_item(resp))
+            recv_table.setItem(row, 2, self._make_item(dst))
+            recv_table.setItem(row, 3, self._make_item(str(seq)))
+            recv_table.setItem(row, 4, self._make_item(resp))
             data_item = self._make_item(details)
             data_item.setForeground(QColor("#10B981"))
-            recv_table.setItem(row, 4, data_item)
+            recv_table.setItem(row, 5, data_item)
             sent_table.scrollToBottom()
             recv_table.scrollToBottom()
 
@@ -969,73 +1002,106 @@ class CommunicationTab(QWidget):
         self.tester_received_table.setRowCount(0)
         self._tester_seq_to_row.clear()
         self._tester_seqs.clear()
+        self._manual_send_expected_name = None
+        self._manual_send_expected_seq = None
         self.tester_status_label.setText("Ready")
         self.tester_status_label.setStyleSheet("color: #94A3B8; font-style: italic;")
+
+    def _finish_manual_send_dispatch(self) -> None:
+        self._manual_send_in_flight = False
+        if hasattr(self, "btn_send_packet"):
+            self.btn_send_packet.setEnabled(True)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Manual packet sender
     # ─────────────────────────────────────────────────────────────────────────
 
     def _send_manual_packet(self) -> None:
+        if self._manual_send_in_flight:
+            self.tester_status_label.setText("Warning: previous send still being dispatched")
+            self.tester_status_label.setStyleSheet("color: #F59E0B;")
+            return
+
         packet_name = self.tester_packet_select.currentData()
         if not packet_name:
-            self.tester_status_label.setText("⚠ Please select a valid packet")
+            self.tester_status_label.setText("Warning: please select a valid packet")
             self.tester_status_label.setStyleSheet("color: #F59E0B;")
             return
 
         dst_addr = int(self.tester_dst_select.currentData())
         src_addr = int(self.tester_src_select.currentData())
 
-        # Collect parameters
         try:
             params = self._collect_params(packet_name)
         except ValueError as exc:
-            self.tester_status_label.setText(f"⚠ Param error: {exc}")
+            self.tester_status_label.setText(f"Warning: param error: {exc}")
             self.tester_status_label.setStyleSheet("color: #EF4444;")
             return
 
-        # No dongle → simulation mode
-        if not self._protocol_service:
-            self.tester_status_label.setText("⚠ Simulation Mode (no dongle connected)")
+        send_signature = (
+            packet_name,
+            src_addr,
+            dst_addr,
+            json.dumps(params, sort_keys=True, default=str),
+        )
+        now = time.monotonic()
+        if self._last_manual_send_sig == send_signature and (now - self._last_manual_send_at) < 0.25:
+            self.tester_status_label.setText("Warning: duplicate click ignored")
             self.tester_status_label.setStyleSheet("color: #F59E0B;")
-            self._simulate_exchange(packet_name, dst_addr, params)
             return
 
-        # Real hardware path via CommandBus
-        from services.command_bus import shared_command_bus  # local import
-        if not shared_command_bus:
-            self.tester_status_label.setText("⚠ CommandBus not initialized")
-            self.tester_status_label.setStyleSheet("color: #EF4444;")
-            return
+        self._manual_send_in_flight = True
+        self.btn_send_packet.setEnabled(False)
+        self._manual_send_expected_name = packet_name
+        self._manual_send_expected_seq = None
 
-        # ── IMPORTANT: Set flag BEFORE calling send().
-        # packet_sent is a Direct Connection → _on_packet_sent fires synchronously
-        # INSIDE send_command() BEFORE pkt is returned here.  The flag lets
-        # _on_packet_sent know to tag the seq as a tester packet immediately.
-        self._manual_send_active = True
         try:
-            pkt = shared_command_bus.send(
-                packet_name,
-                dst_addr=dst_addr,
-                src_addr=src_addr,
-                manual_bypass=True,
-                **params,
-            )
+            if not self._protocol_service:
+                self._last_manual_send_sig = send_signature
+                self._last_manual_send_at = now
+                self.tester_status_label.setText("Warning: simulation mode (no dongle connected)")
+                self.tester_status_label.setStyleSheet("color: #F59E0B;")
+                self._simulate_exchange(packet_name, dst_addr, params)
+                return
+
+            from services.command_bus import shared_command_bus  # local import
+            if not shared_command_bus:
+                self.tester_status_label.setText("Warning: CommandBus not initialized")
+                self.tester_status_label.setStyleSheet("color: #EF4444;")
+                self._manual_send_expected_name = None
+                return
+
+            self._manual_send_active = True
+            try:
+                pkt = shared_command_bus.send(
+                    packet_name,
+                    dst_addr=dst_addr,
+                    src_addr=src_addr,
+                    manual_bypass=True,
+                    **params,
+                )
+            finally:
+                self._manual_send_active = False
+
+            if pkt is not None:
+                seq = getattr(getattr(pkt, "hdr", None), "seq", None)
+                if self._manual_send_expected_seq is None and seq is not None:
+                    self._manual_send_expected_seq = int(seq)
+                    self._tester_seqs.add(int(seq))
+                self._last_manual_send_sig = send_signature
+                self._last_manual_send_at = now
+                self.tester_status_label.setText(f"Sent {packet_name}  seq={seq}")
+                self.tester_status_label.setStyleSheet("color: #22D3EE;")
+                log.info("Manual packet sent: %s  seq=%s  dst=0x%02X", packet_name, seq, dst_addr)
+            else:
+                self._manual_send_expected_name = None
+                self._manual_send_expected_seq = None
+                self.tester_status_label.setText("Warning: send failed (check connection / command flag)")
+                self.tester_status_label.setStyleSheet("color: #EF4444;")
         finally:
-            self._manual_send_active = False
+            QTimer.singleShot(150, self._finish_manual_send_dispatch)
 
-        if pkt is not None:
-            seq = getattr(getattr(pkt, "hdr", None), "seq", None)
-            # seq was already added to _tester_seqs inside _on_packet_sent
-            self.tester_status_label.setText(f"✈ Sent {packet_name}  seq={seq}")
-            self.tester_status_label.setStyleSheet("color: #22D3EE;")
-            log.info("Manual packet sent: %s  seq=%s  dst=0x%02X", packet_name, seq, dst_addr)
-        else:
-            self.tester_status_label.setText("⚠ Send failed (check connection / command flag)")
-            self.tester_status_label.setStyleSheet("color: #EF4444;")
-
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Parameter collection
+    # Manual packet parameter collection
     # ─────────────────────────────────────────────────────────────────────────
 
     def _collect_params(self, packet_name: str) -> dict:
@@ -1154,11 +1220,11 @@ class CommunicationTab(QWidget):
         # Add TX rows
         self._add_sent_row(
             self.monitor_sent_table, self.monitor_received_table,
-            self._monitor_seq_to_row, seq, timestamp, dst_str, packet_name, param_str,
+            self._monitor_seq_to_row, seq, timestamp, self._addr_name(int(VvAddress.HOST)), dst_str, packet_name, param_str,
         )
         self._add_sent_row(
             self.tester_sent_table, self.tester_received_table,
-            self._tester_seq_to_row, seq, timestamp, dst_str, packet_name, param_str,
+            self._tester_seq_to_row, seq, timestamp, self._addr_name(int(VvAddress.HOST)), dst_str, packet_name, param_str,
         )
 
         # Simulate response after 120 ms
@@ -1182,11 +1248,11 @@ class CommunicationTab(QWidget):
 
             self._fill_recv_row(
                 self.monitor_sent_table, self.monitor_received_table,
-                self._monitor_seq_to_row, seq, resp_ts, dst_str, resp_name, resp_data,
+                self._monitor_seq_to_row, seq, resp_ts, dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
             )
             self._fill_recv_row(
                 self.tester_sent_table, self.tester_received_table,
-                self._tester_seq_to_row, seq, resp_ts, dst_str, resp_name, resp_data,
+                self._tester_seq_to_row, seq, resp_ts, dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
             )
             self._tester_seqs.discard(seq)
             self.tester_status_label.setText(f"✓ [SIM] Response received — seq={seq}")
@@ -1200,9 +1266,17 @@ class CommunicationTab(QWidget):
 
     @staticmethod
     def _addr_name(addr: int) -> str:
-        return {1: "MCU (0x01)", 2: "HOST (0x02)", 3: "CENTRAL (0x03)", 4: "PERIPHERAL (0x04)"}.get(
-            addr, f"UNKNOWN (0x{addr:02X})"
-        )
+        labels = {
+            int(VvAddress.NONE): f"NONE (0x{int(VvAddress.NONE):02X})",
+            int(VvAddress.MCU): f"MCU (0x{int(VvAddress.MCU):02X})",
+            int(VvAddress.VEHICLE): f"VEHICLE (0x{int(VvAddress.VEHICLE):02X})",
+            int(VvAddress.CENTRAL): f"CENTRAL (0x{int(VvAddress.CENTRAL):02X})",
+            int(VvAddress.PERIPHERAL): f"PERIPHERAL (0x{int(VvAddress.PERIPHERAL):02X})",
+            int(VvAddress.HOST): f"HOST (0x{int(VvAddress.HOST):02X})",
+            int(VvAddress.DEBUG): f"DEBUG (0x{int(VvAddress.DEBUG):02X})",
+            int(VvAddress.BCAST): f"BCAST (0x{int(VvAddress.BCAST):02X})",
+        }
+        return labels.get(int(addr or 0), f"UNKNOWN (0x{int(addr or 0):02X})")
 
     @staticmethod
     def _format_pkt(param_name: str, pkt) -> str:

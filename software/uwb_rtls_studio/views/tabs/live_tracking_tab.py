@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF, QShortcut, QKeySequence
 
+from common.transport import VvAddress
 from views.components.position_canvas import PositionCanvas
 from views.components.geofence_3d_widget import Geofence3DWidget, OPENGL_AVAILABLE
 from models.geofence_model import GeofenceZone
@@ -1662,7 +1663,14 @@ class LiveTrackingTab(QWidget):
         editor.btn_assign_anchor.clicked.connect(self._on_set_local_origin_clicked)
 
         # Device target setup
-        editor.cmb_device_target.setItemData(0, {"dst_addr": 1, "role": "tag"})
+        editor.cmb_device_target.setItemData(
+            0,
+            {
+                "proto_dst_addr": int(VvAddress.MCU),
+                "device_id": 1,
+                "role": "tag",
+            },
+        )
         editor.btn_read_layout_dev.clicked.connect(self._read_layout_from_device)
         editor.btn_write_layout_dev.clicked.connect(self._write_layout_to_device)
 
@@ -1882,7 +1890,11 @@ class LiveTrackingTab(QWidget):
             data = self.geofence_editor_widget.cmb_device_target.currentData()
             if isinstance(data, dict):
                 return data
-        return {"dst_addr": 1, "role": "tag"}
+        return {
+            "proto_dst_addr": int(VvAddress.MCU),
+            "device_id": 1,
+            "role": "tag",
+        }
 
     def _create_default_anchors(self):
         if not self._vm:
@@ -1972,7 +1984,10 @@ class LiveTrackingTab(QWidget):
             return
         target = self._selected_device_target()
         self._pending_layout_read_for_editor = bool(getattr(self._canvas, "dim_tracking_view", False))
-        self._vm._send_command("anchor_layout_get", dst_addr=self._coerce_int_id(target.get("dst_addr"), 1))
+        self._vm._send_command(
+            "anchor_layout_get",
+            dst_addr=self._coerce_int_id(target.get("proto_dst_addr"), int(VvAddress.MCU)),
+        )
         QMessageBox.information(self, "Read Layout", "Sent layout query to Tag MCU.")
 
     def _write_layout_to_device(self):
@@ -1998,7 +2013,11 @@ class LiveTrackingTab(QWidget):
             })
         
         target = self._selected_device_target()
-        self._vm._send_command("anchor_layout_set", dst_addr=self._coerce_int_id(target.get("dst_addr"), 1), anchors=anchors_payload)
+        self._vm._send_command(
+            "anchor_layout_set",
+            dst_addr=self._coerce_int_id(target.get("proto_dst_addr"), int(VvAddress.MCU)),
+            anchors=anchors_payload,
+        )
         warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
         QMessageBox.information(self, "Write Layout", f"Sent layout with {len(layout)} anchors to Tag MCU.{warning_text}")
 
@@ -2009,7 +2028,14 @@ class LiveTrackingTab(QWidget):
         selected = combo.currentData()
         combo.blockSignals(True)
         combo.clear()
-        combo.addItem("Tag / MCU (0x0001)", {"dst_addr": 1, "role": "tag"})
+        combo.addItem(
+            "Tag 0x0001 / MCU (0x01)",
+            {
+                "proto_dst_addr": int(VvAddress.MCU),
+                "device_id": 1,
+                "role": "tag",
+            },
+        )
         seen = {1}
         for device in devices or []:
             role = str(device.get("role", "")).lower()
@@ -2020,15 +2046,20 @@ class LiveTrackingTab(QWidget):
             if device_id <= 0 or device_id in seen:
                 continue
             combo.addItem(
-                f"Tag 0x{device_id:04x}",
-                {"dst_addr": device_id, "role": "tag", "device_type": device_type},
+                f"Tag 0x{device_id:04x} / MCU (0x01)",
+                {
+                    "proto_dst_addr": int(VvAddress.MCU),
+                    "device_id": device_id,
+                    "role": "tag",
+                    "device_type": device_type,
+                },
             )
             seen.add(device_id)
         if isinstance(selected, dict):
-            selected_addr = selected.get("dst_addr")
+            selected_device_id = self._coerce_int_id(selected.get("device_id"), 1)
             for index in range(combo.count()):
                 data = combo.itemData(index)
-                if isinstance(data, dict) and data.get("dst_addr") == selected_addr:
+                if isinstance(data, dict) and self._coerce_int_id(data.get("device_id"), 1) == selected_device_id:
                     combo.setCurrentIndex(index)
                     break
         combo.blockSignals(False)
