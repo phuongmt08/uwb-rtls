@@ -21,10 +21,8 @@
 #include <string.h>
 
 /* Private defines ---------------------------------------------------- */
-#define ANCHOR_MASTER                    4U
 #define CALIB_TURN_TIMEOUT_MS            4000U
 #define CALIB_DONE_GRACE_MS              60000U
-#define CALIB_SUMMARY_COLLECTOR_ID       ANCHOR_MASTER
 #define CALIB_SUMMARY_RX_WINDOW_MS       3000U
 #define SURVEY_FINISH_RETRY_MS           4000U
 #define SURVEY_FINISH_ACK_WINDOW_MS      500U
@@ -74,7 +72,7 @@ static bool     s_system_started     = false;
 static uint32_t s_status_log_ms      = 0U;
 
 /* Turn and local collection state */
-static uint8_t  s_current_turn       = ANCHOR_MASTER;
+static uint8_t  s_current_turn       = 0U;
 static uint8_t  s_round_seq          = 0U;
 static uint8_t  s_peer_ready_mask    = 0U;
 static uint8_t  s_peer_expected_mask = 0U;
@@ -122,6 +120,70 @@ static uint8_t calib_anchor_count(void) {
     return 0U;
   }
   return (uint8_t)count;
+}
+
+static bool calib_anchor_id_is_valid(uint8_t anchor_id) {
+  if (anchor_id == 0U || anchor_id > MAX_ANCHORS_SUPPORTED) {
+    return false;
+  }
+
+  sys_config_t *cfg = sys_config_get();
+  uint8_t count = calib_anchor_count();
+  for (uint8_t i = 0U; i < count; i++) {
+    if (cfg->anchor_layout[i].anchor_id == anchor_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static uint8_t calib_anchor_id_at(uint8_t layout_idx) {
+  sys_config_t *cfg = sys_config_get();
+  uint8_t count = calib_anchor_count();
+  if (layout_idx >= count) {
+    return 0U;
+  }
+  uint32_t anchor_id = cfg->anchor_layout[layout_idx].anchor_id;
+  return (anchor_id <= MAX_ANCHORS_SUPPORTED) ? (uint8_t)anchor_id : 0U;
+}
+
+static bool calib_anchor_index_for_id(uint8_t anchor_id, uint8_t *layout_idx) {
+  if (!layout_idx) {
+    return false;
+  }
+
+  sys_config_t *cfg = sys_config_get();
+  uint8_t count = calib_anchor_count();
+  for (uint8_t i = 0U; i < count; i++) {
+    if (cfg->anchor_layout[i].anchor_id == anchor_id) {
+      *layout_idx = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+static uint8_t calib_summary_collector_id(void) {
+  uint8_t count = calib_anchor_count();
+  if (count == 0U) {
+    return 0U;
+  }
+  return calib_anchor_id_at((uint8_t)(count - 1U));
+}
+
+static uint8_t calib_next_anchor_id_after(uint8_t anchor_id) {
+  uint8_t count = calib_anchor_count();
+  if (count == 0U) {
+    return 0U;
+  }
+
+  uint8_t layout_idx = 0U;
+  if (!calib_anchor_index_for_id(anchor_id, &layout_idx)) {
+    return calib_anchor_id_at(0U);
+  }
+
+  layout_idx = (uint8_t)((layout_idx + 1U) % count);
+  return calib_anchor_id_at(layout_idx);
 }
 
 static uint8_t calib_all_anchor_mask(void) {
@@ -248,7 +310,7 @@ static void calib_reset(void) {
   s_finish_outcome = SYS_SURVEY_FINISH_ABORT;
   s_turn_start_ms = HAL_GetTick();
   s_last_act_ms = HAL_GetTick();
-  s_current_turn = ANCHOR_MASTER;
+  s_current_turn = calib_summary_collector_id();
 }
 
 static void calib_finish_v1(sys_calib_status_t status) {
@@ -284,10 +346,11 @@ static void calib_return_to_normal(const char *reason) {
 
 static void calib_peer_poll_finish(uint8_t my_id) {
   sys_survey_finish_msg_t finish;
+  uint8_t collector_id = calib_summary_collector_id();
   if (sys_ranging_control_receive(SYS_UWB_CTRL_SURVEY_FINISH,
                                   &finish, sizeof(finish), 20U) != SYS_RANGING_OK ||
       finish.epoch_id != s_summary_epoch_id ||
-      finish.collector_id != CALIB_SUMMARY_COLLECTOR_ID ||
+      finish.collector_id != collector_id ||
       finish.outcome > SYS_SURVEY_FINISH_COMPLETE) {
     return;
   }
@@ -329,7 +392,7 @@ static void calib_master_process_finish(void) {
   s_finish_last_tx_ms = now;
   const sys_survey_finish_msg_t finish = {
     .epoch_id = s_summary_epoch_id,
-    .collector_id = CALIB_SUMMARY_COLLECTOR_ID,
+    .collector_id = calib_summary_collector_id(),
     .outcome = (uint8_t)s_finish_outcome,
   };
   if (sys_ranging_control_send(SYS_UWB_CTRL_SURVEY_FINISH,
@@ -344,8 +407,8 @@ static void calib_master_process_finish(void) {
                                         &ack, 30U) == SYS_RANGING_OK &&
         ack.epoch_id == s_summary_epoch_id &&
         ack.acked_value == (uint8_t)s_finish_outcome &&
-        ack.sender_id > 0U && ack.sender_id <= calib_anchor_count() &&
-        ack.sender_id != CALIB_SUMMARY_COLLECTOR_ID) {
+        calib_anchor_id_is_valid(ack.sender_id) &&
+        ack.sender_id != calib_summary_collector_id()) {
       uint8_t bit = (uint8_t)(1U << (ack.sender_id - 1U));
       if ((s_finish_ack_mask & bit) == 0U) {
         s_finish_ack_mask |= bit;
@@ -360,7 +423,7 @@ static void calib_master_process_finish(void) {
 static bool calib_build_pair_summary(uint8_t sender_id, sys_calib_pair_summary_msg_t *summary) {
   uint8_t anchor_count = calib_anchor_count();
   uint8_t expected_pairs = (anchor_count > 0U) ? (uint8_t)(anchor_count - 1U) : 0U;
-  if (!summary || sender_id == 0U || sender_id > anchor_count ||
+  if (!summary || !calib_anchor_id_is_valid(sender_id) ||
       expected_pairs > (NUM_ANCHORS - 1U)) {
     return false;
   }
@@ -409,14 +472,14 @@ static bool calib_store_pair_summary(const sys_calib_pair_summary_msg_t *summary
   uint8_t anchor_count = calib_anchor_count();
   uint8_t expected_pairs = (anchor_count > 0U) ? (uint8_t)(anchor_count - 1U) : 0U;
   if (!summary || summary->epoch_id != s_summary_epoch_id ||
-      summary->sender_id == 0U || summary->sender_id > anchor_count ||
+      !calib_anchor_id_is_valid(summary->sender_id) ||
       summary->pair_count != expected_pairs ||
       summary->pair_count > (NUM_ANCHORS - 1U)) {
     return false;
   }
   for (uint8_t i = 0U; i < summary->pair_count; i++) {
     const sys_calib_pair_summary_item_t *item = &summary->pair[i];
-    if (item->peer_id == 0U || item->peer_id > anchor_count ||
+    if (!calib_anchor_id_is_valid(item->peer_id) ||
         !isfinite(item->mean_m) || !isfinite(item->std_m) ||
         !isfinite(item->timeout_rate)) {
       return false;
@@ -425,7 +488,7 @@ static bool calib_store_pair_summary(const sys_calib_pair_summary_msg_t *summary
 
   s_summary_by_anchor[summary->sender_id - 1U] = *summary;
   s_summary_ready_mask |= (uint8_t)(1U << (summary->sender_id - 1U));
-  if (summary->sender_id != CALIB_SUMMARY_COLLECTOR_ID) {
+  if (summary->sender_id != calib_summary_collector_id()) {
     s_peer_done_mask |= (uint8_t)(1U << (summary->sender_id - 1U));
   }
   return true;
@@ -442,8 +505,7 @@ static void calib_collect_remote_summaries(void) {
         sys_ranging_control_receive(SYS_UWB_CTRL_CALIB_PAIR_SUMMARY,
                                     &summary, sizeof(summary), 40U);
     if (err == SYS_RANGING_OK) {
-      uint8_t sender_bit = (summary.sender_id > 0U &&
-                            summary.sender_id <= calib_anchor_count())
+      uint8_t sender_bit = calib_anchor_id_is_valid(summary.sender_id)
                              ? (uint8_t)(1U << (summary.sender_id - 1U))
                              : 0U;
       bool is_new_summary = (sender_bit != 0U) &&
@@ -451,7 +513,7 @@ static void calib_collect_remote_summaries(void) {
       if (calib_store_pair_summary(&summary)) {
         sys_ranging_err_t ack_err =
             sys_ranging_control_send_ack(summary.epoch_id,
-                                         CALIB_SUMMARY_COLLECTOR_ID,
+                                         calib_summary_collector_id(),
                                          SYS_UWB_CTRL_CALIB_PAIR_SUMMARY,
                                          summary.sender_id,
                                          0U);
@@ -480,9 +542,8 @@ static void calib_collect_remote_summaries(void) {
 }
 
 static bool calib_summary_item_usable(const sys_calib_pair_summary_item_t *item) {
-  uint8_t anchor_count = calib_anchor_count();
   return item &&
-         item->peer_id > 0U && item->peer_id <= anchor_count &&
+         calib_anchor_id_is_valid(item->peer_id) &&
          item->valid_count >= CALIB_ANCHOR_SAMPLES &&
          item->std_m <= CALIB_ANCHOR_MAX_STD_M;
 }
@@ -502,12 +563,23 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
 
   // 1. Map measured distances
   float d_meas[NUM_ANCHORS][NUM_ANCHORS] = {0};
-  for (uint8_t sender = 1U; sender <= NUM_ANCHORS; sender++) {
-    const sys_calib_pair_summary_msg_t *summary = &s_summary_by_anchor[sender - 1U];
+  uint8_t layout_anchor_ids[NUM_ANCHORS] = {0U};
+  for (uint8_t sender_idx = 0U; sender_idx < NUM_ANCHORS; sender_idx++) {
+    uint8_t sender_id = calib_anchor_id_at(sender_idx);
+    if (sender_id == 0U) {
+      calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
+      return;
+    }
+    layout_anchor_ids[sender_idx] = sender_id;
+    const sys_calib_pair_summary_msg_t *summary = &s_summary_by_anchor[sender_id - 1U];
     for (uint8_t p = 0U; p < summary->pair_count; p++) {
       const sys_calib_pair_summary_item_t *item = &summary->pair[p];
+      uint8_t peer_idx = 0U;
       if (calib_summary_item_usable(item)) {
-        d_meas[sender - 1][item->peer_id - 1] = item->mean_m;
+        if (calib_anchor_index_for_id(item->peer_id, &peer_idx) &&
+            peer_idx < NUM_ANCHORS) {
+          d_meas[sender_idx][peer_idx] = item->mean_m;
+        }
       }
     }
   }
@@ -521,7 +593,7 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
       if (d_ij <= 0.0f && d_ji <= 0.0f) {
         RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_SYSTEM,
                "[SURVEY] Missing both directions A%u-A%u",
-               i + 1U, j + 1U);
+               layout_anchor_ids[i], layout_anchor_ids[j]);
         calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
         return;
       }
@@ -531,20 +603,20 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
         avg = (d_ij > 0.0f) ? d_ij : d_ji;
         RLOG_W(LOG_OBJECT_CODE_ANCHOR,
                "[SURVEY] Link A%u-A%u single direction: forward=%.3fm reverse=%.3fm using=%.3fm",
-               i + 1U, j + 1U, d_ij, d_ji, avg);
+               layout_anchor_ids[i], layout_anchor_ids[j], d_ij, d_ji, avg);
       } else {
         float diff = fabsf(d_ij - d_ji);
         if (diff > 0.5f) {
           RLOG_W(LOG_OBJECT_CODE_ANCHOR,
                  "[SURVEY] Reciprocal mismatch A%u-A%u: diff=%.3fm; using average",
-                 i + 1U, j + 1U, diff);
+                 layout_anchor_ids[i], layout_anchor_ids[j], diff);
         }
         avg = (d_ij + d_ji) * 0.5f;
       }
       d[i][j] = avg;
       d[j][i] = avg;
       RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] Link A%u-A%u: forward=%.3fm, reverse=%.3fm, avg=%.3fm",
-             i+1, j+1, d_ij, d_ji, avg);
+             layout_anchor_ids[i], layout_anchor_ids[j], d_ij, d_ji, avg);
     }
   }
 
@@ -557,7 +629,7 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
 
   float z[NUM_ANCHORS];
   for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-      z[i] = active_profile->anchors[i].z_m;
+      z[i] = cfg->anchor_layout[i].z_m;
   }
 
   // 4. Convert to horizontal planar 2D distances
@@ -570,14 +642,14 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
       if (d2 <= dz2) {
         RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_SYSTEM,
                "[SURVEY] Measured distance is not physically valid A%u-A%u: d=%.3f dz=%.3f",
-               i+1, j+1, d[i][j], dz);
+               layout_anchor_ids[i], layout_anchor_ids[j], d[i][j], dz);
         calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
         return;
       }
       r[i][j] = sqrtf(d2 - dz2);
       r[j][i] = r[i][j];
       RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] Planar distance r_A%u-A%u = %.3fm",
-             i+1, j+1, r[i][j]);
+             layout_anchor_ids[i], layout_anchor_ids[j], r[i][j]);
     }
   }
 
@@ -643,10 +715,10 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   }
 
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] Solved relative coordinates:");
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A1: (0.000, 0.000, %.3f)", z[0]);
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A2: (%.3f, 0.000, %.3f)", x2, z[1]);
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A3: (%.3f, %.3f, %.3f)", x3, y3, z[2]);
-  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A4: (%.3f, %.3f, %.3f)", x4, y4, z[3]);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A%u: (0.000, 0.000, %.3f)", layout_anchor_ids[0], z[0]);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A%u: (%.3f, 0.000, %.3f)", layout_anchor_ids[1], x2, z[1]);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A%u: (%.3f, %.3f, %.3f)", layout_anchor_ids[2], x3, y3, z[2]);
+  RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] A%u: (%.3f, %.3f, %.3f)", layout_anchor_ids[3], x4, y4, z[3]);
   RLOG_I(LOG_OBJECT_CODE_ANCHOR, "[SURVEY] residual rms=%.3fm max=%.3fm",
          residual_rms, residual_max);
 
@@ -654,7 +726,7 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   active_profile->anchor_count = NUM_ANCHORS;
   active_profile->anchors_count = NUM_ANCHORS;
   for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-      active_profile->anchors[i].anchor_id = i + 1;
+      active_profile->anchors[i].anchor_id = layout_anchor_ids[i];
       active_profile->anchors[i].z_m = z[i];
   }
   active_profile->anchors[0].x_m = 0.0f;
@@ -721,7 +793,8 @@ static void calib_calculate_and_adjust(void) {
       return;
   }
 
-  if (cfg->uwb.device_id == CALIB_SUMMARY_COLLECTOR_ID) {
+  uint8_t collector_id = calib_summary_collector_id();
+  if (cfg->uwb.device_id == collector_id) {
       calib_store_pair_summary(&summary);
       calib_collect_remote_summaries();
       const uint8_t expected_mask = calib_all_anchor_mask();
@@ -749,12 +822,12 @@ static void calib_calculate_and_adjust(void) {
           sys_ranging_control_send_wait_ack(SYS_UWB_CTRL_CALIB_PAIR_SUMMARY,
                                             &summary, sizeof(summary),
                                             slot_id,
-                                            CALIB_SUMMARY_COLLECTOR_ID,
+                                            collector_id,
                                             summary.sender_id,
                                             70U);
       RLOG_I(LOG_OBJECT_CODE_ANCHOR,
-             "[SURVEY][SUMMARY] A%u -> A4 result=%s pairs=%u slot=%u",
-             summary.sender_id, (err == SYS_RANGING_OK) ? "ACKED" : "NO_ACK",
+             "[SURVEY][SUMMARY] A%u -> A%u result=%s pairs=%u slot=%u",
+             summary.sender_id, collector_id, (err == SYS_RANGING_OK) ? "ACKED" : "NO_ACK",
              summary.pair_count, slot_id);
       if (err == SYS_RANGING_OK) {
         /*
@@ -785,14 +858,19 @@ static void calib_next_turn(void) {
     calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
     return;
   }
-  s_current_turn = (uint8_t)((s_current_turn % anchor_count) + 1U);
+  s_current_turn = calib_next_anchor_id_after(s_current_turn);
+  if (s_current_turn == 0U) {
+    calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
+    return;
+  }
   uint8_t my_id = sys_config_get()->uwb.device_id;
+  uint8_t collector_id = calib_summary_collector_id();
 
   /*
    * A peer summary is retried at most once per complete survey cycle. This is
    * bounded recovery for a lost summary, not a continuous transmit loop.
    */
-  if (previous_turn == ANCHOR_MASTER && my_id != CALIB_SUMMARY_COLLECTOR_ID) {
+  if (previous_turn == collector_id && my_id != collector_id) {
     s_summary_done = false;
   }
   RLOG_I(LOG_OBJECT_CODE_ANCHOR,
@@ -801,7 +879,7 @@ static void calib_next_turn(void) {
          (my_id == s_current_turn) ? "INITIATOR" : "RESPONDER",
          s_peer_ready_mask, s_peer_expected_mask);
   
-  if (s_current_turn == ANCHOR_MASTER) {
+  if (s_current_turn == collector_id) {
       calib_calculate_and_adjust();
   }
 
@@ -838,11 +916,12 @@ static void calib_process_round(uint32_t rx_timeout_ms) {
        * 1. If we haven't started yet, only wait forever if we are in the MASTER turn.
        * 2. If we've started or we are in a non-master turn, timeout after 4s to recover from skipped turns.
        */
-      bool can_timeout = s_system_started || s_heard_poll || (s_current_turn != ANCHOR_MASTER);
+      uint8_t collector_id = calib_summary_collector_id();
+      bool can_timeout = s_system_started || s_heard_poll || (s_current_turn != collector_id);
       if (can_timeout && (now - s_last_act_ms > CALIB_TURN_TIMEOUT_MS)) {
           RLOG_W(LOG_OBJECT_CODE_ANCHOR, "[CALIB] Turn %u Silence -> Next %u (gap=%ums tick=%u)", 
                  s_current_turn,
-                 (uint8_t)((s_current_turn % calib_anchor_count()) + 1U),
+                 calib_next_anchor_id_after(s_current_turn),
                  (uint32_t)(now - s_last_act_ms), (uint32_t)now);
           calib_next_turn();
           return;
@@ -994,7 +1073,7 @@ static const char *calib_state_name(void) {
 }
 
 static void calib_log_status(uint32_t now, uint8_t my_id) {
-  if (my_id == CALIB_SUMMARY_COLLECTOR_ID ||
+  if (my_id == calib_summary_collector_id() ||
       (now - s_status_log_ms) < 2000U) {
     return;
   }
@@ -1007,8 +1086,10 @@ static void calib_log_status(uint32_t now, uint8_t my_id) {
          "[SURVEY][STATUS] self=A%u state=%s role=%s turn=A%u ready=0x%02X/%02X samples=[%u,%u,%u,%u]",
          my_id, calib_state_name(), role, s_current_turn,
          s_peer_ready_mask, s_peer_expected_mask,
-         s_peer_calib[0].count, s_peer_calib[1].count,
-         s_peer_calib[2].count, s_peer_calib[3].count);
+         s_peer_calib[calib_anchor_id_at(0U) - 1U].count,
+         s_peer_calib[calib_anchor_id_at(1U) - 1U].count,
+         s_peer_calib[calib_anchor_id_at(2U) - 1U].count,
+         s_peer_calib[calib_anchor_id_at(3U) - 1U].count);
 }
 
 app_err_t app_anchor_init(void) {
@@ -1067,8 +1148,9 @@ void app_anchor_process(void *arg) {
     uint32_t now = HAL_GetTick();
 
     if (s_app_state == ANCHOR_STATE_CALIB_COLLECTING) {
-      if (my_id != CALIB_SUMMARY_COLLECTOR_ID &&
-          s_summary_done && s_current_turn == ANCHOR_MASTER) {
+      uint8_t collector_id = calib_summary_collector_id();
+      if (my_id != collector_id &&
+          s_summary_done && s_current_turn == collector_id) {
         calib_peer_poll_finish(my_id);
       }
       if (s_app_state == ANCHOR_STATE_CALIB_COLLECTING) {
@@ -1078,7 +1160,7 @@ void app_anchor_process(void *arg) {
 
     if (s_app_state == ANCHOR_STATE_CALIB_DONE) {
       now = HAL_GetTick();
-      if (my_id == CALIB_SUMMARY_COLLECTOR_ID) {
+      if (my_id == calib_summary_collector_id()) {
         calib_master_process_finish();
       } else {
         /* ACK duplicate FINISH packets in case the first ACK was lost. */

@@ -84,6 +84,10 @@ bool g_pm_ranging_blocked = false;
 /* Network objects â€” non-static so main.c can init via extern */
 network_core_t g_network_core;
 uint8_t        g_network_rx_buf[512];
+uint8_t        uwb_entry_cnt = 0;
+uint8_t        fusion_entry_cnt = 0;
+bsp_imu_data_t imu_test_mutex_lock = {0};
+bool imu_test_mutex_flag = false;
 
 #if ENABLE_SYS_FUSION
 /* Owner variables for decoupled active Sensor Fusion */
@@ -177,6 +181,10 @@ static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static void sensor_fusion_reset_state(void);
 #endif
+static void drain_signal_semaphore(osSemaphoreId_t sem);
+static void abort_uwb_ranging_locked(void);
+static void reset_ranging_runtime_state(sys_config_t *cfg);
+static void apply_ranging_enabled(sys_config_t *cfg, bool enabled);
 /* USER CODE END FunctionPrototypes */
 
 void uwb_ranging_entry(void *argument);
@@ -292,6 +300,9 @@ void uwb_ranging_entry(void *argument)
 
   for (;;)
   {
+	  uwb_entry_cnt++;
+	  if(uwb_entry_cnt >= 255) uwb_entry_cnt = 0;
+
     app_tag_process_uwb_control(cfg);
 
     /* Calculate dynamic timeout based on UWB deadline to prevent missing FINAL TX slot */
@@ -740,11 +751,14 @@ void io_entry(void *argument)
       if (cfg->uwb.role == DEVICE_ROLE_ANCHOR)
       {
         bool enable = !app_anchor_is_survey_active();
-        sys_ranging_abort();
-        bsp_uwb_idle();
+        g_ranging_enabled = false;
+        abort_uwb_ranging_locked();
         app_anchor_set_survey_active(enable);
         app_anchor_init();
         g_ranging_enabled = true;
+        if (g_uwb_isr_semHandle != NULL) {
+          (void)osSemaphoreRelease(g_uwb_isr_semHandle);
+        }
         RLOG_I(LOG_OBJECT_CODE_APPLICATION,
                "[CALIB] Anchor survey %s",
                enable ? "enabled" : "disabled");
@@ -757,14 +771,14 @@ void io_entry(void *argument)
       {
         break;
       }
-      g_ranging_enabled = !g_ranging_enabled;
-      if (g_ranging_enabled)
+      bool enable_ranging = !g_ranging_enabled;
+      apply_ranging_enabled(cfg, enable_ranging);
+      if (enable_ranging)
       {
         RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
       }
       else
       {
-        bsp_uwb_idle();
         RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped");
       }
       break;
@@ -845,6 +859,50 @@ void app_rtos_set_ranging_enabled(bool enabled)
 bool app_rtos_is_ranging_enabled(void)
 {
     return g_ranging_enabled;
+}
+
+static void drain_signal_semaphore(osSemaphoreId_t sem)
+{
+    if (sem == NULL) {
+        return;
+    }
+    while (osSemaphoreAcquire(sem, 0U) == osOK) {
+    }
+}
+
+static void abort_uwb_ranging_locked(void)
+{
+    (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+    sys_ranging_abort();
+    bsp_uwb_idle();
+    (void)osMutexRelease(g_spi1_mutexHandle);
+    drain_signal_semaphore(g_uwb_isr_semHandle);
+}
+
+static void reset_ranging_runtime_state(sys_config_t *cfg)
+{
+    if (cfg == NULL) {
+        return;
+    }
+
+    if (cfg->uwb.role == DEVICE_ROLE_TAG) {
+        app_calib_master_on_ranging_stopped();
+        app_tag_reset_fusion();
+    } else {
+        (void)app_anchor_init();
+    }
+}
+
+static void apply_ranging_enabled(sys_config_t *cfg, bool enabled)
+{
+    g_ranging_enabled = false;
+    abort_uwb_ranging_locked();
+    reset_ranging_runtime_state(cfg);
+    g_ranging_enabled = enabled;
+
+    if (enabled && g_uwb_isr_semHandle != NULL) {
+        (void)osSemaphoreRelease(g_uwb_isr_semHandle);
+    }
 }
 
 #if ENABLE_SYS_FUSION

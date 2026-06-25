@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include "positioning_config.h"
 #include "sys_config.h"
+#include "ble/sys_ble_peripheral.h"
 #include "sys_logger.h"
 #include "cmsis_os2.h"
 
@@ -122,6 +123,9 @@ static float normalize_angle(float angle);
 static float calc_dt(void);
 static void reset_runtime_state(void);
 static void send_uart_snapshot(void);
+static bool active_anchor_index_for_id(uint8_t anchor_id, uint8_t *index_out);
+static void clear_latest_anchor_metrics(void);
+static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id);
 #if UKF_BLE_STREAM_TEST_ENABLE
 static void configure_adv(network_core_t *stream);
 #endif
@@ -612,17 +616,15 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm",
                init_x, init_y, TAG_HEIGHT_M);
 
-        for (int k = 0; k < NUM_ANCHORS; k++) {
-            s_latest_distances[k] = 0.0f;
+        clear_latest_anchor_metrics();
+        const float init_distances[3] = {init_d0, init_d1, init_d2};
+        for (uint8_t k = 0U; k < 3U; k++) {
+            uint8_t layout_idx = 0U;
+            if (active_anchor_index_for_id(best_3_anchors[k].id, &layout_idx)) {
+                s_latest_distances[layout_idx] = init_distances[k];
+            }
         }
-        s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
-        s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
-        s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
-
-        for (uint8_t k = 0; k < NUM_ANCHORS; k++) {
-            s_latest_fp_amp_norm[k] = anchors_by_id[k + 1].fp_amp_norm;
-            s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
-        }
+        snapshot_latest_anchor_metrics(anchors_by_id);
 
         sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
         sys_sensor_fusion_set_predict_flag();
@@ -631,20 +633,16 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
     }
 
     CHECK_ERR(anchors_compact != NULL, false);
-    for (int k = 0; k < NUM_ANCHORS; k++) {
-        s_latest_distances[k] = 0.0f;
-    }
+    clear_latest_anchor_metrics();
     for (uint8_t k = 0; k < compact_count; k++) {
         uint8_t aid = anchors_compact[k].id;
-        if (aid >= 1U && aid <= NUM_ANCHORS) {
-            s_latest_distances[aid - 1U] = (float)anchors_compact[k].distance;
+        uint8_t layout_idx = 0U;
+        if (active_anchor_index_for_id(aid, &layout_idx)) {
+            s_latest_distances[layout_idx] = (float)anchors_compact[k].distance;
         }
     }
 
-    for (uint8_t k = 0; k < NUM_ANCHORS; k++) {
-        s_latest_fp_amp_norm[k] = anchors_by_id[k + 1].fp_amp_norm;
-        s_latest_fp_snr[k] = anchors_by_id[k + 1].fp_snr;
-    }
+    snapshot_latest_anchor_metrics(anchors_by_id);
 
     const uint8_t selected_anchor_ids[3] = {
         best_3_anchors[0].id,
@@ -830,16 +828,63 @@ static void reset_runtime_state(void)
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
     mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
 
-    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-        s_latest_distances[i] = 0.0f;
-        s_latest_fp_amp_norm[i] = 0.0;
-        s_latest_fp_snr[i] = 0.0;
-    }
+    clear_latest_anchor_metrics();
 
     s_error_count = 0U;
     s_last_selected_anchors_mask = 0U;
     s_latest_tril_x = 0.0f;
     s_latest_tril_y = 0.0f;
+}
+
+static bool active_anchor_index_for_id(uint8_t anchor_id, uint8_t *index_out)
+{
+    const sys_config_t *cfg = sys_config_get();
+    if (!cfg || !index_out || anchor_id == 0U) {
+        return false;
+    }
+
+    uint32_t count = cfg->anchor_count;
+    if (count > NUM_ANCHORS) {
+        count = NUM_ANCHORS;
+    }
+
+    for (uint32_t i = 0U; i < count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == anchor_id) {
+            *index_out = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void clear_latest_anchor_metrics(void)
+{
+    for (uint8_t i = 0U; i < NUM_ANCHORS; i++) {
+        s_latest_distances[i] = 0.0f;
+        s_latest_fp_amp_norm[i] = 0.0;
+        s_latest_fp_snr[i] = 0.0;
+    }
+}
+
+static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id)
+{
+    const sys_config_t *cfg = sys_config_get();
+    if (!cfg || !anchors_by_id) {
+        return;
+    }
+
+    uint32_t count = cfg->anchor_count;
+    if (count > NUM_ANCHORS) {
+        count = NUM_ANCHORS;
+    }
+
+    for (uint32_t i = 0U; i < count; i++) {
+        uint32_t aid = cfg->anchor_layout[i].anchor_id;
+        if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
+            s_latest_fp_amp_norm[i] = anchors_by_id[aid].fp_amp_norm;
+            s_latest_fp_snr[i] = anchors_by_id[aid].fp_snr;
+        }
+    }
 }
 
 static void send_uart_snapshot(void)
@@ -867,28 +912,8 @@ static void send_uart_snapshot(void)
 static void configure_adv(network_core_t *stream)
 {
 #ifdef HAVE_BLE_PERIPHERAL
-    uint32_t sn = bsp_util_get_serial_number();
-    char dev_name[32];
-    const sys_config_t *p_cfg = sys_config_get();
-
-    if (p_cfg && p_cfg->uwb.role == DEVICE_ROLE_TAG) 
-    {
-        snprintf(dev_name, sizeof(dev_name), "RTLS-Tag-%u", (unsigned int)p_cfg->uwb.device_id);
-    } 
-    else if (p_cfg) 
-    {
-        snprintf(dev_name, sizeof(dev_name), "RTLS-Anchor-%u", (unsigned int)p_cfg->uwb.device_id);
-    } 
-    else 
-    {
-        snprintf(dev_name, sizeof(dev_name), "RTLS-Node-%04X", (unsigned int)(sn & 0xFFFF));
-    }
-
-    for (int i = 0; i < 5; i++) 
-    {
-        network_send_ble_adv_config_set(stream, protobuf_PACKET_ADDR_PERIPHERAL, true, sn, dev_name);
-        osDelay(50);
-    }
+    (void)stream;
+    sys_ble_peripheral_set_config();
 #else
     (void)stream;
 #endif

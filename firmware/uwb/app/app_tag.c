@@ -118,6 +118,9 @@ static bool s_zone_switch_pending_save = false;
 static void init_filters(void);
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+static bool active_anchor_index_for_id(uint8_t aid, uint8_t *index_out);
+static void clear_latest_anchor_metrics(void);
+static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id);
 static bool ensure_minimum_ranging_anchors(uint8_t count, const char *context);
 #endif
 static bool process_ranging_results(sys_ranging_result_t *results, int num_success);
@@ -416,11 +419,7 @@ static void init_filters(void)
 
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
     mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
-    for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-        s_latest_distances[i] = 0.0f;
-        s_latest_fp_amp_norm[i] = 0.0;
-        s_latest_fp_snr[i] = 0.0;
-    }
+    clear_latest_anchor_metrics();
     s_latest_ranging_dt = 0.0f;
     s_fusion_log_seq = 0U;
     s_last_fusion_log_tick = 0U;
@@ -481,6 +480,57 @@ static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out)
         }
     }
     return false;
+}
+
+static bool active_anchor_index_for_id(uint8_t aid, uint8_t *index_out)
+{
+    const sys_config_t *cfg = sys_config_get();
+    if (!cfg || !index_out || aid == 0U) {
+        return false;
+    }
+
+    uint32_t count = cfg->anchor_count;
+    if (count > NUM_ANCHORS) {
+        count = NUM_ANCHORS;
+    }
+
+    for (uint32_t i = 0U; i < count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == aid) {
+            *index_out = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void clear_latest_anchor_metrics(void)
+{
+    for (uint8_t i = 0U; i < NUM_ANCHORS; i++) {
+        s_latest_distances[i] = 0.0f;
+        s_latest_fp_amp_norm[i] = 0.0;
+        s_latest_fp_snr[i] = 0.0;
+    }
+}
+
+static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id)
+{
+    const sys_config_t *cfg = sys_config_get();
+    if (!cfg || !anchors_by_id) {
+        return;
+    }
+
+    uint32_t count = cfg->anchor_count;
+    if (count > NUM_ANCHORS) {
+        count = NUM_ANCHORS;
+    }
+
+    for (uint32_t i = 0U; i < count; i++) {
+        uint32_t aid = cfg->anchor_layout[i].anchor_id;
+        if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
+            s_latest_fp_amp_norm[i] = anchors_by_id[aid].fp_amp_norm;
+            s_latest_fp_snr[i] = anchors_by_id[aid].fp_snr;
+        }
+    }
 }
 #endif
 
@@ -596,7 +646,7 @@ static void send_fusion_log_snapshot(void)
     }
 
     bsp_imu_data_t imu_data = {0};
-    (void)bsp_imu_get_raw_data(&imu_data);
+    // (void)bsp_imu_get_raw_data(&imu_data);
     bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,
                                      s_error_count,
                                      imu_data.ax,
@@ -657,7 +707,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_error_count = 0;
     return true;
 #else
-    mw_tril_anchor_t anchors_by_id[NUM_ANCHORS + 1] = {0};
+    mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
     uint8_t valid_count = 0;
 
     float anchor_distances[NUM_ANCHORS] = {0.0f};
@@ -670,8 +720,12 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     for (int i = 0; i < num_success; i++) {
         sys_ranging_result_t *r = &results[i];
         uint8_t aid = r->anchor_id;
-        if (aid < 1 || aid > NUM_ANCHORS) continue;
-        anchor_distances[aid - 1] = r->distance_m;
+        uint8_t anchor_idx = 0U;
+        if (aid < 1 || aid > MAX_ANCHORS_SUPPORTED ||
+            !active_anchor_index_for_id(aid, &anchor_idx)) {
+            continue;
+        }
+        anchor_distances[anchor_idx] = r->distance_m;
 
         if (!r->valid) {
             RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -696,7 +750,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
             RLOG_W(LOG_OBJECT_CODE_TAG, "Anchor #%u: Cannot project to 2D (r3d=%.3fm dz=%.3fm)", aid, d_used, (float)dz);
             continue;
         }
-        anchor_distances[aid - 1] = (float)r2d;
+        anchor_distances[anchor_idx] = (float)r2d;
         d_used = (float)r2d;
 
         mw_tril_anchor_t anchor_entry = {0};
@@ -787,10 +841,14 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
         for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
             uint8_t aid = prefilter_rejects[i].id;
-            if (aid == 0U || aid > NUM_ANCHORS || anchors_by_id[aid].valid) {
+            uint8_t anchor_idx = 0U;
+            if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED ||
+                !active_anchor_index_for_id(aid, &anchor_idx) ||
+                anchors_by_id[aid].valid) {
                 continue;
             }
             anchors_by_id[aid] = prefilter_rejects[i];
+            anchor_distances[anchor_idx] = (float)prefilter_rejects[i].distance;
             valid_count++;
             RLOG_W(LOG_OBJECT_CODE_TAG,
                    "Anchor #%u rescued by fusion mw_filter Mahalanobis (d2=%.2f, valid=%u/%u)",
@@ -802,11 +860,26 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 #endif
 
-    for (uint8_t id = 1; id <= NUM_ANCHORS; id++) {
+    for (uint8_t id = 1; id <= MAX_ANCHORS_SUPPORTED; id++) {
         if (anchors_by_id[id].valid) {
-            anchor_distances[id - 1] = anchors_by_id[id].distance;
+            uint8_t anchor_idx = 0U;
+            if (active_anchor_index_for_id(id, &anchor_idx)) {
+                anchor_distances[anchor_idx] = anchors_by_id[id].distance;
+            }
         }
     }
+
+    // bsp_io_uart_send_fusion_log_data(0,
+    //                                      s_error_count,
+    //                                      0,
+    //                                      0,
+    //                                      0,
+    //                                      0,
+    //                                      0,
+	// 									 anchor_distances,
+    //                                      s_latest_fp_amp_norm,
+    //                                      s_latest_fp_snr,
+    //                                      0);
 
     /* Need at least 3 anchors for trilateration */
     if (valid_count < 3) {
@@ -822,7 +895,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
     uint8_t compact_idx = 0;
     
-    for (uint8_t id = 1; id <= NUM_ANCHORS && compact_idx < NUM_ANCHORS; id++) {
+    for (uint8_t id = 1; id <= MAX_ANCHORS_SUPPORTED && compact_idx < NUM_ANCHORS; id++) {
         if (anchors_by_id[id].valid) {
             anchors_compact[compact_idx++] = anchors_by_id[id];
         }
@@ -874,15 +947,15 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
 
             RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
 
-            for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-            s_latest_distances[best_3_anchors[0].id - 1] = init_d0;
-            s_latest_distances[best_3_anchors[1].id - 1] = init_d1;
-            s_latest_distances[best_3_anchors[2].id - 1] = init_d2;
-
-            for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-                s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
-                s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
+            clear_latest_anchor_metrics();
+            const float init_distances[3] = {init_d0, init_d1, init_d2};
+            for (uint8_t i = 0U; i < 3U; i++) {
+                uint8_t anchor_idx = 0U;
+                if (active_anchor_index_for_id(best_3_anchors[i].id, &anchor_idx)) {
+                    s_latest_distances[anchor_idx] = init_distances[i];
+                }
             }
+            snapshot_latest_anchor_metrics(anchors_by_id);
 
             sys_sensor_fusion_set_initial_position(&ukf_data, init_x, init_y);
             sys_sensor_fusion_set_predict_flag();
@@ -906,10 +979,13 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     else
     {
 
-        for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
+        clear_latest_anchor_metrics();
         for(int i=0; i<compact_idx; i++)
         {
-            s_latest_distances[anchors_compact[i].id - 1] = (float)anchors_compact[i].distance;
+            uint8_t anchor_idx = 0U;
+            if (active_anchor_index_for_id(anchors_compact[i].id, &anchor_idx)) {
+                s_latest_distances[anchor_idx] = (float)anchors_compact[i].distance;
+            }
         }
 
     	/* ==== STEP 3: Trilateration ==== */
@@ -929,24 +1005,21 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
 		for (uint8_t i = 0; i < 3; i++) {
 			s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
 		}
-        for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-            s_latest_fp_amp_norm[i] = anchors_by_id[i + 1].fp_amp_norm;
-            s_latest_fp_snr[i] = anchors_by_id[i + 1].fp_snr;
-        }
+        snapshot_latest_anchor_metrics(anchors_by_id);
 
         const uint8_t selected_anchor_ids[3] = {
             best_3_anchors[0].id,
             best_3_anchors[1].id,
             best_3_anchors[2].id
         };
-        if (sys_sensor_fusion_update(&ukf_data,
-                                     best_3_anchors[0].distance,
-                                     best_3_anchors[1].distance,
-                                     best_3_anchors[2].distance,
-                                     selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
-            record_ranging_error();
-            return false;
-        }
+        // if (sys_sensor_fusion_update(&ukf_data,
+        //                              best_3_anchors[0].distance,
+        //                              best_3_anchors[1].distance,
+        //                              best_3_anchors[2].distance,
+        //                              selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
+        //     record_ranging_error();
+        //     return false;
+        // }
         s_latest_fusion_position = tril_position;
         s_latest_fusion_position_valid = true;
         record_fusion_log_update_timing();
@@ -1266,8 +1339,7 @@ void app_tag_reset_fusion(void)
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
 #else
-    /* For active Sensor Fusion, delegate the reset to sys_sensor_fusion. */
-    sys_sensor_fusion_reset();
+    app_rtos_request_sensor_fusion_reset();
 #endif
 }
 
