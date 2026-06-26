@@ -67,6 +67,7 @@ _MCU_COMMANDS = {
     "rtos_resource_get",
     "rtos_task_stats_get",
     "end_session",
+    "log_data",
 }
 
 _CENTRAL_COMMANDS = {
@@ -84,14 +85,22 @@ _PERIPHERAL_COMMANDS = {
 }
 
 
-def default_destination_for(command_name: str) -> int:
-    """Return the host-side default destination for a command name."""
+def mapped_destination_for(command_name: str) -> int | None:
+    """Return the explicit host-side destination hint for a command name, if known."""
     if command_name in _MCU_COMMANDS:
         return int(VvAddress.MCU)
     if command_name in _PERIPHERAL_COMMANDS:
         return int(VvAddress.PERIPHERAL)
     if command_name in _CENTRAL_COMMANDS:
         return int(VvAddress.CENTRAL)
+    return None
+
+
+def default_destination_for(command_name: str) -> int:
+    """Return the host-side default destination for a command name."""
+    mapped = mapped_destination_for(command_name)
+    if mapped is not None:
+        return mapped
     return int(VvAddress.CENTRAL)
 
 

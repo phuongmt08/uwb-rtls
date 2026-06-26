@@ -36,6 +36,7 @@ import time
 import json
 import logging
 
+from common.commands import mapped_destination_for
 from common.transport import VvAddress
 
 from PyQt6 import uic
@@ -676,6 +677,11 @@ class CommunicationTab(QWidget):
     def _update_tester_fields(self) -> None:
         packet_name = self.tester_packet_select.currentData()
         visible = self._VISIBLE_FIELDS.get(packet_name or "", set())
+        mapped_dst = mapped_destination_for(packet_name or "")
+        if mapped_dst is not None:
+            index = self.tester_dst_select.findData(int(mapped_dst))
+            if index >= 0:
+                self.tester_dst_select.setCurrentIndex(index)
         if not visible and packet_name and packet_name != "none":
             visible = {"extra_args_json"}
         for key, (lbl, widget) in self._tester_param_widgets.items():

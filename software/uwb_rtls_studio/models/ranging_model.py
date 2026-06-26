@@ -173,7 +173,6 @@ class RangingModel(QObject):
         self.is_ranging = True
         shared_app_state.ranging_active = True
         shared_app_state.update_job("ranging_session", JobState.RUNNING)
-        self.request_ranging_status(force=True)
         self._status_timer.start()
         return pkt
 
@@ -186,6 +185,15 @@ class RangingModel(QObject):
         return pkt
 
     def request_ranging_status(self, force: bool = False):
+        if (
+            not force
+            and self.is_ranging
+            and self._last_result_time > 0.0
+            and (time.time() - self._last_result_time) < 3.0
+        ):
+            # When ranging_result packets are flowing, avoid stealing airtime
+            # with periodic status polls.
+            return None
         return self._request_query(
             "ranging_status_get",
             dst_addr=VvAddress.MCU,

@@ -13,8 +13,8 @@ from datetime import datetime
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from common import protocol_pb2 as pb
 from common.transport import VvAddress
+from utils.app_state import shared_app_state
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class LogModel(QObject):
         self._latest_mcu_log_seq = None
         self._tx_counts.clear()
         self._rx_counts.clear()
-
+        shared_app_state.log_streaming = False
     def add_live_log(self, timestamp: str, level: str, source: str, message: str) -> dict:
         entry = {
             "timestamp": timestamp or datetime.now().strftime("%H:%M:%S"),
@@ -243,6 +243,7 @@ class LogModel(QObject):
         # Delay the first poll by 10 seconds as requested
         self._log_first_segment_deadline = self._log_stream_started_at + 10.0
         self._log_poll_retry_count = 0
+        shared_app_state.log_streaming = True
         log.info("LogModel: Log stream requested. Will start polling in 10 seconds...")
         return True
 
@@ -257,7 +258,7 @@ class LogModel(QObject):
         self._clear_pending_log_ack()
         self._deferred_ack_trace_by_ack_seq.clear()
         self._latest_mcu_log_seq = None
-
+        shared_app_state.log_streaming = False
     def poll_log_timeout(self) -> bool:
         """Retry log start poll until the first segment arrives, then retry pending ACKs."""
         if not self._log_stream_requested:

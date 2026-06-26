@@ -99,6 +99,7 @@ class SharedAppState(QObject):
     battery_info_changed = pyqtSignal(dict)       # Voltage, SOC, remains, charging, temps...
     ble_status_changed = pyqtSignal(dict)          # BLE state, rssi, disconnect reason
     ranging_active_changed = pyqtSignal(bool)      # Ranging active/stopped
+    log_streaming_changed = pyqtSignal(bool)       # Firmware log stream active/stopped
     ranging_stats_changed = pyqtSignal(dict)       # total_count, success_count, rms_error_m...
     calib_status_changed = pyqtSignal(dict)         # state, progress, iteration, peer ready mask...
     anchor_layout_changed = pyqtSignal(list)       # List of fixed anchors positions
@@ -132,6 +133,7 @@ class SharedAppState(QObject):
         self._battery_info: Dict[str, Any] = {}
         self._ble_status: Dict[str, Any] = {}
         self._ranging_active = False
+        self._log_streaming = False
         self.current_session_id = ""
         self._ranging_stats: Dict[str, Any] = {}
         self._calib_status: Dict[str, Any] = {}
@@ -205,6 +207,17 @@ class SharedAppState(QObject):
     def ranging_stats(self, val: Dict[str, Any]) -> None:
         self._ranging_stats = val.copy()
         self.ranging_stats_changed.emit(self._ranging_stats)
+
+    @property
+    def log_streaming(self) -> bool:
+        return self._log_streaming
+
+    @log_streaming.setter
+    def log_streaming(self, val: bool) -> None:
+        enabled = bool(val)
+        if self._log_streaming != enabled:
+            self._log_streaming = enabled
+            self.log_streaming_changed.emit(enabled)
 
     @property
     def calib_status(self) -> Dict[str, Any]:
@@ -303,6 +316,7 @@ class SharedAppState(QObject):
         self._battery_info = {}
         self._ble_status = {}
         self._ranging_active = False
+        self._log_streaming = False
         self._ranging_stats = {}
         self._calib_status = {}
         self._anchor_layout = []
@@ -318,6 +332,7 @@ class SharedAppState(QObject):
         self.battery_info_changed.emit(self._battery_info)
         self.ble_status_changed.emit(self._ble_status)
         self.ranging_active_changed.emit(self._ranging_active)
+        self.log_streaming_changed.emit(self._log_streaming)
         self.ranging_stats_changed.emit(self._ranging_stats)
         self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)

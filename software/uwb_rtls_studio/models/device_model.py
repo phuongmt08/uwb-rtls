@@ -853,13 +853,17 @@ class DeviceModel(QObject):
             self.start_scan()
 
     def _poll_ble_status(self):
-        """Poll BLE status from Central device (dongle) periodically."""
-        if self._connected_mac:
-            log.debug("Polling BLE status from dongle...")
-            try:
-                self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
-            except Exception as e:
-                log.error("Failed to send ble_status_get: %s", e)
+        """Poll BLE status only when no higher-priority stream is active."""
+        if not self._connected_mac:
+            return
+        if shared_app_state.ranging_active or shared_app_state.log_streaming:
+            log.debug("Skipping ble_status_get while ranging/log stream is active.")
+            return
+        log.debug("Polling BLE status from dongle...")
+        try:
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+        except Exception as e:
+            log.error("Failed to send ble_status_get: %s", e)
 
     def _handle_ble_conn_params(self, resp):
         p = getattr(resp, 'params', None)
