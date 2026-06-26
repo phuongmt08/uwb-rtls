@@ -68,6 +68,16 @@ class ConfigTab(QWidget):
         self.main_layout.removeWidget(self.fusion_group)
         self.main_layout.removeWidget(self.device_operations_group)
         self.main_layout.removeWidget(self.sys_group)
+        if hasattr(self, "dev_type_group"):
+            self.main_layout.removeWidget(self.dev_type_group)
+
+        # Create Column 2 Container to wrap UWB Config and Device Type Configuration vertically
+        self.col2_container = QWidget()
+        self.col2_layout = QVBoxLayout(self.col2_container)
+        self.col2_layout.setContentsMargins(0, 0, 0, 0)
+        self.col2_layout.setSpacing(16)
+        self.col2_layout.addWidget(self.uwb_config_group)
+        self.col2_layout.addWidget(self.dev_type_group, 0, Qt.AlignmentFlag.AlignTop)
 
         # Create Host Transport Group Box
         self._setup_host_transport_group()
@@ -381,9 +391,11 @@ class ConfigTab(QWidget):
             getattr(self, "fusion_group", None),
             getattr(self, "host_group", None),
             getattr(self, "ble_group", None),
+            getattr(self, "dev_type_group", None),
             getattr(self, "ranging_group", None),
             getattr(self, "device_operations_group", None),
-            getattr(self, "sys_group", None)
+            getattr(self, "sys_group", None),
+            getattr(self, "col2_container", None)
         ]
         for w in widgets:
             if w is not None:
@@ -427,8 +439,8 @@ class ConfigTab(QWidget):
             # 1. Developer Mode Layout (Grid 4-columns)
             # Row 0: Anchor Layout (Col 0-1)
             self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
-            # UWB Config (Col 2, spanning row 0 and 1) - aligned to top to prevent vertical row stretch empty space
-            self.main_layout.addWidget(self.uwb_config_group, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
+            # Column 2 Container (spanning row 0 and 1)
+            self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
             # Sensor Fusion (Col 3, spanning row 0 and 1)
             self.main_layout.addWidget(self.fusion_group, 0, 3, 2, 1)
 
@@ -466,8 +478,8 @@ class ConfigTab(QWidget):
             # 2. User Mode: 3 Column Layout (Anchor Layout, Host, BLE on left/middle, UWB on right)
             # Row 0: Anchor Layout (Col 0-1)
             self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
-            # UWB Config (Col 2, spanning row 0 and 1) - aligned to top to prevent vertical row stretch empty space
-            self.main_layout.addWidget(self.uwb_config_group, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
+            # Column 2 Container (spanning row 0 and 1)
+            self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
 
             # Row 1: Host Transport (Col 0), BLE Config (Col 1)
             self.main_layout.addWidget(self.host_group, 1, 0, 1, 1)
@@ -488,6 +500,7 @@ class ConfigTab(QWidget):
             self.host_group.setVisible(True)
             self.ranging_group.setVisible(False)
             self.ble_group.setVisible(True)
+            self.dev_type_group.setVisible(True)
 
             # Table Edit Triggers - enable editing so users can modify coordinates of added anchors
             self.anchor_table.setEditTriggers(
@@ -515,6 +528,8 @@ class ConfigTab(QWidget):
         self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
         if hasattr(self._vm, "ble_conn_params_updated"):
             self._vm.ble_conn_params_updated.connect(self._on_ble_conn_params_loaded)
+        if hasattr(self._vm, "device_type_updated"):
+            self._vm.device_type_updated.connect(self._on_device_type_loaded)
         if hasattr(self._vm, "scan_devices_updated"):
             self._vm.scan_devices_updated.connect(self._refresh_target_devices)
 
@@ -526,6 +541,8 @@ class ConfigTab(QWidget):
         self.btn_bootloader.clicked.connect(self._vm.enter_bootloader)
         self.btn_set_ble.clicked.connect(self._on_set_ble_clicked)
         self.btn_apply_host_transport.clicked.connect(self._on_apply_host_transport_clicked)
+        self.btn_get_device_type.clicked.connect(self._on_get_device_type)
+        self.btn_set_device_type.clicked.connect(self._on_set_device_type)
         if hasattr(self._vm.model, "connection_state_changed"):
             self._vm.model.connection_state_changed.connect(self._on_connection_state_changed)
         self._vm.emit_current_state()
@@ -557,10 +574,11 @@ class ConfigTab(QWidget):
             set_widget_placeholder(self.val_ns_sfd)
         if self._has_widget("val_phr_mode"):
             set_widget_placeholder(self.val_phr_mode)
-        if self._has_widget("chk_smart_tx_power"):
+        if hasattr(self, "chk_smart_tx_power") and self.chk_smart_tx_power is not None:
             set_widget_placeholder(self.chk_smart_tx_power)
-        if self._has_widget("val_pg_delay"):
+        if hasattr(self, "val_pg_delay") and self.val_pg_delay is not None:
             set_widget_placeholder(self.val_pg_delay)
+        set_widget_placeholder(self.combo_device_type)
             
         # Reset Ranging widgets
         set_widget_placeholder(self.rng_period_spin)
@@ -1336,3 +1354,29 @@ class ConfigTab(QWidget):
         except Exception:
             pass
         self.txt_usb_device.setText("STM32 Virtual COM Port" if "COM" in port_name else "Unknown Device")
+
+    def _on_get_device_type(self):
+        if self._vm:
+            self._vm.read_device_type()
+
+    def _on_set_device_type(self):
+        if self._vm:
+            text_map = {
+                "Tag": 1,
+                "Anchor": 2,
+                "Gateway": 3,
+                "Debug Tool": 4
+            }
+            dev_type = text_map.get(self.combo_device_type.currentText(), 1)
+            self._vm.write_device_type(dev_type)
+
+    def _on_device_type_loaded(self, device_type: int):
+        from utils.helpers import set_widget_value
+        type_map = {
+            1: "Tag",
+            2: "Anchor",
+            3: "Gateway",
+            4: "Debug Tool"
+        }
+        text = type_map.get(device_type, "Tag")
+        set_widget_value(self.combo_device_type, text)

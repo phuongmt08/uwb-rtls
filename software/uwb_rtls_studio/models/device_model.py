@@ -57,6 +57,7 @@ class DeviceModel(QObject):
     sys_ranging_cfg_parsed = pyqtSignal(dict)
     sensor_fusion_cfg_parsed = pyqtSignal(dict)
     pos_calib_cfg_parsed = pyqtSignal(dict)
+    device_type_parsed = pyqtSignal(int)
 
 
     def __init__(self, protocol: ProtocolService, telemetry_repo=None, ble_scan_repo=None, command_bus=None, parent=None):
@@ -95,6 +96,7 @@ class DeviceModel(QObject):
 
         # ── Protocol listener ────────────────────────────────────────
         self._protocol.packet_received.connect(self._on_packet)
+        shared_app_state.manual_test_mode_changed.connect(self._on_manual_test_mode_changed)
 
         # ── Prune timer for stale advertising devices ────────────────
         self._prune_timer = QTimer(self)
@@ -104,6 +106,11 @@ class DeviceModel(QObject):
         self._ble_status_timer = QTimer(self)
         self._ble_status_timer.setInterval(10000)
         self._ble_status_timer.timeout.connect(self._poll_ble_status)
+
+        self._battery_poll_timer = QTimer(self)
+        self._battery_poll_timer.setInterval(2000)
+        self._battery_poll_timer.timeout.connect(self._poll_battery_info)
+
 
         self._session_bootstrap_timer = QTimer(self)
         self._session_bootstrap_timer.setSingleShot(True)
@@ -142,6 +149,56 @@ class DeviceModel(QObject):
     def send_command(self, command_name: str, dst_addr: int = VvAddress.CENTRAL, **kwargs):
         """Public model command path used by ViewModels when no CommandBus is injected."""
         return self._send_command(command_name, dst_addr=dst_addr, **kwargs)
+
+    @staticmethod
+    def _non_negative_value(value, default):
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            return default
+        return numeric if numeric >= 0 else default
+
+    @classmethod
+    def _sanitize_sys_config(cls, kwargs: dict) -> dict:
+        sanitized = dict(kwargs)
+        defaults = {
+            "role": 1,
+            "device_id": 1,
+            "ranging_period_ms": 300,
+            "rx_timeout_ms": 120,
+            "uwb_channel": 5,
+            "uwb_prf": 64,
+            "uwb_data_rate": 6800,
+            "uwb_preamble_code": 9,
+            "tx_antenna_delay": 16436,
+            "rx_antenna_delay": 16436,
+            "tx_power": 0,
+            "power_mode": 0,
+            "uwb_preamble_len": 0x34,
+            "uwb_rx_pac": 0,
+            "uwb_ns_sfd": 0,
+            "uwb_phr_mode": 0,
+            "pg_delay": 193,
+        }
+        for key, default in defaults.items():
+            if key in sanitized:
+                sanitized[key] = cls._non_negative_value(sanitized[key], default)
+        return sanitized
+
+    @classmethod
+    def _sanitize_pos_calib_config(cls, kwargs: dict) -> dict:
+        sanitized = dict(kwargs)
+        defaults = {
+            "calib_anchor_id": 1,
+            "samples": 10,
+            "min_delta_step": 1,
+            "max_rounds": 10,
+            "iterations": 100,
+        }
+        for key, default in defaults.items():
+            if key in sanitized:
+                sanitized[key] = cls._non_negative_value(sanitized[key], default)
+        return sanitized
 
     def request_end_session(self, reason: int = 0):
         """Request firmware/session shutdown through the shared command path."""
@@ -184,7 +241,7 @@ class DeviceModel(QObject):
 
     def set_sys_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._send_command("sys_config_set", dst_addr=VvAddress.MCU, **kwargs)
+        return self._send_command("sys_config_set", dst_addr=VvAddress.MCU, **self._sanitize_sys_config(kwargs))
 
     def request_sensor_fusion_config(self, force: bool = False):
         # BE/API: legacy backend helper for Config tab orchestration.
@@ -200,7 +257,7 @@ class DeviceModel(QObject):
 
     def set_pos_calib_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._send_command("pos_calib_cfg_set", dst_addr=VvAddress.MCU, **kwargs)
+        return self._send_command("pos_calib_cfg_set", dst_addr=VvAddress.MCU, **self._sanitize_pos_calib_config(kwargs))
 
     def request_ble_conn_params(self, force: bool = False):
         # BE/API: backend helper for Device Info BLE connection parameters.
@@ -225,10 +282,10 @@ class DeviceModel(QObject):
         return self._send_command(
             "ble_conn_params_set",
             dst_addr=VvAddress.CENTRAL,
-            min_interval_ms=min_interval_ms,
-            max_interval_ms=max_interval_ms,
-            slave_latency=slave_latency,
-            sup_timeout_ms=sup_timeout_ms,
+            min_interval_ms=self._non_negative_value(min_interval_ms, 20),
+            max_interval_ms=self._non_negative_value(max_interval_ms, 40),
+            slave_latency=self._non_negative_value(slave_latency, 0),
+            sup_timeout_ms=self._non_negative_value(sup_timeout_ms, 3000),
         )
 
     def set_ble_adv_config(self, enable: bool, serial_number: int, device_name: str):
@@ -244,6 +301,18 @@ class DeviceModel(QObject):
     def set_host_transport(self, transport: int):
         # BE/API: select MCU host transport without touching flash/FOTA flows.
         return self._send_command("host_transport_set", dst_addr=VvAddress.MCU, transport=transport)
+
+
+    def request_device_type(self, force: bool = False):
+        # BE/API: fetch MCU device type for the Config tab.
+        return self._request_query("device_type_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+
+    def set_device_type(self, device_type: int):
+        # BE/API: update MCU device type from the Config tab.
+        device_type = int(device_type)
+        shared_app_state.device_type = device_type
+        self.device_type_parsed.emit(device_type)
+        return self._send_command("device_type_set", dst_addr=VvAddress.MCU, device_type=device_type)
 
 
     def request_device_reset(self):
@@ -301,6 +370,20 @@ class DeviceModel(QObject):
     @staticmethod
     def _normalize_mac(mac: str) -> str:
         return str(mac or "").strip().replace("-", ":").upper()
+
+    def _set_background_polling_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled) and bool(self._connected_mac) and not shared_app_state.manual_test_mode_enabled
+        if enabled:
+            if not self._ble_status_timer.isActive():
+                self._ble_status_timer.start()
+            if not self._battery_poll_timer.isActive():
+                self._battery_poll_timer.start()
+            return
+        self._ble_status_timer.stop()
+        self._battery_poll_timer.stop()
+
+    def _on_manual_test_mode_changed(self, enabled: bool) -> None:
+        self._set_background_polling_enabled(not enabled)
 
     def _run_pending_target_operation(self):
         pending = self._pending_target_operation
@@ -360,8 +443,7 @@ class DeviceModel(QObject):
         self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
 
         # Start periodic BLE status polling (10s interval)
-        if not self._ble_status_timer.isActive():
-            self._ble_status_timer.start()
+        self._set_background_polling_enabled(True)
 
         # Start session bootstrap after a short grace period.
         self.schedule_session_start(delay_ms=1500, force=True)
@@ -401,6 +483,7 @@ class DeviceModel(QObject):
         self._request_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU)
         self._request_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU)
         self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU)
+        self._request_query("device_type_get", dst_addr=VvAddress.MCU)
         
         # BE/API: confirm dongle BLE state for the current device session.
         self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL)
@@ -460,7 +543,7 @@ class DeviceModel(QObject):
         host_time_ms = int(time.time() * 1000)
         tz_offset_min = self._host_timezone_offset_min()
         log.info("Sending time_sync_adv_set to MCU: type=%d, id=%d, time=%d, tz=%d",
-                 device_type, device_id, host_time_ms, tz_offset_min)
+        device_type, device_id, host_time_ms, tz_offset_min)
         return self._send_command(
             "time_sync_adv_set",
             dst_addr=VvAddress.MCU,
@@ -676,6 +759,7 @@ class DeviceModel(QObject):
         self._connected_grace_until = 0.0
         self._prune_timer.stop()
         self._ble_status_timer.stop()
+        self._battery_poll_timer.stop()
         self._session_bootstrap_timer.stop()
         self._reset_time_sync_flow()
         self._pending_target_operation = None
@@ -713,6 +797,8 @@ class DeviceModel(QObject):
             self._handle_sensor_fusion_cfg(pkt.sensor_fusion_cfg_resp)
         elif param_name == "pos_calib_cfg_resp":
             self._handle_pos_calib_cfg(pkt.pos_calib_cfg_resp)
+        elif param_name == "device_type_set":
+            self._handle_device_type(pkt.device_type_set)
 
 
     def _handle_device_info(self, resp):
@@ -740,6 +826,11 @@ class DeviceModel(QObject):
         dev = shared_app_state.connected_device
         dev.update(info)
         shared_app_state.connected_device = dev
+
+    def _handle_device_type(self, resp):
+        device_type = int(getattr(resp, 'device_type', 0))
+        shared_app_state.device_type = device_type
+        self.device_type_parsed.emit(device_type)
 
     def _handle_battery_info(self, resp):
         present_fields = {field.name for field, _ in resp.ListFields()}
@@ -817,9 +908,8 @@ class DeviceModel(QObject):
                     "SwitchToLogTab": True,
                 })
                 
-                # Start/Restart the periodic BLE status checking timer
-                if not self._ble_status_timer.isActive():
-                    self._ble_status_timer.start()
+                # Start/Restart background polling unless Communication test mode is active
+                self._set_background_polling_enabled(True)
 
                 # NOTE: Do NOT auto-start scan here.
                 # Scanning causes dongle firmware to exit CONNECTED LED state.
@@ -864,6 +954,15 @@ class DeviceModel(QObject):
             self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
         except Exception as e:
             log.error("Failed to send ble_status_get: %s", e)
+
+    def _poll_battery_info(self):
+        """Poll battery info periodically for the connected device."""
+        if not self._connected_mac:
+            return
+        try:
+            self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
+        except Exception as e:
+            log.error("Failed to send battery_info_get: %s", e)
 
     def _handle_ble_conn_params(self, resp):
         p = getattr(resp, 'params', None)

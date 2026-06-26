@@ -25,6 +25,8 @@ COMMAND_ENABLE = {
     "device_reset": 1,
     "uwb_reset": 1,
     "factory_config_reset": 1,
+    "device_type_get": 1,
+    "device_type_set": 1,
     "ble_adv_config_set": 1,
     "ble_status_get": 1,
     "ble_conn_params_get": 1,

@@ -79,7 +79,6 @@ def mock_rtos_resource() -> dict[str, Any]:
         "heap_free_bytes": 18536,
         "heap_min_ever_free_bytes": 14336,
         "min_stack_free_bytes": 9,
-        "min_stack_min_ever_free_bytes": 0,
         "min_stack_task_id": 4,
         "task_count": 6,
         "health_flags": 0,

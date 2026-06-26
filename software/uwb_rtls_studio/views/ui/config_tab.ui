@@ -800,6 +800,70 @@ QPushButton:hover { background: #F97316; color: #F8FAFC; }</string>
          </layout>
         </widget>
        </item>
+       
+       <item row="2" column="2">
+        <widget class="QGroupBox" name="dev_type_group">
+         <property name="title">
+          <string>⚙️ Device Type Configuration</string>
+         </property>
+         <layout class="QGridLayout" name="dev_type_grid">
+          <property name="spacing"><number>10</number></property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="lbl_device_type">
+            <property name="text">
+             <string>🏷️ Device Type:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QComboBox" name="combo_device_type">
+            <item>
+             <property name="text">
+              <string>Tag</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Anchor</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Gateway</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Debug Tool</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QPushButton" name="btn_get_device_type">
+            <property name="styleSheet">
+             <string>QPushButton { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; font-weight: bold; padding: 5px; }
+QPushButton:hover { background: #475569; color: #F8FAFC; }</string>
+            </property>
+            <property name="text">
+             <string>Get Device Type</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QPushButton" name="btn_set_device_type">
+            <property name="styleSheet">
+             <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+            </property>
+            <property name="text">
+             <string>Set Device Type</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
 
        </layout>
       </item>

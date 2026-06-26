@@ -946,7 +946,7 @@ class CommandCatalog:
             CommandSpec(31, "uwb_reset", self.factory.uwb_reset),
             CommandSpec(32, "factory_config_reset", self.factory.factory_config_reset),
             CommandSpec(33, "device_type_set", self.factory.device_type_set),
-            CommandSpec(34, "device_type_get", self.factory.device_type_get),
+            CommandSpec(34, "device_type_get", self.factory.device_type_get, "device_type_set"),
             CommandSpec(35, "flash_erase", self.factory.flash_erase),
             CommandSpec(36, "flash_read", self.factory.flash_read),
             CommandSpec(37, "flash_data", self.factory.flash_data),

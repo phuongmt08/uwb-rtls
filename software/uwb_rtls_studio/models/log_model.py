@@ -240,11 +240,12 @@ class LogModel(QObject):
         self._log_stream_requested = True
         self._log_first_segment_seen = False
         self._log_stream_started_at = time.monotonic()
-        # Delay the first poll by 10 seconds as requested
-        self._log_first_segment_deadline = self._log_stream_started_at + 10.0
         self._log_poll_retry_count = 0
         shared_app_state.log_streaming = True
-        log.info("LogModel: Log stream requested. Will start polling in 10 seconds...")
+        if not self._send_log_poll():
+            return False
+        self._log_first_segment_deadline = time.monotonic() + self.LOG_POLL_TIMEOUT_S
+        log.info("LogModel: Log stream requested. Sent log_data trigger immediately.")
         return True
 
     def stop_log_stream(self) -> None:

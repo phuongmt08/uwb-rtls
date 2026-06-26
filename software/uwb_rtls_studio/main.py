@@ -273,7 +273,6 @@ class MockSerialService(QObject):
                     resp.rtos_resource_resp.heap_free_bytes = res_data["heap_free_bytes"]
                     resp.rtos_resource_resp.heap_min_ever_free_bytes = res_data["heap_min_ever_free_bytes"]
                     resp.rtos_resource_resp.min_stack_free_bytes = res_data["min_stack_free_bytes"]
-                    resp.rtos_resource_resp.min_stack_min_ever_free_bytes = res_data["min_stack_min_ever_free_bytes"]
                     resp.rtos_resource_resp.min_stack_task_id = res_data["min_stack_task_id"]
                     resp.rtos_resource_resp.task_count = res_data["task_count"]
                     resp.rtos_resource_resp.health_flags = res_data["health_flags"]

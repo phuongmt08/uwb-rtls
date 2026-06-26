@@ -17,6 +17,8 @@ class ConfigRepository(QObject):
     sys_ranging_cfg_updated = pyqtSignal(dict)
     sensor_fusion_cfg_updated = pyqtSignal(dict)
     pos_calib_cfg_updated = pyqtSignal(dict)
+    device_type_updated = pyqtSignal(int)
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,6 +55,9 @@ class ConfigRepository(QObject):
             return True
         if param_name == "pos_calib_cfg_resp":
             self.save_pos_calib_cfg(self.parse_pos_calib_cfg(pkt.pos_calib_cfg_resp.config))
+            return True
+        if param_name == "device_type_set":
+            self.save_device_type(int(getattr(pkt.device_type_set, "device_type", 0)))
             return True
         return False
 
@@ -149,3 +154,7 @@ class ConfigRepository(QObject):
         self._pos_calib_cfg = data.copy()
         shared_app_state.pos_calib_cfg = self._pos_calib_cfg
         self.pos_calib_cfg_updated.emit(self.pos_calib_cfg)
+
+    def save_device_type(self, device_type: int) -> None:
+        shared_app_state.device_type = device_type
+        self.device_type_updated.emit(device_type)

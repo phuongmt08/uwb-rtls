@@ -123,6 +123,8 @@ class MockDeviceSimulator:
                     resp.device_information_resp.role = self.proto.pb.DEVICE_ROLE_TAG
                     resp.device_information_resp.fw_version = "mock-device-v1.0"
                     resp.device_information_resp.hw_version = "nRF52840-UWB"
+                elif response_name == "device_type_set":
+                    resp.device_type_set.device_type = self.proto.pb.DEVICE_TYPE_TAG
                 elif response_name == "anchor_layout_resp":
                     # Build mock anchor layout
                     positions = [
@@ -167,7 +169,6 @@ class MockDeviceSimulator:
                     resp.rtos_resource_resp.heap_free_bytes = res_data["heap_free_bytes"]
                     resp.rtos_resource_resp.heap_min_ever_free_bytes = res_data["heap_min_ever_free_bytes"]
                     resp.rtos_resource_resp.min_stack_free_bytes = res_data["min_stack_free_bytes"]
-                    resp.rtos_resource_resp.min_stack_min_ever_free_bytes = res_data["min_stack_min_ever_free_bytes"]
                     resp.rtos_resource_resp.min_stack_task_id = res_data["min_stack_task_id"]
                     resp.rtos_resource_resp.task_count = res_data["task_count"]
                     resp.rtos_resource_resp.health_flags = res_data["health_flags"]

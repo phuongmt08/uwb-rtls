@@ -132,6 +132,7 @@ class ConfigViewModel(QObject):
     pos_calib_cfg_updated = pyqtSignal(dict)
     ble_conn_params_updated = pyqtSignal(dict)
     scan_devices_updated = pyqtSignal(list)
+    device_type_updated = pyqtSignal(int)
 
     def __init__(self, device_model, ranging_model, command_bus=None, ble_scan_repo=None, parent=None):
         super().__init__(parent)
@@ -155,6 +156,7 @@ class ConfigViewModel(QObject):
         shared_app_state.pos_calib_cfg_changed.connect(self.pos_calib_cfg_updated.emit)
         if hasattr(self.model, "ble_conn_params_parsed"):
             self.model.ble_conn_params_parsed.connect(self.ble_conn_params_updated.emit)
+        shared_app_state.device_type_changed.connect(self.device_type_updated.emit)
         if self._ble_scan_repo:
             self._ble_scan_repo.scan_results_updated.connect(self.scan_devices_updated.emit)
 
@@ -173,6 +175,8 @@ class ConfigViewModel(QObject):
             self.sensor_fusion_cfg_updated.emit(self._shared_app_state.sensor_fusion_cfg)
         if self._shared_app_state.pos_calib_cfg:
             self.pos_calib_cfg_updated.emit(self._shared_app_state.pos_calib_cfg)
+        if self._shared_app_state.device_type:
+            self.device_type_updated.emit(self._shared_app_state.device_type)
         if hasattr(self.model, "request_ble_conn_params"):
             self.model.request_ble_conn_params()
         if self._ble_scan_repo:
@@ -192,6 +196,7 @@ class ConfigViewModel(QObject):
             self.read_sensor_fusion_config()
             self.read_pos_calib_config()
             self.read_ble_conn_params()
+            self.read_device_type()
 
         return self.model.execute_for_target(target, operation)
 
@@ -299,6 +304,14 @@ class ConfigViewModel(QObject):
     def write_ble_adv_config(self, enable: bool, serial_number: int, device_name: str):
         log.info("Sending BLE advertising config: enable=%s, serial=%d, name=%s", enable, serial_number, device_name)
         self.model.set_ble_adv_config(enable=enable, serial_number=serial_number, device_name=device_name)
+
+    def read_device_type(self):
+        log.info("Requesting device type from MCU...")
+        self.model.request_device_type()
+
+    def write_device_type(self, device_type: int):
+        log.info("Sending set device type command: %d", device_type)
+        self.model.set_device_type(device_type)
 
     def set_host_transport(self, transport: int):
         log.info("Sending host transport set command: transport=%d", transport)

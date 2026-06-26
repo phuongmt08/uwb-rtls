@@ -110,6 +110,7 @@ class SharedAppState(QObject):
     rtos_resource_changed = pyqtSignal(dict)       # CPU, heap, stack, task count, health flags
     rtos_task_stats_changed = pyqtSignal(list)     # Per-task CPU and stack snapshots
     manual_test_mode_changed = pyqtSignal(bool)    # Communication tab test-mode gate
+    device_type_changed = pyqtSignal(int)          # Device type (Tag=1, Anchor=2, Gateway=3, Debug=4)
 
     # Job State Machine signal
     # Params: job_name, status, progress (0-100), retries, error_msg
@@ -145,6 +146,7 @@ class SharedAppState(QObject):
         self._rtos_resource: Dict[str, Any] = {}
         self._rtos_task_stats: List[Dict[str, Any]] = []
         self._manual_test_mode_enabled = False
+        self._device_type = 0
 
         # Job State Machine storage
         self._jobs: Dict[str, Dict[str, Any]] = {}
@@ -265,6 +267,15 @@ class SharedAppState(QObject):
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
 
     @property
+    def device_type(self) -> int:
+        return self._device_type
+
+    @device_type.setter
+    def device_type(self, val: int) -> None:
+        self._device_type = val
+        self.device_type_changed.emit(self._device_type)
+
+    @property
     def pos_calib_cfg(self) -> Dict[str, Any]:
         return self._pos_calib_cfg.copy()
 
@@ -291,6 +302,9 @@ class SharedAppState(QObject):
         enabled = bool(val)
         if self._manual_test_mode_enabled != enabled:
             self._manual_test_mode_enabled = enabled
+            if enabled and self._query_manager:
+                self._query_manager.reset()
+                self.update_job("query_queue", JobState.IDLE, progress=0)
             self.manual_test_mode_changed.emit(enabled)
 
     @property
@@ -326,12 +340,14 @@ class SharedAppState(QObject):
         self._pos_calib_cfg = {}
         self._rtos_resource = {}
         self._rtos_task_stats = []
+        self._device_type = 0
 
         # Emit the changes so that the Views are notified
         self.connected_device_changed.emit(self._connected_device)
         self.battery_info_changed.emit(self._battery_info)
         self.ble_status_changed.emit(self._ble_status)
         self.ranging_active_changed.emit(self._ranging_active)
+        self.device_type_changed.emit(0)
         self.log_streaming_changed.emit(self._log_streaming)
         self.ranging_stats_changed.emit(self._ranging_stats)
         self.calib_status_changed.emit(self._calib_status)
@@ -357,6 +373,10 @@ class SharedAppState(QObject):
 
     def enqueue_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
         """Add a query to the sequential execution queue."""
+        if self._manual_test_mode_enabled:
+            log.debug("[SharedAppState] Query skipped by manual test mode: %s", command_name)
+            return
+
         if not is_command_enabled(command_name):
             log.info("[SharedAppState] Query skipped by command flag: %s", command_name)
             return

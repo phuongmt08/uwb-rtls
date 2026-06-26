@@ -38,6 +38,7 @@ import logging
 
 from common.commands import mapped_destination_for
 from common.transport import VvAddress
+from common import protocol_pb2 as pb
 
 from PyQt6 import uic
 from PyQt6.QtWidgets import (
@@ -427,7 +428,7 @@ class CommunicationTab(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _configure_table(self, table: QTableWidget, *, is_sent: bool) -> None:
-        table.setColumnCount(6)
+        table.setColumnCount(7)
         table.verticalHeader().setDefaultSectionSize(26)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -435,11 +436,11 @@ class CommunicationTab(QWidget):
         table.setAlternatingRowColors(False)
 
         if is_sent:
-            headers = ["Time", "Src", "Dst", "Seq", "Command", "Parameters"]
+            headers = ["Time", "ID", "Src", "Dst", "Seq", "Command", "Parameters"]
             accent = "#F59E0B"
             sel_bg = "rgba(245,158,11,0.2)"
         else:
-            headers = ["Time", "Src", "Dst", "Seq", "Response", "Decoded Data"]
+            headers = ["Time", "ID", "Src", "Dst", "Seq", "Response", "Decoded Data"]
             accent = "#EF4444"
             sel_bg = "rgba(239,68,68,0.2)"
 
@@ -458,12 +459,13 @@ class CommunicationTab(QWidget):
         """)
 
         table.setColumnWidth(0, 150)
-        table.setColumnWidth(1, 105)
+        table.setColumnWidth(1, 45)
         table.setColumnWidth(2, 105)
-        table.setColumnWidth(3, 70)
-        table.setColumnWidth(4, 160)
+        table.setColumnWidth(3, 105)
+        table.setColumnWidth(4, 70)
+        table.setColumnWidth(5, 160)
         hdr = table.horizontalHeader()
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Packet list & tester parameter fields
@@ -486,6 +488,7 @@ class CommunicationTab(QWidget):
             ("rtos_task_stats_get",     "rtos_task_stats_get"),
             ("── SET Commands ──────────────────", None),
             ("time_sync_set",           "time_sync_set"),
+            ("time_sync_adv_set",       "time_sync_adv_set"),
             ("sys_config_set",          "sys_config_set"),
             ("sys_ranging_cfg_set",     "sys_ranging_cfg_set"),
             ("sensor_fusion_cfg_set",   "sensor_fusion_cfg_set"),
@@ -500,6 +503,8 @@ class CommunicationTab(QWidget):
             ("device_reset",            "device_reset"),
             ("uwb_reset",               "uwb_reset"),
             ("factory_config_reset",    "factory_config_reset"),
+            ("device_type_get",         "device_type_get"),
+            ("device_type_set",         "device_type_set"),
             ("enter_to_bootloader",     "enter_to_bootloader"),
             ("end_session",             "end_session"),
             ("── Log Commands ──────────────────", None),
@@ -555,6 +560,11 @@ class CommunicationTab(QWidget):
         self.f_device_id.setText("1")
         self.f_device_id.setPlaceholderText("Integer device ID (1–254)")
         add("device_id", "Device ID:", self.f_device_id)
+        self.f_device_type = QComboBox(self.tester_control_group)
+        self.f_device_type.addItem("TAG (1)", 1)
+        self.f_device_type.addItem("ANCHOR (2)", 2)
+        self.f_device_type.addItem("DONGLE (3)", 3)
+        add("device_type", "Device type:", self.f_device_type)
 
         self.f_ranging_period_ms = QLineEdit(self.tester_control_group)
         self.f_ranging_period_ms.setText("300")
@@ -663,6 +673,8 @@ class CommunicationTab(QWidget):
     # Mapping: command_name → set of field keys to show
     _VISIBLE_FIELDS: dict[str, set[str]] = {
         "time_sync_set":       {"unix_time_ms", "timezone_offset"},
+        "time_sync_adv_set":   {"device_type", "device_id", "unix_time_ms", "timezone_offset"},
+        "device_type_set":     {"device_type"},
         "sys_config_set":      {"role", "device_id", "ranging_period_ms", "rx_timeout_ms", "uwb_channel"},
         "sys_ranging_cfg_set": {"period_ms", "timeout_ms"},
         "ble_connect":         {"mac_address"},
@@ -779,6 +791,7 @@ class CommunicationTab(QWidget):
         src_str = self._addr_name(src_addr)
         dst_str = self._addr_name(dst_addr)
         details = self._format_pkt(param_name, pkt)
+        packet_id = self._packet_id_text(param_name, pkt)
 
         is_current_manual_send = False
         if self._manual_send_active and self._manual_send_expected_seq is None:
@@ -803,7 +816,7 @@ class CommunicationTab(QWidget):
             self.monitor_sent_table,
             self.monitor_received_table,
             self._monitor_seq_to_row,
-            seq, timestamp, src_str, dst_str, param_name, details,
+            seq, timestamp, packet_id, src_str, dst_str, param_name, details,
         )
 
         if is_current_manual_send or seq in self._tester_seqs:
@@ -811,7 +824,7 @@ class CommunicationTab(QWidget):
                 self.tester_sent_table,
                 self.tester_received_table,
                 self._tester_seq_to_row,
-                seq, timestamp, src_str, dst_str, param_name, details,
+                seq, timestamp, packet_id, src_str, dst_str, param_name, details,
             )
 
     @pyqtSlot(str, object)
@@ -826,6 +839,7 @@ class CommunicationTab(QWidget):
         src_str = self._addr_name(src_addr)
         dst_str = self._addr_name(dst_addr)
         details = self._format_pkt(param_name, pkt)
+        packet_id = self._packet_id_text(param_name, pkt)
         match_seq = int(getattr(getattr(pkt, "ack", None), "ack_seq", seq) or seq) if param_name == "ack" else seq
 
         response_detail = (
@@ -856,7 +870,7 @@ class CommunicationTab(QWidget):
             self.monitor_sent_table,
             self.monitor_received_table,
             self._monitor_seq_to_row,
-            match_seq, timestamp, src_str, dst_str, param_name, details,
+            match_seq, timestamp, packet_id, src_str, dst_str, param_name, details,
         )
 
         if match_seq in self._tester_seqs:
@@ -864,7 +878,7 @@ class CommunicationTab(QWidget):
                 self.tester_sent_table,
                 self.tester_received_table,
                 self._tester_seq_to_row,
-                match_seq, timestamp, src_str, dst_str, param_name, details,
+                match_seq, timestamp, packet_id, src_str, dst_str, param_name, details,
             )
             if param_name == "ack":
                 self.tester_status_label.setText(f"ACK received - seq={match_seq}")
@@ -890,28 +904,29 @@ class CommunicationTab(QWidget):
         seq_to_row: dict,
         seq: int,
         timestamp: str,
+        packet_id: str,
         src: str,
         dst: str,
         cmd: str,
         details: str,
     ) -> None:
         """Insert a new correlated row into sent+recv tables (TX side)."""
+        follow_tail = self._should_follow_table_tail(sent_table, recv_table)
         row = sent_table.rowCount()
         sent_table.insertRow(row)
         recv_table.insertRow(row)
 
         # Sent side
-        self._set_row(sent_table, row, [timestamp, src, dst, str(seq), cmd, details])
+        self._set_row(sent_table, row, [timestamp, packet_id, src, dst, str(seq), cmd, details])
 
         # Received side — placeholders (will be filled when response arrives)
-        for col in range(6):
+        for col in range(7):
             item = QTableWidgetItem("")
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             recv_table.setItem(row, col, item)
 
         seq_to_row[seq] = row
-        sent_table.scrollToBottom()
-        recv_table.scrollToBottom()
+        self._scroll_tables_if_following(sent_table, recv_table, follow_tail)
 
     def _fill_recv_row(
         self,
@@ -920,51 +935,73 @@ class CommunicationTab(QWidget):
         seq_to_row: dict,
         seq: int,
         timestamp: str,
+        packet_id: str,
         src: str,
         dst: str,
         resp: str,
         details: str,
     ) -> None:
         """Fill the RX side of an existing correlated row, or add a new unsolicited row."""
+        follow_tail = self._should_follow_table_tail(sent_table, recv_table)
         row = seq_to_row.get(seq)
 
         if row is not None:
             # Update existing correlated row (matching Sent entry)
-            existing_resp = recv_table.item(row, 4).text().strip() if recv_table.item(row, 4) else ""
-            existing_details = recv_table.item(row, 5).data(Qt.ItemDataRole.UserRole) if recv_table.item(row, 5) else ""
+            existing_resp = recv_table.item(row, 5).text().strip() if recv_table.item(row, 5) else ""
+            existing_details = recv_table.item(row, 6).data(Qt.ItemDataRole.UserRole) if recv_table.item(row, 6) else ""
             if resp == "ack" and existing_resp and existing_resp != "ack" and existing_details:
                 return
             recv_table.setItem(row, 0, self._make_item(timestamp))
-            recv_table.setItem(row, 1, self._make_item(src))
-            recv_table.setItem(row, 2, self._make_item(dst))
-            recv_table.setItem(row, 3, self._make_item(str(seq)))
-            recv_table.setItem(row, 4, self._make_item(resp))
+            recv_table.setItem(row, 1, self._make_item(packet_id))
+            recv_table.setItem(row, 2, self._make_item(src))
+            recv_table.setItem(row, 3, self._make_item(dst))
+            recv_table.setItem(row, 4, self._make_item(str(seq)))
+            recv_table.setItem(row, 5, self._make_item(resp))
             data_item = self._make_item(details)
             data_item.setData(Qt.ItemDataRole.UserRole, details)
             data_item.setToolTip("Click to view full decoded fields")
             data_item.setForeground(QColor("#10B981"))  # green = valid data received
-            recv_table.setItem(row, 5, data_item)
-            recv_table.scrollToBottom()
+            recv_table.setItem(row, 6, data_item)
+            self._scroll_tables_if_following(sent_table, recv_table, follow_tail)
         else:
             # Unsolicited / pushed-by-device packet — no matching sent entry
             row = sent_table.rowCount()
             sent_table.insertRow(row)
             recv_table.insertRow(row)
-            for col in range(6):
+            for col in range(7):
                 sent_table.setItem(row, col, self._make_item(""))
             recv_table.setItem(row, 0, self._make_item(timestamp))
-            recv_table.setItem(row, 1, self._make_item(src))
-            recv_table.setItem(row, 2, self._make_item(dst))
-            recv_table.setItem(row, 3, self._make_item(str(seq)))
-            recv_table.setItem(row, 4, self._make_item(resp))
+            recv_table.setItem(row, 1, self._make_item(packet_id))
+            recv_table.setItem(row, 2, self._make_item(src))
+            recv_table.setItem(row, 3, self._make_item(dst))
+            recv_table.setItem(row, 4, self._make_item(str(seq)))
+            recv_table.setItem(row, 5, self._make_item(resp))
             data_item = self._make_item(details)
             data_item.setData(Qt.ItemDataRole.UserRole, details)
             data_item.setToolTip("Click to view full decoded fields")
             data_item.setForeground(QColor("#10B981"))
-            recv_table.setItem(row, 5, data_item)
+            recv_table.setItem(row, 6, data_item)
+            self._scroll_tables_if_following(sent_table, recv_table, follow_tail)
+
+    @staticmethod
+    def _is_table_at_tail(table: QTableWidget, threshold: int = 2) -> bool:
+        scrollbar = table.verticalScrollBar()
+        return scrollbar.value() >= max(0, scrollbar.maximum() - threshold)
+
+    def _should_follow_table_tail(self, sent_table: QTableWidget, recv_table: QTableWidget) -> bool:
+        return self._is_table_at_tail(sent_table) and self._is_table_at_tail(recv_table)
+
+    @staticmethod
+    def _scroll_tables_if_following(sent_table: QTableWidget, recv_table: QTableWidget, follow_tail: bool) -> None:
+        if follow_tail:
             sent_table.scrollToBottom()
             recv_table.scrollToBottom()
 
+    @staticmethod
+    def _packet_id_text(param_name: str, pkt=None) -> str:
+        descriptor = getattr(pkt, "DESCRIPTOR", pb.packet_t.DESCRIPTOR)
+        field = descriptor.fields_by_name.get(param_name or "")
+        return str(field.number) if field is not None else "-"
     @staticmethod
     def _set_row(table: QTableWidget, row: int, values: list[str]) -> None:
         for col, val in enumerate(values):
@@ -1023,7 +1060,7 @@ class CommunicationTab(QWidget):
         self._show_decoded_popup(self.tester_sent_table, row, column, "Test Sent Packet Parameters")
 
     def _show_decoded_popup(self, table: QTableWidget, row: int, column: int, title: str) -> None:
-        if column != 5 or row < 0:
+        if column != 6 or row < 0:
             return
         item = table.item(row, column)
         if item is None:
@@ -1188,6 +1225,17 @@ class CommunicationTab(QWidget):
                 self.f_timezone.text().strip() or "420", "timezone_offset"
             )
 
+        elif packet_name == "time_sync_adv_set":
+            txt = self.f_unix_ms.text().strip()
+            params["device_type"] = int(self.f_device_type.currentData())
+            params["device_id"] = self._parse_int(self.f_device_id.text().strip() or "1", "device_id")
+            params["unix_time_ms"] = int(txt, 0) if txt else int(time.time() * 1000)
+            params["timezone_offset"] = self._parse_int(
+                self.f_timezone.text().strip() or "420", "timezone_offset"
+            )
+
+        elif packet_name == "device_type_set":
+            params["device_type"] = int(self.f_device_type.currentData())
         elif packet_name == "sys_config_set":
             params["role"]               = int(self.f_role.currentData())
             params["device_id"]          = self._parse_int(self.f_device_id.text().strip() or "1", "device_id")
@@ -1294,11 +1342,11 @@ class CommunicationTab(QWidget):
         # Add TX rows
         self._add_sent_row(
             self.monitor_sent_table, self.monitor_received_table,
-            self._monitor_seq_to_row, seq, timestamp, self._addr_name(int(VvAddress.HOST)), dst_str, packet_name, param_str,
+            self._monitor_seq_to_row, seq, timestamp, self._packet_id_text(packet_name), self._addr_name(int(VvAddress.HOST)), dst_str, packet_name, param_str,
         )
         self._add_sent_row(
             self.tester_sent_table, self.tester_received_table,
-            self._tester_seq_to_row, seq, timestamp, self._addr_name(int(VvAddress.HOST)), dst_str, packet_name, param_str,
+            self._tester_seq_to_row, seq, timestamp, self._packet_id_text(packet_name), self._addr_name(int(VvAddress.HOST)), dst_str, packet_name, param_str,
         )
 
         # Simulate response after 120 ms
@@ -1322,11 +1370,11 @@ class CommunicationTab(QWidget):
 
             self._fill_recv_row(
                 self.monitor_sent_table, self.monitor_received_table,
-                self._monitor_seq_to_row, seq, resp_ts, dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
+                self._monitor_seq_to_row, seq, resp_ts, self._packet_id_text(resp_name), dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
             )
             self._fill_recv_row(
                 self.tester_sent_table, self.tester_received_table,
-                self._tester_seq_to_row, seq, resp_ts, dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
+                self._tester_seq_to_row, seq, resp_ts, self._packet_id_text(resp_name), dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
             )
             self._tester_seqs.discard(seq)
             self.tester_status_label.setText(f"✓ [SIM] Response received — seq={seq}")

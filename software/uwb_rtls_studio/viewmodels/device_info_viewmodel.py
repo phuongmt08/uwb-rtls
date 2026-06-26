@@ -88,6 +88,7 @@ class DeviceInfoViewModel(QObject):
         from utils.app_state import shared_app_state
         shared_app_state.rtos_resource_changed.connect(self._on_rtos_resource_changed)
         shared_app_state.rtos_task_stats_changed.connect(self._on_rtos_task_stats_changed)
+        shared_app_state.device_type_changed.connect(self._on_device_type_changed)
 
         # ── Handle Dongle Connection Lifecycle ───────────────────────
         if self.dongle_model:
@@ -196,6 +197,20 @@ class DeviceInfoViewModel(QObject):
         if self._telemetry_model:
             self._telemetry_model.handle_rtos_task_stats(self._last_rtos_tasks)
         self._emit_rtos_telemetry()
+
+    def _on_device_type_changed(self, device_type: int):
+        from utils.constants import DEVICE_TYPE_LABELS
+        from utils.app_state import shared_app_state
+        type_str = DEVICE_TYPE_LABELS.get(device_type, str(device_type))
+        dev = shared_app_state.connected_device
+        dev["Type"] = type_str
+        shared_app_state._connected_device["Type"] = type_str
+        merged = {
+            "Device Name": self.model.connected_name,
+            "MAC Address": self.model.connected_mac,
+        }
+        merged.update(dev)
+        self.device_info_updated.emit(merged)
 
     def _emit_rtos_telemetry(self):
         if self._telemetry_model:
