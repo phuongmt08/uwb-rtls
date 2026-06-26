@@ -153,6 +153,23 @@ bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_m
 void bsp_uwb_idle(void);
 
 /**
+ * @brief Put DW1000 into low-power sleep.
+ * @note Intended for long standby gaps only. Hot ranging paths should keep
+ *       using bsp_uwb_idle() so TX/RX timing is not disturbed.
+ */
+bsp_err_t bsp_uwb_sleep_enter(void);
+
+/**
+ * @brief Wake DW1000 from sleep using the SPI CS wake mechanism.
+ */
+bsp_err_t bsp_uwb_sleep_wake(void);
+
+/**
+ * @brief Return true when the BSP believes DW1000 is in sleep mode.
+ */
+bool bsp_uwb_is_sleeping(void);
+
+/**
  * @brief Get cached first-path quality diagnostics of the last RX frame.
  * @param[out] quality Output quality metrics.
  * @return BSP_OK when valid diagnostics are available.

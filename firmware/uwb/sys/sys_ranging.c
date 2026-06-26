@@ -50,6 +50,12 @@
 #define ANCHOR_SMART_DISCOVERY_DECAY_MISSES 3U
 #define ANCHOR_SMART_TRACK_REARM_GAP_MS    10U
 
+// Smart sleep/standby parameters
+#define ANCHOR_SMART_STANDBY_SLEEP_ENABLE  1U // Enable smart standby sleep for anchors
+#define ANCHOR_SMART_SLEEP_MIN_GAP_MS       30U
+#define ANCHOR_SMART_SLEEP_WAKE_GUARD_MS    16U
+#define ANCHOR_SMART_SLEEP_RETRY_MS         20U
+
 #define TAG_MIN_ANCHOR_SAMPLES             3U
 
 /* Software margin needed before programming DW1000 delayed TX.
@@ -350,6 +356,12 @@ static uint32_t anchor_smart_active_power_mode(uint32_t configured_mode)
 {
   uint32_t target = anchor_smart_clamp_power_mode(configured_mode);
   uint32_t active = anchor_smart_clamp_power_mode(s_anchor_smart_rx.active_power_mode);
+
+  if (s_anchor_smart_rx.mode == ANCHOR_RX_TRACKING &&
+      target > ANCHOR_POWER_MODE_BALANCED)
+  {
+    target = ANCHOR_POWER_MODE_BALANCED;
+  }
 
   if (!s_anchor_smart_rx.initialized)
   {
@@ -2301,7 +2313,6 @@ static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uin
 {
   uint32_t period_ms = sys_config_get()->uwb.ranging_period_ms;
   uint32_t poll_tick = anchor_smart_estimate_poll_tick(result, now_tick);
-  uint32_t pre_poll_ms = anchor_smart_tracking_pre_poll_ms();
   bool was_tracking = (s_anchor_smart_rx.mode == ANCHOR_RX_TRACKING);
 
   if (period_ms == 0U) {
@@ -2318,6 +2329,7 @@ static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uin
   if (!was_tracking) {
     s_anchor_smart_rx.stable_successes = 0U;
   }
+  uint32_t pre_poll_ms = anchor_smart_tracking_pre_poll_ms();
   s_anchor_smart_rx.next_poll_tick = poll_tick + period_ms;
   s_anchor_smart_rx.next_poll_dw = (result && result->t2 != 0ULL)
       ? ((result->t2 + tdma_us_to_dw(period_ms * 1000U)) & DW_MASK_40)
@@ -2400,6 +2412,12 @@ static void anchor_smart_note_success(uint32_t configured_mode)
   uint32_t target_mode = anchor_smart_clamp_power_mode(configured_mode);
   uint32_t active_mode = anchor_smart_active_power_mode(target_mode);
 
+  if (s_anchor_smart_rx.mode == ANCHOR_RX_TRACKING &&
+      target_mode > ANCHOR_POWER_MODE_BALANCED)
+  {
+    target_mode = ANCHOR_POWER_MODE_BALANCED;
+  }
+
   s_anchor_smart_rx.track_misses = 0U;
   s_anchor_smart_rx.discovery_misses = 0U;
 
@@ -2476,6 +2494,53 @@ static void anchor_smart_prepare_poll_rx_plan(void)
        tdma_us_to_dw(anchor_smart_tracking_pre_poll_ms() * 1000U)) & DW_MASK_40;
 }
 
+static bool anchor_smart_standby_sleep_allowed(uint32_t power_mode)
+{
+#if ANCHOR_SMART_STANDBY_SLEEP_ENABLE
+  uint32_t active_mode = anchor_smart_active_power_mode(power_mode);
+  return s_anchor_smart_rx.mode == ANCHOR_RX_DISCOVERY &&
+         active_mode >= ANCHOR_POWER_MODE_ECO;
+#else
+  (void)power_mode;
+  return false;
+#endif
+}
+
+static void anchor_smart_service_standby_sleep(uint32_t power_mode, uint32_t now_tick)
+{
+  if (!anchor_smart_standby_sleep_allowed(power_mode))
+  {
+    if (bsp_uwb_is_sleeping())
+    {
+      (void)bsp_uwb_sleep_wake();
+    }
+    return;
+  }
+
+  uint32_t wake_tick = s_anchor_smart_rx.next_window_tick - ANCHOR_SMART_SLEEP_WAKE_GUARD_MS;
+
+  if (bsp_uwb_is_sleeping())
+  {
+    if (anchor_smart_tick_due(now_tick, wake_tick) &&
+        bsp_uwb_sleep_wake() != BSP_OK)
+    {
+      s_anchor_smart_rx.next_window_tick = now_tick + ANCHOR_SMART_SLEEP_RETRY_MS;
+    }
+    return;
+  }
+
+  if (anchor_smart_tick_due(now_tick, wake_tick))
+  {
+    return;
+  }
+
+  uint32_t sleep_gap_ms = wake_tick - now_tick;
+  if (sleep_gap_ms >= ANCHOR_SMART_SLEEP_MIN_GAP_MS)
+  {
+    (void)bsp_uwb_sleep_enter();
+  }
+}
+
 sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
                                                   const uint8_t *anchor_ids,
                                                   uint32_t rx_timeout_ms)
@@ -2506,8 +2571,15 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
     anchor_smart_switch_discovery(now, true);
   }
 
+  anchor_smart_service_standby_sleep(power_mode, now);
+
   if (power_mode != ANCHOR_POWER_MODE_PERFORMANCE &&
       !anchor_smart_tick_due(now, s_anchor_smart_rx.next_window_tick)) {
+    return SYS_RANGING_ERR_BUSY;
+  }
+
+  if (bsp_uwb_is_sleeping() && bsp_uwb_sleep_wake() != BSP_OK) {
+    s_anchor_smart_rx.next_window_tick = now + ANCHOR_SMART_SLEEP_RETRY_MS;
     return SYS_RANGING_ERR_BUSY;
   }
 

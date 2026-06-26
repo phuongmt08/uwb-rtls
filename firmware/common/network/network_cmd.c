@@ -1512,8 +1512,7 @@ bool network_cmd_is_ble_host_active(void)
 
 bool network_cmd_set_ranging_enabled(bool enabled)
 {
-    app_rtos_apply_ranging_enabled(enabled);
-    return true;
+    return app_rtos_apply_ranging_enabled(enabled);
 }
 
 bool network_cmd_is_ranging_enabled(void)

@@ -932,14 +932,10 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
         for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
             uint8_t aid = prefilter_rejects[i].id;
-<<<<<<< HEAD
             uint8_t anchor_idx = 0U;
             if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED ||
                 !active_anchor_index_for_id(aid, &anchor_idx) ||
                 anchors_by_id[aid].valid) {
-=======
-            if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED || anchors_by_id[aid].valid) {
->>>>>>> acf1475 (feat: implement sleeping logic during IDLE state for both STM32 and NRF +fix  minor bugs)
                 continue;
             }
             anchors_by_id[aid] = prefilter_rejects[i];
@@ -961,8 +957,6 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
             if (active_anchor_index_for_id(id, &anchor_idx)) {
                 anchor_distances[anchor_idx] = anchors_by_id[id].distance;
             }
-        }
-    }
         }
     }
 
@@ -1044,26 +1038,12 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
 
             RLOG_I(LOG_OBJECT_CODE_TAG, "[UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm", init_x, init_y, TAG_HEIGHT_M);
 
-<<<<<<< HEAD
             clear_latest_anchor_metrics();
             const float init_distances[3] = {init_d0, init_d1, init_d2};
             for (uint8_t i = 0U; i < 3U; i++) {
                 uint8_t anchor_idx = 0U;
                 if (active_anchor_index_for_id(best_3_anchors[i].id, &anchor_idx)) {
                     s_latest_distances[anchor_idx] = init_distances[i];
-=======
-            for(int i=0; i<NUM_ANCHORS; i++) s_latest_distances[i] = 0.0f;
-            uint8_t slot = 0U;
-            if (get_anchor_slot(best_3_anchors[0].id, &slot)) s_latest_distances[slot] = init_d0;
-            if (get_anchor_slot(best_3_anchors[1].id, &slot)) s_latest_distances[slot] = init_d1;
-            if (get_anchor_slot(best_3_anchors[2].id, &slot)) s_latest_distances[slot] = init_d2;
-
-            for (uint32_t active_slot = 0U; active_slot < active_count; active_slot++) {
-                uint8_t aid = (uint8_t)cfg->anchor_layout[active_slot].anchor_id;
-                if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
-                    s_latest_fp_amp_norm[active_slot] = anchors_by_id[aid].fp_amp_norm;
-                    s_latest_fp_snr[active_slot] = anchors_by_id[aid].fp_snr;
->>>>>>> acf1475 (feat: implement sleeping logic during IDLE state for both STM32 and NRF +fix  minor bugs)
                 }
             }
             snapshot_latest_anchor_metrics(anchors_by_id);

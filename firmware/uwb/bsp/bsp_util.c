@@ -29,7 +29,7 @@ extern RTC_HandleTypeDef hrtc;
 extern osThreadId_t UwbRangingHandle;
 extern osThreadId_t SensorFusionHandle;
 extern osThreadId_t NetworkHandle;
-extern osThreadId_t LoggerHandle;
+extern osThreadId_t SysMonitoringHandle;
 extern osThreadId_t FlashStorageHandle;
 extern osThreadId_t IOHandle;
 extern osThreadId_t PMHandle;
@@ -37,7 +37,7 @@ extern osThreadId_t PMHandle;
 extern const osThreadAttr_t UwbRanging_attributes;
 extern const osThreadAttr_t SensorFusion_attributes;
 extern const osThreadAttr_t Network_attributes;
-extern const osThreadAttr_t Logger_attributes;
+extern const osThreadAttr_t SysMonitoring_attributes;
 extern const osThreadAttr_t FlashStorage_attributes;
 extern const osThreadAttr_t IO_attributes;
 extern const osThreadAttr_t PM_attributes;
@@ -201,10 +201,10 @@ bsp_util_status_t bsp_rtc_get_time(bsp_rtc_time_t *time)
 
 uint64_t bsp_rtc_get_timestamp_ms(void)
 {
+  uint32_t ssr       = LL_RTC_TIME_GetSubSecond(hrtc.Instance);
   uint32_t time_reg  = LL_RTC_TIME_Get(hrtc.Instance);
   uint32_t date_reg  = LL_RTC_DATE_Get(hrtc.Instance);
   uint32_t prediv_s  = LL_RTC_GetSynchPrescaler(hrtc.Instance);
-  uint32_t ssr       = LL_RTC_TIME_GetSubSecond(hrtc.Instance);
   uint32_t subsec_ms = ((prediv_s - ssr) * 1000U) / (prediv_s + 1U);
 
   uint8_t h   = __LL_RTC_CONVERT_BCD2BIN(__LL_RTC_GET_HOUR(time_reg));

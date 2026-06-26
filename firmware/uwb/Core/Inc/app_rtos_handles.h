@@ -52,7 +52,7 @@ extern osMessageQueueId_t g_uwb_distance_queue;
 
 void app_rtos_set_ranging_enabled(bool enabled);
 bool app_rtos_is_ranging_enabled(void);
-void app_rtos_apply_ranging_enabled(bool enabled);
+bool app_rtos_apply_ranging_enabled(bool enabled);
 void app_rtos_request_sensor_fusion_reset(void);
 bool app_rtos_request_zone_switch(uint32_t zone_id);
 bool app_rtos_request_active_zone_profile_update(const protobuf_zone_profile_t *profile);
