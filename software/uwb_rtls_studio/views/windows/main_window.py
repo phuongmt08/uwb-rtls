@@ -433,6 +433,13 @@ class MainWindow(QMainWindow):
                     pass
             self._session_active = False
             self._session_timer.stop()
+        else:
+            if self._main_vm:
+                try:
+                    self._main_vm._clear_live_session_buffers()
+                except Exception:
+                    pass
+
 
         # 3. Đóng cổng COM
         if self._serial_service:

@@ -28,7 +28,13 @@ import signal
 
 
 def _force_exit(_signum, _frame):
+    try:
+        from data.raw_packet_store import shared_raw_packet_store
+        shared_raw_packet_store.clear()
+    except Exception:
+        pass
     os._exit(130)
+
 
 
 signal.signal(signal.SIGINT, _force_exit)

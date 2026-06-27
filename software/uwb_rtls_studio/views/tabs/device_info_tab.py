@@ -265,9 +265,7 @@ class DeviceInfoTab(QWidget):
             row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
             widget = QWidget()
             uic.loadUi(row_ui_path, widget)
-            widget.btn_connect.clicked.connect(lambda checked, m=dev["mac"]: self._vm.connect_device(m))
-            
-            # Create and style Set Time button
+
             btn_set_time = QPushButton("Set Time")
             btn_set_time.setMinimumSize(65, 22)
             btn_set_time.setMaximumSize(65, 22)
@@ -278,19 +276,42 @@ class DeviceInfoTab(QWidget):
                 "QPushButton:disabled { background: #334155; color: #94A3B8; }"
             )
             btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
-            
-            # Disable Set Time if d_id is None
             if d_id is None:
                 btn_set_time.setEnabled(False)
-                
             widget.layout().addWidget(btn_set_time)
-            
-            # Disable connect button if we are currently connecting to this device
-            if self._vm.model._pending_connect_mac == dev["mac"]:
+
+            model = self._vm.model
+            row_mac = dev["mac"]
+            is_connected_row = model.connected_mac == row_mac and model.connection_status == "Connected"
+            is_connecting_row = model.connected_mac == row_mac and model.connection_status == "Connecting"
+            is_disconnecting_row = model.connected_mac == row_mac and model.connection_status == "Disconnecting"
+            is_pending_row = model.pending_connect_mac == row_mac and model.connection_status in ("Connecting", "Disconnecting")
+
+            if is_connected_row:
+                widget.btn_connect.setText("Disconnect")
+                widget.btn_connect.setStyleSheet(
+                    "QPushButton { background: #DC2626; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                    "QPushButton:hover { background: #EF4444; } "
+                    "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+                )
+                widget.btn_connect.clicked.connect(lambda checked=False: self._vm.disconnect_device())
+            elif is_connecting_row or is_pending_row:
                 widget.btn_connect.setText("Connecting...")
                 widget.btn_connect.setEnabled(False)
                 btn_set_time.setEnabled(False)
-            
+            elif is_disconnecting_row:
+                widget.btn_connect.setText("Disconnecting...")
+                widget.btn_connect.setEnabled(False)
+                btn_set_time.setEnabled(False)
+            else:
+                widget.btn_connect.setText("Connect")
+                widget.btn_connect.setStyleSheet(
+                    "QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                    "QPushButton:hover { background: #10B981; } "
+                    "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+                )
+                widget.btn_connect.clicked.connect(lambda checked, m=row_mac: self._vm.connect_device(m))
+
             self._adv_table.setCellWidget(i, 7, widget)
 
         # Dynamic height adjustment so the groupbox scales with the content

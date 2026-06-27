@@ -118,6 +118,10 @@ class DeviceInfoViewModel(QObject):
         """Called by View when user clicks Connect on a scanned device."""
         self.model.connect_device(mac_hex)
 
+    def disconnect_device(self, reason: int = 0):
+        """Called by View when user clicks Disconnect on the connected scanned device."""
+        return self.model.disconnect_device(reason=reason)
+
     def send_time_sync_adv(self, device_type: int, device_id: int):
         """Forward time sync advertising set command to the model."""
         self.model.send_time_sync_adv(device_type, device_id)

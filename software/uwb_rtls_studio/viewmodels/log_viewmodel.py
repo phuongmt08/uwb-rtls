@@ -1,118 +1,23 @@
 """
-===============================================================================
-  UWB RTLS Studio — Log ViewModel
-===============================================================================
-  File        : viewmodels/log_viewmodel.py
-  Description : ViewModel cho tab "Log & Session History" (Tab 5).
-                Quản lý device logs, app logs, và session history browser.
-
-  MVVM Role   : VIEWMODEL
-
-  ═══════════════════════════════════════════════════════════════════════
-  QUAN TRỌNG — Log Tab hiện cho CẢ USER và DEVELOPER
-  ═══════════════════════════════════════════════════════════════════════
-
-  Lý do: Khi user đang ranging, STM32 / UWB chip / IMU vẫn phát sinh
-  các log messages (warnings, errors, status). User cần thấy các log
-  này để debug vấn đề (VD: "Ranging timeout", "Low battery", 
-  "IMU calibration failed", ...). Không chỉ developer mới cần log.
-
-  Tuy nhiên, level chi tiết khác nhau giữa 2 mode:
-
-  ┌──────────────────────────────┬──────────────┬───────────────┐
-  │ Log Feature                  │ User Mode    │ Developer Mode│
-  ├──────────────────────────────┼──────────────┼───────────────┤
-  │ Device Logs (INFO/WARN/ERR)  │ ✅           │ ✅            │
-  │ Device Logs (DEBUG)          │ ❌ Filtered  │ ✅            │
-  │ App Internal Logs            │ ❌ Hidden    │ ✅            │
-  │ Raw Protocol Logs (TX/RX)    │ ❌ Hidden    │ ✅            │
-  │ Session History Browser      │ ✅           │ ✅            │
-  │ Export CSV/TXT               │ ✅           │ ✅            │
-  │ Clear Device Logs            │ ❌ Hidden    │ ✅            │
-  │ Advanced Filters             │ ❌ Hidden    │ ✅            │
-  └──────────────────────────────┴──────────────┴───────────────┘
-
-  ═══════════════════════════════════════════════════════════════════════
-
-  Tab Layout:
-    ┌─────────────────────────────────────────────────────────────┐
-    │  LOG & SESSION HISTORY TAB                                  │
-    ├─────────────────────────────────────────────────────────────┤
-    │  ┌─ 📋 Live Log (hiện trong cả 2 mode) ──────────────────┐ │
-    │  │  ┌─ Filter Bar ──────────────────────────────────────┐ │ │
-    │  │  │  Level: [▼ ALL] │ Source: [▼ ALL]*(dev)           │ │ │
-    │  │  │  🔍 [Search...]                                    │ │ │
-    │  │  │  [Export CSV] [Export TXT] [Clear]*(dev)           │ │ │
-    │  │  └───────────────────────────────────────────────────┘ │ │
-    │  │  ┌─ Log Area (scrollable) ───────────────────────────┐ │ │
-    │  │  │  [12:30:01] INFO  DEVICE  Ranging started          │ │ │
-    │  │  │  [12:30:05] WARN  DEVICE  Low battery: 15%         │ │ │
-    │  │  │  [12:30:10] ERROR DEVICE  Ranging timeout #3       │ │ │
-    │  │  │  [12:30:15] INFO  DEVICE  Position quality: GOOD   │ │ │
-    │  │  │  ── Developer only ──────────────────────────────  │ │ │
-    │  │  │  [12:30:02] DEBUG PROTOCOL TX: ranging_start       │ │ │
-    │  │  │  [12:30:02] DEBUG PROTOCOL RX: ack (OK)            │ │ │
-    │  │  │  [12:30:03] DEBUG APP     RangingVM: session init  │ │ │
-    │  │  └───────────────────────────────────────────────────┘ │ │
-    │  │  Status: 1,234 entries | 2 errors | 1 warning         │ │
-    │  └──────────────────────────────────────────────────────┘ │
-    │                                                            │
-    │  ┌─ 📂 Session History (hiện trong cả 2 mode) ──────────┐ │
-    │  │  ┌─ Filter ──────────────────────────────────────────┐│ │
-    │  │  │  Date: [From ___] → [To ___]                      ││ │
-    │  │  │  Type: [▼ ALL]  Device: [▼ ALL]                   ││ │
-    │  │  └───────────────────────────────────────────────────┘│ │
-    │  │  ┌────────┬──────────┬─────────┬────────┬───────────┐│ │
-    │  │  │ Date   │ Type     │ Device  │ Dura.  │ Actions   ││ │
-    │  │  ├────────┼──────────┼─────────┼────────┼───────────┤│ │
-    │  │  │ 05/30  │ RANGING  │ TAG-123 │ 5:23   │ [📂][🗑] ││ │
-    │  │  │ 05/30  │ LOG      │ TAG-123 │ 1:05   │ [📂][🗑] ││ │
-    │  │  │ 05/29  │ RANGING  │ TAG-456 │ 12:30  │ [📂][🗑] ││ │
-    │  │  │ 05/28  │ STREAM   │ ANC-789 │ 3:45   │ [📂][🗑] ││ │
-    │  │  └────────┴──────────┴─────────┴────────┴───────────┘│ │
-    │  │  📂 = Open session (load data for review)             │ │
-    │  │  🗑 = Delete session (remove from disk)               │ │
-    │  │  Total: 15 sessions | Disk: 2.3 MB                    │ │
-    │  └──────────────────────────────────────────────────────┘ │
-    └─────────────────────────────────────────────────────────────┘
-
-  Signals:
-    - log_entry_added(entry: dict)
-    - log_filtered(count: int)
-    - session_list_updated(sessions: list)
-    - session_opened(session_id: str, data: dict)
-    - session_deleted(session_id: str)
-
-  Slots:
-    - on_filter_changed(level, source)
-    - on_search(query: str)
-    - on_export(format: str)
-    - on_clear_logs()
-    - on_open_session(session_id: str)
-    - on_delete_session(session_id: str)
-    - on_refresh_sessions()
-
-  Protocol Messages: tags 37 (log_data_t), 38 (log_clear_t)
-
-  Sử dụng:
-    - Models: LogModel
-    - Repository: SessionRepository, SessionBrowser
-===============================================================================
+Log ViewModel for the Log & Session History tab.
 """
 import logging
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+
 from repository.session_browser import SessionBrowser
 
 log = logging.getLogger(__name__)
 
+
 class LogViewModel(QObject):
-    # Signals for View updates
     log_entry_added = pyqtSignal(dict)
     log_filtered = pyqtSignal(int)
     session_list_updated = pyqtSignal(list)
-    session_details_loaded = pyqtSignal(str, str, list)  # session_id, detail_type, data_list
+    session_details_loaded = pyqtSignal(str, str, list)
     session_deleted = pyqtSignal(str)
     live_logs_cleared = pyqtSignal()
+    log_stream_state_changed = pyqtSignal(bool)
 
     def __init__(self, session_browser: SessionBrowser, log_model=None, session_run_manager=None, parent=None):
         super().__init__(parent)
@@ -125,12 +30,19 @@ class LogViewModel(QObject):
         self._log_poll_timer.timeout.connect(self._poll_log_timeout)
         if self._log_model:
             self._log_model.log_entry_added.connect(self._on_model_log_entry)
+            self._log_model.log_stream_state_changed.connect(self._on_model_log_stream_state_changed)
 
     @property
     def session_logs(self) -> list[dict]:
         if self._log_model:
             return self._log_model.session_logs
         return [entry.copy() for entry in self._live_logs]
+
+    @property
+    def is_log_streaming(self) -> bool:
+        if self._log_model and hasattr(self._log_model, "is_log_streaming"):
+            return bool(self._log_model.is_log_streaming)
+        return False
 
     def clear_session_logs(self):
         if self._log_model:
@@ -146,15 +58,12 @@ class LogViewModel(QObject):
         self._live_logs.append(entry.copy())
         self.log_entry_added.emit(entry)
 
-    # ── Live Log Methods ─────────────────────────────────────────────
-
     def add_live_log(self, timestamp: str, level: str, source: str, message: str):
-        """Thêm một dòng live log mới và phát tín hiệu báo cho UI."""
         entry = {
             "timestamp": timestamp,
             "level": level,
             "source": source,
-            "message": message
+            "message": message,
         }
         if self._log_model:
             self._log_model.add_live_log(timestamp, level, source, message)
@@ -163,7 +72,6 @@ class LogViewModel(QObject):
             self.log_entry_added.emit(entry)
 
     def clear_live_logs(self):
-        """Xóa toàn bộ live logs hiện tại."""
         self._live_logs.clear()
         if self._log_model:
             self._log_model.clear_live_logs()
@@ -171,30 +79,18 @@ class LogViewModel(QObject):
         self.log_filtered.emit(0)
 
     def clear_log_session(self):
-        """Stop firmware logging, persist the run, send LOG_DATA end reason, and clear live logs."""
-        if self._log_model and hasattr(self._log_model, "stop_log_stream"):
-            self._log_model.stop_log_stream()
-
-        if self._session_run_manager:
-            self._session_run_manager.close_log_run(send_end=True, clear_buffers=False)
-            self.refresh_sessions()
-
-        # Step 3: Clear in-memory buffers + UI
-        self.clear_session_logs()
-        self.clear_live_logs()
-
-
-    # ── Session History Methods ──────────────────────────────────────
+        """Send log_clear to firmware and clear only the current live-log table."""
+        if self._log_model and hasattr(self._log_model, "request_log_stop"):
+            self._log_model.request_log_stop(log_type=1, offset=0, length=0)
+        self.live_logs_cleared.emit()
+        self.log_filtered.emit(0)
 
     def refresh_sessions(self, filters: dict = None):
-        """Tải lại danh sách session từ Repository và cập nhật cho UI."""
         try:
             sessions = self.browser.list_all_sessions(filters)
-            # Chuẩn hóa dữ liệu cho UI hiển thị
             formatted_sessions = []
             for s in sessions:
                 session_id = s.get("session_id")
-                # Tính toán chuỗi hiển thị thời lượng
                 dur = s.get("duration_sec", 0.0)
                 h = int(dur // 3600)
                 m = int((dur % 3600) // 60)
@@ -219,8 +115,8 @@ class LogViewModel(QObject):
                     "browser_path": self.browser.get_browser_root(),
                 })
             self.session_list_updated.emit(formatted_sessions)
-        except Exception as e:
-            log.error(f"Error refreshing sessions: {e}")
+        except Exception as exc:
+            log.error("Error refreshing sessions: %s", exc)
 
     def _session_file_exists(self, session_id: str, filename: str) -> bool:
         return self.browser.session_file_exists(session_id, filename)
@@ -243,8 +139,7 @@ class LogViewModel(QObject):
         return self.browser.export_session_to(session_id, destination_dir)
 
     def load_session_detail(self, session_id: str, detail_type: str):
-        """Tải chi tiết tọa độ hoặc logs của session cũ."""
-        log.info(f"Loading details for session {session_id} (type: {detail_type})")
+        log.info("Loading details for session %s (type: %s)", session_id, detail_type)
         try:
             if detail_type == "ranging":
                 data = self.browser.get_ranging_data(session_id)
@@ -253,28 +148,39 @@ class LogViewModel(QObject):
             else:
                 data = self.browser.get_log_data(session_id)
             self.session_details_loaded.emit(session_id, detail_type, data)
-        except Exception as e:
-            log.error(f"Error loading session detail: {e}")
+        except Exception as exc:
+            log.error("Error loading session detail: %s", exc)
 
     def delete_session(self, session_id: str):
-        """Xóa session khỏi kho file và làm mới UI."""
-        log.warning(f"Requesting deletion of session: {session_id}")
+        log.warning("Requesting deletion of session: %s", session_id)
         try:
             success = self.browser.delete_session(session_id)
             if success:
                 self.session_deleted.emit(session_id)
                 self.refresh_sessions()
-        except Exception as e:
-            log.error(f"Error deleting session {session_id}: {e}")
+        except Exception as exc:
+            log.error("Error deleting session %s: %s", session_id, exc)
 
-    def start_log_stream(self):
-        """Kích hoạt log stream từ thiết bị và đảm bảo mở log run."""
+    def start_log_stream(self) -> bool:
         log.info("Requesting start of log stream from device...")
         if self._session_run_manager:
             self._session_run_manager.open_log_run()
-        if self._log_model:
-            if self._log_model.request_log_stream(force=True):
-                self._log_poll_timer.start()
+        if self._log_model and self._log_model.request_log_stream(force=True):
+            self._log_poll_timer.start()
+            return True
+        return False
+
+    def stop_log_stream(self) -> bool:
+        if not self.is_log_streaming:
+            return False
+
+        self._log_poll_timer.stop()
+        if self._session_run_manager:
+            self._session_run_manager.close_log_run(send_end=True, clear_buffers=False)
+            self.refresh_sessions()
+        elif self._log_model and hasattr(self._log_model, "stop_log_stream"):
+            self._log_model.stop_log_stream()
+        return True
 
     def send_host_log_packet(self, packet_name: str, **params) -> dict:
         if not self._log_model:
@@ -284,3 +190,8 @@ class LogViewModel(QObject):
     def _poll_log_timeout(self):
         if self._log_model and self._log_model.poll_log_timeout():
             return
+
+    def _on_model_log_stream_state_changed(self, is_streaming: bool):
+        if not is_streaming:
+            self._log_poll_timer.stop()
+        self.log_stream_state_changed.emit(bool(is_streaming))

@@ -1,5 +1,5 @@
 """
-UWB RTLS Studio — Log & Session History Tab (UI loaded from .ui file)
+UWB RTLS Studio - Log & Session History Tab (UI loaded from .ui file)
 Tab 5: Live log viewer + Session history browser.
 
 FE: Loaded from views/ui/log_tab.ui (editable in Qt Designer)
@@ -56,10 +56,10 @@ class LogTab(QWidget):
         self._detail_mode = "ranging"
         self._detail_rows = []
 
-        # ── Load UI from .ui file ──
+        # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
 
-        # ── Post-load setup ──
+        # Post-load setup
         self._setup_splitter()
         self._setup_object_code_filter()
         self._setup_session_table()
@@ -68,7 +68,7 @@ class LogTab(QWidget):
         self._connect_signals()
         self._vm = None
 
-        # Sẽ sinh virtual history sau 50ms nếu không có ViewModel nào được gán
+        # Sáº½ sinh virtual history sau 50ms náº¿u khÃ´ng cÃ³ ViewModel nÃ o Ä‘Æ°á»£c gÃ¡n
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(50, self._check_and_populate_virtual)
 
@@ -81,111 +81,6 @@ class LogTab(QWidget):
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
         self._dev_widgets = []
-        self._setup_host_packet_sender()
-
-    def _setup_host_packet_sender(self):
-        self.host_packet_group = QGroupBox("Host Packet Sender", self)
-        self.host_packet_group.setStyleSheet(
-            "QGroupBox { color: #22D3EE; border: 1px solid #334155; border-radius: 6px; "
-            "margin-top: 8px; padding: 8px; font-weight: bold; } "
-            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
-        )
-
-        outer = QVBoxLayout(self.host_packet_group)
-        outer.setContentsMargins(8, 10, 8, 8)
-        outer.setSpacing(6)
-
-        packet_row = QHBoxLayout()
-        packet_row.setSpacing(6)
-        packet_row.addWidget(QLabel("Packet:", self.host_packet_group))
-
-        self.host_packet_select = QComboBox(self.host_packet_group)
-        self.host_packet_select.addItem("none keep-alive", "none")
-        self.host_packet_select.addItem("host_ack", "ack")
-        self.host_packet_select.addItem("time_sync_set", "time_sync_set")
-        self.host_packet_select.addItem("host_transport_set", "host_transport_set")
-        self.host_packet_select.addItem("log_data", "log_data")
-        self.host_packet_select.addItem("log_clear", "log_clear")
-        packet_row.addWidget(self.host_packet_select, 1)
-
-        self.host_packet_dst = QComboBox(self.host_packet_group)
-        self.host_packet_dst.addItem("MCU(1)", 1)
-        self.host_packet_dst.addItem("CENTRAL(3)", 3)
-        self.host_packet_dst.addItem("PERIPHERAL(4)", 4)
-        packet_row.addWidget(QLabel("Dst:", self.host_packet_group))
-        packet_row.addWidget(self.host_packet_dst)
-        outer.addLayout(packet_row)
-
-        self._host_packet_param_rows = {}
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(6)
-        outer.addLayout(form)
-
-        self.host_packet_log_type = QComboBox(self.host_packet_group)
-        self.host_packet_log_type.addItem("DEVICE_LOG(1)", 1)
-        self.host_packet_log_type.addItem("UNSPECIFIED(0)", 0)
-        self._add_host_packet_field(form, "log_type", "Log type:", self.host_packet_log_type)
-
-        self.host_packet_ack_seq = QLineEdit(self.host_packet_group)
-        self.host_packet_ack_seq.setPlaceholderText("seq from MCU packet")
-        self._add_host_packet_field(form, "ack_seq", "ACK seq:", self.host_packet_ack_seq)
-
-        self.host_packet_ack_response = QComboBox(self.host_packet_group)
-        self.host_packet_ack_response.addItem("ACK(1)", 1)
-        self.host_packet_ack_response.addItem("NACK_BAD_CRC(2)", 2)
-        self.host_packet_ack_response.addItem("NACK_UNIMPLEMENTED(3)", 3)
-        self.host_packet_ack_response.addItem("NACK_TIMED_OUT(4)", 4)
-        self.host_packet_ack_response.addItem("NACK_BUSY(5)", 5)
-        self.host_packet_ack_response.addItem("NACK_CMD_FAILED(6)", 6)
-        self.host_packet_ack_response.addItem("NACK_INVALID_TYPE(7)", 7)
-        self._add_host_packet_field(form, "ack_response", "Response:", self.host_packet_ack_response)
-
-        self.host_packet_data = QLineEdit(self.host_packet_group)
-        self.host_packet_data.setPlaceholderText("hex: 01 02 03 or text:hello")
-        self._add_host_packet_field(form, "data", "Data:", self.host_packet_data)
-
-        self.host_packet_offset = QLineEdit(self.host_packet_group)
-        self.host_packet_offset.setPlaceholderText("0")
-        self._add_host_packet_field(form, "offset", "Offset:", self.host_packet_offset)
-
-        self.host_packet_length = QLineEdit(self.host_packet_group)
-        self.host_packet_length.setPlaceholderText("0")
-        self._add_host_packet_field(form, "length", "Length:", self.host_packet_length)
-
-        self.host_packet_unix_ms = QLineEdit(self.host_packet_group)
-        self.host_packet_unix_ms.setPlaceholderText("blank = current host time")
-        self._add_host_packet_field(form, "unix_time_ms", "Unix ms:", self.host_packet_unix_ms)
-
-        self.host_packet_timezone = QLineEdit(self.host_packet_group)
-        self.host_packet_timezone.setText("420")
-        self._add_host_packet_field(form, "timezone_offset", "Timezone min:", self.host_packet_timezone)
-
-        self.host_packet_transport = QComboBox(self.host_packet_group)
-        self.host_packet_transport.addItem("USB(1)", 1)
-        self.host_packet_transport.addItem("UART(2)", 2)
-        self.host_packet_transport.addItem("UNSPECIFIED(0)", 0)
-        self._add_host_packet_field(form, "transport", "Transport:", self.host_packet_transport)
-
-        action_row = QHBoxLayout()
-        action_row.setSpacing(8)
-        self.host_packet_status = QLabel("Ready", self.host_packet_group)
-        self.host_packet_status.setStyleSheet("color: #94A3B8;")
-        self.btn_send_host_packet = QPushButton("Send Packet", self.host_packet_group)
-        action_row.addWidget(self.host_packet_status, 1)
-        action_row.addWidget(self.btn_send_host_packet, 0)
-        outer.addLayout(action_row)
-
-        self.log_layout.insertWidget(2, self.host_packet_group)
-        self._dev_widgets.append(self.host_packet_group)
-        self.host_packet_select.currentIndexChanged.connect(self._update_host_packet_fields)
-        self.btn_send_host_packet.clicked.connect(self._send_selected_host_packet)
-        self._update_host_packet_fields()
-
-    def _add_host_packet_field(self, form, key, label_text, widget):
-        label = QLabel(label_text, self.host_packet_group)
-        form.addRow(label, widget)
-        self._host_packet_param_rows[key] = (label, widget)
 
     def _setup_splitter(self):
         """Keep live log and session history as equal left/right panes."""
@@ -242,7 +137,7 @@ class LogTab(QWidget):
         if hasattr(self, "btn_clear_log"):
             self.btn_clear_log.clicked.connect(self._clear_log_session)
         if hasattr(self, "btn_start_log"):
-            self.btn_start_log.clicked.connect(self._start_log_session)
+            self.btn_start_log.clicked.connect(self._toggle_log_session)
         self.session_table.itemSelectionChanged.connect(self._on_session_selection_changed)
         self.btn_detail_ranging.toggled.connect(
             lambda checked: checked and self._set_detail_mode("ranging")
@@ -292,9 +187,11 @@ class LogTab(QWidget):
         self._vm.session_list_updated.connect(self._on_session_list_updated)
         self._vm.session_details_loaded.connect(self._on_session_details_loaded)
         self._vm.session_deleted.connect(self._on_session_deleted)
+        self._vm.log_stream_state_changed.connect(self._update_log_stream_button)
         if hasattr(self._vm, "set_developer_mode"):
             self._vm.set_developer_mode(self._is_developer)
         self._vm.refresh_sessions()
+        self._update_log_stream_button(self._vm.is_log_streaming)
 
     def _append_log_entry(self, entry: dict):
         raw_line = entry.get("raw_line")
@@ -327,99 +224,29 @@ class LogTab(QWidget):
     def _clear_log_session(self):
         if self._vm:
             self._vm.clear_log_session()
+        else:
+            self._clear_live_log_view()
 
-    def _start_log_session(self):
-        if self._vm:
+    def _toggle_log_session(self):
+        if not self._vm:
+            return
+        if self._vm.is_log_streaming:
+            self._vm.stop_log_stream()
+        else:
             self._vm.start_log_stream()
 
-    def _update_host_packet_fields(self):
-        packet_name = self.host_packet_select.currentData()
-        visible_fields = {
-            "none": set(),
-            "ack": {"ack_seq", "ack_response"},
-            "time_sync_set": {"unix_time_ms", "timezone_offset"},
-            "host_transport_set": {"transport"},
-            "log_data": {"log_type", "data"},
-            "log_clear": {"log_type", "offset", "length"},
-        }.get(packet_name, set())
-
-        for key, (label, widget) in self._host_packet_param_rows.items():
-            is_visible = key in visible_fields
-            label.setVisible(is_visible)
-            widget.setVisible(is_visible)
-
-    def _send_selected_host_packet(self):
-        if not self._vm:
-            self.host_packet_status.setText("No ViewModel")
+    def _update_log_stream_button(self, is_streaming: bool):
+        if not hasattr(self, "btn_start_log"):
             return
+        self.btn_start_log.setText("Stop Log" if is_streaming else "Start Log")
+        self.btn_start_log.setToolTip(
+            "Stop device log stream and keep current log entries"
+            if is_streaming else
+            "Start device log stream"
+        )
 
-        packet_name = self.host_packet_select.currentData()
-        try:
-            params = self._collect_host_packet_params(packet_name)
-        except ValueError as exc:
-            self.host_packet_status.setText(str(exc))
-            return
 
-        result = self._vm.send_host_log_packet(packet_name, **params)
-        if result.get("ok"):
-            self.host_packet_status.setText(f"Sent {packet_name} seq={result.get('seq')}")
-        else:
-            self.host_packet_status.setText(result.get("error", "Send failed"))
 
-    def _collect_host_packet_params(self, packet_name):
-        params = {"dst_addr": int(self.host_packet_dst.currentData())}
-
-        if packet_name == "time_sync_set":
-            unix_text = self.host_packet_unix_ms.text().strip()
-            params["unix_time_ms"] = self._parse_optional_int(unix_text, "unix_time_ms")
-            params["timezone_offset"] = self._parse_int_field(
-                self.host_packet_timezone.text().strip() or "420",
-                "timezone_offset",
-            )
-        elif packet_name == "ack":
-            ack_text = self.host_packet_ack_seq.text().strip()
-            if not ack_text:
-                raise ValueError("ack_seq is required")
-            params["ack_seq"] = self._parse_int_field(ack_text, "ack_seq")
-            params["response"] = int(self.host_packet_ack_response.currentData())
-        elif packet_name == "host_transport_set":
-            params["transport"] = int(self.host_packet_transport.currentData())
-        elif packet_name == "log_data":
-            params["log_type"] = int(self.host_packet_log_type.currentData())
-            params["data"] = self._parse_packet_data(self.host_packet_data.text())
-        elif packet_name == "log_clear":
-            params["log_type"] = int(self.host_packet_log_type.currentData())
-            params["offset"] = self._parse_int_field(self.host_packet_offset.text().strip() or "0", "offset")
-            params["length"] = self._parse_int_field(self.host_packet_length.text().strip() or "0", "length")
-
-        return params
-
-    def _parse_optional_int(self, text, field_name):
-        if not text:
-            return None
-        return self._parse_int_field(text, field_name)
-
-    def _parse_int_field(self, text, field_name):
-        try:
-            value = int(text, 0)
-        except ValueError as exc:
-            raise ValueError(f"{field_name} must be a number") from exc
-        if value < 0:
-            raise ValueError(f"{field_name} must be >= 0")
-        return value
-
-    def _parse_packet_data(self, text):
-        raw = (text or "").strip()
-        if not raw:
-            return b""
-        if raw.lower().startswith("text:"):
-            return raw[5:].encode("utf-8")
-
-        normalized = raw.replace(" ", "").replace(",", "").replace("_", "")
-        try:
-            return bytes.fromhex(normalized)
-        except ValueError:
-            return raw.encode("utf-8")
 
     def _on_session_list_updated(self, sessions):
         self.session_table.blockSignals(True)
@@ -432,7 +259,7 @@ class LogTab(QWidget):
             self.session_table.setItem(row, 1, self._readonly_item(s["start_time"]))
             self.session_table.setItem(row, 2, self._readonly_item(s["duration"]))
             
-            # Giữ tương thích số tệp tin chi tiết của UI
+            # Giá»¯ tÆ°Æ¡ng thÃ­ch sá»‘ tá»‡p tin chi tiáº¿t cá»§a UI
             ranging_count = str(s.get("ranging_count", 1 if s["type"] == "RANGING" else 0))
             session_file_count = str(s.get("session_file_count", 0))
             self.session_table.setItem(row, 3, self._readonly_item(ranging_count))
@@ -484,7 +311,7 @@ class LogTab(QWidget):
                 self._detail_rows.append({"file": f"{session_id}:logs.txt", **l})
             self.detail_table.setColumnWidth(4, 150)
 
-        self.detail_title.setText(f"Session Details · {session_id}")
+        self.detail_title.setText(f"Session Details - {session_id}")
         self.detail_selection_label.setText(f"Loaded {len(data)} items")
         self._set_detail_actions_enabled(self._current_session_name is not None)
 
@@ -568,7 +395,7 @@ class LogTab(QWidget):
 
         session_specs = [
             ("20260610", "093012", "ab12", "09:30:12", "11:35:23", "2h 05m 11s", "Closed", 2, 3),
-            ("20260610", "131844", "f03c", "13:18:44", "--", "Active · 18m 42s", "Active", 1, 2),
+            ("20260610", "131844", "f03c", "13:18:44", "--", "Active - 18m 42s", "Active", 1, 2),
             ("20260609", "170502", "c9e4", "17:05:02", "17:48:19", "43m 17s", "Closed", 3, 1),
             ("20260609", "101915", "77a1", "10:19:15", "10:24:43", "5m 28s", "Closed", 1, 1),
             ("20260608", "154030", "9b06", "15:40:30", "17:02:08", "1h 21m 38s", "Closed", 4, 3),
@@ -713,7 +540,7 @@ class LogTab(QWidget):
     def _load_session_detail(self, session_name):
         record = self._session_records.get(session_name)
         self._current_session_name = session_name if record else None
-        self.detail_title.setText(f"Session Details · {session_name}" if record else "Session Details")
+        self.detail_title.setText(f"Session Details - {session_name}" if record else "Session Details")
         self._detail_rows = list(record[self._detail_mode]) if record else []
         self._render_detail_table()
 

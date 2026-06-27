@@ -67,6 +67,7 @@ from repository.geofence_repository import GeofenceRepository
 log = logging.getLogger(__name__)
 
 LIVE_RENDER_INTERVAL_MS = 50  # 20 Hz UI update; model/session buffers keep every sample.
+STOP_RANGING_END_DELAY_MS = 3000
 
 class LiveTrackingViewModel(QObject):
     ranging_started = pyqtSignal()
@@ -263,7 +264,14 @@ class LiveTrackingViewModel(QObject):
         self.model.stop_ranging()
         self._flush_pending_live_updates()
         if self._session_run_manager:
-            self._session_run_manager.close_ranging_run(send_end=True)
+            log.info(
+                "LiveTrackingViewModel: Waiting %d ms after ranging_stop before end_session.",
+                STOP_RANGING_END_DELAY_MS,
+            )
+            QTimer.singleShot(
+                STOP_RANGING_END_DELAY_MS,
+                lambda: self._session_run_manager.close_ranging_run(send_end=True),
+            )
         self.ranging_stopped.emit()
 
     # Geofence service methods

@@ -290,7 +290,7 @@ QTabBar::tab:hover:!selected { background: #302852; color: #F5F3FF; }</string>
       </widget>
       <widget class="LogTab" name="tab_log">
        <attribute name="title">
-        <string>📋 Log &amp; History</string>
+        <string>📋 Log History</string>
        </attribute>
       </widget>
       <widget class="CommunicationTab" name="tab_communication">

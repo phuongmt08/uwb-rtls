@@ -43,7 +43,8 @@ class BleScanRepository(QObject):
             "device_type": int(getattr(res, "device", 0)),
             "device_id": int(getattr(res, "device_id", 0)),
             "bat_soc_percent": int(getattr(res, "bat_soc_percent", 0)),
-            "local_timestamp_ms": int(getattr(res, "local_timestamp_ms", 0)),
+            "local_timestamp_s": int(getattr(res, "local_timestamp_s", 0)),
+            "local_timestamp_ms": int(getattr(res, "local_timestamp_s", 0)) * 1000,
             "status_flags": int(getattr(res, "status_flags", 0)),
             "warning_count": int(getattr(res, "warning_count", 0)),
             "error_count": int(getattr(res, "error_count", 0)),
@@ -60,9 +61,11 @@ class BleScanRepository(QObject):
         current = self._devices.get(mac, {})
         current.update(data)
         current["order"] = self._device_order[mac]
-        serial_number = current.get("serial_number")
-        if serial_number in self._adv_status_by_device_id:
-            current.update(self._adv_status_by_device_id[serial_number])
+        serial_number = int(current.get("serial_number") or 0)
+        for candidate in (serial_number, serial_number & 0xFFFF if serial_number else 0):
+            if candidate in self._adv_status_by_device_id:
+                current.update(self._adv_status_by_device_id[candidate])
+                break
         self._devices[mac] = current
         self.scan_results_updated.emit(self.merged_results())
 
@@ -72,7 +75,8 @@ class BleScanRepository(QObject):
             return
         self._adv_status_by_device_id[device_id] = data.copy()
         for device in self._devices.values():
-            if device.get("serial_number") == device_id:
+            serial_number = int(device.get("serial_number") or 0)
+            if device_id in (serial_number, serial_number & 0xFFFF if serial_number else 0):
                 device.update(data)
         self.scan_results_updated.emit(self.merged_results())
 
