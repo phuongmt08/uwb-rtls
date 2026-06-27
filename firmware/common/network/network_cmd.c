@@ -1460,7 +1460,7 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
 {
     CHECK(stream && data, false);
 //    CHECK(network_cmd_is_ranging_enabled(), false);
-#if !defined(UKF_BLE_STREAM_TEST_ENABLE) || (UKF_BLE_STREAM_TEST_ENABLE == 0)
+#if !defined(TEST_UKF_STREAM_BLE) || (TEST_UKF_STREAM_BLE == 0)
     CHECK(network_cmd_is_ble_host_active(), false);
 #endif
 

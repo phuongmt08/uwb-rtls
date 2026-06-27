@@ -283,7 +283,7 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_uwb_ranging_entry */
 void uwb_ranging_entry(void *argument)
 {
-#if UKF_BLE_STREAM_TEST_ENABLE
+#if TEST_UKF_STREAM_BLE
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
@@ -405,11 +405,18 @@ void sensor_fusion_entry(void *argument)
     osThreadExit();
   }
 
-#if UKF_BLE_STREAM_TEST_ENABLE
-  sys_sensor_fusion_stream_test_init(&g_network_core);
+#if TEST_UKF_STREAM_UART
   for (;;)
   {
-    sys_sensor_fusion_test_stream_result(&g_network_core, g_ranging_enabled);
+    sys_sensor_fusion_stream_uart();
+    osDelay(20);
+  }
+#endif
+
+#if TEST_UKF_STREAM_BLE
+  for (;;)
+  {
+    sys_sensor_fusion_stream_ble();
     osDelay(20);
   }
 #else

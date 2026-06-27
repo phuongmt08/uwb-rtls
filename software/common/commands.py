@@ -396,14 +396,16 @@ class CommandFactory:
 
     def sensor_fusion_result(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.sensor_fusion_result.ukf_x_m = 0.0
-        pkt.sensor_fusion_result.ukf_y_m = 0.0
-        pkt.sensor_fusion_result.ukf_yaw_deg = 0.0
-        pkt.sensor_fusion_result.tril_x_m = 0.0
-        pkt.sensor_fusion_result.tril_y_m = 0.0
-        pkt.sensor_fusion_result.yaw_deg = 0.0
+        pkt.sensor_fusion_result.ukf_x_m = 0
+        pkt.sensor_fusion_result.ukf_y_m = 0
+        pkt.sensor_fusion_result.ukf_yaw_deg = 0
+        pkt.sensor_fusion_result.tril_x_m = 0
+        pkt.sensor_fusion_result.tril_y_m = 0
+        pkt.sensor_fusion_result.yaw_deg = 0
+        pkt.sensor_fusion_result.anchor_mask = 0
         pkt.sensor_fusion_result.ranging_error_count = 0
         pkt.sensor_fusion_result.timestamp_ms = 0
+        pkt.sensor_fusion_result.zone_id = 0
         return pkt
 
     def imu_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:

@@ -23,8 +23,12 @@
 /* Public defines ----------------------------------------------------- */
 #define SYS_SENSOR_FUSION_PI 3.14159265358979323846f
 
-#ifndef UKF_BLE_STREAM_TEST_ENABLE
-#define UKF_BLE_STREAM_TEST_ENABLE false
+#ifndef TEST_UKF_STREAM_BLE
+#define TEST_UKF_STREAM_BLE false
+#endif
+
+#ifndef TEST_UKF_STREAM_UART
+#define TEST_UKF_STREAM_UART false
 #endif
 
 /* Public enumerate/structure ----------------------------------------- */
@@ -77,9 +81,9 @@ uint32_t sys_sensor_fusion_get_error_count(void);
 
 void sys_sensor_fusion_reset(void);
 
-void sys_sensor_fusion_stream_test_init(network_core_t *stream);
+void sys_sensor_fusion_stream_ble();
 
-void sys_sensor_fusion_test_stream_result(network_core_t *stream, bool ranging_enabled);
+void sys_sensor_fusion_stream_uart();
 
 float sys_sensor_fusion_get_ukf_yaw_deg();
 

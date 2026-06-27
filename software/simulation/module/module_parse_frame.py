@@ -60,16 +60,15 @@ def parse_uart_fusion_frame(data_bytes):
         return {
             'sof': unpacked[0],
             'length': unpacked[1],
-            'anchor_mask': unpacked[2],
-            'tx_frame_cnt': unpacked[3],
-            'ukf_x': unpacked[4],
-            'ukf_y': unpacked[5],
-            'ukf_yaw': unpacked[6],
-            'tril_x': unpacked[7],
-            'tril_y': unpacked[8],
-            'yaw': unpacked[9],
-            'err_cnt': unpacked[10],
-            'error_frame_cnt': unpacked[10],
+            'tx_frame_cnt': unpacked[2],
+            'ukf_x': unpacked[3] / 100.0,
+            'ukf_y': unpacked[4] / 100.0,
+            'ukf_yaw': unpacked[5] / 100.0,
+            'tril_x': unpacked[6] / 100.0,
+            'tril_y': unpacked[7] / 100.0,
+            'yaw': unpacked[8] / 100.0,
+            'err_cnt': unpacked[9],
+            'error_frame_cnt': unpacked[9],
         }
     except struct.error:
         return None

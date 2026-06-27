@@ -28,6 +28,10 @@ def _ensure_qt_app():
     return QCoreApplication.instance() or QCoreApplication([])
 
 
+def _fixed2(value: float) -> int:
+    return int(round(value * 100.0))
+
+
 def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     app = _ensure_qt_app()
     repo = RangingRepository()
@@ -38,22 +42,22 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     factory = CommandFactory()
 
     pkt1 = factory.sensor_fusion_result(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, 1)
-    pkt1.sensor_fusion_result.ukf_x_m = 1.0
-    pkt1.sensor_fusion_result.ukf_y_m = 2.0
-    pkt1.sensor_fusion_result.ukf_yaw_deg = 10.0
-    pkt1.sensor_fusion_result.tril_x_m = 0.9
-    pkt1.sensor_fusion_result.tril_y_m = 2.1
-    pkt1.sensor_fusion_result.yaw_deg = 9.0
+    pkt1.sensor_fusion_result.ukf_x_m = _fixed2(1.0)
+    pkt1.sensor_fusion_result.ukf_y_m = _fixed2(2.0)
+    pkt1.sensor_fusion_result.ukf_yaw_deg = _fixed2(10.0)
+    pkt1.sensor_fusion_result.tril_x_m = _fixed2(0.9)
+    pkt1.sensor_fusion_result.tril_y_m = _fixed2(2.1)
+    pkt1.sensor_fusion_result.yaw_deg = _fixed2(9.0)
     pkt1.sensor_fusion_result.ranging_error_count = 3
     pkt1.sensor_fusion_result.timestamp_ms = 1000
 
     pkt2 = factory.sensor_fusion_result(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, 2)
-    pkt2.sensor_fusion_result.ukf_x_m = 2.5
-    pkt2.sensor_fusion_result.ukf_y_m = 4.0
-    pkt2.sensor_fusion_result.ukf_yaw_deg = 12.0
-    pkt2.sensor_fusion_result.tril_x_m = 2.4
-    pkt2.sensor_fusion_result.tril_y_m = 4.1
-    pkt2.sensor_fusion_result.yaw_deg = 11.0
+    pkt2.sensor_fusion_result.ukf_x_m = _fixed2(2.5)
+    pkt2.sensor_fusion_result.ukf_y_m = _fixed2(4.0)
+    pkt2.sensor_fusion_result.ukf_yaw_deg = _fixed2(12.0)
+    pkt2.sensor_fusion_result.tril_x_m = _fixed2(2.4)
+    pkt2.sensor_fusion_result.tril_y_m = _fixed2(4.1)
+    pkt2.sensor_fusion_result.yaw_deg = _fixed2(11.0)
     pkt2.sensor_fusion_result.ranging_error_count = 4
     pkt2.sensor_fusion_result.timestamp_ms = 2000
 
