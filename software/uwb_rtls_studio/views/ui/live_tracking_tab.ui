@@ -18,9 +18,6 @@ QPushButton:disabled { background: #1E293B; color: #475569; border-color: #33415
 QLabel { background: transparent; }</string>
   </property>
   <layout class="QGridLayout" name="main_layout">
-   <property name="spacing">
-    <number>0</number>
-   </property>
    <property name="leftMargin">
     <number>0</number>
    </property>
@@ -33,8 +30,11 @@ QLabel { background: transparent; }</string>
    <property name="bottomMargin">
     <number>0</number>
    </property>
+   <property name="spacing">
+    <number>0</number>
+   </property>
    <item row="0" column="0" rowspan="2" colspan="2">
-    <widget class="PositionCanvas" name="position_canvas">
+    <widget class="PositionCanvas" name="position_canvas" native="true">
      <property name="minimumSize">
       <size>
        <width>400</width>
@@ -46,7 +46,7 @@ QLabel { background: transparent; }</string>
      </property>
     </widget>
    </item>
-   <item row="0" column="0" alignment="Qt::AlignTop|Qt::AlignLeft">
+   <item row="0" column="0" alignment="Qt::AlignLeft|Qt::AlignTop">
     <widget class="QWidget" name="header_widget" native="true">
      <property name="minimumSize">
       <size>
@@ -161,12 +161,6 @@ QLabel { background: transparent; }</string>
         </property>
         <item>
          <widget class="QScrollArea" name="right_scroll">
-          <property name="widgetResizable">
-           <bool>true</bool>
-          </property>
-          <property name="horizontalScrollBarPolicy">
-           <enum>Qt::ScrollBarAlwaysOff</enum>
-          </property>
           <property name="styleSheet">
            <string notr="true">QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background-color: transparent; width: 8px; margin: 0px; }
@@ -175,7 +169,21 @@ QScrollBar::handle:vertical:hover { background-color: #64748B; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }</string>
           </property>
+          <property name="horizontalScrollBarPolicy">
+           <enum>Qt::ScrollBarAlwaysOff</enum>
+          </property>
+          <property name="widgetResizable">
+           <bool>true</bool>
+          </property>
           <widget class="QWidget" name="scroll_content">
+           <property name="geometry">
+            <rect>
+             <x>0</x>
+             <y>0</y>
+             <width>333</width>
+             <height>1472</height>
+            </rect>
+           </property>
            <property name="styleSheet">
             <string notr="true">background: transparent;</string>
            </property>
@@ -224,14 +232,14 @@ QPushButton:hover { background: #10B981; }</string>
             </item>
             <item>
              <widget class="QPushButton" name="btn_stop">
+              <property name="enabled">
+               <bool>false</bool>
+              </property>
               <property name="minimumSize">
                <size>
                 <width>0</width>
                 <height>38</height>
                </size>
-              </property>
-              <property name="enabled">
-               <bool>false</bool>
               </property>
               <property name="styleSheet">
                <string notr="true">QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 14px; }
@@ -262,11 +270,11 @@ QPushButton:hover { background: #475569; }</string>
             </item>
             <item>
              <widget class="QFrame" name="separator_1">
-              <property name="frameShape">
-               <enum>QFrame::HLine</enum>
-              </property>
               <property name="styleSheet">
                <string notr="true">background-color: #334155; max-height: 1px;</string>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::HLine</enum>
               </property>
              </widget>
             </item>
@@ -281,15 +289,489 @@ QPushButton:hover { background: #475569; }</string>
              </widget>
             </item>
             <item>
-             <layout class="QGridLayout" name="pos_grid"/>
+             <layout class="QGridLayout" name="pos_grid">
+              <property name="spacing">
+               <number>10</number>
+              </property>
+              <item row="0" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_frame">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>FRAME</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="lbl_sof">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>SOF:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QLabel" name="sof_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="lbl_length">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Length:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="QLabel" name="length_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="0">
+               <widget class="QLabel" name="lbl_anchor_mask_title">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Anchor Mask:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="1">
+               <widget class="QLabel" name="anchor_mask_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="4" column="0">
+               <widget class="QLabel" name="lbl_fusion_ts">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Timestamp:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="4" column="1">
+               <widget class="QLabel" name="fusion_ts_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #CBD5E1; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="5" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_counters">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>COUNTERS</string>
+                </property>
+               </widget>
+              </item>
+              <item row="6" column="0">
+               <widget class="QLabel" name="lbl_tx_frames">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Tx Frames:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="6" column="1">
+               <widget class="QLabel" name="tx_frame_cnt_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #2DD4BF; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="7" column="0">
+               <widget class="QLabel" name="lbl_err_frames">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Err Frames:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="7" column="1">
+               <widget class="QLabel" name="error_frame_cnt_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F87171; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="8" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_ukf">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>UKF</string>
+                </property>
+               </widget>
+              </item>
+              <item row="9" column="0">
+               <widget class="QLabel" name="lbl_ukf_x">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>X:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="9" column="1">
+               <widget class="QLabel" name="ukf_x_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="10" column="0">
+               <widget class="QLabel" name="lbl_ukf_y">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Y:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="10" column="1">
+               <widget class="QLabel" name="ukf_y_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="11" column="0">
+               <widget class="QLabel" name="lbl_ukf_yaw">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Yaw:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="11" column="1">
+               <widget class="QLabel" name="ukf_yaw_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F472B6; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="12" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_tril">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>TRILATERATION</string>
+                </property>
+               </widget>
+              </item>
+              <item row="13" column="0">
+               <widget class="QLabel" name="lbl_tril_x">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>X:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="13" column="1">
+               <widget class="QLabel" name="tril_x_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #FB923C; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="14" column="0">
+               <widget class="QLabel" name="lbl_tril_y">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Y:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="14" column="1">
+               <widget class="QLabel" name="tril_y_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #FB923C; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="15" column="0">
+               <widget class="QLabel" name="lbl_tril_yaw">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Yaw:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="15" column="1">
+               <widget class="QLabel" name="yaw_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F472B6; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="16" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_motion">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>MOTION</string>
+                </property>
+               </widget>
+              </item>
+              <item row="17" column="0">
+               <widget class="QLabel" name="lbl_vx">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>VX:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="17" column="1">
+               <widget class="QLabel" name="vx_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #2DD4BF; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="18" column="0">
+               <widget class="QLabel" name="lbl_vy">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>VY:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="18" column="1">
+               <widget class="QLabel" name="vy_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #2DD4BF; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="19" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_ranging">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>RANGING</string>
+                </property>
+               </widget>
+              </item>
+              <item row="20" column="0">
+               <widget class="QLabel" name="lbl_d1">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>D1:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="20" column="1">
+               <widget class="QLabel" name="d1_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="21" column="0">
+               <widget class="QLabel" name="lbl_d2">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>D2:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="21" column="1">
+               <widget class="QLabel" name="d2_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="22" column="0">
+               <widget class="QLabel" name="lbl_d3">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>D3:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="22" column="1">
+               <widget class="QLabel" name="d3_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="23" column="0">
+               <widget class="QLabel" name="lbl_d4">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>D4:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="23" column="1">
+               <widget class="QLabel" name="d4_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="24" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_quality">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>QUALITY</string>
+                </property>
+               </widget>
+              </item>
+              <item row="25" column="0">
+               <widget class="QLabel" name="lbl_z_height">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Z Height:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="25" column="1">
+               <widget class="QLabel" name="z_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="26" column="0">
+               <widget class="QLabel" name="lbl_quality_error">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Error:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="26" column="1">
+               <widget class="QLabel" name="error_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F59E0B; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
             </item>
             <item>
              <widget class="QFrame" name="separator_2">
-              <property name="frameShape">
-               <enum>QFrame::HLine</enum>
-              </property>
               <property name="styleSheet">
                <string notr="true">background-color: #334155; max-height: 1px;</string>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::HLine</enum>
               </property>
              </widget>
             </item>
@@ -368,7 +850,189 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
+              <item row="3" column="0">
+               <widget class="QLabel" name="lbl_success">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Success:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="1">
+               <widget class="QLabel" name="success_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #10B981; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="4" column="0">
+               <widget class="QLabel" name="lbl_failed">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Failed:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="4" column="1">
+               <widget class="QLabel" name="failed_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F87171; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="5" column="0">
+               <widget class="QLabel" name="lbl_timeout">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Timeout:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="5" column="1">
+               <widget class="QLabel" name="timeout_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F59E0B; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="6" column="0">
+               <widget class="QLabel" name="lbl_period">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Period:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="6" column="1">
+               <widget class="QLabel" name="period_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="7" column="0">
+               <widget class="QLabel" name="lbl_success_rate">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Success Rate:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="7" column="1">
+               <widget class="QLabel" name="success_rate_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #10B981; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="8" column="0">
+               <widget class="QLabel" name="lbl_avg_rssi">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Avg RSSI:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="8" column="1">
+               <widget class="QLabel" name="avg_rssi_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="9" column="0">
+               <widget class="QLabel" name="lbl_last_range_time">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>Last Range:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="9" column="1">
+               <widget class="QLabel" name="last_range_time_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #CBD5E1; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
              </layout>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="user_map_groupbox">
+              <property name="styleSheet">
+               <string notr="true">QGroupBox { background-color: rgba(15, 23, 42, 0.90); color: #38BDF8; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 8px; padding-top: 15px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; background-color: transparent; }
+QComboBox { background-color: #1E293B; border: 1px solid #475569; border-radius: 6px; color: #F8FAFC; padding: 5px; font-size: 12px; }
+QComboBox:hover { border-color: #38BDF8; }
+QComboBox QAbstractItemView { background-color: #0F172A; color: #F8FAFC; selection-background-color: #2563EB; border: 1px solid #334155; }
+QCheckBox { color: #CBD5E1; font-weight: bold; font-size: 12px; }</string>
+              </property>
+              <property name="title">
+               <string>Active Geofence Map</string>
+              </property>
+              <layout class="QVBoxLayout" name="user_map_layout">
+               <property name="spacing">
+                <number>8</number>
+               </property>
+               <property name="leftMargin">
+                <number>10</number>
+               </property>
+               <property name="topMargin">
+                <number>15</number>
+               </property>
+               <property name="rightMargin">
+                <number>10</number>
+               </property>
+               <property name="bottomMargin">
+                <number>10</number>
+               </property>
+               <item>
+                <widget class="QComboBox" name="cmb_user_map"/>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="chk_enable_geofence">
+                 <property name="text">
+                  <string>Geofence map disabled</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
             </item>
             <item>
              <spacer name="right_panel_spacer">
@@ -406,11 +1070,53 @@ QPushButton:hover { background: #475569; }</string>
         <property name="bottomMargin">
          <number>0</number>
         </property>
+        <item>
+         <widget class="GeofenceEditorWidget" name="geofence_editor_widget" native="true"/>
+        </item>
        </layout>
       </widget>
      </widget>
     </item>
    </layout>
+  </widget>
+  <widget class="QToolButton" name="btn_preview_overlay">
+   <property name="geometry">
+    <rect>
+     <x>730</x>
+     <y>10</y>
+     <width>136</width>
+     <height>36</height>
+    </rect>
+   </property>
+   <property name="minimumSize">
+    <size>
+     <width>136</width>
+     <height>36</height>
+    </size>
+   </property>
+   <property name="maximumSize">
+    <size>
+     <width>136</width>
+     <height>36</height>
+    </size>
+   </property>
+   <property name="cursor">
+    <cursorShape>PointingHandCursor</cursorShape>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">QToolButton { background: rgba(17, 24, 39, 230); color: #F8FAFC; border: 1px solid #FACC15; border-radius: 8px; font-weight: bold; padding: 5px 10px; }
+QToolButton:hover { background: rgba(30, 41, 59, 245); border-color: #FDE047; }
+QToolButton:pressed { background: rgba(15, 23, 42, 245); }</string>
+   </property>
+   <property name="text">
+    <string>2D</string>
+   </property>
+   <property name="toolButtonStyle">
+    <enum>Qt::ToolButtonTextOnly</enum>
+   </property>
+   <property name="autoRaise">
+    <bool>true</bool>
+   </property>
   </widget>
   <widget class="QPushButton" name="btn_toggle_sidebar">
    <property name="geometry">
@@ -441,12 +1147,22 @@ QPushButton:hover { background-color: rgba(37, 99, 235, 0.90); color: #FFFFFF; }
     <string>&gt;</string>
    </property>
   </widget>
+  <zorder>btn_preview_overlay</zorder>
+  <zorder>btn_toggle_sidebar</zorder>
+  <zorder>position_canvas</zorder>
+  <zorder>header_widget</zorder>
+  <zorder>right_widget</zorder>
  </widget>
  <customwidgets>
   <customwidget>
    <class>PositionCanvas</class>
    <extends>QWidget</extends>
    <header>views.components.position_canvas</header>
+  </customwidget>
+  <customwidget>
+   <class>GeofenceEditorWidget</class>
+   <extends>QWidget</extends>
+   <header>views.components.geofence_editor</header>
   </customwidget>
  </customwidgets>
  <resources/>

@@ -92,6 +92,8 @@ class SessionRunManager(QObject):
         session_id = self.ensure_session()
         run = self.session_model.active_run("log")
         logs = self._collect_logs()
+        if self.log_model:
+            self.log_model.stop_log_stream()
         if not run and not logs:
             return session_id, []
         if not run:
@@ -211,4 +213,3 @@ class SessionRunManager(QObject):
     def _device_key(self) -> str:
         snap = self._device_snapshot()
         return snap.get("mac_address") or snap.get("device_name") or "default"
-

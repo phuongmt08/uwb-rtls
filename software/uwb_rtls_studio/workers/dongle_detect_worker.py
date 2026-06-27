@@ -35,7 +35,7 @@ from utils.constants import DONGLE_DETECT_TIMEOUT_S
 
 log = logging.getLogger(__name__)
 
-# Interval giữa các lần check port list thay đổi (ms)
+# Interval giữa các lần scan/probe COM ports (ms)
 _PORT_CHECK_INTERVAL_MS = 800
 
 
@@ -58,59 +58,39 @@ class DongleDetectWorker(QThread):
         self._should_stop = True
 
     def run(self):
-        """Main entry: probe ban đầu, sau đó monitor port changes."""
+        """Main entry: continuously rescan COM ports until a dongle answers or timeout."""
         self._should_stop = False
         deadline = time.monotonic() + DONGLE_DETECT_TIMEOUT_S
-
-        # ── Phase 1: Initial scan tất cả COM ports hiện tại ──────────
-        log.info("Phase 1: Initial COM port probe...")
-        result = self._scan_all_ports()
-        if result is not None:
-            self.dongle_found.emit(result)
-            return
-
-        if self._should_stop:
-            return
-
-        # ── Phase 2: Monitor port changes ─────────────────────────────
-        # Giống cách programmer hoạt động: chỉ probe khi có port mới.
-        # So sánh danh sách port mỗi 800ms — rất nhẹ, chỉ gọi
-        # serial.tools.list_ports.comports() (không mở port).
-        log.info("Phase 2: Monitoring for new COM ports...")
-        known_ports = {p.device for p in self._service.list_all_ports()}
+        last_ports: tuple[str, ...] = ()
 
         while not self._should_stop:
             if time.monotonic() > deadline:
+                log.info("Dongle detect timed out after %.1fs", DONGLE_DETECT_TIMEOUT_S)
                 self.timeout.emit()
                 return
 
-            self.msleep(_PORT_CHECK_INTERVAL_MS)
+            ports = self._service.list_all_ports()
+            port_names = tuple(p.device for p in ports)
+            if port_names != last_ports:
+                log.info("COM port set changed: %s", list(port_names))
+                last_ports = port_names
+
+            result = self._scan_ports(ports)
+            if result is not None:
+                self.dongle_found.emit(result)
+                return
 
             if self._should_stop:
                 return
 
-            current_ports = {p.device for p in self._service.list_all_ports()}
-            new_ports = current_ports - known_ports
-
-            if new_ports:
-                log.info("New COM port(s) detected: %s", new_ports)
-                known_ports = current_ports
-
-                # Đợi driver enumerate xong
-                self.msleep(500)
-
-                # Probe tất cả ports (ưu tiên port mới nhưng scan hết
-                # để tránh miss trường hợp driver enumerate chậm)
-                result = self._scan_all_ports()
-                if result is not None:
-                    self.dongle_found.emit(result)
-                    return
-            else:
-                known_ports = current_ports
+            self.msleep(_PORT_CHECK_INTERVAL_MS)
 
     def _scan_all_ports(self) -> DongleInfo | None:
         """Probe tất cả COM ports hiện tại. Return DongleInfo hoặc None."""
-        ports = self._service.list_all_ports()
+        return self._scan_ports(self._service.list_all_ports())
+
+    def _scan_ports(self, ports) -> DongleInfo | None:
+        """Probe danh sách COM ports đã chụp snapshot sẵn."""
         self.port_scanned.emit(len(ports))
 
         if not ports:

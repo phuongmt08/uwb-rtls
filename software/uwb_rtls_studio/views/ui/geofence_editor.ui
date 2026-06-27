@@ -119,7 +119,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
              <double>0.100000000000000</double>
             </property>
             <property name="maximum">
-             <double>10.000000000000000</double>
+             <double>15.000000000000000</double>
             </property>
             <property name="singleStep">
              <double>0.100000000000000</double>
@@ -174,6 +174,12 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
        </item>
        <item>
         <widget class="QTabWidget" name="editor_tabs">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <property name="currentIndex">
           <number>0</number>
          </property>
@@ -225,6 +231,19 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
                </property>
                <property name="styleSheet">
                 <string notr="true">QPushButton:checked { background-color: #64748B; color: white; border-color: #94A3B8; }</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_mode_anchor">
+               <property name="text">
+                <string>Anchor</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">QPushButton:checked { background-color: #0891B2; color: white; border-color: #22D3EE; }</string>
                </property>
               </widget>
              </item>
@@ -281,6 +300,11 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
                   <string>Wall</string>
                  </property>
                 </item>
+                <item>
+                 <property name="text">
+                  <string>Anchor</string>
+                 </property>
+                </item>
                </widget>
               </item>
               <item row="2" column="0">
@@ -309,7 +333,101 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
                 </property>
                </widget>
               </item>
-              <item row="3" column="0" colspan="2">
+              <item row="3" column="0">
+               <widget class="QLabel" name="lbl_scanned_device">
+                <property name="text">
+                 <string>Scanned Link:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="1">
+               <widget class="QComboBox" name="cmb_scanned_anchors">
+                <item>
+                 <property name="text">
+                  <string>Manual (No Link)</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+              <item row="4" column="0">
+               <widget class="QLabel" name="lbl_anchor_x">
+                <property name="text">
+                 <string>X:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="4" column="1">
+               <widget class="QDoubleSpinBox" name="sb_anchor_x">
+                <property name="minimum">
+                 <double>-1000.000000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>1000.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="decimals">
+                 <number>3</number>
+                </property>
+                <property name="suffix">
+                 <string> m</string>
+                </property>
+               </widget>
+              </item>
+              <item row="5" column="0">
+               <widget class="QLabel" name="lbl_anchor_y">
+                <property name="text">
+                 <string>Y:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="5" column="1">
+               <widget class="QDoubleSpinBox" name="sb_anchor_y">
+                <property name="minimum">
+                 <double>-1000.000000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>1000.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="decimals">
+                 <number>3</number>
+                </property>
+                <property name="suffix">
+                 <string> m</string>
+                </property>
+               </widget>
+              </item>
+              <item row="6" column="0">
+               <widget class="QLabel" name="lbl_anchor_z">
+                <property name="text">
+                 <string>Z:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="6" column="1">
+               <widget class="QDoubleSpinBox" name="sb_anchor_z">
+                <property name="minimum">
+                 <double>-1000.000000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>1000.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="decimals">
+                 <number>3</number>
+                </property>
+                <property name="suffix">
+                 <string> m</string>
+                </property>
+               </widget>
+              </item>
+              <item row="7" column="0" colspan="2">
                <widget class="QPushButton" name="btn_apply_map_properties">
                 <property name="text">
                  <string>Update Map Object</string>
@@ -320,6 +438,51 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
                </widget>
               </item>
              </layout>
+            </widget>
+           </item>
+           <item>
+            <layout class="QGridLayout" name="anchor_actions">
+             <item row="0" column="0">
+              <widget class="QPushButton" name="btn_create_default_anchors">
+               <property name="text">
+                <string>Create A0..A3</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QPushButton" name="btn_add_anchor">
+               <property name="text">
+                <string>Add Anchor</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QPushButton" name="btn_assign_anchor">
+               <property name="text">
+                <string>Assign / Focus</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QPushButton" name="btn_remove_anchor">
+               <property name="text">
+                <string>Remove Anchor</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QLabel" name="lbl_anchor_status">
+             <property name="text">
+              <string>No anchors placed</string>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">color: #94A3B8; font-weight: bold;</string>
+             </property>
             </widget>
            </item>
           </layout>
@@ -409,7 +572,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
                 </item>
                 <item>
                  <property name="text">
-                  <string>Forbidden</string>
+                  <string>Banned (No Entry)</string>
                  </property>
                 </item>
                </widget>
@@ -477,6 +640,73 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
          </property>
          <property name="styleSheet">
           <string notr="true">background-color: #334155; max-height: 1px; margin: 5px 0;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="sync_gb">
+         <property name="title">
+          <string>Device Layout Sync</string>
+         </property>
+         <layout class="QVBoxLayout" name="sync_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <property name="leftMargin">
+           <number>6</number>
+          </property>
+          <property name="topMargin">
+           <number>10</number>
+          </property>
+          <property name="rightMargin">
+           <number>6</number>
+          </property>
+          <property name="bottomMargin">
+           <number>6</number>
+          </property>
+          <item>
+           <widget class="QComboBox" name="cmb_device_target">
+            <item>
+             <property name="text">
+              <string>Tag / MCU (0x0001)</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="sync_buttons">
+            <item>
+             <widget class="QPushButton" name="btn_read_layout_dev">
+              <property name="text">
+               <string>Read from Tag</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">background: #0284C7; color: white; border: 1px solid #0369A1; font-weight: bold; padding: 6px;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_write_layout_dev">
+              <property name="text">
+               <string>Write to Tag</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">background: #0D9488; color: white; border: 1px solid #0F766E; font-weight: bold; padding: 6px;</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_load_map">
+         <property name="text">
+          <string>Load Map JSON</string>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background: #334155; color: white; border: 1px solid #475569; font-weight: bold; padding: 6px;</string>
          </property>
         </widget>
        </item>

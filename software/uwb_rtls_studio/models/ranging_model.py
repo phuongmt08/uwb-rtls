@@ -173,7 +173,6 @@ class RangingModel(QObject):
         self.is_ranging = True
         shared_app_state.ranging_active = True
         shared_app_state.update_job("ranging_session", JobState.RUNNING)
-        self.request_ranging_status(force=True)
         self._status_timer.start()
         return pkt
 
@@ -186,6 +185,15 @@ class RangingModel(QObject):
         return pkt
 
     def request_ranging_status(self, force: bool = False):
+        if (
+            not force
+            and self.is_ranging
+            and self._last_result_time > 0.0
+            and (time.time() - self._last_result_time) < 3.0
+        ):
+            # When ranging_result packets are flowing, avoid stealing airtime
+            # with periodic status polls.
+            return None
         return self._request_query(
             "ranging_status_get",
             dst_addr=VvAddress.MCU,
@@ -244,6 +252,31 @@ class RangingModel(QObject):
         )
 
     @staticmethod
+    def _extract_room_frame_fields(payload) -> dict:
+        room_id = ""
+        for field_name in ("room_id", "active_room_id", "zone_id"):
+            value = getattr(payload, field_name, "")
+            if value not in (None, ""):
+                room_id = str(value)
+                break
+
+        def first_value(*names, default=None):
+            for name in names:
+                value = getattr(payload, name, None)
+                if value is not None:
+                    return value
+            return default
+
+        local_x = first_value("local_x_m", "pos_local_x_m", "ukf_local_x_m", "tril_local_x_m")
+        local_y = first_value("local_y_m", "pos_local_y_m", "ukf_local_y_m", "tril_local_y_m")
+        local_z = first_value("local_z_m", "pos_local_z_m", default=None)
+        return {
+            "room_id": room_id,
+            "local_x_m": float(local_x) if local_x is not None else None,
+            "local_y_m": float(local_y) if local_y is not None else None,
+            "local_z_m": float(local_z) if local_z is not None else None,
+        }
+    @staticmethod
     def _parse_anchor_distances(res) -> tuple[list[dict], int, dict[int, int]]:
         anchors = []
         anchor_mask = 0
@@ -269,6 +302,7 @@ class RangingModel(QObject):
         anchors, anchor_mask, distances_by_anchor = self._parse_anchor_distances(res)
 
         # Store in history buffer
+        room_frame = self._extract_room_frame_fields(res)
         sample = {
             "x_m": float(getattr(res, "pos_x_m", 0.0)),
             "y_m": float(getattr(res, "pos_y_m", 0.0)),
@@ -285,6 +319,10 @@ class RangingModel(QObject):
             "d3_mm": distances_by_anchor.get(3, ""),
             "d4_mm": distances_by_anchor.get(4, ""),
             "anchors": anchors,
+            "room_id": room_frame["room_id"],
+            "local_x_m": room_frame["local_x_m"],
+            "local_y_m": room_frame["local_y_m"],
+            "local_z_m": room_frame["local_z_m"],
         }
         self._position_history.append(sample)
 
@@ -322,7 +360,7 @@ class RangingModel(QObject):
             }
             for anchor in getattr(res, "anchors", [])
         ]
-
+        room_frame = self._extract_room_frame_fields(res)
         sample = {
             "ukf_x_m": float(getattr(res, "ukf_x_m", 0)) / 100.0,
             "ukf_y_m": float(getattr(res, "ukf_y_m", 0)) / 100.0,
@@ -339,6 +377,10 @@ class RangingModel(QObject):
             "received_at": time.time(),
             "source": "sensor_fusion",
             "seq": int(seq or 0),
+            "room_id": room_frame["room_id"],
+            "local_x_m": room_frame["local_x_m"],
+            "local_y_m": room_frame["local_y_m"],
+            "local_z_m": room_frame["local_z_m"],
         }
         self._handle_sensor_fusion_sample(sample)
 
@@ -377,6 +419,17 @@ class RangingModel(QObject):
                 "x_m": coord_or_none("x_m"),
                 "y_m": coord_or_none("y_m"),
                 "z_m": coord_or_none("z_m"),
+                "label": f"A{a.anchor_id}",
+                "role": "anchor",
+                "device_type": "uwb_anchor",
+                "device_id": a.anchor_id,
+                "zone_id": "",
+                "zone_name": "",
+                "zone_ids": [],
+                "zone_names": [],
+                "placed": True,
+                "is_scanned": False,
+                "sync_state": "synced",
             })
         log.info("Anchor layout received: %d anchors", len(self._anchor_layout))
         self.anchor_layout_updated.emit(self._anchor_layout)

@@ -99,6 +99,7 @@ class SharedAppState(QObject):
     battery_info_changed = pyqtSignal(dict)       # Voltage, SOC, remains, charging, temps...
     ble_status_changed = pyqtSignal(dict)          # BLE state, rssi, disconnect reason
     ranging_active_changed = pyqtSignal(bool)      # Ranging active/stopped
+    log_streaming_changed = pyqtSignal(bool)       # Firmware log stream active/stopped
     ranging_stats_changed = pyqtSignal(dict)       # total_count, success_count, rms_error_m...
     calib_status_changed = pyqtSignal(dict)         # state, progress, iteration, peer ready mask...
     anchor_layout_changed = pyqtSignal(list)       # List of fixed anchors positions
@@ -108,6 +109,8 @@ class SharedAppState(QObject):
     pos_calib_cfg_changed = pyqtSignal(dict)       # Auto calibration parameters
     rtos_resource_changed = pyqtSignal(dict)       # CPU, heap, stack, task count, health flags
     rtos_task_stats_changed = pyqtSignal(list)     # Per-task CPU and stack snapshots
+    manual_test_mode_changed = pyqtSignal(bool)    # Communication tab test-mode gate
+    device_type_changed = pyqtSignal(int)          # Device type (Tag=1, Anchor=2, Gateway=3, Debug=4)
 
     # Job State Machine signal
     # Params: job_name, status, progress (0-100), retries, error_msg
@@ -131,6 +134,7 @@ class SharedAppState(QObject):
         self._battery_info: Dict[str, Any] = {}
         self._ble_status: Dict[str, Any] = {}
         self._ranging_active = False
+        self._log_streaming = False
         self.current_session_id = ""
         self._ranging_stats: Dict[str, Any] = {}
         self._calib_status: Dict[str, Any] = {}
@@ -141,6 +145,8 @@ class SharedAppState(QObject):
         self._pos_calib_cfg: Dict[str, Any] = {}
         self._rtos_resource: Dict[str, Any] = {}
         self._rtos_task_stats: List[Dict[str, Any]] = []
+        self._manual_test_mode_enabled = False
+        self._device_type = 0
 
         # Job State Machine storage
         self._jobs: Dict[str, Dict[str, Any]] = {}
@@ -205,6 +211,17 @@ class SharedAppState(QObject):
         self.ranging_stats_changed.emit(self._ranging_stats)
 
     @property
+    def log_streaming(self) -> bool:
+        return self._log_streaming
+
+    @log_streaming.setter
+    def log_streaming(self, val: bool) -> None:
+        enabled = bool(val)
+        if self._log_streaming != enabled:
+            self._log_streaming = enabled
+            self.log_streaming_changed.emit(enabled)
+
+    @property
     def calib_status(self) -> Dict[str, Any]:
         return self._calib_status.copy()
 
@@ -250,6 +267,15 @@ class SharedAppState(QObject):
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
 
     @property
+    def device_type(self) -> int:
+        return self._device_type
+
+    @device_type.setter
+    def device_type(self, val: int) -> None:
+        self._device_type = val
+        self.device_type_changed.emit(self._device_type)
+
+    @property
     def pos_calib_cfg(self) -> Dict[str, Any]:
         return self._pos_calib_cfg.copy()
 
@@ -268,12 +294,69 @@ class SharedAppState(QObject):
         self.rtos_resource_changed.emit(self._rtos_resource)
 
     @property
+    def manual_test_mode_enabled(self) -> bool:
+        return self._manual_test_mode_enabled
+
+    @manual_test_mode_enabled.setter
+    def manual_test_mode_enabled(self, val: bool) -> None:
+        enabled = bool(val)
+        if self._manual_test_mode_enabled != enabled:
+            self._manual_test_mode_enabled = enabled
+            if enabled and self._query_manager:
+                self._query_manager.reset()
+                self.update_job("query_queue", JobState.IDLE, progress=0)
+            self.manual_test_mode_changed.emit(enabled)
+
+    @property
     def rtos_task_stats(self) -> List[Dict[str, Any]]:
         return [item.copy() for item in self._rtos_task_stats]
 
     @rtos_task_stats.setter
     def rtos_task_stats(self, val: List[Dict[str, Any]]) -> None:
         self._rtos_task_stats = [item.copy() for item in val]
+        self.rtos_task_stats_changed.emit(self.rtos_task_stats)
+
+    def clear_device_session_state(self) -> None:
+        """Clear all device-specific configurations and telemetry states."""
+        if hasattr(self, '_query_manager') and self._query_manager:
+            self._query_manager.reset()
+        try:
+            from services.command_bus import shared_command_bus
+            if shared_command_bus:
+                shared_command_bus.reset()
+        except Exception:
+            pass
+        self._connected_device = {}
+        self._battery_info = {}
+        self._ble_status = {}
+        self._ranging_active = False
+        self._log_streaming = False
+        self._ranging_stats = {}
+        self._calib_status = {}
+        self._anchor_layout = []
+        self._sys_config = {}
+        self._sys_ranging_cfg = {}
+        self._sensor_fusion_cfg = {}
+        self._pos_calib_cfg = {}
+        self._rtos_resource = {}
+        self._rtos_task_stats = []
+        self._device_type = 0
+
+        # Emit the changes so that the Views are notified
+        self.connected_device_changed.emit(self._connected_device)
+        self.battery_info_changed.emit(self._battery_info)
+        self.ble_status_changed.emit(self._ble_status)
+        self.ranging_active_changed.emit(self._ranging_active)
+        self.device_type_changed.emit(0)
+        self.log_streaming_changed.emit(self._log_streaming)
+        self.ranging_stats_changed.emit(self._ranging_stats)
+        self.calib_status_changed.emit(self._calib_status)
+        self.anchor_layout_changed.emit(self._anchor_layout)
+        self.sys_config_changed.emit(self._sys_config)
+        self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
+        self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
+        self.pos_calib_cfg_changed.emit(self._pos_calib_cfg)
+        self.rtos_resource_changed.emit(self._rtos_resource)
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
     # ── Global Query Queue Management (Retry/Timeout logic) ─────────
@@ -290,6 +373,10 @@ class SharedAppState(QObject):
 
     def enqueue_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
         """Add a query to the sequential execution queue."""
+        if self._manual_test_mode_enabled:
+            log.debug("[SharedAppState] Query skipped by manual test mode: %s", command_name)
+            return
+
         if not is_command_enabled(command_name):
             log.info("[SharedAppState] Query skipped by command flag: %s", command_name)
             return

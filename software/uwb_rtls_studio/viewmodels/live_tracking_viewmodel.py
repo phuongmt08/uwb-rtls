@@ -54,6 +54,7 @@
 ===============================================================================
 """
 import logging
+import math
 from typing import Optional
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from models.ranging_model import RangingModel
@@ -75,6 +76,7 @@ class LiveTrackingViewModel(QObject):
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
     anchor_layout_updated = pyqtSignal(list)
+    scan_devices_updated = pyqtSignal(list)
     
     # Geofence signals
     geofence_status_updated = pyqtSignal(str, str, float)  # status, zone_name, speed_limit
@@ -87,6 +89,7 @@ class LiveTrackingViewModel(QObject):
         ranging_repo=None,
         command_bus=None,
         session_run_manager=None,
+        ble_scan_repo=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -95,7 +98,9 @@ class LiveTrackingViewModel(QObject):
         self._ranging_repo = ranging_repo
         self._command_bus = command_bus
         self._session_run_manager = session_run_manager
+        self._ble_scan_repo = ble_scan_repo
         self._pending_position: tuple[float, float, float, float] | None = None
+        self._pending_position_meta: dict | None = None
         self._pending_sensor_fusion: dict | None = None
         
         # Instantiate geofence repository
@@ -109,30 +114,114 @@ class LiveTrackingViewModel(QObject):
         self.model.stats_updated.connect(self.stats_updated.emit)
         shared_app_state.anchor_layout_changed.connect(self.anchor_layout_updated.emit)
 
+        if self._ble_scan_repo:
+            self._ble_scan_repo.scan_results_updated.connect(self.scan_devices_updated.emit)
+
         self._render_timer = QTimer(self)
         self._render_timer.setInterval(LIVE_RENDER_INTERVAL_MS)
         self._render_timer.timeout.connect(self._flush_pending_live_updates)
         self._render_timer.start()
 
+    def _find_room(self, room_id: str):
+        if not room_id:
+            return None
+        return next(
+            (
+                zone for zone in self.geofence_repo.get_zones()
+                if zone.id == room_id and getattr(zone, "object_type", "zone") == "room"
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _room_origin(room):
+        points = list(getattr(room, "points", []) or [])
+        if not points:
+            return 0.0, 0.0
+        index = getattr(room, "origin_vertex_idx", None)
+        if index is None or not 0 <= int(index) < len(points):
+            index = 0
+        return float(points[int(index)][0]), float(points[int(index)][1])
+
+    @staticmethod
+    def _room_local_to_scene(local_x, local_y, room):
+        origin_x, origin_y = LiveTrackingViewModel._room_origin(room)
+        theta = math.radians(float(getattr(room, "local_frame_yaw_deg", 0.0)))
+        cos_theta, sin_theta = math.cos(theta), math.sin(theta)
+        return (
+            origin_x + cos_theta * float(local_x) - sin_theta * float(local_y),
+            origin_y + sin_theta * float(local_x) + cos_theta * float(local_y),
+        )
+
+    def _resolve_room_frame(self, payload: dict, x_key: str, y_key: str, z_value: float):
+        room_id = str(payload.get("room_id") or "")
+        local_x = payload.get("local_x_m")
+        local_y = payload.get("local_y_m")
+        if room_id and local_x is not None and local_y is not None:
+            room = self._find_room(room_id)
+            if room is not None:
+                global_x, global_y = self._room_local_to_scene(local_x, local_y, room)
+                return {
+                    "room_id": room_id,
+                    "local_x_m": float(local_x),
+                    "local_y_m": float(local_y),
+                    "x_m": float(global_x),
+                    "y_m": float(global_y),
+                    "z_m": float(payload.get("local_z_m", z_value) if payload.get("local_z_m") is not None else z_value),
+                    "is_local_frame": True,
+                }
+        return {
+            "room_id": room_id,
+            "local_x_m": None,
+            "local_y_m": None,
+            "x_m": float(payload.get(x_key, 0.0)),
+            "y_m": float(payload.get(y_key, 0.0)),
+            "z_m": float(z_value),
+            "is_local_frame": False,
+        }
+
     def _on_model_position_updated(self, x: float, y: float, z: float, rms: float):
-        self._pending_position = (x, y, z, rms)
+        sample = self.model._position_history[-1].copy() if self.model._position_history else {}
+        resolved = self._resolve_room_frame(sample, "x_m", "y_m", z)
+        self._pending_position = (resolved["x_m"], resolved["y_m"], resolved["z_m"], rms)
+        self._pending_position_meta = resolved
 
     def _emit_position_update(self, x: float, y: float, z: float, rms: float):
         self.position_updated.emit(x, y, z, rms)
-        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z)
+        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z, speed=0.0)
         self.geofence_status_updated.emit(status, zone_name, speed_limit)
 
     def _on_model_sensor_fusion_updated(self, data: dict):
         self._pending_sensor_fusion = data.copy()
 
     def _emit_sensor_fusion_update(self, data: dict):
-        self.sensor_fusion_updated.emit(data)
-        x = data.get("ukf_x_m", 0.0)
-        y = data.get("ukf_y_m", 0.0)
         z = 0.0
-        if self.model._position_history:
+        if self._pending_position_meta is not None:
+            z = float(self._pending_position_meta.get("z_m", 0.0))
+        elif self.model._position_history:
             z = self.model._position_history[-1].get("z_m", 0.0)
-        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z)
+
+        resolved = self._resolve_room_frame(data, "ukf_x_m", "ukf_y_m", z)
+        emitted = data.copy()
+        emitted["ukf_x_m"] = resolved["x_m"]
+        emitted["ukf_y_m"] = resolved["y_m"]
+        emitted["room_id"] = resolved["room_id"]
+        emitted["is_local_frame"] = resolved["is_local_frame"]
+        if emitted.get("local_x_m") is None:
+            emitted["local_x_m"] = resolved["local_x_m"]
+        if emitted.get("local_y_m") is None:
+            emitted["local_y_m"] = resolved["local_y_m"]
+        if emitted.get("tril_x_m") is not None and emitted.get("tril_y_m") is not None and resolved["is_local_frame"]:
+            emitted["tril_x_m"] = resolved["x_m"]
+            emitted["tril_y_m"] = resolved["y_m"]
+
+        self.sensor_fusion_updated.emit(emitted)
+        x = emitted.get("ukf_x_m", 0.0)
+        y = emitted.get("ukf_y_m", 0.0)
+        vx = emitted.get("vx_mps", 0.0)
+        vy = emitted.get("vy_mps", 0.0)
+        speed = math.hypot(vx, vy)
+        status, zone_name, speed_limit = self.geofence_repo.check_position(x, y, z, speed)
         self.geofence_status_updated.emit(status, zone_name, speed_limit)
 
     def _flush_pending_live_updates(self):
@@ -164,6 +253,7 @@ class LiveTrackingViewModel(QObject):
             self._session_run_manager.open_ranging_run()
         self.model.clear_history()
         self._pending_position = None
+        self._pending_position_meta = None
         self._pending_sensor_fusion = None
         shared_raw_packet_store.clear()
         self.model.start_ranging()
@@ -179,6 +269,68 @@ class LiveTrackingViewModel(QObject):
     # Geofence service methods
     def get_geofence_zones(self) -> list:
         return self.geofence_repo.get_zones()
+
+    def get_map_anchors(self) -> list:
+        return self.geofence_repo.get_anchors()
+
+    def get_active_room_ids(self) -> list[str]:
+        return self.geofence_repo.get_active_room_ids()
+
+    def set_active_room_ids(self, room_ids: list[str]) -> None:
+        self.geofence_repo.set_active_room_ids(room_ids)
+
+    def _coerce_int_id(self, value, default: int = 0) -> int:
+        if value is None or value == "":
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        text = str(value).strip()
+        try:
+            if text.lower().startswith("0x"):
+                return int(text, 16)
+            if text.lower().startswith("a") and text[1:].isdigit():
+                return int(text[1:])
+            return int(text)
+        except (TypeError, ValueError):
+            return default
+
+    def update_anchor_layout_from_map(self, anchors: list) -> None:
+        normalized = []
+        for idx, anchor in enumerate(anchors):
+            anchor_id = self._coerce_int_id(anchor.get("anchor_id"), idx)
+            normalized.append({
+                "anchor_id": anchor_id,
+                "x_m": float(anchor.get("x_m", anchor.get("x", 0.0))),
+                "y_m": float(anchor.get("y_m", anchor.get("y", 0.0))),
+                "z_m": float(anchor.get("z_m", anchor.get("z", 0.0))),
+                "label": anchor.get("label", f"A{anchor_id}"),
+                "role": anchor.get("role", "anchor"),
+                "device_type": anchor.get("device_type", "uwb_anchor"),
+                "device_id": self._coerce_int_id(anchor.get("device_id"), anchor_id),
+                "mac": anchor.get("mac", ""),
+                "zone_id": anchor.get("zone_id", ""),
+                "zone_name": anchor.get("zone_name", ""),
+                "zone_ids": list(anchor.get("zone_ids", [])),
+                "zone_names": list(anchor.get("zone_names", [])),
+                "room_id": anchor.get("room_id", anchor.get("zone_id", "")),
+                "local_x_m": float(anchor.get("local_x_m", anchor.get("x_m", anchor.get("x", 0.0)))),
+                "local_y_m": float(anchor.get("local_y_m", anchor.get("y_m", anchor.get("y", 0.0)))),
+                "placed": bool(anchor.get("placed", True)),
+                "is_scanned": bool(anchor.get("is_scanned", anchor.get("scan_seen", False))),
+                "sync_state": anchor.get("sync_state", "synced"),
+            })
+        self.geofence_repo.set_anchors(normalized)
+        if hasattr(self.model, "set_anchor_layout"):
+            self.model.set_anchor_layout(normalized)
+        else:
+            shared_app_state.anchor_layout = normalized
+
+    def get_scan_devices(self) -> list:
+        if self._ble_scan_repo:
+            return self._ble_scan_repo.merged_results()
+        return []
 
     def add_geofence_zone(self, zone: GeofenceZone) -> None:
         self.geofence_repo.add_zone(zone)

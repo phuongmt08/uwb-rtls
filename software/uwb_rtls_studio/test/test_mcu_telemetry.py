@@ -42,7 +42,8 @@ logging.getLogger("services.dongle_detect_service").setLevel(logging.WARNING)
 # ===============================================================================
 # CONFIGURATION FOR TESTING
 # ===============================================================================
-USE_VIRTUAL_COM = False  # Set to False to auto-detect and use real Dongle
+from utils.runtime_mode import is_test_mode
+USE_VIRTUAL_COM = is_test_mode()  # Set to False to auto-detect and use real Dongle
 VIRTUAL_COM_PORT = "TCP" # "TCP" or COM port (e.g. "COM11")
 
 # Cấu hình bật (1) hoặc tắt (0) từng lệnh truy vấn get

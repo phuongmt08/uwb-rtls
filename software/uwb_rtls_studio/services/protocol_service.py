@@ -61,6 +61,7 @@ class ProtocolService(QObject):
 
     # ── Signals ──────────────────────────────────────────────────────
     packet_received = pyqtSignal(str, object)   # (param_name, packet_t)
+    packet_sent = pyqtSignal(str, object)       # (param_name, packet_t)
     ack_received = pyqtSignal(int, int)         # (ack_seq, response_code)
     decode_error = pyqtSignal(str)              # error message
 
@@ -128,6 +129,8 @@ class ProtocolService(QObject):
             # Special handling cho ACK
             if param == "ack":
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
+                self.packet_received.emit(param, pkt)
+                log.debug("RX: %s seq=%d ack_seq=%d", param, pkt.hdr.seq, pkt.ack.ack_seq)
                 continue
 
             if self._packet_repository:
@@ -169,6 +172,7 @@ class ProtocolService(QObject):
         self._serial.write(frame)
         param = pkt.WhichOneof("params") or "unknown"
         log.debug("TX: %s seq=%d", param, pkt.hdr.seq)
+        self.packet_sent.emit(param, pkt)
 
     def send_command(self, builder_name: str, dst_addr: int | None = None, src_addr: int = VvAddress.HOST, **kwargs) -> pb.packet_t:
         """Build + send command bằng tên.

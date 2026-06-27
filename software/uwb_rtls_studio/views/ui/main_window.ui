@@ -40,163 +40,228 @@ QWidget#centralwidget { background-color: #0F172A; }</string>
     <property name="bottomMargin">
      <number>0</number>
     </property>
-    <!-- ═══ TITLE BAR ═══ -->
     <item>
      <widget class="QFrame" name="title_bar">
       <property name="minimumSize">
        <size>
         <width>0</width>
-        <height>52</height>
+        <height>56</height>
        </size>
       </property>
       <property name="maximumSize">
        <size>
         <width>16777215</width>
-        <height>52</height>
+        <height>56</height>
        </size>
       </property>
       <property name="styleSheet">
-       <string notr="true">QFrame { background: #1E293B; border-bottom: 1px solid #334155; }</string>
+       <string notr="true">QFrame#title_bar { background: transparent; }</string>
       </property>
       <layout class="QHBoxLayout" name="tb_layout">
+       <property name="spacing">
+        <number>0</number>
+       </property>
        <property name="leftMargin">
-        <number>20</number>
+        <number>0</number>
        </property>
        <property name="topMargin">
         <number>0</number>
        </property>
        <property name="rightMargin">
-        <number>20</number>
+        <number>0</number>
        </property>
        <property name="bottomMargin">
         <number>0</number>
        </property>
-       <!-- App Title -->
        <item>
-        <widget class="QLabel" name="app_title">
-         <property name="font">
-          <font>
-           <family>Segoe UI</family>
-           <pointsize>16</pointsize>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">color: #22D3EE; background: transparent;</string>
-         </property>
-         <property name="text">
-          <string>🔵 UWB RTLS Studio</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Device Badge -->
-       <item>
-        <widget class="QLabel" name="device_badge">
-         <property name="styleSheet">
-          <string notr="true">color: #10B981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; padding: 4px 14px; font-weight: bold;</string>
-         </property>
-         <property name="text">
-          <string>● -</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Spacer -->
-       <item>
-        <spacer name="tb_spacer">
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>40</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <!-- Mode Label -->
-       <item>
-        <widget class="QLabel" name="mode_label">
-         <property name="styleSheet">
-          <string notr="true">color: #94A3B8; background: transparent; font-weight: bold;</string>
-         </property>
-         <property name="text">
-          <string>Mode:</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Mode ComboBox -->
-       <item>
-        <widget class="QComboBox" name="mode_combo">
+        <widget class="QFrame" name="sidebar_logo_frame">
          <property name="minimumSize">
           <size>
-           <width>150</width>
-           <height>0</height>
+           <width>220</width>
+           <height>56</height>
           </size>
          </property>
          <property name="maximumSize">
           <size>
-           <width>150</width>
-           <height>16777215</height>
+           <width>220</width>
+           <height>56</height>
           </size>
          </property>
          <property name="styleSheet">
-          <string notr="true">QComboBox { background: #0A0F1E; color: #22D3EE; border: 1px solid #334155; border-radius: 8px; padding: 6px 12px; font-weight: bold; }
-QComboBox:hover { border-color: #22D3EE; }
-QComboBox QAbstractItemView { background: #1E293B; color: #F8FAFC; border: 1px solid #334155; selection-background-color: #0E7490; }</string>
+          <string notr="true">QFrame#sidebar_logo_frame { background-color: #13111C; border-right: 1px solid #2E1B4E; }</string>
          </property>
-         <item>
-          <property name="text">
-           <string>👤 User</string>
+         <layout class="QHBoxLayout" name="logo_layout">
+          <property name="leftMargin">
+           <number>20</number>
           </property>
-         </item>
-         <item>
-          <property name="text">
-           <string>🔧 Developer</string>
+          <property name="topMargin">
+           <number>0</number>
           </property>
-         </item>
+          <property name="rightMargin">
+           <number>10</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="app_title">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>14</pointsize>
+              <weight>75</weight>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color: #C084FC; background: transparent; font-weight: bold;</string>
+            </property>
+            <property name="text">
+             <string>🔵 UWB RTLS Studio</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </widget>
        </item>
-       <!-- End Session Button -->
        <item>
-        <widget class="QPushButton" name="btn_end_session">
-         <property name="minimumSize">
-          <size>
-           <width>140</width>
-           <height>36</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>140</width>
-           <height>36</height>
-          </size>
-         </property>
+        <widget class="QFrame" name="header_content_frame">
          <property name="styleSheet">
-          <string notr="true">QPushButton { background: rgba(239,68,68,0.12); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 13px; }
+          <string notr="true">QFrame#header_content_frame { background-color: #13111C; border-bottom: 1px solid #2E1B4E; }</string>
+         </property>
+         <layout class="QHBoxLayout" name="header_layout">
+          <property name="leftMargin">
+           <number>20</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>20</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="active_tab_title">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>20</pointsize>
+              <weight>75</weight>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color: #FFFFFF; background: transparent; font-size: 20pt; font-weight: bold;</string>
+            </property>
+            <property name="text">
+             <string>Device Info</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="tb_spacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QLabel" name="device_badge">
+            <property name="styleSheet">
+             <string notr="true">color: #10B981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; padding: 4px 14px; font-weight: bold;</string>
+            </property>
+            <property name="text">
+             <string>● -</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="mode_label">
+            <property name="styleSheet">
+             <string notr="true">color: #A5B4FC; background: transparent; font-weight: bold;</string>
+            </property>
+            <property name="text">
+             <string>Mode:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="mode_combo">
+            <property name="minimumSize">
+             <size>
+              <width>170</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>150</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QComboBox { background: #1E1B2E; color: #C084FC; border: 1px solid #2E1B4E; border-radius: 8px; padding: 6px 12px; font-weight: bold; }
+QComboBox:hover { border-color: #C084FC; }
+QComboBox QAbstractItemView { background: #1E1B2E; color: #F5F3FF; border: 1px solid #2E1B4E; selection-background-color: #4C1D95; }</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>👤 User</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>🔧 Developer</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_end_session">
+            <property name="minimumSize">
+             <size>
+              <width>140</width>
+              <height>36</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>140</width>
+              <height>36</height>
+             </size>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton { background: rgba(239,68,68,0.12); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 13px; }
 QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
-         </property>
-         <property name="text">
-          <string>🔴 End Session</string>
-         </property>
+            </property>
+            <property name="text">
+             <string>🔴 End Session</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </widget>
        </item>
       </layout>
      </widget>
     </item>
-    <!-- ═══ TAB WIDGET ═══ -->
     <item>
-      <widget class="QTabWidget" name="tabs">
-       <property name="styleSheet">
-        <string notr="true">QTabWidget { background-color: #0F172A; }
-QTabWidget::pane { border: none; background: #0F172A; }
-QTabBar { background-color: transparent; }
-QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px 18px; margin-right: 4px; font-weight: bold; min-width: 120px; }
-QTabBar::tab:selected { background: #0F172A; color: #22D3EE; border: 1.5px solid #22D3EE; border-bottom-color: #0F172A; }
-QTabBar::tab:hover:!selected { background: #253346; color: #F8FAFC; border-color: #475569; }</string>
-       </property>
-      <property name="currentIndex">
-       <number>0</number>
+     <widget class="LeftTabWidget" name="tabs">
+      <property name="styleSheet">
+       <string notr="true">LeftTabWidget { background-color: #231E3D; }
+QTabWidget::pane { border: none; border-left: 1px solid #2E1B4E; background: #0F172A; }
+QTabBar { background-color: #231E3D; padding: 12px 0px; }
+QTabBar::tab { background: #231E3D; color: #C4B5FD; border: 1px solid transparent; border-radius: 8px; padding: 12px 18px; margin: 4px 8px; font-weight: bold; }
+QTabBar::tab:selected { background: #382F5F; color: #FFFFFF; border-left: 4px solid #A78BFA; }
+QTabBar::tab:hover:!selected { background: #302852; color: #F5F3FF; }</string>
       </property>
       <widget class="DeviceInfoTab" name="tab_device">
        <attribute name="title">
@@ -206,6 +271,11 @@ QTabBar::tab:hover:!selected { background: #253346; color: #F8FAFC; border-color
       <widget class="LiveTrackingTab" name="tab_tracking">
        <attribute name="title">
         <string>📍 Live Tracking</string>
+       </attribute>
+      </widget>
+      <widget class="LiveTrackingTab" name="tab_spatial_constraints">
+       <attribute name="title">
+        <string>📍 Spatial Constraints</string>
        </attribute>
       </widget>
       <widget class="ConfigTab" name="tab_config">
@@ -223,11 +293,15 @@ QTabBar::tab:hover:!selected { background: #253346; color: #F8FAFC; border-color
         <string>📋 Log &amp; History</string>
        </attribute>
       </widget>
+      <widget class="CommunicationTab" name="tab_communication">
+       <attribute name="title">
+        <string>📡 Communication</string>
+       </attribute>
+      </widget>
      </widget>
     </item>
    </layout>
   </widget>
-  <!-- ═══ STATUS BAR ═══ -->
   <widget class="QStatusBar" name="statusbar">
    <property name="styleSheet">
     <string notr="true">QStatusBar { background: #1E293B; color: #94A3B8; border-top: 1px solid #334155; font-size: 12px; padding: 4px 12px; }
@@ -236,6 +310,12 @@ QStatusBar QLabel { background: transparent; }</string>
   </widget>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>LeftTabWidget</class>
+   <extends>QTabWidget</extends>
+   <header>views.components.left_tab_widget</header>
+   <container>1</container>
+  </customwidget>
   <customwidget>
    <class>DeviceInfoTab</class>
    <extends>QWidget</extends>
@@ -264,6 +344,12 @@ QStatusBar QLabel { background: transparent; }</string>
    <class>LogTab</class>
    <extends>QWidget</extends>
    <header>views.tabs.log_tab</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>CommunicationTab</class>
+   <extends>QWidget</extends>
+   <header>views.tabs.communication_tab</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

@@ -3,7 +3,7 @@
   UWB RTLS Studio — Geofence 3D Viewer Popup
 ===============================================================================
   File        : views/popups/geofence_3d_viewer.py
-  Description : 3D visualization of 2.5D Geofence maps using pyqtgraph.opengl.
+  Description : Interactive 3D visualization of geofence maps.
   MVVM Role   : VIEW — 3D layout rendering.
 ===============================================================================
 """
@@ -28,7 +28,7 @@ class Geofence3DViewer(QDialog):
     def __init__(self, viewmodel, parent=None):
         super().__init__(parent)
         self._vm = viewmodel
-        self.setWindowTitle("UWB RTLS Studio — 2.5D Geofence Viewer")
+        self.setWindowTitle("UWB RTLS Studio - Geofence 3D View")
         self.resize(800, 600)
         self.setStyleSheet("background-color: #0F172A; color: #F8FAFC; font-family: 'Segoe UI';")
 
@@ -52,12 +52,12 @@ class Geofence3DViewer(QDialog):
 
         # Header section
         header_layout = QHBoxLayout()
-        title_label = QLabel("🌌 2.5D Geofence Map Real-time Viewer")
+        title_label = QLabel("Geofence 3D View")
         title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #22D3EE;")
         header_layout.addWidget(title_label)
         
-        btn_close = QPushButton("Đóng")
+        btn_close = QPushButton("Close")
         btn_close.setStyleSheet("QPushButton { background: #334155; color: white; border: 1px solid #475569; border-radius: 6px; padding: 5px 15px; font-weight: bold; }"
                                 "QPushButton:hover { background: #475569; }")
         btn_close.clicked.connect(self.close)
@@ -79,9 +79,8 @@ class Geofence3DViewer(QDialog):
 
     def _show_opengl_warning(self):
         warning_msg = (
-            "⚠️ Không thể mở chế độ 3D!\n\n"
-            "Thư viện PyOpenGL chưa được cài đặt trên máy tính của bạn.\n"
-            "Để kích hoạt tính năng hiển thị 3D cho mô hình 2.5D, vui lòng cài đặt bằng lệnh:\n"
+            "Cannot open 3D mode.\n\n"
+            "PyOpenGL is not installed. Install it with:\n"
             "pip install PyOpenGL PyOpenGL_accelerate"
         )
         self.warning_container.setText(warning_msg)
@@ -158,12 +157,19 @@ class Geofence3DViewer(QDialog):
             # Vertices N..2N-1 represent top face
             N = len(zone.points)
             verts = []
+            object_type = getattr(zone, "object_type", "zone")
+            bottom_z = float(zone.min_z)
+            top_z = float(zone.max_z)
+            if object_type == "room":
+                top_z = bottom_z + 0.03
+            elif object_type == "zone" and top_z <= bottom_z:
+                top_z = bottom_z + 0.05
             # Bottom vertices (z = min_z)
             for pt in zone.points:
-                verts.append([pt[0], pt[1], zone.min_z])
+                verts.append([pt[0], pt[1], bottom_z])
             # Top vertices (z = max_z)
             for pt in zone.points:
-                verts.append([pt[0], pt[1], zone.max_z])
+                verts.append([pt[0], pt[1], top_z])
 
             verts = np.array(verts)
 
@@ -188,11 +194,9 @@ class Geofence3DViewer(QDialog):
 
             faces = np.array(faces)
 
-            # Colors
-            if zone.zone_type == "forbidden":
-                color = [239/255, 68/255, 68/255, 0.4]  # transparent red
-            else:
-                color = [34/255, 197/255, 94/255, 0.4]   # transparent green
+            zone_color = QColor(str(getattr(zone, "color", "#64748B")).replace("_semi", ""))
+            alpha = 0.25 if object_type == "room" else (0.72 if object_type == "wall" else 0.38)
+            color = [zone_color.redF(), zone_color.greenF(), zone_color.blueF(), alpha]
 
             mesh = gl.GLMeshItem(
                 vertexes=verts,

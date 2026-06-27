@@ -28,12 +28,15 @@ SERIAL_READ_TIMEOUT_S = 0.1     # Non-blocking read timeout
 SERIAL_WRITE_TIMEOUT_S = 1.0
 
 # ── Protocol Addresses ────────────────────────────────────────────
-# Sync với protocol.proto device_addr_t
-ADDR_HOST        = 0x5                 # PACKET_ADDR_HOST
+# Sync voi protocol.proto device_addr_t
+ADDR_NONE        = 0x0                 # PACKET_ADDR_UNSPECIFIED
+ADDR_MCU         = 0x1                 # PACKET_ADDR_MCU
 ADDR_CENTRAL     = 0x3                 # PACKET_ADDR_CENTRAL (dongle)
 ADDR_PERIPHERAL  = 0x4                 # PACKET_ADDR_PERIPHERAL (tag/anchor)
-ADDR_MCU         = 0x1                 # PACKET_ADDR_MCU
+ADDR_HOST        = 0x5                 # PACKET_ADDR_HOST
+ADDR_DEBUG       = 0x7                 # PACKET_ADDR_DEBUG
 ADDR_BCAST       = 0xF                 # PACKET_ADDR_BCAST
+ADDR_VEHICLE     = 0x10                # PACKET_ADDR_VEHICLE
 ADDR_BCAS        = ADDR_BCAST          # Backward-compatible alias for old typo
 
 # ── UI Settings ───────────────────────────────────────────────────
@@ -57,7 +60,7 @@ MAX_SCAN_DEVICES = 10           # Max BLE devices in scan list
 # ── Device & Ranging Configs ──────────────────────────────────────
 DEVICE_TIMEOUT_S = 5.0              # Timeout for stale advertising devices (seconds)
 STOP_TO_CONNECT_DELAY_MS = 400      # Delay after ble_scan_stop before sending ble_connect (ms)
-TIME_SYNC_THRESHOLD_MS = 5000       # Time sync drift threshold (ms) — auto-correct if exceeded
+TIME_SYNC_THRESHOLD_MS = 5000       # Time sync verification tolerance (ms)
 
 # Device Role/Type Labels
 DEVICE_TYPE_LABELS = {

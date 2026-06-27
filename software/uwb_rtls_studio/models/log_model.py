@@ -14,6 +14,7 @@ from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from common.transport import VvAddress
+from utils.app_state import shared_app_state
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class LogModel(QObject):
         self._latest_mcu_log_seq = None
         self._tx_counts.clear()
         self._rx_counts.clear()
-
+        shared_app_state.log_streaming = False
     def add_live_log(self, timestamp: str, level: str, source: str, message: str) -> dict:
         entry = {
             "timestamp": timestamp or datetime.now().strftime("%H:%M:%S"),
@@ -166,6 +167,8 @@ class LogModel(QObject):
             return {"ok": False, "error": str(exc)}
 
     def acknowledge_log_segment(self, segment_info: dict) -> bool:
+        if not self._log_stream_requested:
+            return False
         if not self._command_bus:
             return False
 
@@ -194,6 +197,9 @@ class LogModel(QObject):
         self._append_entry(entry)
 
     def _on_log_segment_received(self, segment_info: dict) -> None:
+        if not self._log_stream_requested:
+            log.debug("LogModel: Ignoring log segment because log stream is not started.")
+            return
         self._log_first_segment_seen = True
         self._latest_mcu_log_seq = int(segment_info.get("seq", 0))
         self._print_rx_log_segment(segment_info)
@@ -234,12 +240,26 @@ class LogModel(QObject):
         self._log_stream_requested = True
         self._log_first_segment_seen = False
         self._log_stream_started_at = time.monotonic()
-        # Delay the first poll by 10 seconds as requested
-        self._log_first_segment_deadline = self._log_stream_started_at + 10.0
         self._log_poll_retry_count = 0
-        log.info("LogModel: Log stream requested. Will start polling in 10 seconds...")
+        shared_app_state.log_streaming = True
+        if not self._send_log_poll():
+            return False
+        self._log_first_segment_deadline = time.monotonic() + self.LOG_POLL_TIMEOUT_S
+        log.info("LogModel: Log stream requested. Sent log_data trigger immediately.")
         return True
 
+    def stop_log_stream(self) -> None:
+        """Disable firmware log streaming and clear pending log protocol state."""
+        self._log_stream_requested = False
+        self._log_first_segment_seen = False
+        self._log_stream_started_at = 0.0
+        self._log_first_segment_deadline = 0.0
+        self._last_log_poll_at = 0.0
+        self._log_poll_retry_count = 0
+        self._clear_pending_log_ack()
+        self._deferred_ack_trace_by_ack_seq.clear()
+        self._latest_mcu_log_seq = None
+        shared_app_state.log_streaming = False
     def poll_log_timeout(self) -> bool:
         """Retry log start poll until the first segment arrives, then retry pending ACKs."""
         if not self._log_stream_requested:

@@ -48,12 +48,21 @@ class DongleModel(QObject):
         self._serial.connection_lost.connect(self._on_connection_lost)
 
     def _on_connection_lost(self):
-        """Dongle physically disconnected. Restart detection loop."""
+        """Dongle physically disconnected. Reset serial state and restart detection."""
         log.warning("Dongle physically disconnected! Starting auto-detect loop...")
+        try:
+            self._serial.close()
+        except Exception as exc:
+            log.debug("Ignored serial close error during reconnect: %s", exc)
         self.start_detection()
 
     def start_detection(self) -> None:
         self.stop_detection()
+        if self._serial.is_open:
+            try:
+                self._serial.close()
+            except Exception as exc:
+                log.debug("Ignored serial close error before detect: %s", exc)
         self._worker = DongleDetectWorker()
         self._worker.dongle_found.connect(self._on_dongle_found)
         self._worker.port_scanned.connect(self.ports_scanned.emit)
@@ -79,14 +88,19 @@ class DongleModel(QObject):
 
     def _on_dongle_found(self, info: DongleInfo) -> None:
         """Worker đã probe thành công (nhận ACK) → mở serial chính thức và xem như đã verify."""
+        self.stop_detection()
         self._current_info = info
         self.dongle_found.emit(info)
         try:
+            if self._serial.is_open and self._serial.port_name != info.port:
+                self._serial.close()
             self._serial.open(info.port)
         except Exception as e:
+            log.warning("Cannot open detected dongle on %s: %s", info.port, e)
             self.error_occurred.emit(f"Cannot open {info.port}: {e}")
+            self.start_detection()
             return
-            
+
         # Dongle trả ACK lúc probe là đủ để verify, không cần chờ device_information_resp
         info_dict = {
             "port": info.port,

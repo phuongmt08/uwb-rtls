@@ -1,0 +1,21 @@
+{
+  "editor_settings": {
+    "grid_spacing_m": 0.4,
+    "grid_subdivisions": 4,
+    "map_color": "#F8FAFC",
+    "zone_color": "#AA0000",
+    "map_name": "",
+    "map_type": "Object",
+    "map_height_m": 4.0,
+    "rule_name": "",
+    "rule_type_index": 1,
+    "rule_speed_mps": 1.0,
+    "wall_thickness_m": 0.2,
+    "object_radius_m": 0.5,
+    "wall_mode": "boundary_outside",
+    "wall_host_room_id": "f754d6bd",
+    "object_shape": "polygon",
+    "object_subtype": "generic",
+    "object_direction": "up"
+  }
+}

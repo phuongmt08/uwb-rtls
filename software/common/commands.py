@@ -67,6 +67,7 @@ _MCU_COMMANDS = {
     "rtos_resource_get",
     "rtos_task_stats_get",
     "end_session",
+    "log_data",
 }
 
 _CENTRAL_COMMANDS = {
@@ -84,14 +85,22 @@ _PERIPHERAL_COMMANDS = {
 }
 
 
-def default_destination_for(command_name: str) -> int:
-    """Return the host-side default destination for a command name."""
+def mapped_destination_for(command_name: str) -> int | None:
+    """Return the explicit host-side destination hint for a command name, if known."""
     if command_name in _MCU_COMMANDS:
         return int(VvAddress.MCU)
     if command_name in _PERIPHERAL_COMMANDS:
         return int(VvAddress.PERIPHERAL)
     if command_name in _CENTRAL_COMMANDS:
         return int(VvAddress.CENTRAL)
+    return None
+
+
+def default_destination_for(command_name: str) -> int:
+    """Return the host-side default destination for a command name."""
+    mapped = mapped_destination_for(command_name)
+    if mapped is not None:
+        return mapped
     return int(VvAddress.CENTRAL)
 
 
@@ -472,11 +481,19 @@ class CommandFactory:
         pkt.flash_write.data = b"\x00\x01\x02\x03"
         return pkt
 
-    def ble_adv_config_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def ble_adv_config_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        enable: bool = True,
+        serial_number: int = 0,
+        device_name: str = "",
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.ble_adv_config_set.enable = True
-        pkt.ble_adv_config_set.serial_number = 1
-        pkt.ble_adv_config_set.device_name = "uwb-rtls"
+        pkt.ble_adv_config_set.enable = bool(enable)
+        pkt.ble_adv_config_set.serial_number = int(serial_number)
+        pkt.ble_adv_config_set.device_name = str(device_name or "")
         return pkt
 
     def ble_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -530,11 +547,16 @@ class CommandFactory:
         pkt.log_clear.length = length
         return pkt
 
-    def host_transport_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def host_transport_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        transport: int = int(HostTransport.USB),
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.host_transport_set.transport = int(HostTransport.USB)
+        pkt.host_transport_set.transport = int(transport)
         return pkt
-
     def pos_calib_cfg_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.pos_calib_cfg_get.dummy = 0
@@ -926,7 +948,7 @@ class CommandCatalog:
             CommandSpec(31, "uwb_reset", self.factory.uwb_reset),
             CommandSpec(32, "factory_config_reset", self.factory.factory_config_reset),
             CommandSpec(33, "device_type_set", self.factory.device_type_set),
-            CommandSpec(34, "device_type_get", self.factory.device_type_get),
+            CommandSpec(34, "device_type_get", self.factory.device_type_get, "device_type_set"),
             CommandSpec(35, "flash_erase", self.factory.flash_erase),
             CommandSpec(36, "flash_read", self.factory.flash_read),
             CommandSpec(37, "flash_data", self.factory.flash_data),

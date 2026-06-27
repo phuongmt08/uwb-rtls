@@ -16,7 +16,6 @@
 #include "app_rtos_handles.h"
 
 #include <string.h>
-#include "positioning_config.h"
 
 /* Private defines ---------------------------------------------------- */
 #define UART_SOF           (0xAA)

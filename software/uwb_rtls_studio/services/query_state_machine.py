@@ -60,17 +60,26 @@ class QueryQueueManager(QObject):
         "device_information_get": "device_information_resp",
         "battery_info_get": "battery_info_resp",
         "time_sync_get": "time_sync_resp",
+        "time_sync_set": "time_sync_resp",
         "anchor_layout_get": "anchor_layout_resp",
         "sys_config_get": "sys_config_resp",
+        "sys_config_set": "sys_config_resp",
         "sys_ranging_cfg_get": "sys_ranging_cfg_resp",
+        "sys_ranging_cfg_set": "sys_ranging_cfg_resp",
         "sensor_fusion_cfg_get": "sensor_fusion_cfg_resp",
+        "sensor_fusion_cfg_set": "sensor_fusion_cfg_resp",
         "pos_calib_cfg_get": "pos_calib_cfg_resp",
+        "pos_calib_cfg_set": "pos_calib_cfg_resp",
         "ble_status_get": "ble_status_resp",
         "ble_conn_params_get": "ble_conn_params_resp",
+        "ble_conn_params_set": "ble_conn_params_resp",
         "ranging_status_get": "ranging_status_resp",
         "calib_status_get": "calib_status_resp",
         "rtos_resource_get": "rtos_resource_resp",
         "rtos_task_stats_get": "rtos_task_stats_resp",
+        "device_type_get": "device_type_set",
+        "prefilter_cfg_get": "prefilter_cfg_resp",
+        "prefilter_cfg_set": "prefilter_cfg_resp",
     }
 
     def __init__(
@@ -216,6 +225,12 @@ class QueryQueueManager(QObject):
                         tx.seq = sent_pkt.hdr.seq
                     elif isinstance(sent_pkt, int):
                         tx.seq = sent_pkt
+                else:
+                    # Packet was blocked/skipped by CommandBus (e.g. manual test mode or flag disabled)
+                    # We mark it failed immediately without waiting for a non-existent timeout
+                    tx.status = QueryState.FAILED
+                    self._request_send_next()
+                    return
             except Exception as e:
                 log.error(f"Failed to send query packet: {e}")
                 tx.status = QueryState.FAILED
@@ -255,3 +270,12 @@ class QueryQueueManager(QObject):
                 )
 
         self._request_send_next()
+
+    def reset(self) -> None:
+        """Clear the queue and stop any active timeouts/transactions."""
+        with self.lock:
+            self.timer.stop()
+            self.queue.clear()
+            self.current_transaction = None
+            self.is_running = False
+            log.info("QueryQueueManager reset successfully.")

@@ -171,13 +171,18 @@ class LogViewModel(QObject):
         self.log_filtered.emit(0)
 
     def clear_log_session(self):
-        """End the current log run, persist it, send LOG_DATA end reason, and clear live logs."""
-        self._log_poll_timer.stop()
+        """Stop firmware logging, persist the run, send LOG_DATA end reason, and clear live logs."""
+        if self._log_model and hasattr(self._log_model, "stop_log_stream"):
+            self._log_model.stop_log_stream()
+
         if self._session_run_manager:
             self._session_run_manager.close_log_run(send_end=True, clear_buffers=False)
             self.refresh_sessions()
+
+        # Step 3: Clear in-memory buffers + UI
         self.clear_session_logs()
         self.clear_live_logs()
+
 
     # ── Session History Methods ──────────────────────────────────────
 
