@@ -219,8 +219,17 @@ void sys_pm_process(void)
         s_pm_status.remaining_min       = 0;
     }
 
-    // IMU Sensor Telemetry (Temporarily disabled to avoid SPI mutex conflicts)
-    s_pm_status.values[PM_CH_IMU_TEMP] = 30.0f;
+    // IMU Sensor Telemetry
+    if (sys_pm_imu_required() && (s_pm_status.init_mask & PM_INIT_IMU_BIT)) {
+        float imu_temp = 0.0f;
+        if (bsp_imu_get_temp(&imu_temp) == BSP_IMU_OK) {
+            s_pm_status.values[PM_CH_IMU_TEMP] = imu_temp;
+        } else {
+            s_pm_status.values[PM_CH_IMU_TEMP] = 0.0f; /* Normal fallback if not active */
+        }
+    } else {
+        s_pm_status.values[PM_CH_IMU_TEMP] = 0.0f;
+    }
 
     /* 3. Threshold Monitoring & Alerting (Skip uninitialized channels) */
     for (int i = 0; i < PM_CH_MAX; i++) {
@@ -332,9 +341,19 @@ static uint32_t sys_pm_make_critical_mask(uint32_t current_errors)
 
 static void sys_pm_update_uwb_telemetry(void)
 {
-    // Temporarily disabled to avoid SPI mutex conflicts
-    s_pm_status.values[PM_CH_UWB_TEMP] = 30.0f;
-    s_pm_status.values[PM_CH_UWB_VBAT] = 3300.0f;
+    if (!(s_pm_status.init_mask & PM_INIT_UWB_BIT)) {
+        s_pm_status.values[PM_CH_UWB_TEMP] = 30.0f;
+        s_pm_status.values[PM_CH_UWB_VBAT] = 3300.0f;
+        return;
+    }
+
+    float uwb_temp = 0.0f;
+    float uwb_vbat = 0.0f;
+
+    if (bsp_uwb_read_temp_vbat(&uwb_temp, &uwb_vbat) == BSP_OK) {
+        s_pm_status.values[PM_CH_UWB_TEMP] = uwb_temp;
+        s_pm_status.values[PM_CH_UWB_VBAT] = uwb_vbat * 1000.0f;
+    }
 }
 
 static void sys_pm_handle_charging(uint32_t critical_errors)
