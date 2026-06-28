@@ -36,6 +36,7 @@ class LogModel(QObject):
 
     log_entry_added = pyqtSignal(dict)
     log_segment_received = pyqtSignal(dict)
+    log_stream_state_changed = pyqtSignal(bool)
 
     def __init__(self, log_repository=None, command_bus=None, parent=None):
         super().__init__(parent)
@@ -75,6 +76,10 @@ class LogModel(QObject):
     def session_logs(self) -> list[dict]:
         return [entry.copy() for entry in self._session_logs]
 
+    @property
+    def is_log_streaming(self) -> bool:
+        return bool(self._log_stream_requested)
+
     def clear_session_logs(self) -> None:
         self._session_logs.clear()
 
@@ -99,6 +104,7 @@ class LogModel(QObject):
         self._tx_counts.clear()
         self._rx_counts.clear()
         shared_app_state.log_streaming = False
+        self.log_stream_state_changed.emit(False)
     def add_live_log(self, timestamp: str, level: str, source: str, message: str) -> dict:
         entry = {
             "timestamp": timestamp or datetime.now().strftime("%H:%M:%S"),
@@ -233,9 +239,9 @@ class LogModel(QObject):
 
     def request_log_stream(self, force: bool = False) -> bool:
         """Trigger firmware/device log streaming for the current connected device."""
-        if self._log_first_segment_seen:
-            return False
         if self._log_stream_requested and not force:
+            return False
+        if self._log_first_segment_seen and not force:
             return False
         self._log_stream_requested = True
         self._log_first_segment_seen = False
@@ -243,9 +249,36 @@ class LogModel(QObject):
         self._log_poll_retry_count = 0
         shared_app_state.log_streaming = True
         if not self._send_log_poll():
+            self._log_stream_requested = False
+            shared_app_state.log_streaming = False
+            self.log_stream_state_changed.emit(False)
             return False
         self._log_first_segment_deadline = time.monotonic() + self.LOG_POLL_TIMEOUT_S
         log.info("LogModel: Log stream requested. Sent log_data trigger immediately.")
+        self.log_stream_state_changed.emit(True)
+        return True
+
+    def request_log_stop(self, log_type: int = 1, offset: int = 0, length: int = 0) -> bool:
+        """Request firmware to stop/clear the current device log upload."""
+        result = self.send_host_log_packet(
+            "log_clear",
+            dst_addr=VvAddress.MCU,
+            log_type=log_type,
+            offset=offset,
+            length=length,
+        )
+        if not result.get("ok"):
+            log.warning("LogModel: Failed to send log_clear stop request: %s", result.get("error"))
+            return False
+        log.info(
+            "LogModel: Sent log_clear src=%s dst=%s type=%s offset=%s length=%s seq=%s",
+            f"HOST({int(VvAddress.HOST)})",
+            f"MCU({int(VvAddress.MCU)})",
+            log_type,
+            offset,
+            length,
+            result.get("seq"),
+        )
         return True
 
     def stop_log_stream(self) -> None:
@@ -260,6 +293,7 @@ class LogModel(QObject):
         self._deferred_ack_trace_by_ack_seq.clear()
         self._latest_mcu_log_seq = None
         shared_app_state.log_streaming = False
+        self.log_stream_state_changed.emit(False)
     def poll_log_timeout(self) -> bool:
         """Retry log start poll until the first segment arrives, then retry pending ACKs."""
         if not self._log_stream_requested:

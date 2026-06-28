@@ -73,6 +73,7 @@ class DeviceModel(QObject):
         self._connection_status = "Disconnected"
         self._is_scanning = False
         self._pending_connect_mac = ""
+        self._pending_connect_name = ""
         self._session_bootstrap_done = False
         self._session_start_events_done = False
         self._log_stream_requested = False
@@ -111,6 +112,9 @@ class DeviceModel(QObject):
         self._battery_poll_timer.setInterval(2000)
         self._battery_poll_timer.timeout.connect(self._poll_battery_info)
 
+        self._ble_transition_timer = QTimer(self)
+        self._ble_transition_timer.setInterval(500)
+        self._ble_transition_timer.timeout.connect(self._poll_ble_transition_status)
 
         self._session_bootstrap_timer = QTimer(self)
         self._session_bootstrap_timer.setSingleShot(True)
@@ -418,6 +422,14 @@ class DeviceModel(QObject):
     def is_connected(self) -> bool:
         return bool(self._connected_mac)
 
+    @property
+    def connection_status(self) -> str:
+        return self._connection_status
+
+    @property
+    def pending_connect_mac(self) -> str:
+        return self._pending_connect_mac
+
     # ═══════════════════════════════════════════════════════════════════
     #  COMMAND METHODS (called by ViewModel)
     # ═══════════════════════════════════════════════════════════════════
@@ -660,72 +672,86 @@ class DeviceModel(QObject):
     def connect_device(self, mac_hex: str):
         """
         Connect to a device from the advertising list.
-        Flow: ble_disconnect old (if any) → delay → stop_scan → delay → ble_connect new
+        Flow: if another device is active, send ble_disconnect and wait until
+        dongle reports a non-connected BLE state before sending ble_connect.
         """
+        mac_hex = self._normalize_mac(mac_hex)
         if not mac_hex:
             return
 
         log.info("Connect request: %s", mac_hex)
         name = self._adv_devices.get(mac_hex, {}).get("name", "Unknown")
 
-        # Guard: Ignore if already connected to this exact device
-        if self._connected_mac == mac_hex:
+        if self._connected_mac == mac_hex and self._connection_status == "Connected":
             log.info("Already connected to %s. Ignoring connect request.", mac_hex)
             return
 
-        # Cancel any pending connect
+        if self._connection_status == "Connecting" and self._connected_mac == mac_hex:
+            log.info("Connect to %s already in progress.", mac_hex)
+            return
+
         self._pending_connect_mac = mac_hex
+        self._pending_connect_name = name
 
-        delay_ms = 0
-        # 1) If already connected to a different device, disconnect first
-        if self._connected_mac:
-            try:
-                self._send_command(
-                    "ble_disconnect", 
-                    src_addr=self._protocol.pb.PACKET_ADDR_HOST, 
-                    dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
-                )
-            except Exception:
-                pass
-            
-            # Emit disconnecting state immediately
-            self.connection_state_changed.emit({
-                "name": self._connected_name, "mac": self._connected_mac, "status": "Disconnecting"
-            })
-            self._connection_status = "Disconnecting"
-            self._connected_mac = ""
-            self._connected_name = ""
-            self._session_bootstrap_done = False
-            self._session_start_events_done = False
-            self._log_stream_requested = False
-            self._session_start_scheduled = False
-            self._connected_grace_until = 0.0
-            self._ble_status_timer.stop()
-            self._session_bootstrap_timer.stop()
-            self._reset_time_sync_flow()
-            delay_ms = 150 # Reduced delay
+        if self._connected_mac and self._connected_mac != mac_hex:
+            log.info("Switching BLE target: disconnect current %s before connecting %s", self._connected_mac, mac_hex)
+            self.disconnect_device()
+            return
 
-        # 2) Stop scan
-        # Delay stop scan slightly if we just disconnected, to avoid command overlap
-        QTimer.singleShot(delay_ms, self.stop_scan)
+        if self._connection_status == "Disconnecting":
+            log.info("Disconnect in progress; pending connect to %s will start after disconnect confirms.", mac_hex)
+            return
 
-        total_delay = delay_ms + 350 # Faster transition (350ms instead of 400ms)
+        if self._connection_status == "Connecting" and self._connected_mac and self._connected_mac != mac_hex:
+            log.info("Connect in progress to %s; waiting for state transition before switching to %s.", self._connected_mac, mac_hex)
+            return
 
-        # 3) After dongle finishes stopping, send ble_connect
-        QTimer.singleShot(total_delay, lambda: self._do_connect(mac_hex, name))
+        self.stop_scan()
+        QTimer.singleShot(350, lambda: self._do_connect(mac_hex, name))
+
+    def disconnect_device(self, reason: int = 0):
+        if not self._connected_mac and self._connection_status != "Connecting":
+            return False
+
+        current_name = self._connected_name or "-"
+        current_mac = self._connected_mac or "-"
+        try:
+            self._send_command(
+                "ble_disconnect",
+                src_addr=self._protocol.pb.PACKET_ADDR_HOST,
+                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
+                reason=reason,
+            )
+            log.info("ble_disconnect sent for %s (%s)", current_name, current_mac)
+        except Exception as exc:
+            log.warning("ble_disconnect failed: %s", exc)
+            return False
+
+        self._connection_status = "Disconnecting"
+        shared_app_state.connection_status = "Disconnecting"
+        self._set_background_polling_enabled(False)
+        self._session_bootstrap_timer.stop()
+        self._reset_time_sync_flow()
+        self.connection_state_changed.emit({
+            "name": current_name,
+            "mac": current_mac,
+            "status": "Disconnecting",
+        })
+        if not self._ble_transition_timer.isActive():
+            self._ble_transition_timer.start()
+        return True
 
     def _do_connect(self, mac_hex: str, name: str):
         """Actually send ble_connect after scan has stopped."""
-        # Guard: make sure this is still the intended connect
         if self._pending_connect_mac != mac_hex:
             return
 
         try:
             mac_bytes = bytes.fromhex(mac_hex.replace(":", ""))
             self._send_command(
-                "ble_connect", 
-                src_addr=self._protocol.pb.PACKET_ADDR_HOST, 
-                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL, 
+                "ble_connect",
+                src_addr=self._protocol.pb.PACKET_ADDR_HOST,
+                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
                 mac_address=mac_bytes
             )
             log.info("ble_connect sent for %s (%s)", name, mac_hex)
@@ -733,16 +759,15 @@ class DeviceModel(QObject):
             log.error("ble_connect failed: %s", e)
             return
 
-        # Update state + emit UI status
         self._connected_mac = mac_hex
         self._connected_name = name
         self._connection_status = "Connecting"
+        shared_app_state.connection_status = "Connecting"
         self.connection_state_changed.emit({
             "name": name, "mac": mac_hex, "status": "Connecting"
         })
-
-        # Clear pending
-        self._pending_connect_mac = ""
+        if not self._ble_transition_timer.isActive():
+            self._ble_transition_timer.start()
 
     def on_connection_lost(self):
         """Called when dongle is physically disconnected."""
@@ -760,6 +785,7 @@ class DeviceModel(QObject):
         self._prune_timer.stop()
         self._ble_status_timer.stop()
         self._battery_poll_timer.stop()
+        self._ble_transition_timer.stop()
         self._session_bootstrap_timer.stop()
         self._reset_time_sync_flow()
         self._pending_target_operation = None
@@ -863,7 +889,6 @@ class DeviceModel(QObject):
         state = getattr(resp, 'state', 0)
         rssi = getattr(resp, 'rssi_dbm', 0)
 
-        # Log received BLE status state on terminal
         BLE_STATE_NAMES = {
             0: "UNSPECIFIED",
             1: "IDLE",
@@ -880,14 +905,24 @@ class DeviceModel(QObject):
             "rssi_dbm": rssi,
         }
         self.ble_status_parsed.emit(ble_info)
-        
-        # Write to Shared App State
+
         curr_ble = shared_app_state.ble_status
         curr_ble.update(ble_info)
         shared_app_state.ble_status = curr_ble
 
-        # ── Connection state machine ────────────────────────────────
         pb = self._protocol.pb
+
+        if state == pb.BLE_STATE_CONNECTING and self._connected_mac:
+            if self._connection_status != "Connecting":
+                log.info("Dongle reported BLE_STATE_CONNECTING for %s.", self._connected_mac)
+                self._connection_status = "Connecting"
+                shared_app_state.connection_status = "Connecting"
+                self.connection_state_changed.emit({
+                    "name": self._connected_name or self._pending_connect_name or "-",
+                    "mac": self._connected_mac or self._pending_connect_mac or "-",
+                    "status": "Connecting",
+                })
+            return
 
         if state == pb.BLE_STATE_CONNECTED and self._connected_mac:
             log.info("Dongle confirmed BLE_STATE_CONNECTED.")
@@ -897,6 +932,8 @@ class DeviceModel(QObject):
                 self._session_start_events_done = False
                 self._log_stream_requested = False
                 shared_app_state.connection_status = "Connected"
+                self._pending_connect_mac = ""
+                self._pending_connect_name = ""
                 dev_info = shared_app_state.connected_device
                 dev_info.update({"name": self._connected_name, "mac": self._connected_mac})
                 shared_app_state.connected_device = dev_info
@@ -907,14 +944,10 @@ class DeviceModel(QObject):
                     "status": "Connected",
                     "SwitchToLogTab": True,
                 })
-                
-                # Start/Restart background polling unless Communication test mode is active
+
                 self._set_background_polling_enabled(True)
 
-                # NOTE: Do NOT auto-start scan here.
-                # Scanning causes dongle firmware to exit CONNECTED LED state.
-                # User can manually start scan from UI if needed.
-
+            self._ble_transition_timer.stop()
             QTimer.singleShot(250, self._run_pending_target_operation)
 
         elif self._connected_mac and state not in (
@@ -922,7 +955,18 @@ class DeviceModel(QObject):
             pb.BLE_STATE_CONNECTING,
             pb.BLE_STATE_SCANNING,
         ):
-            log.warning("BLE state changed to %d while device was connected — lost connection.", state)
+            previous_name = self._connected_name
+            previous_mac = self._connected_mac
+            next_mac = self._pending_connect_mac
+            next_name = self._pending_connect_name
+            switch_requested = bool(next_mac and next_mac != previous_mac)
+
+            log.warning(
+                "BLE state changed to %d while device was connected/disconnecting; current=%s next=%s.",
+                state,
+                previous_mac,
+                next_mac or "-",
+            )
             self._connected_mac = ""
             self._connected_name = ""
             self._connection_status = "Disconnected"
@@ -933,14 +977,26 @@ class DeviceModel(QObject):
             shared_app_state.connection_status = "Disconnected"
             shared_app_state.connected_device = {}
             self._ble_status_timer.stop()
+            self._battery_poll_timer.stop()
+            self._ble_transition_timer.stop()
             self._session_bootstrap_timer.stop()
             self._reset_time_sync_flow()
             self._pending_target_operation = None
             self.connection_state_changed.emit({
-                "name": "-", "mac": "-", "status": "Disconnected"
+                "name": previous_name or "-", "mac": previous_mac or "-", "status": "Disconnected"
             })
-            # Restart scan so user can find it again
-            self.start_scan()
+
+            if switch_requested:
+                log.info(
+                    "BLE disconnect confirmed for %s. Scheduling connect to %s after 1000 ms.",
+                    previous_mac,
+                    next_mac,
+                )
+                QTimer.singleShot(1000, lambda: self._do_connect(next_mac, next_name))
+            else:
+                self._pending_connect_mac = ""
+                self._pending_connect_name = ""
+                self.start_scan()
 
     def _poll_ble_status(self):
         """Poll BLE status only when no higher-priority stream is active."""
@@ -954,6 +1010,15 @@ class DeviceModel(QObject):
             self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
         except Exception as e:
             log.error("Failed to send ble_status_get: %s", e)
+
+    def _poll_ble_transition_status(self):
+        if self._connection_status not in ("Connecting", "Disconnecting"):
+            self._ble_transition_timer.stop()
+            return
+        try:
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+        except Exception as exc:
+            log.error("Failed to poll transition ble_status_get: %s", exc)
 
     def _poll_battery_info(self):
         """Poll battery info periodically for the connected device."""
@@ -1125,22 +1190,32 @@ class DeviceModel(QObject):
             "device_type": getattr(res, 'device', 0),
             "device_id": getattr(res, 'device_id', 0),
             "bat_soc_percent": getattr(res, 'bat_soc_percent', 0),
-            "local_timestamp_ms": getattr(res, 'local_timestamp_ms', 0),
+            "local_timestamp_s": getattr(res, 'local_timestamp_s', 0),
+            "local_timestamp_ms": int(getattr(res, 'local_timestamp_s', 0) or 0) * 1000,
             "status_flags": getattr(res, 'status_flags', 0),
             "warning_count": getattr(res, 'warning_count', 0),
             "error_count": getattr(res, 'error_count', 0),
             "last_seen": time.monotonic()
         }
         self._adv_status_by_device_id[res.device_id] = status_data
-        
+
         self._emit_merged_scan_data()
 
     def _emit_merged_scan_data(self):
         """Merge scan results + adv_status and emit."""
         merged_list = []
         for d in self._adv_devices.values():
-            sn = d.get("serial_number")
-            adv_status = self._adv_status_by_device_id.get(sn, {}) if sn else {}
+            serial_number = int(d.get("serial_number") or 0)
+            adv_status = {}
+            device_id = int(d.get("device_id") or 0)
+            for candidate in (
+                device_id,
+                serial_number,
+                serial_number & 0xFFFF if serial_number else 0,
+            ):
+                if candidate and candidate in self._adv_status_by_device_id:
+                    adv_status = self._adv_status_by_device_id.get(candidate, {})
+                    break
             item = d.copy()
             item.update(adv_status)
             merged_list.append(item)

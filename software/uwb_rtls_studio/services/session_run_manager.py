@@ -8,6 +8,7 @@ from typing import Any
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from common import protocol_pb2 as pb
+from common.transport import VvAddress
 from models.session_model import SessionModel, StreamRunState
 from repository.session_repository import SessionRepository
 from utils.app_state import shared_app_state
@@ -172,6 +173,15 @@ class SessionRunManager(QObject):
         if not self.device_info_vm:
             return
         try:
+            reason_name = pb.session_end_reason_t.Name(reason)
+            stop_target = "log" if reason == pb.SESSION_END_REASON_LOG_DATA else "ranging" if reason == pb.SESSION_END_REASON_RANGING_RESULTS else "unknown"
+            log.info(
+                "Sending end_session: reason=%s src=%s dst=%s action=stop_%s",
+                reason_name,
+                f"HOST({int(VvAddress.HOST)})",
+                f"MCU({int(VvAddress.MCU)})",
+                stop_target,
+            )
             self.device_info_vm.request_end_session(reason=reason)
         except Exception as exc:
             log.warning("Failed to send end_session(%s): %s", reason, exc)
