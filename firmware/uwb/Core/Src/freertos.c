@@ -868,6 +868,11 @@ bool app_rtos_is_ranging_enabled(void)
     return g_ranging_enabled;
 }
 
+void app_rtos_apply_ranging_enabled(bool enabled)
+{
+    apply_ranging_enabled(sys_config_get(), enabled);
+}
+
 static void drain_signal_semaphore(osSemaphoreId_t sem)
 {
     if (sem == NULL) {
