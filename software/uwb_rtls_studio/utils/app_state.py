@@ -26,7 +26,7 @@ QUERY_TIMEOUT_S = 1.0          # Time to wait for expected response (seconds)
 QUERY_MAX_RETRIES = 3          # Maximum attempts per command on timeout
 
 # Polling intervals in milliseconds
-POLL_BATTERY_MS = 30000        # Battery polling interval (30s)
+POLL_BATTERY_MS = 10000        # Battery polling interval (10s)
 POLL_BLE_STATUS_MS = 5000      # BLE status polling interval (5s)
 POLL_RANGING_STATUS_MS = 5000  # Ranging statistics polling interval (5s)
 POLL_CALIB_STATUS_MS = 2000    # Calibration progress polling interval (2s)
@@ -373,6 +373,7 @@ class SharedAppState(QObject):
 
     def enqueue_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
         """Add a query to the sequential execution queue."""
+        traffic_class = kwargs.pop("traffic_class", kwargs.pop("_traffic_class", ""))
         if self._manual_test_mode_enabled:
             log.debug("[SharedAppState] Query skipped by manual test mode: %s", command_name)
             return
@@ -381,10 +382,25 @@ class SharedAppState(QObject):
             log.info("[SharedAppState] Query skipped by command flag: %s", command_name)
             return
 
+        try:
+            from services.traffic_scheduler import shared_traffic_scheduler
+            decision = shared_traffic_scheduler.allow_command(
+                command_name,
+                traffic_class=traffic_class,
+                force=traffic_class != "background",
+            )
+            if not decision.allowed:
+                log.debug("[SharedAppState] Query skipped by traffic scheduler: %s (%s)", command_name, decision.reason)
+                return
+        except ImportError:
+            pass
+
         if not hasattr(self, '_query_manager') or not self._query_manager:
             log.warning("[SharedAppState] Query manager not initialized. Can't enqueue.")
             return
         
+        if traffic_class:
+            kwargs["traffic_class"] = traffic_class
         self._query_manager.add_query(command_name, dst_addr, **kwargs)
         if not self._query_manager.is_running:
             self.update_job("query_queue", JobState.RUNNING)

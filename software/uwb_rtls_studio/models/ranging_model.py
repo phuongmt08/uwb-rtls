@@ -84,6 +84,8 @@ log = logging.getLogger(__name__)
 
 # Maximum number of position samples to keep in history
 _MAX_HISTORY_SIZE = 100000
+RANGING_UI_EMIT_INTERVAL_S = 0.05
+RANGING_STATS_EMIT_INTERVAL_S = 0.20
 
 
 class RangingModel(QObject):
@@ -126,6 +128,10 @@ class RangingModel(QObject):
         }
         self._last_result_time = 0.0
         self._last_fusion_sample: dict | None = None
+        self._last_position_emit_at = 0.0
+        self._last_fusion_emit_at = 0.0
+        self._last_anchor_emit_at = 0.0
+        self._last_stats_emit_at = 0.0
 
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(POLL_RANGING_STATUS_MS)
@@ -199,6 +205,7 @@ class RangingModel(QObject):
             dst_addr=VvAddress.MCU,
             cache_ttl_s=0.0,
             force=force,
+            traffic_class="background",
         )
 
     def set_anchor_layout(self, anchors: list):
@@ -220,6 +227,10 @@ class RangingModel(QObject):
         }
         self._last_result_time = 0.0
         self._last_fusion_sample = None
+        self._last_position_emit_at = 0.0
+        self._last_fusion_emit_at = 0.0
+        self._last_anchor_emit_at = 0.0
+        self._last_stats_emit_at = 0.0
         shared_app_state.ranging_stats = self._stats.copy()
 
     # ── Packet handler ───────────────────────────────────────────────
@@ -336,20 +347,10 @@ class RangingModel(QObject):
                 self._stats["update_rate_hz"] = round(1.0 / dt, 1)
         self._last_result_time = now
 
-        # Emit position
-        self.position_updated.emit(
-            sample["x_m"],
-            sample["y_m"],
-            sample["z_m"],
-            sample["rms_error_m"],
-        )
-
+        self._emit_position_if_due(sample, now=now)
         if anchors:
-            self.anchor_distances_updated.emit(anchors)
-
-        # Emit updated stats
-        self.stats_updated.emit(self._stats.copy())
-        shared_app_state.ranging_stats = self._stats.copy()
+            self._emit_anchor_distances_if_due(anchors, now=now)
+        self._emit_stats_if_due(now=now)
 
     def _handle_sensor_fusion_result(self, res, seq: int = 0, packet_timestamp_ms: int = 0):
         room_frame = self._extract_room_frame_fields(res)
@@ -445,13 +446,8 @@ class RangingModel(QObject):
                 self._stats["update_rate_hz"] = round(1.0 / dt, 1)
         self._last_result_time = now
 
-        x = stored.get("x_m", stored.get("x", 0.0))
-        y = stored.get("y_m", stored.get("y", 0.0))
-        z = stored.get("z_m", stored.get("z", 0.0))
-        rms = stored.get("rms_error_m", stored.get("rms", 0.0))
-        self.position_updated.emit(x, y, z, rms)
-        self.stats_updated.emit(self._stats.copy())
-        shared_app_state.ranging_stats = self._stats.copy()
+        self._emit_position_if_due(stored, now=now)
+        self._emit_stats_if_due(now=now)
 
     def _handle_sensor_fusion_sample(self, sample: dict):
         enriched = sample.copy()
@@ -477,9 +473,44 @@ class RangingModel(QObject):
         self._last_fusion_sample = enriched.copy()
         self._fusion_history.append(enriched.copy())
         self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
-        self.sensor_fusion_updated.emit(enriched)
-        self.stats_updated.emit(self._stats.copy())
-        shared_app_state.ranging_stats = self._stats.copy()
+        now = enriched.get("received_at", time.time())
+        self._emit_sensor_fusion_if_due(enriched, now=now)
+        self._emit_stats_if_due(now=now)
+
+    def _should_emit(self, attr_name: str, now: float, interval_s: float) -> bool:
+        last = float(getattr(self, attr_name, 0.0) or 0.0)
+        if last <= 0.0 or now - last >= interval_s:
+            setattr(self, attr_name, now)
+            return True
+        return False
+
+    def _emit_position_if_due(self, sample: dict, now: float | None = None) -> None:
+        now = time.time() if now is None else float(now)
+        if not self._should_emit("_last_position_emit_at", now, RANGING_UI_EMIT_INTERVAL_S):
+            return
+        self.position_updated.emit(
+            float(sample.get("x_m", sample.get("x", 0.0))),
+            float(sample.get("y_m", sample.get("y", 0.0))),
+            float(sample.get("z_m", sample.get("z", 0.0))),
+            float(sample.get("rms_error_m", sample.get("rms", 0.0))),
+        )
+
+    def _emit_sensor_fusion_if_due(self, sample: dict, now: float | None = None) -> None:
+        now = time.time() if now is None else float(now)
+        if self._should_emit("_last_fusion_emit_at", now, RANGING_UI_EMIT_INTERVAL_S):
+            self.sensor_fusion_updated.emit(sample.copy())
+
+    def _emit_anchor_distances_if_due(self, anchors: list, now: float | None = None) -> None:
+        now = time.time() if now is None else float(now)
+        if self._should_emit("_last_anchor_emit_at", now, RANGING_UI_EMIT_INTERVAL_S):
+            self.anchor_distances_updated.emit(anchors)
+
+    def _emit_stats_if_due(self, now: float | None = None, force: bool = False) -> None:
+        now = time.time() if now is None else float(now)
+        if force or self._should_emit("_last_stats_emit_at", now, RANGING_STATS_EMIT_INTERVAL_S):
+            snapshot = self._stats.copy()
+            self.stats_updated.emit(snapshot)
+            shared_app_state.ranging_stats = snapshot
 
     def build_session_samples(self) -> list[dict]:
         """Return a combined, time-ordered snapshot for session export."""
@@ -498,7 +529,7 @@ class RangingModel(QObject):
         return samples
 
     def _handle_anchor_distances(self, anchors: list):
-        self.anchor_distances_updated.emit(anchors)
+        self._emit_anchor_distances_if_due(anchors)
 
     def _handle_anchor_layout_data(self, anchors: list):
         self._anchor_layout = list(anchors)
@@ -507,5 +538,4 @@ class RangingModel(QObject):
 
     def _handle_stats_data(self, stats: dict):
         self._stats.update(stats)
-        self.stats_updated.emit(self._stats.copy())
-        shared_app_state.ranging_stats = self._stats.copy()
+        self._emit_stats_if_due(force=True)

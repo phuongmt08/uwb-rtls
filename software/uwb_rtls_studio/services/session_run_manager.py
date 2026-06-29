@@ -11,6 +11,7 @@ from common import protocol_pb2 as pb
 from common.transport import VvAddress
 from models.session_model import SessionModel, StreamRunState
 from repository.session_repository import SessionRepository
+from services.traffic_scheduler import shared_traffic_scheduler
 from utils.app_state import shared_app_state
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class SessionRunManager(QObject):
 
     def close_ranging_run(self, send_end: bool = True) -> tuple[str, list[str]]:
         session_id = self.ensure_session()
+        shared_traffic_scheduler.begin_closing()
         run = self.session_model.active_run("ranging")
         if not run:
             return session_id, []
@@ -91,6 +93,7 @@ class SessionRunManager(QObject):
 
     def close_log_run(self, send_end: bool = True, clear_buffers: bool = False) -> tuple[str, list[str]]:
         session_id = self.ensure_session()
+        shared_traffic_scheduler.begin_closing()
         run = self.session_model.active_run("log")
         logs = self._collect_logs()
         if self.log_model:

@@ -445,6 +445,8 @@ class LiveTrackingPeripheralSimulator:
         seq = pkt.hdr.seq
         print(f"[Simulator] RX {param_name} seq={seq} src={src} dst={dst}")
 
+        if param_name == "ack":
+            return
         if param_name == "device_information_get":
             self._send_device_info_resp(src, seq)
             return

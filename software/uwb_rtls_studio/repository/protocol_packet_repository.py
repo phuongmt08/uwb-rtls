@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 
-from data.raw_packet import RawPacket
 from data.raw_packet_store import shared_raw_packet_store
 from utils.app_state import shared_app_state
 
@@ -24,7 +23,7 @@ class ProtocolPacketRepository:
         self._repositories.append(repository)
 
     def handle_packet(self, param_name: str, pkt) -> None:
-        shared_raw_packet_store.append(RawPacket.from_proto(param_name, pkt))
+        shared_raw_packet_store.append_proto_async(param_name, pkt)
         if shared_app_state.manual_test_mode_enabled:
             return
         for repository in self._repositories:

@@ -17,6 +17,7 @@ from typing import Any
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from common.commands import CommandCatalog, default_destination_for
+from services.traffic_scheduler import shared_traffic_scheduler
 from utils.app_state import shared_app_state
 from utils.command_flags import is_command_enabled
 
@@ -64,6 +65,7 @@ class CommandBus(QObject):
         pending request already covers the caller's need.
         """
         manual_bypass = kwargs.pop("manual_bypass", False)
+        traffic_class = kwargs.pop("traffic_class", kwargs.pop("_traffic_class", ""))
         if getattr(self, "manual_test_mode_enabled", False) and not manual_bypass:
             log.debug("Command blocked by manual test mode: %s", command_name)
             return False
@@ -72,13 +74,22 @@ class CommandBus(QObject):
             log.info("Command skipped by flag: %s", command_name)
             return False
 
+        decision = shared_traffic_scheduler.allow_command(
+            command_name,
+            traffic_class=traffic_class,
+            force=force,
+        )
+        if not decision.allowed:
+            log.debug("Command deferred by traffic scheduler: %s (%s)", command_name, decision.reason)
+            return False
+
         ttl = self.DEFAULT_CACHE_TTL_S if cache_ttl_s is None else cache_ttl_s
         try:
             expected_response = self._catalog.expected_response_for(command_name)
         except KeyError:
             expected_response = ""
         if not expected_response:
-            self.send(command_name, dst_addr=dst_addr, manual_bypass=manual_bypass, **kwargs)
+            self.send(command_name, dst_addr=dst_addr, manual_bypass=manual_bypass, traffic_class=traffic_class, **kwargs)
             return True
 
         now = time.monotonic()
@@ -95,18 +106,34 @@ class CommandBus(QObject):
 
         self._pending[expected_response] = now + self.PENDING_TTL_S
         target_addr = default_destination_for(command_name) if dst_addr is None else dst_addr
-        shared_app_state.enqueue_query(command_name, dst_addr=target_addr, **kwargs)
+        shared_app_state.enqueue_query(
+            command_name,
+            dst_addr=target_addr,
+            traffic_class=traffic_class,
+            **kwargs,
+        )
         self.command_sent.emit(command_name)
         return True
 
     def send(self, command_name: str, dst_addr: int | None = None, **kwargs: Any):
         manual_bypass = kwargs.pop("manual_bypass", False)
+        traffic_class = kwargs.pop("traffic_class", kwargs.pop("_traffic_class", ""))
         if getattr(self, "manual_test_mode_enabled", False) and not manual_bypass:
             log.debug("Command blocked by manual test mode: %s", command_name)
             return None
 
         if not is_command_enabled(command_name):
             log.info("Command skipped by flag: %s", command_name)
+            return None
+
+
+        decision = shared_traffic_scheduler.allow_command(
+            command_name,
+            traffic_class=traffic_class,
+            force=traffic_class != "background",
+        )
+        if not decision.allowed:
+            log.debug("Command skipped by traffic scheduler: %s (%s)", command_name, decision.reason)
             return None
 
         self.invalidate_for_command(command_name)

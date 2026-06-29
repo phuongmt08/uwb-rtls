@@ -109,7 +109,7 @@ class DeviceModel(QObject):
         self._ble_status_timer.timeout.connect(self._poll_ble_status)
 
         self._battery_poll_timer = QTimer(self)
-        self._battery_poll_timer.setInterval(2000)
+        self._battery_poll_timer.setInterval(10000)
         self._battery_poll_timer.timeout.connect(self._poll_battery_info)
 
         self._ble_transition_timer = QTimer(self)
@@ -1007,7 +1007,7 @@ class DeviceModel(QObject):
             return
         log.debug("Polling BLE status from dongle...")
         try:
-            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True, traffic_class="background")
         except Exception as e:
             log.error("Failed to send ble_status_get: %s", e)
 
@@ -1016,7 +1016,7 @@ class DeviceModel(QObject):
             self._ble_transition_timer.stop()
             return
         try:
-            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True, traffic_class="connection")
         except Exception as exc:
             log.error("Failed to poll transition ble_status_get: %s", exc)
 
@@ -1025,7 +1025,7 @@ class DeviceModel(QObject):
         if not self._connected_mac:
             return
         try:
-            self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
+            self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True, traffic_class="background")
         except Exception as e:
             log.error("Failed to send battery_info_get: %s", e)
 
