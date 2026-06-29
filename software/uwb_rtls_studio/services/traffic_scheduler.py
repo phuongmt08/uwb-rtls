@@ -44,8 +44,6 @@ class TrafficScheduler(QObject):
         "battery_info_get",
         "ble_status_get",
         "ranging_status_get",
-        "rtos_resource_get",
-        "rtos_task_stats_get",
     }
 
     STREAM_CONTROL_COMMANDS = {
