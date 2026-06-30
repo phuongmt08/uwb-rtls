@@ -11,7 +11,7 @@ import logging
 import time
 from datetime import datetime
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from common.transport import VvAddress
 from utils.app_state import shared_app_state
@@ -24,6 +24,8 @@ PACKET_TRACE_NAME_WIDTH = 18
 PACKET_TRACE_COUNT_WIDTH = 5
 PACKET_TRACE_SEQ_WIDTH = 5
 PACKET_TRACE_ADDR_WIDTH = 13
+LOG_UI_FLUSH_INTERVAL_MS = 100
+LOG_UI_MAX_ENTRIES_PER_FLUSH = 5
 
 
 class LogModel(QObject):
@@ -44,7 +46,12 @@ class LogModel(QObject):
         self._command_bus = command_bus
         self._live_logs: list[dict] = []
         self._session_logs: list[dict] = []
+        self._pending_ui_log_entries: list[dict] = []
+        self._log_ui_flush_timer = QTimer(self)
+        self._log_ui_flush_timer.setInterval(LOG_UI_FLUSH_INTERVAL_MS)
+        self._log_ui_flush_timer.timeout.connect(self._flush_pending_log_entries)
         self._log_stream_requested = False
+        self._log_stream_suppressed_after_stop = False
         self._log_first_segment_seen = False
         self._log_stream_started_at = 0.0
         self._log_first_segment_deadline = 0.0
@@ -89,6 +96,7 @@ class LogModel(QObject):
     def clear_live_logs(self) -> None:
         self._live_logs.clear()
         self._log_stream_requested = False
+        self._log_stream_suppressed_after_stop = False
         self._log_first_segment_seen = False
         self._log_stream_started_at = 0.0
         self._log_first_segment_deadline = 0.0
@@ -103,6 +111,8 @@ class LogModel(QObject):
         self._latest_mcu_log_seq = None
         self._tx_counts.clear()
         self._rx_counts.clear()
+        self._pending_ui_log_entries.clear()
+        self._log_ui_flush_timer.stop()
         shared_app_state.log_streaming = False
         self.log_stream_state_changed.emit(False)
     def add_live_log(self, timestamp: str, level: str, source: str, message: str) -> dict:
@@ -172,8 +182,8 @@ class LogModel(QObject):
             log.warning("LogModel: Failed to send developer host packet %s: %s", packet_name, exc)
             return {"ok": False, "error": str(exc)}
 
-    def acknowledge_log_segment(self, segment_info: dict) -> bool:
-        if not self._log_stream_requested:
+    def acknowledge_log_segment(self, segment_info: dict, *, force: bool = False, track_pending: bool = True) -> bool:
+        if not self._log_stream_requested and not force:
             return False
         if not self._command_bus:
             return False
@@ -189,6 +199,8 @@ class LogModel(QObject):
             ack_pkt = commands.ack(VvAddress.HOST, ack_dst, protocol.next_seq())
             ack_pkt.ack.ack_seq = ack_seq
             self._send_packet(protocol, ack_pkt, live_log_ack_after_seq=ack_seq)
+            if not track_pending:
+                return True
             self._pending_log_ack_seq = ack_seq
             self._pending_log_ack_dst = ack_dst
             self._pending_log_ack_sent_at = time.monotonic()
@@ -203,9 +215,17 @@ class LogModel(QObject):
         self._append_entry(entry)
 
     def _on_log_segment_received(self, segment_info: dict) -> None:
-        if not self._log_stream_requested:
-            log.debug("LogModel: Ignoring log segment because log stream is not started.")
+        # Firmware may push log_data without a UI-started stream; still keep it for the session.
+        was_requested = self._log_stream_requested
+        if not was_requested and self._log_stream_suppressed_after_stop:
+            self._print_rx_log_segment(segment_info)
+            self.acknowledge_log_segment(segment_info, force=True, track_pending=False)
+            log.debug("Ignoring late log_data after explicit log stop: seq=%s", segment_info.get("seq", ""))
             return
+        if not was_requested:
+            self._log_stream_requested = True
+            shared_app_state.log_streaming = True
+            self.log_stream_state_changed.emit(True)
         self._log_first_segment_seen = True
         self._latest_mcu_log_seq = int(segment_info.get("seq", 0))
         self._print_rx_log_segment(segment_info)
@@ -219,7 +239,25 @@ class LogModel(QObject):
         safe_entry = dict(entry or {})
         self._live_logs.append(safe_entry)
         self._session_logs.append(safe_entry.copy())
-        self.log_entry_added.emit(safe_entry.copy())
+        self._queue_log_entry_for_ui(safe_entry)
+
+    def _queue_log_entry_for_ui(self, entry: dict) -> None:
+        self._pending_ui_log_entries.append(entry.copy())
+        if not self._log_ui_flush_timer.isActive():
+            self._log_ui_flush_timer.start()
+
+    def _flush_pending_log_entries(self) -> None:
+        if not self._pending_ui_log_entries:
+            self._log_ui_flush_timer.stop()
+            return
+
+        batch = self._pending_ui_log_entries[:LOG_UI_MAX_ENTRIES_PER_FLUSH]
+        del self._pending_ui_log_entries[:LOG_UI_MAX_ENTRIES_PER_FLUSH]
+        for entry in batch:
+            self.log_entry_added.emit(entry.copy())
+
+        if not self._pending_ui_log_entries:
+            self._log_ui_flush_timer.stop()
 
     def _send_log_poll(self) -> bool:
         if not self._command_bus:
@@ -243,6 +281,7 @@ class LogModel(QObject):
             return False
         if self._log_first_segment_seen and not force:
             return False
+        self._log_stream_suppressed_after_stop = False
         self._log_stream_requested = True
         self._log_first_segment_seen = False
         self._log_stream_started_at = time.monotonic()
@@ -284,6 +323,7 @@ class LogModel(QObject):
     def stop_log_stream(self) -> None:
         """Disable firmware log streaming and clear pending log protocol state."""
         self._log_stream_requested = False
+        self._log_stream_suppressed_after_stop = True
         self._log_first_segment_seen = False
         self._log_stream_started_at = 0.0
         self._log_first_segment_deadline = 0.0

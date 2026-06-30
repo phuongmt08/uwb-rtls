@@ -48,6 +48,9 @@ class SessionRepository:
     def get_browser_log_folder(self, session_id: str = "") -> str:
         return os.path.join(BROWSER_LOG_DIR, session_id) if session_id else BROWSER_LOG_DIR
 
+    def get_session_messages_folder(self, session_id: str) -> str:
+        return os.path.join(self.get_session_folder(session_id), "messages")
+
     def session_file_exists(self, session_id: str, filename: str) -> bool:
         if not session_id or not filename:
             return False
@@ -279,8 +282,10 @@ class SessionRepository:
 
         ranging_destination = os.path.join(destination, "ranging")
         log_destination = os.path.join(destination, "log")
+        messages_destination = os.path.join(destination, "messages")
         os.makedirs(ranging_destination, exist_ok=True)
         os.makedirs(log_destination, exist_ok=True)
+        os.makedirs(messages_destination, exist_ok=True)
 
         self._copy_folder_files(self.get_browser_ranging_folder(session_id), ranging_destination)
         self._copy_folder_files(self.get_browser_log_folder(session_id), log_destination)
@@ -294,6 +299,7 @@ class SessionRepository:
         self._copy_folder_files(os.path.join(source, "ranging"), ranging_destination)
         self._copy_folder_files(os.path.join(source, "log"), log_destination)
         self._copy_folder_files(os.path.join(source, "logs"), log_destination)
+        self._copy_folder_files(os.path.join(source, "messages"), messages_destination)
         return destination
 
     def _copy_file_if_exists(self, source_path: str, destination_dir: str) -> bool:
@@ -506,6 +512,19 @@ class SessionRepository:
             return False
 
         return True
+    @staticmethod
+    def _display_time_from_position(pos: dict) -> str:
+        explicit = str(pos.get("time", pos.get("timestamp", "")) or "").strip()
+        if explicit:
+            return explicit
+
+        received_at = float(pos.get("received_at", 0.0) or 0.0)
+        if received_at > 0:
+            try:
+                return datetime.fromtimestamp(received_at).strftime("%d/%m/%Y %H:%M:%S.%f")[:-3]
+            except Exception:
+                return ""
+        return ""
 
     def _write_positions_csv(self, path: str, positions: list[dict]) -> None:
         fieldnames = [
@@ -537,7 +556,7 @@ class SessionRepository:
             for pos in positions:
                 timestamp_ms = int(pos.get("timestamp_ms", 0) or 0)
                 writer.writerow([
-                    pos.get("time", pos.get("timestamp", "")),
+                    self._display_time_from_position(pos),
                     timestamp_ms,
                     int(pos.get("packet_timestamp_ms", 0) or 0),
                     pos.get("seq", 0),

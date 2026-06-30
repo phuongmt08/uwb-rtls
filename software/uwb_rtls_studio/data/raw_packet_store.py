@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import base64
 import json
+import queue
 from collections import deque
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 
 from data.raw_packet import RawPacket, RawSerialChunk
 
@@ -27,18 +28,33 @@ class RawPacketStore:
         self._serial_file = self._runtime_dir / "raw_serial_chunks.jsonl"
         self._packet_file = self._runtime_dir / "raw_packets.jsonl"
         self._parsed_file = self._runtime_dir / "parsed_packets.jsonl"
+        self._capture_generation = 0
+        self._disk_queue: queue.Queue[tuple] = queue.Queue()
         self._prepare_runtime_capture()
+        self._writer_thread = Thread(
+            target=self._disk_write_loop,
+            name="RawPacketStoreWriter",
+            daemon=True,
+        )
+        self._writer_thread.start()
 
     def append(self, packet: RawPacket) -> None:
         with self._lock:
             gap = self._detect_packet_gap(packet)
             self._packets.append(packet)
-            self._append_packet_to_disk(packet, gap=gap)
+            generation = self._capture_generation
+        self._disk_queue.put((generation, "packet", packet, gap))
+
+    def append_proto_async(self, param_name: str, pkt) -> None:
+        with self._lock:
+            generation = self._capture_generation
+        self._disk_queue.put((generation, "proto", param_name, pkt))
 
     def append_serial_chunk(self, chunk: RawSerialChunk) -> None:
         with self._lock:
             self._serial_chunks.append(chunk)
-            self._append_serial_chunk_to_disk(chunk)
+            generation = self._capture_generation
+        self._disk_queue.put((generation, "serial", chunk))
 
     def recent(self) -> list[RawPacket]:
         with self._lock:
@@ -58,6 +74,7 @@ class RawPacketStore:
             self._last_seq_by_route.clear()
             self._packet_gap_count = 0
             self._last_packet_gap = None
+            self._capture_generation += 1
             self._prepare_runtime_capture()
 
     def stats(self) -> dict:
@@ -102,6 +119,42 @@ class RawPacketStore:
         self._serial_file.write_text("", encoding="utf-8")
         self._packet_file.write_text("", encoding="utf-8")
         self._parsed_file.write_text("", encoding="utf-8")
+
+    def _disk_write_loop(self) -> None:
+        while True:
+            item = self._disk_queue.get()
+            if item is None:
+                break
+            if not item:
+                continue
+
+            generation = item[0]
+            kind = item[1]
+            with self._lock:
+                if generation != self._capture_generation:
+                    continue
+
+            if kind == "serial":
+                self._append_serial_chunk_to_disk(item[2])
+                continue
+
+            if kind == "packet":
+                self._append_packet_to_disk(item[2], gap=item[3])
+                continue
+
+            if kind == "proto":
+                packet = RawPacket.from_proto(item[2], item[3])
+                with self._lock:
+                    if generation != self._capture_generation:
+                        continue
+                    gap = self._detect_packet_gap(packet)
+                    self._packets.append(packet)
+                self._append_packet_to_disk(packet, gap=gap)
+
+    def close(self) -> None:
+        self._disk_queue.put(None)
+        if self._writer_thread.is_alive():
+            self._writer_thread.join(timeout=1.0)
 
     def _append_serial_chunk_to_disk(self, chunk: RawSerialChunk) -> None:
         record = {

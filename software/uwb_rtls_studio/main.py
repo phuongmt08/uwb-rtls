@@ -58,7 +58,7 @@ setup_logging()
 from data.raw_packet_store import shared_raw_packet_store
 shared_raw_packet_store.stats()
 
-from utils.runtime_mode import is_test_mode, mock_device_identity
+from utils.runtime_mode import is_test_mode, mock_device_identity, mock_rtos_resource, mock_rtos_task_stats
 
 TEST_MODE = is_test_mode()
 
@@ -144,22 +144,13 @@ class MockSerialService(QObject):
                 break
 
     def _client_read_loop(self, client_sock):
-        buffer = bytearray()
         while self._running:
             try:
                 data = client_sock.recv(4096)
                 if not data:
                     break
-                buffer.extend(data)
-                try:
-                    packets = self._proto.decode_from_frames(bytes(buffer))
-                    buffer.clear()
-                    for pkt in packets:
-                        self.handle_incoming_packet(pkt, client_sock=client_sock)
-                except Exception:
-                    # Keep waiting for more data if frame is incomplete
-                    if len(buffer) > 4096:
-                        buffer.clear()
+                # External simulator bytes should enter the same path as real serial RX.
+                self.data_received.emit(data)
             except Exception:
                 break
         
@@ -188,7 +179,7 @@ class MockSerialService(QObject):
                     client.close()
                 except Exception:
                     pass
-
+    # If macro = 1, then the following code block will be included in the final output. If macro = 0, it will be excluded.
     def handle_incoming_packet(self, pkt, client_sock=None):
         param_name = pkt.WhichOneof("params")
         if not param_name:
@@ -539,6 +530,7 @@ def main():
     from repository.session_repository import SessionRepository
     from repository.session_browser import SessionBrowser
     from services.session_run_manager import SessionRunManager
+    from services.session_message_recorder import SessionMessageRecorder
     from models.log_model import LogModel
     from viewmodels.log_viewmodel import LogViewModel
     from viewmodels.config_viewmodel import ConfigViewModel
@@ -571,6 +563,7 @@ def main():
         ranging_model=ranging_model,
         log_model=log_model,
     )
+    session_message_recorder = SessionMessageRecorder(protocol_service, session_repo, session_model)
     log_vm = LogViewModel(session_browser, log_model=log_model, session_run_manager=session_run_manager)
     live_tracking_vm = LiveTrackingViewModel(
         ranging_model,
@@ -627,7 +620,10 @@ def main():
     exit_code = app.exec()
 
     # Cleanup
+    session_message_recorder.close()
+    protocol_service.close()
     serial_service.close()
+    shared_raw_packet_store.close()
     sys.exit(exit_code)
 
 
