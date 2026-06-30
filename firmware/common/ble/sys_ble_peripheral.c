@@ -118,16 +118,16 @@ static void ble_refresh_adv_config(void)
 #ifndef BOOTLOADER
     const sys_config_t *cfg = sys_config_get();
     if (cfg && cfg->uwb.role == DEVICE_ROLE_TAG) {
-        snprintf(name, sizeof(name), "RTLS-Tag-%u", (unsigned int)cfg->uwb.device_id);
+        snprintf(name, sizeof(name), "Tag-%u", (unsigned int)cfg->uwb.device_id);
     } else if (cfg) {
-        snprintf(name, sizeof(name), "RTLS-Anchor-%u", (unsigned int)cfg->uwb.device_id);
+        snprintf(name, sizeof(name), "Anchor-%u", (unsigned int)cfg->uwb.device_id);
     } else {
-        snprintf(name, sizeof(name), "RTLS-Node-%04X", (unsigned int)(sn & 0xFFFFu));
+        snprintf(name, sizeof(name), "Node-%04X", (unsigned int)(sn & 0xFFFFu));
     }
 #else
     protobuf_device_type_t device_type = ble_read_otp_device_type();
     if (device_type == protobuf_DEVICE_TYPE_UNSPECIFIED) {
-        snprintf(name, sizeof(name), "RTLS-BL-%04X", (unsigned int)(sn & 0xFFFFu));
+        snprintf(name, sizeof(name), "BL-%04X", (unsigned int)(sn & 0xFFFFu));
     } else {
         snprintf(name, sizeof(name), "%s-%04X",
                  ble_device_type_prefix(device_type),
