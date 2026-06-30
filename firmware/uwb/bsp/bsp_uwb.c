@@ -29,8 +29,10 @@
 #define DWT_START_RX_DELAYED   1
 #define TX_MAX_PAYLOAD         120
 #define DW1000_CRC_LENGTH      2
-#define DW1000_SLEEP_WAKE_US   800U
-#define DW1000_SLEEP_SETTLE_MS 5U
+#define DW1000_SLEEP_WAKE_US   1200U
+#define DW1000_SLEEP_SETTLE_MS 7U
+#define DW1000_SLEEP_WAKE_RETRIES 3U
+#define DW1000_SLEEP_WAKE_SPI_BYTES 200U
 #define DW1000_SLEEP_MODE      (DWT_CONFIG | DWT_LOADUCODE | DWT_LOADLDO | DWT_LOADOPSET)
 #define DW1000_SLEEP_WAKE_CFG  (DWT_WAKE_CS | DWT_SLP_EN)
 
@@ -180,10 +182,11 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
 
 static void reset_DW1000(void)
 {
+  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
   HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
-  bsp_delay_ms(2);
+  bsp_delay_ms(10);
   HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
-  bsp_delay_ms(2);
+  bsp_delay_ms(10);
 }
 
 static void port_set_dw1000_slowrate(void)
@@ -256,8 +259,9 @@ bsp_err_t bsp_uwb_init(void)
   uint32_t dev_id;
 
   bsp_util_init();
-  reset_DW1000();
+  s_sleeping = false;
   port_set_dw1000_slowrate();
+  reset_DW1000();
 
   /* Load LDE microcode - CRITICAL for accurate RX timestamps */
   if (dwt_initialise(DWT_LOADUCODE) != DWT_SUCCESS)
@@ -286,6 +290,7 @@ bsp_err_t bsp_uwb_init(void)
                    DWT_INT_RXPTO | DWT_INT_RXOVRR | DWT_INT_RFCE | DWT_INT_SFDT |
                    DWT_INT_RPHE | DWT_INT_RFSL, 1);
 
+  s_sleeping = false;
   s_initialized = true;
   return BSP_OK;
 }
@@ -379,6 +384,8 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 
     dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
     dwt_forcetrxoff();
+    configure_dw1000_sleep();
+    dwt_setleds(1);
 
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)",
            cfg->tx_antenna_delay, cfg->rx_antenna_delay);
@@ -697,6 +704,7 @@ bsp_err_t bsp_uwb_sleep_enter(void)
   bsp_uwb_clear_event();
 
   port_set_dw1000_slowrate();
+  configure_dw1000_sleep();
   dwt_entersleep();
   port_set_dw1000_fastrate();
 
@@ -711,24 +719,33 @@ bsp_err_t bsp_uwb_sleep_wake(void)
     return BSP_OK;
   }
 
-  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_RESET);
-  bsp_delay_us(DW1000_SLEEP_WAKE_US);
-  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-  bsp_delay_ms(DW1000_SLEEP_SETTLE_MS);
+  port_set_dw1000_slowrate();
 
-  uint32_t dev_id = dwt_readdevid();
-  if (dev_id != DW1000_DEVICE_ID)
+  uint32_t dev_id = 0U;
+  uint8_t wake_buf[DW1000_SLEEP_WAKE_SPI_BYTES] = {0U};
+  for (uint32_t attempt = 0U; attempt < DW1000_SLEEP_WAKE_RETRIES; attempt++)
   {
-    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
-           "[SLEEP] DW1000 wake verify failed: dev_id=0x%08lX",
-           (unsigned long)dev_id);
-    return BSP_ERR;
+    (void)dwt_spicswakeup(wake_buf, sizeof(wake_buf));
+    bsp_delay_us(DW1000_SLEEP_WAKE_US);
+    bsp_delay_ms(DW1000_SLEEP_SETTLE_MS);
+
+    dev_id = dwt_readdevid();
+    if (dev_id == DW1000_DEVICE_ID)
+    {
+      s_sleeping = false;
+      dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+      dwt_forcetrxoff();
+      dwt_setleds(1);
+      port_set_dw1000_fastrate();
+      return BSP_OK;
+    }
   }
 
-  s_sleeping = false;
-  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
-  dwt_forcetrxoff();
-  return BSP_OK;
+  port_set_dw1000_fastrate();
+  RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+         "[SLEEP] DW1000 wake verify failed: dev_id=0x%08lX",
+         (unsigned long)dev_id);
+  return BSP_ERR;
 }
 
 bool bsp_uwb_is_sleeping(void)
