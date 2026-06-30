@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import List, Optional
 
+from google.protobuf.message import DecodeError
+
 from . import protocol_pb2 as pb
 
 class VvAddress(IntEnum):
-    # Keep values aligned with protocol_pb2 to avoid routing packets to wrong link.
     NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
     MCU = int(pb.PACKET_ADDR_MCU)
     VEHICLE = int(pb.PACKET_ADDR_VEHICLE)

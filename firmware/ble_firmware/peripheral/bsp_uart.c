@@ -11,21 +11,19 @@
 /* Includes ----------------------------------------------------------- */
 #include "bsp_uart.h"
 #include "app_uart.h"
-#include "app_error.h"
-#include "app_util.h"
-#include "boards.h"
-#include <string.h>
 #include "nrf_uart.h"
+#include "nrf_uarte.h"
 #include "nrf_error.h"
 #include "peripheral_io.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
+#include "../ble_common/ble_bridge/bb_debug.h"
 
 /* Private defines ---------------------------------------------------- */
-#define UART_TX_BUF_SIZE 256
-#define UART_RX_BUF_SIZE 256
+#define UART_TX_BUF_SIZE 1024
+#define UART_RX_BUF_SIZE 1024
 #define BLE_NUS_MAX_DATA_LEN 244
 
 /* Private enumerate/structure ---------------------------------------- */
@@ -36,7 +34,6 @@ static bsp_uart_rx_cb_t s_rx_cb = NULL;
 
 /* Private function prototypes ---------------------------------------- */
 static void uart_event_handler(app_uart_evt_t * p_event);
-// static void bsp_uart_read_byte();
 
 /* Function definitions ----------------------------------------------- */
 ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
@@ -53,9 +50,9 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
         .flow_control = APP_UART_FLOW_CONTROL_DISABLED,
         .use_parity   = false,
 #if defined (UART_PRESENT)
-        .baud_rate    = NRF_UART_BAUDRATE_460800
+        .baud_rate    = NRF_UART_BAUDRATE_230400
 #else
-        .baud_rate    = NRF_UARTE_BAUDRATE_460800
+        .baud_rate    = NRF_UARTE_BAUDRATE_230400
 #endif
     };
 
@@ -65,10 +62,10 @@ ret_code_t bsp_uart_init(bsp_uart_rx_cb_t rx_cb)
                        uart_event_handler,
                        APP_IRQ_PRIORITY_LOWEST,
                        err_code);
-    
+
     if (err_code == NRF_SUCCESS)
     {
-        NRF_LOG_INFO("UART module initialized (115200 8N1)");
+        BB_DEBUG_LOG_INFO("UART module initialized in interrupt mode (230400 8N1)");
     }
     
     return err_code;
@@ -95,27 +92,16 @@ ret_code_t bsp_uart_transmit(const uint8_t *buf, uint16_t len)
 }
 
 /* Private definitions ------------------------------------------------ */
-/**@brief UART event handler.
- */
-uint32_t count = 0;
 static void uart_event_handler(app_uart_evt_t * p_event)
 {
     switch (p_event->evt_type)
     {
         case APP_UART_DATA_READY:
-            // NRF_LOG_INFO("Received: %u bytes\n", ++count);
-
-            // bsp_uart_read_byte();
+            bsp_uart_read_byte();
             break;
 
         case APP_UART_COMMUNICATION_ERROR:
-            // NRF_LOG_WARNING("UART Communication Error: 0x%X", p_event->data.error_communication);
-            break;
-
         case APP_UART_FIFO_ERROR:
-            // NRF_LOG_WARNING("UART FIFO Error: 0x%X", p_event->data.error_code);
-            break;
-
         default:
             break;
     }

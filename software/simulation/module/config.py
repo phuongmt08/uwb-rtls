@@ -160,7 +160,7 @@ UART_SOF = 0xAA
 GROUND_TRUTH_D1 = 4.88 * np.sqrt(2)
 GROUND_TRUTH_D2 = 4.88 * np.sqrt(2)
 GROUND_TRUTH_D3 = 4.88 * np.sqrt(2)
-GROUND_TRUTH_D4 = 3.45
+GROUND_TRUTH_D4 = 5.78
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
@@ -183,9 +183,10 @@ LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
 
 # ==================== FUSION FRAME CONFIGURATION ====================
 # Matches firmware uart_fusion_frame_t:
-# sof, length, anchor_mask, tx_frame_cnt,
+# sof, length, tx_frame_cnt,
 # ukf_x, ukf_y, ukf_yaw, tril_x, tril_y, yaw, error_frame_cnt
-FUSION_FRAME_FORMAT = '<BBBI6fI'
+# Position and yaw fields are int16 fixed-point values scaled by 100.
+FUSION_FRAME_FORMAT = '<BBIhhhhhhI'
 FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
 FUSION_FRAME_PAYLOAD_LEN = FUSION_FRAME_SIZE - 2
 

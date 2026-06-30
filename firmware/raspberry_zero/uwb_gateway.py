@@ -13,9 +13,10 @@ from dataclasses import dataclass
 from typing import Optional
 from config import Config
 
-UART_FUSION_PAYLOAD_LEN = 33
-UART_FUSION_FORMAT = '<BBBIffffffI'
+UART_FUSION_FORMAT = '<BBIhhhhhhI'
 UART_FUSION_FRAME_LEN = struct.calcsize(UART_FUSION_FORMAT)
+UART_FUSION_PAYLOAD_LEN = UART_FUSION_FRAME_LEN - 2
+UART_FUSION_LEGACY_PAYLOAD_LEN = UART_FUSION_FRAME_LEN
 
 
 @dataclass
@@ -23,7 +24,6 @@ class UwbFusionFrame:
     """UKF/UWB fusion data frame from STM uart_fusion_frame_t"""
     sof: int
     length: int
-    anchor_mask: int
     tx_frame_cnt: int
     ukf_x: float
     ukf_y: float
@@ -36,7 +36,7 @@ class UwbFusionFrame:
 
     def __str__(self):
         return (
-            f"Fusion(cnt={self.tx_frame_cnt}, mask=0x{self.anchor_mask:02X}, "
+            f"Fusion(cnt={self.tx_frame_cnt}, "
             f"ukf=({self.ukf_x:.3f}, {self.ukf_y:.3f}, {self.ukf_yaw:.2f}deg), "
             f"tril=({self.tril_x:.3f}, {self.tril_y:.3f}), "
             f"yaw={self.yaw:.2f}deg, err_cnt={self.error_frame_cnt})"
@@ -48,7 +48,6 @@ class UwbFusionFrame:
             'type': 'fusion',
             'sof': self.sof,
             'length': self.length,
-            'anchor_mask': self.anchor_mask,
             'tx_frame_cnt': self.tx_frame_cnt,
             'ukf_x': self.ukf_x,
             'ukf_y': self.ukf_y,
@@ -266,6 +265,11 @@ class UwbGateway:
             # Stop the loop
             self.ws_loop.call_soon_threadsafe(self.ws_loop.stop)
             self.logger.info("WebSocket server stopped")
+
+    @staticmethod
+    def _decode_fixed2(value: int) -> float:
+        """Decode int16 fixed-point values with 2 decimal places."""
+        return value / 100.0
     
     def validate_fusion_frame(self, frame: UwbFusionFrame) -> bool:
         """Validate UKF/trilateration fusion frame data"""
@@ -287,9 +291,9 @@ class UwbGateway:
         Parse STM uart_fusion_frame_t only.
         
         Frame:
-            SOF(1) + LEN(1) + AnchorMask(1) + TxCnt(4)
-            + UKF_X(4) + UKF_Y(4) + UKF_Yaw(4)
-            + Tril_X(4) + Tril_Y(4) + Yaw(4) + ErrorCnt(4)
+            SOF(1) + LEN(1) + TxCnt(4)
+            + UKF_X(2) + UKF_Y(2) + UKF_Yaw(2)
+            + Tril_X(2) + Tril_Y(2) + Yaw(2) + ErrorCnt(4)
         
         Args:
             frame_bytes: Raw frame data
@@ -315,7 +319,6 @@ class UwbGateway:
             (
                 sof,
                 length,
-                anchor_mask,
                 tx_frame_cnt,
                 ukf_x,
                 ukf_y,
@@ -326,21 +329,20 @@ class UwbGateway:
                 error_frame_cnt,
             ) = unpacked
 
-            if sof != Config.UWB_SOF or length != UART_FUSION_PAYLOAD_LEN:
+            if sof != Config.UWB_SOF or length not in (UART_FUSION_PAYLOAD_LEN, UART_FUSION_LEGACY_PAYLOAD_LEN):
                 self.logger.debug(f"Invalid fusion header: sof=0x{sof:02X}, length={length}")
                 return None
 
             frame = UwbFusionFrame(
                 sof=sof,
                 length=length,
-                anchor_mask=anchor_mask,
                 tx_frame_cnt=tx_frame_cnt,
-                ukf_x=ukf_x,
-                ukf_y=ukf_y,
-                ukf_yaw=ukf_yaw,
-                tril_x=tril_x,
-                tril_y=tril_y,
-                yaw=yaw,
+                ukf_x=self._decode_fixed2(ukf_x),
+                ukf_y=self._decode_fixed2(ukf_y),
+                ukf_yaw=self._decode_fixed2(ukf_yaw),
+                tril_x=self._decode_fixed2(tril_x),
+                tril_y=self._decode_fixed2(tril_y),
+                yaw=self._decode_fixed2(yaw),
                 error_frame_cnt=error_frame_cnt,
                 timestamp=time.time()
             )
@@ -355,32 +357,18 @@ class UwbGateway:
             self.logger.error(f"Fusion frame parse error: {e}")
             return None
     
-    def send_udp(self, frame: UwbFusionFrame) -> bool:
+    def send_udp(self, frame_bytes: bytes) -> bool:
         """
-        Send parsed fusion frame via UDP as the same 35-byte packed struct.
+        Send the validated fusion frame via UDP without altering its bytes.
         
         Args:
-            frame: UwbFusionFrame object
+            frame_bytes: Raw frame bytes
             
         Returns:
             True if sent successfully, False otherwise
         """
         try:
-            data = struct.pack(
-                UART_FUSION_FORMAT,
-                frame.sof,
-                frame.length,
-                frame.anchor_mask,
-                frame.tx_frame_cnt,
-                frame.ukf_x,
-                frame.ukf_y,
-                frame.ukf_yaw,
-                frame.tril_x,
-                frame.tril_y,
-                frame.yaw,
-                frame.error_frame_cnt
-            )
-            self.udp_socket.sendto(data, (self.udp_host, self.udp_port))
+            self.udp_socket.sendto(frame_bytes, (self.udp_host, self.udp_port))
             self.udp_send_count += 1
             return True
             
@@ -417,7 +405,7 @@ class UwbGateway:
             
             # State 1: Reading Length byte
             if self.parse_index == 1:
-                if byte != UART_FUSION_PAYLOAD_LEN:
+                if byte not in (UART_FUSION_PAYLOAD_LEN, UART_FUSION_LEGACY_PAYLOAD_LEN):
                     self.logger.debug(f"Invalid fusion length byte: {byte}")
                     self.parse_buffer = bytearray()
                     self.parse_index = 0
@@ -443,7 +431,7 @@ class UwbGateway:
                     
                     # Send via UDP
                     if Config.UDP_ENABLED:
-                        if self.send_udp(frame):
+                        if self.send_udp(bytes(self.parse_buffer)):
                             self.logger.debug(f"Sent UDP: {frame}")
                     
                     # Send via WebSocket

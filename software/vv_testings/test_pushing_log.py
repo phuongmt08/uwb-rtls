@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import argparse
 import time
 from datetime import datetime
-from typing import Iterable
+from typing import Dict, Iterable, Optional, Tuple
 
 import serial
 from serial import SerialException
@@ -20,8 +20,20 @@ BAUD_DEFAULT = 115200
 READ_TIMEOUT_S = 0.05
 HOST_ACTIVITY_PING_S = 5.0
 LOG_POLL_PERIOD_S = 1.0
+LOG_ACK_RETRY_PERIOD_S = 1.0
+LOG_ACK_RETRY_MAX_RETRIES = 10  # 0 = retry forever
+PRINT_PACKET_TRACE = False
+PACKET_TRACE_TAG_WIDTH = 7
+PACKET_TRACE_NAME_WIDTH = 18
+PACKET_TRACE_COUNT_WIDTH = 5
+PACKET_TRACE_SEQ_WIDTH = 5
+PACKET_TRACE_ADDR_WIDTH = 13
 MAX_RECORD_LEN = 512
 EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
+
+COLOR_CYAN = "\033[36m"
+COLOR_GRAY = "\033[90m"
+COLOR_RESET = "\033[0m"
 
 
 def packet_name(pkt: pb.packet_t) -> str:
@@ -117,7 +129,15 @@ class LogRealtimeTester:
         self.calibration = calibration
         self.log_parser = FlashLogStreamParser()
         self.last_ping = 0.0
+        self.last_mcu_rx_time = 0.0
         self.last_poll = 0.0
+        self.pending_log_ack_seq: Optional[int] = None
+        self.pending_log_ack_dst: Optional[int] = None
+        self.pending_log_ack_confirm_seq: Optional[int] = None
+        self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_retries = 0
+        self.tx_counts: Dict[str, int] = {}
+        self.rx_counts: Dict[str, int] = {}
         
         self.record = args.record
         self.log_file = None
@@ -142,9 +162,100 @@ class LogRealtimeTester:
             self.uwb_file.close()
 
     def _send_packet(self, pkt: pb.packet_t) -> None:
+        name = packet_name(pkt)
+        self.tx_counts[name] = self.tx_counts.get(name, 0) + 1
+        self._print_tx_packet(pkt, name, self.tx_counts[name])
+
         frame = self.proto.wrap_packet(pkt)
         self.ser.write(frame)
         self.ser.flush()
+
+    @staticmethod
+    def _addr_text(value: int) -> str:
+        try:
+            addr = VvAddress(int(value))
+            return f"{addr.name}({int(addr)})"
+        except (ValueError, TypeError):
+            return f"UNKNOWN({value})"
+
+    @classmethod
+    def _packet_hdr_values(cls, pkt: pb.packet_t) -> Tuple[str, str, str]:
+        try:
+            return (
+                str(pkt.hdr.seq),
+                cls._addr_text(int(pkt.hdr.addr.src)),
+                cls._addr_text(int(pkt.hdr.addr.dst)),
+            )
+        except (AttributeError, TypeError, ValueError):
+            return "?", "?", "?"
+
+    @staticmethod
+    def _packet_extra_text(pkt: pb.packet_t, name: str) -> str:
+        if name == "ack":
+            return f"ack_seq={pkt.ack.ack_seq} response={pkt.ack.response}"
+        if name == "log_clear":
+            return f"type={pkt.log_clear.type} offset={pkt.log_clear.offset} length={pkt.log_clear.length}"
+        if name == "log_data":
+            return f"type={pkt.log_data.type} bytes={len(pkt.log_data.data)}"
+        if name == "host_transport_set":
+            return f"transport={pkt.host_transport_set.transport}"
+        return ""
+
+    def _packet_display_name(self, pkt: pb.packet_t, name: str) -> str:
+        if name != "ack":
+            return name
+
+        try:
+            src = VvAddress(int(pkt.hdr.addr.src))
+            return f"{src.name.lower()}_ack"
+        except (AttributeError, TypeError, ValueError):
+            return name
+
+    def _format_packet_trace(self, tag: str, pkt: pb.packet_t, name: str, count: int) -> str:
+        seq, src, dst = self._packet_hdr_values(pkt)
+        display_name = self._packet_display_name(pkt, name)
+        extra = self._packet_extra_text(pkt, name)
+        suffix = f" {extra}" if extra else ""
+        return (
+            f"{tag:<{PACKET_TRACE_TAG_WIDTH}} "
+            f"{display_name:<{PACKET_TRACE_NAME_WIDTH}} "
+            f"#{count:<{PACKET_TRACE_COUNT_WIDTH}} "
+            f"seq={seq:<{PACKET_TRACE_SEQ_WIDTH}} "
+            f"src={src:<{PACKET_TRACE_ADDR_WIDTH}} "
+            f"dst={dst:<{PACKET_TRACE_ADDR_WIDTH}}"
+            f"{suffix}"
+        )
+
+    def _print_tx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
+        if not PRINT_PACKET_TRACE:
+            return
+
+        if name == "log_data":
+            prefix = "[POLL]"
+            color = COLOR_CYAN
+        elif name == "ack":
+            prefix = "[ACK]"
+            color = COLOR_GRAY
+        elif name == "log_clear":
+            prefix = "[CLEAR]"
+            color = COLOR_GRAY
+        else:
+            prefix = "[TX]"
+            color = COLOR_GRAY
+
+        print(
+            f"{color}{self._format_packet_trace(prefix, pkt, name, count)}{COLOR_RESET}",
+            flush=True,
+        )
+
+    def _print_rx_packet(self, pkt: pb.packet_t, name: str, count: int) -> None:
+        if not PRINT_PACKET_TRACE:
+            return
+
+        print(
+            f"{COLOR_GRAY}{self._format_packet_trace('[RX]', pkt, name, count)}{COLOR_RESET}",
+            flush=True,
+        )
 
     def _build_none(self) -> pb.packet_t:
         pkt = pb.packet_t()
@@ -201,6 +312,38 @@ class LogRealtimeTester:
         pkt.ack.response = pb.PACKET_ACK_RESPONSE_ACK
         return pkt
 
+    def _track_log_ack(self, ack_pkt: pb.packet_t) -> None:
+        self.pending_log_ack_seq = int(ack_pkt.ack.ack_seq)
+        self.pending_log_ack_dst = int(ack_pkt.hdr.addr.dst)
+        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
+        self.pending_log_ack_sent_at = time.time()
+        self.pending_log_ack_retries = 0
+
+    def _clear_pending_log_ack(self) -> None:
+        self.pending_log_ack_seq = None
+        self.pending_log_ack_dst = None
+        self.pending_log_ack_confirm_seq = None
+        self.pending_log_ack_sent_at = 0.0
+        self.pending_log_ack_retries = 0
+
+    def _retry_pending_log_ack(self, now: float) -> None:
+        if self.pending_log_ack_seq is None or self.pending_log_ack_dst is None:
+            return
+
+        last_ack_activity = max(self.pending_log_ack_sent_at, self.last_mcu_rx_time)
+        if now - last_ack_activity < LOG_ACK_RETRY_PERIOD_S:
+            return
+
+        if LOG_ACK_RETRY_MAX_RETRIES > 0 and self.pending_log_ack_retries >= LOG_ACK_RETRY_MAX_RETRIES:
+            self._clear_pending_log_ack()
+            return
+
+        self.pending_log_ack_retries += 1
+        self.pending_log_ack_sent_at = now
+        ack_pkt = self._build_ack(self.pending_log_ack_seq, self.pending_log_ack_dst)
+        self._send_packet(ack_pkt)
+        self.pending_log_ack_confirm_seq = int(ack_pkt.hdr.seq)
+
     def _build_log_clear_all(self) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.hdr.addr.src = self.src
@@ -235,6 +378,22 @@ class LogRealtimeTester:
 
     def _process_packet(self, pkt: pb.packet_t) -> None:
         name = packet_name(pkt)
+        self.rx_counts[name] = self.rx_counts.get(name, 0) + 1
+        self._print_rx_packet(pkt, name, self.rx_counts[name])
+        try:
+            if int(pkt.hdr.addr.src) == int(VvAddress.MCU):
+                self.last_mcu_rx_time = time.time()
+                self.pending_log_ack_retries = 0
+        except (AttributeError, ValueError):
+            pass
+
+        if name == "ack" and self.pending_log_ack_confirm_seq is not None:
+            try:
+                if int(pkt.hdr.addr.src) == int(VvAddress.MCU) and int(pkt.ack.ack_seq) == self.pending_log_ack_confirm_seq:
+                    print(f"[FLOW]  host_ack confirmed by MCU seq={self.pending_log_ack_confirm_seq}")
+                    self._clear_pending_log_ack()
+            except (AttributeError, ValueError):
+                pass
 
         if name == "log_data":
             payload = bytes(pkt.log_data.data)
@@ -279,6 +438,7 @@ class LogRealtimeTester:
 
             ack_pkt = self._build_ack(pkt.hdr.seq, int(pkt.hdr.addr.src))
             self._send_packet(ack_pkt)
+            self._track_log_ack(ack_pkt)
             return
 
         if self.verbose:
@@ -287,12 +447,13 @@ class LogRealtimeTester:
     def loop(self) -> None:
         while True:
             now = time.time()
+            self._retry_pending_log_ack(now)
 
             if now - self.last_ping >= HOST_ACTIVITY_PING_S:
                 self._send_packet(self._build_none())
                 self.last_ping = now
 
-            if now - self.last_poll >= LOG_POLL_PERIOD_S:
+            if self.pending_log_ack_seq is None and now - self.last_poll >= LOG_POLL_PERIOD_S:
                 self._send_packet(self._build_log_data_get())
                 self.last_poll = now
 

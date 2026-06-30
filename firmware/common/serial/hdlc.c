@@ -14,6 +14,16 @@
 
 #define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
 
+static void hdlc_parser_start_frame(hdlc_parser_t *parser)
+{
+    parser->frame.sof = HDLC_SOF;
+    parser->frame.type = 0;
+    parser->frame.len = 0;
+    parser->frame.checksum = 0;
+    parser->data_counter = 0;
+    parser->state = HDLC_PARSER_STATE_TYPE;
+}
+
 void hdlc_parser_init(hdlc_parser_t *parser)
 {
     if (!parser) {
@@ -82,22 +92,33 @@ bool hdlc_parse_byte(hdlc_parser_t *parser, uint8_t byte, hdlc_data_chunk_t *out
     {
     case HDLC_PARSER_STATE_IDLE:
         if (byte == HDLC_SOF) {
-            parser->frame.sof = byte;
-            parser->state = HDLC_PARSER_STATE_TYPE;
+            hdlc_parser_start_frame(parser);
         }
         break;
 
     case HDLC_PARSER_STATE_TYPE:
+        if (byte == HDLC_SOF) {
+            hdlc_parser_start_frame(parser);
+            break;
+        }
         parser->frame.type = byte;
         parser->state = HDLC_PARSER_STATE_LEN_LOW;
         break;
 
     case HDLC_PARSER_STATE_LEN_LOW:
+        if (byte == HDLC_SOF) {
+            hdlc_parser_start_frame(parser);
+            break;
+        }
         parser->frame.len = (uint16_t)byte;
         parser->state = HDLC_PARSER_STATE_LEN_HIGH;
         break;
 
     case HDLC_PARSER_STATE_LEN_HIGH:
+        if (byte == HDLC_SOF) {
+            hdlc_parser_start_frame(parser);
+            break;
+        }
         parser->frame.len |= (uint16_t)((uint16_t)byte << 8U);
         if (parser->frame.len > HDLC_MAX_DATA_LEN) {
             hdlc_parser_reset(parser);
@@ -139,6 +160,9 @@ bool hdlc_parse_byte(hdlc_parser_t *parser, uint8_t byte, hdlc_data_chunk_t *out
         }
 
         hdlc_parser_reset(parser);
+        if (byte == HDLC_SOF) {
+            hdlc_parser_start_frame(parser);
+        }
         break;
     }
 

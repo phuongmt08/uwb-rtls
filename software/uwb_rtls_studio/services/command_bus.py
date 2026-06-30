@@ -1,0 +1,142 @@
+"""
+Shared command bus for all ViewModels.
+
+ViewModels use this instead of calling ProtocolService directly for common
+commands. It provides a thin shared-memory friendly layer:
+  - GET command de-duplication while a matching response is pending.
+  - Short-lived response cache for tabs that need the same state.
+  - A single place to send direct SET/control commands.
+  - Command destination defaults shared with ProtocolService.
+"""
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+from PyQt6.QtCore import QObject, pyqtSignal
+
+from common.commands import CommandCatalog, default_destination_for
+from utils.app_state import shared_app_state
+from utils.command_flags import is_command_enabled
+
+log = logging.getLogger(__name__)
+
+
+class CommandBus(QObject):
+    response_received = pyqtSignal(str, object)
+    cache_hit = pyqtSignal(str, object)
+    command_sent = pyqtSignal(str)
+
+    DEFAULT_CACHE_TTL_S = 2.0
+    PENDING_TTL_S = 2.0
+    INVALIDATE_ON_SEND = {
+        "anchor_layout_set": "anchor_layout_resp",
+        "sys_ranging_cfg_set": "sys_ranging_cfg_resp",
+        "sys_config_set": "sys_config_resp",
+        "sensor_fusion_cfg_set": "sensor_fusion_cfg_resp",
+        "pos_calib_cfg_set": "pos_calib_cfg_resp",
+        "ble_conn_params_set": "ble_conn_params_resp",
+        "time_sync_set": "time_sync_resp",
+    }
+
+    def __init__(self, protocol_service, parent=None):
+        super().__init__(parent)
+        self._protocol = protocol_service
+        self._catalog = CommandCatalog()
+        self._cache: dict[str, tuple[float, object]] = {}
+        self._pending: dict[str, float] = {}
+        self.manual_test_mode_enabled = False
+        self._protocol.packet_received.connect(self._on_packet_received)
+
+    def request(
+        self,
+        command_name: str,
+        dst_addr: int | None = None,
+        cache_ttl_s: float | None = None,
+        force: bool = False,
+        **kwargs: Any,
+    ) -> bool:
+        """
+        Request a command-response packet through the global queue.
+
+        Returns True when a new command is enqueued, False when a fresh cache or
+        pending request already covers the caller's need.
+        """
+        manual_bypass = kwargs.pop("manual_bypass", False)
+        if getattr(self, "manual_test_mode_enabled", False) and not manual_bypass:
+            log.debug("Command blocked by manual test mode: %s", command_name)
+            return False
+
+        if not is_command_enabled(command_name):
+            log.info("Command skipped by flag: %s", command_name)
+            return False
+
+        ttl = self.DEFAULT_CACHE_TTL_S if cache_ttl_s is None else cache_ttl_s
+        try:
+            expected_response = self._catalog.expected_response_for(command_name)
+        except KeyError:
+            expected_response = ""
+        if not expected_response:
+            self.send(command_name, dst_addr=dst_addr, manual_bypass=manual_bypass, **kwargs)
+            return True
+
+        now = time.monotonic()
+        cached = self._cache.get(expected_response)
+        if not force and cached and now - cached[0] <= ttl:
+            log.debug("CommandBus cache hit: %s -> %s", command_name, expected_response)
+            self.cache_hit.emit(expected_response, cached[1])
+            return False
+
+        pending_until = self._pending.get(expected_response, 0.0)
+        if not force and pending_until > now:
+            log.debug("CommandBus dedupe pending: %s waits for %s", command_name, expected_response)
+            return False
+
+        self._pending[expected_response] = now + self.PENDING_TTL_S
+        target_addr = default_destination_for(command_name) if dst_addr is None else dst_addr
+        shared_app_state.enqueue_query(command_name, dst_addr=target_addr, **kwargs)
+        self.command_sent.emit(command_name)
+        return True
+
+    def send(self, command_name: str, dst_addr: int | None = None, **kwargs: Any):
+        manual_bypass = kwargs.pop("manual_bypass", False)
+        if getattr(self, "manual_test_mode_enabled", False) and not manual_bypass:
+            log.debug("Command blocked by manual test mode: %s", command_name)
+            return None
+
+        if not is_command_enabled(command_name):
+            log.info("Command skipped by flag: %s", command_name)
+            return None
+
+        self.invalidate_for_command(command_name)
+        target_addr = default_destination_for(command_name) if dst_addr is None else dst_addr
+        pkt = self._protocol.send_command(command_name, dst_addr=target_addr, **kwargs)
+        self.command_sent.emit(command_name)
+        return pkt
+
+    def invalidate_for_command(self, command_name: str) -> None:
+        response_name = self.INVALIDATE_ON_SEND.get(command_name)
+        if response_name:
+            self._cache.pop(response_name, None)
+            self._pending.pop(response_name, None)
+
+    def _on_packet_received(self, param_name: str, pkt) -> None:
+        self._cache[param_name] = (time.monotonic(), pkt)
+        self._pending.pop(param_name, None)
+        self.response_received.emit(param_name, pkt)
+
+    def reset(self) -> None:
+        """Clear cache and pending command tracking."""
+        self._cache.clear()
+        self._pending.clear()
+        log.info("CommandBus reset cache.")
+
+
+shared_command_bus: CommandBus | None = None
+
+
+def init_shared_command_bus(protocol_service) -> CommandBus:
+    global shared_command_bus
+    shared_command_bus = CommandBus(protocol_service)
+    return shared_command_bus

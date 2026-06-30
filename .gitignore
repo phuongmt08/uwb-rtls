@@ -5,6 +5,8 @@
 # Python bytecode
 *.pyc
 __pycache__/
+.codex_pycache/
+**/.codex_pycache/
 
 # Build artifacts
 _build/
@@ -27,6 +29,11 @@ _build/
 # Data and Logs
 *.csv
 logs_data/
+# UWB RTLS Studio runtime data
+software/uwb_rtls_studio/data/sessions/
+!software/uwb_rtls_studio/data/sessions/.gitkeep
+software/uwb_rtls_studio/session_browser/
+!software/uwb_rtls_studio/session_browser/.gitkeep
 # Data logs
 software/simulation/**/*_log_data.csv
 software/simulation/**/*_sim.html

@@ -89,12 +89,12 @@ enum flash_addr_region_t {
 }
 
 enum ble_state_t {
-    BLE_STATE_UNSPECIFIED = 0;
-    BLE_STATE_IDLE        = 1;
-    BLE_STATE_SCANNING    = 2;
-    BLE_STATE_ADVERTISING = 3;
-    BLE_STATE_CONNECTING  = 4;
-    BLE_STATE_CONNECTED   = 5;
+    BLE_STATE_UNSPECIFIED   = 0;
+    BLE_STATE_IDLE          = 1;
+    BLE_STATE_SCANNING      = 2;
+    BLE_STATE_ADVERTISING   = 3;
+    BLE_STATE_CONNECTING    = 4;
+    BLE_STATE_CONNECTED     = 5;
 }
 
 enum host_transport_t {
@@ -209,6 +209,7 @@ message uwb_cfg_t {
     uint32 tx_power             = 11;
     bytes anchor_list           = 12;
     anchor_power_mode_t power_mode = 13;
+    /* for developer mode */
     uint32 uwb_preamble_len     = 14;
     uint32 uwb_rx_pac           = 15;
     uint32 uwb_ns_sfd           = 16;
@@ -305,15 +306,17 @@ message sensor_fusion_cfg_resp_t {
 }
 
 message sensor_fusion_result_t {
-    float ukf_x_m       = 1;
-    float ukf_y_m       = 2;
-    float ukf_yaw_deg   = 3;
-    float tril_x_m      = 4;
-    float tril_y_m      = 5;
-    float yaw_deg       = 6;
-    uint32 ranging_error_count  = 7;
-    uint32 timestamp_ms = 8;
-    uint32 zone_id      = 9;
+    sint32 ukf_x_m      = 1;
+    sint32 ukf_y_m      = 2;
+    sint32 ukf_yaw_deg  = 3;
+    sint32 tril_x_m     = 4;
+    sint32 tril_y_m     = 5;
+    sint32 yaw_deg      = 6;
+    uint32 anchor_mask  = 7;
+    uint32 ranging_error_count  = 8;
+    uint32 timestamp_ms = 9;
+    uint32 zone_id      = 10;
+    repeated anchor_data_t  anchors = 11;
 }
 
 /* Positioning prefilter ---------------------------------------------------- */
@@ -454,6 +457,10 @@ message ble_adv_config_t {
     string device_name   = 3;
 }
 
+message ble_adv_config_request_t {
+    uint32 dummy = 1;
+}
+
 /*
  * STM32 → nRF : poll current BLE state
  * nRF  → STM32 : response, also pushed unsolicited on state change
@@ -465,7 +472,7 @@ message ble_status_get_t {
 message ble_status_resp_t {
     ble_state_t state        = 1;
     int32 rssi_dbm           = 2;  /* valid only when connected */
-    optional uint32 disconnect_reason = 3;  
+    uint32 disconnect_reason = 3;  
 }
 
 message ble_scan_result_t {
@@ -520,19 +527,16 @@ message ble_adv_status_t {
     uint32 status_flags       = 4;
     uint32 warning_count      = 5;
     uint32 error_count        = 6;
-    uint32 local_timestamp_ms = 7;
+    uint32 local_timestamp_s = 7;
 }
 
-/*
- * NOTE: deprecated
- * Anchor distance sample
- * - Produced by an anchor while connected to gateway.
- * message anchor_distance_t {
- *    uint32 anchor_id          = 1;
- *    uint32 distance_mm        = 2;
- *    int32 rssi_dbm            = 3;
- * }
- */
+
+message anchor_data_t {
+    uint32 anchor_id            = 1;
+    uint32 distance_mm          = 2;
+    int32 weight                = 3;
+}
+
 
 /*
  * NOTE: deprecated
@@ -753,6 +757,10 @@ message fota_state_resp_t {
 
 /* Battery information -----------------------------------------------------------*/
 
+message battery_info_get_t {
+    uint32 dummy = 1;
+}
+
 message battery_info_resp_t {
     uint32 bat_voltage_mv  = 1;
     uint32 bat_soc_percent = 2;
@@ -766,10 +774,7 @@ message battery_info_resp_t {
     uint32 uwb_voltage_mv      = 8;  /* DW1000 supply voltage in mV */
     float  imu_temp_c       = 9;  /* IMU sensor internal temperature in degrees Celsius */
     
-    uint32 error_mask      = 10; /* Bitmask of breached thresholds */
-}
-message battery_info_get_t {
-    uint32 dummy = 1;
+    uint32 error_mask       = 10; /* Bitmask of breached thresholds */
 }
 
 /* Factory OTP provisioning -------------------------------------------------- */
@@ -944,6 +949,8 @@ message packet_t {
 
         /* Factory OTP provisioning */
         factory_otp_write_t       factory_otp_write       = 68;
+
+        ble_adv_config_request_t  ble_adv_config_request  = 69;
 
         /* RTOS resource diagnostics */
         rtos_resource_get_t       rtos_resource_get       = 71;

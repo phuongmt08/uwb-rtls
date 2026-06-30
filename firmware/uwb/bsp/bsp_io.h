@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "main.h"
+#include "positioning_config.h"
 
 /* Public defines ----------------------------------------------------- */
 /* LED PC13 */
@@ -155,7 +156,7 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 #endif
 
 #if ENABLE_SYS_FUSION
-bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, float ukf_x, float ukf_y, float ukf_yaw, float tril_x, float tril_y, float yaw, uint32_t err_frame_count);
+bsp_err_t bsp_io_uart_send_fusion_data(int16_t ukf_x, int16_t ukf_y, int16_t ukf_yaw, int16_t tril_x, int16_t tril_y, int16_t yaw, uint32_t err_frame_count);
 #endif
 
 /**

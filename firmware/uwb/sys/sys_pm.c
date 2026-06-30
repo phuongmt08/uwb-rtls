@@ -225,10 +225,10 @@ void sys_pm_process(void)
         if (bsp_imu_get_temp(&imu_temp) == BSP_IMU_OK) {
             s_pm_status.values[PM_CH_IMU_TEMP] = imu_temp;
         } else {
-            s_pm_status.values[PM_CH_IMU_TEMP] = 30.0f; /* Normal fallback if not active */
+            s_pm_status.values[PM_CH_IMU_TEMP] = 0.0f; /* Normal fallback if not active */
         }
     } else {
-        s_pm_status.values[PM_CH_IMU_TEMP] = 30.0f;
+        s_pm_status.values[PM_CH_IMU_TEMP] = 0.0f;
     }
 
     /* 3. Threshold Monitoring & Alerting (Skip uninitialized channels) */

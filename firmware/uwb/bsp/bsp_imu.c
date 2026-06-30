@@ -26,6 +26,7 @@ icm42688_dev_t bsp_imu;
 
 /* Private variables -------------------------------------------------- */
 static bool s_spi1_cs_mutex_locked = false;
+static float s_cached_temp = 0.0f;
 
 static const icm42688_config_t s_default_cfg =
 {
@@ -89,6 +90,7 @@ bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data)
 	p_imu_data->ax = raw_data.accel.x * GRAVITY;
 	p_imu_data->ay = raw_data.accel.y * GRAVITY;
 	p_imu_data->gz = raw_data.gyro.z * DEG2RAD;
+	s_cached_temp = raw_data.temp;
 
     return BSP_IMU_OK;
 }
@@ -237,12 +239,8 @@ bsp_imu_err_t bsp_imu_get_temp(float *temp)
 {
 	CHECK_ERR(s_initialized, BSP_IMU_ERR);
 	CHECK_ERR(temp != NULL, BSP_IMU_ERR);
-	icm42688_sensor_data_t raw_data;
 
-	// Burst read raw sensor data (including temperature) from ICM-42688
-	CHECK_ERR(icm42688_get_raw_data(&bsp_imu, &raw_data) == ICM42688_OK, BSP_IMU_ERR);
-
-	*temp = raw_data.temp;
+	*temp = s_cached_temp;
 	return BSP_IMU_OK;
 }
 

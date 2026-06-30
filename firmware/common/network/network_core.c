@@ -13,6 +13,7 @@
 static const uint16_t network_core_skip_ack_tb[] = {
     protobuf_packet_t_ack_tag,
     protobuf_packet_t_ble_adv_status_tag,
+    protobuf_packet_t_ble_adv_config_request_tag,
     protobuf_packet_t_sensor_fusion_result_tag
     // protobuf_packet_t_log_erase_tag,
 //    protobuf_packet_t_anchor_distance_tag,
@@ -94,9 +95,9 @@ static bool network_core_try_receive(network_core_t *core, stream_type_t in_stre
     return true;
 }
 
-static void network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
+static bool network_core_send_ble_packet(network_core_t *core, stream_type_t tx_stream, const protobuf_packet_t *packet)
 {
-    network_core_encode_and_send(core, tx_stream, packet);
+    return network_core_encode_and_send(core, tx_stream, packet);
 }
 
 static stream_type_t network_core_dst_to_tx_stream(network_core_t *core, protobuf_device_addr_t dst)
@@ -141,18 +142,18 @@ static void network_core_forward_packet(network_core_t *core, stream_type_t in_s
 
     protobuf_device_addr_t dst = (protobuf_device_addr_t)packet->hdr.addr.dst;
     
-    stream_type_t fwd = network_core_dst_to_tx_stream(core, dst);
     if (dst == protobuf_PACKET_ADDR_BCAST) {
-        /* BCAST: route to everything EXCEPT where it came from, and only to active soft connections */
+        /* BCAST: route to every output except the link it came from. */
         if (in_stream != STREAM_SERIAL_RX && core->serial_connection_active) {
             network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
         }
-        if (in_stream != STREAM_BLE_RX && core->ble_connection_active) {
+        if (in_stream != STREAM_BLE_RX) {
             network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
         }
         return;
     }
 
+    stream_type_t fwd = network_core_dst_to_tx_stream(core, dst);
     if (fwd == STREAM_MAX) return;          /* unknown dst -> drop */
 
     /* Map in_stream to its tx equivalent to avoid bouncing */
@@ -191,6 +192,7 @@ static void network_core_update_ack_trackers(network_core_t *core, const protobu
         network_core_finalize_tracker(t, packet);
         return;
     }
+
 }
 
 static void network_core_check_tracker_timeouts(network_core_t *core)
@@ -297,14 +299,15 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     packet->hdr.seq = (core->tx_seq)++;
 
     if (dst == protobuf_PACKET_ADDR_BCAST) {
-        /* BCAST is sent to all active soft connections */
+        bool sent = false;
+
+        /* BCAST always goes to the BLE bridge; serial host output is session-gated. */
         if (core->serial_connection_active) {
-            network_core_encode_and_send(core, STREAM_SERIAL_TX, packet);
+            sent = network_core_encode_and_send(core, STREAM_SERIAL_TX, packet) || sent;
         }
-        if (core->ble_connection_active) {
-            network_core_send_ble_packet(core, STREAM_BLE_TX, packet);
-        }
-        return true;
+
+        sent = network_core_send_ble_packet(core, STREAM_BLE_TX, packet) || sent;
+        return sent;
     }
 
     if (dst == protobuf_PACKET_ADDR_DEBUG) {
@@ -324,8 +327,7 @@ bool network_core_send_packet(network_core_t *core, uint8_t dst, protobuf_packet
     }
 
     if (tx_stream == STREAM_BLE_TX) {
-        network_core_send_ble_packet(core, tx_stream, packet);
-        return true;
+        return network_core_send_ble_packet(core, tx_stream, packet);
     }
 
     if (!network_core_encode_and_send(core, tx_stream, packet)) {

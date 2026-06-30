@@ -1,0 +1,1169 @@
+{
+  "meta": {
+    "name": "Sample_Map_20x20",
+    "version": 2,
+    "schema": "uwb_rtls_geofence_map"
+  },
+  "map_objects": {
+    "rooms": [
+      {
+        "id": "room_main_20x20",
+        "name": "Main Room 20x20",
+        "type": "room",
+        "object_type": "room",
+        "points": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 16.5,
+            "y": 0.0
+          },
+          {
+            "x": 20.0,
+            "y": 4.5
+          },
+          {
+            "x": 20.0,
+            "y": 16.0
+          },
+          {
+            "x": 15.0,
+            "y": 20.0
+          },
+          {
+            "x": 0.0,
+            "y": 20.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 0.0,
+        "height_m": 0.0,
+        "speed_limit": 1.0,
+        "color": "#E8E8E8"
+      }
+    ],
+    "walls": [
+      {
+        "id": "wall_outer_left",
+        "name": "Wall Outer Left",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 0.45,
+            "y": 0.0
+          },
+          {
+            "x": 0.45,
+            "y": 20.0
+          },
+          {
+            "x": 0.0,
+            "y": 20.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 3.0,
+        "height_m": 3.0,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_outer_top",
+        "name": "Wall Outer Top",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 0.45,
+            "y": 19.55
+          },
+          {
+            "x": 14.8,
+            "y": 19.55
+          },
+          {
+            "x": 15.0,
+            "y": 20.0
+          },
+          {
+            "x": 0.0,
+            "y": 20.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 3.0,
+        "height_m": 3.0,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_outer_top_right_slant",
+        "name": "Wall Outer Top Right Slant",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 14.8,
+            "y": 19.55
+          },
+          {
+            "x": 15.0,
+            "y": 20.0
+          },
+          {
+            "x": 20.0,
+            "y": 16.0
+          },
+          {
+            "x": 19.64,
+            "y": 15.72
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 3.0,
+        "height_m": 3.0,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_outer_right",
+        "name": "Wall Outer Right",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 19.55,
+            "y": 4.5
+          },
+          {
+            "x": 20.0,
+            "y": 4.5
+          },
+          {
+            "x": 20.0,
+            "y": 16.0
+          },
+          {
+            "x": 19.64,
+            "y": 15.72
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 3.0,
+        "height_m": 3.0,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_outer_bottom_right_slant",
+        "name": "Wall Outer Bottom Right Slant",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 16.14,
+            "y": 0.28
+          },
+          {
+            "x": 16.5,
+            "y": 0.0
+          },
+          {
+            "x": 20.0,
+            "y": 4.5
+          },
+          {
+            "x": 19.55,
+            "y": 4.5
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 3.0,
+        "height_m": 3.0,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_outer_bottom",
+        "name": "Wall Outer Bottom",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "x": 16.5,
+            "y": 0.0
+          },
+          {
+            "x": 16.14,
+            "y": 0.28
+          },
+          {
+            "x": 0.45,
+            "y": 0.45
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 3.0,
+        "height_m": 3.0,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_left_upper",
+        "name": "Wall Left Upper",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 2.0,
+            "y": 9.0
+          },
+          {
+            "x": 2.5,
+            "y": 9.0
+          },
+          {
+            "x": 2.5,
+            "y": 19.0
+          },
+          {
+            "x": 2.0,
+            "y": 19.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_top_left",
+        "name": "Wall Top Left",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 2.5,
+            "y": 18.5
+          },
+          {
+            "x": 12.8,
+            "y": 18.5
+          },
+          {
+            "x": 12.8,
+            "y": 19.0
+          },
+          {
+            "x": 2.5,
+            "y": 19.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_center_vertical",
+        "name": "Wall Center Vertical",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 12.8,
+            "y": 9.2
+          },
+          {
+            "x": 13.3,
+            "y": 9.2
+          },
+          {
+            "x": 13.3,
+            "y": 19.0
+          },
+          {
+            "x": 12.8,
+            "y": 19.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_mid_horizontal",
+        "name": "Wall Mid Horizontal",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 12.8,
+            "y": 9.0
+          },
+          {
+            "x": 18.2,
+            "y": 9.0
+          },
+          {
+            "x": 18.2,
+            "y": 9.5
+          },
+          {
+            "x": 12.8,
+            "y": 9.5
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_bottom_left",
+        "name": "Wall Bottom Left",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 0.8,
+            "y": 5.8
+          },
+          {
+            "x": 10.8,
+            "y": 5.8
+          },
+          {
+            "x": 10.8,
+            "y": 6.3
+          },
+          {
+            "x": 0.8,
+            "y": 6.3
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_bottom_center_vertical",
+        "name": "Wall Bottom Center Vertical",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 10.3,
+            "y": 5.8
+          },
+          {
+            "x": 10.8,
+            "y": 5.8
+          },
+          {
+            "x": 10.8,
+            "y": 11.2
+          },
+          {
+            "x": 10.3,
+            "y": 11.2
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_bottom_right",
+        "name": "Wall Bottom Right",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 10.8,
+            "y": 5.8
+          },
+          {
+            "x": 18.2,
+            "y": 5.8
+          },
+          {
+            "x": 18.2,
+            "y": 6.3
+          },
+          {
+            "x": 10.8,
+            "y": 6.3
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_service_top",
+        "name": "Wall Service Top",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 7.2,
+            "y": 0.8
+          },
+          {
+            "x": 13.8,
+            "y": 0.8
+          },
+          {
+            "x": 13.8,
+            "y": 1.3
+          },
+          {
+            "x": 7.2,
+            "y": 1.3
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_service_left",
+        "name": "Wall Service Left",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 7.2,
+            "y": 0.8
+          },
+          {
+            "x": 7.7,
+            "y": 0.8
+          },
+          {
+            "x": 7.7,
+            "y": 5.8
+          },
+          {
+            "x": 7.2,
+            "y": 5.8
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      },
+      {
+        "id": "wall_service_right",
+        "name": "Wall Service Right",
+        "type": "wall",
+        "object_type": "wall",
+        "points": [
+          {
+            "x": 13.3,
+            "y": 0.8
+          },
+          {
+            "x": 13.8,
+            "y": 0.8
+          },
+          {
+            "x": 13.8,
+            "y": 5.8
+          },
+          {
+            "x": 13.3,
+            "y": 5.8
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 2.8,
+        "height_m": 2.8,
+        "speed_limit": 1.0,
+        "color": "#202020"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor_id": 0,
+        "label": "A0",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 0,
+        "mac": "",
+        "zone_id": "",
+        "zone_name": "",
+        "zone_ids": [],
+        "zone_names": [],
+        "x_m": 0.0,
+        "y_m": 0.0,
+        "z_m": 0.0,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      },
+      {
+        "anchor_id": 1,
+        "label": "A1",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 1,
+        "mac": "",
+        "zone_id": "",
+        "zone_name": "",
+        "zone_ids": [],
+        "zone_names": [],
+        "x_m": 16.5,
+        "y_m": 0.0,
+        "z_m": 0.0,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      },
+      {
+        "anchor_id": 2,
+        "label": "A2",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 2,
+        "mac": "",
+        "zone_id": "",
+        "zone_name": "",
+        "zone_ids": [],
+        "zone_names": [],
+        "x_m": 15.0,
+        "y_m": 20.0,
+        "z_m": 0.0,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      },
+      {
+        "anchor_id": 3,
+        "label": "A3",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 3,
+        "mac": "",
+        "zone_id": "",
+        "zone_name": "",
+        "zone_ids": [],
+        "zone_names": [],
+        "x_m": 0.0,
+        "y_m": 20.0,
+        "z_m": 0.0,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      }
+    ],
+    "gateways": []
+  },
+  "rule_zones": [],
+  "map_name": "Sample_Map_20x20",
+  "anchors": [
+    {
+      "anchor_id": 0,
+      "label": "A0",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 0,
+      "mac": "",
+      "zone_id": "",
+      "zone_name": "",
+      "zone_ids": [],
+      "zone_names": [],
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "z_m": 0.0,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    },
+    {
+      "anchor_id": 1,
+      "label": "A1",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 1,
+      "mac": "",
+      "zone_id": "",
+      "zone_name": "",
+      "zone_ids": [],
+      "zone_names": [],
+      "x_m": 16.5,
+      "y_m": 0.0,
+      "z_m": 0.0,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    },
+    {
+      "anchor_id": 2,
+      "label": "A2",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 2,
+      "mac": "",
+      "zone_id": "",
+      "zone_name": "",
+      "zone_ids": [],
+      "zone_names": [],
+      "x_m": 15.0,
+      "y_m": 20.0,
+      "z_m": 0.0,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    },
+    {
+      "anchor_id": 3,
+      "label": "A3",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 3,
+      "mac": "",
+      "zone_id": "",
+      "zone_name": "",
+      "zone_ids": [],
+      "zone_names": [],
+      "x_m": 0.0,
+      "y_m": 20.0,
+      "z_m": 0.0,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    }
+  ],
+  "objects": [
+    {
+      "id": "room_main_20x20",
+      "name": "Main Room 20x20",
+      "type": "room",
+      "object_type": "room",
+      "points": [
+        {
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "x": 16.5,
+          "y": 0.0
+        },
+        {
+          "x": 20.0,
+          "y": 4.5
+        },
+        {
+          "x": 20.0,
+          "y": 16.0
+        },
+        {
+          "x": 15.0,
+          "y": 20.0
+        },
+        {
+          "x": 0.0,
+          "y": 20.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "speed_limit": 1.0,
+      "color": "#E8E8E8"
+    },
+    {
+      "id": "wall_outer_left",
+      "name": "Wall Outer Left",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "x": 0.45,
+          "y": 0.0
+        },
+        {
+          "x": 0.45,
+          "y": 20.0
+        },
+        {
+          "x": 0.0,
+          "y": 20.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 3.0,
+      "height_m": 3.0,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_outer_top",
+      "name": "Wall Outer Top",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 0.45,
+          "y": 19.55
+        },
+        {
+          "x": 14.8,
+          "y": 19.55
+        },
+        {
+          "x": 15.0,
+          "y": 20.0
+        },
+        {
+          "x": 0.0,
+          "y": 20.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 3.0,
+      "height_m": 3.0,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_outer_top_right_slant",
+      "name": "Wall Outer Top Right Slant",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 14.8,
+          "y": 19.55
+        },
+        {
+          "x": 15.0,
+          "y": 20.0
+        },
+        {
+          "x": 20.0,
+          "y": 16.0
+        },
+        {
+          "x": 19.64,
+          "y": 15.72
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 3.0,
+      "height_m": 3.0,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_outer_right",
+      "name": "Wall Outer Right",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 19.55,
+          "y": 4.5
+        },
+        {
+          "x": 20.0,
+          "y": 4.5
+        },
+        {
+          "x": 20.0,
+          "y": 16.0
+        },
+        {
+          "x": 19.64,
+          "y": 15.72
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 3.0,
+      "height_m": 3.0,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_outer_bottom_right_slant",
+      "name": "Wall Outer Bottom Right Slant",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 16.14,
+          "y": 0.28
+        },
+        {
+          "x": 16.5,
+          "y": 0.0
+        },
+        {
+          "x": 20.0,
+          "y": 4.5
+        },
+        {
+          "x": 19.55,
+          "y": 4.5
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 3.0,
+      "height_m": 3.0,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_outer_bottom",
+      "name": "Wall Outer Bottom",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "x": 16.5,
+          "y": 0.0
+        },
+        {
+          "x": 16.14,
+          "y": 0.28
+        },
+        {
+          "x": 0.45,
+          "y": 0.45
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 3.0,
+      "height_m": 3.0,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_left_upper",
+      "name": "Wall Left Upper",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 2.0,
+          "y": 9.0
+        },
+        {
+          "x": 2.5,
+          "y": 9.0
+        },
+        {
+          "x": 2.5,
+          "y": 19.0
+        },
+        {
+          "x": 2.0,
+          "y": 19.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_top_left",
+      "name": "Wall Top Left",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 2.5,
+          "y": 18.5
+        },
+        {
+          "x": 12.8,
+          "y": 18.5
+        },
+        {
+          "x": 12.8,
+          "y": 19.0
+        },
+        {
+          "x": 2.5,
+          "y": 19.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_center_vertical",
+      "name": "Wall Center Vertical",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 12.8,
+          "y": 9.2
+        },
+        {
+          "x": 13.3,
+          "y": 9.2
+        },
+        {
+          "x": 13.3,
+          "y": 19.0
+        },
+        {
+          "x": 12.8,
+          "y": 19.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_mid_horizontal",
+      "name": "Wall Mid Horizontal",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 12.8,
+          "y": 9.0
+        },
+        {
+          "x": 18.2,
+          "y": 9.0
+        },
+        {
+          "x": 18.2,
+          "y": 9.5
+        },
+        {
+          "x": 12.8,
+          "y": 9.5
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_bottom_left",
+      "name": "Wall Bottom Left",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 0.8,
+          "y": 5.8
+        },
+        {
+          "x": 10.8,
+          "y": 5.8
+        },
+        {
+          "x": 10.8,
+          "y": 6.3
+        },
+        {
+          "x": 0.8,
+          "y": 6.3
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_bottom_center_vertical",
+      "name": "Wall Bottom Center Vertical",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 10.3,
+          "y": 5.8
+        },
+        {
+          "x": 10.8,
+          "y": 5.8
+        },
+        {
+          "x": 10.8,
+          "y": 11.2
+        },
+        {
+          "x": 10.3,
+          "y": 11.2
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_bottom_right",
+      "name": "Wall Bottom Right",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 10.8,
+          "y": 5.8
+        },
+        {
+          "x": 18.2,
+          "y": 5.8
+        },
+        {
+          "x": 18.2,
+          "y": 6.3
+        },
+        {
+          "x": 10.8,
+          "y": 6.3
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_service_top",
+      "name": "Wall Service Top",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 7.2,
+          "y": 0.8
+        },
+        {
+          "x": 13.8,
+          "y": 0.8
+        },
+        {
+          "x": 13.8,
+          "y": 1.3
+        },
+        {
+          "x": 7.2,
+          "y": 1.3
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_service_left",
+      "name": "Wall Service Left",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 7.2,
+          "y": 0.8
+        },
+        {
+          "x": 7.7,
+          "y": 0.8
+        },
+        {
+          "x": 7.7,
+          "y": 5.8
+        },
+        {
+          "x": 7.2,
+          "y": 5.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    },
+    {
+      "id": "wall_service_right",
+      "name": "Wall Service Right",
+      "type": "wall",
+      "object_type": "wall",
+      "points": [
+        {
+          "x": 13.3,
+          "y": 0.8
+        },
+        {
+          "x": 13.8,
+          "y": 0.8
+        },
+        {
+          "x": 13.8,
+          "y": 5.8
+        },
+        {
+          "x": 13.3,
+          "y": 5.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 2.8,
+      "height_m": 2.8,
+      "speed_limit": 1.0,
+      "color": "#202020"
+    }
+  ],
+  "geofences": []
+}

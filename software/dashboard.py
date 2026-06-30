@@ -14,6 +14,8 @@ import socket
 import struct
 import math
 import os
+import signal
+signal.signal(signal.SIGINT, signal.SIG_DFL)
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -28,9 +30,14 @@ import time
 class UDPReceiver(QThread):
     """Thread to receive UDP data"""
     position_received = pyqtSignal(dict)
-    FUSION_FRAME_FORMAT = '<BBB I f f f f f f I'
+    FUSION_FRAME_FORMAT = '<BBIhhhhhhI'
     FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
     FUSION_FRAME_PAYLOAD_SIZE = FUSION_FRAME_SIZE - 2
+    FUSION_FRAME_LEGACY_PAYLOAD_SIZE = FUSION_FRAME_SIZE
+
+    @staticmethod
+    def decode_fixed2(value):
+        return value / 100.0
 
     def __init__(self, port=5005):
         super().__init__()
@@ -53,26 +60,27 @@ class UDPReceiver(QThread):
                     try:
                         if len(data) == self.FUSION_FRAME_SIZE and data[0] == 0xAA:
                             (
-                                sof, payload_len, anchor_mask, tx_frame_cnt,
+                                sof, payload_len, tx_frame_cnt,
                                 ukf_x, ukf_y, ukf_yaw,
                                 tril_x, tril_y, yaw,
                                 error_frame_cnt
                             ) = struct.unpack(self.FUSION_FRAME_FORMAT, data)
 
-                            if payload_len not in (self.FUSION_FRAME_PAYLOAD_SIZE, self.FUSION_FRAME_SIZE):
+                            if payload_len not in (self.FUSION_FRAME_PAYLOAD_SIZE, self.FUSION_FRAME_LEGACY_PAYLOAD_SIZE):
                                 print(f"Warning: Fusion frame length field mismatch ({payload_len} bytes).")
 
                             position = {
-                                'x': ukf_x,
-                                'y': ukf_y,
+                                'x': self.decode_fixed2(ukf_x),
+                                'y': self.decode_fixed2(ukf_y),
                                 'z': 0.0,
-                                'ukf_x': ukf_x,
-                                'ukf_y': ukf_y,
-                                'ukf_yaw': ukf_yaw,
-                                'tril_x': tril_x,
-                                'tril_y': tril_y,
-                                'yaw': yaw,
-                                'anchor_mask': anchor_mask,
+                                'sof': sof,
+                                'length': payload_len,
+                                'ukf_x': self.decode_fixed2(ukf_x),
+                                'ukf_y': self.decode_fixed2(ukf_y),
+                                'ukf_yaw': self.decode_fixed2(ukf_yaw),
+                                'tril_x': self.decode_fixed2(tril_x),
+                                'tril_y': self.decode_fixed2(tril_y),
+                                'yaw': self.decode_fixed2(yaw),
                                 'tx_frame_cnt': tx_frame_cnt,
                                 'error_frame_cnt': error_frame_cnt,
                                 'err_cnt': error_frame_cnt,
@@ -537,7 +545,7 @@ class MainWindow(QMainWindow):
             'x': 0, 'y': 0, 'z': 0,
             'ukf_x': 0, 'ukf_y': 0, 'ukf_yaw': 0,
             'tril_x': 0, 'tril_y': 0, 'yaw': 0,
-            'anchor_mask': 0, 'tx_frame_cnt': 0,
+            'sof': 0xAA, 'length': UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE, 'tx_frame_cnt': 0,
             'error_frame_cnt': 0, 'err_cnt': 0, 'error': 0
         }
         self.frame_count = 0
@@ -817,8 +825,7 @@ class MainWindow(QMainWindow):
         groups = [
             ("FRAME", [
                 ("SOF:", "sof_label", "#60a5fa", ""),
-                ("Length:", "length_label", "#60a5fa", "bytes"),
-                ("Anchor Mask:", "anchor_mask_label", "#60a5fa", "")
+                ("Length:", "length_label", "#60a5fa", "bytes")
             ]),
             ("COUNTERS", [
                 ("Tx Frames:", "tx_frame_cnt_label", "#2dd4bf", ""),
@@ -997,7 +1004,7 @@ class MainWindow(QMainWindow):
             try:
                 self.record_file = open(filename, "a", encoding="utf-8")
                 # Write CSV Header
-                self.record_file.write("tx_frame_cnt,anchor_mask,ukf_x,ukf_y,ukf_yaw,tril_x,tril_y,yaw,error_frame_cnt,dt\n")
+                self.record_file.write("tx_frame_cnt,ukf_x,ukf_y,ukf_yaw,tril_x,tril_y,yaw,error_frame_cnt,dt\n")
                 self.record_start_time = time.time()
                 self.record_last_time = None
                 self.record_line_no = 0
@@ -1020,10 +1027,8 @@ class MainWindow(QMainWindow):
         self.position = position
         self.frame_count += 1
         
-        anchor_mask = position.get('anchor_mask', 0)
-        self.sof_label.setText("0xAA")
-        self.length_label.setText(f"{UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE} bytes")
-        self.anchor_mask_label.setText(f"0x{anchor_mask:02X} ({anchor_mask:08b})")
+        self.sof_label.setText(f"0x{position.get('sof', 0xAA):02X}")
+        self.length_label.setText(f"{position.get('length', UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE)} bytes")
         self.tx_frame_cnt_label.setText(str(position.get('tx_frame_cnt', 0)))
         self.error_frame_cnt_label.setText(str(position.get('error_frame_cnt', 0)))
 
@@ -1056,7 +1061,6 @@ class MainWindow(QMainWindow):
             self.record_line_no += 1
 
             tx_frame_cnt = int(position.get('tx_frame_cnt', self.record_line_no))
-            anchor_mask = int(position.get('anchor_mask', 0))
             ukf_x = float(position.get('ukf_x', 0.0))
             ukf_y = float(position.get('ukf_y', 0.0))
             ukf_yaw = float(position.get('ukf_yaw', 0.0))
@@ -1065,7 +1069,7 @@ class MainWindow(QMainWindow):
             yaw = float(position.get('yaw', 0.0))
             error_frame_cnt = int(position.get('error_frame_cnt', 0))
 
-            log_str = f"{tx_frame_cnt},{anchor_mask},{ukf_x:.6f},{ukf_y:.6f},{ukf_yaw:.6f},{tril_x:.6f},{tril_y:.6f},{yaw:.6f},{error_frame_cnt},{dt:.6f}"
+            log_str = f"{tx_frame_cnt},{ukf_x:.6f},{ukf_y:.6f},{ukf_yaw:.6f},{tril_x:.6f},{tril_y:.6f},{yaw:.6f},{error_frame_cnt},{dt:.6f}"
                 
             self.record_file.write(log_str + "\n")
             self.record_file.flush()

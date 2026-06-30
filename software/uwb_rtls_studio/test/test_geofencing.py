@@ -1,0 +1,207 @@
+import os
+import sys
+import math
+import tempfile
+from PyQt6.QtCore import QCoreApplication
+
+# Add project root to path for imports
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+STUDIO_DIR = os.path.dirname(CURRENT_DIR)
+if STUDIO_DIR not in sys.path:
+    sys.path.insert(0, STUDIO_DIR)
+
+from models.geofence_model import GeofenceZone
+from repository.geofence_repository import GeofenceRepository
+
+
+def _ensure_qt_app():
+    return QCoreApplication.instance() or QCoreApplication([])
+
+
+def test_geofence_zone_serialization():
+    _ensure_qt_app()
+    points = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    zone = GeofenceZone(
+        id="zone_test",
+        name="Test Zone",
+        zone_type="forbidden",
+        points=points,
+        min_z=0.5,
+        max_z=2.5,
+        speed_limit=0.5,
+        color="#FF0000"
+    )
+
+    data = zone.to_dict()
+    assert data["id"] == "zone_test"
+    assert data["name"] == "Test Zone"
+    assert data["type"] == "forbidden"
+    assert data["object_type"] == "zone"
+    assert len(data["points"]) == 4
+    assert data["min_z"] == 0.5
+    assert data["max_z"] == 2.5
+    assert data["speed_limit"] == 0.5
+    assert data["color"] == "#FF0000"
+
+    loaded_zone = GeofenceZone.from_dict(data)
+    assert loaded_zone.id == zone.id
+    assert loaded_zone.name == zone.name
+    assert loaded_zone.zone_type == zone.zone_type
+    assert loaded_zone.object_type == zone.object_type
+    assert loaded_zone.min_z == zone.min_z
+    assert loaded_zone.max_z == zone.max_z
+    assert loaded_zone.speed_limit == zone.speed_limit
+    assert loaded_zone.color == zone.color
+    assert len(loaded_zone.points) == 4
+    assert loaded_zone.points[1] == (10.0, 0.0)
+
+
+def test_geofence_zone_contains_math():
+    _ensure_qt_app()
+    points = [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0)]
+    zone = GeofenceZone(
+        id="zone_math",
+        name="Math Zone",
+        zone_type="forbidden",
+        points=points,
+        min_z=1.0,
+        max_z=2.0,
+        speed_limit=1.0,
+        color="#FF0000"
+    )
+
+    # 1. Point is inside the 2D rule zone
+    assert zone.contains(2.5, 2.5, 1.5) is True
+
+    # 2. Point is outside the 2D polygon
+    assert zone.contains(6.0, 2.5, 1.5) is False
+
+    # 3. Rule zones are 2.5D, so z coordinates outside [min_z, max_z] return False.
+    assert zone.contains(2.5, 2.5, 0.5) is False
+    assert zone.contains(2.5, 2.5, 1.5) is True
+
+    # 4. Map objects are geometry only and do not participate in rule checks.
+    wall = GeofenceZone(
+        id="wall_math",
+        name="Wall",
+        zone_type="wall",
+        points=points,
+        min_z=0.0,
+        max_z=3.0,
+        speed_limit=0.0,
+        color="#0F172A",
+        object_type="wall",
+    )
+    assert wall.contains(2.5, 2.5, 1.5) is False
+
+
+def test_geofence_repository_position_checks():
+    _ensure_qt_app()
+    # Create a temporary file path for testing repo
+    test_json_path = os.path.join(tempfile.gettempdir(), f"uwb_rtls_test_geofences_{os.getpid()}.json")
+    if os.path.exists(test_json_path):
+        try:
+            os.remove(test_json_path)
+        except PermissionError:
+            pass
+
+    repo = GeofenceRepository(default_file_path=test_json_path)
+    
+    # Init empty checking
+    status, zone_name, limit = repo.check_position(1.0, 1.0, 1.0)
+    assert status == "allowed"
+    assert zone_name == "Default Space"
+
+    # Add allowed zone
+    allowed_points = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    allowed_zone = GeofenceZone(
+        id="allowed_1",
+        name="Allowed Space",
+        zone_type="allowed",
+        points=allowed_points,
+        min_z=0.0,
+        max_z=3.0,
+        speed_limit=2.0,
+        color="#00FF00"
+    )
+    repo.add_zone(allowed_zone)
+
+    # Add forbidden zone inside
+    forbidden_points = [(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0)]
+    forbidden_zone = GeofenceZone(
+        id="forbidden_1",
+        name="Danger Zone",
+        zone_type="forbidden",
+        points=forbidden_points,
+        min_z=0.0,
+        max_z=3.0,
+        speed_limit=0.0,
+        color="#FF0000"
+    )
+    repo.add_zone(forbidden_zone)
+
+    # Add a wall map object; it should be persisted but ignored by rule checks.
+    wall_zone = GeofenceZone(
+        id="wall_1",
+        name="North Wall",
+        zone_type="wall",
+        points=[(20.0, 20.0), (21.0, 20.0), (21.0, 21.0), (20.0, 21.0)],
+        min_z=0.0,
+        max_z=3.0,
+        speed_limit=0.0,
+        color="#0F172A",
+        object_type="wall",
+    )
+    repo.add_zone(wall_zone)
+
+    # Check safe position (inside allowed, outside forbidden)
+    status, zone_name, limit = repo.check_position(2.0, 2.0, 1.0)
+    assert status == "allowed"
+    assert zone_name == "Allowed Space"
+    assert limit == 2.0
+
+    # Check forbidden position (inside forbidden)
+    status, zone_name, limit = repo.check_position(5.0, 5.0, 1.0)
+    assert status == "forbidden"
+    assert zone_name == "Danger Zone"
+    assert limit == 0.0
+
+    # Check out of bounds position (outside allowed)
+    status, zone_name, limit = repo.check_position(12.0, 5.0, 1.0)
+    assert status == "forbidden"
+    assert "Outside Allowed Boundary" in zone_name
+
+    # Check save/load
+    assert repo.save() is True
+    assert os.path.exists(test_json_path) is True
+
+    # Reload repo from saved json
+    new_repo = GeofenceRepository(default_file_path=test_json_path)
+    assert len(new_repo.get_zones()) == 3
+    status, zone_name, limit = new_repo.check_position(5.0, 5.0, 1.0)
+    assert status == "forbidden"
+    assert zone_name == "Danger Zone"
+
+    # Cleanup temp file
+    if os.path.exists(test_json_path):
+        try:
+            os.remove(test_json_path)
+        except PermissionError:
+            pass
+
+
+if __name__ == "__main__":
+    print("Running Geofencing tests...")
+    try:
+        test_geofence_zone_serialization()
+        print("[OK] test_geofence_zone_serialization passed!")
+        test_geofence_zone_contains_math()
+        print("[OK] test_geofence_zone_contains_math passed!")
+        test_geofence_repository_position_checks()
+        print("[OK] test_geofence_repository_position_checks passed!")
+        print("All tests passed successfully!")
+    except Exception as e:
+        import traceback
+        print("[ERROR] Test failed!")
+        traceback.print_exc()
+        sys.exit(1)

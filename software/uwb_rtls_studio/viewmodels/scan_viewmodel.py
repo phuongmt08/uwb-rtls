@@ -1,0 +1,78 @@
+"""
+===============================================================================
+  UWB RTLS Studio — Scan ViewModel
+===============================================================================
+  File        : viewmodels/scan_viewmodel.py
+  Description : Lớp ViewModel (Strict MVVM).
+                Nhận tín hiệu từ ScanModel, format và báo cho UI (View).
+                Chuyển tiếp lệnh Connect, Start/Stop Scan xuống Model.
+===============================================================================
+"""
+from __future__ import annotations
+import logging
+from PyQt6.QtCore import QObject, pyqtSignal
+
+from models.scan_model import ScanModel
+
+log = logging.getLogger(__name__)
+
+class ScanViewModel(QObject):
+    # Signals cho View
+    scan_started = pyqtSignal()
+    scan_stopped = pyqtSignal()
+    device_list_updated = pyqtSignal(list)
+    device_connecting = pyqtSignal(str)
+    device_connected = pyqtSignal(dict)
+    connection_failed = pyqtSignal(str)
+    log_message = pyqtSignal(str)
+    dongle_disconnected = pyqtSignal(str)
+
+    def __init__(self, model: ScanModel, parent=None):
+        super().__init__(parent)
+        self.model = model
+        
+        # Binds model signals -> view presentation signals
+        self.model.device_list_changed.connect(self._on_device_list_changed)
+        self.model.connect_success.connect(self.device_connected.emit)
+        self.model.connect_failed.connect(self._on_connect_failed)
+        self.model.dongle_disconnected.connect(self.dongle_disconnected.emit)
+
+    # ── Action từ View ───────────────────────────────────────────────
+    def start_scan(self) -> None:
+        self.log_message.emit("Sending ble_scan_start...")
+        self.model.start_scan()
+        self.scan_started.emit()
+        self.log_message.emit("BLE scan started (continuous mode)")
+
+    def restart_scan(self) -> None:
+        self.log_message.emit("Restarting BLE scan...")
+        self.model.restart_scan()
+        self.scan_started.emit()
+        self.log_message.emit("BLE scan restarted")
+
+    def stop_scan(self) -> None:
+        self.model.stop_scan()
+        self.scan_stopped.emit()
+        self.log_message.emit("BLE scan stopped")
+
+    def connect_device(self, mac_hex: str) -> None:
+        self.device_connecting.emit(mac_hex)
+        self.log_message.emit(f"Connecting to {mac_hex}...")
+        
+        success = self.model.connect_device(mac_hex)
+        if not success:
+            self.connection_failed.emit(f"Device {mac_hex} not in scan list")
+            self.log_message.emit("❌ Connect failed: device not found")
+
+    def cleanup(self) -> None:
+        self.model.cleanup()
+
+    # ── Presentation Logic ───────────────────────────────────────────
+    def _on_device_list_changed(self, device_list: list) -> None:
+        # Nếu có logic chuyển đổi format (ví dụ thêm đuôi ' dBm' hoặc dịch màu) 
+        # thì sẽ xử lý ở đây. Tạm thời pass list cho View trực tiếp xử lý item text.
+        self.device_list_updated.emit(device_list)
+
+    def _on_connect_failed(self, msg: str) -> None:
+        self.connection_failed.emit(msg)
+        self.log_message.emit(f"❌ {msg}")

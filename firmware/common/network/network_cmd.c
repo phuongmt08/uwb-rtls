@@ -11,7 +11,9 @@
 
 #ifndef BOOTLOADER
     #include "bsp_flash.h"
+    #include "bsp_uwb.h"
     #include "sys_config.h"
+    #include "sys_ranging.h"
     #include "bsp_battery.h"
     #include "sys_logger.h"
     #include "sys_pm.h"
@@ -20,6 +22,7 @@
     #include "app_rtos_handles.h"
 #else
     #include "sys_logger_bl.h"
+    #include "otp/otp.h"
 
 #endif
 
@@ -29,9 +32,11 @@
 #define OBJECT_CODE                     LOG_OBJECT_CODE_NETWORK
 #define RESP_RETRY_MAX                  2
 #define RESP_RETRY_DELAY_MS             200
-#define WAIT_TIME_TO_RESEND_ACK_MS      30000u
+#define WAIT_TIME_TO_RESEND_ACK_MS      3000u
 #define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
-#define SENSOR_FUSION_STREAM_PERIOD_MS  50u
+#ifndef SENSOR_FUSION_STREAM_PERIOD_MS
+#define SENSOR_FUSION_STREAM_PERIOD_MS  20u
+#endif
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);
 
@@ -68,6 +73,7 @@ static bool network_cmd_host_active(void);
 #ifdef HAVE_BLE_PERIPHERAL
 static void network_cmd_ble_status_resp(const protobuf_packet_t *pkt);
 static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt);
+static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt);
 #endif
 
 static void network_cmd_device_information_get(const protobuf_packet_t *pkt);
@@ -79,6 +85,9 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
 #endif
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
+#ifndef BOOTLOADER
+static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt);
+#endif
 
 #ifndef BOOTLOADER
 
@@ -102,11 +111,12 @@ static void network_cmd_calib_start(const protobuf_packet_t *pkt);
 static void network_cmd_calib_stop(const protobuf_packet_t *pkt);
 static void network_cmd_calib_status_get(const protobuf_packet_t *pkt);
 static void network_cmd_calib_candidate_apply(const protobuf_packet_t *pkt);
+static void network_cmd_rtos_task_stats_get(const protobuf_packet_t *pkt);
+static void network_cmd_rtos_resource_get(const protobuf_packet_t *pkt);
+static void network_cmd_sensor_fusion_cfg_get(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
 static void network_cmd_end_session(const protobuf_packet_t *pkt);
 
-
-/* ---- Internal State ---- */
 
 typedef struct {
     network_core_t *stream;
@@ -126,17 +136,21 @@ typedef struct {
     bool     waiting_ack;
     uint32_t log_len;
     int      tracker_id;
+    uint8_t  waiting_seq;
 } network_log_tracker_t;
 
 static network_log_tracker_t s_log_tracker = {
     .waiting_ack = false,
     .log_len     = 0u,
-    .tracker_id  = -1
+    .tracker_id  = -1,
+    .waiting_seq = 0
 };
 
 static bool    s_log_stream_enabled = false;
 static uint8_t s_log_stream_dst     = protobuf_PACKET_ADDR_HOST;
 static uint32_t s_last_sensor_fusion_stream_tick = 0u;
+float dt_s = 0.0f;
+uint32_t stream_packet_cnt = 0;
 
 /* ---- Command dispatch table ----
  * Sparse, indexed by protobuf tag via CMD_INFO.
@@ -162,7 +176,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_sys_config_resp_tag,           network_cmd_unimplemented,               "cfg_resp"),           /* 12 */
 #endif /* !BOOTLOADER */
 
+#ifndef BOOTLOADER
+    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_time_sync_adv_set,           "time_sync_adv_set"),  /* 9  */
+#else
     CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_unimplemented,               "time_sync_adv_set"),  /* 9  */
+#endif
 
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_sys_ranging_cfg_get_tag,       network_cmd_sys_ranging_cfg_get,         "rng_cfg_get"),        /* 13 */
@@ -175,7 +193,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 19 */
     CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,       network_cmd_unimplemented,               "rng_status_resp"),    /* 20 */
 
-    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_get_tag,     network_cmd_unimplemented,               "fusion_cfg_get"),     /* 21 */
+    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_get_tag,     network_cmd_sensor_fusion_cfg_get,       "fusion_cfg_get"),     /* 21 */
     CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_set_tag,     network_cmd_unimplemented,               "fusion_cfg_set"),     /* 22 */
     CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_resp_tag,    network_cmd_unimplemented,               "fusion_cfg_resp"),    /* 23 */
 #endif /* !BOOTLOADER */
@@ -204,7 +222,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,        network_cmd_unimplemented,               "ble_adv_cfg_set"),    /* 33 */
     CMD_INFO(protobuf_packet_t_ble_status_get_tag,            network_cmd_unimplemented,              "ble_status_get"),     /* 34 */
     CMD_INFO(protobuf_packet_t_ble_status_resp_tag,           network_cmd_ble_status_resp,             "ble_status_resp"),    /* 35 */
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_unimplemented,              "ble_adv_status"),     /* 36 */
+    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,            network_cmd_ble_adv_status,              "ble_adv_status"),     /* 36 */
+    CMD_INFO(protobuf_packet_t_ble_adv_config_request_tag,    network_cmd_ble_adv_config_request,      "ble_adv_cfg_req"),    /* 69 */
 #endif
 
     CMD_INFO(protobuf_packet_t_log_data_tag,                  network_cmd_log_data_get,                "log_data"),           /* 37 */
@@ -249,6 +268,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 67 */
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 68 */
+    CMD_INFO(protobuf_packet_t_rtos_resource_get_tag,         network_cmd_rtos_resource_get,           "rtos_resource_get"),  /* 71 */
+    CMD_INFO(protobuf_packet_t_rtos_task_stats_get_tag,       network_cmd_rtos_task_stats_get,         "rtos_task_stats_get"), /* 73 */
     CMD_INFO(protobuf_packet_t_prefilter_cfg_get_tag,         network_cmd_prefilter_cfg_get,           "prefilter_get"),      /* 75 */
     CMD_INFO(protobuf_packet_t_prefilter_cfg_set_tag,         network_cmd_prefilter_cfg_set,           "prefilter_set"),      /* 76 */
     CMD_INFO(protobuf_packet_t_prefilter_cfg_resp_tag,        network_cmd_unimplemented,               "prefilter_resp"),     /* 77 */
@@ -303,6 +324,31 @@ static void network_cmd_config_save(const char *context)
     if (sys_config_save() != 0) {
         RLOG_W(OBJECT_CODE, "Failed to persist %s from host", context);
     }
+}
+
+static bool network_cmd_reconfigure_uwb(const protobuf_uwb_cfg_t *cfg)
+{
+    CHECK(cfg, false);
+
+    bool was_ranging_enabled = app_rtos_is_ranging_enabled();
+    app_rtos_set_ranging_enabled(false);
+
+    if (g_spi1_mutexHandle != NULL &&
+        osMutexAcquire(g_spi1_mutexHandle, osWaitForever) != osOK) {
+        app_rtos_set_ranging_enabled(was_ranging_enabled);
+        return false;
+    }
+
+    sys_ranging_abort();
+    bsp_uwb_idle();
+    bsp_err_t status = bsp_uwb_configure(cfg);
+
+    if (g_spi1_mutexHandle != NULL) {
+        (void)osMutexRelease(g_spi1_mutexHandle);
+    }
+
+    app_rtos_set_ranging_enabled(was_ranging_enabled);
+    return status == BSP_OK;
 }
 #endif /* !BOOTLOADER */
 
@@ -409,14 +455,35 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_device_information_resp_tag);
 
+    uint8_t otp_info[5] = {0};
+    uint8_t otp_len = 0u;
+    uint32_t hw_version = 0u;
+    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    if (otp_get(OTP_TYPE_DEVICE_INFO, otp_info, sizeof(otp_info), &otp_len) == OTP_OK &&
+        otp_len == sizeof(otp_info)) {
+        protobuf_device_type_t otp_device_type = (protobuf_device_type_t)otp_info[0];
+        if (otp_device_type == protobuf_DEVICE_TYPE_TAG ||
+            otp_device_type == protobuf_DEVICE_TYPE_ANCHOR ||
+            otp_device_type == protobuf_DEVICE_TYPE_GATEWAY ||
+            otp_device_type == protobuf_DEVICE_TYPE_DEBUG_TOOL) {
+            device_type = otp_device_type;
+            hw_version = otp_info[4];
+        }
+    }
+
     /* Bootloader responds with minimal identity fields only. */
-    resp.params.device_information_resp.device_type    = protobuf_DEVICE_TYPE_UNSPECIFIED;
+    resp.params.device_information_resp.device_type    = device_type;
     resp.params.device_information_resp.role           = protobuf_DEVICE_ROLE_UNSPECIFIED;
+    if (resp.params.device_information_resp.device_type == protobuf_DEVICE_TYPE_TAG) {
+        resp.params.device_information_resp.role = protobuf_DEVICE_ROLE_TAG;
+    } else if (resp.params.device_information_resp.device_type == protobuf_DEVICE_TYPE_ANCHOR) {
+        resp.params.device_information_resp.role = protobuf_DEVICE_ROLE_ANCHOR;
+    }
     resp.params.device_information_resp.has_fw_version = true;
     resp.params.device_information_resp.fw_version     = (protobuf_version_t){0};
     /* Mark as bootloader firmware in fw_version metadata. */
     resp.params.device_information_resp.fw_version.gitsha = 0x424F4F54ULL; /* 'BOOT' */
-    resp.params.device_information_resp.hw_version     = 0u; /* unknown/not provided in bootloader */
+    resp.params.device_information_resp.hw_version     = hw_version;
     resp.params.device_information_resp.serial_number = bsp_util_get_serial_number();
 
     network_cmd_send_packet(&resp);
@@ -454,7 +521,7 @@ static void network_cmd_sys_config_get(const protobuf_packet_t *pkt)
 
     network_cmd_send_packet(&resp);
 }
-
+protobuf_uwb_cfg_t old_cfg;
 static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
@@ -507,10 +574,33 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
         return;
     }
 
+    if (new_cfg->tx_antenna_delay > 0xFFFFu || new_cfg->rx_antenna_delay > 0xFFFFu) {
+        RLOG_W(OBJECT_CODE,
+               "Invalid antenna delay in sys_config_set: TX=%lu RX=%lu",
+               (unsigned long)new_cfg->tx_antenna_delay,
+               (unsigned long)new_cfg->rx_antenna_delay);
+        return;
+    }
+
     sys_config_t *cfg = sys_config_get();
+    old_cfg = cfg->uwb;
     cfg->uwb = *new_cfg;
 
+    if (!network_cmd_reconfigure_uwb(&cfg->uwb)) {
+        cfg->uwb = old_cfg;
+        if (!network_cmd_reconfigure_uwb(&cfg->uwb)) {
+            RLOG_E(OBJECT_CODE, ERR_HAL, "Failed to restore previous UWB config after sys_config_set");
+        }
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
     network_cmd_config_save("sys_config");
+
+    RLOG_I(OBJECT_CODE,
+           "sys_config_set applied and UWB reconfigured: TX delay=%lu RX delay=%lu",
+           (unsigned long)cfg->uwb.tx_antenna_delay,
+           (unsigned long)cfg->uwb.rx_antenna_delay);
 }
 
 static void network_cmd_sys_ranging_cfg_get(const protobuf_packet_t *pkt)
@@ -555,6 +645,9 @@ static void network_cmd_ranging_stop(const protobuf_packet_t *pkt)
     if (!network_cmd_set_ranging_enabled(false)) {
         RLOG_W(OBJECT_CODE, "ranging_stop rejected by platform");
     }
+    dt_s = 0.0f;
+	stream_packet_cnt = 0u;
+	s_last_sensor_fusion_stream_tick = 0u;
 }
 
 #endif /* !BOOTLOADER */
@@ -606,6 +699,41 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
            (unsigned)rtc_time.second,
            (long)pkt->params.time_sync_set.timezone_offset);
 }
+
+#ifndef BOOTLOADER
+static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    const sys_config_t *cfg = sys_config_get();
+    if (cfg == NULL) {
+        return;
+    }
+
+    const protobuf_time_sync_adv_set_t *adv_set = &pkt->params.time_sync_adv_set;
+
+    // Check device type and device id
+    if (adv_set->device_type == cfg->device_type && adv_set->device_id == cfg->uwb.device_id) {
+        if (bsp_rtc_sync_set(adv_set->unix_time_ms,
+                             adv_set->timezone_offset) != BSP_UTIL_OK) {
+            RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_adv_set");
+            return;
+        }
+
+        bsp_rtc_time_t rtc_time;
+        bsp_rtc_get_time(&rtc_time);
+        RLOG_I(OBJECT_CODE,
+               "RTC synced (adv_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
+               (unsigned)rtc_time.day,
+               (unsigned)rtc_time.month,
+               (unsigned)(2000u + rtc_time.year),
+               (unsigned)rtc_time.hour,
+               (unsigned)rtc_time.minute,
+               (unsigned)rtc_time.second,
+               (long)adv_set->timezone_offset);
+    }
+}
+#endif
 
 
 #ifndef BOOTLOADER
@@ -799,6 +927,88 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
     
     // Alert flags
     resp.params.battery_info_resp.error_mask       = pm_status.error_mask;
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_rtos_resource_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_rtos_resource_resp_tag);
+    
+    resp.params.rtos_resource_resp.sample_window_ms = 0;
+    resp.params.rtos_resource_resp.cpu_busy_permille = 0;
+    resp.params.rtos_resource_resp.heap_free_bytes = 0;
+    resp.params.rtos_resource_resp.heap_min_ever_free_bytes = 0;
+    resp.params.rtos_resource_resp.min_stack_free_bytes = 0;
+    resp.params.rtos_resource_resp.min_stack_task_id = 0;
+    resp.params.rtos_resource_resp.task_count = 0;
+    resp.params.rtos_resource_resp.health_flags = 0;
+
+    const bsp_util_rtos_snapshot_t *snapshot = bsp_util_rtos_monitor_get();
+    if (snapshot != NULL) {
+        resp.params.rtos_resource_resp.sample_window_ms = snapshot->sample_window_ms;
+        resp.params.rtos_resource_resp.cpu_busy_permille = snapshot->cpu_busy_permille;
+        resp.params.rtos_resource_resp.heap_free_bytes = snapshot->heap_free_bytes;
+        resp.params.rtos_resource_resp.heap_min_ever_free_bytes = snapshot->heap_min_ever_free_bytes;
+        resp.params.rtos_resource_resp.min_stack_free_bytes = snapshot->min_stack_free_bytes;
+        resp.params.rtos_resource_resp.min_stack_task_id = snapshot->min_stack_task_id;
+        resp.params.rtos_resource_resp.task_count = snapshot->task_count_total;
+        resp.params.rtos_resource_resp.health_flags = snapshot->health_flags;
+    }
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_sensor_fusion_cfg_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_sensor_fusion_cfg_resp_tag);
+    resp.params.sensor_fusion_cfg_resp.has_config = true;
+    
+    resp.params.sensor_fusion_cfg_resp.config.alpha          = SYS_FUSION_UKF_ALPHA;
+    resp.params.sensor_fusion_cfg_resp.config.kappa          = SYS_FUSION_UKF_KAPPA;
+    resp.params.sensor_fusion_cfg_resp.config.beta           = SYS_FUSION_UKF_BETA;
+    resp.params.sensor_fusion_cfg_resp.config.q_a            = SYS_FUSION_UKF_QA;
+    resp.params.sensor_fusion_cfg_resp.config.q_g            = SYS_FUSION_UKF_QG;
+    resp.params.sensor_fusion_cfg_resp.config.r_uwb          = SYS_FUSION_UKF_R_UWB;
+    
+    resp.params.sensor_fusion_cfg_resp.config.init_p_px      = SYS_FUSION_UKF_INIT_P_PX;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_py      = SYS_FUSION_UKF_INIT_P_PY;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_vx      = SYS_FUSION_UKF_INIT_P_VX;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_vy      = SYS_FUSION_UKF_INIT_P_VY;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_theta   = SYS_FUSION_UKF_INIT_P_THETA;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_bias_ax = SYS_FUSION_UKF_INIT_P_BIAS_AX;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_bias_ay = SYS_FUSION_UKF_INIT_P_BIAS_AY;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_bias_gz = SYS_FUSION_UKF_INIT_P_BIAS_GZ;
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_rtos_task_stats_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_rtos_task_stats_resp_tag);
+    resp.params.rtos_task_stats_resp.tasks_count = 0;
+
+    const bsp_util_rtos_snapshot_t *snapshot = bsp_util_rtos_monitor_get();
+    if (snapshot != NULL) {
+        uint32_t count = snapshot->task_count;
+        if (count > 10U) {
+            count = 10U;
+        }
+        resp.params.rtos_task_stats_resp.tasks_count = (pb_size_t)count;
+        for (uint32_t i = 0U; i < count; i++) {
+            resp.params.rtos_task_stats_resp.tasks[i].task_id = snapshot->tasks[i].task_id;
+            resp.params.rtos_task_stats_resp.tasks[i].cpu_permille = snapshot->tasks[i].cpu_permille;
+            resp.params.rtos_task_stats_resp.tasks[i].stack_min_free_bytes = snapshot->tasks[i].stack_min_free_bytes;
+            strncpy(resp.params.rtos_task_stats_resp.tasks[i].name, snapshot->tasks[i].name, sizeof(resp.params.rtos_task_stats_resp.tasks[i].name) - 1);
+            resp.params.rtos_task_stats_resp.tasks[i].name[sizeof(resp.params.rtos_task_stats_resp.tasks[i].name) - 1] = '\0';
+        }
+    }
 
     network_cmd_send_packet(&resp);
 }
@@ -1007,6 +1217,11 @@ static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
     /* Log received telemetry from other nodes for debug */
     RLOG_I(OBJECT_CODE, "Received BLE adv status from 0x%02X", (unsigned)pkt->hdr.addr.src);
 }
+
+static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt)
+{
+	sys_ble_peripheral_set_config();
+}
 #endif
 
 static void network_cmd_device_reset(const protobuf_packet_t *pkt)
@@ -1044,6 +1259,12 @@ static void network_cmd_enter_to_bootloader(const protobuf_packet_t *pkt)
 static void network_cmd_log_data_get(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt && s_network_cmd.stream);
+
+    if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+        s_network_cmd.stream->serial_connection_active = true;
+    } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+        s_network_cmd.stream->ble_connection_active = true;
+    }
 
     s_log_stream_enabled = true;
     s_log_stream_dst     = (uint8_t)pkt->hdr.addr.src;
@@ -1103,7 +1324,9 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     }
 
     s_log_tracker.waiting_ack  = true;
+    g_network_cmd_log_debug_stats.ack_wait_set_on_log_send++;
     s_log_tracker.log_len      = read_len;
+    s_log_tracker.waiting_seq  = packet.hdr.seq;
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
                                                         packet.hdr.seq,
                                                         WAIT_TIME_TO_RESEND_ACK_MS,
@@ -1112,10 +1335,11 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     if (s_log_tracker.tracker_id < 0) {
         s_log_tracker.waiting_ack = false;
         s_log_tracker.log_len     = 0u;
+        s_log_tracker.waiting_seq = 0;
     }
 #else
     /* No flash storage: logger returns framed entries from RAM buffer.
-     * ACK tracking mirrors the flash path — consume only after host ACKs. */
+     * ACK tracking mirrors the flash path - consume only after host ACKs. */
     if (s_log_tracker.waiting_ack) {
         return;
     }
@@ -1143,6 +1367,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
 
     s_log_tracker.waiting_ack  = true;
     s_log_tracker.log_len      = read_len;
+    s_log_tracker.waiting_seq  = packet.hdr.seq;
     s_log_tracker.tracker_id   = network_core_wait_ack(s_network_cmd.stream,
                                                         packet.hdr.seq,
                                                         WAIT_TIME_TO_RESEND_ACK_MS,
@@ -1151,6 +1376,7 @@ static void network_send_log(uint8_t dst, uint32_t data_length)
     if (s_log_tracker.tracker_id < 0) {
         s_log_tracker.waiting_ack = false;
         s_log_tracker.log_len     = 0u;
+        s_log_tracker.waiting_seq = 0;
     }
 #endif
 }
@@ -1164,14 +1390,23 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
     RLOG_I(OBJECT_CODE, "Received end_session from 0x%02X, reason: %d",
            (unsigned)pkt->hdr.addr.src, (int)reason);
 
+    /* Any end_session must stop log streaming immediately. */
+    s_log_stream_enabled = false;
+    dt_s = 0.0f;
+    stream_packet_cnt = 0u;
+    s_last_sensor_fusion_stream_tick = 0u;
+
     switch (reason) {
         case protobuf_SESSION_END_REASON_LOG_DATA:
-            s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Log streaming stopped");
             /* Also reset connection flag for LOG_DATA as it is usually the primary session */
             if(pkt->hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
                 s_network_cmd.stream->serial_connection_active = false;
             }
+            s_log_tracker.waiting_ack = false;
+            s_log_tracker.log_len     = 0u;
+            s_log_tracker.tracker_id  = -1;
+            s_log_tracker.waiting_seq = 0;
             break;
 
         case protobuf_SESSION_END_REASON_RANGING_RESULTS:
@@ -1180,7 +1415,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             break;
 
         case protobuf_SESSION_END_REASON_DEBUG_STREAMING:
-            s_log_stream_enabled = false;
             RLOG_I(OBJECT_CODE, "Debug streaming stopped");
             break;
 
@@ -1190,7 +1424,6 @@ static void network_cmd_end_session(const protobuf_packet_t *pkt)
             } else if (pkt->hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
                 s_network_cmd.stream->ble_connection_active = false;
             }
-            s_log_stream_enabled = false;
             break;
     }
 }
@@ -1207,11 +1440,17 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
 
     if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
         sys_logger_flash_consume(tracker->log_len);
+        tracker->waiting_ack = false;
+        tracker->log_len     = 0u;
+        tracker->tracker_id  = -1;
+        tracker->waiting_seq = 0;
+        return;
     }
 
     tracker->waiting_ack = false;
     tracker->log_len     = 0u;
     tracker->tracker_id  = -1;
+    tracker->waiting_seq = 0;
 #else
     /* No flash: consume from RAM buffer when host ACKs. */
     CHECK_VOID(p_tracker != NULL);
@@ -1221,11 +1460,17 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
 
     if ((p_tracker->state == NETWORK_CORE_ACK_STATE_FOUND) && (tracker->log_len > 0u)) {
         sys_logger_ram_consume((uint16_t)tracker->log_len);
+        tracker->waiting_ack = false;
+        tracker->log_len     = 0u;
+        tracker->tracker_id  = -1;
+        tracker->waiting_seq = 0;
+        return;
     }
 
     tracker->waiting_ack = false;
     tracker->log_len     = 0u;
     tracker->tracker_id  = -1;
+    tracker->waiting_seq = 0;
 #endif
 }
 
@@ -1267,7 +1512,7 @@ bool network_cmd_is_ble_host_active(void)
 
 bool network_cmd_set_ranging_enabled(bool enabled)
 {
-    g_ranging_enabled = enabled;
+    app_rtos_apply_ranging_enabled(enabled);
     return true;
 }
 
@@ -1349,11 +1594,16 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {
     CHECK(stream && data, false);
-    CHECK(network_cmd_is_ranging_enabled(), false);
-//    CHECK(network_cmd_is_ble_host_active(), false);
+//    CHECK(network_cmd_is_ranging_enabled(), false);
+#if !defined(TEST_UKF_STREAM_BLE) || (TEST_UKF_STREAM_BLE == 0)
+    CHECK(network_cmd_is_ble_host_active(), false);
+#endif
+
 
     uint32_t now = bsp_util_get_ticks();
     CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+
+    dt_s = (float)(now - s_last_sensor_fusion_stream_tick) / 1000.0f;
 
     protobuf_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -1362,6 +1612,7 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
 
     if (network_core_send_packet(stream, dst, &pkt)) {
         s_last_sensor_fusion_stream_tick = now;
+        stream_packet_cnt++;
         return true;
     }
 
@@ -1386,7 +1637,14 @@ bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool e
     if (device_name) {
         strncpy(pkt.params.ble_adv_config_set.device_name, device_name,
                 sizeof(pkt.params.ble_adv_config_set.device_name) - 1);
+        pkt.params.ble_adv_config_set.device_name[sizeof(pkt.params.ble_adv_config_set.device_name) - 1] = '\0';
     }
+
+    RLOG_I(OBJECT_CODE, "Send BLE adv config dst=0x%02X enable=%d sn=%lu name=%s",
+           (unsigned)dst,
+           (int)pkt.params.ble_adv_config_set.enable,
+           (unsigned long)pkt.params.ble_adv_config_set.serial_number,
+           pkt.params.ble_adv_config_set.device_name);
 
     return network_core_send_packet(stream, dst, &pkt);
 }
@@ -1417,7 +1675,7 @@ bool network_send_ble_adv_status(network_core_t *stream, uint8_t dst, const prot
     pkt.which_params = protobuf_packet_t_ble_adv_status_tag;
     pkt.params.ble_adv_status = *status;
 
-    return network_core_send_packet(s_network_cmd.stream, dst, &pkt);
+    return network_core_send_packet(stream, dst, &pkt);
 }
 
 #endif /* HAVE_BLE_PERIPHERAL */

@@ -24,6 +24,8 @@ from ..module_ukf import create_ukf_context, ukf_predict, ukf_update, normalize_
 from ..module_kinematic import trilateration_2d
 from ..config import DRAW_RECTANGLE, RECT_WIDTH, RECT_HEIGHT
 
+DISTANCE_GRAPH_SLIDING_WINDOW = 100
+
 
 class DataThread(QThread):
     connected_signal = pyqtSignal(str)
@@ -69,6 +71,7 @@ class DataThread(QThread):
         self._dropped_chunks = 0
         self._last_tx_frame_cnt = None
         self._tx_gap_count = 0
+        self._zero_distance_counts = [0, 0, 0, 0]
         self._last_gui_emit = 0.0
 
     def stop(self):
@@ -285,6 +288,11 @@ class DataThread(QThread):
             print(f"[WARNING] STM frame counter gap: expected {expected}, got {tx_frame_cnt}, missing {gap}")
         self._last_tx_frame_cnt = tx_frame_cnt
 
+    def _track_zero_distances(self, distances):
+        for idx, distance in enumerate(distances[:len(self._zero_distance_counts)]):
+            if abs(distance) <= 1e-6:
+                self._zero_distance_counts[idx] += 1
+
     def _print_stats(self, frame_count):
         now = time.monotonic()
         if now - self._stats_last_print < 2.0:
@@ -294,7 +302,8 @@ class DataThread(QThread):
             "[STATS] "
             f"csv_frames={frame_count} parsed={self._parsed_frames} "
             f"rx_queue={self._rx_queue.qsize()} bad_frames={self._bad_frames} "
-            f"tx_gaps={self._tx_gap_count} dropped_chunks={self._dropped_chunks}"
+            f"tx_gaps={self._tx_gap_count} dropped_chunks={self._dropped_chunks} "
+            f"zero_distances={self._zero_distance_counts}"
         )
 
     def process_frame(self, frame_data, status):
@@ -327,7 +336,9 @@ class DataThread(QThread):
                 'type': 'Init', 
                 'x': init_x, 
                 'y': init_y, 
-                'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0))
+                'dt': 0.0,
+                'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0)),
+                'zero_distance_counts': self._zero_distance_counts.copy()
             }
             
         if self.ukf_ctx is None:
@@ -417,6 +428,8 @@ class DataThread(QThread):
             'err_cnt': frame_data.get('err_cnt', 0),
             'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0)),
             'distances': frame_data.get('distances', [0.0, 0.0, 0.0, 0.0]),
+            'dt': dt,
+            'zero_distance_counts': self._zero_distance_counts.copy(),
             'ax': ax_in, # Used bias subtracted and ZUPT applied
             'ay': ay_in,
             'ax_ema': self.ax_ema,
@@ -474,6 +487,7 @@ class DataThread(QThread):
                     frame_count += 1
                     self._parsed_frames += 1
                     self._track_tx_gap(frame_data['tx_frame_cnt'])
+                    self._track_zero_distances(frame_data.get('distances', []))
 
                     if self.csv_writer is not None:
                         status, self.prev_distances = write_frame_to_csv(
@@ -488,7 +502,15 @@ class DataThread(QThread):
                     result = self.process_frame(frame_data, status)
                     if result is not None:
                         now = time.monotonic()
-                        if result.get('type') == 'Init' or now - self._last_gui_emit >= 0.03:
+                        has_zero_distance = any(
+                            abs(distance) <= 1e-6
+                            for distance in frame_data.get('distances', [])
+                        )
+                        if (
+                            result.get('type') == 'Init'
+                            or has_zero_distance
+                            or now - self._last_gui_emit >= 0.03
+                        ):
                             self.data_signal.emit(result)
                             self._last_gui_emit = now
 
@@ -530,6 +552,7 @@ class MainWindow(QMainWindow):
         self.graph_d.setBackground('w')
         self.graph_d.showGrid(x=True, y=True)
         self.graph_d.setLabel('left', 'Distance (m)')
+        self.graph_d.setLabel('bottom', 'Time (s)')
         self.graph_d.addLegend()
         
         # Reference rectangle
@@ -540,10 +563,22 @@ class MainWindow(QMainWindow):
         self.plot_uwb = self.graph_pos.plot(pen=pg.mkPen('g', width=1.5), name="UWB Trilateration")
         self.plot_ukf = self.graph_pos.plot(pen=pg.mkPen('b', width=2.5), name="UKF Filtered")
         
-        self.plot_d1 = self.graph_d.plot(pen=pg.mkPen('r', width=1.5), name="d1")
-        self.plot_d2 = self.graph_d.plot(pen=pg.mkPen('g', width=1.5), name="d2")
-        self.plot_d3 = self.graph_d.plot(pen=pg.mkPen('b', width=1.5), name="d3")
-        self.plot_d4 = self.graph_d.plot(pen=pg.mkPen('m', width=1.5), name="d4")
+        self.plot_d1 = self.graph_d.plot(
+            pen=None, symbol='o', symbolSize=6,
+            symbolPen=pg.mkPen('r'), symbolBrush=pg.mkBrush('r'), name="d1"
+        )
+        self.plot_d2 = self.graph_d.plot(
+            pen=None, symbol='o', symbolSize=6,
+            symbolPen=pg.mkPen('g'), symbolBrush=pg.mkBrush('g'), name="d2"
+        )
+        self.plot_d3 = self.graph_d.plot(
+            pen=None, symbol='o', symbolSize=6,
+            symbolPen=pg.mkPen('b'), symbolBrush=pg.mkBrush('b'), name="d3"
+        )
+        self.plot_d4 = self.graph_d.plot(
+            pen=None, symbol='o', symbolSize=6,
+            symbolPen=pg.mkPen('m'), symbolBrush=pg.mkBrush('m'), name="d4"
+        )
         
         # Ground truth horizontal lines
         self.gt_line_d1 = pg.InfiniteLine(pos=GROUND_TRUTH_D1, angle=0, pen=pg.mkPen('r', width=3, style=pg.QtCore.Qt.DashLine))
@@ -568,12 +603,16 @@ class MainWindow(QMainWindow):
         self.uwb_xs, self.uwb_ys = [], []
         self.ukf_xs, self.ukf_ys = [], []
         self.d1_data, self.d2_data, self.d3_data, self.d4_data = [], [], [], []
-        self.last_d = [0.0, 0.0, 0.0, 0.0]
+        self.distance_xs = []
+        self.distance_elapsed_time = 0.0
+        self.zero_distance_counts = [0, 0, 0, 0]
         self.latest_data = None
+        self._update_zero_distance_title()
         
         # Setup UI connections
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
+        self.checkBox_graphDSliding.stateChanged.connect(self.on_graph_d_mode_changed)
         
         # Setup Timer for GUI updates (~30fps)
         self.timer = QTimer()
@@ -596,6 +635,9 @@ class MainWindow(QMainWindow):
     def on_csv_created(self):
         self.checkBox_createCsv.setChecked(False)
 
+    def on_graph_d_mode_changed(self, _state):
+        self._update_distance_plot()
+
     def clear_graph(self):
         self.imu_xs.clear()
         self.imu_ys.clear()
@@ -607,7 +649,8 @@ class MainWindow(QMainWindow):
         self.d2_data.clear()
         self.d3_data.clear()
         self.d4_data.clear()
-        self.last_d = [0.0, 0.0, 0.0, 0.0]
+        self.distance_xs.clear()
+        self.distance_elapsed_time = 0.0
         self.latest_data = None
         
         if getattr(self, 'ref_rect_item', None) is not None:
@@ -621,6 +664,7 @@ class MainWindow(QMainWindow):
         self.plot_d2.setData([])
         self.plot_d3.setData([])
         self.plot_d4.setData([])
+        self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)
         
         if hasattr(self, 'thread') and self.thread is not None:
             if self.checkBox_createCsv.isChecked():
@@ -638,6 +682,11 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def on_data(self, data):
+        self.zero_distance_counts = data.get(
+            'zero_distance_counts', self.zero_distance_counts
+        )
+        self._update_zero_distance_title()
+
         if data.get('type') == 'Init':
             if DRAW_RECTANGLE and self.ref_rect_item is None:
                 from PyQt5.QtWidgets import QGraphicsRectItem
@@ -666,15 +715,12 @@ class MainWindow(QMainWindow):
         self.ukf_ys.append(data['ukf_y'])
         
         d = data.get('distances', [0, 0, 0, 0])
-        if len(d) > 0 and d[0] > 1e-6: self.last_d[0] = d[0]
-        if len(d) > 1 and d[1] > 1e-6: self.last_d[1] = d[1]
-        if len(d) > 2 and d[2] > 1e-6: self.last_d[2] = d[2]
-        if len(d) > 3 and d[3] > 1e-6: self.last_d[3] = d[3]
-        
-        self.d1_data.append(self.last_d[0])
-        self.d2_data.append(self.last_d[1])
-        self.d3_data.append(self.last_d[2])
-        self.d4_data.append(self.last_d[3])
+        distance_series = (self.d1_data, self.d2_data, self.d3_data, self.d4_data)
+        for idx, series in enumerate(distance_series):
+            distance = d[idx] if idx < len(d) else 0.0
+            series.append(distance if abs(distance) > 1e-6 else np.nan)
+        self.distance_elapsed_time += max(0.0, float(data.get('dt', 0.0)))
+        self.distance_xs.append(self.distance_elapsed_time)
         
         # Keep maximum defined samples
         if len(self.imu_xs) > MAX_SAMPLES:
@@ -688,6 +734,35 @@ class MainWindow(QMainWindow):
             self.d2_data.pop(0)
             self.d3_data.pop(0)
             self.d4_data.pop(0)
+            self.distance_xs.pop(0)
+
+    def _update_zero_distance_title(self):
+        counts = " | ".join(
+            f"A{idx + 1}: {count}" for idx, count in enumerate(self.zero_distance_counts)
+        )
+        self.graph_d.setTitle(f"Distance = 0 count — {counts}")
+
+    def _update_distance_plot(self):
+        if not self.distance_xs:
+            self.plot_d1.setData([], [])
+            self.plot_d2.setData([], [])
+            self.plot_d3.setData([], [])
+            self.plot_d4.setData([], [])
+            return
+
+        self.plot_d1.setData(self.distance_xs, self.d1_data)
+        self.plot_d2.setData(self.distance_xs, self.d2_data)
+        self.plot_d3.setData(self.distance_xs, self.d3_data)
+        self.plot_d4.setData(self.distance_xs, self.d4_data)
+
+        if self.checkBox_graphDSliding.isChecked():
+            self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
+            x_max = self.distance_xs[-1]
+            window_start_idx = max(0, len(self.distance_xs) - DISTANCE_GRAPH_SLIDING_WINDOW)
+            x_min = self.distance_xs[window_start_idx]
+            self.graph_d.setXRange(x_min, x_max if x_max > x_min else x_min + 1, padding=0.0)
+        else:
+            self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)
 
     def update_gui(self):
         # Update Plots
@@ -695,11 +770,7 @@ class MainWindow(QMainWindow):
             self.plot_imu.setData(self.imu_xs, self.imu_ys)
             self.plot_uwb.setData(self.uwb_xs, self.uwb_ys)
             self.plot_ukf.setData(self.ukf_xs, self.ukf_ys)
-            
-            self.plot_d1.setData(self.d1_data)
-            self.plot_d2.setData(self.d2_data)
-            self.plot_d3.setData(self.d3_data)
-            self.plot_d4.setData(self.d4_data)
+            self._update_distance_plot()
             
         # Update Text Fields
         if self.latest_data is not None:
