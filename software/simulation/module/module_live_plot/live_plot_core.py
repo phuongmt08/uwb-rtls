@@ -336,6 +336,7 @@ class DataThread(QThread):
                 'type': 'Init', 
                 'x': init_x, 
                 'y': init_y, 
+                'dt': 0.0,
                 'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0)),
                 'zero_distance_counts': self._zero_distance_counts.copy()
             }
@@ -427,6 +428,7 @@ class DataThread(QThread):
             'err_cnt': frame_data.get('err_cnt', 0),
             'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0)),
             'distances': frame_data.get('distances', [0.0, 0.0, 0.0, 0.0]),
+            'dt': dt,
             'zero_distance_counts': self._zero_distance_counts.copy(),
             'ax': ax_in, # Used bias subtracted and ZUPT applied
             'ay': ay_in,
@@ -550,7 +552,7 @@ class MainWindow(QMainWindow):
         self.graph_d.setBackground('w')
         self.graph_d.showGrid(x=True, y=True)
         self.graph_d.setLabel('left', 'Distance (m)')
-        self.graph_d.setLabel('bottom', 'Sample')
+        self.graph_d.setLabel('bottom', 'Time (s)')
         self.graph_d.addLegend()
         
         # Reference rectangle
@@ -602,7 +604,7 @@ class MainWindow(QMainWindow):
         self.ukf_xs, self.ukf_ys = [], []
         self.d1_data, self.d2_data, self.d3_data, self.d4_data = [], [], [], []
         self.distance_xs = []
-        self.distance_sample_index = 0
+        self.distance_elapsed_time = 0.0
         self.zero_distance_counts = [0, 0, 0, 0]
         self.latest_data = None
         self._update_zero_distance_title()
@@ -648,7 +650,7 @@ class MainWindow(QMainWindow):
         self.d3_data.clear()
         self.d4_data.clear()
         self.distance_xs.clear()
-        self.distance_sample_index = 0
+        self.distance_elapsed_time = 0.0
         self.latest_data = None
         
         if getattr(self, 'ref_rect_item', None) is not None:
@@ -717,8 +719,8 @@ class MainWindow(QMainWindow):
         for idx, series in enumerate(distance_series):
             distance = d[idx] if idx < len(d) else 0.0
             series.append(distance if abs(distance) > 1e-6 else np.nan)
-        self.distance_xs.append(self.distance_sample_index)
-        self.distance_sample_index += 1
+        self.distance_elapsed_time += max(0.0, float(data.get('dt', 0.0)))
+        self.distance_xs.append(self.distance_elapsed_time)
         
         # Keep maximum defined samples
         if len(self.imu_xs) > MAX_SAMPLES:
@@ -756,7 +758,8 @@ class MainWindow(QMainWindow):
         if self.checkBox_graphDSliding.isChecked():
             self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
             x_max = self.distance_xs[-1]
-            x_min = max(0, x_max - DISTANCE_GRAPH_SLIDING_WINDOW + 1)
+            window_start_idx = max(0, len(self.distance_xs) - DISTANCE_GRAPH_SLIDING_WINDOW)
+            x_min = self.distance_xs[window_start_idx]
             self.graph_d.setXRange(x_min, x_max if x_max > x_min else x_min + 1, padding=0.0)
         else:
             self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)

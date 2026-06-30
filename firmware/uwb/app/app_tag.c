@@ -97,11 +97,6 @@ static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static uint32_t s_last_fusion_log_tick = 0U;
 #endif
 
-#if ENABLE_SYS_FUSION
-static vec2d_t s_last_position = {.x = 0.0f, .y = 0.0f};
-static bool s_position_valid = false;
-#endif
-
 static volatile app_tag_uwb_control_op_t s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
 static uint32_t s_control_zone_id = 0U;
 static protobuf_zone_profile_t s_control_zone_profile = {0};

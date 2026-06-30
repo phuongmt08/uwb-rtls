@@ -152,14 +152,14 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 
 	// P
     for(int i=0; i<64; i++) ukf.P_data[i] = 0.0f;
-	ukf.P_data[0] 	= 0.1f;  	// p_x
-	ukf.P_data[9] 	= 0.1f;   	// p_y
-	ukf.P_data[18] 	= 0.1f; 	// v_x
-	ukf.P_data[27] 	= 0.1f;  	// v_y
-	ukf.P_data[36] 	= 1.0e-10f;  	// theta
-	ukf.P_data[45] 	= 1.0e-5f; 	// Bias
-	ukf.P_data[54] 	= 1.0e-5f;
-	ukf.P_data[63] 	= 1.0e-10f;
+	ukf.P_data[0] 	= SYS_FUSION_UKF_INIT_P_PX;  	// p_x
+	ukf.P_data[9] 	= SYS_FUSION_UKF_INIT_P_PY;   	// p_y
+	ukf.P_data[18] 	= SYS_FUSION_UKF_INIT_P_VX; 	// v_x
+	ukf.P_data[27] 	= SYS_FUSION_UKF_INIT_P_VY;  	// v_y
+	ukf.P_data[36] 	= SYS_FUSION_UKF_INIT_P_THETA;  	// theta
+	ukf.P_data[45] 	= SYS_FUSION_UKF_INIT_P_BIAS_AX; 	// Bias
+	ukf.P_data[54] 	= SYS_FUSION_UKF_INIT_P_BIAS_AY;
+	ukf.P_data[63] 	= SYS_FUSION_UKF_INIT_P_BIAS_GZ;
 
     // Q
     for(int i=0; i<9; i++) ukf.Q_data[i] = 0.0f;

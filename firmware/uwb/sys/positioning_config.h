@@ -337,6 +337,38 @@
 #define SYS_FUSION_UKF_R_UWB   0.01f
 #endif
 
+#ifndef SYS_FUSION_UKF_INIT_P_PX
+#define SYS_FUSION_UKF_INIT_P_PX        0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_PY
+#define SYS_FUSION_UKF_INIT_P_PY        0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_VX
+#define SYS_FUSION_UKF_INIT_P_VX        0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_VY
+#define SYS_FUSION_UKF_INIT_P_VY        0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_THETA
+#define SYS_FUSION_UKF_INIT_P_THETA     1.0e-10f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_BIAS_AX
+#define SYS_FUSION_UKF_INIT_P_BIAS_AX   1.0e-5f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_BIAS_AY
+#define SYS_FUSION_UKF_INIT_P_BIAS_AY   1.0e-5f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_BIAS_GZ
+#define SYS_FUSION_UKF_INIT_P_BIAS_GZ   1.0e-10f
+#endif
+
 
 
 /* ===================================================================
