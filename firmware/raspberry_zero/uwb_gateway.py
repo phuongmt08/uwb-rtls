@@ -5,6 +5,10 @@ import socket
 import struct
 import time
 import logging
+import json
+import threading
+import asyncio
+import websockets
 from dataclasses import dataclass
 from typing import Optional
 from config import Config
@@ -63,7 +67,7 @@ class UwbGateway:
     Combines parsing and network transmission in one module
     """
     
-    def __init__(self, uart_port=None, udp_host=None, udp_port=None):
+    def __init__(self, uart_port=None, udp_host=None, udp_port=None, ws_host=None, ws_port=None):
         """
         Initialize UWB Gateway
         
@@ -71,6 +75,8 @@ class UwbGateway:
             uart_port: Serial port path (default from Config)
             udp_host: UDP server IP (default from Config)
             udp_port: UDP server port (default from Config)
+            ws_host: WebSocket host to bind (default from Config)
+            ws_port: WebSocket port to bind (default from Config)
         """
         self.logger = logging.getLogger('UwbGateway')
         
@@ -78,12 +84,21 @@ class UwbGateway:
         self.uart_port = uart_port or Config.UART_PORT
         self.udp_host = udp_host or Config.UDP_HOST
         self.udp_port = udp_port or Config.UDP_PORT
+        self.ws_host = ws_host or Config.WS_HOST
+        self.ws_port = ws_port or Config.WS_PORT
         
         # Serial port
         self.serial = None
         
         # UDP socket
         self.udp_socket = None
+        
+        # WebSocket server states
+        self.ws_clients = set()
+        self.ws_loop = None
+        self.ws_thread = None
+        self.ws_server = None
+        self.ws_lock = threading.Lock()
         
         # Parsing state
         self.parse_buffer = bytearray()
@@ -94,13 +109,15 @@ class UwbGateway:
         self.error_count = 0
         self.udp_send_count = 0
         self.udp_error_count = 0
+        self.ws_send_count = 0
+        self.ws_error_count = 0
         self.last_stats_time = time.time()
         
         # Running flag
         self.running = False
     
     def connect(self):
-        """Open serial port and UDP socket"""
+        """Open serial port and start network services (UDP and/or WebSocket)"""
         try:
             # Open UART
             self.serial = serial.Serial(
@@ -113,24 +130,105 @@ class UwbGateway:
             )
             self.logger.info(f"UART opened: {self.uart_port} @ {Config.UART_BAUDRATE}")
             
-            # Create UDP socket
-            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.udp_socket.settimeout(Config.UDP_TIMEOUT)
-            self.logger.info(f"UDP socket created -> {self.udp_host}:{self.udp_port}")
+            # Create UDP socket if enabled
+            if Config.UDP_ENABLED:
+                self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.udp_socket.settimeout(Config.UDP_TIMEOUT)
+                self.logger.info(f"UDP socket created -> {self.udp_host}:{self.udp_port}")
+            else:
+                self.logger.info("UDP streaming is disabled")
             
+            # Start WebSocket server if enabled
+            if Config.WS_ENABLED:
+                self._start_ws_server()
+                
             return True
             
         except serial.SerialException as e:
             self.logger.error(f"Failed to open UART: {e}")
             return False
         except socket.error as e:
-            self.logger.error(f"Failed to create UDP socket: {e}")
+            self.logger.error(f"Failed to initialize network sockets: {e}")
             if self.serial:
                 self.serial.close()
             return False
-    
+
+    def _start_ws_server(self):
+        """Start the WebSocket server in a separate background thread"""
+        self.ws_loop = asyncio.new_event_loop()
+        self.ws_thread = threading.Thread(target=self._run_ws_loop, daemon=True)
+        self.ws_thread.start()
+        self.logger.info("WebSocket server thread started")
+
+    def _run_ws_loop(self):
+        """Run the asyncio event loop for the WebSocket server"""
+        asyncio.set_event_loop(self.ws_loop)
+        
+        # Start server
+        try:
+            start_server = websockets.serve(self._ws_handler, self.ws_host, self.ws_port)
+            self.ws_server = self.ws_loop.run_until_complete(start_server)
+            self.logger.info(f"WebSocket server listening on ws://{self.ws_host}:{self.ws_port}")
+            self.ws_loop.run_forever()
+        except Exception as e:
+            self.logger.error(f"WebSocket loop error: {e}")
+        finally:
+            self.ws_loop.close()
+            self.logger.info("WebSocket loop closed")
+
+    async def _ws_handler(self, websocket):
+        """Handle incoming WebSocket client connections"""
+        client_address = websocket.remote_address
+        self.logger.info(f"WebSocket client connected from {client_address}")
+        with self.ws_lock:
+            self.ws_clients.add(websocket)
+            
+        try:
+            # Keep connection open and detect disconnection
+            async for message in websocket:
+                self.logger.debug(f"Received message from client {client_address}: {message}")
+        except websockets.exceptions.ConnectionClosed:
+            self.logger.info(f"WebSocket client disconnected from {client_address}")
+        except Exception as e:
+            self.logger.error(f"Error in WebSocket handler for client {client_address}: {e}")
+        finally:
+            with self.ws_lock:
+                self.ws_clients.discard(websocket)
+            self.logger.debug(f"Removed WebSocket client {client_address}")
+
+    def broadcast_ws(self, frame: UwbFusionFrame):
+        """Broadcast frame to all WebSocket clients (thread-safe)"""
+        if not Config.WS_ENABLED or not self.ws_clients:
+            return
+
+        # Prepare JSON payload
+        data_dict = frame.to_dict()
+        message = json.dumps(data_dict)
+        
+        # Run send coroutine in the websocket event loop
+        if self.ws_loop and self.ws_loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._async_broadcast(message), self.ws_loop)
+
+    async def _async_broadcast(self, message: str):
+        """Async helper to broadcast message to all connected clients"""
+        with self.ws_lock:
+            active_clients = list(self.ws_clients)
+            
+        if active_clients:
+            tasks = [self._send_to_client(client, message) for client in active_clients]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _send_to_client(self, client, message: str):
+        """Send message to a single client with error handling"""
+        try:
+            await client.send(message)
+            self.ws_send_count += 1
+        except Exception as e:
+            self.logger.error(f"WebSocket send error to client: {e}")
+            self.ws_error_count += 1
+
     def disconnect(self):
-        """Close serial port and UDP socket"""
+        """Close serial port, UDP socket, and stop WebSocket server"""
         if self.serial and self.serial.is_open:
             self.serial.close()
             self.logger.info("UART closed")
@@ -138,6 +236,36 @@ class UwbGateway:
         if self.udp_socket:
             self.udp_socket.close()
             self.logger.info("UDP socket closed")
+            
+        if Config.WS_ENABLED and self.ws_server and self.ws_loop:
+            self.logger.info("Stopping WebSocket server...")
+            # Schedule closing of server
+            self.ws_loop.call_soon_threadsafe(self.ws_server.close)
+            
+            # Wait for server to close
+            future = asyncio.run_coroutine_threadsafe(self.ws_server.wait_closed(), self.ws_loop)
+            try:
+                future.result(timeout=2.0)
+            except Exception as e:
+                self.logger.error(f"Error waiting for WebSocket server to close: {e}")
+                
+            # Close all active clients
+            with self.ws_lock:
+                active_clients = list(self.ws_clients)
+            
+            if active_clients:
+                close_tasks = []
+                for client in active_clients:
+                    close_tasks.append(asyncio.run_coroutine_threadsafe(client.close(), self.ws_loop))
+                for task in close_tasks:
+                    try:
+                        task.result(timeout=1.0)
+                    except Exception:
+                        pass
+                        
+            # Stop the loop
+            self.ws_loop.call_soon_threadsafe(self.ws_loop.stop)
+            self.logger.info("WebSocket server stopped")
     
     def validate_fusion_frame(self, frame: UwbFusionFrame) -> bool:
         """Validate UKF/trilateration fusion frame data"""
@@ -314,8 +442,14 @@ class UwbGateway:
                     self.logger.debug(f"Parsed: {frame}")
                     
                     # Send via UDP
-                    if self.send_udp(frame):
-                        self.logger.debug(f"Sent UDP: {frame}")
+                    if Config.UDP_ENABLED:
+                        if self.send_udp(frame):
+                            self.logger.debug(f"Sent UDP: {frame}")
+                    
+                    # Send via WebSocket
+                    if Config.WS_ENABLED:
+                        self.broadcast_ws(frame)
+                        self.logger.debug(f"Broadcasted WS: {frame}")
                     
                 else:
                     self.error_count += 1
@@ -343,12 +477,20 @@ class UwbGateway:
             self.logger.info(f"Statistics (last {elapsed:.1f}s):")
             self.logger.info(f"  Valid frames: {self.frame_count}")
             self.logger.info(f"  Parse errors: {self.error_count}")
-            self.logger.info(f"  UDP sent: {self.udp_send_count}")
-            self.logger.info(f"  UDP errors: {self.udp_error_count}")
+            if Config.UDP_ENABLED:
+                self.logger.info(f"  UDP sent: {self.udp_send_count}")
+                self.logger.info(f"  UDP errors: {self.udp_error_count}")
+            if Config.WS_ENABLED:
+                with self.ws_lock:
+                    client_count = len(self.ws_clients)
+                self.logger.info(f"  WS clients connected: {client_count}")
+                self.logger.info(f"  WS messages sent: {self.ws_send_count}")
+                self.logger.info(f"  WS errors: {self.ws_error_count}")
             
             if self.frame_count > 0:
-                success_rate = (self.udp_send_count / self.frame_count) * 100
-                self.logger.info(f"  Success rate: {success_rate:.1f}%")
+                if Config.UDP_ENABLED:
+                    success_rate = (self.udp_send_count / self.frame_count) * 100
+                    self.logger.info(f"  UDP Success rate: {success_rate:.1f}%")
             
             self.logger.info("=" * 60)
             self.last_stats_time = now
