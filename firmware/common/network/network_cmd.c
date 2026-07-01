@@ -1594,7 +1594,7 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {
     CHECK(stream && data, false);
-//    CHECK(network_cmd_is_ranging_enabled(), false);
+    CHECK(network_cmd_is_ranging_enabled(), false);
 #if !defined(TEST_UKF_STREAM_BLE) || (TEST_UKF_STREAM_BLE == 0)
     CHECK(network_cmd_is_ble_host_active(), false);
 #endif
