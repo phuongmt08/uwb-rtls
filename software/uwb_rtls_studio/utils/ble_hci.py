@@ -1,0 +1,93 @@
+"""BLE HCI status and disconnect reason helpers."""
+from __future__ import annotations
+
+
+HCI_ERROR_NAMES = {
+    0x00: "Success",
+    0x01: "Unknown HCI Command",
+    0x02: "Unknown Connection Identifier",
+    0x03: "Hardware Failure",
+    0x04: "Page Timeout",
+    0x05: "Authentication Failure",
+    0x06: "PIN or Key Missing",
+    0x07: "Memory Capacity Exceeded",
+    0x08: "Connection Timeout",
+    0x09: "Connection Limit Exceeded",
+    0x0A: "Synchronous Connection Limit To A Device Exceeded",
+    0x0B: "Connection Already Exists",
+    0x0C: "Command Disallowed",
+    0x0D: "Connection Rejected Due To Limited Resources",
+    0x0E: "Connection Rejected Due To Security Reasons",
+    0x0F: "Connection Rejected Due To Unacceptable BD_ADDR",
+    0x10: "Connection Accept Timeout Exceeded",
+    0x11: "Unsupported Feature Or Parameter Value",
+    0x12: "Invalid HCI Command Parameters",
+    0x13: "Remote User Terminated Connection",
+    0x14: "Remote Device Terminated Connection Due To Low Resources",
+    0x15: "Remote Device Terminated Connection Due To Power Off",
+    0x16: "Connection Terminated By Local Host",
+    0x17: "Repeated Attempts",
+    0x18: "Pairing Not Allowed",
+    0x19: "Unknown LMP PDU",
+    0x1A: "Unsupported Remote Feature / Unsupported LMP Feature",
+    0x1B: "SCO Offset Rejected",
+    0x1C: "SCO Interval Rejected",
+    0x1D: "SCO Air Mode Rejected",
+    0x1E: "Invalid LMP Parameters / Invalid LL Parameters",
+    0x1F: "Unspecified Error",
+    0x20: "Unsupported LMP Parameter Value / Unsupported LL Parameter Value",
+    0x21: "Role Change Not Allowed",
+    0x22: "LMP Response Timeout / LL Response Timeout",
+    0x23: "LMP Error Transaction Collision / LL Procedure Collision",
+    0x24: "LMP PDU Not Allowed",
+    0x25: "Encryption Mode Not Acceptable",
+    0x26: "Link Key Cannot Be Changed",
+    0x27: "Requested QoS Not Supported",
+    0x28: "Instant Passed",
+    0x29: "Pairing With Unit Key Not Supported",
+    0x2A: "Different Transaction Collision",
+    0x2B: "QoS Unacceptable Parameter",
+    0x2C: "QoS Rejected",
+    0x2D: "Channel Classification Not Supported",
+    0x2E: "Insufficient Security",
+    0x2F: "Parameter Out Of Mandatory Range",
+    0x31: "Role Switch Pending",
+    0x32: "Reserved Slot Violation",
+    0x33: "Role Switch Failed",
+    0x34: "Extended Inquiry Response Too Large",
+    0x35: "Secure Simple Pairing Not Supported By Host",
+    0x36: "Host Busy - Pairing",
+    0x37: "Host Busy - Pairing",
+    0x38: "Controller Busy",
+    0x39: "Connection Rejected Due To No Suitable Channel Found",
+    0x3A: "Controller Busy",
+    0x3B: "Unacceptable Connection Parameters",
+    0x3C: "Advertising Timeout",
+    0x3D: "Connection Terminated Due To MIC Failure",
+    0x3E: "Connection Failed To Be Established",
+    0x3F: "MAC Connection Failed",
+    0x40: "Coarse Clock Adjustment Rejected",
+    0x41: "Unknown Advertising Identifier",
+    0x42: "Limit Reached",
+    0x43: "Operation Cancelled By Host",
+    0x44: "Packet Too Long",
+    0x45: "Too Late",
+    0x46: "Too Early",
+    0x47: "Too Short",
+    0x48: "Too Long",
+    0x49: "Insufficient Channels",
+}
+
+
+def normalize_hci_reason(code: int | str | None) -> dict:
+    """Return display metadata for a BLE HCI reason code."""
+    try:
+        reason = int(code or 0)
+    except (TypeError, ValueError):
+        reason = 0
+    reason &= 0xFF
+    return {
+        "code": reason,
+        "code_hex": f"0x{reason:02X}",
+        "name": HCI_ERROR_NAMES.get(reason, "Unknown HCI Error"),
+    }

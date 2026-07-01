@@ -1,15 +1,15 @@
 """
-UWB RTLS Studio — Device Info Tab (UI loaded from .ui file)
-Tab 1: Hiển thị thông tin device đã connected.
+UWB RTLS Studio - Device Info Tab (UI loaded from .ui file)
+Tab 1: Shows connected device information.
 
 FE: Loaded from views/ui/device_info_tab.ui (editable in Qt Designer)
 BE: ViewModel bindings + data updaters (this file)
 
 Layout: Split-screen
-  - LEFT column:  Connected Device + BLE Connection + Battery + Temperature + Voltage
+  - LEFT column: Connected Device + BLE Connection + Battery + Temperature + Voltage
   - RIGHT column: Other Advertising Devices (with Connect buttons per row)
 
-Background polling: ViewModel tự động gửi GET commands mỗi 2s (không cần nút Refresh).
+Background polling: ViewModel sends GET commands every 2s (no Refresh button needed).
 """
 import os
 import time
@@ -32,11 +32,9 @@ class DeviceInfoTab(QWidget):
         super().__init__(parent)
         self._vm = None
         self._is_developer_mode = False
-
-        # ── Load UI from .ui file ──
+        # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
-
-        # ── Post-load setup ──
+        # Post-load setup
         self._setup_mappings()
         self._setup_table()
         self._reset_display_fields()
@@ -56,7 +54,15 @@ class DeviceInfoTab(QWidget):
         }
 
         # BLE info value labels
+        self.lbl_ble_state = QLabel("State:")
+        self.lbl_ble_state.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        self.val_ble_state = QLabel("-")
+        self.val_ble_state.setStyleSheet("color: #F8FAFC;")
+        self.ble_grid.addWidget(self.lbl_ble_state, 5, 0)
+        self.ble_grid.addWidget(self.val_ble_state, 5, 1)
+
         self._ble_values = {
+            "State:": self.val_ble_state,
             "RSSI:": self.val_ble_rssi,
             "Conn Interval:": self.val_ble_interval,
             "Slave Latency:": self.val_ble_latency,
@@ -116,6 +122,8 @@ class DeviceInfoTab(QWidget):
         ):
             for label in group.values():
                 label.setText("-")
+                label.setToolTip("")
+        self.val_ble_state.setStyleSheet("color: #F8FAFC;")
         self._bat_pct.setText("-")
         self._bat_bar.setValue(0)
         self._time_local.setText("-")
@@ -162,6 +170,19 @@ class DeviceInfoTab(QWidget):
                 self._dev_values[lbl].setText(str(v) if v not in (None, "") else "-")
 
     def _on_ble_info(self, info: dict):
+        display_state = info.get("display_state")
+        if display_state is not None:
+            self._ble_values["State:"].setText(str(display_state))
+            color = "#10B981" if display_state == "Connected" else "#EF4444"
+            self._ble_values["State:"].setStyleSheet(f"color: {color}; font-weight: bold;")
+            reason_hex = info.get("disconnect_reason_hex")
+            reason_name = info.get("disconnect_reason_name")
+            raw_state = info.get("state_name")
+            tooltip = f"Raw BLE state: {raw_state or display_state}"
+            if reason_hex and reason_name:
+                tooltip += f" | Reason: {reason_hex} - {reason_name}"
+            self._ble_values["State:"].setToolTip(tooltip)
+
         rssi = info.get("rssi_dbm")
         if rssi is not None:
             self._ble_values["RSSI:"].setText(f"{rssi} dBm")

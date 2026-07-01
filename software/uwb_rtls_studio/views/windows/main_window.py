@@ -17,9 +17,9 @@ import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTabWidget, QStatusBar, QComboBox, QFrame,
-    QApplication, QMessageBox
+    QApplication, QMessageBox, QProgressBar, QGraphicsOpacityEffect
 )
-from PyQt6.QtCore import QTimer, QSize
+from PyQt6.QtCore import QTimer, QSize, Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QAction
 from PyQt6 import uic
 
@@ -28,6 +28,90 @@ from PyQt6 import uic
 # Path to .ui file
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'main_window.ui')
 
+
+class ToastNotification(QFrame):
+    def __init__(self, title: str, message: str, kind: str = "info", parent=None):
+        super().__init__(parent)
+        self.setObjectName("ble_toast")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(430)
+        self._close_started = False
+        accent = {
+            "disconnect": "#EF4444",
+            "connect_retry": "#F59E0B",
+        }.get(kind, "#22D3EE")
+        self.setStyleSheet(f"""
+            QFrame#ble_toast {{
+                background: #111827;
+                border: 1px solid {accent};
+                border-left: 4px solid {accent};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #E5E7EB; }}
+            QPushButton {{
+                background: transparent;
+                color: #94A3B8;
+                border: none;
+                font-weight: bold;
+                padding: 2px 6px;
+            }}
+            QPushButton:hover {{ color: #FFFFFF; }}
+        """)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 8, 10)
+        layout.setSpacing(8)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        self._title = QLabel(title)
+        self._title.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
+        text_layout.addWidget(self._title)
+
+        self._message = QLabel(message)
+        self._message.setWordWrap(True)
+        self._message.setStyleSheet("font-size: 12px; color: #CBD5E1;")
+        text_layout.addWidget(self._message)
+        layout.addLayout(text_layout, 1)
+
+        self._close_btn = QPushButton("x")
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close_btn.setFixedSize(24, 24)
+        self._close_btn.clicked.connect(self.close_animated)
+        layout.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._opacity = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity)
+        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
+        self._fade.setDuration(180)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._auto_close = QTimer(self)
+        self._auto_close.setSingleShot(True)
+        self._auto_close.timeout.connect(self.close_animated)
+
+    def show_animated(self, auto_close_ms: int) -> None:
+        self._opacity.setOpacity(0.0)
+        self.show()
+        self.raise_()
+        self._fade.stop()
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._fade.start()
+        if auto_close_ms > 0:
+            self._auto_close.start(auto_close_ms)
+
+    def close_animated(self) -> None:
+        if self._close_started:
+            return
+        self._close_started = True
+        self._auto_close.stop()
+        self._fade.stop()
+        self._fade.setStartValue(float(self._opacity.opacity()))
+        self._fade.setEndValue(0.0)
+        self._fade.finished.connect(self.deleteLater)
+        self._fade.start()
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -63,6 +147,9 @@ class MainWindow(QMainWindow):
         # -- Load UI from .ui file --
         uic.loadUi(UI_FILE, self)
 
+        self._ble_toast = None
+        self._setup_header_progress()
+
         # -- Setup tabs (replace placeholder) --
         self._setup_tabs()
 
@@ -77,6 +164,174 @@ class MainWindow(QMainWindow):
         self._session_timer.timeout.connect(self._tick_session)
         self._set_session_button_active(False)
         self._begin_session(initial=True)
+
+    def _setup_header_progress(self):
+        self._conn_progress_frame = QFrame(self.header_content_frame)
+        self._conn_progress_frame.setObjectName("ble_process_frame")
+        self._conn_progress_frame.setFixedHeight(36)
+        self._conn_progress_frame.setMinimumWidth(360)
+        self._conn_progress_frame.setMaximumWidth(470)
+
+        layout = QHBoxLayout(self._conn_progress_frame)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+
+        self._conn_progress_label = QLabel("BLE: Disconnected")
+        self._conn_progress_label.setMinimumWidth(132)
+        self._conn_progress_label.setMaximumWidth(170)
+        self._conn_progress_label.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self._conn_progress_label)
+
+        self._conn_progress_bar = QProgressBar()
+        self._conn_progress_bar.setRange(0, 100)
+        self._conn_progress_bar.setValue(0)
+        self._conn_progress_bar.setFormat("%p%")
+        self._conn_progress_bar.setTextVisible(True)
+        self._conn_progress_bar.setFixedHeight(18)
+        layout.addWidget(self._conn_progress_bar, 1)
+
+        self.header_layout.insertWidget(2, self._conn_progress_frame)
+        self.update_progress_style("IDLE")
+
+    def update_progress_style(self, status: str):
+        if status == "SUCCESS":
+            border_color = "#10B981"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #10B981, stop:1 #047857);"
+        elif status in ("FAILED", "ERROR"):
+            border_color = "#EF4444"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #EF4444, stop:1 #B91C1C);"
+        elif status == "RETRYING":
+            border_color = "#F59E0B"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #F59E0B, stop:1 #B45309);"
+        elif status == "RUNNING":
+            border_color = "#3B82F6"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #06B6D4, stop:1 #10B981);"
+        else:  # IDLE/DEFAULT
+            border_color = "#334155"
+            chunk_style = "background: #1E293B;"
+
+        self._conn_progress_frame.setStyleSheet(f"""
+            QFrame#ble_process_frame {{
+                background: #0F172A;
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #CBD5E1; font-size: 12px; }}
+            QProgressBar {{
+                background: #020617;
+                border: 1px solid #334155;
+                border-radius: 5px;
+                color: #E5E7EB;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                {chunk_style}
+                border-radius: 4px;
+            }}
+        """)
+
+    def _animate_success(self):
+        import math
+        self._success_anim_step = 0
+        if hasattr(self, "_success_timer") and self._success_timer:
+            self._success_timer.stop()
+        self._success_timer = QTimer(self)
+        self._success_timer.setInterval(60)
+        self._success_timer.timeout.connect(self._on_success_anim_tick)
+        self._success_timer.start()
+
+    def _on_success_anim_tick(self):
+        import math
+        self._success_anim_step += 1
+        if self._success_anim_step > 12:
+            self._success_timer.stop()
+            self._success_timer = None
+            self.update_progress_style("SUCCESS")
+            return
+
+        alpha = int(127 + 128 * abs(math.sin(self._success_anim_step * 0.5)))
+        border_color = f"rgba(16, 185, 129, {alpha/255.0:.2f})"
+        chunk_style = f"background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(16, 185, 129, {alpha/255.0:.2f}), stop:1 #047857);"
+
+        self._conn_progress_frame.setStyleSheet(f"""
+            QFrame#ble_process_frame {{
+                background: #0F172A;
+                border: 2px solid {border_color};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #E2E8F0; font-size: 12px; font-weight: bold; }}
+            QProgressBar {{
+                background: #020617;
+                border: 1px solid #334155;
+                border-radius: 5px;
+                color: #FFFFFF;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                {chunk_style}
+                border-radius: 4px;
+            }}
+        """)
+
+    def _on_connection_progress(self, payload: dict):
+        progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
+        message = str(payload.get("message") or "BLE process")
+        status = str(payload.get("status") or "RUNNING")
+
+        self._conn_progress_label.setText(message)
+        self._conn_progress_label.setToolTip(message)
+        self._conn_progress_bar.setValue(progress)
+
+        if hasattr(self, "_success_timer") and self._success_timer:
+            self._success_timer.stop()
+            self._success_timer = None
+
+        if status == "SUCCESS" or progress >= 100:
+            self._animate_success()
+        else:
+            self.update_progress_style(status)
+
+    def _show_ble_notification(self, payload: dict):
+        title = str(payload.get("title") or "BLE notification")
+        message = str(payload.get("message") or "")
+        kind = str(payload.get("kind") or "info")
+        auto_close_ms = int(payload.get("auto_close_ms", 3000) or 0)
+
+        current = self._ble_toast
+        if current is not None:
+            current.close_animated()
+
+        toast = ToastNotification(title, message, kind, parent=self.centralwidget)
+        self._ble_toast = toast
+        toast.destroyed.connect(lambda _=None, t=toast: self._on_toast_destroyed(t))
+        self._position_ble_toast(toast)
+        toast.show_animated(auto_close_ms)
+
+    def _position_ble_toast(self, toast=None):
+        toast = toast or self._ble_toast
+        if toast is None:
+            return
+        parent = toast.parentWidget()
+        if parent is None:
+            return
+        width = min(430, max(320, parent.width() - 48))
+        toast.setFixedWidth(width)
+        toast.adjustSize()
+        x = max(16, parent.width() - toast.width() - 24)
+        y = 70
+        toast.move(x, y)
+
+    def _on_toast_destroyed(self, toast):
+        if self._ble_toast is toast:
+            self._ble_toast = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_ble_toast()
 
     def _setup_tabs(self):
         """Setup viewmodels for pre-loaded tabs from .ui"""
@@ -95,6 +350,10 @@ class MainWindow(QMainWindow):
         if self._device_info_vm:
             self._tab_device.set_viewmodel(self._device_info_vm)
             self._device_info_vm.device_info_updated.connect(self._on_device_changed)
+            if hasattr(self._device_info_vm, "connection_progress_updated"):
+                self._device_info_vm.connection_progress_updated.connect(self._on_connection_progress)
+            if hasattr(self._device_info_vm, "ble_notification_requested"):
+                self._device_info_vm.ble_notification_requested.connect(self._show_ble_notification)
 
         if self._live_tracking_vm:
             self._tab_tracking.set_viewmodel(self._live_tracking_vm)

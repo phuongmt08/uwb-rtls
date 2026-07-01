@@ -55,6 +55,34 @@ def test_telemetry_model_displays_missing_fields_as_placeholders():
     assert display["mcu_temp_str"] == "--"
 
 
+
+def test_telemetry_model_tracks_ble_status_and_connection_params():
+    _ensure_qt_app()
+    model = TelemetryModel()
+
+    model.handle_ble_status({
+        "state": 5,
+        "state_name": "CONNECTED",
+        "display_state": "Connected",
+        "rssi_dbm": -58,
+        "disconnect_reason": 0,
+        "disconnect_reason_hex": "0x00",
+        "disconnect_reason_name": "Success",
+    }, received_at=1000.0)
+    model.handle_ble_conn_params({
+        "conn_interval": "30 - 50 ms",
+        "slave_latency": 0,
+        "supervision_timeout": 4000,
+        "phy": "2M",
+    }, received_at=1001.0)
+
+    ble = model.snapshot()["ble_status"]
+    assert ble["display_state"]["value"] == "Connected"
+    assert ble["rssi_dbm"]["value"] == -58
+    assert ble["conn_interval"]["value"] == "30 - 50 ms"
+    assert ble["phy"]["freshness"] == "fresh"
+
+
 def test_telemetry_repository_does_not_parse_absent_proto_fields_as_zero():
     repo = TelemetryRepository()
     resp = pb.battery_info_resp_t()

@@ -45,6 +45,8 @@ class DeviceInfoViewModel(QObject):
     telemetry_updated = pyqtSignal(dict)
     advertising_devices_updated = pyqtSignal(list, bool)   # list of dicts, is_scanning
     time_sync_updated = pyqtSignal(str, bool, bool)        # local_time_str, is_synced, is_syncing
+    connection_progress_updated = pyqtSignal(dict)
+    ble_notification_requested = pyqtSignal(dict)
 
     def __init__(
         self,
@@ -84,6 +86,10 @@ class DeviceInfoViewModel(QObject):
             self.model.scan_data_updated.connect(self._on_scan_data_updated)
             
         self.model.connection_state_changed.connect(self._on_connection_state_changed)
+        if hasattr(self.model, "connection_progress_changed"):
+            self.model.connection_progress_changed.connect(self.connection_progress_updated.emit)
+        if hasattr(self.model, "ble_notification_requested"):
+            self.model.ble_notification_requested.connect(self.ble_notification_requested.emit)
 
         from utils.app_state import shared_app_state
         shared_app_state.rtos_resource_changed.connect(self._on_rtos_resource_changed)
@@ -389,20 +395,31 @@ class DeviceInfoViewModel(QObject):
         return f"{float(value):.1f} C"
 
     def _on_ble_status_parsed(self, info: dict):
-        """Forward BLE status to View."""
-        self.ble_info_updated.emit({
+        """Forward BLE status to View and telemetry state."""
+        payload = {
             "state": info.get("state"),
+            "state_name": info.get("state_name"),
+            "display_state": info.get("display_state"),
             "rssi_dbm": info.get("rssi_dbm"),
-        })
+            "disconnect_reason": info.get("disconnect_reason"),
+            "disconnect_reason_hex": info.get("disconnect_reason_hex"),
+            "disconnect_reason_name": info.get("disconnect_reason_name"),
+        }
+        if self._telemetry_model:
+            payload.update(self._telemetry_model.handle_ble_status(payload))
+        self.ble_info_updated.emit(payload)
 
     def _on_ble_conn_params_parsed(self, params: dict):
-        """Forward BLE connection parameters to View."""
-        self.ble_info_updated.emit({
+        """Forward BLE connection parameters to View and telemetry state."""
+        payload = {
             "conn_interval": f"{params.get('min_interval_ms', 0)} - {params.get('max_interval_ms', 0)} ms",
             "slave_latency": params.get("slave_latency"),
             "supervision_timeout": params.get("sup_timeout_ms"),
             "phy": params.get("phy", "-"),
-        })
+        }
+        if self._telemetry_model:
+            payload.update(self._telemetry_model.handle_ble_conn_params(payload))
+        self.ble_info_updated.emit(payload)
 
     def _on_connection_state_changed(self, info: dict):
         """Model reports connection state change -> emit a complete UI snapshot."""

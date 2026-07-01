@@ -126,15 +126,29 @@ class SessionRunManager(QObject):
 
     def end_all_active(self, duration_sec: float = 0.0) -> str:
         session_id = self.ensure_session()
+        sent_ranging_end = False
+        sent_log_end = False
+
         if shared_app_state.ranging_active or self.session_model.active_run("ranging"):
             try:
                 if self.ranging_model and getattr(self.ranging_model, "is_ranging", False):
                     self.ranging_model.stop_ranging()
             finally:
                 self.close_ranging_run(send_end=True)
+                sent_ranging_end = True
 
-        if self.session_model.active_run("log") or self._collect_logs():
+        active_log_run = self.session_model.active_run("log")
+        has_log_stream = bool(shared_app_state.log_streaming)
+        has_log_payload = bool(self._collect_logs())
+        if has_log_stream or has_log_payload:
             self.close_log_run(send_end=True)
+            sent_log_end = True
+        elif active_log_run:
+            self.session_model.close_log_run(
+                line_count=0,
+                files=[],
+                end_reason="SESSION_END_REASON_UNSPECIFIED",
+            )
 
         meta = self.session_model.end_app_session(reason="USER_END_SESSION")
         if duration_sec:
@@ -142,6 +156,10 @@ class SessionRunManager(QObject):
         if meta:
             self.session_repository.ensure_session(meta)
         self.session_closed.emit(session_id)
+
+        if not sent_ranging_end and not sent_log_end:
+            self._send_end_session(pb.SESSION_END_REASON_UNSPECIFIED)
+
         return session_id
 
     def start_new_session(self) -> str:

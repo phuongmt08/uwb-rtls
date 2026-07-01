@@ -59,7 +59,19 @@ class TelemetryModel(QObject):
         "imu_temp_c",
         "error_mask",
     )
-    BLE_KEYS = ("state", "rssi_dbm", "disconnect_reason")
+    BLE_KEYS = (
+        "state",
+        "state_name",
+        "display_state",
+        "rssi_dbm",
+        "disconnect_reason",
+        "disconnect_reason_hex",
+        "disconnect_reason_name",
+        "conn_interval",
+        "slave_latency",
+        "supervision_timeout",
+        "phy",
+    )
     RTOS_KEYS = (
         "sample_window_ms",
         "cpu_busy_permille",
@@ -91,6 +103,12 @@ class TelemetryModel(QObject):
         return flat
 
     def handle_ble_status(self, data: dict, received_at: float | None = None) -> dict:
+        return self._handle_ble_update(data, received_at)
+
+    def handle_ble_conn_params(self, data: dict, received_at: float | None = None) -> dict:
+        return self._handle_ble_update(data, received_at)
+
+    def _handle_ble_update(self, data: dict, received_at: float | None = None) -> dict:
         now = time.time() if received_at is None else float(received_at)
         self._update_group(self._snapshot.ble_status, self.BLE_KEYS, data, now)
         flat = self._flatten_group(self._snapshot.ble_status)
