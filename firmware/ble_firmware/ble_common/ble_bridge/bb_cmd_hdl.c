@@ -285,7 +285,6 @@ static void handle_ble_status_get(const protobuf_packet_t * p_in, protobuf_packe
     
     if (active_disconnect_reason != 0)
     {
-        p_out->params.ble_status_resp.has_disconnect_reason = true;
         p_out->params.ble_status_resp.disconnect_reason = active_disconnect_reason;
     }
 
@@ -363,7 +362,6 @@ static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packe
     // Fill the output packet.
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_SCANNING; 
-    p_out->params.ble_status_resp.has_disconnect_reason = false;
 
     // Tell the router to send this response back over serial.
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
@@ -377,7 +375,6 @@ static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE; 
-    p_out->params.ble_status_resp.has_disconnect_reason = false;
     
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
@@ -441,7 +438,6 @@ static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_CONNECTING; 
-    p_out->params.ble_status_resp.has_disconnect_reason = false;
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
 
@@ -453,7 +449,6 @@ static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packe
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE; 
-    p_out->params.ble_status_resp.has_disconnect_reason = false;
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
 
@@ -522,7 +517,6 @@ void bb_cmd_notify_ble_status(uint8_t state,
 
     if (disconnect_reason != 0)
     {
-        pkt.params.ble_status_resp.has_disconnect_reason = true;
         pkt.params.ble_status_resp.disconnect_reason = disconnect_reason;
     }
 

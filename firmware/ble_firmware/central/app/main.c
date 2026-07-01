@@ -120,21 +120,15 @@ int main(void)
 
     /* ----- USB CDC ACM --------------------------------------------------- */
 #if APP_ENABLE_USB_CDC_ACM
-    bb_router_init();
     app_usbd_serial_num_generate();
+    err_code = bb_router_init();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("BLE bridge init failed (0x%08x) - continuing BLE-only.", err_code);
+    }
 
-    NRF_LOG_INFO("Boot: bsp_usbd_init");
+    NRF_LOG_INFO("Boot: BLE bridge/USB init complete");
     NRF_LOG_FLUSH();
-    // err_code = bsp_usbd_init();
-    // if (err_code != NRF_SUCCESS)
-    // {
-    //     NRF_LOG_WARNING("USB init failed (0x%08x) - continuing BLE-only.", err_code);
-    // }
-    // else
-    // {
-    //     NRF_LOG_INFO("Boot: USB CDC ACM ready");
-    // }
-    // NRF_LOG_FLUSH(); /* Flush before BLE init so USB events don't drop BLE logs */
 #else
     NRF_LOG_INFO("Boot: USB CDC ACM disabled");
 #endif /* APP_ENABLE_USB_CDC_ACM */
