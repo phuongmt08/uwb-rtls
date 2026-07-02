@@ -604,7 +604,7 @@ class MainWindow(QMainWindow):
         self.ukf_xs, self.ukf_ys = [], []
         self.d1_data, self.d2_data, self.d3_data, self.d4_data = [], [], [], []
         self.distance_xs = []
-        self.distance_elapsed_time = 0.0
+        self.distance_time_origin = time.monotonic()
         self.zero_distance_counts = [0, 0, 0, 0]
         self.latest_data = None
         self._update_zero_distance_title()
@@ -650,7 +650,7 @@ class MainWindow(QMainWindow):
         self.d3_data.clear()
         self.d4_data.clear()
         self.distance_xs.clear()
-        self.distance_elapsed_time = 0.0
+        self.distance_time_origin = time.monotonic()
         self.latest_data = None
         
         if getattr(self, 'ref_rect_item', None) is not None:
@@ -719,8 +719,7 @@ class MainWindow(QMainWindow):
         for idx, series in enumerate(distance_series):
             distance = d[idx] if idx < len(d) else 0.0
             series.append(distance if abs(distance) > 1e-6 else np.nan)
-        self.distance_elapsed_time += max(0.0, float(data.get('dt', 0.0)))
-        self.distance_xs.append(self.distance_elapsed_time)
+        self.distance_xs.append(time.monotonic() - self.distance_time_origin)
         
         # Keep maximum defined samples
         if len(self.imu_xs) > MAX_SAMPLES:
@@ -743,26 +742,40 @@ class MainWindow(QMainWindow):
         self.graph_d.setTitle(f"Distance = 0 count — {counts}")
 
     def _update_distance_plot(self):
+        current_time = time.monotonic() - self.distance_time_origin
+
         if not self.distance_xs:
             self.plot_d1.setData([], [])
             self.plot_d2.setData([], [])
             self.plot_d3.setData([], [])
             self.plot_d4.setData([], [])
+            if self.checkBox_graphDSliding.isChecked():
+                self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
+                x_max = current_time
+                x_min = max(0.0, x_max - 1.0)
+                self.graph_d.setXRange(x_min, x_max if x_max > x_min else x_min + 1, padding=0.0)
+            else:
+                self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
+                self.graph_d.setXRange(0.0, current_time if current_time > 0.0 else 1.0, padding=0.0)
             return
 
         self.plot_d1.setData(self.distance_xs, self.d1_data)
         self.plot_d2.setData(self.distance_xs, self.d2_data)
         self.plot_d3.setData(self.distance_xs, self.d3_data)
         self.plot_d4.setData(self.distance_xs, self.d4_data)
-
         if self.checkBox_graphDSliding.isChecked():
             self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
-            x_max = self.distance_xs[-1]
+            x_max = current_time
             window_start_idx = max(0, len(self.distance_xs) - DISTANCE_GRAPH_SLIDING_WINDOW)
-            x_min = self.distance_xs[window_start_idx]
+            if len(self.distance_xs) >= 2:
+                window_span = max(1.0, self.distance_xs[-1] - self.distance_xs[window_start_idx])
+            else:
+                window_span = 1.0
+            x_min = max(0.0, x_max - window_span)
             self.graph_d.setXRange(x_min, x_max if x_max > x_min else x_min + 1, padding=0.0)
         else:
-            self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)
+            self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
+            self.graph_d.setXRange(0.0, current_time if current_time > 0.0 else 1.0, padding=0.0)
 
     def update_gui(self):
         # Update Plots
