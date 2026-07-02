@@ -481,9 +481,11 @@ def main():
     # Connection loop
     connected_name = ""
     connected_mac = ""
+    initial_scan_devices = []
 
     if TEST_MODE:
         connected_name, connected_mac = mock_device_identity()
+        initial_scan_devices = [{"name": connected_name, "mac": connected_mac, "rssi": 0, "serial": "", "order": 0}]
     else:
         while True:
             dongle_popup = DonglePopup(dongle_vm)
@@ -499,6 +501,7 @@ def main():
             if res == 1:
                 # Extract connected device info from scan_model before cleanup
                 connected_mac = scan_model.connected_mac
+                initial_scan_devices = [dict(dev) for dev in sorted(scan_model._devices.values(), key=lambda d: d.get("order", 0))]
                 if connected_mac and connected_mac in scan_model._devices:
                     dev = scan_model._devices[connected_mac]
                     connected_name = dev.get("name", "")
@@ -604,7 +607,7 @@ def main():
         command_bus=command_bus,
     )
     if connected_name and connected_mac:
-        device_info_vm.set_connected_device(connected_name, connected_mac)
+        device_info_vm.set_connected_device(connected_name, connected_mac, initial_scan_devices)
 
 
 

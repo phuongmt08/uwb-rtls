@@ -24,6 +24,7 @@ class TrafficState:
     RANGING_ACTIVE = "ranging_active"
     LOG_ACTIVE = "log_active"
     RANGING_AND_LOG_ACTIVE = "ranging_and_log_active"
+    BLE_SCANNING = "ble_scanning"
     CLOSING = "closing"
 
 
@@ -68,6 +69,7 @@ class TrafficScheduler(QObject):
         self._closing_until = 0.0
         shared_app_state.ranging_active_changed.connect(self._refresh_state)
         shared_app_state.log_streaming_changed.connect(self._refresh_state)
+        shared_app_state.ble_scan_active_changed.connect(self._refresh_state)
         shared_app_state.connection_status_changed.connect(lambda _status: self._refresh_state())
         self._refresh_state()
 
@@ -104,6 +106,7 @@ class TrafficScheduler(QObject):
             TrafficState.RANGING_ACTIVE,
             TrafficState.LOG_ACTIVE,
             TrafficState.RANGING_AND_LOG_ACTIVE,
+            TrafficState.BLE_SCANNING,
             TrafficState.CLOSING,
         }:
             reason = f"background poll deferred while {self._state}"
@@ -119,6 +122,8 @@ class TrafficScheduler(QObject):
         now = time.monotonic()
         if self._closing_until > now:
             new_state = TrafficState.CLOSING
+        elif shared_app_state.ble_scan_active:
+            new_state = TrafficState.BLE_SCANNING
         elif shared_app_state.ranging_active and shared_app_state.log_streaming:
             new_state = TrafficState.RANGING_AND_LOG_ACTIVE
         elif shared_app_state.ranging_active:

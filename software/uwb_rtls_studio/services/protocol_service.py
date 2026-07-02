@@ -48,7 +48,8 @@ _common_dir = os.path.normpath(
 if _common_dir not in sys.path:
     sys.path.insert(0, os.path.dirname(_common_dir))
 
-from common.transport import VvProtocol, HdlcCodec, FRAME_TYPE_PROTOBUF, VvAddress
+from common.parser_protocol import VvProtocol
+from common.transport import HdlcCodec, FRAME_TYPE_PROTOBUF, VvAddress
 from common.commands import CommandFactory, default_destination_for
 from common import protocol_pb2 as pb
 from data.raw_packet import RawSerialChunk
@@ -71,8 +72,7 @@ class ProtocolService(QObject):
     def __init__(self, serial_service, parent=None):
         super().__init__(parent)
         self._serial = serial_service
-        self._protocol = VvProtocol()
-        self._commands = CommandFactory()
+        self._protocol = VvProtocol()   # parser_protocol.VvProtocol — encode/decode/HDLC + build_*() methods
         self._seq = 0
         self._seq_lock = threading.Lock()
         self._packet_repository = None
@@ -111,7 +111,8 @@ class ProtocolService(QObject):
 
     @property
     def commands(self) -> CommandFactory:
-        return self._commands
+        """Expose CommandFactory cho external use (nằm bên trong VvProtocol)."""
+        return self._protocol._commands
 
     def set_packet_repository(self, repository) -> None:
         """Attach decoded-packet repository for raw/debug and shared parsers."""
@@ -234,7 +235,8 @@ class ProtocolService(QObject):
         """Build + send command bằng tên.
 
         Args:
-            builder_name: tên method trong CommandFactory (e.g. 'ble_scan_start')
+            builder_name: tên command (e.g. 'ble_scan_start') —
+                          method tương ứng là build_<name> trên VvProtocol (parser_protocol).
             dst_addr: Địa chỉ đích. Nếu None, tự suy ra theo command catalog.
             src_addr: Địa chỉ nguồn (mặc định ADDR_HOST)
             **kwargs: extra args cho builder
@@ -244,7 +246,7 @@ class ProtocolService(QObject):
         """
         seq = self.next_seq()
         target_addr = default_destination_for(builder_name) if dst_addr is None else dst_addr
-        builder = getattr(self._commands, builder_name)
+        builder = getattr(self._protocol, f"build_{builder_name}")
         pkt = builder(src_addr, target_addr, seq, **kwargs)
         self.send_packet(pkt)
         return pkt

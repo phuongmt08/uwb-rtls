@@ -246,7 +246,22 @@ class DeviceInfoTab(QWidget):
     def _on_advertising_devices(self, devices: list, is_scanning: bool):
         # Scan status removed by user
 
-        self._adv_table.setRowCount(len(devices))
+        # Compare existing rows to see if we can reuse the table structure and widgets
+        rebuild_needed = True
+        if self._adv_table.rowCount() == len(devices):
+            # Check if all MACs match in the same order
+            match = True
+            for i, dev in enumerate(devices):
+                mac_item = self._adv_table.item(i, 1)
+                if not mac_item or mac_item.text() != dev["mac"]:
+                    match = False
+                    break
+            if match:
+                rebuild_needed = False
+
+        if rebuild_needed:
+            self._adv_table.setRowCount(len(devices))
+
         for i, dev in enumerate(devices):
             d_type = dev.get("device_type", 0)
             d_type_label = DEVICE_TYPE_LABELS_SHORT.get(d_type, str(d_type))
@@ -257,11 +272,8 @@ class DeviceInfoTab(QWidget):
             else:
                 device_str = dev.get("name", "-")
 
-            self._adv_table.setItem(i, 0, QTableWidgetItem(device_str))
-            self._adv_table.setItem(i, 1, QTableWidgetItem(dev["mac"]))
-
             bat = dev.get("bat_soc_percent")
-            self._adv_table.setItem(i, 2, QTableWidgetItem(f"{bat}%" if bat is not None else "-"))
+            bat_str = f"{bat}%" if bat is not None else "-"
 
             t_ms = dev.get("local_timestamp_ms")
             if t_ms is not None and t_ms > 0:
@@ -271,69 +283,127 @@ class DeviceInfoTab(QWidget):
                     t_str = str(t_ms)
             else:
                 t_str = "-"
-            self._adv_table.setItem(i, 3, QTableWidgetItem(t_str))
 
             st_flags = dev.get("status_flags")
-            self._adv_table.setItem(i, 4, QTableWidgetItem(f"0x{st_flags:X}" if st_flags is not None else "-"))
+            st_flags_str = f"0x{st_flags:X}" if st_flags is not None else "-"
 
             warn_cnt = dev.get("warning_count")
-            self._adv_table.setItem(i, 5, QTableWidgetItem(str(warn_cnt) if warn_cnt is not None else "-"))
+            warn_cnt_str = str(warn_cnt) if warn_cnt is not None else "-"
 
             err_cnt = dev.get("error_count")
-            self._adv_table.setItem(i, 6, QTableWidgetItem(str(err_cnt) if err_cnt is not None else "-"))
+            err_cnt_str = str(err_cnt) if err_cnt is not None else "-"
 
-            # Load custom row widget from UI Designer file
-            row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
-            widget = QWidget()
-            uic.loadUi(row_ui_path, widget)
+            if rebuild_needed:
+                self._adv_table.setItem(i, 0, QTableWidgetItem(device_str))
+                self._adv_table.setItem(i, 1, QTableWidgetItem(dev["mac"]))
+                self._adv_table.setItem(i, 2, QTableWidgetItem(bat_str))
+                self._adv_table.setItem(i, 3, QTableWidgetItem(t_str))
+                self._adv_table.setItem(i, 4, QTableWidgetItem(st_flags_str))
+                self._adv_table.setItem(i, 5, QTableWidgetItem(warn_cnt_str))
+                self._adv_table.setItem(i, 6, QTableWidgetItem(err_cnt_str))
 
-            btn_set_time = QPushButton("Set Time")
-            btn_set_time.setMinimumSize(65, 22)
-            btn_set_time.setMaximumSize(65, 22)
-            btn_set_time.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_set_time.setStyleSheet(
-                "QPushButton { background: #2563EB; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
-                "QPushButton:hover { background: #3B82F6; } "
-                "QPushButton:disabled { background: #334155; color: #94A3B8; }"
-            )
-            btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
-            if d_id is None:
-                btn_set_time.setEnabled(False)
-            widget.layout().addWidget(btn_set_time)
+                # Load custom row widget from UI Designer file
+                row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
+                widget = QWidget()
+                uic.loadUi(row_ui_path, widget)
+                widget.setProperty("mac", dev["mac"])
 
-            model = self._vm.model
-            row_mac = dev["mac"]
-            is_connected_row = model.connected_mac == row_mac and model.connection_status == "Connected"
-            is_connecting_row = model.connected_mac == row_mac and model.connection_status == "Connecting"
-            is_disconnecting_row = model.connected_mac == row_mac and model.connection_status == "Disconnecting"
-            is_pending_row = model.pending_connect_mac == row_mac and model.connection_status in ("Connecting", "Disconnecting")
-
-            if is_connected_row:
-                widget.btn_connect.setText("Disconnect")
-                widget.btn_connect.setStyleSheet(
-                    "QPushButton { background: #DC2626; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
-                    "QPushButton:hover { background: #EF4444; } "
+                btn_set_time = QPushButton("Set Time")
+                btn_set_time.setObjectName("btn_set_time")
+                btn_set_time.setMinimumSize(65, 22)
+                btn_set_time.setMaximumSize(65, 22)
+                btn_set_time.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_set_time.setStyleSheet(
+                    "QPushButton { background: #2563EB; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                    "QPushButton:hover { background: #3B82F6; } "
                     "QPushButton:disabled { background: #334155; color: #94A3B8; }"
                 )
-                widget.btn_connect.clicked.connect(lambda checked=False: self._vm.disconnect_device())
-            elif is_connecting_row or is_pending_row:
-                widget.btn_connect.setText("Connecting...")
-                widget.btn_connect.setEnabled(False)
-                btn_set_time.setEnabled(False)
-            elif is_disconnecting_row:
-                widget.btn_connect.setText("Disconnecting...")
-                widget.btn_connect.setEnabled(False)
-                btn_set_time.setEnabled(False)
+                widget.layout().addWidget(btn_set_time)
+                self._adv_table.setCellWidget(i, 7, widget)
             else:
-                widget.btn_connect.setText("Connect")
-                widget.btn_connect.setStyleSheet(
-                    "QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
-                    "QPushButton:hover { background: #10B981; } "
-                    "QPushButton:disabled { background: #334155; color: #94A3B8; }"
-                )
-                widget.btn_connect.clicked.connect(lambda checked, m=row_mac: self._vm.connect_device(m))
+                self._set_table_item_text(i, 0, device_str)
+                self._set_table_item_text(i, 2, bat_str)
+                self._set_table_item_text(i, 3, t_str)
+                self._set_table_item_text(i, 4, st_flags_str)
+                self._set_table_item_text(i, 5, warn_cnt_str)
+                self._set_table_item_text(i, 6, err_cnt_str)
+                widget = self._adv_table.cellWidget(i, 7)
 
-            self._adv_table.setCellWidget(i, 7, widget)
+            if widget:
+                # Retrieve child buttons
+                btn_connect = widget.btn_connect
+                btn_set_time = widget.findChild(QPushButton, "btn_set_time")
+
+                model = self._vm.model
+                row_mac = dev["mac"]
+                is_connected_row = model.connected_mac == row_mac and model.connection_status == "Connected"
+                is_connecting_row = model.connected_mac == row_mac and model.connection_status == "Connecting"
+                is_disconnecting_row = model.connected_mac == row_mac and model.connection_status == "Disconnecting"
+                is_pending_row = model.pending_connect_mac == row_mac and model.connection_status in ("Connecting", "Disconnecting")
+
+                # Determine current state string
+                if is_connected_row:
+                    state_str = "connected"
+                elif is_connecting_row or is_pending_row:
+                    state_str = "connecting"
+                elif is_disconnecting_row:
+                    state_str = "disconnecting"
+                else:
+                    state_str = "disconnected"
+
+                # Check if state has changed or rebuild occurred to update signals and styling
+                prev_state = btn_connect.property("state")
+                if prev_state != state_str or rebuild_needed:
+                    btn_connect.setProperty("state", state_str)
+                    
+                    try:
+                        btn_connect.clicked.disconnect()
+                    except TypeError:
+                        pass
+
+                    if state_str == "connected":
+                        btn_connect.setText("Disconnect")
+                        btn_connect.setEnabled(True)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #DC2626; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                            "QPushButton:hover { background: #EF4444; } "
+                            "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+                        )
+                        btn_connect.clicked.connect(lambda checked=False: self._vm.disconnect_device())
+                    elif state_str == "connecting":
+                        btn_connect.setText("Connecting...")
+                        btn_connect.setEnabled(False)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #334155; color: #94A3B8; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+                        )
+                    elif state_str == "disconnecting":
+                        btn_connect.setText("Disconnecting...")
+                        btn_connect.setEnabled(False)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #334155; color: #94A3B8; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+                        )
+                    else: # disconnected
+                        btn_connect.setText("Connect")
+                        btn_connect.setEnabled(True)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                            "QPushButton:hover { background: #10B981; } "
+                            "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+                        )
+                        btn_connect.clicked.connect(lambda checked, m=row_mac: self._vm.connect_device(m))
+
+                # Update Set Time button connections only on change or rebuild
+                if btn_set_time:
+                    prev_did = btn_set_time.property("d_id")
+                    if prev_did != d_id or rebuild_needed:
+                        btn_set_time.setProperty("d_id", d_id)
+                        try:
+                            btn_set_time.clicked.disconnect()
+                        except TypeError:
+                            pass
+                        btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
+                    
+                    btn_set_time.setEnabled(d_id is not None and state_str not in ("connecting", "disconnecting"))
 
         # Dynamic height adjustment so the groupbox scales with the content
         header_height = self._adv_table.horizontalHeader().height()
@@ -343,3 +413,10 @@ class DeviceInfoTab(QWidget):
         visible_rows = min(len(devices), 10)  # maximum devices show at 10 rows for height
         total_height = header_height + (visible_rows * row_height) + 2  # +2 for borders
         self._adv_table.setFixedHeight(max(total_height, 60))
+
+    def _set_table_item_text(self, row: int, col: int, text: str):
+        item = self._adv_table.item(row, col)
+        if item:
+            item.setText(text)
+        else:
+            self._adv_table.setItem(row, col, QTableWidgetItem(text))

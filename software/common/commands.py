@@ -729,15 +729,27 @@ class CommandFactory:
         pkt.calib_status_resp.total_iterations = 0
         return pkt
 
-    def factory_otp_write(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def factory_otp_write(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        confirm_magic: int = 0x4F545057,
+        otp_type: int = 0,
+        device_type: int = pb.DEVICE_TYPE_ANCHOR,
+        tx_antenna_delay: int = 0,
+        rx_antenna_delay: int = 0,
+        value_u32: int = 0,
+        value_u8: int = 0,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.factory_otp_write.confirm_magic = 0x4F545057
-        pkt.factory_otp_write.otp_type = 0
-        pkt.factory_otp_write.device_type = pb.DEVICE_TYPE_ANCHOR
-        pkt.factory_otp_write.tx_antenna_delay = 0
-        pkt.factory_otp_write.rx_antenna_delay = 0
-        pkt.factory_otp_write.value_u32 = 0
-        pkt.factory_otp_write.value_u8 = 0
+        pkt.factory_otp_write.confirm_magic = confirm_magic
+        pkt.factory_otp_write.otp_type = otp_type
+        pkt.factory_otp_write.device_type = device_type
+        pkt.factory_otp_write.tx_antenna_delay = tx_antenna_delay
+        pkt.factory_otp_write.rx_antenna_delay = rx_antenna_delay
+        pkt.factory_otp_write.value_u32 = value_u32
+        pkt.factory_otp_write.value_u8 = value_u8
         return pkt
 
     def rtos_resource_get(self, src: int, dst: int, seq: int) -> pb.packet_t:

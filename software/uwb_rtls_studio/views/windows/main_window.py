@@ -38,7 +38,9 @@ class ToastNotification(QFrame):
         self._close_started = False
         accent = {
             "disconnect": "#EF4444",
+            "error": "#EF4444",
             "connect_retry": "#F59E0B",
+            "success": "#10B981",
         }.get(kind, "#22D3EE")
         self.setStyleSheet(f"""
             QFrame#ble_toast {{
@@ -166,6 +168,19 @@ class MainWindow(QMainWindow):
         self._begin_session(initial=True)
 
     def _setup_header_progress(self):
+        # Create Scan Device button
+        self.btn_scan_device = QPushButton("🔍 Scan Device")
+        self.btn_scan_device.setObjectName("btn_scan_device")
+        self.btn_scan_device.setMinimumSize(QSize(130, 36))
+        self.btn_scan_device.setMaximumSize(QSize(130, 36))
+        self.btn_scan_device.setStyleSheet(
+            "QPushButton { background: rgba(6, 182, 212, 0.12); color: #06B6D4; border: 1px solid #06B6D4; border-radius: 8px; font-weight: bold; font-size: 13px; }"
+            "QPushButton:hover { background: #06B6D4; color: #F8FAFC; }"
+            "QPushButton:disabled { background: rgba(51, 65, 85, 0.2); color: #64748B; border: 1px solid #475569; }"
+        )
+        self.btn_scan_device.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_scan_device.clicked.connect(self._on_scan_device_clicked)
+
         self._conn_progress_frame = QFrame(self.header_content_frame)
         self._conn_progress_frame.setObjectName("ble_process_frame")
         self._conn_progress_frame.setFixedHeight(36)
@@ -190,7 +205,9 @@ class MainWindow(QMainWindow):
         self._conn_progress_bar.setFixedHeight(18)
         layout.addWidget(self._conn_progress_bar, 1)
 
-        self.header_layout.insertWidget(2, self._conn_progress_frame)
+        # Insert button first, then progress status frame
+        self.header_layout.insertWidget(2, self.btn_scan_device)
+        self.header_layout.insertWidget(3, self._conn_progress_frame)
         self.update_progress_style("IDLE")
 
     def update_progress_style(self, status: str):
@@ -461,6 +478,7 @@ class MainWindow(QMainWindow):
 
         if self._main_vm:
             self._main_vm.session_save_failed.connect(self._on_session_save_failed)
+            self._main_vm.session_ended.connect(self._on_session_ended)
 
     # -- Status bar update slots -----------------------------------------------
 
@@ -492,18 +510,21 @@ class MainWindow(QMainWindow):
             self.device_badge.setText("\u25CF -")
 
         if status_text == "Connecting":
+            self.btn_scan_device.setEnabled(False)
             self._status_conn.setText(f"\u23F3 Connecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
             self._status_rate.setText("\U0001F504 ---")
             return
 
         if status_text == "Disconnecting":
+            self.btn_scan_device.setEnabled(False)
             self._status_conn.setText(f"\U0001F6D1 Disconnecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
             self._status_rate.setText("\U0001F504 ---")
             return
 
         if status_text == "Disconnected":
+            self.btn_scan_device.setEnabled(True)
             label_name = name if name and name != "-" else "-"
             self._status_conn.setText(f"\U0001F534 Disconnected: {label_name}")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -515,12 +536,14 @@ class MainWindow(QMainWindow):
             return
 
         if status_text == "Connected":
+            self.btn_scan_device.setEnabled(True)
             self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
             self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
             self._status_rate.setText("\U0001F504 30 FPS")
             return
 
         if not info:
+            self.btn_scan_device.setEnabled(True)
             self.device_badge.setText("\u25CF -")
             self._status_conn.setText("\U0001F534 Disconnected")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -625,21 +648,20 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self._session_active = False
-            self._status_session.setText("\u23F2 Session: Ended")
+            self._session_timer.stop()
+            self._status_session.setText("\u23F2 Session: Ending...")
             self._status_session.setStyleSheet("color: #F59E0B;")
-            
-            # GOI LUU SESSION THUC TE
+            self.btn_end_session.setEnabled(False)
+
             if self._main_vm:
                 try:
                     self._main_vm.end_session(duration_sec=self._session_seconds)
                 except Exception as exc:
+                    self.btn_end_session.setEnabled(True)
                     QMessageBox.warning(self, "Session Save Failed", str(exc))
             else:
                 self._save_active_session()
-            self._session_seconds = 0
-            self._session_timer.stop()
-            self._set_session_button_active(False)
+                self._on_session_ended("")
             
     def _set_session_button_active(self, active: bool):
         if active:
@@ -663,9 +685,27 @@ class MainWindow(QMainWindow):
         """Compatibility wrapper. Session persistence is owned by MainViewModel."""
         if self._main_vm:
             return self._main_vm.save_active_session(duration_sec=self._session_seconds)
+
+    def _on_scan_device_clicked(self):
+        """Manually trigger BLE device scanning."""
+        if self._device_info_vm:
+            self._device_info_vm.start_ble_scan()
         return ""
 
+    def _on_session_ended(self, _session_id: str):
+        self._session_active = False
+        self._session_seconds = 0
+        self._session_timer.stop()
+        self.btn_end_session.setEnabled(True)
+        self._status_session.setText("\u23F2 Session: Ended")
+        self._status_session.setStyleSheet("color: #F59E0B;")
+        self._set_session_button_active(False)
+
     def _on_session_save_failed(self, message: str):
+        self.btn_end_session.setEnabled(True)
+        self._status_session.setText("\u23F2 Session: End Failed")
+        self._status_session.setStyleSheet("color: #EF4444;")
+        self._set_session_button_active(True)
         QMessageBox.warning(self, "Session Save Failed", message)
 
     def _safe_shutdown(self):
@@ -772,6 +812,7 @@ class MainWindow(QMainWindow):
 
                 scan_res = scan_popup.exec()
                 connected_mac = scan_model.connected_mac
+                scanned_devices = [dict(dev) for dev in sorted(scan_model._devices.values(), key=lambda d: d.get("order", 0))]
                 connected_name = ""
                 if connected_mac and connected_mac in scan_model._devices:
                     dev = scan_model._devices[connected_mac]
@@ -785,7 +826,7 @@ class MainWindow(QMainWindow):
 
                 if scan_res == 1 and connected_mac:
                     if self._device_info_vm:
-                        self._device_info_vm.set_connected_device(connected_name, connected_mac)
+                        self._device_info_vm.set_connected_device(connected_name, connected_mac, scanned_devices)
                     return
 
                 if scan_res == 2:
