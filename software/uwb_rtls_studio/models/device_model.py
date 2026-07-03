@@ -21,6 +21,7 @@ import time
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from services.protocol_service import ProtocolService
+from services.time_sync_manager import TimeSyncManager
 from common.transport import VvAddress
 from utils.app_state import shared_app_state, JobState
 from utils.constants import (
@@ -82,13 +83,12 @@ class DeviceModel(QObject):
         self._connected_grace_until = 0.0
         self._session_start_scheduled = False
         self._pending_target_operation = None
-        self._time_sync_correcting = False
-        self._time_sync_retry_count = 0
-        self._time_sync_max_retries = 3
-        self._time_sync_cooldown_until = 0.0
-        self._time_sync_verify_delay_ms = 200
-        self._time_sync_retry_base_delay_ms = 500
-        self._time_sync_cooldown_s = 10.0
+        self._time_sync_manager = TimeSyncManager(
+            request_query_fn=self._request_query,
+            host_time_fn=time.time,
+            timezone_offset_fn=self._host_timezone_offset_min,
+            parent=self,
+        )
 
 
         # Advertising devices storage
@@ -109,7 +109,7 @@ class DeviceModel(QObject):
         self._ble_status_timer.timeout.connect(self._poll_ble_status)
 
         self._battery_poll_timer = QTimer(self)
-        self._battery_poll_timer.setInterval(2000)
+        self._battery_poll_timer.setInterval(10000)
         self._battery_poll_timer.timeout.connect(self._poll_battery_info)
 
         self._ble_transition_timer = QTimer(self)
@@ -119,14 +119,6 @@ class DeviceModel(QObject):
         self._session_bootstrap_timer = QTimer(self)
         self._session_bootstrap_timer.setSingleShot(True)
         self._session_bootstrap_timer.timeout.connect(self._run_scheduled_session_start)
-
-        self._time_sync_verify_timer = QTimer(self)
-        self._time_sync_verify_timer.setSingleShot(True)
-        self._time_sync_verify_timer.timeout.connect(self._queue_time_sync_verify)
-
-        self._time_sync_retry_timer = QTimer(self)
-        self._time_sync_retry_timer.setSingleShot(True)
-        self._time_sync_retry_timer.timeout.connect(self._queue_time_sync_set)
 
         # ── Serial Connection Lost Listener ─────────────────────────
         self._protocol._serial.connection_lost.connect(self.on_connection_lost)
@@ -502,46 +494,13 @@ class DeviceModel(QObject):
         return True
 
     def _start_time_sync_correction(self, reason: str = "manual") -> bool:
-        """Queue a bounded time correction flow without bypassing other API work."""
-        if not self._connected_mac:
-            return False
-        if self._time_sync_correcting:
-            log.debug("Time sync correction already active; reason=%s ignored.", reason)
-            return False
-        now = time.monotonic()
-        if now < self._time_sync_cooldown_until:
-            log.warning("Time sync correction cooling down; reason=%s skipped.", reason)
-            return False
-        self._time_sync_correcting = True
-        self._time_sync_retry_count = 0
-        log.info("Starting time sync correction flow: %s", reason)
-        self._queue_time_sync_set()
-        return True
+        return self._time_sync_manager.start(reason=reason)
 
     def _queue_time_sync_set(self):
-        if not self._connected_mac:
-            self._reset_time_sync_flow()
-            return False
-
-        host_time_ms = int(time.time() * 1000)
-        tz_offset_min = self._host_timezone_offset_min()
-        self._request_query(
-            "time_sync_set",
-            dst_addr=VvAddress.MCU,
-            cache_ttl_s=0.0,
-            force=True,
-            unix_time_ms=host_time_ms,
-            timezone_offset=tz_offset_min,
-        )
-        self._time_sync_verify_timer.start(self._time_sync_verify_delay_ms)
-        return True
+        return self._time_sync_manager._queue_set()
 
     def _queue_time_sync_verify(self):
-        if not self._connected_mac:
-            self._reset_time_sync_flow()
-            return False
-        self._request_query("time_sync_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
-        return True
+        return self._time_sync_manager._queue_verify()
 
     def _host_timezone_offset_min(self) -> int:
         local_time_struct = time.localtime()
@@ -567,44 +526,16 @@ class DeviceModel(QObject):
 
 
     def _reset_time_sync_flow(self) -> None:
-        self._time_sync_correcting = False
-        self._time_sync_retry_count = 0
-        if hasattr(self, "_time_sync_verify_timer"):
-            self._time_sync_verify_timer.stop()
-        if hasattr(self, "_time_sync_retry_timer"):
-            self._time_sync_retry_timer.stop()
+        self._time_sync_manager.reset()
 
     def _handle_time_sync_drift(self, time_diff_ms: int) -> None:
         if not self._connected_mac:
-            self._reset_time_sync_flow()
+            self._time_sync_manager.reset()
             return
-
-        if not self._time_sync_correcting:
+        if not self._time_sync_manager.is_active:
             self._start_time_sync_correction(reason=f"event drift {time_diff_ms}ms")
             return
-
-        self._time_sync_verify_timer.stop()
-        self._time_sync_retry_count += 1
-        if self._time_sync_retry_count > self._time_sync_max_retries:
-            self._reset_time_sync_flow()
-            self._time_sync_cooldown_until = time.monotonic() + self._time_sync_cooldown_s
-            log.warning(
-                "Time sync still out of threshold after %d retries; cooling down for %.1fs.",
-                self._time_sync_max_retries,
-                self._time_sync_cooldown_s,
-            )
-            return
-
-        delay_ms = self._time_sync_retry_base_delay_ms * (2 ** (self._time_sync_retry_count - 1))
-        log.warning(
-            "Time sync drift %dms exceeds threshold %dms; retry %d/%d in %dms.",
-            time_diff_ms,
-            TIME_SYNC_THRESHOLD_MS,
-            self._time_sync_retry_count,
-            self._time_sync_max_retries,
-            delay_ms,
-        )
-        self._time_sync_retry_timer.start(delay_ms)
+        self._time_sync_manager._handle_drift(time_diff_ms)
 
     def request_session_start_events(self, force: bool = False):
         """Trigger session-start data events that should be fetched once per connection."""
@@ -1007,7 +938,7 @@ class DeviceModel(QObject):
             return
         log.debug("Polling BLE status from dongle...")
         try:
-            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True, traffic_class="background")
         except Exception as e:
             log.error("Failed to send ble_status_get: %s", e)
 
@@ -1016,7 +947,7 @@ class DeviceModel(QObject):
             self._ble_transition_timer.stop()
             return
         try:
-            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True)
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True, traffic_class="connection")
         except Exception as exc:
             log.error("Failed to poll transition ble_status_get: %s", exc)
 
@@ -1025,7 +956,7 @@ class DeviceModel(QObject):
         if not self._connected_mac:
             return
         try:
-            self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
+            self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True, traffic_class="background")
         except Exception as e:
             log.error("Failed to send battery_info_get: %s", e)
 
@@ -1042,33 +973,8 @@ class DeviceModel(QObject):
 
     def _handle_time_sync(self, resp):
         """Publish event-driven time state and correct drift only when needed."""
-        dev_time_ms = getattr(resp, 'unix_time_ms', 0)
-        host_time_ms = int(time.time() * 1000)
-        tz_offset_min = self._host_timezone_offset_min()
-        tz_offset_sec = tz_offset_min * 60
-
-        time_diff_ms = abs(host_time_ms - dev_time_ms)
-        is_synced = time_diff_ms <= TIME_SYNC_THRESHOLD_MS
-        was_corrected = self._time_sync_correcting
-
-        self.time_sync_result.emit({
-            "dev_time_ms": dev_time_ms,
-            "host_time_ms": host_time_ms,
-            "tz_offset_sec": tz_offset_sec,
-            "tz_offset_min": tz_offset_min,
-            "time_diff_ms": time_diff_ms,
-            "is_synced": is_synced,
-            "was_corrected": was_corrected,
-        })
-
-        if is_synced:
-            if self._time_sync_correcting:
-                log.info("Time sync verified: drift=%dms <= threshold=%dms.", time_diff_ms, TIME_SYNC_THRESHOLD_MS)
-            self._reset_time_sync_flow()
-            return
-
-        log.warning("Time sync out of threshold: drift=%dms > threshold=%dms.", time_diff_ms, TIME_SYNC_THRESHOLD_MS)
-        self._handle_time_sync_drift(time_diff_ms)
+        result = self._time_sync_manager.handle_response(resp)
+        self.time_sync_result.emit(result)
 
     def _handle_sys_config(self, resp):
         if not resp.HasField("config"):

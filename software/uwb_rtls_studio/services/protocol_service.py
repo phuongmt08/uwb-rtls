@@ -35,9 +35,10 @@ from __future__ import annotations
 import sys
 import os
 import logging
+import queue
 import threading
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from google.protobuf.message import DecodeError
 
 # Add common to path
@@ -64,6 +65,8 @@ class ProtocolService(QObject):
     packet_sent = pyqtSignal(str, object)       # (param_name, packet_t)
     ack_received = pyqtSignal(int, int)         # (ack_seq, response_code)
     decode_error = pyqtSignal(str)              # error message
+    _decoded_packets_ready = pyqtSignal(list)
+    _decode_error_ready = pyqtSignal(str)
 
     def __init__(self, serial_service, parent=None):
         super().__init__(parent)
@@ -74,9 +77,30 @@ class ProtocolService(QObject):
         self._seq_lock = threading.Lock()
         self._packet_repository = None
         self._last_log_data_seq: int | None = None
+        self._rx_queue: queue.Queue[bytes | None] = queue.Queue()
+        self._rx_stop = threading.Event()
+        self._rx_thread = threading.Thread(
+            target=self._rx_worker_loop,
+            name="ProtocolRxWorker",
+            daemon=True,
+        )
+        self._decoded_packets_ready.connect(
+            self._dispatch_decoded_packets,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._decode_error_ready.connect(
+            self._emit_decode_error,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # Connect serial RX → decode
         self._serial.data_received.connect(self.on_serial_data)
+        self._rx_thread.start()
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.threads.register("ProtocolRxWorker", self._rx_thread)
+        except Exception as exc:
+            log.debug("Could not register ProtocolRxWorker thread: %s", exc)
 
     # ── Properties ───────────────────────────────────────────────────
 
@@ -96,14 +120,31 @@ class ProtocolService(QObject):
     # ── RX Path ──────────────────────────────────────────────────────
 
     def on_serial_data(self, data: bytes) -> None:
-        """Được gọi khi SerialService nhận raw bytes.
-        Decode HDLC → protobuf → dispatch.
-        """
-        if data:
-            shared_raw_packet_store.append_serial_chunk(RawSerialChunk.from_bytes(data))
+        """Queue raw serial bytes for the protocol worker."""
+        if not data:
+            return
 
+        self._rx_queue.put(data)
+
+    def _rx_worker_loop(self) -> None:
+        """Decode HDLC/protobuf frames away from the GUI thread."""
+        while not self._rx_stop.is_set():
+            try:
+                data = self._rx_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if data is None:
+                break
+
+            shared_raw_packet_store.append_serial_chunk(RawSerialChunk.from_bytes(data))
+            packets = self._decode_packets(data)
+            if packets:
+                self._decoded_packets_ready.emit(packets)
+
+    def _decode_packets(self, data: bytes) -> list:
+        packets = []
         try:
-            packets = []
             for chunk in self._protocol.hdlc.feed(data):
                 if chunk.frame_type != FRAME_TYPE_PROTOBUF:
                     continue
@@ -113,11 +154,16 @@ class ProtocolService(QObject):
                 except DecodeError as exc:
                     msg = f"Protobuf decode error: payload_len={len(chunk.payload)} err={exc}"
                     log.warning(msg)
-                    self.decode_error.emit(msg)
-        except Exception as e:
-            self.decode_error.emit(f"HDLC decode error: {e}")
-            return
+                    self._decode_error_ready.emit(msg)
+        except Exception as exc:
+            self._decode_error_ready.emit(f"HDLC decode error: {exc}")
+        return packets
 
+    def _emit_decode_error(self, message: str) -> None:
+        self.decode_error.emit(message)
+
+    def _dispatch_decoded_packets(self, packets: list) -> None:
+        """Dispatch decoded packets on the Qt/main thread."""
         for pkt in packets:
             param = pkt.WhichOneof("params")
             if param is None:
@@ -126,7 +172,6 @@ class ProtocolService(QObject):
             if param == "log_data":
                 self._warn_on_log_seq_gap(int(pkt.hdr.seq))
 
-            # Special handling cho ACK
             if param == "ack":
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
                 self.packet_received.emit(param, pkt)
@@ -136,15 +181,14 @@ class ProtocolService(QObject):
             if self._packet_repository:
                 try:
                     self._packet_repository.handle_packet(param, pkt)
-                except Exception as e:
-                    log.error("Failed to forward packet to packet repository: %s", e)
+                except Exception as exc:
+                    log.error("Failed to forward packet to packet repository: %s", exc)
 
-            # Route to global query manager in shared app state
             try:
                 from utils.app_state import shared_app_state
                 shared_app_state.handle_incoming_packet(param, pkt)
-            except Exception as e:
-                log.error("Failed to forward packet to shared_app_state: %s", e)
+            except Exception as exc:
+                log.error("Failed to forward packet to shared_app_state: %s", exc)
 
             self.packet_received.emit(param, pkt)
             log.debug("RX: %s seq=%d", param, pkt.hdr.seq)
@@ -159,6 +203,18 @@ class ProtocolService(QObject):
         self._last_log_data_seq = seq
 
     # ── TX Path ──────────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """Stop the protocol RX worker during application shutdown."""
+        self._rx_stop.set()
+        self._rx_queue.put(None)
+        if self._rx_thread.is_alive():
+            self._rx_thread.join(timeout=1.0)
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.threads.unregister("ProtocolRxWorker")
+        except Exception as exc:
+            log.debug("Could not unregister ProtocolRxWorker thread: %s", exc)
 
     def next_seq(self) -> int:
         """Thread-safe sequence number generator."""
