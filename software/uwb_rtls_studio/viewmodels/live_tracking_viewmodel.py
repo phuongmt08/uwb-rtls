@@ -56,7 +56,7 @@
 import logging
 import math
 from typing import Optional
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from models.ranging_model import RangingModel
 from services.protocol_service import ProtocolService
 from data.raw_packet_store import shared_raw_packet_store
@@ -66,7 +66,7 @@ from repository.geofence_repository import GeofenceRepository
 
 log = logging.getLogger(__name__)
 
-LIVE_RENDER_INTERVAL_MS = 50  # 20 Hz UI update; model/session buffers keep every sample.
+LIVE_RENDER_INTERVAL_MS = 16  # ~60 Hz UI flush; model/session buffers keep every sample.
 STOP_RANGING_END_DELAY_MS = 3000
 
 class LiveTrackingViewModel(QObject):
@@ -119,6 +119,7 @@ class LiveTrackingViewModel(QObject):
             self._ble_scan_repo.scan_results_updated.connect(self.scan_devices_updated.emit)
 
         self._render_timer = QTimer(self)
+        self._render_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._render_timer.setInterval(LIVE_RENDER_INTERVAL_MS)
         self._render_timer.timeout.connect(self._flush_pending_live_updates)
         self._render_timer.start()
@@ -277,6 +278,10 @@ class LiveTrackingViewModel(QObject):
     # Geofence service methods
     def get_geofence_zones(self) -> list:
         return self.geofence_repo.get_zones()
+
+    def set_geofence_zones(self, zones: list[GeofenceZone]) -> None:
+        self.geofence_repo.set_zones(zones)
+        self.geofence_layout_updated.emit(self.get_geofence_zones())
 
     def get_map_anchors(self) -> list:
         return self.geofence_repo.get_anchors()

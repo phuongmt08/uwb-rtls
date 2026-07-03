@@ -6,7 +6,7 @@
 import math
 import time
 from copy import deepcopy
-from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal, QPointF, QPoint, QRect
+from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal, QPointF, QPoint, QRect, QRectF
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -37,6 +37,7 @@ class PositionCanvas(QWidget):
     anchor_selected = pyqtSignal(int)     # index in anchors list, -1 means none
     anchor_layout_edited = pyqtSignal(list)
     zones_undo_remove_requested = pyqtSignal(list)
+    zones_undo_restore_requested = pyqtSignal(list)
     room_origin_vertex_picked = pyqtSignal(str, int)
 
     def __init__(self, parent=None):
@@ -70,6 +71,9 @@ class PositionCanvas(QWidget):
         self._rect_zoom = False
         self._rect_start = None
         self._rect_end = None
+        self._selection_box_active = False
+        self._selection_box_start = None
+        self._selection_box_end = None
 
         # Geofencing properties
         self.geofence_zones = []
@@ -77,14 +81,23 @@ class PositionCanvas(QWidget):
         self.draw_object_type = "zone"  # "zone" | "room" | "wall" | "anchor"
         self.current_draw_points = []
         self.selected_zone_id = None
+        self.selected_zone_ids = set()
         self.selected_vertex_idx = None
         self.selected_edge_idx = None
         self.selected_anchor_idx = None
         self.dragging_anchor_idx = None
         self._anchor_template = None
         self.hovered_edge = None
+        self.hovered_zone_id = None
         self._edge_drag_start_world = None
         self._edge_drag_original_points = None
+        self._zone_drag_start_world = None
+        self._zone_drag_original_points = None
+        self._zone_drag_active = False
+        self._snap_preview_edges = None
+        self._selection_box_active = False
+        self._selection_box_start = None
+        self._selection_box_end = None
         self.mouse_world_pos = (0.0, 0.0)
         self.dim_tracking_view = False
         self._room_origins = {}
@@ -106,6 +119,12 @@ class PositionCanvas(QWidget):
         self._object_draw_center = None
         self.active_room_ids = set()
         self._undo_stack = []
+        self._target_render_fps = 60
+        self._render_dirty = False
+        self._render_timer = QTimer(self)
+        self._render_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._render_timer.setInterval(max(1, int(1000 / self._target_render_fps)))
+        self._render_timer.timeout.connect(self._flush_render_update)
         self._dimension_hitboxes = []
         self._dimension_edit_target = None
         self._dimension_edit_committing = False
@@ -201,7 +220,6 @@ class PositionCanvas(QWidget):
             angle_deg = math.degrees(math.atan2(pt2[1] - pt1[1], pt2[0] - pt1[0]))
             self.set_selected_zone(zone_id)
             self.selected_edge_idx = edge_idx
-            self._push_undo_state()
             self._on_panel_edge_changed(edge_idx, length, angle_deg)
         finally:
             self._dimension_edit_committing = False
@@ -212,11 +230,14 @@ class PositionCanvas(QWidget):
         self.active_room_ids = {str(room_id) for room_id in (room_ids or []) if room_id}
         self.update()
 
+    def clear_undo_history(self):
+        self._undo_stack.clear()
+
     def _push_undo_state(self):
         self._undo_stack.append(
             {
                 "anchors": deepcopy(self.anchors),
-                "zones": [(zone.id, list(zone.points)) for zone in self.geofence_zones],
+                "zones": [deepcopy(zone.to_dict()) for zone in self.geofence_zones],
             }
         )
         if len(self._undo_stack) > 50:
@@ -235,14 +256,18 @@ class PositionCanvas(QWidget):
 
         state = self._undo_stack.pop()
         self.anchors = deepcopy(state["anchors"])
-        zone_points = dict(state["zones"])
-        added_zone_ids = [zone.id for zone in self.geofence_zones if zone.id not in zone_points]
-        if added_zone_ids:
-            self.zones_undo_remove_requested.emit(added_zone_ids)
-        for zone in self.geofence_zones:
-            if zone.id in zone_points:
-                zone.points = list(zone_points[zone.id])
-                self.zone_modified.emit(zone.id, zone.points)
+        zone_snapshots = deepcopy(state.get("zones", []))
+        if zone_snapshots and isinstance(zone_snapshots[0], dict):
+            self.zones_undo_restore_requested.emit(zone_snapshots)
+        else:
+            zone_points = dict(zone_snapshots)
+            added_zone_ids = [zone.id for zone in self.geofence_zones if zone.id not in zone_points]
+            if added_zone_ids:
+                self.zones_undo_remove_requested.emit(added_zone_ids)
+            for zone in self.geofence_zones:
+                if zone.id in zone_points:
+                    zone.points = list(zone_points[zone.id])
+                    self.zone_modified.emit(zone.id, zone.points)
         self.selected_vertex_idx = None
         self.selected_edge_idx = None
         self.dragging_anchor_idx = None
@@ -258,20 +283,31 @@ class PositionCanvas(QWidget):
         self.selected_edge_idx = None
         self.dragging_anchor_idx = None
         self.hovered_edge = None
+        self.hovered_zone_id = None
         self._edge_drag_start_world = None
         self._edge_drag_original_points = None
+        self._zone_drag_start_world = None
+        self._zone_drag_original_points = None
+        self._zone_drag_active = False
+        self._snap_preview_edges = None
+        self._selection_box_active = False
+        self._selection_box_start = None
+        self._selection_box_end = None
         if mode == "navigate":
             self.setCursor(Qt.CursorShape.ArrowCursor)
         elif mode == "draw":
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif mode == "edit_vertices":
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif mode == "pick_zone":
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         elif mode == "insert_vertex":
             self.setCursor(Qt.CursorShape.CrossCursor)
         self.update()
 
     def set_selected_zone(self, zone_id):
         self.selected_zone_id = zone_id
+        self.selected_zone_ids = {zone_id} if zone_id else set()
         if zone_id:
             self.selected_anchor_idx = None
             self.anchor_selected.emit(-1)
@@ -281,6 +317,18 @@ class PositionCanvas(QWidget):
             self.property_panel.hide()
         self.update()
 
+    def set_selected_zones(self, zone_ids, *, primary_id=None, emit_anchor_clear=True):
+        zone_ids = [zone_id for zone_id in zone_ids if zone_id]
+        self.selected_zone_ids = set(zone_ids)
+        self.selected_zone_id = primary_id or (zone_ids[-1] if zone_ids else None)
+        if zone_ids and emit_anchor_clear:
+            self.selected_anchor_idx = None
+            self.anchor_selected.emit(-1)
+        if self.selected_zone_id and len(self.selected_zone_ids) == 1 and self.property_panel_enabled:
+            self.show_property_panel(self.selected_zone_id)
+        else:
+            self.property_panel.hide()
+        self.update()
     def set_room_origin(self, room_id, point):
         if point is None:
             self._room_origins.pop(room_id, None)
@@ -420,11 +468,181 @@ class PositionCanvas(QWidget):
                     return zone.id, idx
         return None
 
+    def _zones_for_hit_testing(self):
+        layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
+        return sorted(
+            self.geofence_zones,
+            key=lambda z: layer_order.get(getattr(z, "object_type", "zone"), 3),
+            reverse=True,
+        )
+
+    def _zone_contains_screen_pos(self, zone, screen_x, screen_y, world_x=None, world_y=None):
+        if zone is None:
+            return False
+        if world_x is None or world_y is None:
+            world_x, world_y = self._screen_to_world(screen_x, screen_y)
+        if getattr(zone, "object_type", "zone") == "wall":
+            path = self._wall_footprint_path(zone)
+            return not path.isEmpty() and path.contains(QPointF(world_x, world_y))
+        return self._is_inside_polygon(zone.points, world_x, world_y)
+
+    def _zone_vertex_at_screen_pos(self, zone, screen_x, screen_y, threshold_px=9):
+        if zone is None:
+            return None
+        for idx, pt in enumerate(zone.points):
+            if self._is_close(pt, screen_x, screen_y, threshold_px=threshold_px):
+                return idx
+        return None
+
+    def _zone_edge_at_screen_pos(self, zone, screen_x, screen_y, threshold_px=7):
+        if zone is None or len(zone.points) < 2:
+            return None
+        for edge_idx in range(len(zone.points)):
+            pt1 = zone.points[edge_idx]
+            pt2 = zone.points[(edge_idx + 1) % len(zone.points)]
+            sx1, sy1 = self._world_to_screen(pt1[0], pt1[1])
+            sx2, sy2 = self._world_to_screen(pt2[0], pt2[1])
+            distance_px, t = self._distance_to_segment_px((screen_x, screen_y), (sx1, sy1), (sx2, sy2))
+            if distance_px <= threshold_px and 0.05 <= t <= 0.95:
+                return edge_idx
+        return None
+
+    def _zone_at_screen_pos(self, screen_x, screen_y, world_x=None, world_y=None):
+        if world_x is None or world_y is None:
+            world_x, world_y = self._screen_to_world(screen_x, screen_y)
+        for zone in self._zones_for_hit_testing():
+            object_type = getattr(zone, "object_type", "zone")
+            if object_type == "wall":
+                path = self._wall_footprint_path(zone)
+                if not path.isEmpty() and path.contains(QPointF(world_x, world_y)):
+                    return zone
+            elif self._is_inside_polygon(zone.points, world_x, world_y):
+                return zone
+        return None
+
+    def _begin_zone_drag(self, zone, start_world, *, emit_selection=True):
+        if zone.id not in self.selected_zone_ids:
+            self.set_selected_zone(zone.id)
+            if emit_selection:
+                self.zone_selected.emit(zone.id)
+        elif emit_selection:
+            self.zone_selected.emit(zone.id)
+        self._push_undo_state()
+        self._zone_drag_start_world = start_world
+        drag_ids = self.selected_zone_ids or {zone.id}
+        self._zone_drag_original_points = {
+            item.id: list(item.points)
+            for item in self.geofence_zones
+            if item.id in drag_ids
+        }
+        self._zone_drag_active = False
+        self._snap_preview_edges = None
+        self._selection_box_active = False
+        self._selection_box_start = None
+        self._selection_box_end = None
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.update()
+
+    def _zone_screen_bounds(self, zone):
+        points = list(getattr(zone, "points", []) or [])
+        if not points:
+            return QRectF()
+        xs = []
+        ys = []
+        if getattr(zone, "object_type", "zone") == "wall":
+            path = self._wall_footprint_screen_path(zone)
+            if not path.isEmpty():
+                return path.boundingRect()
+        for x, y in points:
+            sx, sy = self._world_to_screen(x, y)
+            xs.append(float(sx))
+            ys.append(float(sy))
+        return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+    def _zones_in_selection_box(self, rect):
+        selected = []
+        for zone in self.geofence_zones:
+            bounds = self._zone_screen_bounds(zone)
+            if not bounds.isNull() and rect.intersects(bounds):
+                selected.append(zone.id)
+        return selected
+
+    def _begin_selection_box(self, pos):
+        self._selection_box_active = True
+        self._selection_box_start = QPointF(pos)
+        self._selection_box_end = QPointF(pos)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.update()
+
+    def _selection_box_rect(self):
+        if self._selection_box_start is None or self._selection_box_end is None:
+            return QRectF()
+        x1 = self._selection_box_start.x()
+        y1 = self._selection_box_start.y()
+        x2 = self._selection_box_end.x()
+        y2 = self._selection_box_end.y()
+        return QRectF(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+
+    def _finish_selection_box(self):
+        rect = self._selection_box_rect()
+        self._selection_box_active = False
+        self._selection_box_start = None
+        self._selection_box_end = None
+        if rect.width() < 4 or rect.height() < 4:
+            self.update()
+            return False
+        selected_ids = self._zones_in_selection_box(rect)
+        self.set_selected_zones(selected_ids)
+        self.zone_selected.emit(self.selected_zone_id or "")
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        return bool(selected_ids)
+    @staticmethod
+    def _translated_points(points, dx, dy):
+        return [(round(float(x) + dx, 6), round(float(y) + dy, 6)) for x, y in points]
+
     def _is_inside_polygon(self, poly_points, wx, wy):
         poly = QPolygonF()
         for pt in poly_points:
             poly.append(QPointF(pt[0], pt[1]))
         return poly.containsPoint(QPointF(wx, wy), Qt.FillRule.OddEvenFill)
+
+    @staticmethod
+    def _distance_to_segment_world(point, start, end):
+        px, py = point
+        x1, y1 = start
+        x2, y2 = end
+        dx = x2 - x1
+        dy = y2 - y1
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq <= 1e-12:
+            return math.hypot(px - x1, py - y1)
+        t = ((px - x1) * dx + (py - y1) * dy) / seg_len_sq
+        t = max(0.0, min(1.0, t))
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+        return math.hypot(px - proj_x, py - proj_y)
+
+    def _anchor_room_for_limit(self, anchor):
+        room_id = str(anchor.get("room_id") or anchor.get("zone_id") or "")
+        if not room_id:
+            return None
+        return self._room_by_id(room_id)
+
+    def _anchor_can_move_to(self, anchor, world_x, world_y):
+        room = self._anchor_room_for_limit(anchor)
+        if room is None:
+            return True
+        points = list(getattr(room, "points", []) or [])
+        if len(points) < 3:
+            return True
+        if self._is_inside_polygon(points, world_x, world_y):
+            return True
+        edge_tolerance_m = max(0.01, self._snap_step() * 0.25)
+        for idx, start in enumerate(points):
+            end = points[(idx + 1) % len(points)]
+            if self._distance_to_segment_world((world_x, world_y), start, end) <= edge_tolerance_m:
+                return True
+        return False
 
     def _room_by_id(self, room_id):
         if not room_id:
@@ -453,7 +671,7 @@ class PositionCanvas(QWidget):
             return None
         mid_x = (x1 + x2) * 0.5
         mid_y = (y1 + y2) * 0.5
-        thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
+        thickness = max(0.0, float(getattr(zone, "thickness_m", getattr(zone, "thickness", 0.1))))
         epsilon = min(0.02, max(thickness * 0.25, 0.001))
         plus_is_inside = self._is_inside_polygon(
             host_room.points, mid_x + nx * epsilon, mid_y + ny * epsilon
@@ -467,7 +685,7 @@ class PositionCanvas(QWidget):
         dx = x2 - x1
         dy = y2 - y1
         length = math.hypot(dx, dy)
-        thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
+        thickness = max(0.0, float(getattr(zone, "thickness_m", getattr(zone, "thickness", 0.1))))
         if length <= 1e-9 or thickness <= 0.0:
             return []
 
@@ -527,27 +745,53 @@ class PositionCanvas(QWidget):
             x += step
         painter.restore()
 
-    def _wall_footprint_path(self, zone):
-        """Create one continuous wall footprint with closed, square/mitered corners in screen coordinates."""
-        points = list(getattr(zone, "points", []) or [])
-        thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
-        if len(points) < 2 or thickness <= 0.0:
-            return QPainterPath()
+    @staticmethod
+    def _polygon_area_abs(points):
+        if len(points) < 3:
+            return 0.0
+        area = 0.0
+        for idx, (x1, y1) in enumerate(points):
+            x2, y2 = points[(idx + 1) % len(points)]
+            area += (x1 * y2) - (x2 * y1)
+        return abs(area) * 0.5
 
-        screen_points = [self._world_to_screen(pt[0], pt[1]) for pt in points]
-        
-        ref_x1, ref_y1 = self._world_to_screen(0.0, 0.0)
-        ref_x2, ref_y2 = self._world_to_screen(thickness, 0.0)
-        thickness_px = math.hypot(ref_x2 - ref_x1, ref_y2 - ref_y1)
+    def _wall_uses_polygon_footprint(self, zone):
+        points = list(getattr(zone, "points", []) or [])
+        if len(points) < 3:
+            return False
+        if getattr(zone, "wall_mode", "free_standing") == "boundary_outside":
+            return False
+        if getattr(zone, "shape_kind", "polygon") == "footprint":
+            return True
+        return self._polygon_area_abs(points) > 1e-6
+
+    def _wall_polygon_footprint_path(self, points):
+        path = QPainterPath(QPointF(points[0][0], points[0][1]))
+        for x, y in points[1:]:
+            path.lineTo(x, y)
+        path.closeSubpath()
+        return path
+
+    def _wall_footprint_path(self, zone):
+        """Create one continuous wall footprint in world coordinates."""
+        points = list(getattr(zone, "points", []) or [])
+        if len(points) < 2:
+            return QPainterPath()
+        if self._wall_uses_polygon_footprint(zone):
+            return self._wall_polygon_footprint_path(points)
+
+        thickness = max(0.0, float(getattr(zone, "thickness_m", getattr(zone, "thickness", 0.1))))
+        if thickness <= 0.0:
+            return QPainterPath()
 
         mode = getattr(zone, "wall_mode", "free_standing")
         if mode != "boundary_outside" or self._room_by_id(getattr(zone, "host_room_id", None)) is None:
             from PyQt6.QtGui import QPainterPathStroker
-            centerline = QPainterPath(QPointF(screen_points[0][0], screen_points[0][1]))
-            for x, y in screen_points[1:]:
+            centerline = QPainterPath(QPointF(points[0][0], points[0][1]))
+            for x, y in points[1:]:
                 centerline.lineTo(x, y)
             stroker = QPainterPathStroker()
-            stroker.setWidth(thickness_px)
+            stroker.setWidth(thickness)
             stroker.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
             stroker.setCapStyle(Qt.PenCapStyle.SquareCap)
             return stroker.createStroke(centerline)
@@ -557,9 +801,8 @@ class PositionCanvas(QWidget):
             footprint = self._wall_segment_footprint(zone, points[idx], points[idx + 1])
             if len(footprint) != 4:
                 continue
-            s_footprint = [self._world_to_screen(pt[0], pt[1]) for pt in footprint]
-            segment_path = QPainterPath(QPointF(s_footprint[0][0], s_footprint[0][1]))
-            for x, y in s_footprint[1:]:
+            segment_path = QPainterPath(QPointF(footprint[0][0], footprint[0][1]))
+            for x, y in footprint[1:]:
                 segment_path.lineTo(x, y)
             segment_path.closeSubpath()
             combined = segment_path if combined.isEmpty() else combined.united(segment_path)
@@ -585,21 +828,30 @@ class PositionCanvas(QWidget):
                     vertex[0] + (normal_a[0] + normal_b[0]) * thickness,
                     vertex[1] + (normal_a[1] + normal_b[1]) * thickness,
                 )
-            
-            s_vertex = self._world_to_screen(vertex[0], vertex[1])
-            s_a = self._world_to_screen(a[0], a[1])
-            s_intersection = self._world_to_screen(intersection[0], intersection[1])
-            s_b = self._world_to_screen(b[0], b[1])
-
-            join_path = QPainterPath(QPointF(s_vertex[0], s_vertex[1]))
-            join_path.lineTo(s_a[0], s_a[1])
-            join_path.lineTo(s_intersection[0], s_intersection[1])
-            join_path.lineTo(s_b[0], s_b[1])
+            join_path = QPainterPath(QPointF(vertex[0], vertex[1]))
+            join_path.lineTo(a[0], a[1])
+            join_path.lineTo(intersection[0], intersection[1])
+            join_path.lineTo(b[0], b[1])
             join_path.closeSubpath()
             combined = combined.united(join_path)
 
-        return combined
+        return combined.simplified()
 
+    def _wall_footprint_screen_path(self, zone, to_screen=None):
+        world_path = self._wall_footprint_path(zone)
+        if world_path.isEmpty():
+            return QPainterPath()
+        to_screen = to_screen or self._world_to_screen
+        screen_path = QPainterPath()
+        for polygon in world_path.toSubpathPolygons():
+            if polygon.isEmpty():
+                continue
+            screen_poly = QPolygonF()
+            for point in polygon:
+                sx, sy = to_screen(point.x(), point.y())
+                screen_poly.append(QPointF(sx, sy))
+            screen_path.addPolygon(screen_poly)
+        return screen_path
     def update_position(self, position):
         current_time = time.time()
         source = position.get("source", "ranging")
@@ -728,15 +980,18 @@ class PositionCanvas(QWidget):
             self.update()
             return
         self.selected_zone_id = None
+        self.selected_zone_ids = set()
         self.property_panel.hide()
         self.selected_anchor_idx = anchor_idx
         self.anchor_selected.emit(anchor_idx)
         self.update()
 
     def add_or_move_anchor_at(self, world_x, world_y):
-        self._push_undo_state()
         if self.selected_anchor_idx is not None and self.selected_anchor_idx < len(self.anchors):
             anchor = self.anchors[self.selected_anchor_idx]
+            if not self._anchor_can_move_to(anchor, world_x, world_y):
+                return
+            self._push_undo_state()
             anchor["x"] = world_x
             anchor["y"] = world_y
             anchor["placed"] = True
@@ -744,6 +999,9 @@ class PositionCanvas(QWidget):
         else:
             used_ids = {self._coerce_int_id(anchor.get("anchor_id"), idx) for idx, anchor in enumerate(self.anchors)}
             template = self._anchor_template or {}
+            if not self._anchor_can_move_to(template, world_x, world_y):
+                return
+            self._push_undo_state()
             requested_id = template.get("anchor_id")
             anchor_id = self._coerce_int_id(requested_id, 0) if requested_id is not None else 0
             while anchor_id in used_ids:
@@ -775,7 +1033,6 @@ class PositionCanvas(QWidget):
             self.anchor_selected.emit(self.selected_anchor_idx)
         self._emit_anchor_layout_edited()
         self.update()
-
     def update_selected_anchor(self, *, anchor_id=None, label=None, x=None, y=None, z=None, role=None, device_type=None):
         if self.selected_anchor_idx is None or self.selected_anchor_idx >= len(self.anchors):
             return
@@ -914,7 +1171,7 @@ class PositionCanvas(QWidget):
             object_type = getattr(zone, "object_type", "zone")
             if object_type == "wall":
                 path = self._wall_footprint_path(zone)
-                if not path.isEmpty() and path.contains(pos):
+                if not path.isEmpty() and path.contains(QPointF(world_x, world_y)):
                     clicked_zone = zone
                     break
             else:
@@ -987,6 +1244,27 @@ class PositionCanvas(QWidget):
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
 
+        if self.edit_mode == "pick_zone" and event.button() == Qt.MouseButton.LeftButton:
+            hit_anchor_idx = self._anchor_at_screen_pos(pos.x(), pos.y())
+            if hit_anchor_idx is not None:
+                self.set_selected_anchor(hit_anchor_idx)
+                event.accept()
+                return
+            zone = self._zone_at_screen_pos(pos.x(), pos.y(), world_x, world_y)
+            if zone is not None:
+                self.set_selected_zone(zone.id)
+                self.zone_selected.emit(zone.id)
+                self.update()
+                event.accept()
+                return
+            if self.selected_zone_id:
+                self.set_selected_zone(None)
+                self.zone_selected.emit("")
+            if self.selected_anchor_idx is not None:
+                self.set_selected_anchor(None)
+            self.update()
+            event.accept()
+            return
         # Rule zones are the top visual layer. Select them before allowing the
         # currently selected room/wall to capture a shared vertex or edge.
         if self.edit_mode == "edit_vertices" and event.button() == Qt.MouseButton.LeftButton:
@@ -1012,9 +1290,7 @@ class PositionCanvas(QWidget):
                             hit_rule = True
                             break
                 if hit_rule:
-                    self.set_selected_zone(zone.id)
-                    self.zone_selected.emit(zone.id)
-                    self.update()
+                    self._begin_zone_drag(zone, (snapped_x, snapped_y))
                     event.accept()
                     return
 
@@ -1101,30 +1377,29 @@ class PositionCanvas(QWidget):
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
                 return
 
-            # Check if clicked near any vertex of the selected zone (if selected)
+            # The selected object owns its body drag. This prevents overlapping wall
+            # footprints from stealing a move that should apply only to the room/object.
             if self.selected_zone_id:
                 sel_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
                 if sel_zone:
-                    for idx, pt in enumerate(sel_zone.points):
-                        if self._is_close(pt, pos.x(), pos.y()):
-                            self._push_undo_state()
-                            self.selected_vertex_idx = idx
-                            self.setCursor(Qt.CursorShape.SizeAllCursor)
-                            return
-                    for edge_idx in range(len(sel_zone.points)):
-                        pt1 = sel_zone.points[edge_idx]
-                        pt2 = sel_zone.points[(edge_idx + 1) % len(sel_zone.points)]
-                        sx1, sy1 = self._world_to_screen(pt1[0], pt1[1])
-                        sx2, sy2 = self._world_to_screen(pt2[0], pt2[1])
-                        distance_px, t = self._distance_to_segment_px((pos.x(), pos.y()), (sx1, sy1), (sx2, sy2))
-                        if distance_px <= 10 and 0.05 <= t <= 0.95:
-                            self._push_undo_state()
-                            self.selected_edge_idx = edge_idx
-                            self._edge_drag_start_world = (snapped_x, snapped_y)
-                            self._edge_drag_original_points = list(sel_zone.points)
-                            self.setCursor(Qt.CursorShape.SizeAllCursor)
-                            self.update()
-                            return
+                    vertex_idx = self._zone_vertex_at_screen_pos(sel_zone, pos.x(), pos.y())
+                    if vertex_idx is not None:
+                        self._push_undo_state()
+                        self.selected_vertex_idx = vertex_idx
+                        self.setCursor(Qt.CursorShape.SizeAllCursor)
+                        return
+                    edge_idx = self._zone_edge_at_screen_pos(sel_zone, pos.x(), pos.y())
+                    if edge_idx is not None:
+                        self._push_undo_state()
+                        self.selected_edge_idx = edge_idx
+                        self._edge_drag_start_world = (snapped_x, snapped_y)
+                        self._edge_drag_original_points = list(sel_zone.points)
+                        self.setCursor(Qt.CursorShape.SizeAllCursor)
+                        self.update()
+                        return
+                    if self._zone_contains_screen_pos(sel_zone, pos.x(), pos.y(), world_x, world_y):
+                        self._begin_zone_drag(sel_zone, (snapped_x, snapped_y), emit_selection=False)
+                        return
 
             # Sort zones by reverse Z-order for click priority (upper layer first)
             layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
@@ -1166,28 +1441,22 @@ class PositionCanvas(QWidget):
                 object_type = getattr(zone, "object_type", "zone")
                 if object_type == "wall":
                     path = self._wall_footprint_path(zone)
-                    if not path.isEmpty() and path.contains(pos):
-                        self.set_selected_zone(zone.id)
-                        self.zone_selected.emit(zone.id)
-                        self.update()
+                    if not path.isEmpty() and path.contains(QPointF(world_x, world_y)):
+                        self._begin_zone_drag(zone, (snapped_x, snapped_y))
                         return
                 else:
                     if self._is_inside_polygon(zone.points, world_x, world_y):
-                        self.set_selected_zone(zone.id)
-                        self.zone_selected.emit(zone.id)
-                        self.update()
+                        self._begin_zone_drag(zone, (snapped_x, snapped_y))
                         return
 
-            # Clicked empty space: clear selection
-            if self.selected_zone_id:
-                self.set_selected_zone(None)
-                self.zone_selected.emit("")
-                self.update()
-            if self.selected_anchor_idx is not None:
-                self.set_selected_anchor(None)
+            self._begin_selection_box(event.position())
+            return
 
-        # Fall back to standard dragging
-        if event.button() == Qt.MouseButton.LeftButton:
+        # Fall back to standard view navigation. Left-drag is reserved for box select.
+        if event.button() == Qt.MouseButton.LeftButton and self.edit_mode not in {"draw", "insert_vertex", "pick_zone"}:
+            self._begin_selection_box(event.position())
+            return
+        if event.button() == Qt.MouseButton.MiddleButton:
             self._dragging = True
             self._drag_start = event.position()
             self._drag_view_cx = self._view_cx
@@ -1211,6 +1480,14 @@ class PositionCanvas(QWidget):
             return
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
+        if self.edit_mode == "pick_zone":
+            self.mouse_world_pos = (world_x, world_y)
+            self.snapped_grid_pt = None
+            hovered_zone = self._zone_at_screen_pos(pos.x(), pos.y(), world_x, world_y)
+            self.hovered_zone_id = hovered_zone.id if hovered_zone is not None else None
+            self.setCursor(Qt.CursorShape.PointingHandCursor if hovered_zone is not None else Qt.CursorShape.ArrowCursor)
+            self.update()
+            return
         if self._origin_pick_room_id is not None:
             self._origin_pick_hover_idx = self._origin_vertex_at(pos.x(), pos.y())
             self.setCursor(
@@ -1227,17 +1504,46 @@ class PositionCanvas(QWidget):
             self.mouse_world_pos = (world_x, world_y)
             self.snapped_grid_pt = None
 
+        if self._selection_box_active:
+            self._selection_box_end = event.position()
+            self.update()
+            return
+
         if self.dragging_anchor_idx is not None and self.dragging_anchor_idx < len(self.anchors):
             anchor = self.anchors[self.dragging_anchor_idx]
+            if not self._anchor_can_move_to(anchor, snapped_x, snapped_y):
+                return
             anchor["x"] = snapped_x
             anchor["y"] = snapped_y
             anchor["placed"] = True
             anchor["sync_state"] = "draft"
             self.selected_anchor_idx = self.dragging_anchor_idx
-            self._emit_anchor_layout_edited()
             self.update()
             return
 
+        if self._zone_drag_start_world and self._zone_drag_original_points:
+            dx = snapped_x - self._zone_drag_start_world[0]
+            dy = snapped_y - self._zone_drag_start_world[1]
+            originals = self._zone_drag_original_points
+            if isinstance(originals, dict):
+                changed_primary = None
+                for zone in self.geofence_zones:
+                    if zone.id not in originals:
+                        continue
+                    zone.points = self._translated_points(originals[zone.id], dx, dy)
+                    if zone.id == self.selected_zone_id:
+                        changed_primary = zone
+                self._zone_drag_active = True
+                self._snap_preview_edges = None
+                self.update()
+                return
+            sel_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
+            if sel_zone is not None:
+                sel_zone.points = self._translated_points(originals, dx, dy)
+                self._zone_drag_active = True
+                self._snap_preview_edges = None
+                self.update()
+                return
         # Handle vertex drag
         if self.edit_mode == "edit_vertices" and self.selected_vertex_idx is not None and self.selected_zone_id:
             sel_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
@@ -1303,9 +1609,12 @@ class PositionCanvas(QWidget):
             else:
                 self.hovered_edge = self._find_edge_near_screen_pos(pos.x(), pos.y())
                 if self.hovered_edge:
+                    self.hovered_zone_id = self.hovered_edge[0]
                     self.setCursor(Qt.CursorShape.SizeAllCursor)
                 else:
-                    self.setCursor(Qt.CursorShape.ArrowCursor)
+                    hovered_zone = self._zone_at_screen_pos(pos.x(), pos.y(), world_x, world_y)
+                    self.hovered_zone_id = hovered_zone.id if hovered_zone is not None else None
+                    self.setCursor(Qt.CursorShape.PointingHandCursor if hovered_zone is not None else Qt.CursorShape.ArrowCursor)
 
         if self._dragging and self._drag_start:
             dx = pos.x() - self._drag_start.x()
@@ -1325,8 +1634,42 @@ class PositionCanvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._selection_box_active:
+            handled = self._finish_selection_box()
+            if not handled:
+                self.set_selected_zone(None)
+                self.zone_selected.emit("")
+                if self.selected_anchor_idx is not None:
+                    self.set_selected_anchor(None)
+            self.update()
+            return
+
         if self.dragging_anchor_idx is not None:
+            self._emit_anchor_layout_edited()
             self.dragging_anchor_idx = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.update()
+            return
+
+        if self._zone_drag_start_world is not None:
+            originals = self._zone_drag_original_points
+            if self._zone_drag_active:
+                if isinstance(originals, dict):
+                    for zone in self.geofence_zones:
+                        if zone.id in originals:
+                            self.zone_modified.emit(zone.id, zone.points)
+                elif self.selected_zone_id:
+                    zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
+                    if zone is not None:
+                        self.zone_modified.emit(zone.id, zone.points)
+                selected = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
+                if selected is not None and not self.property_panel.isHidden():
+                    self.property_panel.load_zone(selected)
+                self.update_property_panel_position()
+            self._zone_drag_start_world = None
+            self._zone_drag_original_points = None
+            self._zone_drag_active = False
+            self._snap_preview_edges = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()
             return
@@ -1345,10 +1688,13 @@ class PositionCanvas(QWidget):
             self.update()
             return
 
-        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+        if event.button() == Qt.MouseButton.MiddleButton and self._dragging:
             self._dragging = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
-        elif event.button() == Qt.MouseButton.RightButton and self._rect_zoom:
+            self.update()
+            return
+
+        if event.button() == Qt.MouseButton.RightButton and self._rect_zoom:
             self._rect_zoom = False
             if self._rect_start and self._rect_end:
                 x1 = self._rect_start.x()
@@ -1364,7 +1710,6 @@ class PositionCanvas(QWidget):
             self._rect_start = None
             self._rect_end = None
             self.update()
-
     def _draw_anchor_layer(self, painter, to_screen, *, draw_connections=True):
         active_pos = self.fusion_position if self.fusion_position is not None else self.position
         pos_x, pos_y = to_screen(active_pos["x"], active_pos["y"])
@@ -1407,11 +1752,15 @@ class PositionCanvas(QWidget):
             painter.drawText(center_x + 16, center_y - 10, label)
             painter.setFont(QFont("Segoe UI", 8))
             painter.setPen(QColor(203, 213, 225))
-            painter.drawText(
-                center_x + 16,
-                center_y + 4,
-                f"({anchor['x']:.1f}, {anchor['y']:.1f}, {anchor.get('z', 0.0):.1f})",
-            )
+            if anchor.get("room_id") or anchor.get("zone_id"):
+                coord_text = (
+                    f"L({float(anchor.get('local_x_m', anchor['x'])):.1f}, "
+                    f"{float(anchor.get('local_y_m', anchor['y'])):.1f}, "
+                    f"{anchor.get('z', 0.0):.1f})"
+                )
+            else:
+                coord_text = f"G({anchor['x']:.1f}, {anchor['y']:.1f}, {anchor.get('z', 0.0):.1f})"
+            painter.drawText(center_x + 16, center_y + 4, coord_text)
 
     def _draw_tracking_grid(self, painter, to_screen, view_x1, view_y1, view_x2, view_y2, margin, width, height):
         """Draw a fixed 1 m grid for User mode without changing Spatial settings."""
@@ -1786,14 +2135,14 @@ class PositionCanvas(QWidget):
                 pen_style = Qt.PenStyle.DashLine
                 border_width = 2.0
 
-            is_selected = (zone.id == self.selected_zone_id)
+            is_selected = (zone.id == self.selected_zone_id or zone.id in self.selected_zone_ids)
             if is_selected:
                 border_color = QColor("#FACC15")
                 border_width += 1.2
 
             object_height = max(0.0, zone.max_z - zone.min_z) if object_type in {"wall", "object"} else 0.0
             if object_type == "wall" and not (self.preview_25d and object_height > 0 and len(zone.points) >= 3):
-                path = self._wall_footprint_path(zone)
+                path = self._wall_footprint_screen_path(zone, to_screen)
                 if not path.isEmpty():
                     painter.fillPath(path, QBrush(fill_color))
                     painter.strokePath(path, QPen(border_color, border_width, pen_style))
@@ -1883,6 +2232,7 @@ class PositionCanvas(QWidget):
                     painter.setPen(QPen(QColor(255, 255, 255), 1.5))
                     painter.setBrush(QColor(30, 41, 59))
                     painter.drawEllipse(int(sx - 5), int(sy - 5), 10, 10)
+
 
         # 9. Draw active drawing path
         if self.edit_mode == "draw" and self.current_draw_points:
@@ -1983,7 +2333,14 @@ class PositionCanvas(QWidget):
                     hit_rect = text_rect.adjusted(-8, -6, 8, 6)
                     self._dimension_hitboxes.append((QRect(hit_rect), zone.id, i, length))
 
-        if self.is_developer_mode:
+        is_interacting = bool(
+            self._selection_box_active
+            or self._zone_drag_start_world
+            or self.selected_vertex_idx is not None
+            or self.selected_edge_idx is not None
+            or self.dragging_anchor_idx is not None
+        )
+        if self.is_developer_mode and not is_interacting:
             for zone in self.geofence_zones:
                 draw_dimensions(zone.points, is_closed=True, zone=zone)
             if self.edit_mode == "draw" and self.current_draw_points:
@@ -1992,6 +2349,11 @@ class PositionCanvas(QWidget):
             sel_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
             if sel_zone:
                 draw_dimensions(sel_zone.points, is_closed=True, zone=sel_zone)
+        if self._selection_box_active and self._selection_box_start and self._selection_box_end:
+            rect = self._selection_box_rect()
+            painter.setPen(QPen(QColor(34, 211, 238), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(34, 211, 238, 28))
+            painter.drawRect(rect)
 
         # --- Scale Bar (bottom-left corner) ---
         if self._show_scale_bar:
@@ -2044,6 +2406,7 @@ class PositionCanvas(QWidget):
 
     def _close_property_panel(self):
         self.selected_zone_id = None
+        self.selected_zone_ids = set()
         self.zone_selected.emit("")
         self.property_panel.reset_user_position()
         self.property_panel.hide()
@@ -2056,6 +2419,33 @@ class PositionCanvas(QWidget):
         if not zone:
             return
 
+        old_snapshot = zone.to_dict()
+        changed = False
+        if prop_name == "name":
+            changed = zone.name != str(value)
+        elif prop_name == "color":
+            changed = zone.color != str(value)
+        elif prop_name == "height":
+            changed = abs((zone.max_z - zone.min_z) - float(value)) > 1e-9
+        elif prop_name == "speed_limit":
+            changed = abs(zone.speed_limit - float(value)) > 1e-9
+        elif prop_name == "thickness":
+            changed = abs(zone.thickness - float(value)) > 1e-9
+        elif prop_name == "shape_kind":
+            changed = zone.shape_kind != str(value)
+        elif prop_name == "object_subtype":
+            changed = zone.object_subtype != str(value)
+        elif prop_name == "object_direction":
+            changed = zone.object_direction != str(value)
+        elif prop_name == "wall_mode":
+            changed = zone.wall_mode != str(value)
+        elif prop_name == "host_room_id":
+            new_value = str(value) if value else None
+            changed = zone.host_room_id != new_value
+        if not changed:
+            return
+
+        self._push_undo_state()
         if prop_name == "name":
             zone.name = str(value)
         elif prop_name == "color":
@@ -2080,6 +2470,10 @@ class PositionCanvas(QWidget):
         elif prop_name == "host_room_id":
             zone.host_room_id = str(value) if value else None
 
+        if zone.to_dict() == old_snapshot:
+            if self._undo_stack:
+                self._undo_stack.pop()
+            return
         self.zone_properties_updated.emit(zone.id, {prop_name: value})
         self.update()
 
@@ -2093,7 +2487,13 @@ class PositionCanvas(QWidget):
         n = len(zone.points)
         pt1 = zone.points[edge_idx]
         pt2 = zone.points[(edge_idx + 1) % n]
+        current_length = math.hypot(pt2[0] - pt1[0], pt2[1] - pt1[1])
+        current_angle = math.degrees(math.atan2(pt2[1] - pt1[1], pt2[0] - pt1[0]))
+        angle_delta = abs(((current_angle - float(angle_deg) + 180.0) % 360.0) - 180.0)
+        if abs(current_length - float(length)) <= 1e-9 and angle_delta <= 1e-9:
+            return
 
+        self._push_undo_state()
         theta = math.radians(angle_deg)
         pt2_new_x = pt1[0] + length * math.cos(theta)
         pt2_new_y = pt1[1] + length * math.sin(theta)
@@ -2205,7 +2605,28 @@ class PositionCanvas(QWidget):
         
         self.property_panel.move(target_x, target_y)
 
+    def set_render_fps(self, fps: int):
+        self._target_render_fps = max(30, min(120, int(fps or 60)))
+        if hasattr(self, "_render_timer"):
+            self._render_timer.setInterval(max(1, int(1000 / self._target_render_fps)))
+
+    def _flush_render_update(self):
+        if hasattr(self, "_render_timer"):
+            self._render_timer.stop()
+        if not getattr(self, "_render_dirty", False):
+            return
+        self._render_dirty = False
+        super().update()
+        parent = getattr(self, "parent_tab", None)
+        if parent is not None:
+            scheduler = getattr(parent, "schedule_preview_pane_update", None)
+            if callable(scheduler):
+                scheduler()
+
     def update(self, *args, **kwargs):
-        super().update(*args, **kwargs)
-        if hasattr(self, "parent_tab") and self.parent_tab:
-            self.parent_tab.update_preview_pane()
+        if not hasattr(self, "_render_timer"):
+            super().update(*args, **kwargs)
+            return
+        self._render_dirty = True
+        if not self._render_timer.isActive():
+            self._render_timer.start()

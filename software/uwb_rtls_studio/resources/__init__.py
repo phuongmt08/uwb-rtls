@@ -34,3 +34,14 @@
         Sẽ thay bằng proper SVG icons khi có designer assets.
 ===============================================================================
 """
+import os
+
+RESOURCES_DIR = os.path.dirname(os.path.abspath(__file__))
+ICONS_DIR = os.path.join(RESOURCES_DIR, "icons")
+
+SPIN_UP_ICON_PATH = os.path.join(ICONS_DIR, "spin_up.svg").replace("\\", "/")
+SPIN_DOWN_ICON_PATH = os.path.join(ICONS_DIR, "spin_down.svg").replace("\\", "/")
+
+def get_icon_path(icon_name: str) -> str:
+    """Trả về đường dẫn tuyệt đối chuẩn hóa (dùng /) của file icon trong package resources/icons."""
+    return os.path.join(ICONS_DIR, icon_name).replace("\\", "/")

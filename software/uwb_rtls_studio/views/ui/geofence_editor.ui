@@ -22,7 +22,7 @@ QPushButton { background: #1E293B; color: #F8FAFC; border: 1px solid #334155; bo
 QPushButton:hover { background: #253346; border-color: #22D3EE; }
 QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }
 QLabel { background: transparent; }
-QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background-color: #111827; border: 1px solid #475569; border-radius: 5px; color: #F8FAFC; padding: 4px; }
+QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background-color: #111827; border: 1px solid #475569; border-radius: 5px; color: #F8FAFC; padding: 4px 22px 4px 8px; }
 QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus { border-color: #22D3EE; }
 QTabWidget::pane { border: 1px solid #334155; border-radius: 8px; background: rgba(15, 23, 42, 0.35); margin-top: -1px; }
 QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 7px 12px; font-weight: bold; min-width: 110px; }
@@ -633,10 +633,10 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
        <item>
         <widget class="QFrame" name="separator_geofence">
          <property name="frameShape">
-          <enum>QFrame::Shape::HLine</enum>
+          <enum>QFrame::HLine</enum>
          </property>
          <property name="frameShadow">
-          <enum>QFrame::Shadow::Sunken</enum>
+          <enum>QFrame::Sunken</enum>
          </property>
          <property name="styleSheet">
           <string notr="true">background-color: #334155; max-height: 1px; margin: 5px 0;</string>
@@ -743,7 +743,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
        <item>
         <spacer name="spacer_bottom">
          <property name="orientation">
-          <enum>Qt::Orientation::Vertical</enum>
+          <enum>Qt::Vertical</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>

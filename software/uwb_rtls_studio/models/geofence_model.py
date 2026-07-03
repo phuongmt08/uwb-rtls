@@ -25,7 +25,7 @@ class GeofenceZone:
     color: str = "#FF0000"  # Hex color string
     object_type: str = "zone"  # "zone" | "room" | "wall" | "object"
     thickness: float = 0.2  # Wall thickness metadata in meters
-    shape_kind: str = "polygon"  # "polygon" | "circle" for map objects
+    shape_kind: str = "polygon"  # "polygon" | "circle" | "footprint" for map objects
     object_subtype: str = "generic"  # "generic" | "stairs"
     object_direction: str = "up"  # "up" | "down" for stairs
     radius_m: float = 0.0
@@ -98,7 +98,7 @@ class GeofenceZone:
             "color": self.color,
             "thickness": self.thickness,
             "thickness_m": self.thickness,
-            "shape_kind": self.shape_kind if self.object_type == "object" else "polygon",
+            "shape_kind": self.shape_kind if self.object_type in {"wall", "object"} else "polygon",
             "object_subtype": object_subtype if self.object_type == "object" else "generic",
             "object_direction": self.object_direction if self.object_type == "object" else "up",
             "radius_m": self.radius_m if self.object_type == "object" else 0.0,
@@ -134,7 +134,7 @@ class GeofenceZone:
         if object_direction not in {"up", "down"}:
             object_direction = "up"
         shape_kind = str(data.get("shape_kind", "polygon")).lower()
-        if shape_kind not in {"polygon", "circle"}:
+        if shape_kind not in {"polygon", "circle", "footprint"}:
             shape_kind = "polygon"
 
         thickness_val = float(data.get("thickness_m", data.get("thickness", data.get("wall_thickness_m", 0.2))))

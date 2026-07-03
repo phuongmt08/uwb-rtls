@@ -63,97 +63,106 @@ class ConfigTab(QWidget):
         # ── Post-load setup ──
         self._setup_dev_widgets()
         if self._has_widget("tx_power_spin"):
-            self.tx_power_spin.setDecimals(0)
-            self.tx_power_spin.setRange(0, 0xFFFFFFFF)
+            if hasattr(self.tx_power_spin, "setDecimals"):
+                self.tx_power_spin.setDecimals(0)
+            self.tx_power_spin.setRange(0, 0x7FFFFFFF)
             self.tx_power_spin.setValue(max(0, self.tx_power_spin.value()))
         self._setup_factory_otp_ui()
         self._setup_view_toggle()
         self._setup_target_selector()
         self._merge_ranging_into_uwb_config()
 
+        # Build container for Col 2 if not loaded from UI
+        if not hasattr(self, "col2_container") or self.col2_container is None:
+            self.col2_container = QWidget()
+            self.col2_layout = QVBoxLayout(self.col2_container)
+            self.col2_layout.setContentsMargins(0, 0, 0, 0)
+            self.col2_layout.setSpacing(16)
+            if hasattr(self, "uwb_config_group") and self.uwb_config_group is not None:
+                self.col2_layout.addWidget(self.uwb_config_group)
+            if hasattr(self, "dev_type_group") and self.dev_type_group is not None:
+                self.col2_layout.addWidget(self.dev_type_group, 0, Qt.AlignmentFlag.AlignTop)
 
-        # Remove original widgets from main grid layout to rearrange them dynamically
-        self.main_layout.removeWidget(self.uwb_config_group)
-        self.main_layout.removeWidget(self.anchor_group)
-        self.main_layout.removeWidget(self.fusion_group)
-        self.main_layout.removeWidget(self.device_operations_group)
-        self.main_layout.removeWidget(self.sys_group)
-        if hasattr(self, "dev_type_group"):
-            self.main_layout.removeWidget(self.dev_type_group)
+        # Setup Host Transport Group Box if not present in UI
+        if not hasattr(self, "host_group") or self.host_group is None:
+            self._setup_host_transport_group()
+        else:
+            if hasattr(self, "combo_usb_port"):
+                self._populate_serial_ports(self.combo_usb_port)
+            if hasattr(self, "combo_uart_port"):
+                self._populate_serial_ports(self.combo_uart_port)
+            if hasattr(self, "combo_host_transport"):
+                self.combo_host_transport.currentIndexChanged.connect(self._on_host_transport_changed)
+            if hasattr(self, "combo_usb_port"):
+                self.combo_usb_port.currentIndexChanged.connect(self._on_usb_port_changed)
+            if hasattr(self, "combo_uart_port"):
+                self.combo_uart_port.currentIndexChanged.connect(self._on_uart_port_changed)
+            if hasattr(self, "combo_host_transport"):
+                self._on_host_transport_changed(self.combo_host_transport.currentIndex())
+            if hasattr(self, "combo_usb_port"):
+                self._on_usb_port_changed(self.combo_usb_port.currentIndex())
 
-        # Create Column 2 Container to wrap UWB Config and Device Type Configuration vertically
-        self.col2_container = QWidget()
-        self.col2_layout = QVBoxLayout(self.col2_container)
-        self.col2_layout.setContentsMargins(0, 0, 0, 0)
-        self.col2_layout.setSpacing(16)
-        self.col2_layout.addWidget(self.uwb_config_group)
-        self.col2_layout.addWidget(self.dev_type_group, 0, Qt.AlignmentFlag.AlignTop)
+        # Setup BLE Configuration Group Box if not present in UI
+        if not hasattr(self, "ble_group") or self.ble_group is None:
+            self.ble_group = QGroupBox("📶 BLE Configuration")
+            self.ble_grid = QGridLayout(self.ble_group)
+            self.ble_grid.setSpacing(10)
 
-        # Create Host Transport Group Box
-        self._setup_host_transport_group()
-        # Create BLE Configuration Group Box
-        self.ble_group = QGroupBox("📶 BLE Configuration")
-        self.ble_grid = QGridLayout(self.ble_group)
-        self.ble_grid.setSpacing(10)
+            self.chk_enable_ble = QCheckBox("Enable BLE Advertising")
+            self.chk_enable_ble.setChecked(True)
+            self.ble_grid.addWidget(self.chk_enable_ble, 0, 0, 1, 2)
 
-        self.chk_enable_ble = QCheckBox("Enable BLE Advertising")
-        self.chk_enable_ble.setChecked(True)
-        self.ble_grid.addWidget(self.chk_enable_ble, 0, 0, 1, 2)
+            self.lbl_ble_name = QLabel("🏷️ Device Name:")
+            self.txt_ble_name = QLineEdit("Mock Device")
+            self.ble_grid.addWidget(self.lbl_ble_name, 1, 0)
+            self.ble_grid.addWidget(self.txt_ble_name, 1, 1)
 
-        self.lbl_ble_name = QLabel("🏷️ Device Name:")
-        self.txt_ble_name = QLineEdit("Mock Device")
-        self.ble_grid.addWidget(self.lbl_ble_name, 1, 0)
-        self.ble_grid.addWidget(self.txt_ble_name, 1, 1)
+            self.lbl_ble_min_int = QLabel("⏱️ Min Interval (ms):")
+            self.spin_ble_min_int = QSpinBox()
+            self.spin_ble_min_int.setRange(20, 5000)
+            self.spin_ble_min_int.setValue(20)
+            self.ble_grid.addWidget(self.lbl_ble_min_int, 2, 0)
+            self.ble_grid.addWidget(self.spin_ble_min_int, 2, 1)
 
-        # Advanced BLE Connection parameters for developer mode
-        self.lbl_ble_min_int = QLabel("⏱️ Min Interval (ms):")
-        self.spin_ble_min_int = QSpinBox()
-        self.spin_ble_min_int.setRange(20, 5000)
-        self.spin_ble_min_int.setValue(20)
-        self.ble_grid.addWidget(self.lbl_ble_min_int, 2, 0)
-        self.ble_grid.addWidget(self.spin_ble_min_int, 2, 1)
+            self.lbl_ble_max_int = QLabel("⏱️ Max Interval (ms):")
+            self.spin_ble_max_int = QSpinBox()
+            self.spin_ble_max_int.setRange(20, 5000)
+            self.spin_ble_max_int.setValue(40)
+            self.ble_grid.addWidget(self.lbl_ble_max_int, 3, 0)
+            self.ble_grid.addWidget(self.spin_ble_max_int, 3, 1)
 
-        self.lbl_ble_max_int = QLabel("⏱️ Max Interval (ms):")
-        self.spin_ble_max_int = QSpinBox()
-        self.spin_ble_max_int.setRange(20, 5000)
-        self.spin_ble_max_int.setValue(40)
-        self.ble_grid.addWidget(self.lbl_ble_max_int, 3, 0)
-        self.ble_grid.addWidget(self.spin_ble_max_int, 3, 1)
+            self.lbl_ble_latency = QLabel("⏱️ Slave Latency:")
+            self.spin_ble_latency = QSpinBox()
+            self.spin_ble_latency.setRange(0, 100)
+            self.spin_ble_latency.setValue(0)
+            self.ble_grid.addWidget(self.lbl_ble_latency, 4, 0)
+            self.ble_grid.addWidget(self.spin_ble_latency, 4, 1)
 
-        self.lbl_ble_latency = QLabel("⏱️ Slave Latency:")
-        self.spin_ble_latency = QSpinBox()
-        self.spin_ble_latency.setRange(0, 100)
-        self.spin_ble_latency.setValue(0)
-        self.ble_grid.addWidget(self.lbl_ble_latency, 4, 0)
-        self.ble_grid.addWidget(self.spin_ble_latency, 4, 1)
+            self.lbl_ble_timeout = QLabel("⏱️ Sup. Timeout (ms):")
+            self.spin_ble_timeout = QSpinBox()
+            self.spin_ble_timeout.setRange(100, 30000)
+            self.spin_ble_timeout.setValue(3000)
+            self.ble_grid.addWidget(self.lbl_ble_timeout, 5, 0)
+            self.ble_grid.addWidget(self.spin_ble_timeout, 5, 1)
 
-        self.lbl_ble_timeout = QLabel("⏱️ Sup. Timeout (ms):")
-        self.spin_ble_timeout = QSpinBox()
-        self.spin_ble_timeout.setRange(100, 30000)
-        self.spin_ble_timeout.setValue(3000)
-        self.ble_grid.addWidget(self.lbl_ble_timeout, 5, 0)
-        self.ble_grid.addWidget(self.spin_ble_timeout, 5, 1)
+            self.spin_ble_min_int.valueChanged.connect(self._on_ble_min_interval_changed)
 
-        self.spin_ble_min_int.valueChanged.connect(self._on_ble_min_interval_changed)
+            self.btn_set_ble = QPushButton("Set BLE Config")
+            self.btn_set_ble.setStyleSheet(
+                "QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }"
+                "QPushButton:hover { background: #22D3EE; color: #0F172A; }"
+            )
+            self.ble_grid.addWidget(self.btn_set_ble, 6, 0, 1, 2)
+        else:
+            if hasattr(self, "spin_ble_min_int"):
+                self.spin_ble_min_int.valueChanged.connect(self._on_ble_min_interval_changed)
 
-        self.btn_set_ble = QPushButton("Set BLE Config")
-        self.btn_set_ble.setStyleSheet(
-            "QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }"
-            "QPushButton:hover { background: #22D3EE; color: #0F172A; }"
-        )
-        self.ble_grid.addWidget(self.btn_set_ble, 6, 0, 1, 2)
-
-        # Relocate anchor_btns to be outside the table container (below anchor_stack)
-        self.page_table_layout.removeItem(self.anchor_btns)
-        self.anchor_layout.addLayout(self.anchor_btns)
-
-        # Tighten margins and padding to position buttons close to bottom and maximize table area
-        self.anchor_group.setStyleSheet("QGroupBox#anchor_group { padding-bottom: 2px; }")
-        self.anchor_layout.setContentsMargins(12, 16, 12, 2)
-        self.anchor_layout.setSpacing(4)
-        self.page_table_layout.setContentsMargins(0, 0, 0, 0)
-        self.anchor_btns.setContentsMargins(0, 0, 0, 0)
-        self.anchor_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        if hasattr(self, "page_table_layout") and hasattr(self, "anchor_btns") and self.page_table_layout is not None:
+            self.page_table_layout.removeItem(self.anchor_btns)
+            if hasattr(self, "anchor_layout"):
+                self.anchor_layout.addLayout(self.anchor_btns)
+            if hasattr(self, "anchor_table") and self.anchor_table is not None:
+                self.anchor_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         # Apply initial mode layout
         self.set_developer_mode(self._is_developer)
@@ -322,7 +331,12 @@ class ConfigTab(QWidget):
 
     def _setup_factory_otp_ui(self):
         # Change title
-        self.anchor_group.setTitle("🏭 Factory OTP Configuration")
+        if hasattr(self, "anchor_group"):
+            self.anchor_group.setTitle("🏭 Factory OTP Configuration")
+
+        if hasattr(self, "otp_type_combo") and self.otp_type_combo is not None:
+            self.otp_type_combo.currentIndexChanged.connect(self.otp_stacked_widget.setCurrentIndex)
+            return
 
         # Hide original widgets to replace them with OTP UI
         if hasattr(self, "btn_view_table") and self.btn_view_table is not None:
@@ -494,7 +508,8 @@ class ConfigTab(QWidget):
             # Visibility
             self.fusion_group.setVisible(True)
             self.host_group.setVisible(True)
-            self.ranging_group.setVisible(False)
+            if hasattr(self, "ranging_group") and self.ranging_group is not None:
+                self.ranging_group.setVisible(False)
             self.ble_group.setVisible(True)
 
             # Table Edit Triggers (deprecated)
@@ -524,7 +539,8 @@ class ConfigTab(QWidget):
             # Visibility
             self.fusion_group.setVisible(False)
             self.host_group.setVisible(True)
-            self.ranging_group.setVisible(False)
+            if hasattr(self, "ranging_group") and self.ranging_group is not None:
+                self.ranging_group.setVisible(False)
             self.ble_group.setVisible(True)
             self.dev_type_group.setVisible(True)
 
