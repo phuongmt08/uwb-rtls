@@ -184,7 +184,7 @@ static void sensor_fusion_reset_state(void);
 #endif
 static void drain_signal_semaphore(osSemaphoreId_t sem);
 static bool abort_uwb_ranging_locked(sys_config_t *cfg);
-static void sleep_uwb_ranging_locked(void);
+static void stop_uwb_ranging_locked(void);
 static void reset_ranging_runtime_state(sys_config_t *cfg);
 static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled);
 /* USER CODE END FunctionPrototypes */
@@ -936,13 +936,18 @@ static bool abort_uwb_ranging_locked(sys_config_t *cfg)
     sys_ranging_abort();
     if (bsp_uwb_sleep_wake() != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] Wake failed; resetting DW1000");
-        if (cfg == NULL ||
-            bsp_uwb_init() != BSP_OK ||
-            bsp_uwb_configure(&cfg->uwb) != BSP_OK) {
+        if (bsp_uwb_init() != BSP_OK) {
             (void)osMutexRelease(g_spi1_mutexHandle);
             drain_signal_semaphore(g_uwb_isr_semHandle);
             return false;
         }
+    }
+    /* A valid DEV_ID confirms wakeup, but not that every AON-restored PHY
+     * register is usable. Re-apply the runtime configuration on each start. */
+    if (cfg == NULL || bsp_uwb_configure(&cfg->uwb) != BSP_OK) {
+        (void)osMutexRelease(g_spi1_mutexHandle);
+        drain_signal_semaphore(g_uwb_isr_semHandle);
+        return false;
     }
     bsp_uwb_idle();
     (void)osMutexRelease(g_spi1_mutexHandle);
@@ -950,11 +955,11 @@ static bool abort_uwb_ranging_locked(sys_config_t *cfg)
     return true;
 }
 
-static void sleep_uwb_ranging_locked(void)
+static void stop_uwb_ranging_locked(void)
 {
     (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
     sys_ranging_abort();
-    (void)bsp_uwb_sleep_enter();
+    bsp_uwb_idle();
     (void)osMutexRelease(g_spi1_mutexHandle);
     drain_signal_semaphore(g_uwb_isr_semHandle);
 }
@@ -982,7 +987,7 @@ static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled)
             return false;
         }
     } else {
-        sleep_uwb_ranging_locked();
+        stop_uwb_ranging_locked();
     }
     reset_ranging_runtime_state(cfg);
     g_ranging_enabled = enabled;

@@ -52,6 +52,7 @@ static inline uint64_t dw_read_timestamp(const uint8_t *buf)
 /* Private variables -------------------------------------------------- */
 static bool     s_initialized       = false;
 static bool     s_sleeping          = false;
+static bool     s_rx_windowed       = false;
 static uint64_t s_last_rx_timestamp = 0;    /* Cached RX timestamp */
 static uint64_t s_last_tx_timestamp = 0;    /* Cached TX timestamp */
 static bsp_uwb_rx_quality_t s_last_rx_quality = {0};
@@ -113,6 +114,8 @@ extern SPI_HandleTypeDef hspi1;
 
 /* Private function prototypes ---------------------------------------- */
 static void     reset_DW1000(void);
+static void     drive_DW1000_reset_low(void);
+static void     release_DW1000_reset(void);
 static void     port_set_dw1000_slowrate(void);
 static void     port_set_dw1000_fastrate(void);
 static void     configure_dw1000_sleep(void);
@@ -180,13 +183,34 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
   return 0;
 }
 
+static void drive_DW1000_reset_low(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
+  gpio.Pin = UWB_RST_PIN;
+  gpio.Mode = GPIO_MODE_OUTPUT_OD;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(UWB_RST_PORT, &gpio);
+}
+
+static void release_DW1000_reset(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  gpio.Pin = UWB_RST_PIN;
+  gpio.Mode = GPIO_MODE_INPUT;
+  gpio.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(UWB_RST_PORT, &gpio);
+}
+
 static void reset_DW1000(void)
 {
-  HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
-  bsp_delay_ms(10);
-  HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
-  bsp_delay_ms(10);
+  drive_DW1000_reset_low();
+  bsp_delay_ms(2);
+  release_DW1000_reset();
+  bsp_delay_ms(2);
 }
 
 static void port_set_dw1000_slowrate(void)
@@ -260,8 +284,9 @@ bsp_err_t bsp_uwb_init(void)
 
   bsp_util_init();
   s_sleeping = false;
-  port_set_dw1000_slowrate();
+  s_rx_windowed = false;
   reset_DW1000();
+  port_set_dw1000_slowrate();
 
   /* Load LDE microcode - CRITICAL for accurate RX timestamps */
   if (dwt_initialise(DWT_LOADUCODE) != DWT_SUCCESS)
@@ -277,7 +302,6 @@ bsp_err_t bsp_uwb_init(void)
     return BSP_ERR;
   }
 
-  configure_dw1000_sleep();
   port_set_dw1000_fastrate();
   dwt_setleds(1);
 
@@ -572,11 +596,11 @@ void bsp_uwb_reset(bool active)
 
   if (active)
   {
-    HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_RESET);
+    drive_DW1000_reset_low();
   }
   else
   {
-    HAL_GPIO_WritePin(UWB_RST_PORT, UWB_RST_PIN, GPIO_PIN_SET);
+    release_DW1000_reset();
   }
 }
 
@@ -588,6 +612,7 @@ bsp_err_t bsp_uwb_enable_rx(uint32_t timeout_ms)
 
   dwt_forcetrxoff();
   dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  s_rx_windowed = (timeout_ms > 0U);
 
   if (timeout_ms > 0 && timeout_ms <= 67)
   {
@@ -617,6 +642,7 @@ bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_m
 
   dwt_forcetrxoff();
   dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  s_rx_windowed = (timeout_ms > 0U);
 
   if (timeout_ms > 0 && timeout_ms <= 67)
   {
@@ -688,6 +714,7 @@ void bsp_uwb_idle(void)
 
   dwt_forcetrxoff();
   dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  s_rx_windowed = false;
 }
 
 bsp_err_t bsp_uwb_sleep_enter(void)
@@ -701,6 +728,7 @@ bsp_err_t bsp_uwb_sleep_enter(void)
 
   dwt_forcetrxoff();
   dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  s_rx_windowed = false;
   bsp_uwb_clear_event();
 
   port_set_dw1000_slowrate();
@@ -990,6 +1018,7 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
 
   bsp_uwb_event_t *ev = &s_ev_queue[s_ev_head];
   ev->type   = BSP_UWB_EVENT_TX_DONE;
+  ev->rx_windowed = false;
   ev->rx_len = 0;
   ev->rx_ts  = 0;
   memset(&ev->rx_quality, 0, sizeof(ev->rx_quality));
@@ -1015,6 +1044,8 @@ static void uwb_tx_cb(const dwt_callback_data_t *cb_data)
 static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
 {
   if (cb_data->event == DWT_SIG_RX_OKAY) {
+      bool windowed_rx = s_rx_windowed;
+      s_rx_windowed = false;
       uint8_t next_head = (uint8_t)((s_ev_head + 1u) % UWB_EVENT_QUEUE_SIZE);
       if (next_head == s_ev_tail) {
           /* Queue full — drop oldest, count overflow */
@@ -1025,6 +1056,7 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
       bsp_uwb_event_t *ev = &s_ev_queue[s_ev_head];
       ev->tx_ts = 0;
       ev->type    = BSP_UWB_EVENT_RX_OK;
+      ev->rx_windowed = windowed_rx;
       ev->rx_len  = cb_data->datalength;
       if (ev->rx_len > sizeof(ev->rx_data)) {
           ev->rx_len = sizeof(ev->rx_data);
@@ -1041,14 +1073,34 @@ static void uwb_rx_cb(const dwt_callback_data_t *cb_data)
       s_ev_head = next_head;
       s_event_stats.rx_ok++;
 
-      /* Re-enable RX immediately to capture back-to-back frames */
-      if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
+      /* A finite tracking window ends after POLL. RESP TX re-arms RX for FINAL. */
+      if (!windowed_rx && dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
           s_event_stats.rx_rearm_fail++;
       }
   } else {
       /* Do not queue timeouts or errors. They happen naturally during continuous
        * listening between slots and will rapidly overflow the queue, dropping
        * valid RX_OK/TX_DONE events. The TDMA state machine handles its own timeouts. */
+      bool window_timeout = s_rx_windowed &&
+          (cb_data->event == DWT_SIG_RX_TIMEOUT ||
+           cb_data->event == DWT_SIG_RX_PTOTIMEOUT ||
+           cb_data->event == DWT_SIG_RX_SFDTIMEOUT);
+
+      if (window_timeout) {
+          uint8_t next_head = (uint8_t)((s_ev_head + 1u) % UWB_EVENT_QUEUE_SIZE);
+          if (next_head == s_ev_tail) {
+              s_event_stats.queue_overflow++;
+              s_ev_tail = (uint8_t)((s_ev_tail + 1u) % UWB_EVENT_QUEUE_SIZE);
+          }
+
+          bsp_uwb_event_t *ev = &s_ev_queue[s_ev_head];
+          memset(ev, 0, sizeof(*ev));
+          ev->type = BSP_UWB_EVENT_RX_TIMEOUT;
+          s_ev_head = next_head;
+          s_rx_windowed = false;
+          return;
+      }
+
       if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
           s_event_stats.rx_rearm_fail++;
       }

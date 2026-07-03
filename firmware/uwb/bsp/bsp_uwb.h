@@ -42,6 +42,7 @@ typedef enum {
 
 typedef struct {
     bsp_uwb_event_type_t type;
+    bool                 rx_windowed;
     uint16_t             rx_len;
     uint8_t              rx_data[128];
     uint64_t             rx_ts;
