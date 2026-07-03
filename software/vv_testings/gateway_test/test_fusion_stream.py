@@ -353,6 +353,11 @@ def _run_stream(session: VvTestSession, seconds: float, verbose: bool, control_r
     try:
         while time.time() < deadline:
             if _poll_stop_hotkey():
+                print("[HOTKEY] 'q' pressed, sending ranging_stop...")
+                if control_ranging:
+                    _send_ranging_cmd(session, start=False, verbose=verbose)
+                    time.sleep(STOP_SESSION_DELAY_S)
+                    control_ranging = False
                 break
 
             now = time.time()

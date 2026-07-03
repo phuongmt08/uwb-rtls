@@ -66,6 +66,7 @@ static bool ble_device_type_valid(protobuf_device_type_t device_type)
 }
 #endif
 
+#ifdef BOOTLOADER
 static const char *ble_device_type_prefix(protobuf_device_type_t device_type)
 {
    switch (device_type) {
@@ -77,7 +78,6 @@ static const char *ble_device_type_prefix(protobuf_device_type_t device_type)
    }
 }
 
-#ifdef BOOTLOADER
 static protobuf_device_type_t ble_read_otp_device_type(void)
 {
    ble_otp_device_info_t info = {0};
@@ -113,23 +113,27 @@ static const char *ble_state_name(protobuf_ble_state_t s)
 static void ble_refresh_adv_config(void)
 {
     uint32_t sn = bsp_util_get_serial_number();
-    protobuf_device_type_t device_type = protobuf_DEVICE_TYPE_UNSPECIFIED;
-    uint32_t device_id = sn & 0xFFFFu;
     char name[32] = {0};
 
 #ifndef BOOTLOADER
     const sys_config_t *cfg = sys_config_get();
-    if (cfg) {
-        device_type = cfg->device_type;
-        device_id = cfg->uwb.device_id;
+    if (cfg && cfg->uwb.role == DEVICE_ROLE_TAG) {
+        snprintf(name, sizeof(name), "Tag-%u", (unsigned int)cfg->uwb.device_id);
+    } else if (cfg) {
+        snprintf(name, sizeof(name), "Anchor-%u", (unsigned int)cfg->uwb.device_id);
+    } else {
+        snprintf(name, sizeof(name), "Node-%04X", (unsigned int)(sn & 0xFFFFu));
     }
 #else
-    device_type = ble_read_otp_device_type();
+    protobuf_device_type_t device_type = ble_read_otp_device_type();
+    if (device_type == protobuf_DEVICE_TYPE_UNSPECIFIED) {
+        snprintf(name, sizeof(name), "BL-%04X", (unsigned int)(sn & 0xFFFFu));
+    } else {
+        snprintf(name, sizeof(name), "%s-%04X",
+                 ble_device_type_prefix(device_type),
+                 (unsigned int)(sn & 0xFFFFu));
+    }
 #endif
-
-    snprintf(name, sizeof(name), "%s-%lu",
-             ble_device_type_prefix(device_type),
-             (unsigned long)device_id);
 
     s_ble_peri.serial_number = sn;
     strncpy(s_ble_peri.device_name, name, sizeof(s_ble_peri.device_name) - 1);

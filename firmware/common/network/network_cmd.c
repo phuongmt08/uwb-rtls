@@ -11,7 +11,9 @@
 
 #ifndef BOOTLOADER
     #include "bsp_flash.h"
+    #include "bsp_uwb.h"
     #include "sys_config.h"
+    #include "sys_ranging.h"
     #include "bsp_battery.h"
     #include "sys_logger.h"
     #include "sys_pm.h"
@@ -109,11 +111,12 @@ static void network_cmd_calib_start(const protobuf_packet_t *pkt);
 static void network_cmd_calib_stop(const protobuf_packet_t *pkt);
 static void network_cmd_calib_status_get(const protobuf_packet_t *pkt);
 static void network_cmd_calib_candidate_apply(const protobuf_packet_t *pkt);
+static void network_cmd_rtos_task_stats_get(const protobuf_packet_t *pkt);
+static void network_cmd_rtos_resource_get(const protobuf_packet_t *pkt);
+static void network_cmd_sensor_fusion_cfg_get(const protobuf_packet_t *pkt);
 #endif /* !BOOTLOADER */
 static void network_cmd_end_session(const protobuf_packet_t *pkt);
 
-
-/* ---- Internal State ---- */
 
 typedef struct {
     network_core_t *stream;
@@ -190,7 +193,7 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_ranging_status_get_tag,        network_cmd_unimplemented,               "rng_status_get"),     /* 19 */
     CMD_INFO(protobuf_packet_t_ranging_status_resp_tag,       network_cmd_unimplemented,               "rng_status_resp"),    /* 20 */
 
-    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_get_tag,     network_cmd_unimplemented,               "fusion_cfg_get"),     /* 21 */
+    CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_get_tag,     network_cmd_sensor_fusion_cfg_get,       "fusion_cfg_get"),     /* 21 */
     CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_set_tag,     network_cmd_unimplemented,               "fusion_cfg_set"),     /* 22 */
     CMD_INFO(protobuf_packet_t_sensor_fusion_cfg_resp_tag,    network_cmd_unimplemented,               "fusion_cfg_resp"),    /* 23 */
 #endif /* !BOOTLOADER */
@@ -265,6 +268,8 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 67 */
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 68 */
+    CMD_INFO(protobuf_packet_t_rtos_resource_get_tag,         network_cmd_rtos_resource_get,           "rtos_resource_get"),  /* 71 */
+    CMD_INFO(protobuf_packet_t_rtos_task_stats_get_tag,       network_cmd_rtos_task_stats_get,         "rtos_task_stats_get"), /* 73 */
     CMD_INFO(protobuf_packet_t_prefilter_cfg_get_tag,         network_cmd_prefilter_cfg_get,           "prefilter_get"),      /* 75 */
     CMD_INFO(protobuf_packet_t_prefilter_cfg_set_tag,         network_cmd_prefilter_cfg_set,           "prefilter_set"),      /* 76 */
     CMD_INFO(protobuf_packet_t_prefilter_cfg_resp_tag,        network_cmd_unimplemented,               "prefilter_resp"),     /* 77 */
@@ -319,6 +324,31 @@ static void network_cmd_config_save(const char *context)
     if (sys_config_save() != 0) {
         RLOG_W(OBJECT_CODE, "Failed to persist %s from host", context);
     }
+}
+
+static bool network_cmd_reconfigure_uwb(const protobuf_uwb_cfg_t *cfg)
+{
+    CHECK(cfg, false);
+
+    bool was_ranging_enabled = app_rtos_is_ranging_enabled();
+    app_rtos_set_ranging_enabled(false);
+
+    if (g_spi1_mutexHandle != NULL &&
+        osMutexAcquire(g_spi1_mutexHandle, osWaitForever) != osOK) {
+        app_rtos_set_ranging_enabled(was_ranging_enabled);
+        return false;
+    }
+
+    sys_ranging_abort();
+    bsp_uwb_idle();
+    bsp_err_t status = bsp_uwb_configure(cfg);
+
+    if (g_spi1_mutexHandle != NULL) {
+        (void)osMutexRelease(g_spi1_mutexHandle);
+    }
+
+    app_rtos_set_ranging_enabled(was_ranging_enabled);
+    return status == BSP_OK;
 }
 #endif /* !BOOTLOADER */
 
@@ -491,7 +521,7 @@ static void network_cmd_sys_config_get(const protobuf_packet_t *pkt)
 
     network_cmd_send_packet(&resp);
 }
-
+protobuf_uwb_cfg_t old_cfg;
 static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
@@ -544,10 +574,33 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt)
         return;
     }
 
+    if (new_cfg->tx_antenna_delay > 0xFFFFu || new_cfg->rx_antenna_delay > 0xFFFFu) {
+        RLOG_W(OBJECT_CODE,
+               "Invalid antenna delay in sys_config_set: TX=%lu RX=%lu",
+               (unsigned long)new_cfg->tx_antenna_delay,
+               (unsigned long)new_cfg->rx_antenna_delay);
+        return;
+    }
+
     sys_config_t *cfg = sys_config_get();
+    old_cfg = cfg->uwb;
     cfg->uwb = *new_cfg;
 
+    if (!network_cmd_reconfigure_uwb(&cfg->uwb)) {
+        cfg->uwb = old_cfg;
+        if (!network_cmd_reconfigure_uwb(&cfg->uwb)) {
+            RLOG_E(OBJECT_CODE, ERR_HAL, "Failed to restore previous UWB config after sys_config_set");
+        }
+        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        return;
+    }
+
     network_cmd_config_save("sys_config");
+
+    RLOG_I(OBJECT_CODE,
+           "sys_config_set applied and UWB reconfigured: TX delay=%lu RX delay=%lu",
+           (unsigned long)cfg->uwb.tx_antenna_delay,
+           (unsigned long)cfg->uwb.rx_antenna_delay);
 }
 
 static void network_cmd_sys_ranging_cfg_get(const protobuf_packet_t *pkt)
@@ -878,6 +931,88 @@ static void network_cmd_battery_info_get(const protobuf_packet_t *pkt)
     network_cmd_send_packet(&resp);
 }
 
+static void network_cmd_rtos_resource_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_rtos_resource_resp_tag);
+    
+    resp.params.rtos_resource_resp.sample_window_ms = 0;
+    resp.params.rtos_resource_resp.cpu_busy_permille = 0;
+    resp.params.rtos_resource_resp.heap_free_bytes = 0;
+    resp.params.rtos_resource_resp.heap_min_ever_free_bytes = 0;
+    resp.params.rtos_resource_resp.min_stack_free_bytes = 0;
+    resp.params.rtos_resource_resp.min_stack_task_id = 0;
+    resp.params.rtos_resource_resp.task_count = 0;
+    resp.params.rtos_resource_resp.health_flags = 0;
+
+    const bsp_util_rtos_snapshot_t *snapshot = bsp_util_rtos_monitor_get();
+    if (snapshot != NULL) {
+        resp.params.rtos_resource_resp.sample_window_ms = snapshot->sample_window_ms;
+        resp.params.rtos_resource_resp.cpu_busy_permille = snapshot->cpu_busy_permille;
+        resp.params.rtos_resource_resp.heap_free_bytes = snapshot->heap_free_bytes;
+        resp.params.rtos_resource_resp.heap_min_ever_free_bytes = snapshot->heap_min_ever_free_bytes;
+        resp.params.rtos_resource_resp.min_stack_free_bytes = snapshot->min_stack_free_bytes;
+        resp.params.rtos_resource_resp.min_stack_task_id = snapshot->min_stack_task_id;
+        resp.params.rtos_resource_resp.task_count = snapshot->task_count_total;
+        resp.params.rtos_resource_resp.health_flags = snapshot->health_flags;
+    }
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_sensor_fusion_cfg_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_sensor_fusion_cfg_resp_tag);
+    resp.params.sensor_fusion_cfg_resp.has_config = true;
+    
+    resp.params.sensor_fusion_cfg_resp.config.alpha          = SYS_FUSION_UKF_ALPHA;
+    resp.params.sensor_fusion_cfg_resp.config.kappa          = SYS_FUSION_UKF_KAPPA;
+    resp.params.sensor_fusion_cfg_resp.config.beta           = SYS_FUSION_UKF_BETA;
+    resp.params.sensor_fusion_cfg_resp.config.q_a            = SYS_FUSION_UKF_QA;
+    resp.params.sensor_fusion_cfg_resp.config.q_g            = SYS_FUSION_UKF_QG;
+    resp.params.sensor_fusion_cfg_resp.config.r_uwb          = SYS_FUSION_UKF_R_UWB;
+    
+    resp.params.sensor_fusion_cfg_resp.config.init_p_px      = SYS_FUSION_UKF_INIT_P_PX;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_py      = SYS_FUSION_UKF_INIT_P_PY;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_vx      = SYS_FUSION_UKF_INIT_P_VX;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_vy      = SYS_FUSION_UKF_INIT_P_VY;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_theta   = SYS_FUSION_UKF_INIT_P_THETA;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_bias_ax = SYS_FUSION_UKF_INIT_P_BIAS_AX;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_bias_ay = SYS_FUSION_UKF_INIT_P_BIAS_AY;
+    resp.params.sensor_fusion_cfg_resp.config.init_p_bias_gz = SYS_FUSION_UKF_INIT_P_BIAS_GZ;
+
+    network_cmd_send_packet(&resp);
+}
+
+static void network_cmd_rtos_task_stats_get(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt && s_network_cmd.stream);
+
+    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_rtos_task_stats_resp_tag);
+    resp.params.rtos_task_stats_resp.tasks_count = 0;
+
+    const bsp_util_rtos_snapshot_t *snapshot = bsp_util_rtos_monitor_get();
+    if (snapshot != NULL) {
+        uint32_t count = snapshot->task_count;
+        if (count > 10U) {
+            count = 10U;
+        }
+        resp.params.rtos_task_stats_resp.tasks_count = (pb_size_t)count;
+        for (uint32_t i = 0U; i < count; i++) {
+            resp.params.rtos_task_stats_resp.tasks[i].task_id = snapshot->tasks[i].task_id;
+            resp.params.rtos_task_stats_resp.tasks[i].cpu_permille = snapshot->tasks[i].cpu_permille;
+            resp.params.rtos_task_stats_resp.tasks[i].stack_min_free_bytes = snapshot->tasks[i].stack_min_free_bytes;
+            strncpy(resp.params.rtos_task_stats_resp.tasks[i].name, snapshot->tasks[i].name, sizeof(resp.params.rtos_task_stats_resp.tasks[i].name) - 1);
+            resp.params.rtos_task_stats_resp.tasks[i].name[sizeof(resp.params.rtos_task_stats_resp.tasks[i].name) - 1] = '\0';
+        }
+    }
+
+    network_cmd_send_packet(&resp);
+}
+
 static void network_cmd_zone_switch(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
@@ -1085,17 +1220,7 @@ static void network_cmd_ble_adv_status(const protobuf_packet_t *pkt)
 
 static void network_cmd_ble_adv_config_request(const protobuf_packet_t *pkt)
 {
-    CHECK_VOID(pkt && s_network_cmd.stream);
-
-    uint8_t dst = protobuf_PACKET_ADDR_PERIPHERAL;
-    if (pkt->has_hdr && pkt->hdr.has_addr) {
-        dst = (uint8_t)pkt->hdr.addr.src;
-    }
-
-    RLOG_I(OBJECT_CODE, "Received BLE adv config request from 0x%02X", (unsigned)dst);
-    if (!sys_ble_peripheral_send_config(dst)) {
-        RLOG_W(OBJECT_CODE, "Failed to send BLE adv config to 0x%02X", (unsigned)dst);
-    }
+	sys_ble_peripheral_set_config();
 }
 #endif
 
@@ -1387,7 +1512,7 @@ bool network_cmd_is_ble_host_active(void)
 
 bool network_cmd_set_ranging_enabled(bool enabled)
 {
-    g_ranging_enabled = enabled;
+    app_rtos_apply_ranging_enabled(enabled);
     return true;
 }
 
@@ -1469,8 +1594,8 @@ static bool network_cmd_packet_handler(const protobuf_packet_t *pkt)
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data)
 {
     CHECK(stream && data, false);
-//    CHECK(network_cmd_is_ranging_enabled(), false);
-#if !defined(UKF_BLE_STREAM_TEST_ENABLE) || (UKF_BLE_STREAM_TEST_ENABLE == 0)
+    CHECK(network_cmd_is_ranging_enabled(), false);
+#if !defined(TEST_UKF_STREAM_BLE) || (TEST_UKF_STREAM_BLE == 0)
     CHECK(network_cmd_is_ble_host_active(), false);
 #endif
 

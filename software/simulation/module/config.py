@@ -35,17 +35,17 @@ IMU_ZUPT_FRAMES = 15
 
 TEST_UKF_Q_R_Params = False
 
-ANCHOR_1_X = 0.0
-ANCHOR_1_Y = 0.0
+ANCHOR_1_X = 0.7
+ANCHOR_1_Y = 0.03
 
-ANCHOR_2_X = 10.76
-ANCHOR_2_Y = 0.0
+ANCHOR_2_X = 0.7
+ANCHOR_2_Y = 8.37
 
-ANCHOR_3_X = 0.0
-ANCHOR_3_Y = 13.2
+ANCHOR_3_X = 7.5
+ANCHOR_3_Y = 8.37
 
-ANCHOR_4_X = 10.76
-ANCHOR_4_Y = 13.2
+ANCHOR_4_X = 7.5
+ANCHOR_4_Y = 0.03
 
 # Anchor positions in the room (three corners)
 ANCHOR_POSITIONS = np.array([
@@ -157,10 +157,10 @@ TARGET_PORT = "COM15"
 UART_SOF = 0xAA
 
 # ==================== LIVE PLOT CONFIGURATION ====================
-GROUND_TRUTH_D1 = 4.88 * np.sqrt(2)
-GROUND_TRUTH_D2 = 4.88 * np.sqrt(2)
-GROUND_TRUTH_D3 = 4.88 * np.sqrt(2)
-GROUND_TRUTH_D4 = 3.45
+GROUND_TRUTH_D1 = 6.07
+GROUND_TRUTH_D2 = 6.07
+GROUND_TRUTH_D3 = 6.07
+GROUND_TRUTH_D4 = 6.07
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
@@ -185,9 +185,20 @@ LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
 # Matches firmware uart_fusion_frame_t:
 # sof, length, anchor_mask, tx_frame_cnt,
 # ukf_x, ukf_y, ukf_yaw, tril_x, tril_y, yaw, error_frame_cnt
-FUSION_FRAME_FORMAT = '<BBBI6fI'
+# Position and yaw fields are int16 fixed-point values scaled by 100.
+FUSION_FRAME_FORMAT = '<BBBIhhhhhhI'
 FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
 FUSION_FRAME_PAYLOAD_LEN = FUSION_FRAME_SIZE - 2
+FUSION_FRAME_LEGACY_FORMAT = '<BBIhhhhhhI'
+FUSION_FRAME_LEGACY_SIZE = struct.calcsize(FUSION_FRAME_LEGACY_FORMAT)
+FUSION_FRAME_LEGACY_PAYLOAD_LEN = FUSION_FRAME_LEGACY_SIZE - 2
+FUSION_FRAME_MIN_SIZE = min(FUSION_FRAME_SIZE, FUSION_FRAME_LEGACY_SIZE)
+FUSION_FRAME_LENGTH_TO_SIZE = {
+    FUSION_FRAME_PAYLOAD_LEN: FUSION_FRAME_SIZE,
+    FUSION_FRAME_SIZE: FUSION_FRAME_SIZE,
+    FUSION_FRAME_LEGACY_PAYLOAD_LEN: FUSION_FRAME_LEGACY_SIZE,
+    FUSION_FRAME_LEGACY_SIZE: FUSION_FRAME_LEGACY_SIZE,
+}
 
 # ==================== IMU Q Process CONFIGURATION ====================
 # Frame Structure Format (little-endian)

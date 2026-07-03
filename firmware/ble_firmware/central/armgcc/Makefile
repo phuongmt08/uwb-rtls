@@ -303,8 +303,10 @@ LDFLAGS += --specs=nano.specs
 
 nrf52840_xxaa: CFLAGS += -D__HEAP_SIZE=0
 nrf52840_xxaa: CFLAGS += -D__STACK_SIZE=8192
+nrf52840_xxaa: CFLAGS += -DBOARD_PCA10059
 nrf52840_xxaa: ASMFLAGS += -D__HEAP_SIZE=0
 nrf52840_xxaa: ASMFLAGS += -D__STACK_SIZE=8192
+nrf52840_xxaa: ASMFLAGS += -DBOARD_PCA10059
 
 supermini_nrf52840: CFLAGS += -D__HEAP_SIZE=0
 supermini_nrf52840: CFLAGS += -D__STACK_SIZE=8192

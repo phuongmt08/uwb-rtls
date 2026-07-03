@@ -1,0 +1,11 @@
+# UWB Antenna Delay Configuration
+# Updated: 2026-07-02 16:41:49
+# ============================================
+TARGET_DISTANCE = 6.07
+UNITS_PER_METER = 200.0
+
+# anchor, current_delay, min_measured, max_measured
+A1, 16297, 5.55, 5.75
+A2, 16332, 5.95, 6.10
+A3, 16275, 5.70, 5.90
+A4, 16234, 5.25, 5.50

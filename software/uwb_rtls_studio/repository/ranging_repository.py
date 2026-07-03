@@ -28,6 +28,10 @@ class RangingRepository(QObject):
         self._anchor_layout: list[dict] = []
         self._stats: dict = {}
 
+    @staticmethod
+    def _decode_fixed2(value) -> float:
+        return float(value) / 100.0
+
     @property
     def positions(self) -> list[dict]:
         return list(self._positions)
@@ -111,17 +115,29 @@ class RangingRepository(QObject):
         return sample
 
     def parse_sensor_fusion_result(self, res, seq: int = 0, packet_timestamp_ms: int = 0) -> dict:
+        anchors = [
+            {
+                "anchor_id": int(getattr(anchor, "anchor_id", 0)),
+                "distance_mm": int(getattr(anchor, "distance_mm", 0)),
+                "weight": int(getattr(anchor, "weight", 0)),
+            }
+            for anchor in getattr(res, "anchors", [])
+        ]
+
         sample = {
             "source": "sensor_fusion",
             "seq": int(seq or 0),
-            "ukf_x_m": float(getattr(res, "ukf_x_m", 0.0)),
-            "ukf_y_m": float(getattr(res, "ukf_y_m", 0.0)),
-            "ukf_yaw_deg": float(getattr(res, "ukf_yaw_deg", 0.0)),
-            "tril_x_m": float(getattr(res, "tril_x_m", 0.0)),
-            "tril_y_m": float(getattr(res, "tril_y_m", 0.0)),
-            "yaw_deg": float(getattr(res, "yaw_deg", 0.0)),
+            "ukf_x_m": self._decode_fixed2(getattr(res, "ukf_x_m", 0)),
+            "ukf_y_m": self._decode_fixed2(getattr(res, "ukf_y_m", 0)),
+            "ukf_yaw_deg": self._decode_fixed2(getattr(res, "ukf_yaw_deg", 0)),
+            "tril_x_m": self._decode_fixed2(getattr(res, "tril_x_m", 0)),
+            "tril_y_m": self._decode_fixed2(getattr(res, "tril_y_m", 0)),
+            "yaw_deg": self._decode_fixed2(getattr(res, "yaw_deg", 0)),
+            "anchor_mask": int(getattr(res, "anchor_mask", 0)),
             "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
             "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
+            "zone_id": int(getattr(res, "zone_id", 0)),
+            "anchors": anchors,
             "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": time.time(),
         }

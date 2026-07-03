@@ -993,14 +993,14 @@ void sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count)
 {
     if (!anchors || !count) return;
     uint32_t n = g_storage.config.anchor_count;
-    if (n == 0u || n > SYS_CONFIG_MAX_ANCHORS) n = SYS_CONFIG_MAX_ANCHORS;
+    if (n > SYS_CONFIG_MAX_ANCHORS) n = SYS_CONFIG_MAX_ANCHORS;
     memcpy(anchors, g_storage.config.anchor_layout, (size_t)n * sizeof(sys_anchor_layout_t));
     *count = n;
 }
 
 int sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count)
 {
-    if (!anchors || count != NUM_ANCHORS) return -1;
+    if (!anchors || count == 0U || count > SYS_CONFIG_MAX_ANCHORS) return -1;
 
     protobuf_zone_profile_t profile =
         g_storage.config.zone_profiles[s_active_zone_id - 1U];
@@ -1014,6 +1014,9 @@ int sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t co
     }
 
     g_storage.config.zone_profiles[s_active_zone_id - 1U] = profile;
+    g_storage.config.anchor_count = count;
+    memset(g_storage.config.anchor_layout, 0, sizeof(g_storage.config.anchor_layout));
+    memcpy(g_storage.config.anchor_layout, anchors, (size_t)count * sizeof(sys_anchor_layout_t));
     return 0;
 }
 

@@ -9,18 +9,25 @@ from serial.tools import list_ports
 import numpy as np
 import pyqtgraph as pg
 from PyQt5 import uic
-from PyQt5.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt5.QtWidgets import QComboBox, QLabel, QMainWindow
 
 from ..config import (
     ANCHOR_POSITIONS,
-    FUSION_FRAME_SIZE,
+    FUSION_FRAME_LENGTH_TO_SIZE,
+    FUSION_FRAME_MIN_SIZE,
     MAX_SAMPLES,
     ROOM_SIZE_M,
     UART_BAUDRATE,
     UART_SOF,
 )
 from ..module_parse_frame import parse_uart_fusion_frame
+
+
+GROUND_TRUTH_HORIZONTAL_M = 2.8
+GROUND_TRUTH_VERTICAL_M = 6
+GROUND_TRUTH_START_1 = "start_1"
+GROUND_TRUTH_START_2 = "start_2"
 
 
 class FusionFrameThread(QThread):
@@ -178,24 +185,32 @@ class FusionFrameThread(QThread):
 
     def _extract_frames(self, buffer):
         frames = []
-        while len(buffer) >= FUSION_FRAME_SIZE:
+        while len(buffer) >= FUSION_FRAME_MIN_SIZE:
             sof_idx = buffer.find(bytes((UART_SOF,)))
             if sof_idx < 0:
                 del buffer[:]
                 break
             if sof_idx > 0:
                 del buffer[:sof_idx]
-            if len(buffer) < FUSION_FRAME_SIZE:
+            if len(buffer) < 2:
                 break
 
-            frame_bytes = bytes(buffer[:FUSION_FRAME_SIZE])
+            frame_size = FUSION_FRAME_LENGTH_TO_SIZE.get(buffer[1])
+            if frame_size is None:
+                self._bad_frames += 1
+                del buffer[0]
+                continue
+            if len(buffer) < frame_size:
+                break
+
+            frame_bytes = bytes(buffer[:frame_size])
             frame_data = parse_uart_fusion_frame(frame_bytes)
             if frame_data is None:
                 self._bad_frames += 1
                 del buffer[0]
                 continue
             frames.append(frame_data)
-            del buffer[:FUSION_FRAME_SIZE]
+            del buffer[:frame_size]
         return frames
 
     def _track_tx_gap(self, tx_frame_cnt):
@@ -286,6 +301,18 @@ class FusionFrameWindow(QMainWindow):
 
         self.plot_ukf = self.graph_pos.plot(pen=pg.mkPen("b", width=2.5), name="UKF")
         self.plot_tril = self.graph_pos.plot(pen=pg.mkPen("g", width=2.0), name="Trilateration")
+        self.plot_ground_truth = self.graph_pos.plot(
+            pen=pg.mkPen((230, 116, 37), width=2.0, style=Qt.DashLine),
+            name="Ground truth",
+        )
+        self.ground_truth_start_markers = pg.ScatterPlotItem(
+            size=16,
+            pen=pg.mkPen((160, 70, 20), width=1.5),
+            brush=pg.mkBrush((240, 112, 48)),
+            symbol="o",
+        )
+        self.graph_pos.addItem(self.ground_truth_start_markers)
+        self.ground_truth_labels = []
         self.plot_ukf_yaw = self.graph_d.plot(pen=pg.mkPen("b", width=1.5), name="ukf_yaw")
         self.plot_yaw = self.graph_d.plot(pen=pg.mkPen("g", width=1.5), name="yaw")
 
@@ -300,8 +327,11 @@ class FusionFrameWindow(QMainWindow):
         self.ukf_xs, self.ukf_ys = [], []
         self.tril_xs, self.tril_ys = [], []
         self.ukf_yaws, self.yaws = [], []
+        self.ground_truth_start = None
+        self.ground_truth_start_kind = GROUND_TRUTH_START_1
         self.latest_data = None
 
+        self._setup_ground_truth_controls()
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         if hasattr(self, "checkBox_createCsv"):
             self.checkBox_createCsv.setChecked(False)
@@ -317,6 +347,66 @@ class FusionFrameWindow(QMainWindow):
         self.thread.data_signal.connect(self.on_data)
         self.thread.start()
 
+    def _setup_ground_truth_controls(self):
+        self.groundTruthStartLabel = QLabel("Ground truth start")
+        self.comboBox_groundTruthStart = QComboBox()
+        self.comboBox_groundTruthStart.addItem("start 1", GROUND_TRUTH_START_1)
+        self.comboBox_groundTruthStart.addItem("start 2", GROUND_TRUTH_START_2)
+        self.comboBox_groundTruthStart.currentIndexChanged.connect(self.on_ground_truth_start_changed)
+
+        if hasattr(self, "gridLayout_4"):
+            row = self.gridLayout_4.rowCount()
+            self.gridLayout_4.addWidget(self.groundTruthStartLabel, row, 0)
+            self.gridLayout_4.addWidget(self.comboBox_groundTruthStart, row + 1, 0)
+
+    def _ground_truth_points(self):
+        if self.ground_truth_start is None:
+            return [], []
+
+        start_x, start_y = self.ground_truth_start
+        if self.ground_truth_start_kind == GROUND_TRUTH_START_2:
+            points = [
+                (start_x, start_y),
+                (start_x - GROUND_TRUTH_HORIZONTAL_M, start_y),
+                (start_x - GROUND_TRUTH_HORIZONTAL_M, start_y - GROUND_TRUTH_VERTICAL_M),
+                (start_x - 2.0 * GROUND_TRUTH_HORIZONTAL_M, start_y - GROUND_TRUTH_VERTICAL_M),
+            ]
+        else:
+            points = [
+                (start_x, start_y),
+                (start_x + GROUND_TRUTH_HORIZONTAL_M, start_y),
+                (start_x + GROUND_TRUTH_HORIZONTAL_M, start_y + GROUND_TRUTH_VERTICAL_M),
+                (start_x + 2.0 * GROUND_TRUTH_HORIZONTAL_M, start_y + GROUND_TRUTH_VERTICAL_M),
+            ]
+
+        return [point[0] for point in points], [point[1] for point in points]
+
+    def _clear_ground_truth_labels(self):
+        for label in self.ground_truth_labels:
+            self.graph_pos.removeItem(label)
+        self.ground_truth_labels.clear()
+
+    def _update_ground_truth_plot(self):
+        xs, ys = self._ground_truth_points()
+        self.plot_ground_truth.setData(xs, ys)
+        self.ground_truth_start_markers.setData([], [])
+        self._clear_ground_truth_labels()
+
+        if not xs:
+            return
+
+        self.ground_truth_start_markers.setData([xs[0], xs[-1]], [ys[0], ys[-1]])
+        start_labels = ("start 2", "start 1") if self.ground_truth_start_kind == GROUND_TRUTH_START_2 else ("start 1", "start 2")
+        for text, x, y in ((start_labels[0], xs[0], ys[0]), (start_labels[1], xs[-1], ys[-1])):
+            label = pg.TextItem(text, color=(120, 60, 20), anchor=(0.5, -0.2))
+            label.setPos(x, y)
+            self.graph_pos.addItem(label)
+            self.ground_truth_labels.append(label)
+
+    def on_ground_truth_start_changed(self, *_):
+        self.ground_truth_start_kind = self.comboBox_groundTruthStart.currentData()
+        self._update_ground_truth_plot()
+
     def clear_graph(self):
         self.ukf_xs.clear()
         self.ukf_ys.clear()
@@ -324,11 +414,13 @@ class FusionFrameWindow(QMainWindow):
         self.tril_ys.clear()
         self.ukf_yaws.clear()
         self.yaws.clear()
+        self.ground_truth_start = None
         self.latest_data = None
         self.plot_ukf.setData([], [])
         self.plot_tril.setData([], [])
         self.plot_ukf_yaw.setData([])
         self.plot_yaw.setData([])
+        self._update_ground_truth_plot()
 
     @pyqtSlot(str)
     def on_connected(self, port):
@@ -343,6 +435,10 @@ class FusionFrameWindow(QMainWindow):
     @pyqtSlot(dict)
     def on_data(self, data):
         self.latest_data = data
+        if self.ground_truth_start is None:
+            self.ground_truth_start = (data["tril_x"], data["tril_y"])
+            self._update_ground_truth_plot()
+
         self.ukf_xs.append(data["ukf_x"])
         self.ukf_ys.append(data["ukf_y"])
         self.tril_xs.append(data["tril_x"])

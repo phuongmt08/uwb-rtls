@@ -67,6 +67,10 @@ proto = VvProtocol()
 commands = CommandFactory()
 
 
+def _fixed2(value: float) -> int:
+    return int(round(value * 100.0))
+
+
 def send_to_host(pkt: pb.packet_t) -> None:
     """Gói gói tin protobuf vào khung HDLC và ghi xuống cổng Serial."""
     global ser
@@ -422,14 +426,14 @@ def ranging_stream_loop() -> None:
             
             # 2. Tạo gói tin sensor_fusion_result (để Dashboard vẽ thêm dòng dự đoán lọc Kalman/Fusion)
             pkt_sf = commands.sensor_fusion_result(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, seq)
-            pkt_sf.sensor_fusion_result.ukf_x_m = tag_x
-            pkt_sf.sensor_fusion_result.ukf_y_m = tag_y
-            pkt_sf.sensor_fusion_result.ukf_yaw_deg = math.degrees(angle)
+            pkt_sf.sensor_fusion_result.ukf_x_m = _fixed2(tag_x)
+            pkt_sf.sensor_fusion_result.ukf_y_m = _fixed2(tag_y)
+            pkt_sf.sensor_fusion_result.ukf_yaw_deg = _fixed2(math.degrees(angle))
             
             # Thêm chút nhiễu trắng cho tọa độ thô (Trilateration) để phân biệt với tọa độ mượt của UKF
-            pkt_sf.sensor_fusion_result.tril_x_m = tag_x + random.uniform(-0.05, 0.05)
-            pkt_sf.sensor_fusion_result.tril_y_m = tag_y + random.uniform(-0.05, 0.05)
-            pkt_sf.sensor_fusion_result.yaw_deg = math.degrees(angle)
+            pkt_sf.sensor_fusion_result.tril_x_m = _fixed2(tag_x + random.uniform(-0.05, 0.05))
+            pkt_sf.sensor_fusion_result.tril_y_m = _fixed2(tag_y + random.uniform(-0.05, 0.05))
+            pkt_sf.sensor_fusion_result.yaw_deg = _fixed2(math.degrees(angle))
             pkt_sf.sensor_fusion_result.ranging_error_count = 0
             pkt_sf.sensor_fusion_result.timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
             

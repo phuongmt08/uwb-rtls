@@ -29,6 +29,10 @@ TEST_MODE = is_test_mode()
 from common.transport import VvAddress, VvProtocol
 from common.commands import CommandFactory
 
+
+def _fixed2(value: float) -> int:
+    return int(round(value * 100.0))
+
 def make_anchor_layout_resp(src: int, dst: int, seq: int) -> any:
     """Helper to generate a mock anchor layout packet with 4 anchors"""
     factory = CommandFactory()
@@ -295,12 +299,12 @@ class MockTcpDeviceClient:
         fusion_pkt.hdr.seq = seq
 
         fs = fusion_pkt.sensor_fusion_result
-        fs.ukf_x_m = ukf_x
-        fs.ukf_y_m = ukf_y
-        fs.ukf_yaw_deg = ukf_yaw_deg
-        fs.tril_x_m = tril_x
-        fs.tril_y_m = tril_y
-        fs.yaw_deg = raw_yaw
+        fs.ukf_x_m = _fixed2(ukf_x)
+        fs.ukf_y_m = _fixed2(ukf_y)
+        fs.ukf_yaw_deg = _fixed2(ukf_yaw_deg)
+        fs.tril_x_m = _fixed2(tril_x)
+        fs.tril_y_m = _fixed2(tril_y)
+        fs.yaw_deg = _fixed2(raw_yaw)
         fs.ranging_error_count = 0
         fs.timestamp_ms = res.timestamp_ms
 
