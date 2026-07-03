@@ -593,6 +593,8 @@ class LiveTrackingTab(QWidget):
         self._layout_emit_timer.setInterval(50)
         self._layout_emit_timer.timeout.connect(self._flush_geofence_layout_emit)
         self._preview_overlay_btn = self.btn_preview_overlay
+        self._detail_overlay_btn = QPushButton("Detail", self)
+        self._helpers_overlay_btn = QPushButton("Helpers", self)
         self._setup_map_views()
 
         self._setup_geofencing_ui()
@@ -645,8 +647,59 @@ class LiveTrackingTab(QWidget):
         self._preview_overlay_btn.setText("2D")
         self._preview_overlay_btn.setToolTip("Switch between 2D top view and 3D view")
         self._preview_overlay_btn.toggled.connect(self._toggle_map_view)
+
+        self._detail_overlay_btn.setCheckable(True)
+        self._detail_overlay_btn.setChecked(True)
+        self._detail_overlay_btn.setText("Detail")
+        self._detail_overlay_btn.setToolTip("Toggle detailed labels and dimensions")
+        self._detail_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._detail_overlay_btn.setMinimumWidth(78)
+        self._detail_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+        self._detail_overlay_btn.toggled.connect(self._toggle_overlay_detail)
+
+        self._helpers_overlay_btn.setText("Helpers")
+        self._helpers_overlay_btn.setToolTip("Show mouse helpers and keyboard shortcuts (F1)")
+        self._helpers_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._helpers_overlay_btn.setMinimumWidth(88)
+        self._helpers_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+        self._helpers_overlay_btn.setShortcut(QKeySequence("F1"))
+        self._helpers_overlay_btn.clicked.connect(self._show_canvas_helpers)
+        if hasattr(self._canvas, "set_overlay_detail_mode"):
+            self._canvas.set_overlay_detail_mode(True)
+
         self._preview_overlay_btn.raise_()
+        self._detail_overlay_btn.raise_()
+        self._helpers_overlay_btn.raise_()
         self._position_canvas_preview_button()
+
+    def _toggle_overlay_detail(self, detailed):
+        self._detail_overlay_btn.setText("Detail" if detailed else "Clean")
+        if hasattr(self._canvas, "set_overlay_detail_mode"):
+            self._canvas.set_overlay_detail_mode(detailed)
+
+    def _show_canvas_helpers(self):
+        helper_text = (
+            "Mouse helpers\n"
+            "- Left drag on empty area: box select multiple objects\n"
+            "- Left drag on object body: move object\n"
+            "- Left drag on object name: move label only\n"
+            "- Middle drag: pan map\n"
+            "- Mouse wheel: zoom in/out\n"
+            "- Right drag: zoom to rectangle\n\n"
+            "Keyboard shortcuts\n"
+            "- Ctrl+Z: undo\n"
+            "- Delete: delete selected object(s)\n"
+            "- Ctrl+X: cut selected object(s)\n"
+            "- Ctrl+C: copy selected object(s)\n"
+            "- Ctrl+V: paste object(s)\n"
+            "- Alt+A: add anchor\n"
+            "- Alt+O: set local origin\n"
+            "- Alt+Delete: remove anchor\n"
+            "- Alt+L: open Anchor Layout menu\n"
+            "- Alt+R: read anchor layout\n"
+            "- Alt+W: write anchor layout"
+        )
+        QMessageBox.information(self, "Canvas Helpers & Shortcuts", helper_text)
 
     def _setup_map_views(self):
         self._map_view_stack = QStackedWidget(self)
@@ -688,6 +741,10 @@ class LiveTrackingTab(QWidget):
         self.right_widget.raise_()
         self.btn_toggle_sidebar.raise_()
         self._preview_overlay_btn.raise_()
+        if hasattr(self, "_detail_overlay_btn"):
+            self._detail_overlay_btn.raise_()
+        if hasattr(self, "_helpers_overlay_btn"):
+            self._helpers_overlay_btn.raise_()
 
     def _clear_tracking_trails(self):
         self._canvas.clear_trail()
@@ -698,10 +755,19 @@ class LiveTrackingTab(QWidget):
             return
         canvas = self._map_view_stack
         canvas_origin = canvas.mapTo(self, QPointF(0, 0).toPoint())
-        x = max(self.right_widget.x() - self._preview_overlay_btn.width() - 12, canvas_origin.x() + 12)
+        preview_x = max(self.right_widget.x() - self._preview_overlay_btn.width() - 12, canvas_origin.x() + 12)
         y = canvas_origin.y() + 10
-        self._preview_overlay_btn.move(x, y)
+        self._preview_overlay_btn.move(preview_x, y)
         self._preview_overlay_btn.raise_()
+        detail_x = preview_x
+        if hasattr(self, "_detail_overlay_btn"):
+            detail_x = max(preview_x - self._detail_overlay_btn.width() - 8, canvas_origin.x() + 12)
+            self._detail_overlay_btn.move(detail_x, y)
+            self._detail_overlay_btn.raise_()
+        if hasattr(self, "_helpers_overlay_btn"):
+            helper_x = max(detail_x - self._helpers_overlay_btn.width() - 8, canvas_origin.x() + 12)
+            self._helpers_overlay_btn.move(helper_x, y)
+            self._helpers_overlay_btn.raise_()
 
     def _make_metric_label(self, text: str, color: str = "#94A3B8", bold: bool = False) -> QLabel:
         label = QLabel(text, self)
@@ -3083,6 +3149,10 @@ class LiveTrackingTab(QWidget):
                     zone.wall_mode = str(val)
                 elif key == "host_room_id":
                     zone.host_room_id = str(val) if val else None
+                elif key == "label_offset_x":
+                    zone.label_offset_x = float(val)
+                elif key == "label_offset_y":
+                    zone.label_offset_y = float(val)
             
             # Update sidebar fields if it's currently selected zone
             if self._canvas.selected_zone_id == zone_id:

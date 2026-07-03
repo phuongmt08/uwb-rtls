@@ -170,20 +170,25 @@ class Geofence3DWidget(QWidget):
         self._position_orientation_gizmo()
 
     def eventFilter(self, watched, event):
-        if watched is self.gl_widget and event.type() == QEvent.Type.Wheel:
-            delta = event.angleDelta().y() or event.angleDelta().x()
-            if delta:
-                steps = float(delta) / 120.0
-                pan_pixels = 55.0 * steps
-                modifiers = event.modifiers()
-                if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                    self.gl_widget.pan(-pan_pixels, 0.0, 0.0, relative="view")
-                    event.accept()
-                    return True
-                if modifiers & Qt.KeyboardModifier.ControlModifier:
-                    self.gl_widget.pan(0.0, pan_pixels, 0.0, relative="view")
-                    event.accept()
-                    return True
+        if watched is self.gl_widget:
+            if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                self.reset_camera_orientation()
+                event.accept()
+                return True
+            if event.type() == QEvent.Type.Wheel:
+                delta = event.angleDelta().y() or event.angleDelta().x()
+                if delta:
+                    steps = float(delta) / 120.0
+                    pan_pixels = 55.0 * steps
+                    modifiers = event.modifiers()
+                    if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                        self.gl_widget.pan(-pan_pixels, 0.0, 0.0, relative="view")
+                        event.accept()
+                        return True
+                    if modifiers & Qt.KeyboardModifier.ControlModifier:
+                        self.gl_widget.pan(0.0, pan_pixels, 0.0, relative="view")
+                        event.accept()
+                        return True
         return super().eventFilter(watched, event)
 
     def _initialize_scene(self):
@@ -762,9 +767,15 @@ class Geofence3DWidget(QWidget):
     def reset_camera_orientation(self):
         if not self.gl_widget:
             return
+        curr_center = self.gl_widget.opts.get("center")
+        cx = float(curr_center.x()) if curr_center is not None else 0.0
+        cy = float(curr_center.y()) if curr_center is not None else 0.0
+        cz = float(curr_center.z()) if curr_center is not None else 0.0
         self._camera_reset_start = {
             "azimuth": float(self.gl_widget.opts.get("azimuth", self._RESET_AZIMUTH)),
             "elevation": float(self.gl_widget.opts.get("elevation", self._RESET_ELEVATION)),
+            "distance": float(self.gl_widget.opts.get("distance", 15.0)),
+            "center": (cx, cy, cz),
         }
         self._camera_reset_step = 0
         self._camera_reset_timer.start()
@@ -782,7 +793,19 @@ class Geofence3DWidget(QWidget):
         elevation = self._camera_reset_start["elevation"] + (
             self._RESET_ELEVATION - self._camera_reset_start["elevation"]
         ) * ease
-        self.gl_widget.setCameraPosition(azimuth=azimuth, elevation=elevation)
+        distance = self._camera_reset_start["distance"] + (
+            15.0 - self._camera_reset_start["distance"]
+        ) * ease
+        cx = self._camera_reset_start["center"][0] * (1.0 - ease)
+        cy = self._camera_reset_start["center"][1] * (1.0 - ease)
+        cz = self._camera_reset_start["center"][2] * (1.0 - ease)
+        from PyQt6.QtGui import QVector3D
+        self.gl_widget.setCameraPosition(
+            pos=QVector3D(cx, cy, cz),
+            azimuth=azimuth,
+            elevation=elevation,
+            distance=distance,
+        )
         if t >= 1.0:
             self._camera_reset_timer.stop()
             self._camera_reset_start = None

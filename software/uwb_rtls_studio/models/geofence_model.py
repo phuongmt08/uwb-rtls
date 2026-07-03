@@ -33,6 +33,8 @@ class GeofenceZone:
     local_frame_yaw_deg: float = 0.0
     wall_mode: str = "free_standing"  # "boundary_outside" | "internal_partition" | "free_standing"
     host_room_id: Optional[str] = None
+    label_offset_x: float = 0.0
+    label_offset_y: float = 0.0
 
     @property
     def thickness_m(self) -> float:
@@ -106,6 +108,8 @@ class GeofenceZone:
             "local_frame_yaw_deg": self.local_frame_yaw_deg if self.object_type == "room" else 0.0,
             "wall_mode": self.wall_mode if self.object_type == "wall" else "free_standing",
             "host_room_id": self.host_room_id if self.object_type == "wall" else None,
+            "label_offset_x": self.label_offset_x,
+            "label_offset_y": self.label_offset_y,
         }
 
     @classmethod
@@ -163,6 +167,8 @@ class GeofenceZone:
             local_frame_yaw_deg=float(data.get("local_frame_yaw_deg", 0.0)),
             wall_mode=wall_mode_val,
             host_room_id=host_room_id_val,
+            label_offset_x=float(data.get("label_offset_x", 0.0)),
+            label_offset_y=float(data.get("label_offset_y", 0.0)),
         )
 
     def contains(self, x: float, y: float, z: float) -> bool:

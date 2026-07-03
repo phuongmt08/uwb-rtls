@@ -110,6 +110,7 @@ class PositionCanvas(QWidget):
         self._show_scale_bar = True
         self._show_mouse_coords = True
         self._show_tracking_grid = True
+        self.overlay_detail_mode = True
         self._tracking_grid_spacing = 1.0
         self._tracking_grid_subdivisions = 5
         self.is_developer_mode = False
@@ -126,6 +127,10 @@ class PositionCanvas(QWidget):
         self._render_timer.setInterval(max(1, int(1000 / self._target_render_fps)))
         self._render_timer.timeout.connect(self._flush_render_update)
         self._dimension_hitboxes = []
+        self._label_hitboxes = []
+        self._label_drag_zone_id = None
+        self._label_drag_start_world = None
+        self._label_drag_original_offset = (0.0, 0.0)
         self._dimension_edit_target = None
         self._dimension_edit_committing = False
         self._dimension_editor = QLineEdit(self)
@@ -290,6 +295,9 @@ class PositionCanvas(QWidget):
         self._zone_drag_original_points = None
         self._zone_drag_active = False
         self._snap_preview_edges = None
+        self._label_drag_zone_id = None
+        self._label_drag_start_world = None
+        self._label_drag_original_offset = (0.0, 0.0)
         self._selection_box_active = False
         self._selection_box_start = None
         self._selection_box_end = None
@@ -413,6 +421,10 @@ class PositionCanvas(QWidget):
         self.preview_25d = bool(enabled)
         self.update()
 
+    def set_overlay_detail_mode(self, enabled: bool):
+        self.overlay_detail_mode = bool(enabled)
+        self.update()
+
     def clear_active_drawing(self):
         self.current_draw_points.clear()
         self.update()
@@ -475,6 +487,13 @@ class PositionCanvas(QWidget):
             key=lambda z: layer_order.get(getattr(z, "object_type", "zone"), 3),
             reverse=True,
         )
+
+    def _label_at_screen_pos(self, screen_x, screen_y):
+        point = QPoint(int(screen_x), int(screen_y))
+        for rect, zone_id in reversed(self._label_hitboxes):
+            if rect.contains(point):
+                return zone_id
+        return None
 
     def _zone_contains_screen_pos(self, zone, screen_x, screen_y, world_x=None, world_y=None):
         if zone is None:
@@ -1377,6 +1396,26 @@ class PositionCanvas(QWidget):
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
                 return
 
+            label_zone_id = self._label_at_screen_pos(pos.x(), pos.y())
+            if label_zone_id is not None:
+                zone = next((z for z in self.geofence_zones if z.id == label_zone_id), None)
+                if zone is not None:
+                    self.set_selected_zone(zone.id)
+                    self.zone_selected.emit(zone.id)
+                    self._push_undo_state()
+                    self._label_drag_zone_id = zone.id
+                    self._label_drag_start_world = (world_x, world_y)
+                    self._label_drag_original_offset = (
+                        float(getattr(zone, "label_offset_x", 0.0)),
+                        float(getattr(zone, "label_offset_y", 0.0)),
+                    )
+                    self._selection_box_active = False
+                    self._selection_box_start = None
+                    self._selection_box_end = None
+                    self.setCursor(Qt.CursorShape.SizeAllCursor)
+                    self.update()
+                    return
+
             # The selected object owns its body drag. This prevents overlapping wall
             # footprints from stealing a move that should apply only to the room/object.
             if self.selected_zone_id:
@@ -1507,6 +1546,16 @@ class PositionCanvas(QWidget):
         if self._selection_box_active:
             self._selection_box_end = event.position()
             self.update()
+            return
+
+        if self._label_drag_zone_id is not None and self._label_drag_start_world is not None:
+            zone = next((z for z in self.geofence_zones if z.id == self._label_drag_zone_id), None)
+            if zone is not None:
+                dx = world_x - self._label_drag_start_world[0]
+                dy = world_y - self._label_drag_start_world[1]
+                zone.label_offset_x = round(self._label_drag_original_offset[0] + dx, 6)
+                zone.label_offset_y = round(self._label_drag_original_offset[1] + dy, 6)
+                self.update()
             return
 
         if self.dragging_anchor_idx is not None and self.dragging_anchor_idx < len(self.anchors):
@@ -1647,6 +1696,25 @@ class PositionCanvas(QWidget):
         if self.dragging_anchor_idx is not None:
             self._emit_anchor_layout_edited()
             self.dragging_anchor_idx = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.update()
+            return
+
+        if self._label_drag_zone_id is not None:
+            zone = next((z for z in self.geofence_zones if z.id == self._label_drag_zone_id), None)
+            if zone is not None:
+                self.zone_properties_updated.emit(
+                    zone.id,
+                    {
+                        "label_offset_x": float(getattr(zone, "label_offset_x", 0.0)),
+                        "label_offset_y": float(getattr(zone, "label_offset_y", 0.0)),
+                    },
+                )
+                if not self.property_panel.isHidden():
+                    self.property_panel.load_zone(zone)
+            self._label_drag_zone_id = None
+            self._label_drag_start_world = None
+            self._label_drag_original_offset = (0.0, 0.0)
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()
             return
@@ -1840,6 +1908,7 @@ class PositionCanvas(QWidget):
         if width <= 0 or height <= 0:
             return
 
+        self._label_hitboxes = []
         to_screen = self._world_to_screen
         view_x1, view_y1 = self._screen_to_world(margin, self.height() - margin)
         view_x2, view_y2 = self._screen_to_world(margin + width, margin)
@@ -2188,20 +2257,24 @@ class PositionCanvas(QWidget):
                 painter.setPen(QColor("#FDE68A"))
                 painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter, label_text)
 
-            if len(zone.points) >= 3:
+            show_label = self.overlay_detail_mode or object_type in {"room", "zone", "object"}
+            if show_label and len(zone.points) >= 3:
                 cx = sum(p[0] for p in zone.points) / len(zone.points)
                 cy = sum(p[1] for p in zone.points) / len(zone.points)
-                scx, scy = to_screen(cx, cy)
+                label_x = cx + float(getattr(zone, "label_offset_x", 0.0))
+                label_y = cy + float(getattr(zone, "label_offset_y", 0.0))
+                scx, scy = to_screen(label_x, label_y)
                 
                 painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
                 if object_type == "zone":
-                    text = f"{zone.name} ({zone.speed_limit:.1f} m/s)"
+                    text = f"{zone.name} ({zone.speed_limit:.1f} m/s)" if self.overlay_detail_mode else zone.name
                 elif object_type == "wall":
                     text = f"{zone.name} ({object_height:.1f} m high)"
                 else:
                     text = zone.name
                 text_rect = painter.fontMetrics().boundingRect(text)
                 text_rect.translate(int(scx - text_rect.width() / 2), int(scy - text_rect.height() / 2))
+                self._label_hitboxes.append((QRect(text_rect.adjusted(-6, -4, 6, 4)), zone.id))
                 
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(15, 23, 42, 190))
@@ -2210,7 +2283,6 @@ class PositionCanvas(QWidget):
                 painter.setPen(QColor(248, 250, 252))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawText(text_rect.x(), text_rect.y() + text_rect.height() - 3, text)
-
             active_edge_idx = None
             if is_selected and self.selected_edge_idx is not None:
                 active_edge_idx = self.selected_edge_idx
@@ -2340,12 +2412,12 @@ class PositionCanvas(QWidget):
             or self.selected_edge_idx is not None
             or self.dragging_anchor_idx is not None
         )
-        if self.is_developer_mode and not is_interacting:
+        if self.overlay_detail_mode and self.is_developer_mode and not is_interacting:
             for zone in self.geofence_zones:
                 draw_dimensions(zone.points, is_closed=True, zone=zone)
             if self.edit_mode == "draw" and self.current_draw_points:
                 draw_dimensions(self.current_draw_points, is_closed=False)
-        elif self.selected_zone_id:
+        elif self.overlay_detail_mode and self.selected_zone_id:
             sel_zone = next((z for z in self.geofence_zones if z.id == self.selected_zone_id), None)
             if sel_zone:
                 draw_dimensions(sel_zone.points, is_closed=True, zone=sel_zone)
