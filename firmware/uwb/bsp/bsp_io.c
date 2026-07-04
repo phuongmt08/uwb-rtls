@@ -39,36 +39,37 @@ typedef struct
 #if !ENABLE_SYS_FUSION
 typedef struct
 {
-  uint8_t sof;                   /* Start of frame: 0xAA */
-  uint8_t length;                /* Payload length bytes */
-  uint8_t anchor_mask;           /* Bitmask of which anchors are selected */
-  uint32_t tx_frame_cnt;         /* Tx frame count */
-  float   ax;                    /* ax m/s^2 */
-  float   ay;                    /* ay m/s^2 */
-  float   gz;                    /* gz rad/s */
-  float   px;                    /* X position in meters */
-  float   py;                    /* Y position in meters */
-  float   distance[NUM_ANCHORS]; /* Distance each anchor in meters */
-  double fp_amp_norm[NUM_ANCHORS];
-  double fp_snr[NUM_ANCHORS];
-  uint32_t   error_frame_cnt;    /* Error frame count */
-  float   dt;                    /* Time delta in seconds */
+  uint8_t   sof;                    /* Start of frame: 0xAA */
+  uint8_t   length;                 /* Payload length bytes */
+  uint8_t   anchor_mask;            /* Bitmask of which anchors are selected */
+  uint32_t  tx_frame_cnt;           /* Tx frame count */
+  float     ax;                     /* ax m/s^2 */
+  float     ay;                     /* ay m/s^2 */
+  float     gz;                     /* gz rad/s */
+  float     px;                     /* X position in meters */
+  float     py;                     /* Y position in meters */
+  float     distance[NUM_ANCHORS];  /* Distance each anchor in meters */
+  double    fp_amp_norm[NUM_ANCHORS];
+  double    fp_snr[NUM_ANCHORS];
+  uint32_t  error_frame_cnt;        /* Error frame count */
+  float     dt;                     /* Time delta in seconds */
 } __attribute__((packed)) uart_fusion_log_frame_t;
 #endif
 
 #if ENABLE_SYS_FUSION
 typedef struct
 {
-  uint8_t sof;                   /* Start of frame: 0xAA */
-  uint8_t length;                /* Payload length bytes */
-  uint32_t tx_frame_cnt;         /* Tx frame count */
-  int16_t   ukf_x;                 /* X position in meters */
-  int16_t   ukf_y;                 /* Y position in meters */
-  int16_t   ukf_yaw;               /* Yaw angle in degrees */
-  int16_t   tril_x;                /* X position in meters */
-  int16_t   tril_y;                /* Y position in meters */
-  int16_t   yaw;                   /* Yaw angle in degrees */
-  uint32_t   error_frame_cnt;    /* Error frame count */
+  uint8_t   sof;                    /* Start of frame: 0xAA */
+  uint8_t   length;                 /* Payload length bytes */
+  uint8_t   anchor_mask;            /* Bitmask of which anchors are selected */
+  uint32_t  tx_frame_cnt;           /* Tx frame count */
+  int16_t   ukf_x;                  /* X position in meters */
+  int16_t   ukf_y;                  /* Y position in meters */
+  int16_t   ukf_yaw;                /* Yaw angle in degrees */
+  int16_t   tril_x;                 /* X position in meters */
+  int16_t   tril_y;                 /* Y position in meters */
+  int16_t   yaw;                    /* Yaw angle in degrees */
+  uint32_t  error_frame_cnt;        /* Error frame count */
 } __attribute__((packed)) uart_fusion_frame_t;
 #endif
 
@@ -366,8 +367,6 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
   const double *fp_amp_norm, const double *fp_snr, 
   float dt)
 {
-  if (s_usb_tx_busy)
-    return BSP_ERR;  // hoặc queue lại
 
   s_fusion_log_frame.sof             = UART_SOF;
   s_fusion_log_frame.length          = UART_FUSION_LOG_PAYLOAD_LEN_BYTES;
@@ -405,10 +404,8 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
     }
   }
 
-  s_usb_tx_busy = 1;
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_log_frame, sizeof(s_fusion_log_frame)) != HAL_OK)
   {
-    s_usb_tx_busy = 0;
     return BSP_ERR;
   }
   return BSP_OK;
@@ -416,13 +413,12 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 #endif
 
 #if ENABLE_SYS_FUSION
-bsp_err_t bsp_io_uart_send_fusion_data(int16_t ukf_x, int16_t ukf_y, int16_t ukf_yaw, int16_t tril_x, int16_t tril_y, int16_t yaw, uint32_t err_frame_count)
+bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, int16_t ukf_x, int16_t ukf_y, int16_t ukf_yaw, int16_t tril_x, int16_t tril_y, int16_t yaw, uint32_t err_frame_count)
 {
-  if (s_usb_tx_busy)
-    return BSP_ERR;  // UART transmission already in progress
 
   s_fusion_frame.sof             = UART_SOF;
   s_fusion_frame.length          = UART_FUSION_PAYLOAD_LEN_BYTES;
+  s_fusion_frame.anchor_mask      = anchor_mask;
   s_fusion_frame.tx_frame_cnt++;
   s_fusion_frame.ukf_x              = ukf_x;
   s_fusion_frame.ukf_y              = ukf_y;
@@ -439,7 +435,6 @@ bsp_err_t bsp_io_uart_send_fusion_data(int16_t ukf_x, int16_t ukf_y, int16_t ukf
   if (CDC_Transmit_FS((uint8_t *) &s_fusion_frame, sizeof(s_fusion_frame)) != HAL_OK)
   
   {
-    s_usb_tx_busy = 0;  /* Clear busy flag on transmission failure */
     return BSP_ERR;
   }
   return BSP_OK;

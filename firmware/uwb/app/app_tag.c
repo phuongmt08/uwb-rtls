@@ -736,7 +736,11 @@ static void send_fusion_log_snapshot(void)
     }
 
     bsp_imu_data_t imu_data = {0};
-    // (void)bsp_imu_get_raw_data(&imu_data);
+    if (bsp_imu_get_raw_data(&imu_data) != BSP_IMU_OK) {
+        imu_data.ax = 0.0f;
+        imu_data.ay = 0.0f;
+        imu_data.gz = 0.0f;
+    }
     bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,
                                      s_error_count,
                                      imu_data.ax,
@@ -794,7 +798,6 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         return false;
     }
     s_success_count++;
-    s_error_count = 0;
     return true;
 #else
     mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
@@ -1118,7 +1121,6 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     }
 
     s_success_count++;
-    s_error_count = 0;
 #else
     /* ==== STEP 3: Trilateration (Default/Calibration mode) ==== */
     vec2d_t tril_position;
@@ -1152,7 +1154,6 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     s_position_valid = true;
     
     s_success_count++;
-    s_error_count = 0;
 
     RLOG_I(LOG_OBJECT_CODE_TAG,
            "Dist A1=%.3fm A2=%.3fm A3=%.3fm A4=%.3fm",
@@ -1431,6 +1432,15 @@ void app_tag_reset_fusion(void)
     }
 #else
     app_rtos_request_sensor_fusion_reset();
+#endif
+}
+
+bool app_tag_get_ukf_init_state(void)
+{
+#if !ENABLE_SYS_FUSION
+	return s_ukf_initialized;
+#else
+	return false;
 #endif
 }
 

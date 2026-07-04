@@ -157,10 +157,10 @@ TARGET_PORT = "COM15"
 UART_SOF = 0xAA
 
 # ==================== LIVE PLOT CONFIGURATION ====================
-GROUND_TRUTH_D1 = 6.07
-GROUND_TRUTH_D2 = 6.07
-GROUND_TRUTH_D3 = 6.07
-GROUND_TRUTH_D4 = 6.07
+GROUND_TRUTH_D1 = 5.63
+GROUND_TRUTH_D2 = 5.63
+GROUND_TRUTH_D3 = 5.63
+GROUND_TRUTH_D4 = 5.63
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof

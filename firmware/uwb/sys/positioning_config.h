@@ -36,12 +36,12 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.46f)
+#define TAG_HEIGHT_M            (0.485f)
 
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (2.565f)
+#define ANCHOR_HEIGHT_M         (2.495f)
 
 /**
  * @brief Height offset between Anchor and Tag (meters)
@@ -146,22 +146,22 @@
 /* Zone 1 Defaults */
 #define ZONE_1_ANCHOR_1_ID   1
 #define ZONE_1_ANCHOR_1_X    0.7f
-#define ZONE_1_ANCHOR_1_Y    0.025f
+#define ZONE_1_ANCHOR_1_Y    0.03f
 #define ZONE_1_ANCHOR_1_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_2_ID   2
 #define ZONE_1_ANCHOR_2_X    0.7f
-#define ZONE_1_ANCHOR_2_Y    8.375f
+#define ZONE_1_ANCHOR_2_Y    8.37f
 #define ZONE_1_ANCHOR_2_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_3_ID   3
-#define ZONE_1_ANCHOR_3_X    0.0f
-#define ZONE_1_ANCHOR_3_Y    14.2f
+#define ZONE_1_ANCHOR_3_X    7.5f
+#define ZONE_1_ANCHOR_3_Y    8.37f
 #define ZONE_1_ANCHOR_3_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_4_ID   4
 #define ZONE_1_ANCHOR_4_X    7.5f
-#define ZONE_1_ANCHOR_4_Y    0.025f
+#define ZONE_1_ANCHOR_4_Y    0.03f
 #define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
 /* Zone 2 Defaults */
@@ -310,7 +310,7 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  1
+#define ENABLE_SYS_FUSION  0
 #endif
 
 #ifndef SYS_FUSION_RAW_DEBUG_STREAM_ENABLE

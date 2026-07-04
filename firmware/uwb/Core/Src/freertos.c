@@ -51,11 +51,9 @@
 #include "positioning_config.h"
 #include "bsp_io.h"
 #include <math.h>
-#if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
 #include "mw_filter.h"
 #include "mw_trilateration.h"
-#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -90,14 +88,12 @@ uint8_t        fusion_entry_cnt = 0;
 bsp_imu_data_t imu_test_mutex_lock = {0};
 bool imu_test_mutex_flag = false;
 
-#if ENABLE_SYS_FUSION
 /* Owner variables for decoupled active Sensor Fusion */
 sys_sensor_fusion_data_t ukf_data;
 static mahalanobis_prefilter_t s_prefilter;
 
 static uint8_t s_last_selected_anchors_mask = 0U;
 static volatile bool s_fusion_reset_requested = false;
-#endif
 
 /* USER CODE END Variables */
 /* Definitions for UwbRanging */
@@ -398,15 +394,38 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-#if !ENABLE_SYS_FUSION
-	osThreadExit();
-#endif
-#if ENABLE_SYS_FUSION
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
   }
+  /* Khá»Ÿi táº¡o bá»™ lá»c Ä‘á»‹nh vá»‹ vÃ  prefilter */
+	const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
+	mw_filter_mahalanobis_init(&s_prefilter,
+							   prefilter_cfg->recover_d2,
+							   prefilter_cfg->reject_d2,
+							   prefilter_cfg->r_base,
+							   prefilter_cfg->r_gate,
+							   prefilter_cfg->velocity_weight,
+							   prefilter_cfg->min_covariance);
+	if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
+	{
+		RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
+	}
+	else
+	{
+		RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
+	}
+#if !ENABLE_SYS_FUSION
+  for (;;)
+  {
+	if(app_tag_get_ukf_init_state())
+	{
+		sys_sensor_fusion_task();
+	}
 
+    osDelay(20);
+  }
+#else
 #if TEST_UKF_STREAM_UART
   for (;;)
   {
@@ -422,26 +441,10 @@ void sensor_fusion_entry(void *argument)
     osDelay(20);
   }
 #else
-  /* Khá»Ÿi táº¡o bá»™ lá»c Ä‘á»‹nh vá»‹ vÃ  prefilter */
-  const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
-  mw_filter_mahalanobis_init(&s_prefilter,
-                             prefilter_cfg->recover_d2,
-                             prefilter_cfg->reject_d2,
-                             prefilter_cfg->r_base,
-                             prefilter_cfg->r_gate,
-                             prefilter_cfg->velocity_weight,
-                             prefilter_cfg->min_covariance);
-  if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
-  {
-      RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
-  }
-  else
-  {
-      RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
-  }
   for (;;)
   {
     osDelay(20);
+    (void)bsp_imu_task();
 
     if (s_fusion_reset_requested)
     {

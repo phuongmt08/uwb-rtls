@@ -7,7 +7,7 @@ import numpy as np
 import threading
 import queue
 
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication, QComboBox, QLabel, QMainWindow
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QTimer
 from PyQt5.QtWidgets import QGraphicsRectItem
 from PyQt5 import uic
@@ -25,6 +25,10 @@ from ..module_kinematic import trilateration_2d
 from ..config import DRAW_RECTANGLE, RECT_WIDTH, RECT_HEIGHT
 
 DISTANCE_GRAPH_SLIDING_WINDOW = 100
+GROUND_TRUTH_HORIZONTAL_M = 2.8
+GROUND_TRUTH_VERTICAL_M = 5.6
+GROUND_TRUTH_START_1 = "start_1"
+GROUND_TRUTH_START_2 = "start_2"
 
 
 class DataThread(QThread):
@@ -562,6 +566,18 @@ class MainWindow(QMainWindow):
         self.plot_imu = self.graph_pos.plot(pen=pg.mkPen('r', width=1.5, style=pg.QtCore.Qt.DashLine), name="IMU Dead Reckoning")
         self.plot_uwb = self.graph_pos.plot(pen=pg.mkPen('g', width=1.5), name="UWB Trilateration")
         self.plot_ukf = self.graph_pos.plot(pen=pg.mkPen('b', width=2.5), name="UKF Filtered")
+        self.plot_ground_truth = self.graph_pos.plot(
+            pen=pg.mkPen((230, 116, 37), width=2.0, style=pg.QtCore.Qt.DashLine),
+            name="Ground truth",
+        )
+        self.ground_truth_start_markers = pg.ScatterPlotItem(
+            size=16,
+            pen=pg.mkPen((160, 70, 20), width=1.5),
+            brush=pg.mkBrush((240, 112, 48)),
+            symbol='o',
+        )
+        self.graph_pos.addItem(self.ground_truth_start_markers)
+        self.ground_truth_labels = []
         
         self.plot_d1 = self.graph_d.plot(
             pen=None, symbol='o', symbolSize=6,
@@ -606,10 +622,13 @@ class MainWindow(QMainWindow):
         self.distance_xs = []
         self.distance_time_origin = time.monotonic()
         self.zero_distance_counts = [0, 0, 0, 0]
+        self.ground_truth_start = None
+        self.ground_truth_start_kind = GROUND_TRUTH_START_1
         self.latest_data = None
         self._update_zero_distance_title()
         
         # Setup UI connections
+        self._setup_ground_truth_controls()
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
         self.checkBox_graphDSliding.stateChanged.connect(self.on_graph_d_mode_changed)
@@ -627,6 +646,89 @@ class MainWindow(QMainWindow):
         self.thread.data_signal.connect(self.on_data)
         self.thread.csv_created_signal.connect(self.on_csv_created)
         self.thread.start()
+
+    def _setup_ground_truth_controls(self):
+        self.groundTruthStartLabel = QLabel("Ground truth start")
+        self.comboBox_groundTruthStart = QComboBox()
+        self.comboBox_groundTruthStart.addItem("start 1", GROUND_TRUTH_START_1)
+        self.comboBox_groundTruthStart.addItem("start 2", GROUND_TRUTH_START_2)
+        self.comboBox_groundTruthStart.currentIndexChanged.connect(self.on_ground_truth_start_changed)
+
+        if hasattr(self, 'gridLayout_4'):
+            row = self.gridLayout_4.rowCount()
+            self.gridLayout_4.addWidget(self.groundTruthStartLabel, row, 0)
+            self.gridLayout_4.addWidget(self.comboBox_groundTruthStart, row + 1, 0)
+
+    def _ground_truth_points(self):
+        if self.ground_truth_start is None:
+            return [], []
+
+        start_x, start_y = self.ground_truth_start
+        if self.ground_truth_start_kind == GROUND_TRUTH_START_2:
+            points = [
+                (start_x, start_y),
+                (start_x - GROUND_TRUTH_HORIZONTAL_M, start_y),
+                (start_x - GROUND_TRUTH_HORIZONTAL_M, start_y - GROUND_TRUTH_VERTICAL_M),
+                (start_x - 2.0 * GROUND_TRUTH_HORIZONTAL_M, start_y - GROUND_TRUTH_VERTICAL_M),
+            ]
+        else:
+            points = [
+                (start_x, start_y),
+                (start_x + GROUND_TRUTH_HORIZONTAL_M, start_y),
+                (start_x + GROUND_TRUTH_HORIZONTAL_M, start_y + GROUND_TRUTH_VERTICAL_M),
+                (start_x + 2.0 * GROUND_TRUTH_HORIZONTAL_M, start_y + GROUND_TRUTH_VERTICAL_M),
+            ]
+
+        return [point[0] for point in points], [point[1] for point in points]
+
+    def _clear_ground_truth_labels(self):
+        for label in self.ground_truth_labels:
+            self.graph_pos.removeItem(label)
+        self.ground_truth_labels.clear()
+
+    def _update_ground_truth_plot(self):
+        xs, ys = self._ground_truth_points()
+        self.plot_ground_truth.setData(xs, ys)
+        self.ground_truth_start_markers.setData([], [])
+        self._clear_ground_truth_labels()
+
+        if not xs:
+            return
+
+        self.ground_truth_start_markers.setData([xs[0], xs[-1]], [ys[0], ys[-1]])
+        if self.ground_truth_start_kind == GROUND_TRUTH_START_2:
+            start_labels = ("start 2", "start 1")
+        else:
+            start_labels = ("start 1", "start 2")
+
+        for text, x, y in ((start_labels[0], xs[0], ys[0]), (start_labels[1], xs[-1], ys[-1])):
+            label = pg.TextItem(text, color=(120, 60, 20), anchor=(0.5, -0.2))
+            label.setPos(x, y)
+            self.graph_pos.addItem(label)
+            self.ground_truth_labels.append(label)
+
+    def _maybe_set_ground_truth_start(self, data):
+        if self.ground_truth_start is not None:
+            return
+
+        if data.get('type') == 'Init':
+            start_x = data.get('x')
+            start_y = data.get('y')
+        else:
+            start_x = data.get('stm_px')
+            start_y = data.get('stm_py')
+
+        if start_x is None or start_y is None:
+            return
+        if not (np.isfinite(start_x) and np.isfinite(start_y)):
+            return
+
+        self.ground_truth_start = (float(start_x), float(start_y))
+        self._update_ground_truth_plot()
+
+    def on_ground_truth_start_changed(self, *_):
+        self.ground_truth_start_kind = self.comboBox_groundTruthStart.currentData()
+        self._update_ground_truth_plot()
 
     def on_checkbox_csv_changed(self, state):
         if hasattr(self, 'thread') and self.thread is not None:
@@ -651,6 +753,7 @@ class MainWindow(QMainWindow):
         self.d4_data.clear()
         self.distance_xs.clear()
         self.distance_time_origin = time.monotonic()
+        self.ground_truth_start = None
         self.latest_data = None
         
         if getattr(self, 'ref_rect_item', None) is not None:
@@ -664,6 +767,7 @@ class MainWindow(QMainWindow):
         self.plot_d2.setData([])
         self.plot_d3.setData([])
         self.plot_d4.setData([])
+        self._update_ground_truth_plot()
         self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)
         
         if hasattr(self, 'thread') and self.thread is not None:
@@ -682,6 +786,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def on_data(self, data):
+        self._maybe_set_ground_truth_start(data)
+
         self.zero_distance_counts = data.get(
             'zero_distance_counts', self.zero_distance_counts
         )

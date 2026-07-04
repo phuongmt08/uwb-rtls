@@ -695,8 +695,8 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
 void sys_sensor_fusion_report_error(void)
 {
     s_error_count++;
-    s_latest_tril_x = 0.0f;
-    s_latest_tril_y = 0.0f;
+//    s_latest_tril_x = 0.0f;
+//    s_latest_tril_y = 0.0f;
 }
 
 uint32_t sys_sensor_fusion_get_error_count(void)
@@ -871,7 +871,8 @@ void sys_sensor_fusion_stream_uart()
         ukf_yaw_deg = 180.0f;
     }
 
-    if (bsp_io_uart_send_fusion_data(to_uart_fixed2(x),
+    if (bsp_io_uart_send_fusion_data(0U,
+                                     to_uart_fixed2(x),
                                      to_uart_fixed2(y),
                                      to_uart_fixed2(ukf_yaw_deg),
                                      to_uart_fixed2((x + 0.05f)),
@@ -891,7 +892,8 @@ void sys_sensor_fusion_stream_uart()
     float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
     float raw_yaw = sys_sensor_fusion_get_yaw_deg();
 
-    (void)bsp_io_uart_send_fusion_data(to_uart_fixed2(ukf.state.px),
+    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+                                    to_uart_fixed2(ukf.state.px),
                                     to_uart_fixed2(ukf.state.py),
                                     to_uart_fixed2(ukf_yaw),
                                     to_uart_fixed2(s_latest_tril_x),
@@ -943,6 +945,16 @@ float sys_sensor_fusion_get_ukf_yaw_deg()
 float sys_sensor_fusion_get_yaw_deg()
 {
 	return yaw * RAD2DEG;
+}
+
+void sys_sensor_fusion_task()
+{
+//    if (!ukf.initialized)
+//    {
+//        return;
+//    }
+
+    bsp_imu_task();
 }
 
 /* Private definitions ------------------------------------------------ */

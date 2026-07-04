@@ -85,6 +85,8 @@ void sys_sensor_fusion_stream_ble();
 
 void sys_sensor_fusion_stream_uart();
 
+void sys_sensor_fusion_task();
+
 float sys_sensor_fusion_get_ukf_yaw_deg();
 
 float sys_sensor_fusion_get_yaw_deg();
