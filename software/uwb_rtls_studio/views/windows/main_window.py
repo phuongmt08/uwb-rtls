@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, QSize, Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QAction
 from PyQt6 import uic
+from common import protocol_pb2 as pb
 
 # Tab imports are handled dynamically by uic.loadUi based on <customwidgets> in the .ui file
 
@@ -30,39 +31,27 @@ UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'main_window.ui')
 
 
 class ToastNotification(QFrame):
-    def __init__(self, title: str, message: str, kind: str = "info", parent=None):
+    def __init__(self, title: str, message: str, kind: str = "info", parent=None, icon_text: str = ""):
         super().__init__(parent)
         self.setObjectName("ble_toast")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(430)
         self._close_started = False
-        accent = {
-            "disconnect": "#EF4444",
-            "error": "#EF4444",
-            "connect_retry": "#F59E0B",
-            "success": "#10B981",
-        }.get(kind, "#22D3EE")
-        self.setStyleSheet(f"""
-            QFrame#ble_toast {{
-                background: #111827;
-                border: 1px solid {accent};
-                border-left: 4px solid {accent};
-                border-radius: 8px;
-            }}
-            QLabel {{ background: transparent; color: #E5E7EB; }}
-            QPushButton {{
-                background: transparent;
-                color: #94A3B8;
-                border: none;
-                font-weight: bold;
-                padding: 2px 6px;
-            }}
-            QPushButton:hover {{ color: #FFFFFF; }}
-        """)
+        self._kind = kind
+        self._icon_text = icon_text
+        self._base_message = message
+        self._loading_step = 0
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 8, 10)
         layout.setSpacing(8)
+
+        self._icon = QLabel(icon_text)
+        self._icon.setObjectName("toast_icon")
+        self._icon.setFixedSize(28, 28)
+        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon.setVisible(bool(icon_text))
+        layout.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignTop)
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
@@ -92,6 +81,10 @@ class ToastNotification(QFrame):
         self._auto_close = QTimer(self)
         self._auto_close.setSingleShot(True)
         self._auto_close.timeout.connect(self.close_animated)
+        self._loading_timer = QTimer(self)
+        self._loading_timer.setInterval(350)
+        self._loading_timer.timeout.connect(self._tick_loading_text)
+        self._apply_kind_style(kind)
 
     def show_animated(self, auto_close_ms: int) -> None:
         self._opacity.setOpacity(0.0)
@@ -104,17 +97,81 @@ class ToastNotification(QFrame):
         if auto_close_ms > 0:
             self._auto_close.start(auto_close_ms)
 
+    def update_content(self, title: str, message: str, kind: str | None = None, icon_text: str | None = None) -> None:
+        if kind is not None:
+            self._kind = kind
+            self._apply_kind_style(kind)
+        if icon_text is not None:
+            self._icon_text = icon_text
+            self._icon.setText(icon_text)
+            self._icon.setVisible(bool(icon_text))
+        self._title.setText(title)
+        self._message.setText(message)
+        self._base_message = message
+        self.adjustSize()
+
+    def start_loading(self, base_message: str) -> None:
+        self._base_message = base_message.rstrip(".")
+        self._loading_step = 0
+        self._tick_loading_text()
+        self._loading_timer.start()
+
+    def stop_loading(self) -> None:
+        self._loading_timer.stop()
+
+    def _tick_loading_text(self) -> None:
+        patterns = ("...", ".....", "......")
+        suffix = patterns[self._loading_step % len(patterns)]
+        self._loading_step += 1
+        self._message.setText(f"{self._base_message}{suffix}")
+        self.adjustSize()
+
+    def _apply_kind_style(self, kind: str) -> None:
+        accent = {
+            "disconnect": "#EF4444",
+            "error": "#EF4444",
+            "connect_retry": "#F59E0B",
+            "success": "#10B981",
+            "pending": "#22D3EE",
+        }.get(kind, "#22D3EE")
+        self.setStyleSheet(f"""
+            QFrame#ble_toast {{
+                background: #111827;
+                border: 1px solid {accent};
+                border-left: 4px solid {accent};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #E5E7EB; }}
+            QLabel#toast_icon {{
+                color: {accent};
+                border: 2px solid {accent};
+                border-radius: 14px;
+                font-size: 18px;
+                font-weight: bold;
+            }}
+            QPushButton {{
+                background: transparent;
+                color: #94A3B8;
+                border: none;
+                font-weight: bold;
+                padding: 2px 6px;
+            }}
+            QPushButton:hover {{ color: #FFFFFF; }}
+        """)
+        self._icon.style().unpolish(self._icon)
+        self._icon.style().polish(self._icon)
+
     def close_animated(self) -> None:
         if self._close_started:
             return
         self._close_started = True
         self._auto_close.stop()
+        self._loading_timer.stop()
         self._fade.stop()
         self._fade.setStartValue(float(self._opacity.opacity()))
         self._fade.setEndValue(0.0)
         self._fade.finished.connect(self.deleteLater)
         self._fade.start()
-
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -150,6 +207,7 @@ class MainWindow(QMainWindow):
         self._conn_progress_timer = QTimer(self)
         self._conn_progress_timer.setInterval(8)
         self._conn_progress_timer.timeout.connect(self._tick_connection_progress)
+        self._pending_command_toasts = {}
 
         # -- Load UI from .ui file --
         uic.loadUi(UI_FILE, self)
@@ -359,11 +417,116 @@ class MainWindow(QMainWindow):
         if current is not None:
             current.close_animated()
 
-        toast = ToastNotification(title, message, kind, parent=self.centralwidget)
+        icon_text = "✓" if kind == "success" else ""
+        toast = ToastNotification(title, message, kind, parent=self.centralwidget, icon_text=icon_text)
         self._ble_toast = toast
         toast.destroyed.connect(lambda _=None, t=toast: self._on_toast_destroyed(t))
         self._position_ble_toast(toast)
         toast.show_animated(auto_close_ms)
+
+
+    def _show_command_pending_notification(self, seq: int, command_name: str) -> None:
+        current = self._ble_toast
+        if current is not None:
+            current.close_animated()
+
+        display_name = self._command_display_name(command_name)
+        toast = ToastNotification("Sending command", display_name, "pending", parent=self.centralwidget)
+        self._ble_toast = toast
+        self._pending_command_toasts[int(seq)] = {
+            "command": command_name,
+            "toast": toast,
+        }
+        toast.destroyed.connect(lambda _=None, t=toast: self._on_toast_destroyed(t))
+        self._position_ble_toast(toast)
+        toast.show_animated(0)
+        toast.start_loading(f"Sending {display_name}")
+
+    def _finish_command_notification(self, seq: int, response: int) -> None:
+        pending = self._pending_command_toasts.pop(int(seq), None)
+        if not pending:
+            return
+
+        toast = pending.get("toast")
+        if toast is None:
+            return
+
+        command_name = str(pending.get("command") or "command")
+        display_name = self._command_display_name(command_name)
+        toast.stop_loading()
+        if int(response) == int(pb.PACKET_ACK_RESPONSE_ACK):
+            toast.update_content(
+                "Successful",
+                f"{display_name} acknowledged by device.",
+                kind="success",
+                icon_text="✓",
+            )
+            toast._auto_close.start(2500)
+        else:
+            toast.update_content(
+                "Command failed",
+                f"{display_name} returned ACK response {int(response)}.",
+                kind="error",
+                icon_text="!",
+            )
+            toast._auto_close.start(4000)
+
+    def _on_protocol_packet_sent(self, param_name: str, pkt) -> None:
+        if not self._should_notify_command(param_name):
+            return
+        seq = int(getattr(getattr(pkt, "hdr", None), "seq", 0) or 0)
+        if seq <= 0:
+            return
+        self._show_command_pending_notification(seq, param_name)
+
+    def _on_protocol_ack_received(self, ack_seq: int, response: int) -> None:
+        self._finish_command_notification(int(ack_seq), int(response))
+
+    @staticmethod
+    def _should_notify_command(command_name: str) -> bool:
+        notify_commands = {
+            "anchor_layout_set",
+            "sys_ranging_cfg_set",
+            "sys_config_set",
+            "sensor_fusion_cfg_set",
+            "pos_calib_cfg_set",
+            "ble_conn_params_set",
+            "ble_adv_config_set",
+            "device_type_set",
+            "host_transport_set",
+            "factory_otp_write",
+            "device_reset",
+            "uwb_reset",
+            "factory_config_reset",
+            "enter_to_bootloader",
+            "imu_reset",
+            "imu_calib_start",
+            "time_sync_adv_set",
+        }
+        return command_name in notify_commands
+
+    @staticmethod
+    def _command_display_name(command_name: str) -> str:
+        labels = {
+            "anchor_layout_set": "anchor layout set",
+            "sys_ranging_cfg_set": "ranging config set",
+            "sys_config_set": "system config set",
+            "sensor_fusion_cfg_set": "sensor fusion config set",
+            "pos_calib_cfg_set": "position calibration config set",
+            "ble_conn_params_set": "BLE connection params set",
+            "ble_adv_config_set": "BLE advertising config set",
+            "device_type_set": "device type set",
+            "host_transport_set": "host transport set",
+            "factory_otp_write": "factory OTP write",
+            "device_reset": "device reset",
+            "uwb_reset": "UWB reset",
+            "factory_config_reset": "factory config reset",
+            "enter_to_bootloader": "enter bootloader",
+            "imu_reset": "IMU reset",
+            "imu_calib_start": "IMU calibration start",
+            "time_sync_adv_set": "advertising device time sync",
+        }
+        return labels.get(command_name, command_name.replace("_", " "))
 
     def _position_ble_toast(self, toast=None):
         toast = toast or self._ble_toast
@@ -382,6 +545,9 @@ class MainWindow(QMainWindow):
     def _on_toast_destroyed(self, toast):
         if self._ble_toast is toast:
             self._ble_toast = None
+        stale = [seq for seq, pending in self._pending_command_toasts.items() if pending.get("toast") is toast]
+        for seq in stale:
+            self._pending_command_toasts.pop(seq, None)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -515,6 +681,10 @@ class MainWindow(QMainWindow):
 
         # Connect tab change to update header title
         self.tabs.currentChanged.connect(self._on_tab_changed)
+
+        if self._protocol_service:
+            self._protocol_service.packet_sent.connect(self._on_protocol_packet_sent)
+            self._protocol_service.ack_received.connect(self._on_protocol_ack_received)
 
         # Connect serial connection lost signal
         if self._serial_service:
