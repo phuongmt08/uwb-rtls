@@ -310,7 +310,7 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  0
+#define ENABLE_SYS_FUSION  1
 #endif
 
 #ifndef SYS_FUSION_RAW_DEBUG_STREAM_ENABLE

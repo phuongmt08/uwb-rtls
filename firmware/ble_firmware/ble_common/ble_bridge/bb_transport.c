@@ -121,6 +121,11 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     
     m_rx_cb = cb;
     m_is_packet_ready = false;
+    m_rx_source = BB_SOURCE_SERIAL;
+    m_rx_ring_head = 0;
+    m_rx_ring_tail = 0;
+    m_ble_pkt_head = 0;
+    m_ble_pkt_tail = 0;
     
     // Initialize the HDLC parser state machine.
     hdlc_parser_init(&m_hdlc_parser);
@@ -182,6 +187,7 @@ void bb_transport_process(void)
         if (ble_pkt_pop(p_protobuf_buffer, &pkt_len))
         {
             *p_protobuf_len = pkt_len;
+            m_rx_source = BB_SOURCE_BLE;
             m_is_packet_ready = true;
 
             if (m_rx_cb != NULL)
@@ -304,20 +310,8 @@ static void on_rx_ble(uint8_t const * p_data, uint16_t length)
 
     if (!ble_pkt_push(p_data, length))
     {
+        NRF_LOG_WARNING("BLE RX queue full, dropping packet len=%u", length);
         return;
-    }
-
-    if (p_protobuf_buffer != NULL && p_protobuf_len != NULL) 
-    {
-        m_rx_source = BB_SOURCE_BLE;
-        memcpy(p_protobuf_buffer, p_data, length);
-        *p_protobuf_len = length;
-        m_is_packet_ready = true;
-
-        if (m_rx_cb != NULL) 
-        {
-            m_rx_cb(); 
-        }
     }
 }
 

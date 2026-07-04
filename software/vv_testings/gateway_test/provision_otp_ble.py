@@ -31,7 +31,12 @@ from common import protocol_pb2 as pb
 from common.commands import CommandFactory
 from common.transport import HostTransport, VvAddress
 from vv_test_session import VvTestSession
-from test_ble_log import step_auto_scan_and_connect
+from test_ble_log import (
+    BLE_STATE_NAMES,
+    BleConnectionMonitor,
+    query_ble_status,
+    step_auto_scan_and_connect,
+)
 
 
 OTP_CONFIRM_MAGIC = 0x4F545057  # "OTPW"
@@ -160,6 +165,7 @@ def _send_and_wait_for_ack(
     src: int,
     pkt: pb.packet_t,
     timeout_s: float,
+    monitor: Optional[BleConnectionMonitor] = None,
 ) -> tuple[bool, str]:
     session.send_packet(pkt)
 
@@ -168,11 +174,19 @@ def _send_and_wait_for_ack(
         packets = session.recv_packets(timeout_s=0.05)
         for rx in packets:
             _print_packet("RX", rx)
+            if monitor is not None:
+                monitor.handle_packet(rx)
+                if monitor.lost:
+                    return False, "BLE_DISCONNECTED"
             name = _packet_name(rx)
             if name == "ack" and int(rx.ack.ack_seq) == int(pkt.hdr.seq):
                 response_name = _ack_response_name(int(rx.ack.response))
                 return rx.ack.response == pb.PACKET_ACK_RESPONSE_ACK, response_name
             _ack_mcu_packet_if_needed(session, src, rx)
+        if monitor is not None:
+            monitor.poll_if_due()
+            if monitor.lost:
+                return False, "BLE_DISCONNECTED"
 
     return False, "NO_ACK"
 
@@ -282,14 +296,37 @@ def main() -> int:
             if not target:
                 return 1
 
+            monitor = BleConnectionMonitor(session, factory, args.src, args.central_dst)
+            monitor.mark_connected()
             _bootstrap_mcu_route(session, factory, args.src, args.dst)
+
+            state, reason, _ = query_ble_status(
+                session=session,
+                factory=factory,
+                src=args.src,
+                central_dst=args.central_dst,
+                monitor=monitor,
+            )
+            if state is None:
+                print(f"{COLOR_YELLOW}[WARN] No extra ble_status_resp before OTP write; continuing with the CONNECTED status already received.{COLOR_RESET}")
+            elif state != pb.BLE_STATE_CONNECTED:
+                state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})") if state is not None else "NO_STATUS"
+                reason_part = f", reason=0x{reason:02X}" if reason else ""
+                print(f"{COLOR_RED}[FAIL] BLE is not connected before OTP write: {state_name}{reason_part}.{COLOR_RESET}")
+                return 1
 
             seq = session.proto.next_seq()
             pkt = _build_factory_otp_write(args, args.src, args.dst, seq)
             print(f"\n{COLOR_YELLOW}About to write OTP field={args.field} seq={seq}.{COLOR_RESET}")
             _print_packet("TX", pkt)
 
-            ok, response = _send_and_wait_for_ack(session, args.src, pkt, timeout_s=args.timeout)
+            ok, response = _send_and_wait_for_ack(
+                session,
+                args.src,
+                pkt,
+                timeout_s=args.timeout,
+                monitor=monitor,
+            )
             print(f"\nACK response: {response}")
 
             print("\n[-] Disconnecting BLE...")

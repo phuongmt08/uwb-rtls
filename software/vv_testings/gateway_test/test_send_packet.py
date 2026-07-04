@@ -46,10 +46,141 @@ COLOR_RESET = "\033[0m"
 RESPONSE_TIMEOUT_S = 2.0
 BOOTSTRAP_GAP_S = 0.2
 UINT32_MAX = 0xFFFFFFFF
+BLE_STATUS_POLL_INTERVAL_S = 1.0
+BLE_STATUS_QUERY_TIMEOUT_S = 1.0
+BLE_RECONNECT_SCAN_TIMEOUT_S = 5.0
 
 
 def packet_name(pkt: pb.packet_t) -> str:
     return pkt.WhichOneof("params") or "<none>"
+
+
+class BleConnectionMonitor:
+    def __init__(
+        self,
+        session: VvTestSession,
+        factory: CommandFactory,
+        src: int,
+        central_dst: int,
+        poll_interval_s: float = BLE_STATUS_POLL_INTERVAL_S,
+        print_changes: bool = True,
+    ) -> None:
+        self.session = session
+        self.factory = factory
+        self.src = src
+        self.central_dst = central_dst
+        self.poll_interval_s = poll_interval_s
+        self.print_changes = print_changes
+        self.state: Optional[int] = None
+        self.disconnect_reason = 0
+        self.last_poll_at = 0.0
+        self.expected_connected = False
+        self.lost = False
+        self._last_printed: Optional[tuple[int, int]] = None
+
+    def mark_connected(self) -> None:
+        self.expected_connected = True
+        self.lost = False
+        self.state = pb.BLE_STATE_CONNECTED
+        self.disconnect_reason = 0
+
+    def handle_packet(self, pkt: pb.packet_t) -> bool:
+        if packet_name(pkt) != "ble_status_resp":
+            return False
+
+        self.state = int(pkt.ble_status_resp.state)
+        self.disconnect_reason = int(pkt.ble_status_resp.disconnect_reason)
+        status_key = (self.state, self.disconnect_reason)
+
+        if self.print_changes and status_key != self._last_printed:
+            state_name = BLE_STATE_NAMES.get(self.state, f"UNKNOWN({self.state})")
+            if self.disconnect_reason:
+                print(f"{COLOR_YELLOW}[BLE] {state_name}, reason=0x{self.disconnect_reason:02X}{COLOR_RESET}")
+            else:
+                print(f"{COLOR_CYAN}[BLE] {state_name}{COLOR_RESET}")
+            self._last_printed = status_key
+
+        if self.expected_connected and self.state != pb.BLE_STATE_CONNECTED:
+            self.lost = True
+
+        return True
+
+    def poll_if_due(self, now: Optional[float] = None, force: bool = False) -> None:
+        now = time.time() if now is None else now
+        if not force and now - self.last_poll_at < self.poll_interval_s:
+            return
+
+        pkt = self.factory.ble_status_get(self.src, self.central_dst, self.session.proto.next_seq())
+        self.session.send_packet(pkt)
+        self.last_poll_at = now
+
+
+def query_ble_status(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    central_dst: int,
+    timeout_s: float = BLE_STATUS_QUERY_TIMEOUT_S,
+    monitor: Optional[BleConnectionMonitor] = None,
+) -> tuple[Optional[int], int]:
+    pkt = factory.ble_status_get(src, central_dst, session.proto.next_seq())
+    session.send_packet(pkt)
+
+    deadline = time.time() + timeout_s
+    state: Optional[int] = None
+    reason = 0
+    while time.time() < deadline:
+        for rx in session.recv_packets(timeout_s=0.05):
+            if monitor is not None:
+                monitor.handle_packet(rx)
+            if packet_name(rx) == "ble_status_resp":
+                state = int(rx.ble_status_resp.state)
+                reason = int(rx.ble_status_resp.disconnect_reason)
+            else:
+                ack_mcu_packet_if_needed(session, src, rx)
+        if state is not None:
+            break
+
+    return state, reason
+
+
+def ensure_ble_connected_or_reconnect(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    central_dst: int,
+    selected_mac: bytes,
+    selected_name: str = "",
+    scan_timeout_s: float = BLE_RECONNECT_SCAN_TIMEOUT_S,
+) -> bool:
+    state, reason = query_ble_status(session, factory, src, central_dst)
+    if state is None:
+        state, reason = query_ble_status(session, factory, src, central_dst)
+
+    if state == pb.BLE_STATE_CONNECTED:
+        return True
+
+    if state is None:
+        name_part = f" '{selected_name}'" if selected_name else ""
+        print(f"{COLOR_YELLOW}[BLE] No ble_status_resp while checking{name_part}; keeping current link assumption.{COLOR_RESET}")
+        return True
+
+    state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})")
+    reason_part = f", reason=0x{reason:02X}" if reason else ""
+    name_part = f" '{selected_name}'" if selected_name else ""
+    print(f"{COLOR_YELLOW}[BLE] Not connected to{name_part}: {state_name}{reason_part}. Reconnecting...{COLOR_RESET}")
+
+    session.send_packet(factory.ble_disconnect(src, central_dst, session.proto.next_seq()))
+    time.sleep(0.5)
+    result = step_auto_scan_and_connect(
+        session=session,
+        factory=factory,
+        src=src,
+        central_dst=central_dst,
+        scan_timeout_s=scan_timeout_s,
+        expected_mac=selected_mac,
+    )
+    return result is not None
 
 
 def packet_to_dict(pkt: pb.packet_t) -> dict:
@@ -92,6 +223,7 @@ def recv_and_print(
     src: int,
     expected_param: Optional[str] = None,
     timeout_s: float = RESPONSE_TIMEOUT_S,
+    monitor: Optional[BleConnectionMonitor] = None,
 ) -> tuple[Optional[pb.packet_t], list[pb.packet_t]]:
     deadline = time.time() + timeout_s
     packets: list[pb.packet_t] = []
@@ -101,6 +233,8 @@ def recv_and_print(
         for pkt in session.recv_packets(timeout_s=0.05):
             packets.append(pkt)
             print_packet("RX", pkt)
+            if monitor is not None:
+                monitor.handle_packet(pkt)
 
             if packet_name(pkt) == "ble_status_resp":
                 state = pkt.ble_status_resp.state
@@ -117,6 +251,10 @@ def recv_and_print(
                 match = pkt
         if match is not None:
             break
+        if monitor is not None:
+            monitor.poll_if_due()
+            if monitor.lost:
+                break
 
     if not packets:
         print(f"{COLOR_GRAY}RX <none>{COLOR_RESET}")
@@ -130,17 +268,24 @@ def send_and_wait(
     pkt: pb.packet_t,
     expected_param: Optional[str] = None,
     timeout_s: float = RESPONSE_TIMEOUT_S,
+    monitor: Optional[BleConnectionMonitor] = None,
 ) -> Optional[pb.packet_t]:
     print(f"\n--- {title} ---")
     print_packet("TX", pkt)
     session.send_packet(pkt)
-    match, _ = recv_and_print(session, src, expected_param, timeout_s)
+    match, _ = recv_and_print(session, src, expected_param, timeout_s, monitor=monitor)
     if expected_param is not None and match is None:
         print(f"{COLOR_YELLOW}[WARN] Did not receive {expected_param} within {timeout_s:.1f}s.{COLOR_RESET}")
     return match
 
 
-def bootstrap_mcu_route(session: VvTestSession, factory: CommandFactory, src: int, dst: int) -> None:
+def bootstrap_mcu_route(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    dst: int,
+    monitor: Optional[BleConnectionMonitor] = None,
+) -> None:
     print("\n[*] Preparing MCU route over BLE...")
 
     none_pkt = pb.packet_t()
@@ -148,7 +293,7 @@ def bootstrap_mcu_route(session: VvTestSession, factory: CommandFactory, src: in
     none_pkt.hdr.addr.dst = dst
     none_pkt.hdr.seq = session.proto.next_seq()
     none_pkt.none.dummy = 0
-    send_and_wait(session, src, "none", none_pkt, timeout_s=0.5)
+    send_and_wait(session, src, "none", none_pkt, timeout_s=0.5, monitor=monitor)
     time.sleep(BOOTSTRAP_GAP_S)
 
     transport_pkt = factory.host_transport_set(
@@ -157,7 +302,7 @@ def bootstrap_mcu_route(session: VvTestSession, factory: CommandFactory, src: in
         session.proto.next_seq(),
         transport=int(HostTransport.USB),
     )
-    send_and_wait(session, src, "host_transport_set", transport_pkt, timeout_s=0.5)
+    send_and_wait(session, src, "host_transport_set", transport_pkt, timeout_s=0.5, monitor=monitor)
     time.sleep(BOOTSTRAP_GAP_S)
 
 
@@ -219,6 +364,7 @@ def run_rtos_task_stats_get(
     factory: CommandFactory,
     src: int,
     dst: int,
+    monitor: Optional[BleConnectionMonitor] = None,
 ) -> None:
     pkt = factory.rtos_task_stats_get(src, dst, session.proto.next_seq())
     print_packet("\nPrepared", pkt)
@@ -232,6 +378,7 @@ def run_rtos_task_stats_get(
         "rtos_task_stats_get_t",
         pkt,
         expected_param="rtos_task_stats_resp",
+        monitor=monitor,
     )
     if resp is None:
         return
@@ -252,6 +399,7 @@ def get_current_config(
     factory: CommandFactory,
     src: int,
     dst: int,
+    monitor: Optional[BleConnectionMonitor] = None,
 ) -> Optional[pb.uwb_cfg_t]:
     get_pkt = factory.sys_config_get(src, dst, session.proto.next_seq())
     resp = send_and_wait(
@@ -260,6 +408,7 @@ def get_current_config(
         "sys_config_get_t",
         get_pkt,
         expected_param="sys_config_resp",
+        monitor=monitor,
     )
     if resp is None:
         return None
@@ -274,8 +423,9 @@ def run_sys_config_set(
     factory: CommandFactory,
     src: int,
     dst: int,
+    monitor: Optional[BleConnectionMonitor] = None,
 ) -> None:
-    cfg = get_current_config(session, factory, src, dst)
+    cfg = get_current_config(session, factory, src, dst, monitor=monitor)
     if cfg is None:
         print(f"{COLOR_RED}[FAIL] Cannot prepare sys_config_set_t without current config.{COLOR_RESET}")
         return
@@ -313,19 +463,79 @@ def run_sys_config_set(
         "sys_config_set_t",
         pkt,
         expected_param="sys_config_resp",
+        monitor=monitor,
     )
 
 
-MenuHandler = Callable[[VvTestSession, CommandFactory, int, int], None]
+def run_ranging_start(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    dst: int,
+    monitor: Optional[BleConnectionMonitor] = None,
+) -> None:
+    pkt = factory.ranging_start(src, dst, session.proto.next_seq())
+    print_packet("\nPrepared", pkt)
+    if wait_enter_or_backspace() == "backspace":
+        print("[*] Back to menu.")
+        return
+
+    send_and_wait(
+        session,
+        src,
+        "ranging_start_t",
+        pkt,
+        expected_param="ack",
+        monitor=monitor,
+    )
+
+
+def run_ranging_stop(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    dst: int,
+    monitor: Optional[BleConnectionMonitor] = None,
+) -> None:
+    pkt = factory.ranging_stop(src, dst, session.proto.next_seq())
+    print_packet("\nPrepared", pkt)
+    if wait_enter_or_backspace() == "backspace":
+        print("[*] Back to menu.")
+        return
+
+    send_and_wait(
+        session,
+        src,
+        "ranging_stop_t",
+        pkt,
+        expected_param="ack",
+        monitor=monitor,
+    )
+
+
+MenuHandler = Callable[[VvTestSession, CommandFactory, int, int, Optional[BleConnectionMonitor]], None]
 
 
 MENU: list[tuple[str, str, MenuHandler]] = [
     ("1", "rtos_task_stats_get_t", run_rtos_task_stats_get),
     ("2", "sys_config_set_t", run_sys_config_set),
+    ("3", "ranging_start_t", run_ranging_start),
+    ("4", "ranging_stop_t", run_ranging_stop),
 ]
 
 
-def command_menu(session: VvTestSession, factory: CommandFactory, src: int, dst: int) -> None:
+def command_menu(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    dst: int,
+    central_dst: int,
+    target_mac: bytes,
+    target_name: str,
+) -> None:
+    monitor = BleConnectionMonitor(session, factory, src, central_dst, print_changes=False)
+    monitor.mark_connected()
+
     while True:
         print("\n" + "=" * 58)
         print("  BLE Packet Sender")
@@ -340,8 +550,20 @@ def command_menu(session: VvTestSession, factory: CommandFactory, src: int, dst:
 
         for key, name, handler in MENU:
             if choice == key or choice == name.lower():
+                if not ensure_ble_connected_or_reconnect(
+                    session=session,
+                    factory=factory,
+                    src=src,
+                    central_dst=central_dst,
+                    selected_mac=target_mac,
+                    selected_name=target_name,
+                ):
+                    print(f"{COLOR_RED}[FAIL] Could not restore BLE connection. Command was not sent.{COLOR_RESET}")
+                    monitor.lost = True
+                    break
+                monitor.mark_connected()
                 print(f"\n[*] Selected {name}.")
-                handler(session, factory, src, dst)
+                handler(session, factory, src, dst, monitor)
                 break
         else:
             print("Invalid selection.")
@@ -418,9 +640,12 @@ def main() -> int:
             )
             if not result:
                 return 1
+            target_mac, target_name = result
 
-            bootstrap_mcu_route(session, factory, src_addr, mcu_dst)
-            command_menu(session, factory, src_addr, mcu_dst)
+            monitor = BleConnectionMonitor(session, factory, src_addr, central_dst, print_changes=False)
+            monitor.mark_connected()
+            bootstrap_mcu_route(session, factory, src_addr, mcu_dst, monitor=monitor)
+            command_menu(session, factory, src_addr, mcu_dst, central_dst, target_mac, target_name)
 
             print("\n[-] Disconnecting BLE...")
             session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
