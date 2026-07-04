@@ -180,7 +180,7 @@ class ScanPopup(QDialog):
         self._vm.connection_failed.connect(self._on_connect_failed)
         if hasattr(self._vm, "connection_progress_updated"):
             self._vm.connection_progress_updated.connect(self._on_connection_progress)
-        self._vm.log_message.connect(self._log.setText)
+        self._vm.log_message.connect(self._on_log_message)
         self._vm.dongle_disconnected.connect(self._on_dongle_disconnected)
 
     # ── View Slots ───────────────────────────────────────────────────
@@ -255,6 +255,7 @@ class ScanPopup(QDialog):
         self._btn_connect.setEnabled(False)
         self._btn_connect.setText("⏳ Connecting...")
         self._btn_rescan.setEnabled(False)
+        self._log.setText(f"Connecting to {mac}...")
 
     def _on_connected(self, info: dict):
         self._progress.setRange(0, 100)
@@ -300,6 +301,9 @@ class ScanPopup(QDialog):
         message = info.get("message")
         if message:
             self._log.setText(str(message))
+
+    def _on_log_message(self, message: str):
+        self._log.setText(str(message))
 
     def _on_connect(self):
         if self._selected_mac:

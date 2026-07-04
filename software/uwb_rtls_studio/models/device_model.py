@@ -1539,7 +1539,10 @@ class DeviceModel(QObject):
             pb.BLE_STATE_CONNECTED,
             pb.BLE_STATE_CONNECTING,
         ):
-            if state == pb.BLE_STATE_SCANNING and self._connection_status == "Connected":
+            if state == pb.BLE_STATE_SCANNING and self._connection_status == "Connected" and not reason_code:
+                # Dongle đang quét bình thường trong khi vẫn còn connected — bỏ qua.
+                # Nếu có reason_code (vd: 0x08 Connection Timeout), đây là disconnect thật sự
+                # với lý do HCI rõ ràng → phải xử lý để emit notification đúng.
                 return
             previous_status = self._connection_status
             previous_name = self._connected_name
@@ -1597,7 +1600,7 @@ class DeviceModel(QObject):
                 self._emit_ble_notification(
                     kind="disconnect",
                     title="BLE disconnected",
-                    message=self._reason_text(reason),
+                    message=f"State: {state_str}",
                     reason=reason,
                     auto_close_ms=8000,
                 )

@@ -24,6 +24,7 @@ from services.serial_service import SerialService
 from common import protocol_pb2 as pb
 from utils.constants import DEVICE_TIMEOUT_S, STOP_TO_CONNECT_DELAY_MS
 from common.transport import VvAddress
+from utils.ble_hci import normalize_hci_reason
 
 log = logging.getLogger(__name__)
 
@@ -139,12 +140,17 @@ class ScanModel(QObject):
     def _do_connect(self, mac_hex: str) -> None:
         mac_bytes = bytes.fromhex(mac_hex.replace(":", ""))
         self._connect_stage = "ble_connect"
-        self._send_command(
+        pkt = self._send_command(
             "ble_connect",
             src_addr=self._protocol.pb.PACKET_ADDR_HOST,
             dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
             mac_address=mac_bytes
         )
+        if pkt is None:
+            self._is_connecting = False
+            self._connect_stage = "idle"
+            self.connect_failed.emit("Failed to send ble_connect.")
+            return
         self._emit_progress(35, f"Connecting BLE MAC {mac_hex}...")
         self._connect_timer.start(_CONNECT_TIMEOUT_MS)
         self._status_poll_timer.start()
@@ -200,6 +206,8 @@ class ScanModel(QObject):
         if not self._is_connecting:
             return
 
+        reason_code, has_reason = self._disconnect_reason_from(status)
+
         if status.state == pb.BLE_STATE_CONNECTED:
             self._ble_connected_seen = True
             if self._connect_stage in ("ble_connect", "selected"):
@@ -217,6 +225,22 @@ class ScanModel(QObject):
             if self._connect_stage in ("selected", "ble_connect"):
                 self._connect_stage = "ble_connect"
                 self._emit_progress(45, "Dongle is establishing BLE link...")
+            return
+        elif has_reason and reason_code:
+            reason = normalize_hci_reason(reason_code)
+            log.warning(
+                "Popup connect failed with BLE state %s reason=%s (%s).",
+                int(status.state),
+                reason["code_hex"],
+                reason["name"],
+            )
+            self._connect_timer.stop()
+            self._status_poll_timer.stop()
+            self._time_sync_ack_timer.stop()
+            self._pending_time_sync_seq = None
+            self._is_connecting = False
+            self._connect_stage = "idle"
+            self.connect_failed.emit(self._reason_text(reason))
             return
 
     def _handle_device_info(self, resp) -> None:
@@ -341,6 +365,20 @@ class ScanModel(QObject):
 
     def _on_connection_lost(self) -> None:
         self.dongle_disconnected.emit("Dongle was disconnected!")
+
+    @staticmethod
+    def _disconnect_reason_from(resp) -> tuple[int, bool]:
+        reason = int(getattr(resp, "disconnect_reason", 0) or 0) & 0xFF
+        has_reason = reason != 0
+        try:
+            has_reason = bool(resp.HasField("disconnect_reason")) or has_reason
+        except Exception:
+            pass
+        return reason, has_reason
+
+    @staticmethod
+    def _reason_text(reason: dict) -> str:
+        return f"{reason.get('code_hex', '0x00')} - {reason.get('name', 'Unknown HCI Error')}"
 
     def _emit_progress(self, progress: int, message: str) -> None:
         self.connection_progress_changed.emit({

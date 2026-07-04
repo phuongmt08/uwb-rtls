@@ -161,7 +161,17 @@ class DeviceInfoTab(QWidget):
     def _on_device_info(self, info: dict):
         if "Status" in info:
             if info["Status"] in ("Disconnected", "Connecting", "Connected"):
+                ble_snapshot = {
+                    key: (label.text(), label.toolTip(), label.styleSheet())
+                    for key, label in self._ble_values.items()
+                }
                 self._reset_display_fields()
+                for key, (text, tooltip, style) in ble_snapshot.items():
+                    label = self._ble_values.get(key)
+                    if label is not None:
+                        label.setText(text)
+                        label.setToolTip(tooltip)
+                        label.setStyleSheet(style)
             return
 
         for k, v in info.items():

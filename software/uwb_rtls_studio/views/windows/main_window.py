@@ -770,8 +770,6 @@ class MainWindow(QMainWindow):
         if self._device_info_vm:
             try:
                 self._device_info_vm.request_ble_disconnect()
-                import time
-                time.sleep(0.2)
             except Exception:
                 pass
 
@@ -841,6 +839,18 @@ class MainWindow(QMainWindow):
 
         if not self._dongle_vm:
             return
+        ble_info = dict(getattr(shared_app_state, "ble_status", {}) or {})
+        state_name = str(ble_info.get("state_name") or "").strip()
+        reason_hex = str(ble_info.get("disconnect_reason_hex") or "").strip()
+        reason_name = str(ble_info.get("disconnect_reason_name") or "").strip()
+        popup_lines = []
+        if state_name:
+            popup_lines.append(f"State: {state_name}")
+        if reason_hex and reason_hex != "0x00":
+            popup_lines.append(f"Reason: {reason_hex} - {reason_name}" if reason_name else f"Reason: {reason_hex}")
+        if popup_lines:
+            QMessageBox.warning(self, "BLE disconnected", "\n".join(popup_lines))
+
 
         try:
             self._serial_service.connection_lost.disconnect(self._on_dongle_disconnected)
