@@ -80,6 +80,7 @@ class QueryQueueManager(QObject):
         "device_type_get": "device_type_set",
         "prefilter_cfg_get": "prefilter_cfg_resp",
         "prefilter_cfg_set": "prefilter_cfg_resp",
+        "zone_profile_get": "zone_profile_resp",
     }
 
     def __init__(
@@ -160,13 +161,25 @@ class QueryQueueManager(QObject):
 
             tx = self.current_transaction
             if tx.expected_response == param_name:
+                seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
+                if tx.seq is not None and seq_val is not None and int(seq_val) != int(tx.seq):
+                    log.debug(
+                        "Ignoring query response '%s' seq mismatch for '%s': expected seq=%s got seq=%s",
+                        param_name,
+                        tx.command_name,
+                        tx.seq,
+                        seq_val,
+                    )
+                    return False
+
                 tx.status = QueryState.SUCCESS
                 tx.received_time = time.monotonic()
                 tx.response_packet = pkt
 
                 self.timer.stop()
 
-                seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else tx.seq
+                if seq_val is None:
+                    seq_val = tx.seq
                 seq_str = f" seq={seq_val}" if seq_val is not None else ""
                 log.info(
                     f"Query RX: '{param_name}' <- dst={tx.dst_addr}{seq_str} "

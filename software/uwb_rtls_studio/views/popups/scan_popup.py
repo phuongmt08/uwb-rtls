@@ -34,6 +34,11 @@ class ScanPopup(QDialog):
         super().__init__(parent)
         self._vm = viewmodel
         self._selected_mac: str = ""
+        self._progress_target = 0
+        self._progress_display = 0
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(8)
+        self._progress_timer.timeout.connect(self._tick_progress)
 
         self.setWindowTitle("UWB RTLS Studio — BLE Scanner")
         self.setMinimumSize(720, 520)
@@ -173,6 +178,8 @@ class ScanPopup(QDialog):
         self._vm.device_connecting.connect(self._on_connecting)
         self._vm.device_connected.connect(self._on_connected)
         self._vm.connection_failed.connect(self._on_connect_failed)
+        if hasattr(self._vm, "connection_progress_updated"):
+            self._vm.connection_progress_updated.connect(self._on_connection_progress)
         self._vm.log_message.connect(self._log.setText)
         self._vm.dongle_disconnected.connect(self._on_dongle_disconnected)
 
@@ -203,8 +210,11 @@ class ScanPopup(QDialog):
             color: #94A3B8; background: rgba(148,163,184,0.12);
             border-radius: 10px; padding: 4px 12px; font-weight: bold;
         """)
+        self._progress_target = 100
+        self._progress_display = 100
         self._progress.setRange(0, 100)
         self._progress.setValue(100)
+        self._progress_timer.stop()
 
     def _on_device_list(self, devices: list):
         """Refresh toàn bộ table với device list mới."""
@@ -247,15 +257,49 @@ class ScanPopup(QDialog):
         self._btn_rescan.setEnabled(False)
 
     def _on_connected(self, info: dict):
-        self._btn_connect.setText("✅ Connected")
-        self._log.setText("✅ Connected! Opening main window...")
-        QTimer.singleShot(800, self.accept)
+        self._progress.setRange(0, 100)
+        self._progress_target = 100
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
+        self._btn_connect.setText("Connected")
+        self._log.setText("Connected! Opening main window...")
+        QTimer.singleShot(1000, self.accept)
 
     def _on_connect_failed(self, msg: str):
+        self._progress_target = 0
+        self._progress_display = 0
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._progress_timer.stop()
         self._btn_connect.setEnabled(True)
-        self._btn_connect.setText("⚡ Connect")
+        self._btn_connect.setText("Connect")
         self._btn_rescan.setEnabled(True)
-        self._log.setText(f"❌ {msg}")
+        self._log.setText(f"Connect failed: {msg}")
+
+    def _tick_progress(self):
+        if self._progress_display < self._progress_target:
+            self._progress_display += 1
+            self._progress.setValue(self._progress_display)
+        elif self._progress_display > self._progress_target:
+            self._progress_display -= 1
+            self._progress.setValue(self._progress_display)
+        else:
+            self._progress_timer.stop()
+
+    def _on_connection_progress(self, info: dict):
+        self._progress.setRange(0, 100)
+        self._progress_target = max(0, min(100, int(info.get("progress", 0))))
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
+
+        if self._progress_target == 0:
+            self._progress_display = 0
+            self._progress.setValue(0)
+            self._progress_timer.stop()
+
+        message = info.get("message")
+        if message:
+            self._log.setText(str(message))
 
     def _on_connect(self):
         if self._selected_mac:

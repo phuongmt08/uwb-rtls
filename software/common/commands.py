@@ -66,8 +66,16 @@ _MCU_COMMANDS = {
     "factory_otp_write",
     "rtos_resource_get",
     "rtos_task_stats_get",
+    "prefilter_cfg_get",
+    "prefilter_cfg_set",
     "end_session",
     "log_data",
+    "zone_switch",
+    "zone_profile_set",
+    "zone_profile_get",
+    "calib_start",
+    "calib_stop",
+    "calib_candidate_apply",
 }
 
 _CENTRAL_COMMANDS = {
@@ -84,6 +92,10 @@ _PERIPHERAL_COMMANDS = {
     "ble_adv_config_set",
 }
 
+_VEHICLE_COMMANDS = {
+    "vehicle_control",
+}
+
 
 def mapped_destination_for(command_name: str) -> int | None:
     """Return the explicit host-side destination hint for a command name, if known."""
@@ -93,6 +105,8 @@ def mapped_destination_for(command_name: str) -> int | None:
         return int(VvAddress.PERIPHERAL)
     if command_name in _CENTRAL_COMMANDS:
         return int(VvAddress.CENTRAL)
+    if command_name in _VEHICLE_COMMANDS:
+        return int(VvAddress.VEHICLE)
     return None
 
 
@@ -1014,7 +1028,7 @@ class CommandCatalog:
             CommandSpec(79, "vehicle_status", self.factory.vehicle_status),
             CommandSpec(80, "zone_switch", self.factory.zone_switch),
             CommandSpec(81, "zone_profile_set", self.factory.zone_profile_set),
-            CommandSpec(82, "zone_profile_get", self.factory.zone_profile_get),
+            CommandSpec(82, "zone_profile_get", self.factory.zone_profile_get, "zone_profile_resp"),
             CommandSpec(83, "zone_profile_resp", self.factory.zone_profile_resp),
             CommandSpec(84, "calib_start", self.factory.calib_start),
             CommandSpec(85, "calib_stop", self.factory.calib_stop),

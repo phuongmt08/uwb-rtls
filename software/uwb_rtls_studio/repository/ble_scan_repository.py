@@ -3,6 +3,7 @@ Repository/cache for BLE scan and advertising status packets.
 """
 from __future__ import annotations
 
+import re
 import time
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -39,12 +40,18 @@ class BleScanRepository(QObject):
         }
 
     def parse_adv_status(self, res) -> dict:
+        timestamp_ms = int(getattr(res, "local_timestamp_ms", 0) or 0)
+        timestamp_s = int(getattr(res, "local_timestamp_s", 0) or 0)
+        if timestamp_ms <= 0 and timestamp_s > 0:
+            timestamp_ms = timestamp_s * 1000
+        elif timestamp_s <= 0 and timestamp_ms > 0:
+            timestamp_s = timestamp_ms // 1000
         return {
             "device_type": int(getattr(res, "device", 0)),
             "device_id": int(getattr(res, "device_id", 0)),
             "bat_soc_percent": int(getattr(res, "bat_soc_percent", 0)),
-            "local_timestamp_s": int(getattr(res, "local_timestamp_s", 0)),
-            "local_timestamp_ms": int(getattr(res, "local_timestamp_s", 0)) * 1000,
+            "local_timestamp_s": timestamp_s,
+            "local_timestamp_ms": timestamp_ms,
             "status_flags": int(getattr(res, "status_flags", 0)),
             "warning_count": int(getattr(res, "warning_count", 0)),
             "error_count": int(getattr(res, "error_count", 0)),
@@ -64,8 +71,7 @@ class BleScanRepository(QObject):
         current = self._devices.get(mac, {})
         current.update(data)
         current["order"] = self._device_order[mac]
-        serial_number = int(current.get("serial_number") or 0)
-        for candidate in (serial_number, serial_number & 0xFFFF if serial_number else 0):
+        for candidate in self._merge_candidates(current):
             if candidate in self._adv_status_by_device_id:
                 current.update(self._adv_status_by_device_id[candidate])
                 break
@@ -110,8 +116,7 @@ class BleScanRepository(QObject):
             return
         self._adv_status_by_device_id[device_id] = data.copy()
         for device in self._devices.values():
-            serial_number = int(device.get("serial_number") or 0)
-            if device_id in (serial_number, serial_number & 0xFFFF if serial_number else 0):
+            if device_id in self._merge_candidates(device):
                 device.update(data)
         self.scan_results_updated.emit(self.merged_results())
 
@@ -149,7 +154,33 @@ class BleScanRepository(QObject):
         self._device_order.clear()
         self._next_device_order = 0
         self.scan_results_updated.emit([])
-
     @staticmethod
     def _normalize_mac(mac: str) -> str:
         return str(mac or "").strip().replace("-", ":").upper()
+
+    @staticmethod
+    def _device_name_candidate(device: dict) -> int:
+        name = str(device.get("name") or "").strip()
+        match = re.search(r"(\d+)$", name)
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _merge_candidates(cls, device: dict) -> tuple[int, ...]:
+        serial_number = int(device.get("serial_number") or 0)
+        device_id = int(device.get("device_id") or 0)
+        name_candidate = cls._device_name_candidate(device)
+        candidates = []
+        for candidate in (
+            device_id,
+            serial_number,
+            serial_number & 0xFFFF if serial_number else 0,
+            name_candidate,
+        ):
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+        return tuple(candidates)

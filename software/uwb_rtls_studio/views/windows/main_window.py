@@ -145,6 +145,11 @@ class MainWindow(QMainWindow):
         self._session_active = False
         self._session_seconds = 0
         self._reconnect_popup = None
+        self._conn_progress_target = 0
+        self._conn_progress_display = 0
+        self._conn_progress_timer = QTimer(self)
+        self._conn_progress_timer.setInterval(8)
+        self._conn_progress_timer.timeout.connect(self._tick_connection_progress)
 
         # -- Load UI from .ui file --
         uic.loadUi(UI_FILE, self)
@@ -294,6 +299,16 @@ class MainWindow(QMainWindow):
             }}
         """)
 
+    def _tick_connection_progress(self):
+        if self._conn_progress_display < self._conn_progress_target:
+            self._conn_progress_display += 1
+            self._conn_progress_bar.setValue(self._conn_progress_display)
+        elif self._conn_progress_display > self._conn_progress_target:
+            self._conn_progress_display -= 1
+            self._conn_progress_bar.setValue(self._conn_progress_display)
+        else:
+            self._conn_progress_timer.stop()
+
     def _on_connection_progress(self, payload: dict):
         progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         message = str(payload.get("message") or "BLE process")
@@ -301,7 +316,16 @@ class MainWindow(QMainWindow):
 
         self._conn_progress_label.setText(message)
         self._conn_progress_label.setToolTip(message)
-        self._conn_progress_bar.setValue(progress)
+        self._conn_progress_target = progress
+        if not self._conn_progress_timer.isActive():
+            self._conn_progress_timer.start()
+
+        if progress == 0:
+            self._conn_progress_display = 0
+            self._conn_progress_bar.setValue(0)
+            self._conn_progress_timer.stop()
+        else:
+            self.update_progress_style(status)
 
         if hasattr(self, "_success_timer") and self._success_timer:
             self._success_timer.stop()
@@ -315,6 +339,19 @@ class MainWindow(QMainWindow):
     def _show_ble_notification(self, payload: dict):
         title = str(payload.get("title") or "BLE notification")
         message = str(payload.get("message") or "")
+        reason_hex = str(payload.get("reason_code_hex") or "").strip()
+        reason_name = str(payload.get("reason_name") or "").strip()
+        reason_text = ""
+        if reason_hex and reason_name:
+            reason_text = f"{reason_hex} - {reason_name}"
+        elif reason_hex:
+            reason_text = reason_hex
+        elif reason_name:
+            reason_text = reason_name
+
+        if reason_text and reason_text not in message:
+            message = f"{message}\n{reason_text}" if message else reason_text
+
         kind = str(payload.get("kind") or "info")
         auto_close_ms = int(payload.get("auto_close_ms", 3000) or 0)
 
@@ -440,6 +477,13 @@ class MainWindow(QMainWindow):
 
         status.addWidget(self._make_separator())
 
+        # BLE telemetry state from dongle
+        self._status_ble = QLabel("BLE: ---")
+        self._status_ble.setStyleSheet("color: #94A3B8;")
+        status.addWidget(self._status_ble)
+
+        status.addWidget(self._make_separator())
+
         # RMS
         self._status_rms = QLabel("\U0001F4CA RMS: ---")
         status.addWidget(self._status_rms)
@@ -496,6 +540,19 @@ class MainWindow(QMainWindow):
         rssi = data.get("rssi_dbm")
         if rssi is not None:
             self._status_rssi.setText(f"\U0001F4E1 RSSI: {rssi} dBm")
+
+        state_label = data.get("display_state") or data.get("state_name")
+        state_value = data.get("state")
+        if state_label is not None:
+            self._status_ble.setText(f"BLE: {state_label}")
+            if state_value == 5:
+                self._status_ble.setStyleSheet("color: #10B981; font-weight: bold;")
+            elif state_value in (2, 3, 4):
+                self._status_ble.setStyleSheet("color: #F59E0B; font-weight: bold;")
+            elif state_value == 1:
+                self._status_ble.setStyleSheet("color: #94A3B8; font-weight: bold;")
+            else:
+                self._status_ble.setStyleSheet("color: #EF4444; font-weight: bold;")
 
     def _on_position_status(self, x, y, z, rms):
         self._status_rms.setText(f"\U0001F4CA RMS: {rms:.3f} m")

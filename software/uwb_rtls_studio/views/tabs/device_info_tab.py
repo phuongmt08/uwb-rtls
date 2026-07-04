@@ -173,7 +173,15 @@ class DeviceInfoTab(QWidget):
         display_state = info.get("display_state")
         if display_state is not None:
             self._ble_values["State:"].setText(str(display_state))
-            color = "#10B981" if display_state == "Connected" else "#EF4444"
+            state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
+            if state_value == 5:
+                color = "#10B981"
+            elif state_value in (2, 3, 4):
+                color = "#F59E0B"
+            elif state_value == 1:
+                color = "#94A3B8"
+            else:
+                color = "#EF4444"
             self._ble_values["State:"].setStyleSheet(f"color: {color}; font-weight: bold;")
             reason_hex = info.get("disconnect_reason_hex")
             reason_name = info.get("disconnect_reason_name")
