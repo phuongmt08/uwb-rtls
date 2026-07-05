@@ -13,6 +13,12 @@
  * ANTENNA DELAY CONFIGURATION
  * =================================================================== */
 
+ /* Enable/Disable: Force antenna delay to otp values on startup
+ * 0 = Use calibrated values (if available)
+ * 1 = Force antenna delay to otp
+ */
+#define ENABLE_OTP_ANTENNA_DELAY    0
+
 /* Enable/Disable: Force antenna delay to default values on startup
  * 0 = Use calibrated values (if available)
  * 1 = Force antenna delay to factory defaults
