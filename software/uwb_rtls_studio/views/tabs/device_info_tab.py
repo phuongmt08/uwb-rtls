@@ -1,15 +1,15 @@
 """
-UWB RTLS Studio — Device Info Tab (UI loaded from .ui file)
-Tab 1: Hiển thị thông tin device đã connected.
+UWB RTLS Studio - Device Info Tab (UI loaded from .ui file)
+Tab 1: Shows connected device information.
 
 FE: Loaded from views/ui/device_info_tab.ui (editable in Qt Designer)
 BE: ViewModel bindings + data updaters (this file)
 
 Layout: Split-screen
-  - LEFT column:  Connected Device + BLE Connection + Battery + Temperature + Voltage
+  - LEFT column: Connected Device + BLE Connection + Battery + Temperature + Voltage
   - RIGHT column: Other Advertising Devices (with Connect buttons per row)
 
-Background polling: ViewModel tự động gửi GET commands mỗi 2s (không cần nút Refresh).
+Background polling: ViewModel sends GET commands every 2s (no Refresh button needed).
 """
 import os
 import time
@@ -32,11 +32,9 @@ class DeviceInfoTab(QWidget):
         super().__init__(parent)
         self._vm = None
         self._is_developer_mode = False
-
-        # ── Load UI from .ui file ──
+        # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
-
-        # ── Post-load setup ──
+        # Post-load setup
         self._setup_mappings()
         self._setup_table()
         self._reset_display_fields()
@@ -56,7 +54,15 @@ class DeviceInfoTab(QWidget):
         }
 
         # BLE info value labels
+        self.lbl_ble_state = QLabel("State:")
+        self.lbl_ble_state.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        self.val_ble_state = QLabel("-")
+        self.val_ble_state.setStyleSheet("color: #F8FAFC;")
+        self.ble_grid.addWidget(self.lbl_ble_state, 5, 0)
+        self.ble_grid.addWidget(self.val_ble_state, 5, 1)
+
         self._ble_values = {
+            "State:": self.val_ble_state,
             "RSSI:": self.val_ble_rssi,
             "Conn Interval:": self.val_ble_interval,
             "Slave Latency:": self.val_ble_latency,
@@ -116,6 +122,8 @@ class DeviceInfoTab(QWidget):
         ):
             for label in group.values():
                 label.setText("-")
+                label.setToolTip("")
+        self.val_ble_state.setStyleSheet("color: #F8FAFC;")
         self._bat_pct.setText("-")
         self._bat_bar.setValue(0)
         self._time_local.setText("-")
@@ -153,7 +161,17 @@ class DeviceInfoTab(QWidget):
     def _on_device_info(self, info: dict):
         if "Status" in info:
             if info["Status"] in ("Disconnected", "Connecting", "Connected"):
+                ble_snapshot = {
+                    key: (label.text(), label.toolTip(), label.styleSheet())
+                    for key, label in self._ble_values.items()
+                }
                 self._reset_display_fields()
+                for key, (text, tooltip, style) in ble_snapshot.items():
+                    label = self._ble_values.get(key)
+                    if label is not None:
+                        label.setText(text)
+                        label.setToolTip(tooltip)
+                        label.setStyleSheet(style)
             return
 
         for k, v in info.items():
@@ -162,6 +180,27 @@ class DeviceInfoTab(QWidget):
                 self._dev_values[lbl].setText(str(v) if v not in (None, "") else "-")
 
     def _on_ble_info(self, info: dict):
+        display_state = info.get("display_state")
+        if display_state is not None:
+            self._ble_values["State:"].setText(str(display_state))
+            state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
+            if state_value == 5:
+                color = "#10B981"
+            elif state_value in (2, 3, 4):
+                color = "#F59E0B"
+            elif state_value == 1:
+                color = "#94A3B8"
+            else:
+                color = "#EF4444"
+            self._ble_values["State:"].setStyleSheet(f"color: {color}; font-weight: bold;")
+            reason_hex = info.get("disconnect_reason_hex")
+            reason_name = info.get("disconnect_reason_name")
+            raw_state = info.get("state_name")
+            tooltip = f"Raw BLE state: {raw_state or display_state}"
+            if reason_hex and reason_name:
+                tooltip += f" | Reason: {reason_hex} - {reason_name}"
+            self._ble_values["State:"].setToolTip(tooltip)
+
         rssi = info.get("rssi_dbm")
         if rssi is not None:
             self._ble_values["RSSI:"].setText(f"{rssi} dBm")
@@ -225,7 +264,22 @@ class DeviceInfoTab(QWidget):
     def _on_advertising_devices(self, devices: list, is_scanning: bool):
         # Scan status removed by user
 
-        self._adv_table.setRowCount(len(devices))
+        # Compare existing rows to see if we can reuse the table structure and widgets
+        rebuild_needed = True
+        if self._adv_table.rowCount() == len(devices):
+            # Check if all MACs match in the same order
+            match = True
+            for i, dev in enumerate(devices):
+                mac_item = self._adv_table.item(i, 1)
+                if not mac_item or mac_item.text() != dev["mac"]:
+                    match = False
+                    break
+            if match:
+                rebuild_needed = False
+
+        if rebuild_needed:
+            self._adv_table.setRowCount(len(devices))
+
         for i, dev in enumerate(devices):
             d_type = dev.get("device_type", 0)
             d_type_label = DEVICE_TYPE_LABELS_SHORT.get(d_type, str(d_type))
@@ -236,11 +290,8 @@ class DeviceInfoTab(QWidget):
             else:
                 device_str = dev.get("name", "-")
 
-            self._adv_table.setItem(i, 0, QTableWidgetItem(device_str))
-            self._adv_table.setItem(i, 1, QTableWidgetItem(dev["mac"]))
-
             bat = dev.get("bat_soc_percent")
-            self._adv_table.setItem(i, 2, QTableWidgetItem(f"{bat}%" if bat is not None else "-"))
+            bat_str = f"{bat}%" if bat is not None else "-"
 
             t_ms = dev.get("local_timestamp_ms")
             if t_ms is not None and t_ms > 0:
@@ -250,69 +301,127 @@ class DeviceInfoTab(QWidget):
                     t_str = str(t_ms)
             else:
                 t_str = "-"
-            self._adv_table.setItem(i, 3, QTableWidgetItem(t_str))
 
             st_flags = dev.get("status_flags")
-            self._adv_table.setItem(i, 4, QTableWidgetItem(f"0x{st_flags:X}" if st_flags is not None else "-"))
+            st_flags_str = f"0x{st_flags:X}" if st_flags is not None else "-"
 
             warn_cnt = dev.get("warning_count")
-            self._adv_table.setItem(i, 5, QTableWidgetItem(str(warn_cnt) if warn_cnt is not None else "-"))
+            warn_cnt_str = str(warn_cnt) if warn_cnt is not None else "-"
 
             err_cnt = dev.get("error_count")
-            self._adv_table.setItem(i, 6, QTableWidgetItem(str(err_cnt) if err_cnt is not None else "-"))
+            err_cnt_str = str(err_cnt) if err_cnt is not None else "-"
 
-            # Load custom row widget from UI Designer file
-            row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
-            widget = QWidget()
-            uic.loadUi(row_ui_path, widget)
+            if rebuild_needed:
+                self._adv_table.setItem(i, 0, QTableWidgetItem(device_str))
+                self._adv_table.setItem(i, 1, QTableWidgetItem(dev["mac"]))
+                self._adv_table.setItem(i, 2, QTableWidgetItem(bat_str))
+                self._adv_table.setItem(i, 3, QTableWidgetItem(t_str))
+                self._adv_table.setItem(i, 4, QTableWidgetItem(st_flags_str))
+                self._adv_table.setItem(i, 5, QTableWidgetItem(warn_cnt_str))
+                self._adv_table.setItem(i, 6, QTableWidgetItem(err_cnt_str))
 
-            btn_set_time = QPushButton("Set Time")
-            btn_set_time.setMinimumSize(65, 22)
-            btn_set_time.setMaximumSize(65, 22)
-            btn_set_time.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_set_time.setStyleSheet(
-                "QPushButton { background: #2563EB; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
-                "QPushButton:hover { background: #3B82F6; } "
-                "QPushButton:disabled { background: #334155; color: #94A3B8; }"
-            )
-            btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
-            if d_id is None:
-                btn_set_time.setEnabled(False)
-            widget.layout().addWidget(btn_set_time)
+                # Load custom row widget from UI Designer file
+                row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
+                widget = QWidget()
+                uic.loadUi(row_ui_path, widget)
+                widget.setProperty("mac", dev["mac"])
 
-            model = self._vm.model
-            row_mac = dev["mac"]
-            is_connected_row = model.connected_mac == row_mac and model.connection_status == "Connected"
-            is_connecting_row = model.connected_mac == row_mac and model.connection_status == "Connecting"
-            is_disconnecting_row = model.connected_mac == row_mac and model.connection_status == "Disconnecting"
-            is_pending_row = model.pending_connect_mac == row_mac and model.connection_status in ("Connecting", "Disconnecting")
-
-            if is_connected_row:
-                widget.btn_connect.setText("Disconnect")
-                widget.btn_connect.setStyleSheet(
-                    "QPushButton { background: #DC2626; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
-                    "QPushButton:hover { background: #EF4444; } "
+                btn_set_time = QPushButton("Set Time")
+                btn_set_time.setObjectName("btn_set_time")
+                btn_set_time.setMinimumSize(65, 22)
+                btn_set_time.setMaximumSize(65, 22)
+                btn_set_time.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_set_time.setStyleSheet(
+                    "QPushButton { background: #2563EB; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                    "QPushButton:hover { background: #3B82F6; } "
                     "QPushButton:disabled { background: #334155; color: #94A3B8; }"
                 )
-                widget.btn_connect.clicked.connect(lambda checked=False: self._vm.disconnect_device())
-            elif is_connecting_row or is_pending_row:
-                widget.btn_connect.setText("Connecting...")
-                widget.btn_connect.setEnabled(False)
-                btn_set_time.setEnabled(False)
-            elif is_disconnecting_row:
-                widget.btn_connect.setText("Disconnecting...")
-                widget.btn_connect.setEnabled(False)
-                btn_set_time.setEnabled(False)
+                widget.layout().addWidget(btn_set_time)
+                self._adv_table.setCellWidget(i, 7, widget)
             else:
-                widget.btn_connect.setText("Connect")
-                widget.btn_connect.setStyleSheet(
-                    "QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
-                    "QPushButton:hover { background: #10B981; } "
-                    "QPushButton:disabled { background: #334155; color: #94A3B8; }"
-                )
-                widget.btn_connect.clicked.connect(lambda checked, m=row_mac: self._vm.connect_device(m))
+                self._set_table_item_text(i, 0, device_str)
+                self._set_table_item_text(i, 2, bat_str)
+                self._set_table_item_text(i, 3, t_str)
+                self._set_table_item_text(i, 4, st_flags_str)
+                self._set_table_item_text(i, 5, warn_cnt_str)
+                self._set_table_item_text(i, 6, err_cnt_str)
+                widget = self._adv_table.cellWidget(i, 7)
 
-            self._adv_table.setCellWidget(i, 7, widget)
+            if widget:
+                # Retrieve child buttons
+                btn_connect = widget.btn_connect
+                btn_set_time = widget.findChild(QPushButton, "btn_set_time")
+
+                model = self._vm.model
+                row_mac = dev["mac"]
+                is_connected_row = model.connected_mac == row_mac and model.connection_status == "Connected"
+                is_connecting_row = model.connected_mac == row_mac and model.connection_status == "Connecting"
+                is_disconnecting_row = model.connected_mac == row_mac and model.connection_status == "Disconnecting"
+                is_pending_row = model.pending_connect_mac == row_mac and model.connection_status in ("Connecting", "Disconnecting")
+
+                # Determine current state string
+                if is_connected_row:
+                    state_str = "connected"
+                elif is_connecting_row or is_pending_row:
+                    state_str = "connecting"
+                elif is_disconnecting_row:
+                    state_str = "disconnecting"
+                else:
+                    state_str = "disconnected"
+
+                # Check if state has changed or rebuild occurred to update signals and styling
+                prev_state = btn_connect.property("state")
+                if prev_state != state_str or rebuild_needed:
+                    btn_connect.setProperty("state", state_str)
+                    
+                    try:
+                        btn_connect.clicked.disconnect()
+                    except TypeError:
+                        pass
+
+                    if state_str == "connected":
+                        btn_connect.setText("Disconnect")
+                        btn_connect.setEnabled(True)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #DC2626; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                            "QPushButton:hover { background: #EF4444; } "
+                            "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+                        )
+                        btn_connect.clicked.connect(lambda checked=False: self._vm.disconnect_device())
+                    elif state_str == "connecting":
+                        btn_connect.setText("Connecting...")
+                        btn_connect.setEnabled(False)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #334155; color: #94A3B8; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+                        )
+                    elif state_str == "disconnecting":
+                        btn_connect.setText("Disconnecting...")
+                        btn_connect.setEnabled(False)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #334155; color: #94A3B8; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+                        )
+                    else: # disconnected
+                        btn_connect.setText("Connect")
+                        btn_connect.setEnabled(True)
+                        btn_connect.setStyleSheet(
+                            "QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+                            "QPushButton:hover { background: #10B981; } "
+                            "QPushButton:disabled { background: #334155; color: #94A3B8; }"
+                        )
+                        btn_connect.clicked.connect(lambda checked, m=row_mac: self._vm.connect_device(m))
+
+                # Update Set Time button connections only on change or rebuild
+                if btn_set_time:
+                    prev_did = btn_set_time.property("d_id")
+                    if prev_did != d_id or rebuild_needed:
+                        btn_set_time.setProperty("d_id", d_id)
+                        try:
+                            btn_set_time.clicked.disconnect()
+                        except TypeError:
+                            pass
+                        btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
+                    
+                    btn_set_time.setEnabled(d_id is not None and state_str not in ("connecting", "disconnecting"))
 
         # Dynamic height adjustment so the groupbox scales with the content
         header_height = self._adv_table.horizontalHeader().height()
@@ -322,3 +431,10 @@ class DeviceInfoTab(QWidget):
         visible_rows = min(len(devices), 10)  # maximum devices show at 10 rows for height
         total_height = header_height + (visible_rows * row_height) + 2  # +2 for borders
         self._adv_table.setFixedHeight(max(total_height, 60))
+
+    def _set_table_item_text(self, row: int, col: int, text: str):
+        item = self._adv_table.item(row, col)
+        if item:
+            item.setText(text)
+        else:
+            self._adv_table.setItem(row, col, QTableWidgetItem(text))

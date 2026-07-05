@@ -45,6 +45,9 @@ class DeviceInfoViewModel(QObject):
     telemetry_updated = pyqtSignal(dict)
     advertising_devices_updated = pyqtSignal(list, bool)   # list of dicts, is_scanning
     time_sync_updated = pyqtSignal(str, bool, bool)        # local_time_str, is_synced, is_syncing
+    connection_progress_updated = pyqtSignal(dict)
+    ble_notification_requested = pyqtSignal(dict)
+    end_session_result = pyqtSignal(dict)
 
     def __init__(
         self,
@@ -84,6 +87,12 @@ class DeviceInfoViewModel(QObject):
             self.model.scan_data_updated.connect(self._on_scan_data_updated)
             
         self.model.connection_state_changed.connect(self._on_connection_state_changed)
+        if hasattr(self.model, "connection_progress_changed"):
+            self.model.connection_progress_changed.connect(self.connection_progress_updated.emit)
+        if hasattr(self.model, "ble_notification_requested"):
+            self.model.ble_notification_requested.connect(self.ble_notification_requested.emit)
+        if hasattr(self.model, "end_session_result"):
+            self.model.end_session_result.connect(self.end_session_result.emit)
 
         from utils.app_state import shared_app_state
         shared_app_state.rtos_resource_changed.connect(self._on_rtos_resource_changed)
@@ -103,6 +112,7 @@ class DeviceInfoViewModel(QObject):
         """Called once by main.py after MainWindow is shown and all signals are wired.
         Triggers initial telemetry and session start events for the connected device.
         """
+        self._emit_current_scan_devices()
         if self.model.is_connected:
             self.model.schedule_session_start(delay_ms=1500, force=True)
 
@@ -110,9 +120,26 @@ class DeviceInfoViewModel(QObject):
     #  PUBLIC METHODS (called by main.py or View)
     # ═══════════════════════════════════════════════════════════════════
 
-    def set_connected_device(self, name: str, mac: str):
+    def set_connected_device(self, name: str, mac: str, scanned_devices: list | None = None):
         """Called by main.py after ScanPopup finishes, for command/session routing."""
+        if scanned_devices:
+            self.seed_scan_devices(scanned_devices, emit=False)
         self.model.set_connected_device(name, mac)
+        self._emit_current_scan_devices()
+
+    def seed_scan_devices(self, devices: list[dict], emit: bool = True):
+        """Seed scan results captured by the startup/reconnect popup."""
+        if hasattr(self.model, "seed_scan_devices"):
+            self.model.seed_scan_devices(devices, emit=emit)
+            return
+        if self._ble_scan_repo and hasattr(self._ble_scan_repo, "seed_devices"):
+            self._ble_scan_repo.seed_devices(devices, emit=emit)
+
+    def _emit_current_scan_devices(self):
+        if self._ble_scan_repo:
+            self.advertising_devices_updated.emit(self._ble_scan_repo.merged_results(), self.model.is_scanning)
+        elif hasattr(self.model, "_emit_merged_scan_data"):
+            self.model._emit_merged_scan_data()
 
     def connect_device(self, mac_hex: str):
         """Called by View when user clicks Connect on a scanned device."""
@@ -126,15 +153,19 @@ class DeviceInfoViewModel(QObject):
         """Forward time sync advertising set command to the model."""
         self.model.send_time_sync_adv(device_type, device_id)
 
-    def request_end_session(self, reason: int = 0):
+    def request_end_session(self, reason: int = 0, await_completion: bool = False):
         """Forward session shutdown request to the model command path."""
         # BE/API: session shutdown from Device Info flow.
-        return self.model.request_end_session(reason=reason)
+        return self.model.request_end_session(reason=reason, await_completion=await_completion)
 
     def request_ble_disconnect(self, reason: int = 0):
         """Forward BLE disconnect request to the model command path."""
         # BE/API: BLE disconnect from Device Info flow.
         return self.model.request_ble_disconnect(reason=reason)
+
+    def start_ble_scan(self, duration_ms: int = 5000):
+        """Trigger a finite BLE scan manually from the UI."""
+        self.model.start_scan(clear_results=True, force=True, duration_ms=duration_ms)
 
 
 
@@ -389,20 +420,31 @@ class DeviceInfoViewModel(QObject):
         return f"{float(value):.1f} C"
 
     def _on_ble_status_parsed(self, info: dict):
-        """Forward BLE status to View."""
-        self.ble_info_updated.emit({
+        """Forward BLE status to View and telemetry state."""
+        payload = {
             "state": info.get("state"),
+            "state_name": info.get("state_name"),
+            "display_state": info.get("display_state"),
             "rssi_dbm": info.get("rssi_dbm"),
-        })
+            "disconnect_reason": info.get("disconnect_reason"),
+            "disconnect_reason_hex": info.get("disconnect_reason_hex"),
+            "disconnect_reason_name": info.get("disconnect_reason_name"),
+        }
+        if self._telemetry_model:
+            payload.update(self._telemetry_model.handle_ble_status(payload))
+        self.ble_info_updated.emit(payload)
 
     def _on_ble_conn_params_parsed(self, params: dict):
-        """Forward BLE connection parameters to View."""
-        self.ble_info_updated.emit({
+        """Forward BLE connection parameters to View and telemetry state."""
+        payload = {
             "conn_interval": f"{params.get('min_interval_ms', 0)} - {params.get('max_interval_ms', 0)} ms",
             "slave_latency": params.get("slave_latency"),
             "supervision_timeout": params.get("sup_timeout_ms"),
             "phy": params.get("phy", "-"),
-        })
+        }
+        if self._telemetry_model:
+            payload.update(self._telemetry_model.handle_ble_conn_params(payload))
+        self.ble_info_updated.emit(payload)
 
     def _on_connection_state_changed(self, info: dict):
         """Model reports connection state change -> emit a complete UI snapshot."""
@@ -413,6 +455,7 @@ class DeviceInfoViewModel(QObject):
             "MAC Address": info.get("mac", self.model.connected_mac or "-"),
         }
         self.device_info_updated.emit(payload)
+        self._emit_current_scan_devices()
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
             self.model.schedule_session_start(delay_ms=1500, force=True)
 

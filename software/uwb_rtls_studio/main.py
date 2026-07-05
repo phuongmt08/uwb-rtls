@@ -1,25 +1,25 @@
 """
 ==============================================================================
-  UWB RTLS Studio — Application Entry Point
+  UWB RTLS Studio - Application Entry Point
 ==============================================================================
   File        : main.py
   Author      : Trung Quan
-  Description : Entry point — khởi chạy toàn bộ app.
-                Flow: DonglePopup → ScanPopup → MainWindow.
-                Tất cả đều dùng real backend (serial + protobuf).
+  Description : Entry point that boots the whole app.
+                Flow: DonglePopup -> ScanPopup -> MainWindow.
+                Real hardware mode uses the serial + protobuf backend.
 
   Wiring (Dependency Injection):
-    1. Tạo Services (singleton): SerialService, ProtocolService
-    2. Tạo ViewModels: DongleViewModel, ScanViewModel
-    3. Tạo Views (popups): DonglePopup(vm), ScanPopup(vm)
-    4. Chạy flow: popup1.exec() → popup2.exec() → MainWindow
+    1. Create Services (singleton): SerialService, ProtocolService
+    2. Create ViewModels: DongleViewModel, ScanViewModel
+    3. Create Views (popups): DonglePopup(vm), ScanPopup(vm)
+    4. Run flow: popup1.exec() -> popup2.exec() -> MainWindow
 
-  Giải thích:
-    - Services được tạo 1 lần, share giữa tất cả ViewModels.
-    - ViewModels nhận Services qua constructor (dependency injection).
-    - Views nhận ViewModel qua constructor (MVVM binding).
-    - main.py là "composition root" — nơi duy nhất wire dependencies.
-===============================================================================
+  Notes:
+    - Services are created once and shared across ViewModels.
+    - ViewModels receive Services through constructor injection.
+    - Views receive ViewModels through constructor binding.
+    - main.py is the composition root for app wiring.
+==============================================================================
 """
 import sys
 import os
@@ -49,7 +49,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), ".."
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont
 
-# ── Logging setup ────────────────────────────────────────────────────
+# Logging setup
 from utils.logging_config import setup_logging
 setup_logging()
 
@@ -64,7 +64,7 @@ TEST_MODE = is_test_mode()
 
 import socket
 import threading
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 class MockSerialService(QObject):
     """TCP socket bridge acting as a mock serial service for offline/remote debugging."""
@@ -424,9 +424,9 @@ def main():
     font = QFont("Segoe UI", 13)
     app.setFont(font)
 
-    # ═══════════════════════════════════════════════════════════════
+    # ------------------------------------------------------------
     # STEP 1: Create Services (singleton, shared)
-    # ═══════════════════════════════════════════════════════════════
+    # ------------------------------------------------------------
     from services.serial_service import SerialService
     from services.protocol_service import ProtocolService
 
@@ -467,25 +467,25 @@ def main():
         send_packet_fn=lambda cmd, dst, **kwargs: command_bus.send(cmd, dst_addr=dst, **kwargs)
     )
 
-    # ═══════════════════════════════════════════════════════════════
     # STEP 2 & 3: Connection Flow
-    # ═══════════════════════════════════════════════════════════════
+    # ------------------------------------------------------------
     from models.dongle_model import DongleModel
     from viewmodels.dongle_viewmodel import DongleViewModel
     from views.popups.dongle_popup import DonglePopup
-    
+
     from models.scan_model import ScanModel
     from viewmodels.scan_viewmodel import ScanViewModel
     from views.popups.scan_popup import ScanPopup
     dongle_model = DongleModel(serial_service, protocol_service)
     dongle_vm = DongleViewModel(dongle_model)
-
-    # Vòng lặp cho Connection Flow
+    # Connection loop
     connected_name = ""
     connected_mac = ""
+    initial_scan_devices = []
 
     if TEST_MODE:
         connected_name, connected_mac = mock_device_identity()
+        initial_scan_devices = [{"name": connected_name, "mac": connected_mac, "rssi": 0, "serial": "", "order": 0}]
     else:
         while True:
             dongle_popup = DonglePopup(dongle_vm)
@@ -501,6 +501,7 @@ def main():
             if res == 1:
                 # Extract connected device info from scan_model before cleanup
                 connected_mac = scan_model.connected_mac
+                initial_scan_devices = [dict(dev) for dev in sorted(scan_model._devices.values(), key=lambda d: d.get("order", 0))]
                 if connected_mac and connected_mac in scan_model._devices:
                     dev = scan_model._devices[connected_mac]
                     connected_name = dev.get("name", "")
@@ -513,14 +514,13 @@ def main():
                     pass
                 break
             elif res == 2:
-                # Dongle bị mất kết nối khi đang scan -> comeback popup dongle và quét lại từ đầu
+                # Dongle disconnected during scan -> return to dongle popup and retry from the start
                 continue
             else:
                 sys.exit(0)
 
-    # ═══════════════════════════════════════════════════════════════
     # STEP 4: Main Window
-    # ═══════════════════════════════════════════════════════════════
+    # ------------------------------------------------------------
     from views.windows.main_window import MainWindow
     from models.ranging_model import RangingModel
     from models.device_model import DeviceModel
@@ -607,14 +607,15 @@ def main():
         command_bus=command_bus,
     )
     if connected_name and connected_mac:
-        device_info_vm.set_connected_device(connected_name, connected_mac)
+        device_info_vm.set_connected_device(connected_name, connected_mac, initial_scan_devices)
+
+
+
 
     window.showMaximized()
-
     # Initialize device data after UI is fully ready
     # QTimer.singleShot(0) defers to the next event loop iteration,
     # ensuring all Qt signals are wired before we request telemetry.
-    from PyQt6.QtCore import QTimer
     QTimer.singleShot(0, device_info_vm.initialize)
 
     exit_code = app.exec()

@@ -100,6 +100,7 @@ class SharedAppState(QObject):
     ble_status_changed = pyqtSignal(dict)          # BLE state, rssi, disconnect reason
     ranging_active_changed = pyqtSignal(bool)      # Ranging active/stopped
     log_streaming_changed = pyqtSignal(bool)       # Firmware log stream active/stopped
+    ble_scan_active_changed = pyqtSignal(bool)     # User-triggered BLE scan active/stopped
     ranging_stats_changed = pyqtSignal(dict)       # total_count, success_count, rms_error_m...
     calib_status_changed = pyqtSignal(dict)         # state, progress, iteration, peer ready mask...
     anchor_layout_changed = pyqtSignal(list)       # List of fixed anchors positions
@@ -135,6 +136,7 @@ class SharedAppState(QObject):
         self._ble_status: Dict[str, Any] = {}
         self._ranging_active = False
         self._log_streaming = False
+        self._ble_scan_active = False
         self.current_session_id = ""
         self._ranging_stats: Dict[str, Any] = {}
         self._calib_status: Dict[str, Any] = {}
@@ -200,6 +202,17 @@ class SharedAppState(QObject):
         if self._ranging_active != val:
             self._ranging_active = val
             self.ranging_active_changed.emit(val)
+
+    @property
+    def ble_scan_active(self) -> bool:
+        return self._ble_scan_active
+
+    @ble_scan_active.setter
+    def ble_scan_active(self, val: bool) -> None:
+        enabled = bool(val)
+        if self._ble_scan_active != enabled:
+            self._ble_scan_active = enabled
+            self.ble_scan_active_changed.emit(enabled)
 
     @property
     def ranging_stats(self) -> Dict[str, Any]:
@@ -331,6 +344,7 @@ class SharedAppState(QObject):
         self._ble_status = {}
         self._ranging_active = False
         self._log_streaming = False
+        self._ble_scan_active = False
         self._ranging_stats = {}
         self._calib_status = {}
         self._anchor_layout = []
@@ -347,6 +361,7 @@ class SharedAppState(QObject):
         self.battery_info_changed.emit(self._battery_info)
         self.ble_status_changed.emit(self._ble_status)
         self.ranging_active_changed.emit(self._ranging_active)
+        self.ble_scan_active_changed.emit(self._ble_scan_active)
         self.device_type_changed.emit(0)
         self.log_streaming_changed.emit(self._log_streaming)
         self.ranging_stats_changed.emit(self._ranging_stats)

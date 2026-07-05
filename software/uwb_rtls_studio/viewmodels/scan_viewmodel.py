@@ -24,6 +24,7 @@ class ScanViewModel(QObject):
     device_connecting = pyqtSignal(str)
     device_connected = pyqtSignal(dict)
     connection_failed = pyqtSignal(str)
+    connection_progress_updated = pyqtSignal(dict)
     log_message = pyqtSignal(str)
     dongle_disconnected = pyqtSignal(str)
 
@@ -35,6 +36,8 @@ class ScanViewModel(QObject):
         self.model.device_list_changed.connect(self._on_device_list_changed)
         self.model.connect_success.connect(self.device_connected.emit)
         self.model.connect_failed.connect(self._on_connect_failed)
+        if hasattr(self.model, "connection_progress_changed"):
+            self.model.connection_progress_changed.connect(self._on_connection_progress)
         self.model.dongle_disconnected.connect(self.dongle_disconnected.emit)
 
     # ── Action từ View ───────────────────────────────────────────────
@@ -76,3 +79,9 @@ class ScanViewModel(QObject):
     def _on_connect_failed(self, msg: str) -> None:
         self.connection_failed.emit(msg)
         self.log_message.emit(f"❌ {msg}")
+
+    def _on_connection_progress(self, info: dict) -> None:
+        self.connection_progress_updated.emit(info)
+        message = info.get("message")
+        if message:
+            self.log_message.emit(str(message))

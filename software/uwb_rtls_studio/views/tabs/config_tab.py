@@ -32,6 +32,16 @@ from utils.helpers import format_coord
 from utils.constants import DEVICE_TYPE_LABELS_SHORT
 from views.tabs.anchor_visual_widget import AnchorVisualWidget
 
+# --- Factory OTP constants (mirrors provision_otp.py) ---
+OTP_CONFIRM_MAGIC    = 0x4F545057  # "OTPW"
+OTP_TYPE_DEVICE_INFO   = 0x01
+OTP_TYPE_ANTENNA_DELAY = 0x02
+# Mirrors protocol.proto device_type_t enum values
+DEVICE_TYPE_TAG        = 1
+DEVICE_TYPE_ANCHOR     = 2
+DEVICE_TYPE_GATEWAY    = 3
+DEVICE_TYPE_DEBUG_TOOL = 4
+
 
 
 
@@ -53,97 +63,106 @@ class ConfigTab(QWidget):
         # ── Post-load setup ──
         self._setup_dev_widgets()
         if self._has_widget("tx_power_spin"):
-            self.tx_power_spin.setDecimals(0)
-            self.tx_power_spin.setRange(0, 0xFFFFFFFF)
+            if hasattr(self.tx_power_spin, "setDecimals"):
+                self.tx_power_spin.setDecimals(0)
+            self.tx_power_spin.setRange(0, 0x7FFFFFFF)
             self.tx_power_spin.setValue(max(0, self.tx_power_spin.value()))
-        self._setup_anchor_table()
+        self._setup_factory_otp_ui()
         self._setup_view_toggle()
         self._setup_target_selector()
         self._merge_ranging_into_uwb_config()
 
+        # Build container for Col 2 if not loaded from UI
+        if not hasattr(self, "col2_container") or self.col2_container is None:
+            self.col2_container = QWidget()
+            self.col2_layout = QVBoxLayout(self.col2_container)
+            self.col2_layout.setContentsMargins(0, 0, 0, 0)
+            self.col2_layout.setSpacing(16)
+            if hasattr(self, "uwb_config_group") and self.uwb_config_group is not None:
+                self.col2_layout.addWidget(self.uwb_config_group)
+            if hasattr(self, "dev_type_group") and self.dev_type_group is not None:
+                self.col2_layout.addWidget(self.dev_type_group, 0, Qt.AlignmentFlag.AlignTop)
 
-        # Remove original widgets from main grid layout to rearrange them dynamically
-        self.main_layout.removeWidget(self.uwb_config_group)
-        self.main_layout.removeWidget(self.anchor_group)
-        self.main_layout.removeWidget(self.fusion_group)
-        self.main_layout.removeWidget(self.device_operations_group)
-        self.main_layout.removeWidget(self.sys_group)
-        if hasattr(self, "dev_type_group"):
-            self.main_layout.removeWidget(self.dev_type_group)
+        # Setup Host Transport Group Box if not present in UI
+        if not hasattr(self, "host_group") or self.host_group is None:
+            self._setup_host_transport_group()
+        else:
+            if hasattr(self, "combo_usb_port"):
+                self._populate_serial_ports(self.combo_usb_port)
+            if hasattr(self, "combo_uart_port"):
+                self._populate_serial_ports(self.combo_uart_port)
+            if hasattr(self, "combo_host_transport"):
+                self.combo_host_transport.currentIndexChanged.connect(self._on_host_transport_changed)
+            if hasattr(self, "combo_usb_port"):
+                self.combo_usb_port.currentIndexChanged.connect(self._on_usb_port_changed)
+            if hasattr(self, "combo_uart_port"):
+                self.combo_uart_port.currentIndexChanged.connect(self._on_uart_port_changed)
+            if hasattr(self, "combo_host_transport"):
+                self._on_host_transport_changed(self.combo_host_transport.currentIndex())
+            if hasattr(self, "combo_usb_port"):
+                self._on_usb_port_changed(self.combo_usb_port.currentIndex())
 
-        # Create Column 2 Container to wrap UWB Config and Device Type Configuration vertically
-        self.col2_container = QWidget()
-        self.col2_layout = QVBoxLayout(self.col2_container)
-        self.col2_layout.setContentsMargins(0, 0, 0, 0)
-        self.col2_layout.setSpacing(16)
-        self.col2_layout.addWidget(self.uwb_config_group)
-        self.col2_layout.addWidget(self.dev_type_group, 0, Qt.AlignmentFlag.AlignTop)
+        # Setup BLE Configuration Group Box if not present in UI
+        if not hasattr(self, "ble_group") or self.ble_group is None:
+            self.ble_group = QGroupBox("📶 BLE Configuration")
+            self.ble_grid = QGridLayout(self.ble_group)
+            self.ble_grid.setSpacing(10)
 
-        # Create Host Transport Group Box
-        self._setup_host_transport_group()
-        # Create BLE Configuration Group Box
-        self.ble_group = QGroupBox("📶 BLE Configuration")
-        self.ble_grid = QGridLayout(self.ble_group)
-        self.ble_grid.setSpacing(10)
+            self.chk_enable_ble = QCheckBox("Enable BLE Advertising")
+            self.chk_enable_ble.setChecked(True)
+            self.ble_grid.addWidget(self.chk_enable_ble, 0, 0, 1, 2)
 
-        self.chk_enable_ble = QCheckBox("Enable BLE Advertising")
-        self.chk_enable_ble.setChecked(True)
-        self.ble_grid.addWidget(self.chk_enable_ble, 0, 0, 1, 2)
+            self.lbl_ble_name = QLabel("🏷️ Device Name:")
+            self.txt_ble_name = QLineEdit("Mock Device")
+            self.ble_grid.addWidget(self.lbl_ble_name, 1, 0)
+            self.ble_grid.addWidget(self.txt_ble_name, 1, 1)
 
-        self.lbl_ble_name = QLabel("🏷️ Device Name:")
-        self.txt_ble_name = QLineEdit("Mock Device")
-        self.ble_grid.addWidget(self.lbl_ble_name, 1, 0)
-        self.ble_grid.addWidget(self.txt_ble_name, 1, 1)
+            self.lbl_ble_min_int = QLabel("⏱️ Min Interval (ms):")
+            self.spin_ble_min_int = QSpinBox()
+            self.spin_ble_min_int.setRange(20, 5000)
+            self.spin_ble_min_int.setValue(20)
+            self.ble_grid.addWidget(self.lbl_ble_min_int, 2, 0)
+            self.ble_grid.addWidget(self.spin_ble_min_int, 2, 1)
 
-        # Advanced BLE Connection parameters for developer mode
-        self.lbl_ble_min_int = QLabel("⏱️ Min Interval (ms):")
-        self.spin_ble_min_int = QSpinBox()
-        self.spin_ble_min_int.setRange(20, 5000)
-        self.spin_ble_min_int.setValue(20)
-        self.ble_grid.addWidget(self.lbl_ble_min_int, 2, 0)
-        self.ble_grid.addWidget(self.spin_ble_min_int, 2, 1)
+            self.lbl_ble_max_int = QLabel("⏱️ Max Interval (ms):")
+            self.spin_ble_max_int = QSpinBox()
+            self.spin_ble_max_int.setRange(20, 5000)
+            self.spin_ble_max_int.setValue(40)
+            self.ble_grid.addWidget(self.lbl_ble_max_int, 3, 0)
+            self.ble_grid.addWidget(self.spin_ble_max_int, 3, 1)
 
-        self.lbl_ble_max_int = QLabel("⏱️ Max Interval (ms):")
-        self.spin_ble_max_int = QSpinBox()
-        self.spin_ble_max_int.setRange(20, 5000)
-        self.spin_ble_max_int.setValue(40)
-        self.ble_grid.addWidget(self.lbl_ble_max_int, 3, 0)
-        self.ble_grid.addWidget(self.spin_ble_max_int, 3, 1)
+            self.lbl_ble_latency = QLabel("⏱️ Slave Latency:")
+            self.spin_ble_latency = QSpinBox()
+            self.spin_ble_latency.setRange(0, 100)
+            self.spin_ble_latency.setValue(0)
+            self.ble_grid.addWidget(self.lbl_ble_latency, 4, 0)
+            self.ble_grid.addWidget(self.spin_ble_latency, 4, 1)
 
-        self.lbl_ble_latency = QLabel("⏱️ Slave Latency:")
-        self.spin_ble_latency = QSpinBox()
-        self.spin_ble_latency.setRange(0, 100)
-        self.spin_ble_latency.setValue(0)
-        self.ble_grid.addWidget(self.lbl_ble_latency, 4, 0)
-        self.ble_grid.addWidget(self.spin_ble_latency, 4, 1)
+            self.lbl_ble_timeout = QLabel("⏱️ Sup. Timeout (ms):")
+            self.spin_ble_timeout = QSpinBox()
+            self.spin_ble_timeout.setRange(100, 30000)
+            self.spin_ble_timeout.setValue(3000)
+            self.ble_grid.addWidget(self.lbl_ble_timeout, 5, 0)
+            self.ble_grid.addWidget(self.spin_ble_timeout, 5, 1)
 
-        self.lbl_ble_timeout = QLabel("⏱️ Sup. Timeout (ms):")
-        self.spin_ble_timeout = QSpinBox()
-        self.spin_ble_timeout.setRange(100, 30000)
-        self.spin_ble_timeout.setValue(3000)
-        self.ble_grid.addWidget(self.lbl_ble_timeout, 5, 0)
-        self.ble_grid.addWidget(self.spin_ble_timeout, 5, 1)
+            self.spin_ble_min_int.valueChanged.connect(self._on_ble_min_interval_changed)
 
-        self.spin_ble_min_int.valueChanged.connect(self._on_ble_min_interval_changed)
+            self.btn_set_ble = QPushButton("Set BLE Config")
+            self.btn_set_ble.setStyleSheet(
+                "QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }"
+                "QPushButton:hover { background: #22D3EE; color: #0F172A; }"
+            )
+            self.ble_grid.addWidget(self.btn_set_ble, 6, 0, 1, 2)
+        else:
+            if hasattr(self, "spin_ble_min_int"):
+                self.spin_ble_min_int.valueChanged.connect(self._on_ble_min_interval_changed)
 
-        self.btn_set_ble = QPushButton("Set BLE Config")
-        self.btn_set_ble.setStyleSheet(
-            "QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }"
-            "QPushButton:hover { background: #22D3EE; color: #0F172A; }"
-        )
-        self.ble_grid.addWidget(self.btn_set_ble, 6, 0, 1, 2)
-
-        # Relocate anchor_btns to be outside the table container (below anchor_stack)
-        self.page_table_layout.removeItem(self.anchor_btns)
-        self.anchor_layout.addLayout(self.anchor_btns)
-
-        # Tighten margins and padding to position buttons close to bottom and maximize table area
-        self.anchor_group.setStyleSheet("QGroupBox#anchor_group { padding-bottom: 2px; }")
-        self.anchor_layout.setContentsMargins(12, 16, 12, 2)
-        self.anchor_layout.setSpacing(4)
-        self.page_table_layout.setContentsMargins(0, 0, 0, 0)
-        self.anchor_btns.setContentsMargins(0, 0, 0, 0)
-        self.anchor_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        if hasattr(self, "page_table_layout") and hasattr(self, "anchor_btns") and self.page_table_layout is not None:
+            self.page_table_layout.removeItem(self.anchor_btns)
+            if hasattr(self, "anchor_layout"):
+                self.anchor_layout.addLayout(self.anchor_btns)
+            if hasattr(self, "anchor_table") and self.anchor_table is not None:
+                self.anchor_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         # Apply initial mode layout
         self.set_developer_mode(self._is_developer)
@@ -310,32 +329,96 @@ class ConfigTab(QWidget):
         if widget is not None and hasattr(widget, "setChecked"):
             widget.setChecked(checked)
 
-    def _setup_anchor_table(self):
-        """Configure anchor table with default data."""
-        header = self.anchor_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        header.setStretchLastSection(False)
-        for i in range(4):
-            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+    def _setup_factory_otp_ui(self):
+        # Change title
+        if hasattr(self, "anchor_group"):
+            self.anchor_group.setTitle("🏭 Factory OTP Configuration")
 
-        self.btn_add_anchor.clicked.connect(self._add_anchor)
-        self.btn_remove_anchor.clicked.connect(self._remove_anchor)
-        self.anchor_table.itemChanged.connect(self._on_table_item_changed)
-        self._set_anchor_placeholders()
+        if hasattr(self, "otp_type_combo") and self.otp_type_combo is not None:
+            self.otp_type_combo.currentIndexChanged.connect(self.otp_stacked_widget.setCurrentIndex)
+            return
 
-    def _set_anchor_placeholders(self, count: int = 4):
-        self.anchor_table.blockSignals(True)
-        try:
-            self.anchor_table.setRowCount(0)
-            for idx in range(count):
-                row = self.anchor_table.rowCount()
-                self.anchor_table.insertRow(row)
-                self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{idx}"))
-                self.anchor_table.setItem(row, 1, QTableWidgetItem("-"))
-                self.anchor_table.setItem(row, 2, QTableWidgetItem("-"))
-                self.anchor_table.setItem(row, 3, QTableWidgetItem("-"))
-        finally:
-            self.anchor_table.blockSignals(False)
+        # Hide original widgets to replace them with OTP UI
+        if hasattr(self, "btn_view_table") and self.btn_view_table is not None:
+            self.btn_view_table.hide()
+        if hasattr(self, "btn_view_visual") and self.btn_view_visual is not None:
+            self.btn_view_visual.hide()
+        if hasattr(self, "anchor_stack") and self.anchor_stack is not None:
+            self.anchor_stack.hide()
+        if hasattr(self, "btn_add_anchor") and self.btn_add_anchor is not None:
+            self.btn_add_anchor.hide()
+        if hasattr(self, "btn_remove_anchor") and self.btn_remove_anchor is not None:
+            self.btn_remove_anchor.hide()
+
+        # Remove header layout and stack from main anchor_layout
+        for i in reversed(range(self.anchor_layout.count())):
+            self.anchor_layout.takeAt(i)
+
+        # Setup Form Layout for OTP fields
+        from PyQt6.QtWidgets import QFormLayout, QStackedWidget, QComboBox, QLineEdit, QSpinBox, QCheckBox
+        
+        otp_form = QFormLayout()
+        otp_form.setContentsMargins(12, 12, 12, 12)
+        otp_form.setSpacing(12)
+        
+        self.otp_type_combo = QComboBox()
+        self.otp_type_combo.addItems(["Device Info (0x01)", "Antenna Delay (0x02)"])
+        otp_form.addRow("OTP Field Type:", self.otp_type_combo)
+        
+        self.otp_stacked_widget = QStackedWidget()
+        
+        # Page 0: Device Info
+        page_device_info = QWidget()
+        layout_device_info = QFormLayout(page_device_info)
+        layout_device_info.setContentsMargins(0, 0, 0, 0)
+        layout_device_info.setSpacing(10)
+        
+        self.otp_dev_type_combo = QComboBox()
+        self.otp_dev_type_combo.addItems(["Tag", "Anchor", "Gateway", "Debug Tool"])
+        self.otp_dev_type_combo.setCurrentText("Anchor")
+        
+        self.otp_mfg_date_input = QLineEdit()
+        self.otp_mfg_date_input.setPlaceholderText("DDMMYYYY (e.g. 03072026)")
+        self.otp_mfg_date_input.setInputMask("99999999")
+        
+        self.otp_hw_rev_spin = QSpinBox()
+        self.otp_hw_rev_spin.setRange(0, 255)
+        self.otp_hw_rev_spin.setValue(1)
+        
+        layout_device_info.addRow("Device Type:", self.otp_dev_type_combo)
+        layout_device_info.addRow("Mfg Date:", self.otp_mfg_date_input)
+        layout_device_info.addRow("HW Revision:", self.otp_hw_rev_spin)
+        
+        # Page 1: Antenna Delay
+        page_antenna_delay = QWidget()
+        layout_antenna_delay = QFormLayout(page_antenna_delay)
+        layout_antenna_delay.setContentsMargins(0, 0, 0, 0)
+        layout_antenna_delay.setSpacing(10)
+        
+        self.otp_tx_delay_spin = QSpinBox()
+        self.otp_tx_delay_spin.setRange(0, 65535)
+        self.otp_tx_delay_spin.setValue(16436)
+        
+        self.otp_rx_delay_spin = QSpinBox()
+        self.otp_rx_delay_spin.setRange(0, 65535)
+        self.otp_rx_delay_spin.setValue(16436)
+        
+        layout_antenna_delay.addRow("TX Antenna Delay:", self.otp_tx_delay_spin)
+        layout_antenna_delay.addRow("RX Antenna Delay:", self.otp_rx_delay_spin)
+        
+        self.otp_stacked_widget.addWidget(page_device_info)
+        self.otp_stacked_widget.addWidget(page_antenna_delay)
+        
+        otp_form.addRow(self.otp_stacked_widget)
+        
+        self.otp_confirm_checkbox = QCheckBox("Confirm irreversible OTP write")
+        self.otp_confirm_checkbox.setStyleSheet("QCheckBox { color: #F87171; font-weight: bold; }")
+        otp_form.addRow(self.otp_confirm_checkbox)
+        
+        self.anchor_layout.addLayout(otp_form)
+        
+        # Connect currentIndex changes
+        self.otp_type_combo.currentIndexChanged.connect(self.otp_stacked_widget.setCurrentIndex)
 
     @staticmethod
     def _coord_text(value):
@@ -346,42 +429,6 @@ class ConfigTab(QWidget):
         except (TypeError, ValueError):
             return "-"
 
-    def _add_anchor(self):
-        self.anchor_table.blockSignals(True)
-        try:
-            row = self.anchor_table.rowCount()
-            self.anchor_table.insertRow(row)
-
-            # Find the maximum existing anchor ID to calculate the next ID and prevent duplication
-            max_id = -1
-            for r in range(row):
-                item = self.anchor_table.item(r, 0)
-                if item:
-                    try:
-                        val_str = item.text().strip()
-                        if val_str.startswith('A') or val_str.startswith('a'):
-                            val = int(val_str[1:])
-                        else:
-                            val = int(val_str)
-                        if val > max_id:
-                            max_id = val
-                    except ValueError:
-                        pass
-            next_id = max_id + 1 if max_id >= 0 else row
-
-            self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{next_id}"))
-            self.anchor_table.setItem(row, 1, QTableWidgetItem("0"))
-            self.anchor_table.setItem(row, 2, QTableWidgetItem("0"))
-            self.anchor_table.setItem(row, 3, QTableWidgetItem("0"))
-        finally:
-            self.anchor_table.blockSignals(False)
-        self._sync_table_to_shared_state()
-
-    def _remove_anchor(self):
-        row = self.anchor_table.rowCount()
-        if row > 0:
-            self.anchor_table.removeRow(row - 1)
-            self._sync_table_to_shared_state()
 
     def _clear_main_layout(self):
         # Safely remove all widgets from the grid layout without deleting them
@@ -461,18 +508,12 @@ class ConfigTab(QWidget):
             # Visibility
             self.fusion_group.setVisible(True)
             self.host_group.setVisible(True)
-            self.ranging_group.setVisible(False)
+            if hasattr(self, "ranging_group") and self.ranging_group is not None:
+                self.ranging_group.setVisible(False)
             self.ble_group.setVisible(True)
 
-            # Table Edit Triggers
-            self.anchor_table.setEditTriggers(
-                QAbstractItemView.EditTrigger.DoubleClicked |
-                QAbstractItemView.EditTrigger.SelectedClicked |
-                QAbstractItemView.EditTrigger.EditKeyPressed
-            )
-            is_table = (self.anchor_stack.currentIndex() == 0)
-            self.btn_add_anchor.setVisible(is_table)
-            self.btn_remove_anchor.setVisible(is_table)
+            # Table Edit Triggers (deprecated)
+            pass
 
         else:
             # 2. User Mode: 3 Column Layout (Anchor Layout, Host, BLE on left/middle, UWB on right)
@@ -498,19 +539,13 @@ class ConfigTab(QWidget):
             # Visibility
             self.fusion_group.setVisible(False)
             self.host_group.setVisible(True)
-            self.ranging_group.setVisible(False)
+            if hasattr(self, "ranging_group") and self.ranging_group is not None:
+                self.ranging_group.setVisible(False)
             self.ble_group.setVisible(True)
             self.dev_type_group.setVisible(True)
 
-            # Table Edit Triggers - enable editing so users can modify coordinates of added anchors
-            self.anchor_table.setEditTriggers(
-                QAbstractItemView.EditTrigger.DoubleClicked |
-                QAbstractItemView.EditTrigger.SelectedClicked |
-                QAbstractItemView.EditTrigger.EditKeyPressed
-            )
-            is_table = (self.anchor_stack.currentIndex() == 0)
-            self.btn_add_anchor.setVisible(is_table)
-            self.btn_remove_anchor.setVisible(is_table)
+            # Table Edit Triggers (deprecated)
+            pass
 
         # Row Stretch - give Row 0 (Anchor Layout) more height than Row 1 to prevent table clipping
         self.main_layout.setRowStretch(0, 3)
@@ -644,48 +679,26 @@ class ConfigTab(QWidget):
         set_widget_placeholder(self.spin_ble_latency)
         set_widget_placeholder(self.spin_ble_timeout)
         
-        # Reset Anchor Layout table placeholders
-        self._set_anchor_placeholders()
+        # Reset Anchor Layout table placeholders (deprecated)
+        pass
 
     def _setup_view_toggle(self):
-        self.btn_view_table.clicked.connect(self._show_table_view)
-        self.btn_view_visual.clicked.connect(self._show_visual_view)
-        self.anchor_stack.setCurrentIndex(0)
-        self._update_segmented_style()
+        pass
 
     def _show_table_view(self):
-        self.anchor_stack.setCurrentIndex(0)
-        self._update_segmented_style()
-        self.btn_add_anchor.setVisible(True)
-        self.btn_remove_anchor.setVisible(True)
+        pass
 
     def _show_visual_view(self):
-        anchors = self._get_anchors_from_table()
-        self.visual_widget.set_anchors(anchors)
-        self.anchor_stack.setCurrentIndex(1)
-        self._update_segmented_style()
-        self.btn_add_anchor.setVisible(False)
-        self.btn_remove_anchor.setVisible(False)
+        pass
 
     def _update_segmented_style(self):
-        idx = self.anchor_stack.currentIndex()
-        self.btn_view_table.setProperty("active", idx == 0)
-        self.btn_view_visual.setProperty("active", idx == 1)
-        self.btn_view_table.style().unpolish(self.btn_view_table)
-        self.btn_view_table.style().polish(self.btn_view_table)
-        self.btn_view_visual.style().unpolish(self.btn_view_visual)
-        self.btn_view_visual.style().polish(self.btn_view_visual)
+        pass
 
     def _on_table_item_changed(self, item):
-        self._sync_table_to_shared_state()
-        if self.anchor_stack.currentIndex() == 1:
-            anchors = self._get_anchors_from_table()
-            self.visual_widget.set_anchors(anchors)
+        pass
 
     def _sync_table_to_shared_state(self):
-        if self._vm:
-            anchors = self._get_anchors_from_table()
-            self._vm.update_shared_anchor_layout(anchors)
+        pass
 
     def _refresh_target_devices(self, devices: list):
         self._scan_devices = [dict(d) for d in devices]
@@ -760,8 +773,8 @@ class ConfigTab(QWidget):
         self._current_device_id = device_id
         self.val_role.setCurrentText(role_map.get(role, "Tag"))
         self.val_deviceid.setCurrentText(f"0x{device_id:04X}")
-        if self._last_anchor_layout:
-            self._apply_anchor_layout_to_table()
+        # if self._last_anchor_layout:
+        #     self._apply_anchor_layout_to_table()
 
     def _role_from_ui(self) -> int:
         role_map = {"Tag": 1, "Anchor": 2, "Gateway": 3}
@@ -869,97 +882,146 @@ class ConfigTab(QWidget):
         target = self._selected_target()
         self._apply_target_to_ui(target)
 
-        anchors = self._get_anchors_from_table()
-        period = self.rng_period_spin.value()
-        timeout = self.rx_timeout_spin.value()
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QVBoxLayout
 
-        # 3. Write UWB Config (Sys Config)
-        role = self._role_from_ui()
-        device_id = self._parse_device_id_from_ui(default=1)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Configuration to Write")
+        dialog.setMinimumWidth(320)
+        
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setSpacing(12)
+        dialog_layout.setContentsMargins(16, 16, 16, 16)
+        
+        label = QLabel("Tích chọn các loại cấu hình muốn ghi xuống thiết bị:")
+        label.setStyleSheet("font-weight: bold;")
+        dialog_layout.addWidget(label)
+        
+        # Checkboxes
+        chk_sys = QCheckBox("UWB Configuration (Sys Config)")
+        chk_sys.setChecked(True)
+        dialog_layout.addWidget(chk_sys)
+        
+        chk_ranging = QCheckBox("Ranging Configuration")
+        chk_ranging.setChecked(True)
+        dialog_layout.addWidget(chk_ranging)
+        
+        chk_fusion = QCheckBox("Sensor Fusion (UKF) Configuration")
+        chk_fusion.setChecked(True)
+        dialog_layout.addWidget(chk_fusion)
+        
+        chk_calib = QCheckBox("Position Calibration Configuration")
+        chk_calib.setChecked(True)
+        dialog_layout.addWidget(chk_calib)
+        
+        chk_otp = QCheckBox("Factory OTP Configuration")
+        chk_otp.setChecked(False) # Unchecked by default for safety
+        dialog_layout.addWidget(chk_otp)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        dialog_layout.addWidget(button_box)
+        
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
 
-        try:
-            uwb_channel = int(self.val_channel.currentText())
-        except ValueError:
-            uwb_channel = 5
+        # Prepare configurations to send
+        sys_config = None
+        if chk_sys.isChecked():
+            role = self._role_from_ui()
+            device_id = self._parse_device_id_from_ui(default=1)
 
-        rate_str = self.val_datarate.currentText()
-        rate_map = {"110 kbps": 110, "850 kbps": 850, "6.8 Mbps": 6800}
-        uwb_data_rate = rate_map.get(rate_str, 6800)
+            try:
+                uwb_channel = int(self.val_channel.currentText())
+            except ValueError:
+                uwb_channel = 5
 
-        prf_str = self.val_prf.currentText()
-        prf_map = {"16 MHz": 16, "64 MHz": 64}
-        uwb_prf = prf_map.get(prf_str, 64)
+            rate_str = self.val_datarate.currentText()
+            rate_map = {"110 kbps": 110, "850 kbps": 850, "6.8 Mbps": 6800}
+            uwb_data_rate = rate_map.get(rate_str, 6800)
 
-        # 6 developer-mode UWB fields
-        preamble_len_map = {
-            "64 symbols": 0x04,
-            "128 symbols": 0x08,
-            "256 symbols": 0x18,
-            "512 symbols": 0x28,
-            "1024 symbols": 0x14,
-            "1536 symbols": 0x0C,
-            "2048 symbols": 0x24,
-            "4096 symbols": 0x34
-        }
-        preamble_len_text = self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else "4096 symbols"
-        uwb_preamble_len = preamble_len_map.get(preamble_len_text, 0x34)
+            prf_str = self.val_prf.currentText()
+            prf_map = {"16 MHz": 16, "64 MHz": 64}
+            uwb_prf = prf_map.get(prf_str, 64)
 
-        pac_map = {"8": 0, "16": 1, "32": 2, "64": 3}
-        rx_pac_text = self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else "8"
-        uwb_rx_pac = pac_map.get(rx_pac_text, 0)
+            # 6 developer-mode UWB fields
+            preamble_len_map = {
+                "64 symbols": 0x04,
+                "128 symbols": 0x08,
+                "256 symbols": 0x18,
+                "512 symbols": 0x28,
+                "1024 symbols": 0x14,
+                "1536 symbols": 0x0C,
+                "2048 symbols": 0x24,
+                "4096 symbols": 0x34
+            }
+            preamble_len_text = self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else "4096 symbols"
+            uwb_preamble_len = preamble_len_map.get(preamble_len_text, 0x34)
 
-        sfd_map = {"Standard": 0, "Non-standard": 1}
-        ns_sfd_text = self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else "Standard"
-        uwb_ns_sfd = sfd_map.get(ns_sfd_text, 0)
+            pac_map = {"8": 0, "16": 1, "32": 2, "64": 3}
+            rx_pac_text = self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else "8"
+            uwb_rx_pac = pac_map.get(rx_pac_text, 0)
 
-        phr_map = {"Standard": 0, "Extended": 1}
-        phr_mode_text = self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else "Standard"
-        uwb_phr_mode = phr_map.get(phr_mode_text, 0)
+            sfd_map = {"Standard": 0, "Non-standard": 1}
+            ns_sfd_text = self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else "Standard"
+            uwb_ns_sfd = sfd_map.get(ns_sfd_text, 0)
 
-        smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False
-        pg_delay = self._spin_value("val_pg_delay", 193)
+            phr_map = {"Standard": 0, "Extended": 1}
+            phr_mode_text = self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else "Standard"
+            uwb_phr_mode = phr_map.get(phr_mode_text, 0)
 
-        sys_config = dict(
-            role=role,
-            device_id=device_id,
-            uwb_channel=uwb_channel,
-            uwb_data_rate=uwb_data_rate,
-            uwb_prf=uwb_prf,
-            tx_antenna_delay=self.tx_delay_spin.value(),
-            rx_antenna_delay=self.rx_delay_spin.value(),
-            tx_power=max(0, int(self.tx_power_spin.value())),
-            uwb_preamble_code=self.preamble_spin.value(),
-            ranging_period_ms=self.rng_period_spin.value(),
-            rx_timeout_ms=self.rx_timeout_spin.value(),
-            uwb_preamble_len=uwb_preamble_len,
-            uwb_rx_pac=uwb_rx_pac,
-            uwb_ns_sfd=uwb_ns_sfd,
-            uwb_phr_mode=uwb_phr_mode,
-            smart_tx_power=smart_tx_power,
-            pg_delay=pg_delay
-        )
+            smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False
+            pg_delay = self._spin_value("val_pg_delay", 193)
 
-        # 4. Write Sensor Fusion Config
-        sensor_fusion_config = dict(
-            alpha=self.alpha_spin.value(),
-            beta=self.beta_spin.value(),
-            kappa=self.kappa_spin.value(),
-            q_a=self.q_accel_spin.value(),
-            q_g=self.q_gyro_spin.value(),
-            r_uwb=self.r_uwb_spin.value(),
-            init_p_px=self._spin_value("init_p_px_spin", 1.0),
-            init_p_py=self._spin_value("init_p_py_spin", 1.0),
-            init_p_vx=self._spin_value("init_p_vx_spin", 0.1),
-            init_p_vy=self._spin_value("init_p_vy_spin", 0.1),
-            init_p_theta=self._spin_value("init_p_theta_spin", 0.1),
-            init_p_bias_ax=self._spin_value("init_p_bias_ax_spin", 0.01),
-            init_p_bias_ay=self._spin_value("init_p_bias_ay_spin", 0.01),
-            init_p_bias_gz=self._spin_value("init_p_bias_gz_spin", 0.01)
-        )
+            sys_config = dict(
+                role=role,
+                device_id=device_id,
+                uwb_channel=uwb_channel,
+                uwb_data_rate=uwb_data_rate,
+                uwb_prf=uwb_prf,
+                tx_antenna_delay=self.tx_delay_spin.value(),
+                rx_antenna_delay=self.rx_delay_spin.value(),
+                tx_power=max(0, int(self.tx_power_spin.value())),
+                uwb_preamble_code=self.preamble_spin.value(),
+                ranging_period_ms=self.rng_period_spin.value(),
+                rx_timeout_ms=self.rx_timeout_spin.value(),
+                uwb_preamble_len=uwb_preamble_len,
+                uwb_rx_pac=uwb_rx_pac,
+                uwb_ns_sfd=uwb_ns_sfd,
+                uwb_phr_mode=uwb_phr_mode,
+                smart_tx_power=smart_tx_power,
+                pg_delay=pg_delay
+            )
 
-        # 5. Write Position Calibration Config
-        pos_calib_config = {}
-        if self._has_widget("chk_enable_anchor_calib"):
+        ranging_config = None
+        if chk_ranging.isChecked():
+            ranging_config = {
+                "period_ms": self.rng_period_spin.value(),
+                "timeout_ms": self.rx_timeout_spin.value(),
+            }
+
+        sensor_fusion_config = None
+        if chk_fusion.isChecked():
+            sensor_fusion_config = dict(
+                alpha=self.alpha_spin.value(),
+                beta=self.beta_spin.value(),
+                kappa=self.kappa_spin.value(),
+                q_a=self.q_accel_spin.value(),
+                q_g=self.q_gyro_spin.value(),
+                r_uwb=self.r_uwb_spin.value(),
+                init_p_px=self._spin_value("init_p_px_spin", 1.0),
+                init_p_py=self._spin_value("init_p_py_spin", 1.0),
+                init_p_vx=self._spin_value("init_p_vx_spin", 0.1),
+                init_p_vy=self._spin_value("init_p_vy_spin", 0.1),
+                init_p_theta=self._spin_value("init_p_theta_spin", 0.1),
+                init_p_bias_ax=self._spin_value("init_p_bias_ax_spin", 0.01),
+                init_p_bias_ay=self._spin_value("init_p_bias_ay_spin", 0.01),
+                init_p_bias_gz=self._spin_value("init_p_bias_gz_spin", 0.01)
+            )
+
+        pos_calib_config = None
+        if chk_calib.isChecked() and self._has_widget("chk_enable_anchor_calib"):
             pos_calib_config = dict(
                 enable_anchor_auto_calib=self.chk_enable_anchor_calib.isChecked(),
                 enable_tag_auto_calib=getattr(self, "chk_enable_tag_calib", self.chk_enable_anchor_calib).isChecked(),
@@ -976,16 +1038,84 @@ class ConfigTab(QWidget):
                 iterations=self._spin_value("pos_iterations_spin", 100)
             )
 
+        factory_otp_config = None
+        if chk_otp.isChecked():
+            if not self.otp_confirm_checkbox.isChecked():
+                QMessageBox.warning(self, "Cảnh báo OTP",
+                    "Vui lòng tích chọn 'Confirm irreversible OTP write' trước khi ghi OTP!")
+                return
+
+            otp_type_idx = self.otp_type_combo.currentIndex()
+            # Map combo index → OTP_TYPE constant (matches provision_otp.py)
+            otp_type = OTP_TYPE_DEVICE_INFO if otp_type_idx == 0 else OTP_TYPE_ANTENNA_DELAY
+
+            device_type    = DEVICE_TYPE_ANCHOR  # default
+            value_u32      = 0
+            value_u8       = 0
+            tx_antenna_delay = 0
+            rx_antenna_delay = 0
+
+            if otp_type == OTP_TYPE_DEVICE_INFO:
+                dev_type_map = {
+                    "Tag":       DEVICE_TYPE_TAG,
+                    "Anchor":    DEVICE_TYPE_ANCHOR,
+                    "Gateway":   DEVICE_TYPE_GATEWAY,
+                    "Debug Tool": DEVICE_TYPE_DEBUG_TOOL,
+                }
+                device_type = dev_type_map.get(self.otp_dev_type_combo.currentText(), DEVICE_TYPE_ANCHOR)
+
+                mfg_date_str = self.otp_mfg_date_input.text().strip()
+                try:
+                    value_u32 = int(mfg_date_str)
+                except ValueError:
+                    QMessageBox.warning(self, "Cảnh báo OTP",
+                        "Ngày sản xuất phải là số nguyên định dạng DDMMYYYY (ví dụ: 03072026)!")
+                    return
+
+                # device_info requires a non-zero mfg_date (mirrors provision_otp.py line 118)
+                if value_u32 == 0:
+                    QMessageBox.warning(self, "Cảnh báo OTP",
+                        "device_info yêu cầu ngày sản xuất hợp lệ, ví dụ: 03072026.")
+                    return
+
+                # Validate DDMMYYYY ranges (mirrors _valid_mfg_date in provision_otp.py)
+                day   = value_u32 // 1_000_000
+                month = (value_u32 // 10_000) % 100
+                year  = value_u32 % 10_000
+                if not (1 <= day <= 31 and 1 <= month <= 12 and 2000 <= year <= 2255):
+                    QMessageBox.warning(self, "Cảnh báo OTP",
+                        "Ngày sản xuất không hợp lệ! Định dạng DDMMYYYY, "
+                        "ngày 1..31, tháng 1..12, năm 2000..2255 (ví dụ: 03072026).")
+                    return
+
+                value_u8 = self.otp_hw_rev_spin.value()
+
+            elif otp_type == OTP_TYPE_ANTENNA_DELAY:
+                tx_antenna_delay = self.otp_tx_delay_spin.value()
+                rx_antenna_delay = self.otp_rx_delay_spin.value()
+                # Guard against uint16 overflow (mirrors provision_otp.py line 115)
+                if tx_antenna_delay > 0xFFFF or rx_antenna_delay > 0xFFFF:
+                    QMessageBox.warning(self, "Cảnh báo OTP",
+                        "TX/RX antenna delay phải nằm trong khoảng uint16 (0..65535).")
+                    return
+
+            factory_otp_config = {
+                "confirm_magic":    OTP_CONFIRM_MAGIC,
+                "otp_type":         otp_type,
+                "device_type":      device_type,
+                "tx_antenna_delay": tx_antenna_delay,
+                "rx_antenna_delay": rx_antenna_delay,
+                "value_u32":        value_u32,
+                "value_u8":         value_u8,
+            }
+
         self._vm.write_device_config(
             target=target,
-            anchors=anchors,
-            ranging_config={
-                "period_ms": period,
-                "timeout_ms": timeout,
-            },
+            ranging_config=ranging_config,
             sys_config=sys_config,
             sensor_fusion_config=sensor_fusion_config,
             pos_calib_config=pos_calib_config,
+            factory_otp_config=factory_otp_config,
         )
 
     def _write_all_devices(self):
@@ -1083,8 +1213,7 @@ class ConfigTab(QWidget):
         }
 
     def _on_anchor_layout_loaded(self, anchors):
-        self._last_anchor_layout = [dict(a) for a in anchors]
-        self._apply_anchor_layout_to_table()
+        pass
 
     def _update_single_anchor_in_table(self, anchor_id, x_m, y_m, z_m):
         target_row = -1
@@ -1105,43 +1234,7 @@ class ConfigTab(QWidget):
         self.anchor_table.setItem(target_row, 2, QTableWidgetItem(self._coord_text(y_m)))
         self.anchor_table.setItem(target_row, 3, QTableWidgetItem(self._coord_text(z_m)))
     def _apply_anchor_layout_to_table(self):
-        anchors = [dict(a) for a in self._last_anchor_layout]
-        self.anchor_table.blockSignals(True)
-        try:
-            if not anchors:
-                self.anchor_table.blockSignals(False)
-                self._set_anchor_placeholders()
-                self.visual_widget.set_anchors([])
-                return
-            if self._current_role == 2:  # Anchor device: only expose its own layout item.
-                target_anchor = None
-                for anchor in anchors:
-                    if anchor.get("anchor_id") == self._current_device_id:
-                        target_anchor = anchor
-                        break
-                if not target_anchor and anchors:
-                    target_anchor = anchors[0]
-                self.anchor_table.setRowCount(0)
-                if target_anchor:
-                    self._update_single_anchor_in_table(
-                        target_anchor.get("anchor_id", self._current_device_id),
-                        target_anchor.get("x_m"),
-                        target_anchor.get("y_m"),
-                        target_anchor.get("z_m"),
-                    )
-            else:  # Tag/Gateway: render the full anchor layout list.
-                self.anchor_table.setRowCount(0)
-                for anchor in anchors:
-                    row = self.anchor_table.rowCount()
-                    self.anchor_table.insertRow(row)
-                    self.anchor_table.setItem(row, 0, QTableWidgetItem(f"A{anchor['anchor_id']}"))
-                    self.anchor_table.setItem(row, 1, QTableWidgetItem(self._coord_text(anchor.get("x_m"))))
-                    self.anchor_table.setItem(row, 2, QTableWidgetItem(self._coord_text(anchor.get("y_m"))))
-                    self.anchor_table.setItem(row, 3, QTableWidgetItem(self._coord_text(anchor.get("z_m"))))
-        finally:
-            self.anchor_table.blockSignals(False)
-        current_anchors = self._get_anchors_from_table()
-        self.visual_widget.set_anchors(current_anchors)
+        pass
 
     def _on_sys_config_loaded(self, cfg):
         from utils.helpers import set_widget_placeholder, set_widget_value
@@ -1239,8 +1332,8 @@ class ConfigTab(QWidget):
         if self._has_widget("val_pg_delay"):
             set_widget_value(self.val_pg_delay, cfg.get("pg_delay", 193))
             
-        if self._last_anchor_layout:
-            self._apply_anchor_layout_to_table()
+        # if self._last_anchor_layout:
+        #     self._apply_anchor_layout_to_table()
 
     def _on_sys_ranging_cfg_loaded(self, cfg):
         from utils.helpers import set_widget_placeholder, set_widget_value

@@ -17,11 +17,12 @@ import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTabWidget, QStatusBar, QComboBox, QFrame,
-    QApplication, QMessageBox
+    QApplication, QMessageBox, QProgressBar, QGraphicsOpacityEffect
 )
-from PyQt6.QtCore import QTimer, QSize
+from PyQt6.QtCore import QTimer, QSize, Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QAction
 from PyQt6 import uic
+from common import protocol_pb2 as pb
 
 # Tab imports are handled dynamically by uic.loadUi based on <customwidgets> in the .ui file
 
@@ -29,6 +30,148 @@ from PyQt6 import uic
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'main_window.ui')
 
 
+class ToastNotification(QFrame):
+    def __init__(self, title: str, message: str, kind: str = "info", parent=None, icon_text: str = ""):
+        super().__init__(parent)
+        self.setObjectName("ble_toast")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(430)
+        self._close_started = False
+        self._kind = kind
+        self._icon_text = icon_text
+        self._base_message = message
+        self._loading_step = 0
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 8, 10)
+        layout.setSpacing(8)
+
+        self._icon = QLabel(icon_text)
+        self._icon.setObjectName("toast_icon")
+        self._icon.setFixedSize(28, 28)
+        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon.setVisible(bool(icon_text))
+        layout.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignTop)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        self._title = QLabel(title)
+        self._title.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF;")
+        text_layout.addWidget(self._title)
+
+        self._message = QLabel(message)
+        self._message.setWordWrap(True)
+        self._message.setStyleSheet("font-size: 12px; color: #CBD5E1;")
+        text_layout.addWidget(self._message)
+        layout.addLayout(text_layout, 1)
+
+        self._close_btn = QPushButton("x")
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close_btn.setFixedSize(24, 24)
+        self._close_btn.clicked.connect(self.close_animated)
+        layout.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._opacity = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity)
+        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
+        self._fade.setDuration(180)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._auto_close = QTimer(self)
+        self._auto_close.setSingleShot(True)
+        self._auto_close.timeout.connect(self.close_animated)
+        self._loading_timer = QTimer(self)
+        self._loading_timer.setInterval(350)
+        self._loading_timer.timeout.connect(self._tick_loading_text)
+        self._apply_kind_style(kind)
+
+    def show_animated(self, auto_close_ms: int) -> None:
+        self._opacity.setOpacity(0.0)
+        self.show()
+        self.raise_()
+        self._fade.stop()
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._fade.start()
+        if auto_close_ms > 0:
+            self._auto_close.start(auto_close_ms)
+
+    def update_content(self, title: str, message: str, kind: str | None = None, icon_text: str | None = None) -> None:
+        if kind is not None:
+            self._kind = kind
+            self._apply_kind_style(kind)
+        if icon_text is not None:
+            self._icon_text = icon_text
+            self._icon.setText(icon_text)
+            self._icon.setVisible(bool(icon_text))
+        self._title.setText(title)
+        self._message.setText(message)
+        self._base_message = message
+        self.adjustSize()
+
+    def start_loading(self, base_message: str) -> None:
+        self._base_message = base_message.rstrip(".")
+        self._loading_step = 0
+        self._tick_loading_text()
+        self._loading_timer.start()
+
+    def stop_loading(self) -> None:
+        self._loading_timer.stop()
+
+    def _tick_loading_text(self) -> None:
+        patterns = ("...", ".....", "......")
+        suffix = patterns[self._loading_step % len(patterns)]
+        self._loading_step += 1
+        self._message.setText(f"{self._base_message}{suffix}")
+        self.adjustSize()
+
+    def _apply_kind_style(self, kind: str) -> None:
+        accent = {
+            "disconnect": "#EF4444",
+            "error": "#EF4444",
+            "connect_retry": "#F59E0B",
+            "success": "#10B981",
+            "pending": "#22D3EE",
+        }.get(kind, "#22D3EE")
+        self.setStyleSheet(f"""
+            QFrame#ble_toast {{
+                background: #111827;
+                border: 1px solid {accent};
+                border-left: 4px solid {accent};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #E5E7EB; }}
+            QLabel#toast_icon {{
+                color: {accent};
+                border: 2px solid {accent};
+                border-radius: 14px;
+                font-size: 18px;
+                font-weight: bold;
+            }}
+            QPushButton {{
+                background: transparent;
+                color: #94A3B8;
+                border: none;
+                font-weight: bold;
+                padding: 2px 6px;
+            }}
+            QPushButton:hover {{ color: #FFFFFF; }}
+        """)
+        self._icon.style().unpolish(self._icon)
+        self._icon.style().polish(self._icon)
+
+    def close_animated(self) -> None:
+        if self._close_started:
+            return
+        self._close_started = True
+        self._auto_close.stop()
+        self._loading_timer.stop()
+        self._fade.stop()
+        self._fade.setStartValue(float(self._opacity.opacity()))
+        self._fade.setEndValue(0.0)
+        self._fade.finished.connect(self.deleteLater)
+        self._fade.start()
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -59,9 +202,18 @@ class MainWindow(QMainWindow):
         self._session_active = False
         self._session_seconds = 0
         self._reconnect_popup = None
+        self._conn_progress_target = 0
+        self._conn_progress_display = 0
+        self._conn_progress_timer = QTimer(self)
+        self._conn_progress_timer.setInterval(8)
+        self._conn_progress_timer.timeout.connect(self._tick_connection_progress)
+        self._pending_command_toasts = {}
 
         # -- Load UI from .ui file --
         uic.loadUi(UI_FILE, self)
+
+        self._ble_toast = None
+        self._setup_header_progress()
 
         # -- Setup tabs (replace placeholder) --
         self._setup_tabs()
@@ -77,6 +229,329 @@ class MainWindow(QMainWindow):
         self._session_timer.timeout.connect(self._tick_session)
         self._set_session_button_active(False)
         self._begin_session(initial=True)
+
+    def _setup_header_progress(self):
+        # Create Scan Device button
+        self.btn_scan_device = QPushButton("🔍 Scan Device")
+        self.btn_scan_device.setObjectName("btn_scan_device")
+        self.btn_scan_device.setMinimumSize(QSize(130, 36))
+        self.btn_scan_device.setMaximumSize(QSize(130, 36))
+        self.btn_scan_device.setStyleSheet(
+            "QPushButton { background: rgba(6, 182, 212, 0.12); color: #06B6D4; border: 1px solid #06B6D4; border-radius: 8px; font-weight: bold; font-size: 13px; }"
+            "QPushButton:hover { background: #06B6D4; color: #F8FAFC; }"
+            "QPushButton:disabled { background: rgba(51, 65, 85, 0.2); color: #64748B; border: 1px solid #475569; }"
+        )
+        self.btn_scan_device.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_scan_device.clicked.connect(self._on_scan_device_clicked)
+
+        self._conn_progress_frame = QFrame(self.header_content_frame)
+        self._conn_progress_frame.setObjectName("ble_process_frame")
+        self._conn_progress_frame.setFixedHeight(36)
+        self._conn_progress_frame.setMinimumWidth(360)
+        self._conn_progress_frame.setMaximumWidth(470)
+
+        layout = QHBoxLayout(self._conn_progress_frame)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+
+        self._conn_progress_label = QLabel("BLE: Disconnected")
+        self._conn_progress_label.setMinimumWidth(132)
+        self._conn_progress_label.setMaximumWidth(170)
+        self._conn_progress_label.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self._conn_progress_label)
+
+        self._conn_progress_bar = QProgressBar()
+        self._conn_progress_bar.setRange(0, 100)
+        self._conn_progress_bar.setValue(0)
+        self._conn_progress_bar.setFormat("%p%")
+        self._conn_progress_bar.setTextVisible(True)
+        self._conn_progress_bar.setFixedHeight(18)
+        layout.addWidget(self._conn_progress_bar, 1)
+
+        # Insert button first, then progress status frame
+        self.header_layout.insertWidget(2, self.btn_scan_device)
+        self.header_layout.insertWidget(3, self._conn_progress_frame)
+        self.update_progress_style("IDLE")
+
+    def update_progress_style(self, status: str):
+        if status == "SUCCESS":
+            border_color = "#10B981"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #10B981, stop:1 #047857);"
+        elif status in ("FAILED", "ERROR"):
+            border_color = "#EF4444"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #EF4444, stop:1 #B91C1C);"
+        elif status == "RETRYING":
+            border_color = "#F59E0B"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #F59E0B, stop:1 #B45309);"
+        elif status == "RUNNING":
+            border_color = "#3B82F6"
+            chunk_style = "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #06B6D4, stop:1 #10B981);"
+        else:  # IDLE/DEFAULT
+            border_color = "#334155"
+            chunk_style = "background: #1E293B;"
+
+        self._conn_progress_frame.setStyleSheet(f"""
+            QFrame#ble_process_frame {{
+                background: #0F172A;
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #CBD5E1; font-size: 12px; }}
+            QProgressBar {{
+                background: #020617;
+                border: 1px solid #334155;
+                border-radius: 5px;
+                color: #E5E7EB;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                {chunk_style}
+                border-radius: 4px;
+            }}
+        """)
+
+    def _animate_success(self):
+        import math
+        self._success_anim_step = 0
+        if hasattr(self, "_success_timer") and self._success_timer:
+            self._success_timer.stop()
+        self._success_timer = QTimer(self)
+        self._success_timer.setInterval(60)
+        self._success_timer.timeout.connect(self._on_success_anim_tick)
+        self._success_timer.start()
+
+    def _on_success_anim_tick(self):
+        import math
+        self._success_anim_step += 1
+        if self._success_anim_step > 12:
+            self._success_timer.stop()
+            self._success_timer = None
+            self.update_progress_style("SUCCESS")
+            return
+
+        alpha = int(127 + 128 * abs(math.sin(self._success_anim_step * 0.5)))
+        border_color = f"rgba(16, 185, 129, {alpha/255.0:.2f})"
+        chunk_style = f"background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(16, 185, 129, {alpha/255.0:.2f}), stop:1 #047857);"
+
+        self._conn_progress_frame.setStyleSheet(f"""
+            QFrame#ble_process_frame {{
+                background: #0F172A;
+                border: 2px solid {border_color};
+                border-radius: 8px;
+            }}
+            QLabel {{ background: transparent; color: #E2E8F0; font-size: 12px; font-weight: bold; }}
+            QProgressBar {{
+                background: #020617;
+                border: 1px solid #334155;
+                border-radius: 5px;
+                color: #FFFFFF;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                {chunk_style}
+                border-radius: 4px;
+            }}
+        """)
+
+    def _tick_connection_progress(self):
+        if self._conn_progress_display < self._conn_progress_target:
+            self._conn_progress_display += 1
+            self._conn_progress_bar.setValue(self._conn_progress_display)
+        elif self._conn_progress_display > self._conn_progress_target:
+            self._conn_progress_display -= 1
+            self._conn_progress_bar.setValue(self._conn_progress_display)
+        else:
+            self._conn_progress_timer.stop()
+
+    def _on_connection_progress(self, payload: dict):
+        progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
+        message = str(payload.get("message") or "BLE process")
+        status = str(payload.get("status") or "RUNNING")
+
+        self._conn_progress_label.setText(message)
+        self._conn_progress_label.setToolTip(message)
+        self._conn_progress_target = progress
+        if not self._conn_progress_timer.isActive():
+            self._conn_progress_timer.start()
+
+        if progress == 0:
+            self._conn_progress_display = 0
+            self._conn_progress_bar.setValue(0)
+            self._conn_progress_timer.stop()
+        else:
+            self.update_progress_style(status)
+
+        if hasattr(self, "_success_timer") and self._success_timer:
+            self._success_timer.stop()
+            self._success_timer = None
+
+        if status == "SUCCESS" or progress >= 100:
+            self._animate_success()
+        else:
+            self.update_progress_style(status)
+
+    def _show_ble_notification(self, payload: dict):
+        title = str(payload.get("title") or "BLE notification")
+        message = str(payload.get("message") or "")
+        reason_hex = str(payload.get("reason_code_hex") or "").strip()
+        reason_name = str(payload.get("reason_name") or "").strip()
+        reason_text = ""
+        if reason_hex and reason_name:
+            reason_text = f"{reason_hex} - {reason_name}"
+        elif reason_hex:
+            reason_text = reason_hex
+        elif reason_name:
+            reason_text = reason_name
+
+        if reason_text and reason_text not in message:
+            message = f"{message}\n{reason_text}" if message else reason_text
+
+        kind = str(payload.get("kind") or "info")
+        auto_close_ms = int(payload.get("auto_close_ms", 3000) or 0)
+
+        current = self._ble_toast
+        if current is not None:
+            current.close_animated()
+
+        icon_text = "✓" if kind == "success" else ""
+        toast = ToastNotification(title, message, kind, parent=self.centralwidget, icon_text=icon_text)
+        self._ble_toast = toast
+        toast.destroyed.connect(lambda _=None, t=toast: self._on_toast_destroyed(t))
+        self._position_ble_toast(toast)
+        toast.show_animated(auto_close_ms)
+
+
+    def _show_command_pending_notification(self, seq: int, command_name: str) -> None:
+        current = self._ble_toast
+        if current is not None:
+            current.close_animated()
+
+        display_name = self._command_display_name(command_name)
+        toast = ToastNotification("Sending command", display_name, "pending", parent=self.centralwidget)
+        self._ble_toast = toast
+        self._pending_command_toasts[int(seq)] = {
+            "command": command_name,
+            "toast": toast,
+        }
+        toast.destroyed.connect(lambda _=None, t=toast: self._on_toast_destroyed(t))
+        self._position_ble_toast(toast)
+        toast.show_animated(0)
+        toast.start_loading(f"Sending {display_name}")
+
+    def _finish_command_notification(self, seq: int, response: int) -> None:
+        pending = self._pending_command_toasts.pop(int(seq), None)
+        if not pending:
+            return
+
+        toast = pending.get("toast")
+        if toast is None:
+            return
+
+        command_name = str(pending.get("command") or "command")
+        display_name = self._command_display_name(command_name)
+        toast.stop_loading()
+        if int(response) == int(pb.PACKET_ACK_RESPONSE_ACK):
+            toast.update_content(
+                "Successful",
+                f"{display_name} acknowledged by device.",
+                kind="success",
+                icon_text="✓",
+            )
+            toast._auto_close.start(2500)
+        else:
+            toast.update_content(
+                "Command failed",
+                f"{display_name} returned ACK response {int(response)}.",
+                kind="error",
+                icon_text="!",
+            )
+            toast._auto_close.start(4000)
+
+    def _on_protocol_packet_sent(self, param_name: str, pkt) -> None:
+        if not self._should_notify_command(param_name):
+            return
+        seq = int(getattr(getattr(pkt, "hdr", None), "seq", 0) or 0)
+        if seq <= 0:
+            return
+        self._show_command_pending_notification(seq, param_name)
+
+    def _on_protocol_ack_received(self, ack_seq: int, response: int) -> None:
+        self._finish_command_notification(int(ack_seq), int(response))
+
+    @staticmethod
+    def _should_notify_command(command_name: str) -> bool:
+        notify_commands = {
+            "anchor_layout_set",
+            "sys_ranging_cfg_set",
+            "sys_config_set",
+            "sensor_fusion_cfg_set",
+            "pos_calib_cfg_set",
+            "ble_conn_params_set",
+            "ble_adv_config_set",
+            "device_type_set",
+            "host_transport_set",
+            "factory_otp_write",
+            "device_reset",
+            "uwb_reset",
+            "factory_config_reset",
+            "enter_to_bootloader",
+            "imu_reset",
+            "imu_calib_start",
+            "time_sync_adv_set",
+        }
+        return command_name in notify_commands
+
+    @staticmethod
+    def _command_display_name(command_name: str) -> str:
+        labels = {
+            "anchor_layout_set": "anchor layout set",
+            "sys_ranging_cfg_set": "ranging config set",
+            "sys_config_set": "system config set",
+            "sensor_fusion_cfg_set": "sensor fusion config set",
+            "pos_calib_cfg_set": "position calibration config set",
+            "ble_conn_params_set": "BLE connection params set",
+            "ble_adv_config_set": "BLE advertising config set",
+            "device_type_set": "device type set",
+            "host_transport_set": "host transport set",
+            "factory_otp_write": "factory OTP write",
+            "device_reset": "device reset",
+            "uwb_reset": "UWB reset",
+            "factory_config_reset": "factory config reset",
+            "enter_to_bootloader": "enter bootloader",
+            "imu_reset": "IMU reset",
+            "imu_calib_start": "IMU calibration start",
+            "time_sync_adv_set": "advertising device time sync",
+        }
+        return labels.get(command_name, command_name.replace("_", " "))
+
+    def _position_ble_toast(self, toast=None):
+        toast = toast or self._ble_toast
+        if toast is None:
+            return
+        parent = toast.parentWidget()
+        if parent is None:
+            return
+        width = min(430, max(320, parent.width() - 48))
+        toast.setFixedWidth(width)
+        toast.adjustSize()
+        x = max(16, parent.width() - toast.width() - 24)
+        y = 70
+        toast.move(x, y)
+
+    def _on_toast_destroyed(self, toast):
+        if self._ble_toast is toast:
+            self._ble_toast = None
+        stale = [seq for seq, pending in self._pending_command_toasts.items() if pending.get("toast") is toast]
+        for seq in stale:
+            self._pending_command_toasts.pop(seq, None)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_ble_toast()
 
     def _setup_tabs(self):
         """Setup viewmodels for pre-loaded tabs from .ui"""
@@ -95,6 +570,10 @@ class MainWindow(QMainWindow):
         if self._device_info_vm:
             self._tab_device.set_viewmodel(self._device_info_vm)
             self._device_info_vm.device_info_updated.connect(self._on_device_changed)
+            if hasattr(self._device_info_vm, "connection_progress_updated"):
+                self._device_info_vm.connection_progress_updated.connect(self._on_connection_progress)
+            if hasattr(self._device_info_vm, "ble_notification_requested"):
+                self._device_info_vm.ble_notification_requested.connect(self._show_ble_notification)
 
         if self._live_tracking_vm:
             self._tab_tracking.set_viewmodel(self._live_tracking_vm)
@@ -164,6 +643,13 @@ class MainWindow(QMainWindow):
 
         status.addWidget(self._make_separator())
 
+        # BLE telemetry state from dongle
+        self._status_ble = QLabel("BLE: ---")
+        self._status_ble.setStyleSheet("color: #94A3B8;")
+        status.addWidget(self._status_ble)
+
+        status.addWidget(self._make_separator())
+
         # RMS
         self._status_rms = QLabel("\U0001F4CA RMS: ---")
         status.addWidget(self._status_rms)
@@ -196,12 +682,17 @@ class MainWindow(QMainWindow):
         # Connect tab change to update header title
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
+        if self._protocol_service:
+            self._protocol_service.packet_sent.connect(self._on_protocol_packet_sent)
+            self._protocol_service.ack_received.connect(self._on_protocol_ack_received)
+
         # Connect serial connection lost signal
         if self._serial_service:
             self._serial_service.connection_lost.connect(self._on_dongle_disconnected)
 
         if self._main_vm:
             self._main_vm.session_save_failed.connect(self._on_session_save_failed)
+            self._main_vm.session_ended.connect(self._on_session_ended)
 
     # -- Status bar update slots -----------------------------------------------
 
@@ -220,6 +711,19 @@ class MainWindow(QMainWindow):
         if rssi is not None:
             self._status_rssi.setText(f"\U0001F4E1 RSSI: {rssi} dBm")
 
+        state_label = data.get("display_state") or data.get("state_name")
+        state_value = data.get("state")
+        if state_label is not None:
+            self._status_ble.setText(f"BLE: {state_label}")
+            if state_value == 5:
+                self._status_ble.setStyleSheet("color: #10B981; font-weight: bold;")
+            elif state_value in (2, 3, 4):
+                self._status_ble.setStyleSheet("color: #F59E0B; font-weight: bold;")
+            elif state_value == 1:
+                self._status_ble.setStyleSheet("color: #94A3B8; font-weight: bold;")
+            else:
+                self._status_ble.setStyleSheet("color: #EF4444; font-weight: bold;")
+
     def _on_position_status(self, x, y, z, rms):
         self._status_rms.setText(f"\U0001F4CA RMS: {rms:.3f} m")
 
@@ -233,18 +737,21 @@ class MainWindow(QMainWindow):
             self.device_badge.setText("\u25CF -")
 
         if status_text == "Connecting":
+            self.btn_scan_device.setEnabled(False)
             self._status_conn.setText(f"\u23F3 Connecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
             self._status_rate.setText("\U0001F504 ---")
             return
 
         if status_text == "Disconnecting":
+            self.btn_scan_device.setEnabled(False)
             self._status_conn.setText(f"\U0001F6D1 Disconnecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
             self._status_rate.setText("\U0001F504 ---")
             return
 
         if status_text == "Disconnected":
+            self.btn_scan_device.setEnabled(True)
             label_name = name if name and name != "-" else "-"
             self._status_conn.setText(f"\U0001F534 Disconnected: {label_name}")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -256,12 +763,14 @@ class MainWindow(QMainWindow):
             return
 
         if status_text == "Connected":
+            self.btn_scan_device.setEnabled(True)
             self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
             self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
             self._status_rate.setText("\U0001F504 30 FPS")
             return
 
         if not info:
+            self.btn_scan_device.setEnabled(True)
             self.device_badge.setText("\u25CF -")
             self._status_conn.setText("\U0001F534 Disconnected")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -366,21 +875,20 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self._session_active = False
-            self._status_session.setText("\u23F2 Session: Ended")
+            self._session_timer.stop()
+            self._status_session.setText("\u23F2 Session: Ending...")
             self._status_session.setStyleSheet("color: #F59E0B;")
-            
-            # GOI LUU SESSION THUC TE
+            self.btn_end_session.setEnabled(False)
+
             if self._main_vm:
                 try:
                     self._main_vm.end_session(duration_sec=self._session_seconds)
                 except Exception as exc:
+                    self.btn_end_session.setEnabled(True)
                     QMessageBox.warning(self, "Session Save Failed", str(exc))
             else:
                 self._save_active_session()
-            self._session_seconds = 0
-            self._session_timer.stop()
-            self._set_session_button_active(False)
+                self._on_session_ended("")
             
     def _set_session_button_active(self, active: bool):
         if active:
@@ -404,9 +912,27 @@ class MainWindow(QMainWindow):
         """Compatibility wrapper. Session persistence is owned by MainViewModel."""
         if self._main_vm:
             return self._main_vm.save_active_session(duration_sec=self._session_seconds)
+
+    def _on_scan_device_clicked(self):
+        """Manually trigger BLE device scanning."""
+        if self._device_info_vm:
+            self._device_info_vm.start_ble_scan()
         return ""
 
+    def _on_session_ended(self, _session_id: str):
+        self._session_active = False
+        self._session_seconds = 0
+        self._session_timer.stop()
+        self.btn_end_session.setEnabled(True)
+        self._status_session.setText("\u23F2 Session: Ended")
+        self._status_session.setStyleSheet("color: #F59E0B;")
+        self._set_session_button_active(False)
+
     def _on_session_save_failed(self, message: str):
+        self.btn_end_session.setEnabled(True)
+        self._status_session.setText("\u23F2 Session: End Failed")
+        self._status_session.setStyleSheet("color: #EF4444;")
+        self._set_session_button_active(True)
         QMessageBox.warning(self, "Session Save Failed", message)
 
     def _safe_shutdown(self):
@@ -414,8 +940,6 @@ class MainWindow(QMainWindow):
         if self._device_info_vm:
             try:
                 self._device_info_vm.request_ble_disconnect()
-                import time
-                time.sleep(0.2)
             except Exception:
                 pass
 
@@ -485,6 +1009,18 @@ class MainWindow(QMainWindow):
 
         if not self._dongle_vm:
             return
+        ble_info = dict(getattr(shared_app_state, "ble_status", {}) or {})
+        state_name = str(ble_info.get("state_name") or "").strip()
+        reason_hex = str(ble_info.get("disconnect_reason_hex") or "").strip()
+        reason_name = str(ble_info.get("disconnect_reason_name") or "").strip()
+        popup_lines = []
+        if state_name:
+            popup_lines.append(f"State: {state_name}")
+        if reason_hex and reason_hex != "0x00":
+            popup_lines.append(f"Reason: {reason_hex} - {reason_name}" if reason_name else f"Reason: {reason_hex}")
+        if popup_lines:
+            QMessageBox.warning(self, "BLE disconnected", "\n".join(popup_lines))
+
 
         try:
             self._serial_service.connection_lost.disconnect(self._on_dongle_disconnected)
@@ -513,6 +1049,7 @@ class MainWindow(QMainWindow):
 
                 scan_res = scan_popup.exec()
                 connected_mac = scan_model.connected_mac
+                scanned_devices = [dict(dev) for dev in sorted(scan_model._devices.values(), key=lambda d: d.get("order", 0))]
                 connected_name = ""
                 if connected_mac and connected_mac in scan_model._devices:
                     dev = scan_model._devices[connected_mac]
@@ -526,7 +1063,7 @@ class MainWindow(QMainWindow):
 
                 if scan_res == 1 and connected_mac:
                     if self._device_info_vm:
-                        self._device_info_vm.set_connected_device(connected_name, connected_mac)
+                        self._device_info_vm.set_connected_device(connected_name, connected_mac, scanned_devices)
                     return
 
                 if scan_res == 2:

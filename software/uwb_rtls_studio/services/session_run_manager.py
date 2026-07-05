@@ -124,17 +124,31 @@ class SessionRunManager(QObject):
         self.log_run_saved.emit(session_id, run.index, files)
         return session_id, files
 
-    def end_all_active(self, duration_sec: float = 0.0) -> str:
+    def end_all_active(self, duration_sec: float = 0.0, send_device_end: bool = True) -> str:
         session_id = self.ensure_session()
+        sent_ranging_end = False
+        sent_log_end = False
+
         if shared_app_state.ranging_active or self.session_model.active_run("ranging"):
             try:
                 if self.ranging_model and getattr(self.ranging_model, "is_ranging", False):
                     self.ranging_model.stop_ranging()
             finally:
-                self.close_ranging_run(send_end=True)
+                self.close_ranging_run(send_end=send_device_end)
+                sent_ranging_end = bool(send_device_end)
 
-        if self.session_model.active_run("log") or self._collect_logs():
-            self.close_log_run(send_end=True)
+        active_log_run = self.session_model.active_run("log")
+        has_log_stream = bool(shared_app_state.log_streaming)
+        has_log_payload = bool(self._collect_logs())
+        if has_log_stream or has_log_payload:
+            self.close_log_run(send_end=send_device_end)
+            sent_log_end = bool(send_device_end)
+        elif active_log_run:
+            self.session_model.close_log_run(
+                line_count=0,
+                files=[],
+                end_reason="SESSION_END_REASON_UNSPECIFIED",
+            )
 
         meta = self.session_model.end_app_session(reason="USER_END_SESSION")
         if duration_sec:
@@ -142,6 +156,10 @@ class SessionRunManager(QObject):
         if meta:
             self.session_repository.ensure_session(meta)
         self.session_closed.emit(session_id)
+
+        if send_device_end and not sent_ranging_end and not sent_log_end:
+            self._send_end_session(pb.SESSION_END_REASON_UNSPECIFIED)
+
         return session_id
 
     def start_new_session(self) -> str:
@@ -172,7 +190,7 @@ class SessionRunManager(QObject):
             "device_key": run.device_key,
         }
 
-    def _send_end_session(self, reason: int) -> None:
+    def _send_end_session(self, reason: int, await_completion: bool = False) -> None:
         if not self.device_info_vm:
             return
         try:
@@ -185,7 +203,7 @@ class SessionRunManager(QObject):
                 f"MCU({int(VvAddress.MCU)})",
                 stop_target,
             )
-            self.device_info_vm.request_end_session(reason=reason)
+            self.device_info_vm.request_end_session(reason=reason, await_completion=await_completion)
         except Exception as exc:
             log.warning("Failed to send end_session(%s): %s", reason, exc)
 

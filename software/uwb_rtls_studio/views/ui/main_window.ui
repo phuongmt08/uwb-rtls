@@ -275,7 +275,7 @@ QTabBar::tab:hover:!selected { background: #302852; color: #F5F3FF; }</string>
       </widget>
       <widget class="LiveTrackingTab" name="tab_spatial_constraints">
        <attribute name="title">
-        <string>📍 Spatial Constraints</string>
+        <string>📍 Geofencing</string>
        </attribute>
       </widget>
       <widget class="ConfigTab" name="tab_config">

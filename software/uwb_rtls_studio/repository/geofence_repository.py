@@ -33,6 +33,9 @@ class GeofenceRepository:
     def get_zones(self) -> List[GeofenceZone]:
         return list(self._zones.values())
 
+    def set_zones(self, zones: List[GeofenceZone]) -> None:
+        self._zones = {zone.id: zone for zone in zones or []}
+
     def get_anchors(self) -> List[dict]:
         return [dict(anchor) for anchor in self._anchors]
 

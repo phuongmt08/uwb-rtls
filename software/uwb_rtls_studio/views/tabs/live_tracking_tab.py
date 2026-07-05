@@ -39,8 +39,9 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QColorDialog,
+    QMenu,
 )
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF, QShortcut, QKeySequence
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF, QShortcut, QKeySequence, QAction
 
 from common.transport import VvAddress
 from views.components.position_canvas import PositionCanvas
@@ -564,8 +565,11 @@ class LiveTrackingTab(QWidget):
         self._is_developer_mode = False
         self._anchor_layout_commit_pending = False
         self._draft_anchor_layout = []
+        self._anchor_table_room_id = ""
+        self._anchor_layout_row_map = []
         self._geofence_anchor_baseline = []
         self._pending_layout_read_for_editor = False
+        self._pending_layout_read_room_id = ""
         self._clipboard = None
 
         uic.loadUi(UI_FILE, self)
@@ -576,7 +580,21 @@ class LiveTrackingTab(QWidget):
 
         self._canvas = self.position_canvas
         self._canvas.parent_tab = self
+        if hasattr(self._canvas, "set_render_fps"):
+            self._canvas.set_render_fps(60)
+        self._preview_sync_dirty = False
+        self._preview_sync_timer = QTimer(self)
+        self._preview_sync_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._preview_sync_timer.setInterval(33)
+        self._preview_sync_timer.timeout.connect(self._flush_preview_pane_update)
+        self._layout_emit_dirty = False
+        self._layout_emit_timer = QTimer(self)
+        self._layout_emit_timer.setTimerType(Qt.TimerType.CoarseTimer)
+        self._layout_emit_timer.setInterval(50)
+        self._layout_emit_timer.timeout.connect(self._flush_geofence_layout_emit)
         self._preview_overlay_btn = self.btn_preview_overlay
+        self._detail_overlay_btn = QPushButton("Detail", self)
+        self._helpers_overlay_btn = QPushButton("Helpers", self)
         self._setup_map_views()
 
         self._setup_geofencing_ui()
@@ -629,8 +647,59 @@ class LiveTrackingTab(QWidget):
         self._preview_overlay_btn.setText("2D")
         self._preview_overlay_btn.setToolTip("Switch between 2D top view and 3D view")
         self._preview_overlay_btn.toggled.connect(self._toggle_map_view)
+
+        self._detail_overlay_btn.setCheckable(True)
+        self._detail_overlay_btn.setChecked(True)
+        self._detail_overlay_btn.setText("Detail")
+        self._detail_overlay_btn.setToolTip("Toggle detailed labels and dimensions")
+        self._detail_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._detail_overlay_btn.setMinimumWidth(78)
+        self._detail_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+        self._detail_overlay_btn.toggled.connect(self._toggle_overlay_detail)
+
+        self._helpers_overlay_btn.setText("Helpers")
+        self._helpers_overlay_btn.setToolTip("Show mouse helpers and keyboard shortcuts (F1)")
+        self._helpers_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._helpers_overlay_btn.setMinimumWidth(88)
+        self._helpers_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+        self._helpers_overlay_btn.setShortcut(QKeySequence("F1"))
+        self._helpers_overlay_btn.clicked.connect(self._show_canvas_helpers)
+        if hasattr(self._canvas, "set_overlay_detail_mode"):
+            self._canvas.set_overlay_detail_mode(True)
+
         self._preview_overlay_btn.raise_()
+        self._detail_overlay_btn.raise_()
+        self._helpers_overlay_btn.raise_()
         self._position_canvas_preview_button()
+
+    def _toggle_overlay_detail(self, detailed):
+        self._detail_overlay_btn.setText("Detail" if detailed else "Clean")
+        if hasattr(self._canvas, "set_overlay_detail_mode"):
+            self._canvas.set_overlay_detail_mode(detailed)
+
+    def _show_canvas_helpers(self):
+        helper_text = (
+            "Mouse helpers\n"
+            "- Left drag on empty area: box select multiple objects\n"
+            "- Left drag on object body: move object\n"
+            "- Left drag on object name: move label only\n"
+            "- Middle drag: pan map\n"
+            "- Mouse wheel: zoom in/out\n"
+            "- Right drag: zoom to rectangle\n\n"
+            "Keyboard shortcuts\n"
+            "- Ctrl+Z: undo\n"
+            "- Delete: delete selected object(s)\n"
+            "- Ctrl+X: cut selected object(s)\n"
+            "- Ctrl+C: copy selected object(s)\n"
+            "- Ctrl+V: paste object(s)\n"
+            "- Alt+A: add anchor\n"
+            "- Alt+O: set local origin\n"
+            "- Alt+Delete: remove anchor\n"
+            "- Alt+L: open Anchor Layout menu\n"
+            "- Alt+R: read anchor layout\n"
+            "- Alt+W: write anchor layout"
+        )
+        QMessageBox.information(self, "Canvas Helpers & Shortcuts", helper_text)
 
     def _setup_map_views(self):
         self._map_view_stack = QStackedWidget(self)
@@ -657,6 +726,8 @@ class LiveTrackingTab(QWidget):
             )
             self._map_3d.set_geofences(self._canvas.geofence_zones)
             self._map_3d.set_anchors(self._canvas.anchors)
+            active_position = self._canvas.fusion_position if self._canvas.fusion_position is not None else self._canvas.position
+            self._map_3d.update_position(active_position)
             self._map_view_stack.setCurrentWidget(self._map_3d)
             self._preview_overlay_btn.setText("3D")
         else:
@@ -670,6 +741,10 @@ class LiveTrackingTab(QWidget):
         self.right_widget.raise_()
         self.btn_toggle_sidebar.raise_()
         self._preview_overlay_btn.raise_()
+        if hasattr(self, "_detail_overlay_btn"):
+            self._detail_overlay_btn.raise_()
+        if hasattr(self, "_helpers_overlay_btn"):
+            self._helpers_overlay_btn.raise_()
 
     def _clear_tracking_trails(self):
         self._canvas.clear_trail()
@@ -680,10 +755,19 @@ class LiveTrackingTab(QWidget):
             return
         canvas = self._map_view_stack
         canvas_origin = canvas.mapTo(self, QPointF(0, 0).toPoint())
-        x = max(self.right_widget.x() - self._preview_overlay_btn.width() - 12, canvas_origin.x() + 12)
+        preview_x = max(self.right_widget.x() - self._preview_overlay_btn.width() - 12, canvas_origin.x() + 12)
         y = canvas_origin.y() + 10
-        self._preview_overlay_btn.move(x, y)
+        self._preview_overlay_btn.move(preview_x, y)
         self._preview_overlay_btn.raise_()
+        detail_x = preview_x
+        if hasattr(self, "_detail_overlay_btn"):
+            detail_x = max(preview_x - self._detail_overlay_btn.width() - 8, canvas_origin.x() + 12)
+            self._detail_overlay_btn.move(detail_x, y)
+            self._detail_overlay_btn.raise_()
+        if hasattr(self, "_helpers_overlay_btn"):
+            helper_x = max(detail_x - self._helpers_overlay_btn.width() - 8, canvas_origin.x() + 12)
+            self._helpers_overlay_btn.move(helper_x, y)
+            self._helpers_overlay_btn.raise_()
 
     def _make_metric_label(self, text: str, color: str = "#94A3B8", bold: bool = False) -> QLabel:
         label = QLabel(text, self)
@@ -837,14 +921,21 @@ class LiveTrackingTab(QWidget):
     def _on_anchor_layout_updated(self, anchors_list):
         if getattr(self._canvas, "dim_tracking_view", False):
             normalized = [self._normalize_anchor_record(anchor, idx) for idx, anchor in enumerate(anchors_list or [])]
-            self._draft_anchor_layout = normalized
             if self._pending_layout_read_for_editor:
-                self._canvas.set_anchors(self._format_anchors_for_canvas(normalized))
-                if self._vm:
-                    self._vm.geofence_repo.set_anchors(normalized)
-                self._anchor_layout_commit_pending = True
+                room_id = self._pending_layout_read_room_id or self._layout_scope_room_id(require=False)
+                if room_id:
+                    self._merge_anchor_layout_into_room(room_id, normalized)
+                else:
+                    self._draft_anchor_layout = normalized
+                    self._canvas.set_anchors(self._format_anchors_for_canvas(normalized))
+                    if self._vm:
+                        self._vm.geofence_repo.set_anchors(normalized)
+                    self._anchor_layout_commit_pending = True
+                    self._refresh_anchor_status_label()
                 self._pending_layout_read_for_editor = False
-                self._refresh_anchor_status_label()
+                self._pending_layout_read_room_id = ""
+                return
+            self._draft_anchor_layout = normalized
             return
         self.set_anchors(self._format_anchors_for_canvas(anchors_list or []))
 
@@ -886,7 +977,8 @@ class LiveTrackingTab(QWidget):
             "source": "ranging",
         }
         self._canvas.update_position(position)
-        self._map_3d.update_position(position)
+        if self._map_view_stack.currentWidget() is self._map_3d:
+            self._map_3d.update_position(position)
 
         # Update Frame and Counters
         seq = None
@@ -964,7 +1056,8 @@ class LiveTrackingTab(QWidget):
             "source": "sensor_fusion",
         }
         self._canvas.update_position(position)
-        self._map_3d.update_position(position)
+        if self._map_view_stack.currentWidget() is self._map_3d:
+            self._map_3d.update_position(position)
 
         # Update Frame and Counters
         self._set_metric_value(self.sof_label, "0xAA")
@@ -1121,6 +1214,64 @@ class LiveTrackingTab(QWidget):
             if getattr(zone, "object_type", "zone") == "room"
         ]
 
+    @staticmethod
+    def _segment_lies_on_room_edge(p1, p2, edge_start, edge_end, tolerance):
+        ex = edge_end[0] - edge_start[0]
+        ey = edge_end[1] - edge_start[1]
+        edge_length = math.hypot(ex, ey)
+        if edge_length <= 1e-9:
+            return False
+
+        def point_distance_to_line(point):
+            return abs((point[0] - edge_start[0]) * ey - (point[1] - edge_start[1]) * ex) / edge_length
+
+        if point_distance_to_line(p1) > tolerance or point_distance_to_line(p2) > tolerance:
+            return False
+        proj_1 = ((p1[0] - edge_start[0]) * ex + (p1[1] - edge_start[1]) * ey) / edge_length
+        proj_2 = ((p2[0] - edge_start[0]) * ex + (p2[1] - edge_start[1]) * ey) / edge_length
+        return min(proj_1, proj_2) >= -tolerance and max(proj_1, proj_2) <= edge_length + tolerance
+
+    @staticmethod
+    def _project_point_to_segment(point, edge_start, edge_end):
+        ex = edge_end[0] - edge_start[0]
+        ey = edge_end[1] - edge_start[1]
+        edge_len_sq = ex * ex + ey * ey
+        if edge_len_sq <= 1e-12:
+            return float(edge_start[0]), float(edge_start[1])
+        t = ((point[0] - edge_start[0]) * ex + (point[1] - edge_start[1]) * ey) / edge_len_sq
+        t = max(0.0, min(1.0, t))
+        return round(edge_start[0] + ex * t, 6), round(edge_start[1] + ey * t, 6)
+
+    def _detect_boundary_wall_match(self, wall_points):
+        points = list(wall_points or [])
+        if len(points) < 2:
+            return None, points
+        snap_step = self._canvas._snap_step() if hasattr(self._canvas, "_snap_step") else 0.1
+        tolerance = max(0.01, min(0.05, float(snap_step) * 0.30))
+        for room in self._room_zones():
+            room_points = list(getattr(room, "points", []) or [])
+            if len(room_points) < 3:
+                continue
+            edges = [(room_points[idx], room_points[(idx + 1) % len(room_points)]) for idx in range(len(room_points))]
+            snapped = list(points)
+            matched = True
+            for idx, (p1, p2) in enumerate(zip(points, points[1:])):
+                edge = next(
+                    (
+                        (edge_start, edge_end)
+                        for edge_start, edge_end in edges
+                        if self._segment_lies_on_room_edge(p1, p2, edge_start, edge_end, tolerance)
+                    ),
+                    None,
+                )
+                if edge is None:
+                    matched = False
+                    break
+                snapped[idx] = self._project_point_to_segment(p1, edge[0], edge[1])
+                snapped[idx + 1] = self._project_point_to_segment(p2, edge[0], edge[1])
+            if matched:
+                return room, snapped
+        return None, points
     def _find_room(self, room_id):
         if not room_id or not self._vm:
             return None
@@ -1160,6 +1311,21 @@ class LiveTrackingTab(QWidget):
             origin_y + sin_theta * float(local_x) + cos_theta * float(local_y),
         )
 
+    def _anchor_scene_xy_from_payload(self, anchor: dict, item: dict | None = None):
+        """Resolve anchor payloads to scene XY while preserving local storage semantics."""
+        anchor = anchor or {}
+        item = item or self._normalize_anchor_record(anchor, 0)
+        room_id = anchor.get("room_id", anchor.get("zone_id", item.get("room_id", item.get("zone_id", ""))))
+        room = self._find_room(room_id)
+        if "x" in anchor and "y" in anchor:
+            return float(anchor.get("x", 0.0)), float(anchor.get("y", 0.0)), room
+        if room is not None:
+            local_x = anchor.get("local_x_m", item.get("local_x_m", item.get("x_m", 0.0)))
+            local_y = anchor.get("local_y_m", item.get("local_y_m", item.get("y_m", 0.0)))
+            scene_x, scene_y = self._room_local_to_scene(local_x, local_y, room)
+            return scene_x, scene_y, room
+        return float(item.get("x_m", 0.0)), float(item.get("y_m", 0.0)), room
+
     def _selected_room(self):
         room = self._find_room(self._canvas.selected_zone_id)
         if room is not None:
@@ -1174,13 +1340,7 @@ class LiveTrackingTab(QWidget):
         formatted = []
         for idx, anchor in enumerate(anchors or []):
             item = self._normalize_anchor_record(anchor, idx)
-            room = self._find_room(item.get("room_id"))
-            if room is not None and "local_x_m" in anchor and "local_y_m" in anchor:
-                scene_x, scene_y = self._room_local_to_scene(
-                    item["local_x_m"], item["local_y_m"], room
-                )
-            else:
-                scene_x, scene_y = item["x_m"], item["y_m"]
+            scene_x, scene_y, room = self._anchor_scene_xy_from_payload(anchor, item)
             formatted.append(
                 {
                     "anchor_id": item["anchor_id"],
@@ -1247,14 +1407,7 @@ class LiveTrackingTab(QWidget):
         annotated = []
         for idx, anchor in enumerate(anchors or []):
             item = self._normalize_anchor_record(anchor, idx)
-            room = self._find_room(anchor.get("room_id", anchor.get("zone_id", "")))
-            if room is not None and "local_x_m" in anchor and "local_y_m" in anchor and "x" not in anchor:
-                scene_x, scene_y = self._room_local_to_scene(
-                    anchor["local_x_m"], anchor["local_y_m"], room
-                )
-            else:
-                scene_x = float(anchor.get("x", anchor.get("x_m", 0.0)))
-                scene_y = float(anchor.get("y", anchor.get("y_m", 0.0)))
+            scene_x, scene_y, room = self._anchor_scene_xy_from_payload(anchor, item)
             if room is None:
                 rooms = self._rooms_for_anchor({"x_m": scene_x, "y_m": scene_y})
                 room = rooms[0] if rooms else None
@@ -1312,7 +1465,7 @@ class LiveTrackingTab(QWidget):
         self._refresh_anchor_status_label()
         self._canvas.update()
 
-    def _validate_anchor_layout(self, anchors, *, require_four=False) -> tuple[list[str], list[str]]:
+    def _validate_anchor_layout(self, anchors, *, require_four=False, min_anchors=None) -> tuple[list[str], list[str]]:
         errors = []
         warnings = []
         normalized = [self._normalize_anchor_record(anchor, idx) for idx, anchor in enumerate(anchors or [])]
@@ -1320,8 +1473,9 @@ class LiveTrackingTab(QWidget):
         duplicates = sorted({anchor_id for anchor_id in ids if ids.count(anchor_id) > 1})
         if duplicates:
             errors.append("Duplicate anchor ID: " + ", ".join(f"A{x}" for x in duplicates))
-        if require_four and len(normalized) < 4:
-            errors.append("Anchor layout needs at least 4 anchors for this 1 tag + 4 anchor setup.")
+        required_count = int(min_anchors) if min_anchors is not None else (4 if require_four else 0)
+        if required_count and len(normalized) < required_count:
+            errors.append(f"Anchor layout needs at least {required_count} anchors for this room.")
         elif len(normalized) < 4:
             warnings.append("Less than 4 anchors are placed.")
         for item in normalized:
@@ -1447,7 +1601,7 @@ class LiveTrackingTab(QWidget):
         editor.btn_mode_room.clicked.connect(lambda: self._set_editor_tool("room", "draw"))
         editor.btn_mode_wall.clicked.connect(lambda: self._set_editor_tool("wall", "draw"))
         editor.btn_mode_object.clicked.connect(lambda: self._set_editor_tool("object", "draw"))
-        editor.btn_mode_anchor.clicked.connect(lambda: self._set_editor_tool("anchor", "draw"))
+        editor.btn_mode_anchor.clicked.connect(lambda: self._set_editor_tool("anchor", "pick_zone"))
         editor.btn_mode_edit_map.clicked.connect(lambda: self._set_editor_mode("edit_vertices"))
         editor.btn_mode_draw.clicked.connect(lambda: self._set_editor_tool("zone", "draw"))
         editor.btn_mode_edit.clicked.connect(lambda: self._set_editor_mode("edit_vertices"))
@@ -1472,6 +1626,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.anchor_layout_edited.connect(self._on_canvas_anchor_layout_edited)
         self._canvas.room_origin_vertex_picked.connect(self._on_canvas_room_origin_vertex_picked)
         self._canvas.zones_undo_remove_requested.connect(self._undo_remove_zones)
+        self._canvas.zones_undo_restore_requested.connect(self._undo_restore_zones)
         self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self._undo_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._undo_shortcut.activated.connect(self._canvas.undo_last_action)
@@ -1644,6 +1799,44 @@ class LiveTrackingTab(QWidget):
         self._canvas.set_geofences(self._vm.get_geofence_zones())
         self._canvas.set_selected_zone(None)
         self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
+        self._refresh_anchor_membership_from_canvas()
+        self._active_rooms_snapshot = None
+        self._refresh_active_rooms()
+
+    def _undo_restore_zones(self, zone_snapshots):
+        if not self._vm:
+            return
+        selected_id = self._canvas.selected_zone_id
+        zones = [GeofenceZone.from_dict(snapshot) for snapshot in zone_snapshots]
+        if hasattr(self._vm, "set_geofence_zones"):
+            self._vm.set_geofence_zones(zones)
+        else:
+            self._vm.geofence_repo.set_zones(zones)
+            self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
+        restored_zones = self._vm.get_geofence_zones()
+        self._canvas.set_geofences(restored_zones)
+        self._reload_selected_zone_properties(selected_id)
+        QTimer.singleShot(0, lambda zone_id=selected_id: self._reload_selected_zone_properties(zone_id))
+        self._refresh_anchor_membership_from_canvas()
+        self._active_rooms_snapshot = None
+        self._refresh_active_rooms()
+
+    def _reload_selected_zone_properties(self, zone_id):
+        if not self._vm:
+            return
+        restored_selection = next((zone for zone in self._vm.get_geofence_zones() if zone.id == zone_id), None)
+        if restored_selection is None:
+            self._canvas.set_selected_zone(None)
+            self.geofence_editor_widget.txt_zone_name.clear()
+            self.geofence_editor_widget.txt_map_name.clear()
+            return
+        self._canvas.set_selected_zone(restored_selection.id)
+        self._load_zone_properties_to_ui(restored_selection)
+        if hasattr(self, "_properties_panel"):
+            self._properties_panel.load_zone(restored_selection)
+            self._properties_panel.update()
+        self.geofence_editor_widget.update()
+        self._canvas.update()
 
     def _setup_anchor_authoring_controls(self, editor):
         # Configure coordinates inputs
@@ -1655,7 +1848,7 @@ class LiveTrackingTab(QWidget):
 
 
         # Wire anchor button actions
-        editor.btn_create_default_anchors.clicked.connect(self._create_default_anchors)
+        self._setup_anchor_sync_button(editor)
         editor.btn_add_anchor.clicked.connect(self._add_anchor)
         editor.btn_remove_anchor.clicked.connect(self._remove_selected_anchor)
         editor.btn_assign_anchor.setText("Set Local Origin")
@@ -1677,10 +1870,59 @@ class LiveTrackingTab(QWidget):
         # Load map setup
         editor.btn_load_map.clicked.connect(self._load_map)
 
+        self._setup_anchor_keyboard_helpers(editor)
         self._sync_map_height_visibility()
         self._setup_anchor_layout_table(editor)
         self._refresh_anchor_status_label()
         self._refresh_active_rooms()
+
+    def _is_anchor_tool_active(self):
+        return bool(getattr(self._canvas, "draw_object_type", "") == "anchor")
+
+    def _run_anchor_shortcut(self, callback):
+        if self._is_anchor_tool_active():
+            callback()
+
+    def _show_anchor_layout_menu(self):
+        if not self._is_anchor_tool_active():
+            return
+        button = self.geofence_editor_widget.btn_create_default_anchors
+        menu = button.menu()
+        if menu is not None:
+            menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _setup_anchor_keyboard_helpers(self, editor):
+        shortcuts = (
+            (editor.btn_add_anchor, "Alt+A", "Add Anchor"),
+            (editor.btn_assign_anchor, "Alt+O", "Set Local Origin"),
+            (editor.btn_remove_anchor, "Alt+Delete", "Remove Anchor"),
+        )
+        for button, shortcut, label in shortcuts:
+            button.setShortcut(QKeySequence(shortcut))
+            button.setToolTip(f"{label} ({shortcut})")
+        editor.btn_create_default_anchors.setToolTip("Anchor Layout (Alt+L). Read: Alt+R, Write: Alt+W")
+
+        self._anchor_read_shortcut = QShortcut(QKeySequence("Alt+R"), self.geofence_editor_widget)
+        self._anchor_read_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._anchor_read_shortcut.activated.connect(lambda: self._run_anchor_shortcut(self._read_layout_from_device))
+        self._anchor_write_shortcut = QShortcut(QKeySequence("Alt+W"), self.geofence_editor_widget)
+        self._anchor_write_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._anchor_write_shortcut.activated.connect(lambda: self._run_anchor_shortcut(self._write_layout_to_device))
+        self._anchor_layout_menu_shortcut = QShortcut(QKeySequence("Alt+L"), self.geofence_editor_widget)
+        self._anchor_layout_menu_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._anchor_layout_menu_shortcut.activated.connect(self._show_anchor_layout_menu)
+    def _setup_anchor_sync_button(self, editor):
+        button = editor.btn_create_default_anchors
+        button.setText("Anchor Layout")
+        button.setToolTip("Anchor Layout (Alt+L). Read: Alt+R, Write: Alt+W")
+        menu = QMenu(button)
+        read_action = QAction("Read", button)
+        write_action = QAction("Write", button)
+        read_action.triggered.connect(self._read_layout_from_device)
+        write_action.triggered.connect(self._write_layout_to_device)
+        menu.addAction(read_action)
+        menu.addAction(write_action)
+        button.setMenu(menu)
 
     def _apply_anchor_template_from_combo(self):
         name = self.geofence_editor_widget.txt_map_name.text().strip()
@@ -1695,13 +1937,45 @@ class LiveTrackingTab(QWidget):
         } if name else None
         self._canvas.set_anchor_template(template)
 
+    def _set_anchor_property_enabled(self, enabled):
+        for name in ("txt_map_name", "cmb_map_type", "sb_anchor_x", "sb_anchor_y", "sb_anchor_z", "btn_apply_map_properties"):
+            widget = getattr(self.geofence_editor_widget, name, None)
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _clear_anchor_property_fields(self):
+        self.geofence_editor_widget.txt_map_name.clear()
+        if hasattr(self.geofence_editor_widget, "sb_anchor_x"):
+            self.geofence_editor_widget.lbl_anchor_x.setText("Local X:")
+            self.geofence_editor_widget.lbl_anchor_y.setText("Local Y:")
+            self.geofence_editor_widget.lbl_anchor_z.setText("Z:")
+            self.geofence_editor_widget.sb_anchor_x.setValue(0.0)
+            self.geofence_editor_widget.sb_anchor_y.setValue(0.0)
+            self.geofence_editor_widget.sb_anchor_z.setValue(0.0)
+            self.geofence_editor_widget.sb_anchor_x.setToolTip("Select an anchor to edit its local X coordinate.")
+            self.geofence_editor_widget.sb_anchor_y.setToolTip("Select an anchor to edit its local Y coordinate.")
+            self.geofence_editor_widget.sb_anchor_z.setToolTip("Select an anchor to edit its height.")
+        anchor_type_idx = self.geofence_editor_widget.cmb_map_type.findText("Anchor")
+        if anchor_type_idx >= 0:
+            self.geofence_editor_widget.cmb_map_type.setCurrentIndex(anchor_type_idx)
+        self._set_anchor_property_enabled(False)
+    def _anchor_local_xyz(self, anchor):
+        room = self._find_room(anchor.get("room_id", anchor.get("zone_id", "")))
+        if room is not None:
+            local_x, local_y = self._scene_to_room_local(
+                anchor.get("x", 0.0), anchor.get("y", 0.0), room
+            )
+            return local_x, local_y, float(anchor.get("z", 0.0)), True
+        return float(anchor.get("x", 0.0)), float(anchor.get("y", 0.0)), float(anchor.get("z", 0.0)), False
+
     def _setup_anchor_layout_table(self, editor):
         self._anchor_layout_group = QGroupBox("Anchor Layout", editor)
         layout = QVBoxLayout(self._anchor_layout_group)
-        layout.setContentsMargins(6, 8, 6, 6)
+        layout.setContentsMargins(6, 8, 6, 4)
+        layout.setSpacing(3)
         self._active_rooms_label = QLabel("Active rooms (max 4)", self._anchor_layout_group)
         self._active_rooms_layout = QVBoxLayout()
-        self._active_rooms_layout.setSpacing(2)
+        self._active_rooms_layout.setSpacing(1)
         layout.addWidget(self._active_rooms_label)
         layout.addLayout(self._active_rooms_layout)
         self._anchor_layout_table = QTableWidget(0, 4, self._anchor_layout_group)
@@ -1709,6 +1983,8 @@ class LiveTrackingTab(QWidget):
         self._anchor_layout_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._anchor_layout_table.verticalHeader().setVisible(False)
         self._anchor_layout_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._anchor_layout_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._anchor_layout_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._anchor_layout_table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
@@ -1716,25 +1992,86 @@ class LiveTrackingTab(QWidget):
         )
         self._anchor_layout_table.cellClicked.connect(self._on_anchor_layout_row_clicked)
         self._anchor_layout_table.cellChanged.connect(self._on_anchor_layout_cell_changed)
+        self._resize_anchor_layout_table(0)
         layout.addWidget(self._anchor_layout_table)
         editor.map_tab_layout.insertWidget(2, self._anchor_layout_group)
         self._anchor_layout_group.hide()
+
+    def _room_name(self, room_id):
+        room = self._find_room(room_id)
+        return room.name if room is not None else "selected room"
+
+    def _anchor_table_room_ids(self):
+        if not self._vm:
+            self._anchor_table_room_id = ""
+            return []
+        focus_id = str(getattr(self, "_anchor_table_room_id", "") or "")
+        if focus_id and self._find_room(focus_id) is not None:
+            return [focus_id]
+
+        active_ids = self._vm.get_active_room_ids()
+        for room_id in active_ids:
+            if self._find_room(room_id) is not None:
+                self._anchor_table_room_id = room_id
+                return [room_id]
+
+        selected_room = self._selected_room()
+        if selected_room is not None:
+            self._anchor_table_room_id = selected_room.id
+            return [selected_room.id]
+
+        self._anchor_table_room_id = ""
+        return []
+
+    def _anchor_entries_for_table(self):
+        room_ids = set(self._anchor_table_room_ids())
+        entries = []
+        if not room_ids:
+            return entries
+        for index, anchor in enumerate(self._canvas.anchors):
+            annotated = self._annotate_anchor_membership([anchor])[0]
+            if annotated.get("room_id", annotated.get("zone_id", "")) in room_ids:
+                entries.append((index, annotated, anchor))
+        return entries
+
+    def _resize_anchor_layout_table(self, row_count):
+        table = getattr(self, "_anchor_layout_table", None)
+        if table is None:
+            return
+        visible_rows = max(1, min(int(row_count or 0), 5))
+        header_h = max(table.horizontalHeader().height(), 24)
+        row_h = max(table.verticalHeader().defaultSectionSize(), 28)
+        frame = table.frameWidth() * 2
+        table.setFixedHeight(header_h + row_h * visible_rows + frame + 4)
+        policy = (
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            if row_count > visible_rows
+            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        table.setVerticalScrollBarPolicy(policy)
 
     def _refresh_anchor_layout_table(self):
         table = getattr(self, "_anchor_layout_table", None)
         if table is None:
             return
-        anchors = list(self._canvas.anchors)
+        entries = self._anchor_entries_for_table()
+        self._anchor_layout_row_map = [index for index, _annotated, _anchor in entries]
+        room_ids = self._anchor_table_room_ids()
+        if hasattr(self, "_anchor_layout_group"):
+            if room_ids:
+                self._anchor_layout_group.setTitle(f"Anchor Layout - {self._room_name(room_ids[0])}")
+            else:
+                self._anchor_layout_group.setTitle("Anchor Layout - select/activate a room")
         table.blockSignals(True)
-        table.setRowCount(len(anchors))
-        for row, anchor in enumerate(anchors):
+        table.setRowCount(len(entries))
+        self._resize_anchor_layout_table(len(entries))
+        for row, (_anchor_index, annotated, anchor) in enumerate(entries):
             anchor_id = self._coerce_int_id(anchor.get("anchor_id"), row)
-            annotated = self._annotate_anchor_membership([anchor])[0]
             values = (
                 f"A{anchor_id}",
                 f"{float(annotated.get('local_x_m', anchor.get('x', 0.0))):.3f}",
                 f"{float(annotated.get('local_y_m', anchor.get('y', 0.0))):.3f}",
-                f"{float(anchor.get('z', 0.0)):.3f}",
+                f"{float(anchor.get('z', anchor.get('z_m', 0.0))):.3f}",
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -1743,25 +2080,29 @@ class LiveTrackingTab(QWidget):
         table.blockSignals(False)
 
     def _on_anchor_layout_row_clicked(self, row, _column):
-        if 0 <= row < len(self._canvas.anchors):
-            self._canvas.set_selected_anchor(row)
-            self._on_canvas_anchor_selected(row)
+        anchor_index = self._anchor_layout_row_map[row] if 0 <= row < len(self._anchor_layout_row_map) else None
+        if anchor_index is not None and 0 <= anchor_index < len(self._canvas.anchors):
+            self._canvas.set_selected_anchor(anchor_index)
+            self._on_canvas_anchor_selected(anchor_index)
 
     def _on_anchor_layout_cell_changed(self, row, column):
-        if not (0 <= row < len(self._canvas.anchors)):
+        if not (0 <= row < len(getattr(self, "_anchor_layout_row_map", []))):
+            return
+        anchor_index = self._anchor_layout_row_map[row]
+        if not (0 <= anchor_index < len(self._canvas.anchors)):
             return
         item = self._anchor_layout_table.item(row, column)
         if item is None:
             return
-        anchor = self._canvas.anchors[row]
+        anchor = self._canvas.anchors[anchor_index]
         room = self._find_room(anchor.get("room_id", anchor.get("zone_id", "")))
         self._anchor_layout_table.blockSignals(True)
         try:
             if column == 0:
                 text = item.text().strip()
-                parsed_id = self._coerce_int_id(text, self._coerce_int_id(anchor.get("anchor_id"), row))
+                parsed_id = self._coerce_int_id(text, self._coerce_int_id(anchor.get("anchor_id"), anchor_index))
                 if any(
-                    index != row and self._coerce_int_id(other.get("anchor_id"), -1) == parsed_id
+                    index != anchor_index and self._coerce_int_id(other.get("anchor_id"), -1) == parsed_id
                     for index, other in enumerate(self._canvas.anchors)
                 ):
                     QMessageBox.warning(self, "Duplicate Anchor", f"A{parsed_id} is already used.")
@@ -1788,8 +2129,10 @@ class LiveTrackingTab(QWidget):
                     anchor.update({"x": scene_x, "y": scene_y, "local_x_m": local_x, "local_y_m": local_y})
                 elif column == 1:
                     anchor["x"] = value
+                    anchor["local_x_m"] = value
                 elif column == 2:
                     anchor["y"] = value
+                    anchor["local_y_m"] = value
                 else:
                     anchor["z"] = value
             self._canvas._emit_anchor_layout_edited()
@@ -1797,6 +2140,62 @@ class LiveTrackingTab(QWidget):
         finally:
             self._anchor_layout_table.blockSignals(False)
         self._refresh_anchor_status_label()
+
+    def _layout_scope_room_id(self, *, require=True):
+        room_ids = self._anchor_table_room_ids()
+        if room_ids:
+            return room_ids[0]
+        if require:
+            QMessageBox.information(self, "Anchor Layout", "Select or activate a room before syncing its anchor layout.")
+        return ""
+
+    def _anchor_layout_for_room(self, room_id):
+        if not room_id:
+            return []
+        anchors = self._annotate_anchor_membership(self._canvas.anchor_layout_for_device())
+        return [
+            anchor for anchor in anchors
+            if anchor.get("placed", True) and anchor.get("room_id", anchor.get("zone_id", "")) == room_id
+        ]
+
+    def _merge_anchor_layout_into_room(self, room_id, anchors):
+        if not room_id:
+            return
+        current = self._annotate_anchor_membership(self._canvas.anchor_layout_for_device())
+        kept = [
+            anchor for anchor in current
+            if anchor.get("room_id", anchor.get("zone_id", "")) != room_id
+        ]
+        room = self._find_room(room_id)
+        room_name = room.name if room is not None else ""
+        incoming = []
+        for idx, anchor in enumerate(anchors or []):
+            item = self._normalize_anchor_record(anchor, idx)
+            local_x = float(anchor.get("local_x_m", anchor.get("x_m", item["x_m"])))
+            local_y = float(anchor.get("local_y_m", anchor.get("y_m", item["y_m"])))
+            item.update({
+                "room_id": room_id,
+                "zone_id": room_id,
+                "zone_name": room_name,
+                "zone_ids": [room_id],
+                "zone_names": [room_name] if room_name else [],
+                "local_x_m": local_x,
+                "local_y_m": local_y,
+                "x_m": local_x,
+                "y_m": local_y,
+                "placed": True,
+                "sync_state": "synced",
+            })
+            incoming.append(item)
+        merged = kept + incoming
+        self._draft_anchor_layout = self._annotate_anchor_membership(merged)
+        self._canvas.set_anchors(self._format_anchors_for_canvas(self._draft_anchor_layout))
+        self._anchor_layout_commit_pending = True
+        if self._vm:
+            self._vm.geofence_repo.set_anchors(self._draft_anchor_layout)
+        shared_app_state.anchor_layout = [dict(anchor) for anchor in self._draft_anchor_layout]
+        self._refresh_anchor_status_label()
+        self._refresh_active_rooms()
 
     def _room_has_anchor_layout(self, room_id, min_anchors=3):
         if not room_id:
@@ -1858,8 +2257,13 @@ class LiveTrackingTab(QWidget):
             active_ids = [item for item in active_ids if item != room_id]
         self._vm.set_active_room_ids(active_ids)
         self._canvas.set_active_room_ids(active_ids)
+        if checked:
+            self._anchor_table_room_id = room_id
+        elif self._anchor_table_room_id == room_id:
+            self._anchor_table_room_id = active_ids[0] if active_ids else ""
         self._active_rooms_snapshot = None
         self._refresh_active_rooms()
+        self._refresh_anchor_layout_table()
 
     def _on_set_local_origin_clicked(self):
         if self._canvas._origin_pick_room_id is not None:
@@ -1885,6 +2289,7 @@ class LiveTrackingTab(QWidget):
             self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
         self._refresh_anchor_membership_from_canvas()
         self._refresh_anchor_layout_table()
+
     def _selected_device_target(self):
         if hasattr(self.geofence_editor_widget, "cmb_device_target"):
             data = self.geofence_editor_widget.cmb_device_target.currentData()
@@ -1936,19 +2341,21 @@ class LiveTrackingTab(QWidget):
     def _add_anchor(self):
         if not self._vm:
             return
+        room_id = self._layout_scope_room_id(require=False)
+        room = self._find_room(room_id)
+        if room is None:
+            QMessageBox.information(self, "Add Anchor", "Select a room first, then press Add Anchor.")
+            return
+
         used_ids = {self._coerce_int_id(anchor.get("anchor_id"), idx) for idx, anchor in enumerate(self._canvas.anchors)}
         anchor_id = 0
         while anchor_id in used_ids:
             anchor_id += 1
-        room = self._selected_room()
-        if room is not None:
-            world_x = sum(point[0] for point in room.points) / len(room.points)
-            world_y = sum(point[1] for point in room.points) / len(room.points)
-            local_x, local_y = self._scene_to_room_local(world_x, world_y, room)
-        else:
-            world_x = getattr(self._canvas, "_view_cx", 0.0)
-            world_y = getattr(self._canvas, "_view_cy", 0.0)
-            local_x, local_y = world_x, world_y
+
+        self._anchor_table_room_id = room.id
+        world_x = sum(point[0] for point in room.points) / len(room.points)
+        world_y = sum(point[1] for point in room.points) / len(room.points)
+        local_x, local_y = self._scene_to_room_local(world_x, world_y, room)
         self._canvas.set_anchor_template(
             {
                 "anchor_id": anchor_id,
@@ -1957,9 +2364,9 @@ class LiveTrackingTab(QWidget):
                 "device_type": "uwb_anchor",
                 "device_id": anchor_id,
                 "is_scanned": False,
-                "room_id": room.id if room is not None else "",
-                "zone_id": room.id if room is not None else "",
-                "zone_name": room.name if room is not None else "",
+                "room_id": room.id,
+                "zone_id": room.id,
+                "zone_name": room.name,
                 "local_x_m": local_x,
                 "local_y_m": local_y,
             }
@@ -1975,43 +2382,50 @@ class LiveTrackingTab(QWidget):
             self._anchor_layout_commit_pending = True
             if self._vm:
                 self._vm.geofence_repo.set_anchors(self._annotate_anchor_membership(self._canvas.anchor_layout_for_device()))
-            self.geofence_editor_widget.txt_map_name.clear()
+            self._clear_anchor_property_fields()
             self._refresh_anchor_status_label()
 
     def _read_layout_from_device(self):
         if not self._vm:
             QMessageBox.warning(self, "No Connection", "ViewModel not initialized.")
             return
+        room_id = self._layout_scope_room_id(require=True)
+        if not room_id:
+            return
         target = self._selected_device_target()
         self._pending_layout_read_for_editor = bool(getattr(self._canvas, "dim_tracking_view", False))
+        self._pending_layout_read_room_id = room_id
         self._vm._send_command(
             "anchor_layout_get",
             dst_addr=self._coerce_int_id(target.get("proto_dst_addr"), int(VvAddress.MCU)),
         )
-        QMessageBox.information(self, "Read Layout", "Sent layout query to Tag MCU.")
+        QMessageBox.information(self, "Read Layout", f"Sent layout query to MCU for {self._room_name(room_id)}.")
 
     def _write_layout_to_device(self):
         if not self._vm:
             QMessageBox.warning(self, "No Connection", "ViewModel not initialized.")
             return
-        layout = self._annotate_anchor_membership(self._canvas.anchor_layout_for_device())
-        if not layout:
-            QMessageBox.warning(self, "No Anchors", "No anchors found on the map to save.")
+        room_id = self._layout_scope_room_id(require=True)
+        if not room_id:
             return
-        errors, warnings = self._validate_anchor_layout(layout, require_four=True)
+        layout = self._anchor_layout_for_room(room_id)
+        if not layout:
+            QMessageBox.warning(self, "No Anchors", f"No anchors found in {self._room_name(room_id)}.")
+            return
+        errors, warnings = self._validate_anchor_layout(layout, min_anchors=3)
         if errors:
             QMessageBox.warning(self, "Invalid Anchor Layout", "\n".join(errors))
             return
-        
+
         anchors_payload = []
         for a in layout:
             anchors_payload.append({
                 "anchor_id": self._coerce_int_id(a["anchor_id"], 0),
-                "x_m": float(a["x_m"]),
-                "y_m": float(a["y_m"]),
-                "z_m": float(a["z_m"])
+                "x_m": float(a.get("local_x_m", a.get("x_m", 0.0))),
+                "y_m": float(a.get("local_y_m", a.get("y_m", 0.0))),
+                "z_m": float(a["z_m"]),
             })
-        
+
         target = self._selected_device_target()
         self._vm._send_command(
             "anchor_layout_set",
@@ -2019,7 +2433,11 @@ class LiveTrackingTab(QWidget):
             anchors=anchors_payload,
         )
         warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
-        QMessageBox.information(self, "Write Layout", f"Sent layout with {len(layout)} anchors to Tag MCU.{warning_text}")
+        QMessageBox.information(
+            self,
+            "Write Layout",
+            f"Sent {self._room_name(room_id)} local layout with {len(layout)} anchors to MCU.{warning_text}",
+        )
 
     def _update_device_targets(self, devices):
         combo = getattr(self.geofence_editor_widget, "cmb_device_target", None)
@@ -2069,7 +2487,7 @@ class LiveTrackingTab(QWidget):
         self._pending_layout_read_for_editor = False
         self.user_map_groupbox.setVisible(False)
         self.sidebar_stack.setCurrentIndex(1)
-        self.canvas_header.setText("Spatial Constraints Setup")
+        self.canvas_header.setText("Geofencing Map Editor")
 
         if self._canvas.edit_mode == "navigate":
             self._set_editor_tool("room", "draw")
@@ -2167,7 +2585,10 @@ class LiveTrackingTab(QWidget):
         if object_type == "object":
             self._sync_object_drawing_options()
         if object_type == "anchor":
-            self._apply_anchor_template_from_combo()
+            if self._canvas.selected_anchor_idx is None:
+                self._clear_anchor_property_fields()
+            else:
+                self._on_canvas_anchor_selected(self._canvas.selected_anchor_idx)
         if hasattr(self, "_anchor_layout_group"):
             self._anchor_layout_group.setVisible(object_type == "anchor")
             if object_type == "anchor":
@@ -2183,7 +2604,7 @@ class LiveTrackingTab(QWidget):
         self.geofence_editor_widget.btn_mode_room.setChecked(is_draw and draw_type == "room")
         self.geofence_editor_widget.btn_mode_wall.setChecked(is_draw and draw_type == "wall")
         self.geofence_editor_widget.btn_mode_object.setChecked(is_draw and draw_type == "object")
-        self.geofence_editor_widget.btn_mode_anchor.setChecked(is_draw and draw_type == "anchor")
+        self.geofence_editor_widget.btn_mode_anchor.setChecked(draw_type == "anchor" and mode in {"draw", "pick_zone", "edit_vertices"})
         self.geofence_editor_widget.btn_mode_draw.setChecked(is_draw and draw_type == "zone")
         self.geofence_editor_widget.btn_mode_edit_map.setChecked(is_edit and is_map_tab)
         self.geofence_editor_widget.btn_mode_edit.setChecked(is_edit and not is_map_tab)
@@ -2262,13 +2683,32 @@ class LiveTrackingTab(QWidget):
                 )
             else:
                 height = self.geofence_editor_widget.sb_map_height.value() if object_type == "wall" else 0.0
+                wall_points = list(points)
+                wall_mode = "free_standing"
+                host_room_id = None
+                if object_type == "wall":
+                    host_room, snapped_points = self._detect_boundary_wall_match(points)
+                    if host_room is not None:
+                        wall_points = snapped_points
+                        wall_mode = "boundary_outside"
+                        host_room_id = host_room.id
+                thickness = 0.2
+                if object_type == "wall" and hasattr(self, "_properties_panel"):
+                    thickness_spin = getattr(self._properties_panel, "sb_thickness", None)
+                    if thickness_spin is not None:
+                        thickness = max(0.01, float(thickness_spin.value()))
                 new_zone = GeofenceZone(
                     id=zone_id, name=draft_name or f"{object_type.title()} {number}",
-                    zone_type=object_type, points=points, min_z=0.0, max_z=height, speed_limit=0.0,
+                    zone_type=object_type, points=wall_points, min_z=0.0, max_z=height, speed_limit=0.0,
                     color=draft_color or ("#F8FAFC" if object_type == "room" else "#0F172A"),
                     object_type=object_type,
+                    shape_kind=("footprint" if object_type == "wall" and wall_mode != "boundary_outside" and len(wall_points) >= 3 else "polygon"),
+                    thickness=thickness if object_type == "wall" else 0.2,
+                    wall_mode=wall_mode,
+                    host_room_id=host_room_id,
                 )
 
+        self._canvas._push_undo_state()
         self._vm.add_geofence_zone(new_zone)
         self._canvas.set_geofences(self._vm.get_geofence_zones())
         self._canvas.set_selected_zone(zone_id)
@@ -2313,7 +2753,9 @@ class LiveTrackingTab(QWidget):
                 self._canvas.set_draw_object_shape(getattr(zone, "shape_kind", "polygon"))
             self._sync_map_height_visibility()
             if object_type == "room":
+                self._anchor_table_room_id = zone.id
                 self._refresh_active_rooms()
+                self._refresh_anchor_layout_table()
         self._set_editor_mode("edit_vertices")
 
     def _apply_map_properties_from_enter(self):
@@ -2419,24 +2861,38 @@ class LiveTrackingTab(QWidget):
         self._canvas.update()
 
     def _delete_selected_zone(self):
-        if self._canvas.delete_selected_anchor():
-            self.geofence_editor_widget.txt_map_name.clear()
+        if self._canvas.selected_anchor_idx is not None:
             return
 
-        selected_id = self._canvas.selected_zone_id
-        if not selected_id or not self._vm:
+        if not self._vm:
+            return
+        selected_ids = list(getattr(self._canvas, "selected_zone_ids", set()) or [])
+        if not selected_ids and self._canvas.selected_zone_id:
+            selected_ids = [self._canvas.selected_zone_id]
+        if not selected_ids:
             QMessageBox.warning(self, "No Selection", "Select an object on the map first.")
             return
+
         zones = self._vm.get_geofence_zones()
-        deleted_zone = next((z for z in zones if z.id == selected_id), None)
-        if deleted_zone and getattr(deleted_zone, "object_type", "zone") == "room":
-            self._vm.set_active_room_ids([room_id for room_id in self._vm.get_active_room_ids() if room_id != deleted_zone.id])
-        self._vm.remove_geofence_zone(selected_id)
+        selected_set = set(selected_ids)
+        deleted_zones = [z for z in zones if z.id in selected_set]
+        if not deleted_zones:
+            return
+
+        self._canvas._push_undo_state()
+        deleted_room_ids = {z.id for z in deleted_zones if getattr(z, "object_type", "zone") == "room"}
+        if deleted_room_ids:
+            self._vm.set_active_room_ids([
+                room_id for room_id in self._vm.get_active_room_ids()
+                if room_id not in deleted_room_ids
+            ])
+        for zone_id in selected_ids:
+            self._vm.remove_geofence_zone(zone_id)
         self._canvas.set_geofences(self._vm.get_geofence_zones())
         self._canvas.set_selected_zone(None)
         self.geofence_editor_widget.txt_zone_name.clear()
         self.geofence_editor_widget.txt_map_name.clear()
-        if deleted_zone and getattr(deleted_zone, "object_type", "zone") == "room":
+        if deleted_room_ids:
             self._refresh_anchor_membership_from_canvas()
             self._refresh_active_rooms()
 
@@ -2447,25 +2903,28 @@ class LiveTrackingTab(QWidget):
     def _copy_selected_object(self):
         if not self._vm:
             return
-        # Check if anchor is selected
         if self._canvas.selected_anchor_idx is not None and 0 <= self._canvas.selected_anchor_idx < len(self._canvas.anchors):
             anchor = self._canvas.anchors[self._canvas.selected_anchor_idx]
             self._clipboard = {"type": "anchor", "data": dict(anchor)}
             return
-        
-        # Check if zone/map object is selected
-        selected_id = self._canvas.selected_zone_id
-        if selected_id:
-            zones = self._vm.get_geofence_zones()
-            zone = next((z for z in zones if z.id == selected_id), None)
-            if zone:
-                self._clipboard = {"type": "zone", "data": zone.to_dict()}
+
+        zones = self._vm.get_geofence_zones()
+        selected_ids = list(getattr(self._canvas, "selected_zone_ids", set()) or [])
+        if not selected_ids and self._canvas.selected_zone_id:
+            selected_ids = [self._canvas.selected_zone_id]
+        if not selected_ids:
+            return
+        selected_set = set(selected_ids)
+        copied = [zone.to_dict() for zone in zones if zone.id in selected_set]
+        if len(copied) == 1:
+            self._clipboard = {"type": "zone", "data": copied[0]}
+        elif copied:
+            self._clipboard = {"type": "zones", "data": copied}
 
     def _paste_object(self):
         if not self._vm or not self._clipboard:
             return
-        
-        # Get mouse position
+
         mx, my = (0.0, 0.0)
         if hasattr(self._canvas, "mouse_world_pos") and self._canvas.mouse_world_pos:
             mx, my = self._canvas.mouse_world_pos
@@ -2476,11 +2935,13 @@ class LiveTrackingTab(QWidget):
             return
 
         if clip_type == "anchor":
+            if self._canvas.draw_object_type == "anchor":
+                return
             used_ids = {anchor.get("anchor_id") for anchor in self._canvas.anchors}
             anchor_id = clip_data.get("anchor_id", 0)
             while anchor_id in used_ids:
                 anchor_id += 1
-            
+
             new_anchor = dict(clip_data)
             new_anchor["anchor_id"] = anchor_id
             new_anchor["label"] = f"A{anchor_id}"
@@ -2500,57 +2961,89 @@ class LiveTrackingTab(QWidget):
                 self._canvas.set_selected_anchor(len(self._canvas.anchors) - 1)
                 self._on_canvas_anchor_layout_edited(self._canvas.anchors)
                 self._canvas.update()
+            return
 
-        elif clip_type == "zone":
+        zone_payloads = [clip_data] if clip_type == "zone" else list(clip_data) if clip_type == "zones" else []
+        if not zone_payloads:
+            return
+
+        all_points = []
+        for payload in zone_payloads:
+            for point in payload.get("points", []):
+                all_points.append((float(point["x"]), float(point["y"])))
+        if all_points:
+            cx = sum(point[0] for point in all_points) / len(all_points)
+            cy = sum(point[1] for point in all_points) / len(all_points)
+        else:
+            cx, cy = mx, my
+        dx = mx - cx
+        dy = my - cy
+
+        self._canvas._push_undo_state()
+        new_ids = []
+        new_zones = []
+        for payload in zone_payloads:
+            copied_data = dict(payload)
             zone_id = str(uuid.uuid4())[:8]
-            copied_data = dict(clip_data)
-            
-            # Calculate centroid of copied points to offset to mouse position
             points_list = copied_data.get("points", [])
             if points_list:
-                pts = [(float(p["x"]), float(p["y"])) for p in points_list]
-                cx = sum(p[0] for p in pts) / len(pts)
-                cy = sum(p[1] for p in pts) / len(pts)
-                dx = mx - cx
-                dy = my - cy
-                new_pts = [(p[0] + dx, p[1] + dy) for p in pts]
-                copied_data["points"] = [{"x": p[0], "y": p[1]} for p in new_pts]
-            
+                new_pts = [
+                    (float(point["x"]) + dx, float(point["y"]) + dy)
+                    for point in points_list
+                ]
+                copied_data["points"] = [{"x": point[0], "y": point[1]} for point in new_pts]
             copied_data["id"] = zone_id
-            
-            # Keep original name prefix but append a copy suffix
             name = copied_data.get("name", "Object")
             if not name.endswith("(Copy)"):
                 copied_data["name"] = f"{name} (Copy)"
-            
             new_zone = GeofenceZone.from_dict(copied_data)
-            self._canvas._push_undo_state()
             self._vm.add_geofence_zone(new_zone)
-            self._canvas.set_geofences(self._vm.get_geofence_zones())
-            self._canvas.set_selected_zone(zone_id)
-            self._load_zone_properties_to_ui(new_zone)
-            
-            object_type = getattr(new_zone, "object_type", "zone")
-            if object_type == "room":
-                self._refresh_anchor_membership_from_canvas()
-                self._refresh_active_rooms()
-            
-            self._canvas.update()
+            new_ids.append(zone_id)
+            new_zones.append(new_zone)
 
+        self._canvas.set_geofences(self._vm.get_geofence_zones())
+        self._canvas.set_selected_zones(new_ids, primary_id=(new_ids[-1] if new_ids else None))
+        if new_zones:
+            self._load_zone_properties_to_ui(new_zones[-1])
+        if any(getattr(zone, "object_type", "zone") == "room" for zone in new_zones):
+            self._refresh_anchor_membership_from_canvas()
+            self._refresh_active_rooms()
+        self._canvas.update()
     def _on_canvas_zone_selected(self, zone_id):
         if not zone_id:
             self.geofence_editor_widget.txt_zone_name.clear()
-            self.geofence_editor_widget.txt_map_name.clear()
+            if self._is_anchor_tool_active():
+                self._clear_anchor_property_fields()
+            else:
+                self.geofence_editor_widget.txt_map_name.clear()
             return
         if not self._vm:
             return
         zones = self._vm.get_geofence_zones()
         zone = next((z for z in zones if z.id == zone_id), None)
-        if zone:
-            self._load_zone_properties_to_ui(zone)
+        if not zone:
+            return
+
+        if self._canvas.draw_object_type == "anchor":
+            if getattr(zone, "object_type", "zone") == "room":
+                self._anchor_table_room_id = zone.id
+                self._canvas.set_selected_zone(zone.id)
+                self._canvas.selected_anchor_idx = None
+                self._set_anchor_authoring_visible(True)
+                if hasattr(self, "_properties_scroll"):
+                    self._properties_scroll.hide()
+                self.geofence_editor_widget.gb_map_properties.show()
+                self._clear_anchor_property_fields()
+                self._refresh_active_rooms()
+                self._refresh_anchor_layout_table()
+            return
+
+        self._load_zone_properties_to_ui(zone)
 
     def _on_canvas_anchor_selected(self, anchor_idx):
         if anchor_idx is None or anchor_idx < 0 or anchor_idx >= len(self._canvas.anchors):
+            if self._is_anchor_tool_active():
+                self._clear_anchor_property_fields()
             return
         anchor = self._canvas.anchors[anchor_idx]
         self.geofence_editor_widget.editor_tabs.setCurrentIndex(0)
@@ -2563,39 +3056,54 @@ class LiveTrackingTab(QWidget):
         if anchor_type_idx >= 0:
             self.geofence_editor_widget.cmb_map_type.setCurrentIndex(anchor_type_idx)
         if hasattr(self.geofence_editor_widget, "sb_anchor_x"):
-            room = self._find_room(anchor.get("room_id", anchor.get("zone_id", "")))
-            if room is not None:
-                local_x, local_y = self._scene_to_room_local(
-                    anchor.get("x", 0.0), anchor.get("y", 0.0), room
-                )
+            value_x, value_y, value_z, is_local = self._anchor_local_xyz(anchor)
+            if is_local:
+                self.geofence_editor_widget.lbl_anchor_x.setText("Local X:")
+                self.geofence_editor_widget.lbl_anchor_y.setText("Local Y:")
+                self.geofence_editor_widget.sb_anchor_x.setToolTip("Local X in the selected room, relative to its Local (0,0).")
+                self.geofence_editor_widget.sb_anchor_y.setToolTip("Local Y in the selected room, relative to its Local (0,0).")
             else:
-                local_x, local_y = float(anchor.get("x", 0.0)), float(anchor.get("y", 0.0))
-            self.geofence_editor_widget.sb_anchor_x.setValue(local_x)
-            self.geofence_editor_widget.sb_anchor_y.setValue(local_y)
-            self.geofence_editor_widget.sb_anchor_z.setValue(float(anchor.get("z", 0.0)))
+                self.geofence_editor_widget.lbl_anchor_x.setText("Global X:")
+                self.geofence_editor_widget.lbl_anchor_y.setText("Global Y:")
+                self.geofence_editor_widget.sb_anchor_x.setToolTip("Global map X because this anchor is not assigned to a room.")
+                self.geofence_editor_widget.sb_anchor_y.setToolTip("Global map Y because this anchor is not assigned to a room.")
+            self.geofence_editor_widget.lbl_anchor_z.setText("Z:")
+            self.geofence_editor_widget.sb_anchor_z.setToolTip("Anchor height Z in meters.")
+            self._set_anchor_property_enabled(True)
+            self.geofence_editor_widget.sb_anchor_x.setValue(value_x)
+            self.geofence_editor_widget.sb_anchor_y.setValue(value_y)
+            self.geofence_editor_widget.sb_anchor_z.setValue(value_z)
 
 
         self._sync_map_height_visibility()
         self._refresh_anchor_status_label()
 
     def _on_canvas_anchor_layout_edited(self, anchors):
-        self._map_3d.set_anchors(anchors)
+        if not self._vm:
+            self._map_3d.set_anchors(anchors)
+            self._refresh_anchor_layout_table()
+            self._refresh_active_rooms()
+            return
+        self._refresh_anchor_membership_from_canvas()
+        self._map_3d.set_anchors(self._canvas.anchors)
         self._refresh_anchor_layout_table()
         self._refresh_active_rooms()
+    def _schedule_geofence_layout_emit(self):
         if not self._vm:
             return
-        if getattr(self._canvas, "dim_tracking_view", False):
-            self._draft_anchor_layout = self._annotate_anchor_membership(anchors)
-            self._anchor_layout_commit_pending = not self._same_anchor_layout(
-                self._draft_anchor_layout,
-                self._geofence_anchor_baseline,
-            )
-            self._vm.geofence_repo.set_anchors(self._draft_anchor_layout)
-            shared_app_state.anchor_layout = [dict(anchor) for anchor in self._draft_anchor_layout]
-            self._refresh_anchor_status_label()
+        if not hasattr(self, "_layout_emit_timer"):
+            self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
             return
-        self._vm.update_anchor_layout_from_map(self._annotate_anchor_membership(anchors))
+        self._layout_emit_dirty = True
+        if not self._layout_emit_timer.isActive():
+            self._layout_emit_timer.start()
 
+    def _flush_geofence_layout_emit(self):
+        self._layout_emit_timer.stop()
+        if not getattr(self, "_layout_emit_dirty", False) or not self._vm:
+            return
+        self._layout_emit_dirty = False
+        self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
     def _on_canvas_zone_modified(self, zone_id, points):
         if not self._vm:
             return
@@ -2603,9 +3111,10 @@ class LiveTrackingTab(QWidget):
         zone = next((z for z in zones if z.id == zone_id), None)
         if zone:
             zone.points = points
-            if hasattr(self, "_properties_panel") and self._canvas.selected_zone_id == zone_id:
+            canvas_busy = bool(getattr(self._canvas, "_zone_drag_start_world", None) or self._canvas.selected_vertex_idx is not None or self._canvas.selected_edge_idx is not None)
+            if not canvas_busy and hasattr(self, "_properties_panel") and self._canvas.selected_zone_id == zone_id:
                 self._properties_panel.load_zone(zone)
-            self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
+            self._schedule_geofence_layout_emit()
             if getattr(zone, "object_type", "zone") == "room":
                 self._refresh_anchor_membership_from_canvas()
 
@@ -2636,6 +3145,14 @@ class LiveTrackingTab(QWidget):
                         zone.shape_kind = "polygon"
                 elif key == "object_direction":
                     zone.object_direction = str(val)
+                elif key == "wall_mode":
+                    zone.wall_mode = str(val)
+                elif key == "host_room_id":
+                    zone.host_room_id = str(val) if val else None
+                elif key == "label_offset_x":
+                    zone.label_offset_x = float(val)
+                elif key == "label_offset_y":
+                    zone.label_offset_y = float(val)
             
             # Update sidebar fields if it's currently selected zone
             if self._canvas.selected_zone_id == zone_id:
@@ -2672,6 +3189,7 @@ class LiveTrackingTab(QWidget):
         self._vm.geofence_repo.set_anchors(map_anchors)
         self._canvas.set_geofences(zones)
         self._canvas.set_anchors(self._format_anchors_for_canvas(map_anchors))
+        self._canvas.clear_undo_history()
         self._geofence_anchor_baseline = [dict(anchor) for anchor in map_anchors]
         self._draft_anchor_layout = [dict(anchor) for anchor in map_anchors]
         self._anchor_layout_commit_pending = False
@@ -2718,6 +3236,7 @@ class LiveTrackingTab(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            self._canvas._push_undo_state()
             self._vm.clear_geofence_zones()
             self._canvas.set_geofences([])
             self._canvas.set_anchors([])
@@ -2727,7 +3246,10 @@ class LiveTrackingTab(QWidget):
                 self._anchor_layout_commit_pending = True
             self._canvas.set_selected_zone(None)
             self.geofence_editor_widget.txt_zone_name.clear()
-            self.geofence_editor_widget.txt_map_name.clear()
+            if self._is_anchor_tool_active():
+                self._clear_anchor_property_fields()
+            else:
+                self.geofence_editor_widget.txt_map_name.clear()
 
     def set_developer_mode(self, is_developer: bool):
         self._is_developer_mode = is_developer
@@ -2794,6 +3316,24 @@ class LiveTrackingTab(QWidget):
         else:
             self.warning_label.setVisible(False)
 
+    def schedule_preview_pane_update(self):
+        if not hasattr(self, "_preview_sync_timer"):
+            return
+        if not hasattr(self, "_map_view_stack") or self._map_view_stack.currentWidget() is not self._map_3d:
+            return
+        self._preview_sync_dirty = True
+        if not self._preview_sync_timer.isActive():
+            self._preview_sync_timer.start()
+
+    def _flush_preview_pane_update(self):
+        self._preview_sync_timer.stop()
+        if not self._preview_sync_dirty:
+            return
+        self._preview_sync_dirty = False
+        self.update_preview_pane()
+
     def update_preview_pane(self):
+        if not hasattr(self, "_map_3d"):
+            return
         self._map_3d.set_geofences(self._canvas.geofence_zones)
         self._map_3d.set_anchors(self._canvas.anchors)

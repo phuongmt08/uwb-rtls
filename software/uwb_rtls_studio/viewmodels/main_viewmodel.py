@@ -13,6 +13,7 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from common import protocol_pb2 as pb
 from data.raw_packet_store import shared_raw_packet_store
 from repository.session_repository import SessionRepository
 from utils.app_state import shared_app_state
@@ -42,29 +43,36 @@ class MainViewModel(QObject):
         self.log_vm = log_vm
         self._session_repository = session_repository or SessionRepository()
         self._session_run_manager = session_run_manager
+        self._pending_end_session_id = ""
 
         if self.device_info_vm:
             self.device_info_vm.device_info_updated.connect(self._on_device_info_updated)
+            if hasattr(self.device_info_vm, "end_session_result"):
+                self.device_info_vm.end_session_result.connect(self._on_end_session_result)
 
     def set_mode(self, is_developer: bool) -> None:
         self.mode_changed.emit("developer" if is_developer else "user")
 
     def end_session(self, duration_sec: float = 0.0, reason: int = 0) -> str:
-        """Stop the active protocol session and persist the collected data."""
+        """Stop recording locally, then wait for device end-session confirmation."""
+        end_reason = int(reason or pb.SESSION_END_REASON_UNSPECIFIED)
         if self._session_run_manager:
-            session_id = self._session_run_manager.end_all_active(duration_sec=duration_sec)
+            session_id = self._session_run_manager.end_all_active(
+                duration_sec=duration_sec,
+                send_device_end=False,
+            )
             self._clear_live_session_buffers()
             if self.log_vm:
                 self.log_vm.refresh_sessions()
             self.session_saved.emit(session_id)
-            self.session_ended.emit(session_id)
+            self._pending_end_session_id = session_id
+            self._request_device_end_session(reason=end_reason, await_completion=True)
             return session_id
 
         session_id = self.save_active_session(duration_sec=duration_sec)
-        if reason:
-            self._request_device_end_session(reason=reason)
         self._clear_live_session_buffers()
-        self.session_ended.emit(session_id)
+        self._pending_end_session_id = session_id
+        self._request_device_end_session(reason=end_reason, await_completion=True)
         return session_id
 
     def start_session(self) -> str:
@@ -126,13 +134,34 @@ class MainViewModel(QObject):
             self.session_save_failed.emit(message)
             raise
 
-    def _request_device_end_session(self, reason: int) -> None:
+    def _request_device_end_session(self, reason: int, await_completion: bool = False) -> None:
         if not self.device_info_vm:
+            if self._pending_end_session_id:
+                session_id = self._pending_end_session_id
+                self._pending_end_session_id = ""
+                self.session_ended.emit(session_id)
             return
         try:
-            self.device_info_vm.request_end_session(reason=reason)
+            self.device_info_vm.request_end_session(
+                reason=reason,
+                await_completion=await_completion,
+            )
         except Exception as exc:
             log.warning("Failed to send end_session command: %s", exc)
+            self._pending_end_session_id = ""
+            self.session_save_failed.emit(f"Failed to send end_session command: {exc}")
+
+    def _on_end_session_result(self, result: dict) -> None:
+        session_id = self._pending_end_session_id
+        if not session_id:
+            return
+        if result.get("success"):
+            self._pending_end_session_id = ""
+            self.session_ended.emit(session_id)
+            return
+        self._pending_end_session_id = ""
+        message = result.get("message") or "End session failed."
+        self.session_save_failed.emit(str(message))
 
     def _clear_live_session_buffers(self) -> None:
         model = getattr(self.live_tracking_vm, "model", None)
