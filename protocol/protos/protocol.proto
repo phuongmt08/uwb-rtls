@@ -24,7 +24,7 @@ package protobuf;
 
 enum common_constant_t {
     UNSPECIFIED  = 0;
-    PROTOCOL_REV = 122;
+    PROTOCOL_REV = 123;
 }
 
 enum packet_ack_response_t {
@@ -452,9 +452,9 @@ message flash_verify_t {
  * Useful during UWB calibration or power-saving modes.
  */
 message ble_adv_config_t {
-    bool enable          = 1;
-    uint32 serial_number = 2;
-    string device_name   = 3;
+    bool enable        = 1;
+    reserved 2;
+    string device_name = 3;
 }
 
 message ble_adv_config_request_t {
@@ -528,6 +528,7 @@ message ble_adv_status_t {
     uint32 warning_count      = 5;
     uint32 error_count        = 6;
     uint32 local_timestamp_s = 7;
+    uint32 serial_number     = 8;
 }
 
 

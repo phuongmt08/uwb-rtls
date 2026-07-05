@@ -70,7 +70,7 @@ extern "C" {
 /**
  * @brief Central scan window in milliseconds.
  */
-#define SYSTEM_CONFIG_SCAN_WINDOW_MS       50
+#define SYSTEM_CONFIG_SCAN_WINDOW_MS       100
 
 /**
  * @brief Central scan duration in milliseconds.
@@ -87,6 +87,13 @@ extern "C" {
  * Valid values for nRF52: -40, -20, -16, -12, -8, -4, 0, 3, 4. 
  */
 #define SYSTEM_CONFIG_TX_POWER            4
+
+/* Maximum TX power used after a connection is established. */
+#if defined(NRF52840_XXAA)
+#define SYSTEM_CONFIG_CONN_TX_POWER       8
+#else
+#define SYSTEM_CONFIG_CONN_TX_POWER       4
+#endif
 
 
 // =============================================================================

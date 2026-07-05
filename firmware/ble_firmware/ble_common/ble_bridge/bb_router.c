@@ -50,6 +50,7 @@ APP_TIMER_DEF(m_mcu_rx_stats_timer_id);
 // Router-owned buffer that stores protobuf payloads only.
 static uint8_t protobuf_buffer[MAX_PROTOBUF_PAYLOAD_SIZE];
 static uint16_t protobuf_buffer_len;
+static bool m_route_packet_valid;
 
 /* Private function prototypes ---------------------------------------- */
 static void bb_router_state_transition(void);
@@ -57,6 +58,8 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length);
 static void bb_router_state_check_dst_handle(void);
 static void bb_router_state_process_cmd_handle(void);
 static void bb_router_state_forward_handle(void);
+static void bb_router_log_packet(const char *direction, bb_packet_source_t source, uint8_t *p_data, uint16_t length);
+
 #if defined(BLE_PERIPHERAL)
 static int bb_router_mcu_ble_packet_index(uint32_t cmd_id);
 #if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
@@ -171,6 +174,15 @@ static void bb_router_state_check_dst_handle(void)
     // Check whether the destination address targets this bridge.
     bool is_for_me = bb_router_check_dst(protobuf_buffer, protobuf_buffer_len);
 
+    if (!m_route_packet_valid)
+    {
+        NRF_LOG_WARNING("Dropping malformed protobuf packet, len=%u",
+                        (unsigned)protobuf_buffer_len);
+        m_state = BB_ROUTER_STATE_IDLE;
+        bb_transport_clear_packet_ready();
+        return;
+    }
+
     if (is_for_me) 
     {
         m_state = BB_ROUTER_STATE_PROCESS_CMD;
@@ -211,8 +223,7 @@ static void bb_router_state_process_cmd_handle(void)
 
 static void bb_router_state_forward_handle(void)
 {
-    /* Forward raw payload, or the response payload produced by a command handler. */
-    //bb_router_log_forward_packet();
+    bb_router_log_packet("TX", m_target_source, protobuf_buffer, protobuf_buffer_len);
     ret_code_t err_code = bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
     if (err_code == NRF_ERROR_RESOURCES || err_code == NRF_ERROR_BUSY)
     {
@@ -234,13 +245,59 @@ static void bb_router_state_forward_handle(void)
     bb_transport_clear_packet_ready();
 }
 
-static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
+static void bb_router_log_packet(const char *direction, bb_packet_source_t source, uint8_t *p_data, uint16_t length)
 {
+#if BB_DEBUG_TRANSPORT_LOG_ENABLED
     protobuf_packet_t pkt = protobuf_packet_t_init_zero;
     pb_istream_t stream = pb_istream_from_buffer(p_data, length);
 
     if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
     {
+        const char *src_name = "UNKNOWN";
+        if (source == BB_SOURCE_SERIAL) {
+            src_name = "Serial";
+        } else if (source == BB_SOURCE_BLE) {
+            src_name = "BLE";
+        } else if (source == BB_SOURCE_BLE_BROADCAST) {
+            src_name = "BLE_BCAST";
+        }
+
+        uint8_t pkt_src = (pkt.has_hdr && pkt.hdr.has_addr) ? pkt.hdr.addr.src : 0;
+        uint8_t pkt_dst = (pkt.has_hdr && pkt.hdr.has_addr) ? pkt.hdr.addr.dst : 0;
+        uint32_t pkt_seq = pkt.has_hdr ? pkt.hdr.seq : 0;
+
+        NRF_LOG_INFO("[Transport] %s %s: cmd=%u seq=%u",
+                     src_name,
+                     direction,
+                     (unsigned)pkt.which_params,
+                     (unsigned)pkt_seq);
+        NRF_LOG_INFO("            src=0x%02X dst=0x%02X len=%u",
+                     (unsigned)pkt_src,
+                     (unsigned)pkt_dst,
+                     (unsigned)length);
+    }
+    else
+    {
+        NRF_LOG_WARNING("[Transport] Failed to decode %s packet, len=%u, error=%s",
+                        direction,
+                        length,
+                        PB_GET_ERROR(&stream));
+        NRF_LOG_HEXDUMP_WARNING(p_data, length);
+    }
+#endif
+}
+
+static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
+{
+    m_route_packet_valid = false;
+    bb_router_log_packet("RX", bb_transport_get_rx_source(), p_data, length);
+
+    protobuf_packet_t pkt = protobuf_packet_t_init_zero;
+    pb_istream_t stream = pb_istream_from_buffer(p_data, length);
+
+    if (pb_decode(&stream, protobuf_packet_t_fields, &pkt))
+    {
+        m_route_packet_valid = true;
 #if defined(BLE_PERIPHERAL)
         if (bb_transport_get_rx_source() == BB_SOURCE_SERIAL)
         {
@@ -285,56 +342,24 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
                 return true;
             }
 
-#if defined(BLE_CENTRAL)
+#if defined(BLE_CENTRAL) || defined(BLE_PERIPHERAL)
             bb_packet_source_t rx_src = bb_transport_get_rx_source();
-            if (addr == protobuf_PACKET_ADDR_HOST || addr == protobuf_PACKET_ADDR_DEBUG)
+            if (addr == protobuf_PACKET_ADDR_BCAST && rx_src == BB_SOURCE_SERIAL)
             {
-                m_target_source = BB_SOURCE_SERIAL;
-                return false;
-            }
-            if (addr == protobuf_PACKET_ADDR_BCAST)
-            {
-                if (rx_src == BB_SOURCE_SERIAL)
-                {
-                    m_target_source = BB_SOURCE_BLE_BROADCAST;
-                }
-                else
-                {
-                    m_target_source = BB_SOURCE_SERIAL;
-                }
+                m_target_source = BB_SOURCE_BLE_BROADCAST;
                 return false;
             }
 
-            m_target_source = BB_SOURCE_BLE;
-            return false;
-#elif defined(BLE_PERIPHERAL)
-            bb_packet_source_t rx_src = bb_transport_get_rx_source();
-            if (addr == protobuf_PACKET_ADDR_MCU)
-            {
-                m_target_source = BB_SOURCE_SERIAL;
-                return false;
-            }
-            if (addr == protobuf_PACKET_ADDR_BCAST)
-            {
-                if (rx_src == BB_SOURCE_SERIAL)
-                {
-                    m_target_source = BB_SOURCE_BLE_BROADCAST;
-                }
-                else
-                {
-                    m_target_source = BB_SOURCE_SERIAL;
-                }
-                return false;
-            }
-
-            m_target_source = BB_SOURCE_BLE;
+            /* Never send a packet back to the transport it arrived from. */
+            m_target_source = (rx_src == BB_SOURCE_SERIAL)
+                                ? BB_SOURCE_BLE
+                                : BB_SOURCE_SERIAL;
             return false;
 #endif
         }
     }
 
-    // Default or decode-error fallback is forwarding to BLE.
-    m_target_source = BB_SOURCE_BLE;
+    /* Malformed packets are dropped by the CHECK_DST state handler. */
     return false;
 }
 

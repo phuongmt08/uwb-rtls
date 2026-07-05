@@ -211,8 +211,6 @@ class DfuController(QObject):
             time.sleep(1.0)
 
     def on_scan(self):
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
         def job():
             self._force_app_to_dfu_mode()
             vid_filter, pid_filter = self._parse_scan_filters()
@@ -244,8 +242,6 @@ class DfuController(QObject):
         self.main_ctrl.run_task(job)
 
     def on_connect(self):
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
         def job():
             vid = int(self.view.vid_edit.text().strip(), 16)
             pid = int(self.view.pid_edit.text().strip(), 16)
@@ -253,8 +249,6 @@ class DfuController(QObject):
         self.main_ctrl.run_task(job)
 
     def on_auto_connect(self):
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
         def job():
             self._force_app_to_dfu_mode()
             self.scanned_devices = [] # Force fresh scan after potential reboot
@@ -355,9 +349,6 @@ class DfuController(QObject):
             if item and item.checkState() == Qt.Checked:
                 selected.append(int(item.data(Qt.UserRole)))
         
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
-
         def job():
             if not selected: raise DfuError("No sector selected.")
             self.signals.log.emit("Erasing selected sectors...")
@@ -372,9 +363,6 @@ class DfuController(QObject):
             self.signals.log.emit("[DFU] ERROR: No device connected. Please click Connect first.")
             QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
             return
-
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
 
         def job():
             self.signals.log.emit("Mass erase...")
@@ -413,9 +401,6 @@ class DfuController(QObject):
             QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
             return
 
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
-
         def job():
             self._ensure_hex_loaded()
             payload = self.current_hex.data
@@ -435,9 +420,6 @@ class DfuController(QObject):
             self.signals.log.emit("[DFU] ERROR: No device connected. Please click Connect first.")
             QMessageBox.warning(self.view, "Not Connected", "Please connect DFU device first.")
             return
-
-        if hasattr(self.main_ctrl, 'fota_ctrl') and self.main_ctrl.fota_ctrl.monitor_thread:
-            self.main_ctrl.fota_ctrl.monitor_thread.suspended = True
 
         def job():
             self._ensure_hex_loaded()

@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from contextlib import contextmanager
 from typing import Optional
 
 # Ensure common is in sys.path
@@ -72,6 +73,51 @@ def _split_chunks(data: bytes, chunk_size: int) -> list:
 class FotaService:
     def __init__(self):
         self.factory = CommandFactory()
+        self._persistent_session = None
+        self._device_verification_attempted = False
+        self._verified_device_info = None
+
+    def open_persistent_session(self, port):
+        self.close_persistent_session()
+        session = DongleSession(port, baud=115200, debug=False)
+        session.__enter__()
+        self._persistent_session = session
+        return session
+
+    def close_persistent_session(self):
+        session = self._persistent_session
+        self._persistent_session = None
+        self._device_verification_attempted = False
+        self._verified_device_info = None
+        if session is not None:
+            session.__exit__(None, None, None)
+
+    @contextmanager
+    def _session(self, port):
+        session = self._persistent_session
+        if session is not None and session.port == port and session.ser is not None:
+            yield session
+            return
+        with DongleSession(port, baud=115200, debug=False) as temporary:
+            yield temporary
+
+    def _reset_device_verification(self):
+        self._device_verification_attempted = False
+        self._verified_device_info = None
+
+    def recv_unsolicited_ble_status(self, timeout_s=0.05):
+        session = self._persistent_session
+        if session is None or session.ser is None:
+            return []
+
+        statuses = []
+        for pkt in session.recv_packets(timeout_s):
+            if pkt.WhichOneof("params") != "ble_status_resp":
+                continue
+            statuses.append(
+                self._validated_ble_status(session, pkt.ble_status_resp)
+            )
+        return statuses
 
     def auto_probe_dongle(self, ignore_ports=None):
         return DongleSession.auto_probe(src=int(VvAddress.HOST), debug=False, ignore_ports=ignore_ports)
@@ -80,34 +126,87 @@ class FotaService:
         # Elegant, conflict-free hotplug check: just verify if the virtual COM port still exists in the OS
         return any(p.device == port for p in list_ports.comports())
 
-    def get_ble_status(self, port) -> Optional[str]:
+    @staticmethod
+    def ble_status_dict(resp) -> dict:
+        return {
+            "state": int(resp.state),
+            "rssi_dbm": int(resp.rssi_dbm),
+            "disconnect_reason": int(resp.disconnect_reason),
+        }
+
+    def _get_device_information(self, session, timeout_s=0.6):
+        seq = session.proto.next_seq()
+        pkt = self.factory.device_information_get(
+            int(VvAddress.HOST), int(VvAddress.MCU), seq
+        )
+        match, _ = session.send_expect_param(
+            pkt, "device_information_resp", timeout_s=timeout_s
+        )
+        if match is None:
+            return None
+
+        info = match.device_information_resp
+        return {
+            "device_type": int(info.device_type),
+            "role": int(info.role),
+            "serial_number": int(info.serial_number),
+            "hw_version": int(info.hw_version),
+        }
+
+    def _validated_ble_status(self, session, resp) -> dict:
+        status = self.ble_status_dict(resp)
+        status["central_state"] = status["state"]
+        status["device_verified"] = False
+        status["device_info"] = None
+
+        if status["state"] != pb.BLE_STATE_CONNECTED:
+            self._reset_device_verification()
+            return status
+
+        # Verify the BLE-to-MCU path exactly once per connection.
+        # The 5-second status polls reuse this cached result.
+        if not self._device_verification_attempted:
+            self._device_verification_attempted = True
+            for attempt in range(3):
+                self._verified_device_info = self._get_device_information(session)
+                if self._verified_device_info is not None:
+                    break
+                if attempt < 2:
+                    time.sleep(0.1)
+
+        if self._verified_device_info is not None:
+            status["device_verified"] = True
+            status["device_info"] = self._verified_device_info
+            return status
+
+        status["state"] = pb.BLE_STATE_CONNECTING
+        return status
+
+    def get_ble_status(self, port) -> Optional[dict]:
         if not port:
             return None
         try:
-            with DongleSession(port, baud=115200, debug=False) as session:
+            with self._session(port) as session:
                 seq = session.proto.next_seq()
                 pkt = self.factory.ble_status_get(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
                 match, _ = session.send_expect_param(pkt, "ble_status_resp", timeout_s=0.3)
                 if match is not None:
-                    if match.ble_status_resp.state == pb.BLE_STATE_CONNECTED:
-                        return "Connected"
-                    else:
-                        return "Disconnected"
+                    return self._validated_ble_status(session, match.ble_status_resp)
         except Exception:
             pass
         return None
 
-    def scan_nearby_devices(self, port, log_cb, result_cb):
+    def scan_nearby_devices(self, port, log_cb, result_cb, ble_status_cb=None):
         if not port:
             log_cb("[FOTA] ERROR: Dongle not detected. Please plug in the Dongle first.")
             return
 
-        with DongleSession(port, baud=115200, debug=False) as session:
+        with self._session(port) as session:
             seq = session.proto.next_seq()
             pkt = self.factory.ble_scan_start(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             pkt.ble_scan_start.duration_ms = 2000
             pkt.ble_scan_start.interval_ms = 100
-            pkt.ble_scan_start.window_ms = 50
+            pkt.ble_scan_start.window_ms = 100
             pkt.ble_scan_start.active_scanning = True
             
             session.send_packet(pkt)
@@ -117,23 +216,26 @@ class FotaService:
             while time.time() < deadline:
                 pkts = session.recv_packets(0.1)
                 for p in pkts:
+                    if p.WhichOneof("params") == "ble_status_resp" and ble_status_cb:
+                        ble_status_cb(self.ble_status_dict(p.ble_status_resp))
                     if p.WhichOneof("params") == "ble_scan_result":
                         mac = p.ble_scan_result.mac_address.hex().upper()
                         mac_str = ":".join(mac[i:i+2] for i in range(0, len(mac), 2))
-                        if mac_str not in results:
-                            results[mac_str] = {
-                                'name': p.ble_scan_result.name,
-                                'rssi': p.ble_scan_result.rssi_dbm,
-                                'sn': p.ble_scan_result.serial_number
-                            }
-                            result_cb({mac_str: results[mac_str]})
+                        current = {
+                            'name': p.ble_scan_result.name,
+                            'rssi': p.ble_scan_result.rssi_dbm,
+                            'sn': p.ble_scan_result.serial_number
+                        }
+                        if results.get(mac_str) != current:
+                            results[mac_str] = current
+                            result_cb({mac_str: current})
 
-    def connect_to_device(self, port, mac_bytes, mac_str, log_cb, connected_cb):
+    def connect_to_device(self, port, mac_bytes, mac_str, log_cb, connected_cb, ble_status_cb=None):
         if not port:
             log_cb("[FOTA] ERROR: Dongle not detected.")
             return
 
-        with DongleSession(port, baud=115200, debug=False) as session:
+        with self._session(port) as session:
             # Send stop scan first for safety
             seq_stop = session.proto.next_seq()
             pkt_stop = self.factory.ble_scan_stop(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq_stop)
@@ -143,6 +245,7 @@ class FotaService:
             seq = session.proto.next_seq()
             pkt = self.factory.ble_connect(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             pkt.ble_connect.mac_address = mac_bytes
+            self._reset_device_verification()
             session.send_packet(pkt)
             
             deadline = time.time() + 5.0
@@ -152,21 +255,36 @@ class FotaService:
                 for p in pkts:
                     if p.WhichOneof("params") == "ble_status_resp":
                         if p.ble_status_resp.state == pb.BLE_STATE_CONNECTED:
-                            connected = True
-                            break
+                            status = self._validated_ble_status(session, p.ble_status_resp)
+                            if ble_status_cb:
+                                ble_status_cb(status)
+                            connected = status["device_verified"]
+                            if connected:
+                                info = status["device_info"]
+                                log_cb(
+                                    "[FOTA] Device information verified: "
+                                    f"SN={info['serial_number']} type={info['device_type']} "
+                                    f"role={info['role']} hw={info['hw_version']}"
+                                )
+                                break
+                        elif ble_status_cb:
+                            ble_status_cb(self.ble_status_dict(p.ble_status_resp))
                 if connected: break
             
             if connected:
                 log_cb(f"[FOTA] Connected successfully to {mac_str}!")
                 connected_cb(f"Connected: {mac_str}")
             else:
-                log_cb("[FOTA] Failed to connect. Check if the device is advertising.")
+                log_cb(
+                    "[FOTA] Failed to verify device_information_resp over BLE; "
+                    "connection is not usable."
+                )
                 connected_cb("Disconnected")
 
-    def disconnect_device(self, port, log_cb, disconnected_cb):
+    def disconnect_device(self, port, log_cb, disconnected_cb, ble_status_cb=None):
         if not port:
             return
-        with DongleSession(port, baud=115200, debug=False) as session:
+        with self._session(port) as session:
             seq = session.proto.next_seq()
             pkt = self.factory.ble_disconnect(int(VvAddress.HOST), int(VvAddress.CENTRAL), seq)
             session.send_packet(pkt)
@@ -185,6 +303,8 @@ class FotaService:
                 pkts = session.recv_packets(0.15)
                 for p in pkts:
                     if p.WhichOneof("params") == "ble_status_resp":
+                        if ble_status_cb:
+                            ble_status_cb(self.ble_status_dict(p.ble_status_resp))
                         log_cb(f"[FOTA] Dongle state reported: {p.ble_status_resp.state}")
                         if p.ble_status_resp.state != pb.BLE_STATE_CONNECTED:
                             disconnected = True
@@ -200,7 +320,7 @@ class FotaService:
                 
             disconnected_cb("Disconnected")
 
-    def execute_ota_flash(self, port, hex_path, chunk_size, mac_bytes, mac_str, log_cb, progress_cb, status_cb):
+    def execute_ota_flash(self, port, hex_path, chunk_size, mac_bytes, mac_str, log_cb, progress_cb, status_cb, ble_status_cb=None):
         start_time = time.time()
         if chunk_size % 4 != 0:
             log_cb(f"[FOTA] ERROR: Chunk size ({chunk_size}) must be a multiple of 4.")
@@ -222,7 +342,7 @@ class FotaService:
         src = int(VvAddress.HOST)
         dst = int(VvAddress.MCU)
         
-        with DongleSession(port, baud=115200, debug=False) as session:
+        with self._session(port) as session:
             # 1. enter_to_bootloader
             log_cb("[FOTA] [STEP 1] Sending enter_to_bootloader...")
             seq = session.proto.next_seq()
@@ -250,7 +370,7 @@ class FotaService:
                     log_cb(f"[FOTA] [WARN] Failed to send clean disconnect command: {e}")
                 
                 # Reconnect
-                reconnect_ok = self._scan_and_reconnect(session, src, mac_bytes, mac_str, log_cb)
+                reconnect_ok = self._scan_and_reconnect(session, src, mac_bytes, mac_str, log_cb, ble_status_cb)
                 if not reconnect_ok:
                     log_cb("[FOTA] [FAIL] Could not reconnect to device in Bootloader. Aborting OTA.")
                     return
@@ -356,7 +476,7 @@ class FotaService:
             # The background monitor thread will query the actual BLE status of the dongle
             # and automatically transition the UI to Disconnected when the link is severed.
 
-    def _scan_and_reconnect(self, session, src, mac_bytes, mac_str, log_cb):
+    def _scan_and_reconnect(self, session, src, mac_bytes, mac_str, log_cb, ble_status_cb=None):
         import time
         from common.transport import VvAddress
         log_cb(f"[FOTA] Re-scanning for {mac_str} in Bootloader mode...")
@@ -392,6 +512,7 @@ class FotaService:
         seq = session.proto.next_seq()
         pkt_conn = self.factory.ble_connect(src, int(VvAddress.CENTRAL), seq)
         pkt_conn.ble_connect.mac_address = mac_bytes
+        self._reset_device_verification()
         session.send_packet(pkt_conn)
         
         deadline = time.time() + 8.0
@@ -400,10 +521,19 @@ class FotaService:
         while time.time() < deadline:
             for p in session.recv_packets(0.1):
                 if p.WhichOneof("params") == "ble_status_resp":
-                    last_state = str(p.ble_status_resp.state)
                     if p.ble_status_resp.state == pb.BLE_STATE_CONNECTED:
-                        connected = True
-                        break
+                        status = self._validated_ble_status(session, p.ble_status_resp)
+                        if ble_status_cb:
+                            ble_status_cb(status)
+                        last_state = str(status["state"])
+                        connected = status["device_verified"]
+                        if connected:
+                            break
+                    else:
+                        status = self.ble_status_dict(p.ble_status_resp)
+                        if ble_status_cb:
+                            ble_status_cb(status)
+                        last_state = str(status["state"])
             if connected:
                 break
                 

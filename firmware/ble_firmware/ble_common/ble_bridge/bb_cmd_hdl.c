@@ -78,8 +78,6 @@ static const bb_cmd_entry_t m_cmd_table[] = {
 #if defined(BLE_PERIPHERAL)
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_adv_status,            "ble_adv_status"),
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_adv_config_set,        "ble_adv_config_set"),
-    CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_adv_status,            "ble_adv_status"),
-    CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_adv_config_set,        "ble_adv_config_set"),
 #else
     CMD_INFO(protobuf_packet_t_ble_adv_status_tag,                handle_ble_unimplemented,         "ble_adv_status"),
     CMD_INFO(protobuf_packet_t_ble_adv_config_set_tag,            handle_ble_unimplemented,         "ble_adv_config_set"),
@@ -116,6 +114,37 @@ typedef enum {
 } bb_cmd_hdl_state_t;
 
 static bb_cmd_hdl_state_t m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+#if defined(BLE_CENTRAL)
+#define BB_ASYNC_TX_QUEUE_SIZE 20u
+#define BB_ASYNC_TX_MAX_LEN    128u
+typedef struct {
+    uint8_t data[BB_ASYNC_TX_MAX_LEN];
+    uint16_t len;
+} bb_async_tx_item_t;
+static bb_async_tx_item_t m_async_tx_queue[BB_ASYNC_TX_QUEUE_SIZE];
+static volatile uint8_t m_async_tx_head;
+static volatile uint8_t m_async_tx_tail;
+
+static void bb_cmd_async_tx_enqueue(const uint8_t *data, uint16_t len)
+{
+    if (data == NULL || len == 0u || len > BB_ASYNC_TX_MAX_LEN)
+    {
+        NRF_LOG_WARNING("Async host packet rejected: len=%u", (unsigned)len);
+        return;
+    }
+
+    uint8_t next = (uint8_t)((m_async_tx_head + 1u) % BB_ASYNC_TX_QUEUE_SIZE);
+    if (next == m_async_tx_tail)
+    {
+        NRF_LOG_WARNING("Async host TX queue full; dropping oldest packet");
+        m_async_tx_tail = (uint8_t)((m_async_tx_tail + 1u) % BB_ASYNC_TX_QUEUE_SIZE);
+    }
+
+    memcpy(m_async_tx_queue[m_async_tx_head].data, data, len);
+    m_async_tx_queue[m_async_tx_head].len = len;
+    m_async_tx_head = next;
+}
+#endif
 #if defined(BLE_PERIPHERAL)
 static bool m_ble_adv_config_received = false;
 static uint32_t m_last_ble_adv_config_request_tick = 0;
@@ -126,11 +155,40 @@ ret_code_t bb_cmd_hdl_init(void)
 {
     // Initialize local command-handler state.
     m_cmd_state = BB_CMD_HDL_STATE_IDLE;
+#if defined(BLE_CENTRAL)
+    m_async_tx_head = 0u;
+    m_async_tx_tail = 0u;
+#endif
 #if defined(BLE_PERIPHERAL)
     m_ble_adv_config_received = false;
     m_last_ble_adv_config_request_tick = 0;
 #endif
     return NRF_SUCCESS;
+}
+
+void bb_cmd_async_tx_process(void)
+{
+#if defined(BLE_CENTRAL)
+    if (m_async_tx_head == m_async_tx_tail)
+    {
+        return;
+    }
+
+    bb_async_tx_item_t *item = &m_async_tx_queue[m_async_tx_tail];
+    ret_code_t err_code = bb_transport_send_data(item->data, item->len, BB_SOURCE_SERIAL);
+    if (err_code == NRF_SUCCESS)
+    {
+        m_async_tx_tail = (uint8_t)((m_async_tx_tail + 1u) % BB_ASYNC_TX_QUEUE_SIZE);
+    }
+    else if (err_code != NRF_ERROR_BUSY &&
+             err_code != NRF_ERROR_RESOURCES &&
+             err_code != NRF_ERROR_IO_PENDING &&
+             err_code != NRF_ERROR_INVALID_STATE)
+    {
+        NRF_LOG_WARNING("Async host TX failed permanently: 0x%08x", err_code);
+        m_async_tx_tail = (uint8_t)((m_async_tx_tail + 1u) % BB_ASYNC_TX_QUEUE_SIZE);
+    }
+#endif
 }
 
 ret_code_t bb_cmd_request_ble_adv_config(void)
@@ -302,9 +360,16 @@ static void handle_ble_adv_config_set(const protobuf_packet_t * p_in, protobuf_p
 {
     const protobuf_ble_adv_config_t * p_req = &p_in->params.ble_adv_config_set;
     
-    ble_peripheral_adv_config_set(p_req->enable, p_req->device_name, p_req->serial_number);
-    m_ble_adv_config_received = true;
-    BB_DEBUG_LOG_INFO("BLE advertising config received from MCU");
+    m_ble_adv_config_received = ble_peripheral_adv_config_set(
+        p_req->enable, p_req->device_name);
+    if (m_ble_adv_config_received)
+    {
+        BB_DEBUG_LOG_INFO("BLE advertising config received from MCU");
+    }
+    else
+    {
+        NRF_LOG_WARNING("BLE advertising config deferred; request will retry");
+    }
 
     *p_action = BB_CMD_ACTION_NONE; 
 }
@@ -362,6 +427,7 @@ static void handle_ble_scan_start(const protobuf_packet_t * p_in, protobuf_packe
     // Fill the output packet.
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_SCANNING; 
+    p_out->params.ble_status_resp.disconnect_reason = 0;
 
     // Tell the router to send this response back over serial.
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
@@ -375,6 +441,7 @@ static void handle_ble_scan_stop(const protobuf_packet_t * p_in, protobuf_packet
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE; 
+    p_out->params.ble_status_resp.disconnect_reason = 0;
     
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
@@ -438,6 +505,7 @@ static void handle_ble_connect(const protobuf_packet_t * p_in, protobuf_packet_t
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_CONNECTING; 
+    p_out->params.ble_status_resp.disconnect_reason = 0;
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
 
@@ -449,6 +517,7 @@ static void handle_ble_disconnect(const protobuf_packet_t * p_in, protobuf_packe
     
     p_out->which_params = protobuf_packet_t_ble_status_resp_tag;
     p_out->params.ble_status_resp.state = protobuf_BLE_STATE_IDLE; 
+    p_out->params.ble_status_resp.disconnect_reason = 0;
     *p_action = BB_CMD_ACTION_SEND_SERIAL;
 }
 
@@ -468,7 +537,7 @@ void bb_cmd_notify_scan_result(const uint8_t * mac, int8_t rssi, const char * na
     uint8_t buffer[128];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
     if (pb_encode(&stream, protobuf_packet_t_fields, &pkt)) {
-        bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
+        bb_cmd_async_tx_enqueue(buffer, (uint16_t)stream.bytes_written);
     }
 }
 
@@ -493,7 +562,7 @@ void bb_cmd_notify_adv_status(const protobuf_ble_adv_status_t * status)
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
     if (pb_encode(&stream, protobuf_packet_t_fields, &pkt))
     {
-        bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
+        bb_cmd_async_tx_enqueue(buffer, (uint16_t)stream.bytes_written);
     }
 }
 
@@ -525,7 +594,7 @@ void bb_cmd_notify_ble_status(uint8_t state,
 
     if (pb_encode(&stream, protobuf_packet_t_fields, &pkt)) 
     {
-        bb_transport_send_data(buffer, stream.bytes_written, BB_SOURCE_SERIAL);
+        bb_cmd_async_tx_enqueue(buffer, (uint16_t)stream.bytes_written);
     }
 }
 #endif /* BLE_CENTRAL */

@@ -771,7 +771,6 @@ static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt)
     }
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_pos_calib_cfg_resp_tag);
-    resp.hdr                              = pkt->hdr;
     resp.params.pos_calib_cfg_resp.config = *calib_cfg;
 
     network_cmd_send_packet(&resp);
@@ -838,7 +837,6 @@ static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt)
     }
 
     protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_anchor_layout_resp_tag);
-    resp.hdr                                         = pkt->hdr;
     resp.params.anchor_layout_resp.anchors_count     = count;
     memcpy(resp.params.anchor_layout_resp.anchors, anchors,
            (size_t)count * sizeof(sys_anchor_layout_t));
@@ -1623,7 +1621,7 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
 /**
  * Send advertising configuration to a specific BLE peripheral.
  */
-bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool enable, uint32_t serial_number, const char *device_name)
+bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool enable, const char *device_name)
 {
     CHECK(stream, false);
     
@@ -1631,18 +1629,15 @@ bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool e
     memset(&pkt, 0, sizeof(pkt));
     pkt.which_params = protobuf_packet_t_ble_adv_config_set_tag;
     pkt.params.ble_adv_config_set.enable = enable;
-    pkt.params.ble_adv_config_set.serial_number = serial_number;
-    
     if (device_name) {
         strncpy(pkt.params.ble_adv_config_set.device_name, device_name,
                 sizeof(pkt.params.ble_adv_config_set.device_name) - 1);
         pkt.params.ble_adv_config_set.device_name[sizeof(pkt.params.ble_adv_config_set.device_name) - 1] = '\0';
     }
 
-    RLOG_I(OBJECT_CODE, "Send BLE adv config dst=0x%02X enable=%d sn=%lu name=%s",
+    RLOG_I(OBJECT_CODE, "Send BLE adv config dst=0x%02X enable=%d name=%s",
            (unsigned)dst,
            (int)pkt.params.ble_adv_config_set.enable,
-           (unsigned long)pkt.params.ble_adv_config_set.serial_number,
            pkt.params.ble_adv_config_set.device_name);
 
     return network_core_send_packet(stream, dst, &pkt);
