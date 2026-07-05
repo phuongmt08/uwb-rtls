@@ -1,0 +1,1058 @@
+% Compile with XeLaTeX in TeXstudio.
+% Notes: Some Word list paragraphs were mapped back to LaTeX headings.
+% Review formulas, figure captions, and references before final thesis submission.
+
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+  a4paper,
+]{report}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setmainlanguage{vietnamese}
+\IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{\setmainfont{DejaVu Serif}}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{3}
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Thiết kế hệ thống định vị thời gian thực sử dụng UWB}
+\author{Phương}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\clearpage
+
+\chapter{TỔNG QUAN}
+
+\section{Lí do chọn đề tài}
+
+\section{Mục tiêu nghiên cứu đề tài}
+
+\section{Phương pháp nghiên cứu}
+
+\section{Nội dung thực hiện}
+
+\chapter{CƠ SỞ LÝ THUYẾT}
+
+\section{Cơ sở lý thuyết về định vị}
+
+\subsection{Khái niệm Ultra-Wideband}
+
+\begin{quote}
+Ultra-Wideband là công nghệ truyền thông vô tuyến sử dụng xung tín hiệu
+có độ rộng rất ngắn trong miền thời gian, dẫn đến tín hiệu chiếm dụng
+băng thông rất lớn trong miền tần số. Theo IEEE và FCC, một hệ thống
+được phân loại là UWB khi băng thông chiếm dụng đạt tối thiểu
+500~MHz~hoặc tương đương trên 20\% tần số trung tâm.~
+
+\includegraphics[width=6.2625in,height=2.48889in]{media/image1.png}Khác
+với các hệ thống vô tuyến truyền thống (Wi-Fi,~Bluetooth), UWB không dựa
+trên sóng mang liên tục để truyền dữ liệu. Thay vào đó, thông tin được
+truyền bằng chuỗi xung ngắn, cho phép hệ thống làm việc chủ yếu trong
+miền thời gian. Đây là nền tảng giúp UWB thực hiện đo thời gian lan
+truyền sóng một cách trực tiếp.~
+
+Hình 2.1. Bảng so sánh hình thái sóng trong miền thời gian và tần số
+giữa UWB và các công nghệ định vị phổ biến
+\end{quote}
+
+\subsection{So sánh khả năng định vị của các công nghệ định vị hiện nay}
+
+\subsection{Nguyên lý hoạt động và mô hình đo khoảng cách}
+
+UWB khai thác trực tiếp khả năng~đo thời gian lan truyền của sóng vô
+tuyến~ToF~để xác định khoảng cách giữa các thiết bị. Dựa~trên nguyên lý
+cơ bản này, các hệ thống UWB có thể được triển khai theo nhiều mô hình
+khác nhau nhằm đáp ứng các yêu cầu cụ thể về độ chính xác, quy mô mạng,
+mức tiêu thụ năng lượng và độ phức tạp của hạ tầng.~
+
+\includegraphics[width=5.70139in,height=2.36111in]{media/image2.png}Về
+bản chất, mọi mô hình triển khai UWB đều dựa trên việc xác định mối quan
+hệ thời gian giữa các tín hiệu phát và thu. Sự khác biệt giữa các mô
+hình nằm ở cách tổ chức trao đổi gói tin, số lượng thiết bị tham gia đo,
+cũng như mức độ đồng bộ thời gian cần thiết trong hệ thống.~
+
+\subsubsection{Two-Way~Ranging~(TWR)~}
+
+Two-Way~Ranging~là phương pháp đo khoảng cách dựa trên việc trao đổi gói
+tin hai chiều giữa hai thiết bị UWB. Khoảng cách được suy ra từ thời
+gian khứ hồi của tín hiệu, sau khi loại bỏ thời gian xử lý nội bộ của
+thiết bị phản hồi.~
+
+Ưu điểm cốt lõi của TWR là không yêu cầu đồng bộ tuyệt đối giữa đồng hồ
+của hai thiết bị, giúp giảm đáng kể độ phức tạp phần cứng và phần mềm.
+Tuy nhiên, tùy theo cách tổ chức trao đổi gói tin, TWR được chia thành
+hai biến thể chính:~Single-Sided~TWR (SS-TWR) và~Double-Sided~TWR
+(DS-TWR).~
+
+\begin{itemize}
+\item
+  Single-Sided~Two-Way~Ranging~(SS-TWR)~
+\end{itemize}
+
+Trong SS-TWR, thiết bị khởi tạo (Initiator) gửi một gói tin đến thiết bị
+phản hồi (Responder). Sau khi nhận được gói tin,~Responder~phản hồi lại
+sau một khoảng thời gian xử lý cố định hoặc đã được cấu hình trước.~
+
+Initiator~đo tổng thời gian khứ hồi của tín hiệu và trừ đi thời gian xử
+lý của~Responder~để ước lượng thời gian lan truyền, từ đó tính toán
+khoảng cách.~
+
+Tuy nhiên, SS-TWR~\textbf{nhạy cảm với sai lệch~clock}~giữa hai thiết
+bị. Nếu tần số~clock~của~Initiator~và~Responder~không ổn định hoặc bị
+trôi, sai số đo có thể tăng đáng kể, đặc biệt trong các hệ thống yêu cầu
+độ chính xác cao.~
+
+\includegraphics[width=4.16667in,height=3.10833in]{media/image3.png}~
+
+\begin{itemize}
+\item
+  Double-Sided~Two-Way~Ranging~(DS-TWR)~
+\end{itemize}
+
+DS-TWR được phát triển nhằm khắc phục nhược điểm về sai lệch~clock~của
+SS-TWR. Trong mô hình này, hai thiết bị trao đổi ít nhất ba gói tin, cho
+phép cả hai bên cùng tham gia vào quá trình đo thời gian.~
+
+Thông qua việc đo và trao đổi các~timestamp~ở cả hai phía, hệ thống có
+thể~\textbf{bù trừ sai lệch~clock}~giữa các thiết bị, từ đó cải thiện
+đáng kể độ chính xác của phép đo~ToF.~
+
+\begin{quote}
+Thông qua việc đo và trao đổi các~timestamp~ở cả hai phía, hệ thống có
+thể~bù trừ sai lệch~clock~giữa các thiết bị, từ đó cải thiện đáng kể độ
+chính xác của phép đo~ToF. Đổi lại là tăng số lượng gói tin và độ trễ,
+với phương pháp thông thường thì cần khoảng \(3 \times N\) message với N
+là số lượng anchor
+\end{quote}
+
+DS-TWR là phương pháp được sử dụng phổ biến trong các~chip~UWB
+thương~mại, đặc biệt trong các ứng dụng định vị chính xác ở
+mức~centimet.~
+
+\includegraphics[width=3.42569in,height=3.23542in]{media/image4.png}\emph{Hình
+2.4. Quy trình trao đổi gói tin với mô hình DS-TWR}
+
+\subsubsection{Time~Difference~of~Arrival~(TDoA)~}
+
+Time~Difference~of~Arrival~là mô hình triển khai UWB thường được sử dụng
+trong các hệ thống định vị quy mô lớn với nhiều~anchor~cố định. Trong mô
+hình này, thiết bị cần định vị (tag) phát một gói tin UWB, và
+nhiều~anchor~thu tín hiệu đó gần như đồng thời.~
+
+Thay vì đo thời gian lan truyền~tuyệt đối, hệ thống xác định sự chênh
+lệch thời gian tín hiệu đến giữa các~anchor. Từ các sai khác này, vị trí
+của~tag~được suy ra thông qua các thuật toán định vị dựa trên giao điểm
+của các~hyperbol~thời gian.~
+
+Điểm cốt lõi của~TDoA~là yêu cầu các~anchor~phải được~\textbf{đồng bộ
+thời gian với độ chính xác rất cao}, thường thông qua đồng hồ chuẩn hoặc
+mạng đồng bộ chuyên dụng. Cách~phổ~biến~nhất~là~dùng~một~Master
+Anchor,~trong~đó~nó~sẽ~chủ~động~đồng~bộ~lại~thời~gian~với~các~Slave
+Anchor.\includegraphics[width=6.25833in,height=2.70833in]{media/image5.png}~
+
+\subsubsection{Phase~Difference~of~Arrival~(PDoA)~}
+
+Phase~Difference~of~Arrival~là mô hình đo dựa trên~\textbf{sự chênh lệch
+pha của tín hiệu UWB}~khi được thu tại các~anten~hoặc các điểm thu khác
+nhau. Khoảng cách hoặc góc đến của tín hiệu được suy ra từ mối quan hệ
+giữa pha tín hiệu và bước sóng.~
+
+So với~ToF~hoặc~TDoA,~PDoA~\textbf{phụ thuộc mạnh vào đặc tính pha và
+tần số}, do đó yêu cầu phần cứng có độ ổn định cao và hiệu chuẩn chính
+xác. Do đó PDoA~ít phổ biến hơn TWR và~TDoA~trong các hệ thống UWB
+thương mại, nhưng đóng vai trò quan trọng trong các giải pháp định vị
+nâng cao.~
+
+\includegraphics[width=6.25833in,height=1.83333in]{media/image6.png}
+
+\subsection{Cơ chế truy nhập kênh và lập lịch truyền nhận trong hệ thống UWB nhiều anchor}
+
+\subsubsection{Vai trò của lớp MAC trong hệ thống UWB nhiều anchor}
+
+\begin{quote}
+Trong hệ thống định vị UWB nhiều anchor, một tag cần đo khoảng cách với
+nhiều anchor để thu thập đủ dữ liệu phục vụ quá trình ước lượng vị trí.
+Với các phương pháp đo khoảng cách như DS-TWR, một phiên đo thường gồm
+nhiều gói tin trao đổi theo trình tự, ví dụ Poll, Response và Final. Các
+gói tin này được sử dụng để ghi nhận timestamp tại tag và anchor, từ đó
+tính toán thời gian truyền tín hiệu.
+
+Khi nhiều anchor hoặc nhiều tag cùng hoạt động trong một khu vực, các
+thiết bị có thể phát sinh nhu cầu truyền nhận trong cùng thời điểm. Nếu
+không có cơ chế điều phối, các gói tin có thể va chạm, làm mất timestamp
+và khiến phiên đo khoảng cách không hợp lệ. Ngược lại, nếu các phiên đo
+được thực hiện tuần tự nhưng không có lịch đo hợp lý, chu kỳ cập nhật vị
+trí sẽ tăng khi số lượng anchor mở rộng. Vì vậy, lớp MAC được sử dụng để
+điều phối quyền truy nhập kênh truyền, quy định thiết bị nào được
+truyền, truyền vào thời điểm nào và sử dụng tài nguyên truyền thông nào.
+\end{quote}
+
+\subsubsection{Các nhóm cơ chế truy nhập kênh ở lớp MAC}
+
+\begin{quote}
+Các cơ chế đa truy nhập trong hệ thống truyền thông, hay Multiple Access
+Protocols, được sử dụng để điều phối nhiều thiết bị cùng chia sẻ một môi
+trường truyền dẫn. Các cơ chế này thường được phân thành ba nhóm chính:
+truy nhập ngẫu nhiên, truy nhập có điều khiển và phân kênh.
+
+Nhóm truy nhập ngẫu nhiên gồm các cơ chế như ALOHA, CSMA, CSMA/CD và
+CSMA/CA, trong đó thiết bị chủ động quyết định thời điểm truyền và có
+thể cần xử lý va chạm hoặc tránh va chạm.
+
+Nhóm truy nhập có điều khiển gồm các cơ chế như reservation, polling và
+token passing, trong đó quyền truyền được điều phối thông qua đặt trước
+tài nguyên, thăm dò thiết bị hoặc truyền token.
+
+Nhóm phân kênh gồm FDMA, TDMA và CDMA, trong đó tài nguyên truyền thông
+được chia theo tần số, thời gian hoặc mã.
+
+\includegraphics[width=5.56818in,height=3.34448in]{media/image7.png}
+\end{quote}
+
+Đối với hệ thống định vị UWB nhiều anchor sử dụng DS-TWR, yêu cầu quan
+trọng là giảm va chạm gói tin và duy trì chu kỳ cập nhật vị trí ổn định.
+Do đó, các cơ chế thuộc nhóm phân kênh phù hợp hơn cho luồng đo khoảng
+cách chính, vì chúng cho phép tổ chức tài nguyên truyền nhận theo quy
+tắc xác định. Trong phạm vi đề tài, TDMA được sử dụng để lập lịch các
+phiên đo khoảng cách giữa tag và từng anchor theo các khe thời gian,
+trong khi CDMA được xem xét thông qua việc sử dụng preamble code để phân
+biệt hoặc phân nhóm tín hiệu giữa các anchor trong hệ thống UWB.
+
+\subsubsection{TDMA trong lập lịch đo khoảng cách UWB}
+
+TDMA là cơ chế phân chia truy nhập theo thời gian, trong đó quá trình
+truyền nhận được chia thành các khe thời gian riêng biệt. Mỗi khe thời
+gian được cấp cho một anchor, một tag hoặc một phiên đo cụ thể. Trong hệ
+thống định vị UWB nhiều anchor, TDMA có thể được sử dụng để lập lịch cho
+tag lần lượt đo khoảng cách với từng anchor theo một thứ tự xác định.
+
+Ví dụ, trong một chu kỳ đo gồm bốn anchor, tag có thể thực hiện đo
+khoảng cách với Anchor 1 ở khe thời gian thứ nhất, Anchor 2 ở khe thời
+gian thứ hai, Anchor 3 ở khe thời gian thứ ba và Anchor 4 ở khe thời
+gian thứ tư. Sau khi hoàn thành một chu kỳ TDMA, hệ thống thu được tập
+dữ liệu khoảng cách từ tag đến các anchor để đưa vào thuật toán định vị.
+
+Ưu điểm của TDMA là giảm khả năng va chạm gói tin và giúp hệ thống dự
+đoán được thời gian hoàn thành một chu kỳ đo. Điều này đặc biệt quan
+trọng đối với hệ thống định vị thời gian thực, vì chu kỳ đo ảnh hưởng
+trực tiếp đến tần số cập nhật vị trí của xe tự hành. Tuy nhiên, khi số
+lượng anchor tăng, tổng thời gian của một chu kỳ TDMA cũng tăng theo. Vì
+vậy, việc lựa chọn số lượng anchor tham gia đo, độ dài khe thời gian và
+thứ tự đo cần được thiết kế phù hợp với yêu cầu cập nhật vị trí của hệ
+thống.
+
+\subsubsection{CDMA và vai trò của preamble code trong UWB}
+
+CDMA là cơ chế phân chia truy nhập theo mã, trong đó các tín hiệu được
+phân biệt dựa trên mã khác nhau. Về nguyên lý, CDMA cho phép nhiều thiết
+bị cùng sử dụng chung một dải tần, trong khi phía thu có thể phân biệt
+tín hiệu dựa vào mã tương ứng. Trong các hệ thống UWB, cơ chế phân chia
+theo mã có thể được nghiên cứu và ứng dụng để hỗ trợ nhiều node cùng
+hoạt động trong một môi trường truyền thông.
+
+Trong gói tin UWB, preamble là phần tín hiệu đầu gói được sử dụng để hỗ
+trợ phát hiện gói tin, đồng bộ thời gian và nhận dạng tín hiệu ở phía
+thu. Các thiết bị UWB có thể được cấu hình sử dụng các preamble code
+khác nhau. Do đó, trong hệ thống nhiều anchor, preamble code có thể được
+sử dụng như một cơ chế phân chia theo mã ở tầng vật lý, hỗ trợ phân biệt
+tín hiệu giữa các node hoặc giữa các nhóm anchor khác nhau.
+
+Trong phạm vi đề tài, CDMA được xem xét theo hướng sử dụng preamble code
+để phân nhóm anchor. Cách tổ chức này cho phép các nhóm anchor được gán
+các mã khác nhau, từ đó hỗ trợ quá trình nhận dạng tín hiệu và giảm ảnh
+hưởng giữa các nhóm truyền thông UWB. Việc sử dụng preamble code không
+thay thế vai trò lập lịch của TDMA, mà cung cấp thêm một chiều phân chia
+tài nguyên theo mã bên cạnh phân chia theo thời gian.
+
+Như vậy, TDMA và CDMA có thể được kết hợp trong hệ thống UWB nhiều
+anchor. TDMA đảm nhiệm vai trò lập lịch thời điểm thực hiện các phiên đo
+khoảng cách, trong khi CDMA thông qua preamble code hỗ trợ phân nhóm
+anchor và phân biệt tín hiệu ở tầng vật lý. Sự kết hợp này giúp hệ thống
+kiểm soát tốt hơn quá trình truyền nhận, hạn chế va chạm gói tin, duy
+trì chu kỳ cập nhật ổn định và đáp ứng yêu cầu định vị thời gian thực
+cho xe tự hành.
+
+\section{Cơ sở thuật toán định vị thời gian thực}
+
+\subsection{Thuật toán định vị hình học}
+
+\subsubsection{Mô hình toán học của bài toán định vị theo khoảng cách}
+
+Thuật toán định vị hình học là nhóm thuật toán sử dụng khoảng cách đo
+được từ tag đến các anchor có tọa độ đã biết để ước lượng vị trí của
+tag. Trong hệ thống định vị UWB, các khoảng cách này thường được thu từ
+quá trình đo thời gian truyền tín hiệu giữa tag và anchor. Sau khi có dữ
+liệu khoảng cách, bài toán định vị được chuyển thành bài toán hình học
+trong mặt phẳng.
+
+\begin{quote}
+Gọi tọa độ của tag là \((x,y)\) và tọa độ của \(n\) anchor là
+\(\left( x_{i},\ y_{i} \right).\) Khoảng cách đo được là \(d_{i}\). Khi
+đó, trong điều kiện lý tưởng, vị trí của tag thỏa mãn phương trình:
+\end{quote}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.0633}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.8615}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.0752}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\[\left( x - x_{i} \right)^{2} + \left( y - y_{i} \right)^{2} = d_{i}^{2}\]
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+(2.1)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\end{longtable}
+
+\includegraphics[width=4.72917in,height=2.27569in]{media/image8.jpeg}Phương
+trình trên biểu diễn một đường tròn có tâm tại anchor \(A_{i}\) và bán
+kính bằng khoảng cách đo được di. Vì vậy, về mặt hình học, vị trí của
+tag có thể được xác định từ giao điểm của các đường tròn khoảng cách.
+Trong trường hợp lý tưởng, các đường tròn này giao nhau tại đúng vị trí
+thật của tag. Tuy nhiên, trong thực tế, dữ liệu đo luôn tồn tại sai số
+nên các đường tròn có thể không giao nhau chính xác tại một điểm.
+
+Hình 2.5. Mô hình xác định vị trí dựa trên giao điểm của các đường tròn
+
+\subsubsection{Phương pháp trilateration}
+
+Trilateration xác định vị trí của tag từ khoảng cách đến các anchor có tọa độ
+đã biết. Trong mặt phẳng hai chiều, cần tối thiểu ba anchor không thẳng hàng.
+Về mặt hình học, nghiệm là giao điểm của các đường tròn khoảng cách; khi dữ
+liệu có nhiễu, giao điểm không còn trùng tại một điểm và kết quả chỉ là một
+ước lượng.
+
+\subsubsection{Phương pháp multilateration}
+
+Multilateration mở rộng trilateration cho trường hợp có nhiều hơn số anchor
+tối thiểu. Thay vì tìm giao điểm chính xác, phương pháp lựa chọn vị trí làm
+giảm sai khác giữa khoảng cách dự đoán và khoảng cách đo. Việc sử dụng nhiều
+anchor tạo ra hệ phương trình dư, cho phép đánh giá độ nhất quán của dữ liệu
+và giảm ảnh hưởng của một phép đo riêng lẻ. Các hàm mục tiêu LS, WLS và cách
+xây dựng trọng số được trình bày tại Chương~3.
+
+\subsection{Đánh giá sai số và độ tin cậy của kết quả định vị}
+
+Trong hệ thống định vị UWB, các phép đo khoảng cách không có độ tin cậy như
+nhau. Nhiễu, suy hao, truyền đa đường và điều kiện NLOS có thể làm sai lệch
+khoảng cách trước khi dữ liệu được đưa vào thuật toán định vị. Một số nhóm
+thông tin thường được dùng để đánh giá sơ bộ gồm:
+
+\begin{itemize}
+  \item \textbf{Sai số dư:} phản ánh chênh lệch giữa khoảng cách đo được và
+  khoảng cách dự đoán từ vị trí ước lượng. Sai số dư lớn cho thấy phép đo
+  không phù hợp với các phép đo còn lại hoặc với trạng thái dự đoán.
+
+  \item \textbf{Khoảng cách Mahalanobis:} đánh giá độ lớn của sai lệch có xét
+  đến mức bất định của phép đo và của trạng thái. Nhờ đó, cùng một sai lệch
+  tuyệt đối có thể được xử lý khác nhau tùy theo độ tin cậy hiện tại.
+
+  \item \textbf{Chất lượng tín hiệu và khoảng cách đo:} các chỉ số như tỷ số
+  tín hiệu trên nhiễu, biên độ thành phần đường truyền đầu tiên và dấu hiệu
+  NLOS cung cấp thông tin về điều kiện lan truyền. Khi khoảng cách tiến gần
+  giới hạn làm việc tin cậy, phương sai của phép đo thường tăng.
+
+  \item \textbf{Hình học anchor:} các anchor phân bố trên nhiều hướng tạo ra
+  giao hội tốt hơn; ngược lại, cấu hình gần thẳng hàng có thể khuếch đại sai
+  số khoảng cách thành sai số vị trí.
+\end{itemize}
+
+Các khái niệm trên là cơ sở để xây dựng prefilter, trọng số WLS, ma trận nhiễu
+đo của UKF và cơ chế lựa chọn anchor tại Chương~3. Chương này chỉ trình bày ý
+nghĩa; công thức và logic triển khai được đặt trong phần thiết kế thuật toán.
+
+\subsection{Bộ lọc Unscented Kalman Filter trong hệ thống định vị UWB--IMU}
+
+UKF là bộ lọc trạng thái phi tuyến sử dụng tập sigma point để xấp xỉ sự lan
+truyền của trung bình và hiệp phương sai qua mô hình động học và mô hình đo.
+Trong hệ thống UWB--IMU, UKF cho phép duy trì quỹ đạo liên tục, kết hợp thông
+tin chuyển động với khoảng cách UWB và dự đoán ngắn hạn khi một số phép đo
+tạm thời không hợp lệ.
+\section{Cơ sở thiết kế mạch định vị}
+
+\section{Cơ sở lý thuyết về truyền thông và phần mềm cho hệ thống định vị UWB}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  Vai trò của khối truyền thông trong hệ thống định vị UWB
+\item
+  BLE, \ldots{}
+\item
+  Protobuf, \ldots{}
+\item
+  Hệ điều hành thời gian thực cho hệ thống nhúng
+\end{enumerate}
+
+\chapter{THIẾT KẾ HỆ THỐNG ĐỊNH VỊ THỜI GIAN THỰC}
+
+\section{Tổng quan kiến trúc hệ thống định vị}
+
+\subsection{Thành phần và mô hình triển khai hệ thống}
+
+\subsection{Luồng dữ liệu và điều khiển tổng thể}
+
+\section{Thiết kế phần cứng và lựa chọn linh kiện cho bo mạch}
+
+\subsection{Sơ đồ khối phần cứng tổng thể của hệ thống định vị}
+
+\subsection{Tính toán và lựa chọn linh kiện}
+
+\subsubsection{Tính toán dung lượng pin và ước tính thời gian sạc}
+
+\subsubsection{Tính toán xung nhịp hệ thống và giá trị thạch anh}
+
+\subsubsection{Thiết kế và lựa chọn linh kiện cho khối nguồn}
+
+\subsubsection{Thiết kế khối điều khiển}
+
+\subsection{Thiết kế mạch in PCB}
+
+\subsubsection{Đặc tính vật lý và cấu trúc lớp}
+
+\subsubsection{Tính toán và thiết lập độ rộng đường dây}
+
+\subsubsection{Thiết lập quy chuẩn lỗ xuyên}
+
+\subsubsection{Sơ đồ đi dây và bố trí linh kiện}
+
+\subsubsection{Mạch in 3D}
+
+\subsection{Thiết kế vỏ hộp 3D}
+
+\subsection{Lắp ráp, kiểm tra và thử nghiệm phần cứng}
+
+\section{Thiết kế và triển khai firmware vi điều khiển trung tâm}
+
+\subsection{Phân bổ không gian bộ nhớ hệ thống và cấu trúc lưu trữ dữ liệu}
+
+Vi điều khiển trung tâm cung cấp 512 KB bộ nhớ Flash và 128 KB
+SRAM\ldots.
+
+\includegraphics[width=6.5in,height=3.71944in]{media/image9.png}
+
+\subsubsection{\textbf{Phân bổ vùng trong bộ nhớ Flash}}
+
+Bộ nhớ Flash được chia thành ba vùng độc lập: bootloader, firmware ứng
+dụng và dữ liệu lưu trữ. Ranh giới giữa các vùng được xác định trong
+linker script nhằm ngăn chương trình hoặc thao tác cập nhật truy cập
+ngoài phạm vi được cấp phát.
+
+\textbf{Vùng bootloader:} chiếm 48 KB đầu tiên của Flash và chứa chương
+trình khởi động, xác thực và nâng cấp firmware.
+
+\textbf{Vùng ứng dụng:} bắt đầu tại địa chỉ 0x0800C000 với dung lượng
+208 KB. Trong đó, 1 KB đầu được dành cho bảng vector và tiêu đề ảnh;
+phần còn lại chứa chương trình ứng dụng.
+
+\textbf{Vùng lưu trữ:} chiếm 256 KB cuối của Flash và gồm hai sector có
+dung lượng bằng nhau. Vùng này lưu cấu hình, metadata và nhật ký vận
+hành, đồng thời hỗ trợ cơ chế wear-leveling được trình bày tại Mục
+3.2.1.3.
+
+\subsubsection{Phân bổ vùng trong bộ nhớ RAM}
+
+SRAM được chia thành vùng làm việc thông thường và vùng dùng chung. Do
+bootloader và ứng dụng không thực thi đồng thời, hai chương trình có thể
+tái sử dụng cùng vùng RAM để lưu biến, stack, heap, bộ đệm và các đối
+tượng FreeRTOS.
+
+Phần cuối SRAM được dành cho vùng NOLOAD, có nội dung không bị khởi tạo
+lại khi chuyển từ bootloader sang ứng dụng. Vùng này lưu nhật ký chẩn
+đoán và thông tin bàn giao qua reset mềm. Tuy nhiên, dữ liệu không được
+duy trì khi thiết bị mất nguồn nên không thay thế cho vùng lưu trữ trong
+Flash.
+
+\subsubsection{Vùng lưu trữ và nguyên lý wear-leveling}
+
+Flash chỉ có thể ghi vào vùng đã được xóa, trong khi thao tác xóa được
+thực hiện trên toàn bộ sector. Nếu cấu hình và nhật ký chỉ được lưu
+trong một sector, các lần cập nhật liên tục sẽ làm số chu kỳ xóa tập
+trung tại sector đó. Vì vậy, hệ thống sử dụng hai sector và luân phiên
+vai trò giữa chúng nhằm phân bố số lần xóa.
+
+\includegraphics[width=6.79839in,height=3.23214in]{media/image10.png}Tại
+một thời điểm, một sector giữ vai trò hoạt động và tiếp nhận các bản ghi
+mới. Sector còn lại lưu dữ liệu của thế hệ trước hoặc chờ được tái sử
+dụng. Khi sector hoạt động không còn đủ không gian, hệ thống xóa sector
+còn lại, chuyển dữ liệu cần bảo toàn sang đó và tăng số generation. Sau
+khi quá trình ghi hoàn tất, sector mới trở thành sector hoạt động, còn
+sector cũ được giữ nguyên cho đến lần chuyển vùng tiếp theo.
+
+\emph{Hình 3.x. Tổng quan về nguyên lý luân phiên vùng lưu trữ giữa hai
+sector Flash}
+
+\includegraphics[width=6.5in,height=2.54861in]{media/image11.png}
+
+\emph{Hình 3.x. Luồng xử lý khởi tạo, ghi nối tiếp và chuyển đổi
+sector.}
+
+Như trình bày trong Hình 3.y, khi khởi động, hệ thống quét metadata của
+cả hai sector và lựa chọn sector chứa thế hệ hợp lệ mới nhất. Dữ liệu và
+metadata tiếp tục được ghi nối tiếp cho đến khi không còn đủ không gian.
+Khi đó, sector không hoạt động được xóa, cấu hình cần bảo toàn được
+chuyển sang, sau đó dữ liệu mới được ghi và sector mới được đưa vào hoạt
+động.
+
+\textbf{Cấu trúc dữ liệu trong mỗi sector}
+
+Mỗi sector được chia thành ba vùng có mục đích và phương thức cập nhật
+khác nhau:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.1809}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2910}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.5281}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thành phần}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Phương thức cập nhật}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Vai trò}
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Metadata & Ghi thêm mục mới & Mô tả vị trí, trạng thái và thứ tự của dữ
+liệu \\
+Configuration & Ghi ảnh cấu hình mới & Duy trì trạng thái vận hành gần
+nhất \\
+Log storage & Ghi nối tiếp bản ghi & Lưu lịch sử hoạt động và thông tin
+chẩn đoán \\
+\end{longtable}
+
+\textbf{Tổ chức metadata}
+
+Mỗi lần cấu hình hoặc nhật ký được ghi, hệ thống tạo một mục metadata
+tương ứng. Thay vì chỉ đánh dấu vùng nhớ đã sử dụng, metadata cung cấp
+đủ thông tin để hệ thống khôi phục trạng thái lưu trữ sau khi khởi động
+lại.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.2975}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.7025}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nhóm thông tin}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Mục đích}
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Marker và generation & Nhận dạng bản ghi hợp lệ và xác định thứ tự cập
+nhật \\
+Offset và kích thước & Xác định vị trí của dữ liệu trong sector \\
+Timestamp & Ghi nhận thời điểm tạo bản ghi \\
+CRC dữ liệu & Kiểm tra tính toàn vẹn của nội dung \\
+CRC metadata & Phát hiện mục metadata bị ghi lỗi \\
+Vị trí đọc nhật ký & Khôi phục phần nhật ký đã được tiếp nhận \\
+\end{longtable}
+
+Metadata được tổ chức theo phương pháp append-only. Khi có thay đổi, hệ
+thống thêm một mục mới vào vị trí trống tiếp theo thay vì sửa mục đã tồn
+tại. Cách làm này phù hợp với đặc tính của Flash: dữ liệu có thể được
+lập trình vào vùng đã xóa, nhưng muốn ghi lại một vùng đã sử dụng phải
+xóa toàn bộ sector.
+
+Dữ liệu chính được ghi trước, metadata được thêm sau. Vì vậy, một vùng
+dữ liệu chưa có metadata hợp lệ sẽ không được xem là bản ghi hoàn chỉnh.
+Khi khởi động, hệ thống quét metadata, kiểm tra marker và CRC, sau đó
+lựa chọn bản cấu hình có thứ tự cập nhật mới nhất.
+
+\textbf{Lưu cấu hình và nhật ký}
+
+Đối với cấu hình hệ thống, mỗi lần cập nhật tạo ra một ảnh cấu hình mới.
+Các phiên bản cũ vẫn được giữ lại cho đến khi sector bị xóa. Khi cần
+khôi phục, hệ thống lựa chọn bản mới nhất có metadata và CRC hợp lệ.
+
+Nhật ký được ghi nối tiếp vào vùng log storage. Hệ thống duy trì vị trí
+ghi hiện tại và vị trí mà máy chủ đã xác nhận đọc. Vị trí đọc được lưu
+trong metadata, cho phép tiếp tục quá trình truyền nhật ký sau khi thiết
+bị khởi động lại mà không phải quét toàn bộ dữ liệu để suy đoán trạng
+thái.
+
+\subsection{Chương trình khởi động nhúng}
+
+\subsubsection{Quy trình xác thực và khởi chạy ứng dụng chính}
+
+\begin{quote}
+Sau mỗi lần cấp nguồn hoặc khởi động lại, vi điều khiển bắt đầu thực thi
+tại vùng bootloader thay vì chuyển ngay đến chương trình ứng dụng.
+Bootloader đóng vai trò là lớp trung gian có nhiệm vụ kiểm tra trạng
+thái hệ thống, phát hiện yêu cầu bảo trì và chỉ chuyển quyền điều khiển
+khi ảnh firmware trong vùng ứng dụng đáp ứng các điều kiện hợp lệ.
+
+Trong giai đoạn đầu, bootloader khởi tạo các tài nguyên tối thiểu cần
+thiết như hệ thống xung nhịp, giao tiếp USB, UART, BLE và cơ chế ghi
+nhận trạng thái. Đồng thời, bootloader kiểm tra cờ yêu cầu nâng cấp được
+ứng dụng lưu tạm trong RAM trước khi khởi động lại. Cờ này chỉ có hiệu
+lực cho một lần khởi động và được xóa ngay sau khi đọc, nhờ đó thiết bị
+không bị mắc kẹt trong chế độ bảo trì sau khi quá trình nâng cấp hoàn
+tất.
+
+Sau khi khởi tạo, bootloader mở một khoảng thời gian chờ để phát hiện
+hoạt động từ công cụ cấu hình hoặc chương trình cập nhật firmware. Nếu
+nhận được kết nối USB DFU, BLE FOTA hoặc yêu cầu nâng cấp chủ động từ
+ứng dụng, thiết bị tiếp tục duy trì chế độ bootloader. Ngược lại, khi
+hết thời gian chờ mà không có hoạt động bảo trì, bootloader bắt đầu xác
+thực chương trình ứng dụng.
+
+Quá trình xác thực trước khi khởi chạy tập trung vào hai nhóm điều kiện
+chính:
+\end{quote}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1535}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1444}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3656}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.3366}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Nhóm xác thực}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Thành phần kiểm tra}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Điều kiện hợp lệ}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Mục đích}
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Thông tin nhận dạng firmware} & Header Firmware Image & Giá trị
+nhận dạng, phiên bản cấu trúc và kích thước tiêu đề phải phù hợp với
+định dạng của hệ thống. & Phân biệt firmware hợp lệ với vùng nhớ trống,
+dữ liệu chưa hoàn chỉnh hoặc ảnh không tương thích. \\
+\textbf{Khả năng thực thi} & Bảng vector của ứng dụng & Con trỏ ngăn xếp
+ban đầu phải nằm trong SRAM; địa chỉ hàm khởi động phải thuộc vùng nhớ
+ứng dụng. & Bảo đảm bảng vector có cấu trúc hợp lệ và ứng dụng có thể
+được CPU khởi chạy an toàn. \\
+\end{longtable}
+
+\begin{quote}
+Đối với firmware vừa được nâng cấp, cần xác thực lại bằng cách tính CRC
+của toàn bộ image sau đó so sánh với giá trị trong image header nhằm đảm
+bảo ảnh nhận được là hợp lệ. Như vậy, hệ thống kết hợp kiểm tra cấu trúc
+thực thi với kiểm tra tính toàn vẹn trong quá trình cài đặt firmware,
+hạn chế việc khởi chạy một ảnh bị thiếu dữ liệu hoặc sai lệch trong quá
+trình truyền.
+
+Nếu chương trình ứng dụng không hợp lệ, bootloader không thực hiện
+chuyển quyền mà tiếp tục duy trì chế độ bảo trì để chờ một ảnh firmware
+mới. Cách xử lý này giúp thiết bị vẫn có khả năng phục hồi ngay cả khi
+quá trình cập nhật trước đó bị gián đoạn.
+
+Khi các điều kiện khởi chạy đã được đáp ứng, bootloader thực hiện quá
+trình bàn giao có kiểm soát. Trước hết, các ngắt và bộ định thời hệ
+thống được vô hiệu hóa; giao tiếp USB và các ngoại vi do bootloader sử
+dụng được dừng; các cờ ngắt đang chờ cũng được xóa. Sau đó, địa chỉ bảng
+vector được chuyển sang vùng ứng dụng, con trỏ ngăn xếp chính được nạp
+từ bảng vector mới và CPU chuyển đến hàm khởi động của ứng dụng. Quy
+trình này tạo cho chương trình chính một trạng thái khởi đầu độc lập,
+tránh để cấu hình còn sót lại từ bootloader ảnh hưởng đến quá trình vận
+hành.
+\end{quote}
+
+\subsubsection{Cơ chế nâng cấp và bảo trì hệ thống}
+
+Hệ thống hỗ trợ nâng cấp firmware thông qua hai phương thức: cập nhật có
+dây bằng USB DFU và cập nhật không dây bằng BLE FOTA. Cả hai phương thức
+cùng sử dụng vùng nhớ ứng dụng đã được phân tách khỏi bootloader và vùng
+dữ liệu vận hành. Việc phân vùng giúp quá trình ghi firmware không làm
+thay đổi mã bootloader hoặc dữ liệu cấu hình được lưu giữ riêng.
+
+Trong điều kiện vận hành bình thường, ứng dụng có thể chủ động yêu cầu
+chuyển sang chế độ bảo trì. Khi nhận được lệnh hợp lệ, ứng dụng ghi một
+cờ tạm vào RAM và thực hiện khởi động lại vi điều khiển. Bootloader đọc
+cờ này trong lần khởi động tiếp theo, kéo dài thời gian chờ và duy trì
+các giao tiếp cần thiết để công cụ nâng cấp kết nối với thiết bị. Cơ chế
+này không yêu cầu ứng dụng tự ghi đè lên chính vùng mã đang thực thi.
+
+\includegraphics[width=6.77708in,height=2.87409in]{media/image12.png}
+
+\subsection{Kiến trúc phần mềm ứng dụng đa nhiệm}
+
+\subsubsection{Kiến trúc phân tầng phần mềm ứng dụng}
+
+\includegraphics[width=3.82143in,height=2.08995in]{media/image13.png}
+
+\includegraphics[width=6.5in,height=4.61528in]{media/image14.png}
+
+\subsubsection{Quản lý đa nhiệm và đồng bộ hóa tài nguyên với freeRTOSx}
+
+Firmware được tổ chức theo mô hình đa nhiệm ưu tiên trên. Mục tiêu của
+kiến trúc là tách luồng định vị UWB có yêu cầu thời gian thực khỏi các
+tác vụ tính toán, truyền thông, giám sát và lưu trữ nền. Trên vi điều
+khiển đơn lõi, các tác vụ không thực thi song song mà được scheduler
+chuyển đổi theo trạng thái sẵn sàng và mức ưu tiên.
+
+Scheduler sử dụng cơ chế cưỡng đoạt: khi một tác vụ ưu tiên cao được
+đánh thức bởi ngắt hoặc sự kiện, tác vụ này có thể chiếm quyền xử lý từ
+tác vụ ưu tiên thấp hơn. Ngược lại, semaphore, queue và các lệnh delay
+đưa tác vụ về trạng thái chờ, nhờ đó CPU được dành cho workflow đang có
+dữ liệu cần xử lý.
+
+\textbf{a) Tổ chức tác vụ và phân cấp ưu tiên}
+
+Các tác vụ được phân chia theo vai trò chức năng và độ khẩn cấp của dữ
+liệu. UwbRanging giữ mức ưu tiên cao nhất để đáp ứng các mốc thời gian
+của giao thức ranging; SensorFusion xử lý dữ liệu định vị ở mức ưu tiên
+kế tiếp; các tác vụ dịch vụ được chạy khi luồng thời gian thực đang chờ
+sự kiện.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1769}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.1684}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2470}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.4077}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Tác vụ}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Ưu tiên}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Cơ chế kích hoạt}
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+\textbf{Chức năng chính}
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{UwbRanging} & Realtime & Semaphore UWB hoặc timeout động & Xử lý
+DW1000 và state machine của Tag/Anchor \\
+\textbf{SensorFusion} & High & Chu kỳ 20 ms và dữ liệu từ queue & IMU
+predict, lọc khoảng cách, trilateration và UKF update \\
+\textbf{Network} & Normal & Định kỳ 5 ms & Xử lý giao tiếp UART, USB và
+BLE \\
+\textbf{SysMonitoring} & BelowNormal & Định kỳ 30 s & Theo dõi mức sử
+dụng stack, heap và CPU \\
+\textbf{FlashStorage} & Low & Định kỳ 2 s & Ghi dữ liệu log từ RAM xuống
+bộ nhớ Flash \\
+\textbf{PM} & Low & Định kỳ 100 ms & Giám sát nhiệt độ, mức điện áp, pin
+và xử lý lỗi phần cứng nhằm đảm bảo bo mạch được đưa về trạng thái an
+toàn \\
+\textbf{IO} & Low & Semaphore nút nhấn và timeout 100 ms & Xử lý nút
+nhấn, LED và các ngoại vi trên board \\
+\end{longtable}
+
+\emph{Hình 3.x. Kiến trúc thực thi và đồng bộ hóa tài nguyên bằng
+FreeRTOS.}
+
+\textbf{b) Quy trình khởi tạo và vận hành của hệ điều hành}
+
+Workflow của hệ điều hành được chia thành pha khởi tạo trước kernel và
+pha vận hành sau khi scheduler được kích hoạt. Chuỗi thực thi chính được
+mô tả như sau:
+
+\textbf{c) Cơ chế đồng bộ hóa và bảo vệ tài nguyên}
+
+Semaphore: được sử dụng để truyền sự kiện từ ISR sang tác vụ.
+g\_uwb\_isr\_semHandle đánh thức UwbRanging khi có sự kiện DW1000, trong
+khi g\_io\_btn\_semHandle chuyển sự kiện nút nhấn sang IO. Cơ chế này
+giữ ISR ngắn và chuyển phần xử lý dài vào bên trong tác vụ.
+
+Mutex: được sử dụng để bảo vệ tài nguyên dùng chung.
+g\_spi1\_mutexHandle tuần tự hóa truy cập bus SPI1 giữa DW1000, IMU và
+các lần đọc telemetry của PM; g\_logger\_mutexHandle bảo vệ vùng log
+vòng trong RAM. Mutex chỉ được giữ trong khoảng thời gian cần thiết để
+hạn chế blocking đối với tác vụ ưu tiên cao.
+
+Message queue: được sử dụng để truyền dữ liệu có cấu trúc giữa các tác
+vụ. g\_uwb\_distance\_queue tách thời điểm thu thập khoảng cách trong
+UwbRanging khỏi thời điểm xử lý thuật toán trong SensorFusion, nhờ đó
+hai task không phải chia sẻ trực tiếp một vùng dữ liệu thay đổi đồng
+thời.
+
+Logging: được tổ chức thành side path độc lập. Các tác vụ ghi bản ghi
+qua RLOG\_* vào RAM circular buffer; FlashStorage định kỳ chuyển dữ liệu
+xuống Flash. Vì đường log không nằm trên chuỗi định vị chính, độ trễ ghi
+Flash không chặn workflow UWB.
+
+\subsection{Triển khai các thuật toán định vị nhúng}
+
+\subsubsection{Kiến trúc tầng xử lý dữ liệu định vị}
+
+\includegraphics[width=6.5in,height=3.83264in]{media/image15.png}
+
+\subsubsection{Thuật toán đo khoảng cách và bộ lập lịch}
+
+Chuỗi đo khoảng cách được tổ chức theo ba lớp. DS--TWR tạo dữ liệu khoảng
+cách; TDMA phân khe phản hồi giữa các anchor trong cùng một vùng; preamble
+code hỗ trợ phân tách các vùng lân cận. Nhờ đó, tag thu thập nhiều phép đo
+trong một superframe có thời gian xác định.
+
+Tag phát POLL để mở đầu chu kỳ. Các anchor trả lời trong khe TDMA đã được cấu
+hình, sau đó tag phát FINAL và thu RESULT. Các mốc phát được lập lịch bằng
+chức năng delayed transmission của bộ thu phát UWB; FreeRTOS chỉ điều phối
+tác vụ và sự kiện ngắt, còn độ chính xác của khe do bộ đếm phần cứng UWB bảo
+đảm.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{media/image16.png}
+  \caption{Cấu trúc superframe DS--TWR kết hợp bộ lập lịch TDMA.}
+  \label{fig:tdma-superframe}
+\end{figure}
+
+Thứ tự khe được suy ra từ danh sách anchor của vùng. Guard time hấp thụ sai
+lệch đồng hồ và độ trễ xử lý. Nếu một số phản hồi bị mất, tag cập nhật mặt nạ
+anchor và chỉ tiếp tục khi số phép đo hợp lệ đạt ngưỡng tối thiểu. Khi chuyển
+vùng, preamble code, danh sách anchor và lịch TDMA được cập nhật đồng thời
+trước khi bắt đầu superframe mới.
+
+\begin{longtable}{@{}p{0.24\textwidth}p{0.18\textwidth}p{0.48\textwidth}@{}}
+\toprule
+\textbf{Cấp điều phối} & \textbf{Cơ chế} & \textbf{Chức năng} \\
+\midrule
+\endhead
+Giữa các vùng & Phân tách theo mã & Phân biệt vùng bằng preamble code \\
+Trong một vùng & TDMA & Cấp phát khe cho từng anchor \\
+Trong một phép đo & DS--TWR & Xác định khoảng cách tag--anchor \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{So sánh WLS multilateration và prefilter kết hợp UKF}
+
+Từ cùng một tập khoảng cách UWB, đề tài xem xét hai hướng ước lượng. Hướng thứ
+nhất giải trực tiếp vị trí tại từng chu kỳ bằng WLS multilateration. Hướng thứ
+hai tiền lọc các phép đo không tin cậy rồi đưa dữ liệu hợp lệ vào UKF để kết
+hợp thông tin theo thời gian và dữ liệu chuyển động.
+
+\paragraph{WLS multilateration.}
+Gọi $\mathbf{p}=[x\;y]^T$ là vị trí tag, $\mathbf{a}_i$ là tọa độ anchor thứ
+$i$ và $d_i$ là khoảng cách đo. Sai số dư được viết dưới dạng
+\begin{equation}
+  r_i(\mathbf{p})=\lVert\mathbf{p}-\mathbf{a}_i\rVert-d_i.
+  \label{eq:wls-residual}
+\end{equation}
+WLS tìm vị trí làm nhỏ nhất tổng bình phương sai số có trọng số:
+\begin{equation}
+  \widehat{\mathbf{p}}_{\mathrm{WLS}}
+  =\arg\min_{\mathbf{p}}
+  \sum_{i\in\mathcal{A}_k} w_i r_i^2(\mathbf{p}),
+  \qquad \sum_{i\in\mathcal{A}_k}w_i=1.
+  \label{eq:wls-objective}
+\end{equation}
+Phương pháp không cần trạng thái từ chu kỳ trước, có độ trễ thấp và tạo một
+nghiệm vị trí độc lập ở mỗi lần cập nhật. Nhược điểm là nghiệm có thể dao động
+khi hình học anchor xấu hoặc khi một phép đo NLOS chưa được giảm trọng số đủ.
+
+\paragraph{Prefilter kết hợp UKF.}
+Prefilter kiểm tra giới hạn khoảng cách, chất lượng tín hiệu, sai số dư và độ
+nhất quán thống kê trước khi dữ liệu đi vào UKF. UKF dự đoán trạng thái bằng
+mô hình chuyển động và hiệu chỉnh bằng các khoảng cách đã được chấp nhận. Vì
+khai thác quan hệ giữa nhiều chu kỳ, phương pháp cho quỹ đạo liên tục hơn và
+có thể duy trì dự đoán ngắn hạn khi một số anchor mất phép đo.
+
+\begin{longtable}{@{}p{0.20\textwidth}p{0.34\textwidth}p{0.34\textwidth}@{}}
+\toprule
+\textbf{Tiêu chí} & \textbf{WLS multilateration} & \textbf{Prefilter + UKF} \\
+\midrule
+\endhead
+Dữ liệu & Khoảng cách trong một chu kỳ & Khoảng cách, trạng thái trước và dữ liệu chuyển động \\
+Ngoại lai & Giảm trọng số hoặc loại phép đo & Prefilter kết hợp Mahalanobis gate \\
+Đầu ra & Vị trí độc lập theo từng chu kỳ & Trạng thái và quỹ đạo liên tục \\
+Chi phí tính toán & Thấp đến trung bình & Cao hơn do lan truyền sigma point \\
+Thiếu phép đo & Có thể mất nghiệm nếu hình học không đủ & Có thể dự đoán trong thời gian ngắn \\
+Vai trò & Đường cơ sở hình học & Phương pháp hợp nhất dữ liệu đề xuất \\
+\bottomrule
+\end{longtable}
+
+Hai phương pháp được đánh giá trên cùng tập dữ liệu sau kiểm tra hợp lệ cơ
+bản. Các chỉ tiêu so sánh gồm sai số vị trí, độ ổn định quỹ đạo, tỷ lệ mất
+nghiệm, thời gian tính toán và khả năng đáp ứng thời gian thực.
+
+\subsubsection{Thiết kế prefilter, trọng số và lựa chọn bộ anchor}
+
+Prefilter được tổ chức thành ba tầng. Tầng thứ nhất loại khung không hợp lệ về
+giao thức hoặc khoảng cách nằm ngoài miền làm việc. Tầng thứ hai đánh giá chất
+lượng tín hiệu, khoảng cách và sai số dư. Tầng cuối kiểm tra tính nhất quán
+thống kê với trạng thái dự đoán của UKF.
+
+\paragraph{Trọng số cho WLS.}
+Mỗi phép đo được gán ba hệ số chất lượng chuẩn hóa trong $[0,1]$:
+$q_{\mathrm{sig},i}$ biểu thị chất lượng tín hiệu, $q_{\mathrm{dist},i}$ phản
+ánh mức tin cậy theo khoảng cách và $q_{\mathrm{res},i}$ giảm ảnh hưởng của
+phép đo có sai số dư lớn. Trọng số được tính bởi
+\begin{align}
+  \widetilde{w}_i & =
+  \frac{q_{\mathrm{sig},i}q_{\mathrm{dist},i}q_{\mathrm{res},i}}
+       {\sigma_i^2+\varepsilon}, \\
+  w_i & =\frac{\widetilde{w}_i}
+  {\sum_{j\in\mathcal{A}_k}\widetilde{w}_j}.
+  \label{eq:wls-weight}
+\end{align}
+Trong đó $\sigma_i^2$ là phương sai danh định và $\varepsilon$ tránh phép
+chia cho 0. Một lựa chọn trọng số bền vững theo residual là
+\begin{equation}
+  q_{\mathrm{res},i}
+  =\min\!\left(1,\frac{\tau_r}{|r_i|+\varepsilon}\right),
+  \label{eq:residual-weight}
+\end{equation}
+với $\tau_r$ là ngưỡng residual cần xác định từ dữ liệu thực nghiệm.
+
+\paragraph{Trọng số đo trong UKF.}
+Trong UKF, chất lượng phép đo được phản ánh qua ma trận nhiễu đo. Với từng
+anchor, phương sai được điều chỉnh theo
+\begin{equation}
+  R_i=\frac{\sigma_0^2}
+  {q_{\mathrm{sig},i}q_{\mathrm{dist},i}+\varepsilon}.
+  \label{eq:adaptive-measurement-noise}
+\end{equation}
+Phép đo chất lượng thấp tạo $R_i$ lớn nên có ảnh hưởng nhỏ trong bước cập
+nhật; phép đo không vượt qua prefilter không được đưa vào vector đo.
+
+\paragraph{Mahalanobis gate.}
+Gọi $\nu_i=d_i-\widehat{d}_i^{-}$ là innovation và $S_i$ là phương sai
+innovation do UKF dự đoán. Khoảng cách Mahalanobis là
+\begin{equation}
+  D_i^2=\nu_i^T S_i^{-1}\nu_i.
+  \label{eq:mahalanobis-gate}
+\end{equation}
+Phép đo được chấp nhận khi $D_i^2\leq\chi^2_{m,\alpha}$, với $m$ là bậc tự
+do của phép đo và $\alpha$ là mức tin cậy. Kiểm tra này thích nghi với độ bất
+định hiện tại tốt hơn một ngưỡng sai số tuyệt đối cố định.
+
+\paragraph{Lựa chọn bộ anchor.}
+Sau prefilter, hệ thống chỉ giải vị trí khi còn đủ anchor và cấu hình hình học
+không suy biến. Khi có nhiều anchor hơn mức tối thiểu, tập con được ưu tiên
+theo chất lượng tổng hợp và độ phân bố góc quanh vị trí dự đoán; các tập gần
+thẳng hàng hoặc có điều kiện ma trận kém bị loại. Cùng một tập phép đo hợp lệ
+được cung cấp cho WLS và UKF để phép so sánh không bị thiên lệch bởi đầu vào.
+
+\subsubsection{Thuật toán sensor fusion với UKF}
+
+Trạng thái UKF có thể được mô tả ở mức tối thiểu bởi
+$\mathbf{x}_k=[x_k\;y_k\;v_{x,k}\;v_{y,k}]^T$ và mở rộng thêm các trạng thái
+sai lệch cảm biến khi cần. Với anchor thứ $i$, mô hình đo khoảng cách là
+\begin{equation}
+  h_i(\mathbf{x}_k)=
+  \sqrt{(x_k-x_i)^2+(y_k-y_i)^2}.
+  \label{eq:ukf-range-model}
+\end{equation}
+UKF sinh sigma point từ trạng thái dự đoán, truyền chúng qua mô hình đo, rồi
+tính innovation, hiệp phương sai và Kalman gain. Chỉ các phép đo vượt qua
+prefilter và Mahalanobis gate mới tham gia cập nhật. Các tham số
+$\sigma_0$, $\tau_r$, ngưỡng chất lượng và mức tin cậy $\alpha$ sẽ được hiệu
+chỉnh bằng dữ liệu thực nghiệm và giữ cố định khi so sánh hai phương pháp.
+
+\subsubsection{Thuật toán hiệu chuẩn antenna delay và đo đạc vị trí anchor}
+
+\subsection{Các dịch vụ hệ thống và quản trị thiết bị}
+
+\section{Chương trình khối truyền thông không dây BLE}
+
+\subsection{Cấu hình BLE trên SoC NRF52}
+
+\subsection{Giao thức đóng gói và định tuyến dữ liệu}
+
+\section{Thiết kế và triển khai chương trình giám sát trên máy tính}
+
+\subsection{Kiến trúc tổng thể của phần mềm}
+
+\subsection{Luồng xử lý của hệ thống}
+
+\subsection{Thiết kế đa luồng và cơ chế đồng bộ dữ liệu}
+
+\begin{quote}
+\chapter{KẾT QUẢ THỰC NGHIỆM VÀ ĐÁNH GIÁ}
+\end{quote}
+
+\section{Kiểm chứng phần cứng và nguồn cấp}
+
+\section{Đánh giá tài nguyên xử lý và khả năng đáp ứng định vị thời gian thực}
+
+\section{Mô phỏng thuật toán định vị}
+
+\section{Thực nghiệm định vị trong nhiều môi trường}
+
+\section{Đánh giá cơ chế phân vùng không gian bằng CDMA}
+
+\section{Tổng hợp và nhận xét kết quả thực nghiệm}
+
+\end{document}
