@@ -303,18 +303,19 @@ void on_rx_byte(uint8_t byte)
 
 static void on_rx_ble(uint8_t const * p_data, uint16_t length)
 {
-    if (p_data == NULL || length == 0 || length > BLE_PKT_MAX_LEN) 
+    if (p_data == NULL || length == 0 || length > BLE_PKT_MAX_LEN)
     {
+        NRF_LOG_WARNING("BLE RX packet rejected: len=%u", (unsigned)length);
         return;
     }
 
+    /* Queue only. The main loop is the single owner of the router buffer. */
     if (!ble_pkt_push(p_data, length))
     {
-        NRF_LOG_WARNING("BLE RX queue full, dropping packet len=%u", length);
+        NRF_LOG_WARNING("BLE RX queue full, dropping packet len=%u", (unsigned)length);
         return;
     }
 }
-
 bb_packet_source_t bb_transport_get_rx_source(void)
 {
     return m_rx_source;

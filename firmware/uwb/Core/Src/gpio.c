@@ -56,7 +56,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LED_USR_GPIO_Port, LED_USR_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, UWB_RST_Pin|SPI1_CS1_Pin|SPI1_CS2_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, SPI1_CS1_Pin|SPI1_CS2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CHARGE_EN_GPIO_Port, CHARGE_EN_Pin, GPIO_PIN_RESET);
@@ -80,12 +80,18 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(UWB_IRQ_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : UWB_RST_Pin SPI1_CS2_Pin */
-  GPIO_InitStruct.Pin = UWB_RST_Pin|SPI1_CS2_Pin;
+  /* DW1000 RSTn must be released as high impedance. */
+  GPIO_InitStruct.Pin = UWB_RST_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(UWB_RST_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SPI1_CS2_Pin */
+  GPIO_InitStruct.Pin = SPI1_CS2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(SPI1_CS2_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SPI1_CS1_Pin */
   GPIO_InitStruct.Pin = SPI1_CS1_Pin;

@@ -17,6 +17,10 @@
 /* Developer diagnostics */
 #define DEVELOPER_MODE
 
+#ifndef APP_RTOS_STATS_LOG_ENABLE
+#define APP_RTOS_STATS_LOG_ENABLE 1
+#endif
+
 /*
  * Force this firmware image to run as a TAG even when flash config storage
  * cannot be erased/written or contains an invalid role.

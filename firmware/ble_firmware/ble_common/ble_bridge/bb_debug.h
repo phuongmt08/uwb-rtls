@@ -14,6 +14,11 @@
 #define DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS 5000
 #endif
 
+/* Enable detailed transport routing logs (BLE/UART RX/TX, cmd_id, src, dst) */
+#ifndef BB_DEBUG_TRANSPORT_LOG_ENABLED
+#define BB_DEBUG_TRANSPORT_LOG_ENABLED 0
+#endif
+
 #if defined(BLE_PERIPHERAL) && DEBUG_STREAM_MCU_PERI
 #define BB_DEBUG_STREAM_MCU_PERI_ENABLED 1
 #else

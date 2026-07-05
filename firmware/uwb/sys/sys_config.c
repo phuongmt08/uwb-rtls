@@ -376,6 +376,7 @@ void sys_config_init(void)
         }
     }
 
+#if ENABLE_OTP_ANTENNA_DELAY
     uint16_t otp_tx_delay = 0;
     uint16_t otp_rx_delay = 0;
     if (sys_config_otp_get_antenna_delay(&otp_tx_delay, &otp_rx_delay) == OTP_OK) {
@@ -385,6 +386,7 @@ void sys_config_init(void)
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Antenna Delays loaded from OTP: TX=%u, RX=%u", 
                cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
     }
+#endif
 
     sys_config_apply_forced_mode();
     sys_config_apply_dip_device_id_override();
@@ -861,6 +863,18 @@ void sys_config_reset_to_defaults(void)
 
 }
 
+static const char *sys_config_power_mode_name(uint32_t mode)
+{
+    switch (mode)
+    {
+    case ANCHOR_POWER_MODE_PERFORMANCE: return "PERFORMANCE";
+    case ANCHOR_POWER_MODE_BALANCED:    return "BALANCED";
+    case ANCHOR_POWER_MODE_ECO:         return "ECO";
+    case ANCHOR_POWER_MODE_DEEP_ECO:    return "DEEP_ECO";
+    default:                            return "UNKNOWN";
+    }
+}
+
 void sys_config_print(void)
 {
     /* Read OTP values to indicate sources */
@@ -876,7 +890,7 @@ void sys_config_print(void)
     CFG_LOG("");
     CFG_LOG("=========== FIRMWARE VERSION ===========");
     CFG_LOG("FW Version    : %d.%d.%d.%d", FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH, FW_VERSION_BUILD);
-    CFG_LOG("Git SHA       : %016llX", (unsigned long long)FW_VERSION_GITSHA_HEX);
+    CFG_LOG("Git SHA       : %08lX", (unsigned long)FW_VERSION_GITSHA_HEX);
     CFG_LOG("Timestamp     : %lu", (unsigned long)FW_IMAGE_TIMESTAMP);
     CFG_LOG("========== DEVICE INFORMATION ==========");
     CFG_LOG("Config Ver    : %u", (unsigned)g_storage.config.config_version);
@@ -937,7 +951,7 @@ void sys_config_print(void)
     CFG_LOG("-------------- TIMING -----------------");
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
-    CFG_LOG("Power Mode    : %lu", g_storage.config.uwb.power_mode);
+    CFG_LOG("Power Mode    : %s (%lu)", sys_config_power_mode_name(g_storage.config.uwb.power_mode), g_storage.config.uwb.power_mode);
     CFG_LOG("Prefilter     : %s recover=%.2f reject=%.2f r_base=%.3f r_gate=%.3f",
             g_storage.config.prefilter.enable ? "ON" : "OFF",
             g_storage.config.prefilter.recover_d2,

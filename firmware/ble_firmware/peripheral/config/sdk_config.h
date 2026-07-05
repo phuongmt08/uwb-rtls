@@ -4616,7 +4616,7 @@
 // <e> NRFX_WDT_ENABLED - nrfx_wdt - WDT peripheral driver
 //==========================================================
 #ifndef NRFX_WDT_ENABLED
-#define NRFX_WDT_ENABLED 0
+#define NRFX_WDT_ENABLED 1
 #endif
 // <o> NRFX_WDT_CONFIG_BEHAVIOUR  - WDT behavior in CPU SLEEP or HALT mode
  
@@ -4626,7 +4626,7 @@
 // <0=> Pause in SLEEP and HALT 
 
 #ifndef NRFX_WDT_CONFIG_BEHAVIOUR
-#define NRFX_WDT_CONFIG_BEHAVIOUR 1
+#define NRFX_WDT_CONFIG_BEHAVIOUR 0
 #endif
 
 // <o> NRFX_WDT_CONFIG_RELOAD_VALUE - Reload value in ms  <1-131072000> 
@@ -6018,7 +6018,7 @@
 // <e> WDT_ENABLED - nrf_drv_wdt - WDT peripheral driver - legacy layer
 //==========================================================
 #ifndef WDT_ENABLED
-#define WDT_ENABLED 0
+#define WDT_ENABLED 1
 #endif
 // <o> WDT_CONFIG_BEHAVIOUR  - WDT behavior in CPU SLEEP or HALT mode
  
@@ -6028,7 +6028,7 @@
 // <0=> Pause in SLEEP and HALT 
 
 #ifndef WDT_CONFIG_BEHAVIOUR
-#define WDT_CONFIG_BEHAVIOUR 1
+#define WDT_CONFIG_BEHAVIOUR 0
 #endif
 
 // <o> WDT_CONFIG_RELOAD_VALUE - Reload value  <15-4294967295> 
@@ -7868,7 +7868,7 @@
 // <i> Function for getting the timestamp is provided by the user
 //==========================================================
 #ifndef NRF_LOG_USES_TIMESTAMP
-#define NRF_LOG_USES_TIMESTAMP 0
+#define NRF_LOG_USES_TIMESTAMP 1
 #endif
 // <o> NRF_LOG_TIMESTAMP_DEFAULT_FREQUENCY - Default frequency of the timestamp (in Hz) or 0 to use app_timer frequency. 
 #ifndef NRF_LOG_TIMESTAMP_DEFAULT_FREQUENCY

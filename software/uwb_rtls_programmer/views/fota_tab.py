@@ -24,7 +24,14 @@ class FotaTab(QWidget):
         self.lbl_dongle_status.setStyleSheet("color: #F59E0B; font-weight: bold;")
         dongle_layout.addWidget(self.lbl_dongle_status)
         dongle_layout.addStretch()
-        
+
+        ble_state_layout = QHBoxLayout()
+        ble_state_layout.addWidget(QLabel("BLE State:"))
+        self.lbl_ble_state = QLabel("UNKNOWN")
+        self.lbl_ble_state.setStyleSheet("font-weight: bold;")
+        ble_state_layout.addWidget(self.lbl_ble_state)
+        ble_state_layout.addStretch()
+
         btn_layout = QHBoxLayout()
         self.btn_scan = QPushButton("Scan Nearby Devices")
         self.btn_connect = QPushButton("Connect Selected")
@@ -36,6 +43,7 @@ class FotaTab(QWidget):
         btn_layout.addStretch()
 
         d_layout.addLayout(dongle_layout)
+        d_layout.addLayout(ble_state_layout)
 
         self.table_ble = QTableWidget(0, 4)
         self.table_ble.setHorizontalHeaderLabels(["Device Name", "MAC Address / ID", "Serial Number", "RSSI"])

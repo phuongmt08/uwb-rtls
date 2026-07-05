@@ -38,6 +38,7 @@
 #include "bsp_uwb.h"
 #include "bsp_util.h"
 #include "common.h"
+#include "config.h"
 #include "network/network_core.h"
 #include "network/network_cmd.h"
 #ifdef HAVE_BLE_PERIPHERAL
@@ -50,11 +51,9 @@
 #include "positioning_config.h"
 #include "bsp_io.h"
 #include <math.h>
-#if ENABLE_SYS_FUSION
 #include "sys_sensor_fusion.h"
 #include "mw_filter.h"
 #include "mw_trilateration.h"
-#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -76,7 +75,7 @@
 /* USER CODE BEGIN Variables */
 
 osMessageQueueId_t g_uwb_distance_queue;
-void app_rtos_request_sensor_fusion_reset(void);
+osMessageQueueId_t g_imu_data_queue;
 
 bool g_ranging_enabled = false;
 bool g_pm_ranging_blocked = false;
@@ -89,14 +88,12 @@ uint8_t        fusion_entry_cnt = 0;
 bsp_imu_data_t imu_test_mutex_lock = {0};
 bool imu_test_mutex_flag = false;
 
-#if ENABLE_SYS_FUSION
 /* Owner variables for decoupled active Sensor Fusion */
 sys_sensor_fusion_data_t ukf_data;
 static mahalanobis_prefilter_t s_prefilter;
 
 static uint8_t s_last_selected_anchors_mask = 0U;
 static volatile bool s_fusion_reset_requested = false;
-#endif
 
 /* USER CODE END Variables */
 /* Definitions for UwbRanging */
@@ -120,10 +117,10 @@ const osThreadAttr_t Network_attributes = {
   .stack_size = 768 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for Logger */
-osThreadId_t LoggerHandle;
-const osThreadAttr_t Logger_attributes = {
-  .name = "Logger",
+/* Definitions for SysMonitoring */
+osThreadId_t SysMonitoringHandle;
+const osThreadAttr_t SysMonitoring_attributes = {
+  .name = "SysMonitoring",
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
@@ -176,24 +173,26 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-#if ENABLE_SYS_FUSION
+
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static void sensor_fusion_reset_state(void);
-#endif
+
 static void drain_signal_semaphore(osSemaphoreId_t sem);
-static void abort_uwb_ranging_locked(void);
+static bool abort_uwb_ranging_locked(sys_config_t *cfg);
+static void stop_uwb_ranging_locked(void);
 static void reset_ranging_runtime_state(sys_config_t *cfg);
-static void apply_ranging_enabled(sys_config_t *cfg, bool enabled);
+static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled);
 /* USER CODE END FunctionPrototypes */
 
 void uwb_ranging_entry(void *argument);
 void sensor_fusion_entry(void *argument);
 void network_entry(void *argument);
-void logger_entry(void *argument);
+void sys_monitoring_entry(void *argument);
 void flash_storage_entry(void *argument);
 void io_entry(void *argument);
 void power_manage_entry(void *argument);
+void app_rtos_request_sensor_fusion_reset(void);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -240,6 +239,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
   g_uwb_distance_queue = osMessageQueueNew(4, sizeof(uwb_distance_msg_t), NULL);
+  g_imu_data_queue = osMessageQueueNew(8, sizeof(bsp_imu_data_t), NULL);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -252,8 +252,8 @@ void MX_FREERTOS_Init(void) {
   /* creation of Network */
   NetworkHandle = osThreadNew(network_entry, NULL, &Network_attributes);
 
-  /* creation of Logger */
-  LoggerHandle = osThreadNew(logger_entry, NULL, &Logger_attributes);
+  /* creation of SysMonitoring */
+  SysMonitoringHandle = osThreadNew(sys_monitoring_entry, NULL, &SysMonitoring_attributes);
 
   /* creation of FlashStorage */
   FlashStorageHandle = osThreadNew(flash_storage_entry, NULL, &FlashStorage_attributes);
@@ -396,15 +396,14 @@ void uwb_ranging_entry(void *argument)
 void sensor_fusion_entry(void *argument)
 {
   /* USER CODE BEGIN sensor_fusion_entry */
-#if !ENABLE_SYS_FUSION
-	osThreadExit();
-#endif
-#if ENABLE_SYS_FUSION
   if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG)
   {
     osThreadExit();
   }
+  /* Init prefilter */
+  sensor_fusion_reset_state();
 
+  /* TEST */
 #if TEST_UKF_STREAM_UART
   for (;;)
   {
@@ -419,33 +418,24 @@ void sensor_fusion_entry(void *argument)
     sys_sensor_fusion_stream_ble();
     osDelay(20);
   }
-#else
-  /* Khá»Ÿi táº¡o bá»™ lá»c Ä‘á»‹nh vá»‹ vÃ  prefilter */
-  const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
-  mw_filter_mahalanobis_init(&s_prefilter,
-                             prefilter_cfg->recover_d2,
-                             prefilter_cfg->reject_d2,
-                             prefilter_cfg->r_base,
-                             prefilter_cfg->r_gate,
-                             prefilter_cfg->velocity_weight,
-                             prefilter_cfg->min_covariance);
-  if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
-  {
-      RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
-  }
-  else
-  {
-      RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
-  }
+#endif
+
   for (;;)
   {
-    osDelay(20);
 
     if (s_fusion_reset_requested)
     {
       s_fusion_reset_requested = false;
       (void)osMessageQueueReset(g_uwb_distance_queue);
+      (void)osMessageQueueReset(g_imu_data_queue);
       sensor_fusion_reset_state();
+      continue;
+    }
+
+    (void)sys_sensor_fusion_task();
+
+    if (!g_ranging_enabled)
+    {
       continue;
     }
 
@@ -619,13 +609,13 @@ void sensor_fusion_entry(void *argument)
                 if (err == MW_TRIL_OK)
                 {
                     SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
-                    (void)sys_sensor_fusion_apply_trilateration_result(&ukf_data,
-                                                                       &tril_position,
-                                                                       best_3_anchors,
-                                                                       anchors_by_id,
-                                                                       anchors_compact,
-                                                                       compact_idx,
-                                                                       s_last_selected_anchors_mask);
+                    (void)sys_sensor_fusion_update(   &ukf_data,
+                                                      &tril_position,
+                                                      best_3_anchors,
+                                                      anchors_by_id,
+                                                      anchors_compact,
+                                                      compact_idx,
+                                                      s_last_selected_anchors_mask);
                     SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                 }
                 else
@@ -646,11 +636,12 @@ void sensor_fusion_entry(void *argument)
         /* Update logging metrics mailbox passively when in Sensor Fusion mode */
       }
     }
+
+    osDelay(20);
   }
 
-#endif
   osThreadExit();
-#endif
+
   /* USER CODE END sensor_fusion_entry */
 }
 
@@ -676,23 +667,57 @@ void network_entry(void *argument)
   /* USER CODE END network_entry */
 }
 
-/* USER CODE BEGIN Header_logger_entry */
+/* USER CODE BEGIN Header_sys_monitoring_entry */
 /**
-* @brief Function implementing the Logger thread.
+* @brief Function implementing the SysMonitoring thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_logger_entry */
-void logger_entry(void *argument)
+/* USER CODE END Header_sys_monitoring_entry */
+void sys_monitoring_entry(void *argument)
 {
-  /* USER CODE BEGIN logger_entry */
+  /* USER CODE BEGIN sys_monitoring_entry */
+  const uint32_t monitor_interval_ms = 30000U;
+  (void)argument;
   bsp_util_rtos_monitor_update();
   for (;;)
   {
-    osDelay(30000); /* 30 seconds */
+    osDelay(monitor_interval_ms);
     bsp_util_rtos_monitor_update();
+
+#if APP_RTOS_STATS_LOG_ENABLE
+    const bsp_util_rtos_snapshot_t *snap = bsp_util_rtos_monitor_get();
+    if (snap == NULL || !snap->valid) {
+      RLOG_W(LOG_OBJECT_CODE_TASK, "[RTOS] stats unavailable");
+      continue;
+    }
+
+    RLOG_D(LOG_OBJECT_CODE_TASK,
+           "[RTOS] window=%lums cpu=%lu.%lu%% heap=%luB min_heap=%luB min_stack=%luB task_id=%lu flags=0x%02lX tasks=%lu/%lu",
+           (unsigned long)snap->sample_window_ms,
+           (unsigned long)(snap->cpu_busy_permille / 10U),
+           (unsigned long)(snap->cpu_busy_permille % 10U),
+           (unsigned long)snap->heap_free_bytes,
+           (unsigned long)snap->heap_min_ever_free_bytes,
+           (unsigned long)snap->min_stack_free_bytes,
+           (unsigned long)snap->min_stack_task_id,
+           (unsigned long)snap->health_flags,
+           (unsigned long)snap->task_count,
+           (unsigned long)snap->task_count_total);
+
+    for (uint32_t i = 0U; i < snap->task_count; i++) {
+      const bsp_util_rtos_task_stat_t *task = &snap->tasks[i];
+      RLOG_D(LOG_OBJECT_CODE_TASK,
+             "[RTOS_TASK] name=%s cpu=%lu.%lu%% stack_free=%luB id=%lu",
+             task->name,
+             (unsigned long)(task->cpu_permille / 10U),
+             (unsigned long)(task->cpu_permille % 10U),
+             (unsigned long)task->stack_min_free_bytes,
+             (unsigned long)task->task_id);
+    }
+#endif
   }
-  /* USER CODE END logger_entry */
+  /* USER CODE END sys_monitoring_entry */
 }
 
 /* USER CODE BEGIN Header_flash_storage_entry */
@@ -759,7 +784,10 @@ void io_entry(void *argument)
       {
         bool enable = !app_anchor_is_survey_active();
         g_ranging_enabled = false;
-        abort_uwb_ranging_locked();
+        if (!abort_uwb_ranging_locked(cfg)) {
+          RLOG_W(LOG_OBJECT_CODE_APPLICATION, "[CALIB] UWB wake failed; survey toggle skipped");
+          break;
+        }
         app_anchor_set_survey_active(enable);
         app_anchor_init();
         g_ranging_enabled = true;
@@ -779,12 +807,12 @@ void io_entry(void *argument)
         break;
       }
       bool enable_ranging = !g_ranging_enabled;
-      apply_ranging_enabled(cfg, enable_ranging);
-      if (enable_ranging)
+      bool ranging_changed = apply_ranging_enabled(cfg, enable_ranging);
+      if (ranging_changed && enable_ranging)
       {
         RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
       }
-      else
+      else if (ranging_changed)
       {
         RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped");
       }
@@ -812,7 +840,7 @@ void power_manage_entry(void *argument)
   {
     osDelay(100); /* 10 Hz, aligned with develop PM cadence */
 
-    bool allow_uwb_telemetry = !sys_ranging_is_active();
+    bool allow_uwb_telemetry = !sys_ranging_is_active() && !bsp_uwb_is_sleeping();
     bool telemetry_lock_held = false;
     if (allow_uwb_telemetry) {
       if (osMutexAcquire(g_spi1_mutexHandle, 0U) == osOK) {
@@ -858,6 +886,15 @@ void power_manage_entry(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+void vApplicationIdleHook(void)
+{
+#if APP_IDLE_SLEEP_ENABLE
+    __DSB();
+    __WFI();
+    __ISB();
+#endif
+}
+
 void app_rtos_set_ranging_enabled(bool enabled)
 {
     g_ranging_enabled = enabled;
@@ -868,9 +905,9 @@ bool app_rtos_is_ranging_enabled(void)
     return g_ranging_enabled;
 }
 
-void app_rtos_apply_ranging_enabled(bool enabled)
+bool app_rtos_apply_ranging_enabled(bool enabled)
 {
-    apply_ranging_enabled(sys_config_get(), enabled);
+    return apply_ranging_enabled(sys_config_get(), enabled);
 }
 
 static void drain_signal_semaphore(osSemaphoreId_t sem)
@@ -882,7 +919,32 @@ static void drain_signal_semaphore(osSemaphoreId_t sem)
     }
 }
 
-static void abort_uwb_ranging_locked(void)
+static bool abort_uwb_ranging_locked(sys_config_t *cfg)
+{
+    (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
+    sys_ranging_abort();
+    if (bsp_uwb_sleep_wake() != BSP_OK) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] Wake failed; resetting DW1000");
+        if (bsp_uwb_init() != BSP_OK) {
+            (void)osMutexRelease(g_spi1_mutexHandle);
+            drain_signal_semaphore(g_uwb_isr_semHandle);
+            return false;
+        }
+    }
+    /* A valid DEV_ID confirms wakeup, but not that every AON-restored PHY
+     * register is usable. Re-apply the runtime configuration on each start. */
+    if (cfg == NULL || bsp_uwb_configure(&cfg->uwb) != BSP_OK) {
+        (void)osMutexRelease(g_spi1_mutexHandle);
+        drain_signal_semaphore(g_uwb_isr_semHandle);
+        return false;
+    }
+    bsp_uwb_idle();
+    (void)osMutexRelease(g_spi1_mutexHandle);
+    drain_signal_semaphore(g_uwb_isr_semHandle);
+    return true;
+}
+
+static void stop_uwb_ranging_locked(void)
 {
     (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
     sys_ranging_abort();
@@ -905,19 +967,26 @@ static void reset_ranging_runtime_state(sys_config_t *cfg)
     }
 }
 
-static void apply_ranging_enabled(sys_config_t *cfg, bool enabled)
+static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled)
 {
     g_ranging_enabled = false;
-    abort_uwb_ranging_locked();
+    if (enabled) {
+        if (!abort_uwb_ranging_locked(cfg)) {
+            RLOG_W(LOG_OBJECT_CODE_APPLICATION, "Ranging start skipped: DW1000 wake failed");
+            return false;
+        }
+    } else {
+        stop_uwb_ranging_locked();
+    }
     reset_ranging_runtime_state(cfg);
     g_ranging_enabled = enabled;
 
     if (enabled && g_uwb_isr_semHandle != NULL) {
         (void)osSemaphoreRelease(g_uwb_isr_semHandle);
     }
+    return true;
 }
 
-#if ENABLE_SYS_FUSION
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
     if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
@@ -978,9 +1047,5 @@ static void sensor_fusion_reset_state(void)
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
 }
-#else
-void app_rtos_request_sensor_fusion_reset(void)
-{
-}
-#endif
+
 /* USER CODE END Application */

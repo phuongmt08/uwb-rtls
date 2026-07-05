@@ -58,10 +58,6 @@ void app_tag_reset_fusion(void);
  */
 bool app_tag_get_latest_position(float *x_m, float *y_m);
 
-#if ENABLE_SYS_FUSION
-extern sys_sensor_fusion_data_t ukf_data;
-#endif
-
 #endif /* __APP_TAG_H */
 
 /* End of file -------------------------------------------------------- */

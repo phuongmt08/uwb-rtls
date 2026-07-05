@@ -48,7 +48,8 @@ bool bl_app_vector_valid(void)
     if (msp          <  SRAM_BASE_ADDR || msp > SRAM_END_ADDR)           return false;
     if (reset_vector <  MEM_APP_START  || reset_vector >= MEM_APP_END)   return false;
 
-    return true;
+    /* Never boot a partially erased/written image after an interrupted FOTA. */
+    return (bsp_fl_app_verify_crc() == BSP_FL_OK);
 }
 
 bool bl_should_enter_dfu(void)

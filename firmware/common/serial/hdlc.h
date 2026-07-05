@@ -1,3 +1,13 @@
+/**
+ * @file       hdlc.h
+ * @copyright
+ * @license
+ * @version    1.0.1
+ * @date       2025-12-15
+ * @author     Phuong Mai
+ * @brief      HDLC framing and parsing for serial communication.
+ * @note       This implementation is designed for embedded systems and follows the C17 standard.
+ */
 #ifndef __HDLC_H
 #define __HDLC_H
 

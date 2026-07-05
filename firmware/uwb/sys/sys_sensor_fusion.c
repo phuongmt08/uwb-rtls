@@ -26,6 +26,7 @@
 #include "ble/sys_ble_peripheral.h"
 #include "sys_logger.h"
 #include "cmsis_os2.h"
+#include "app_rtos_handles.h"
 
 /* Private defines ---------------------------------------------------- */
 #define NUM_STATE     			8
@@ -92,7 +93,25 @@ typedef struct
 
 /* Private macros ----------------------------------------------------- */
 /* Public variables --------------------------------------------------- */
-static ukf_core_t ukf = {0};
+extern network_core_t g_network_core;
+extern bool g_ranging_enabled;
+
+/* Private variables -------------------------------------------------- */
+// filter
+static ukf_init_filter_t s_ukf_init_filter;
+static ukf_init_distance_filter_t s_ukf_init_dist_filter;
+// log
+float yaw = 0.0f;
+float b_gz_t = 0.0f;
+static float 	s_latest_distances[NUM_ANCHORS] = {0.0f};
+static double 	s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
+static double 	s_latest_fp_snr[NUM_ANCHORS] = {0.0};
+static uint32_t s_error_count = 0U;
+static uint8_t 	s_last_selected_anchors_mask = 0U;
+static float 	s_latest_tril_x = 0.0f;
+static float 	s_latest_tril_y = 0.0f;
+static float 	s_fusion_dt = 0.0f;
+// debug
 static uint16_t predict_delta_ms = 0;
 static uint16_t update_delta_ms = 0;
 unsigned long sys_predict_count = 0;
@@ -101,21 +120,9 @@ unsigned long sys_predict_err_count = 0;
 unsigned long sys_update_err_count = 0;
 unsigned long sys_update_cholesky_err_count = 0;
 unsigned long sys_update_inverse_err_count = 0;
-extern network_core_t g_network_core;
-extern bool g_ranging_enabled;
+//
+static ukf_core_t ukf = {0};
 
-/* Private variables -------------------------------------------------- */
-float yaw = 0.0f;
-float b_gz_t = 0.0f;
-static ukf_init_filter_t s_ukf_init_filter;
-static ukf_init_distance_filter_t s_ukf_init_dist_filter;
-static float s_latest_distances[NUM_ANCHORS] = {0.0f};
-static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
-static double s_latest_fp_snr[NUM_ANCHORS] = {0.0};
-static uint32_t s_error_count = 0U;
-static uint8_t s_last_selected_anchors_mask = 0U;
-static float s_latest_tril_x = 0.0f;
-static float s_latest_tril_y = 0.0f;
 #if TEST_UKF_STREAM_BLE
 static uint32_t s_stream_test_sample_idx = 0U;
 #endif
@@ -132,6 +139,11 @@ static int32_t to_proto_fixed2(float value);
 #if TEST_UKF_STREAM_BLE
 static void configure_adv(network_core_t *stream);
 #endif
+sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
+                                                 float d0,
+                                                 float d1,
+                                                 float d2,
+                                                 const uint8_t anchor_ids[3]);
 
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
@@ -214,11 +226,15 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 
+    if (g_imu_data_queue == NULL ||
+        osMessageQueueGet(g_imu_data_queue, &ukf.imu_current, NULL, 0U) != osOK) {
+        return SYS_SENSOR_FUSION_OK;
+    }
+
     uint32_t sys_predict_tick_ms = HAL_GetTick();
     float dt = calc_dt();
+    s_fusion_dt = dt;
 	sys_predict_count++;
-
-	bsp_imu_get_raw_data(&ukf.imu_current);
 
 	/* On the first frame imu_old is still zero-initialized; pair it with the
 	 * current sample so the trapezoidal integration below does not integrate
@@ -373,13 +389,420 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	return SYS_SENSOR_FUSION_OK;
 }
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
+sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0)
+{
+	ukf.state.px = x0;
+	ukf.state.py = y0;
+	if (p_ukf != NULL) *p_ukf = ukf.state;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+bool sys_sensor_fusion_is_initialized(void)
+{
+    return ukf.initialized;
+}
+
+static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out)
+{
+    if (!slot_out) {
+        return false;
+    }
+
+    const sys_config_t *cfg = sys_config_get();
+    uint32_t count = (cfg->anchor_count > NUM_ANCHORS) ? NUM_ANCHORS : cfg->anchor_count;
+    for (uint32_t i = 0U; i < count; i++) {
+        if (cfg->anchor_layout[i].anchor_id == aid) {
+            *slot_out = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
+							  const vec2d_t *tril_position,
+							  const mw_tril_anchor_t best_3_anchors[3],
+							  const mw_tril_anchor_t *anchors_by_id,
+							  const mw_tril_anchor_t *anchors_compact,
+							  uint8_t compact_count,
+							  uint8_t selected_anchor_mask)
+{
+    CHECK_ERR(p_ukf && tril_position && best_3_anchors && anchors_by_id, false);
+
+    s_last_selected_anchors_mask = selected_anchor_mask;
+    s_latest_tril_x = (float)tril_position->x;
+    s_latest_tril_y = (float)tril_position->y;
+
+    if (!ukf.initialized)
+    {
+        float init_x, init_y;
+        float init_d0, init_d1, init_d2;
+        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter,
+                                               (float)tril_position->x,
+                                               (float)tril_position->y,
+                                               &init_x,
+                                               &init_y);
+        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter,
+                                                         (float)best_3_anchors[0].distance,
+                                                         (float)best_3_anchors[1].distance,
+                                                         (float)best_3_anchors[2].distance,
+                                                         &init_d0,
+                                                         &init_d1,
+                                                         &init_d2);
+
+        if (!pos_done || !dist_done) {
+            return false;
+        }
+
+        ukf.initialized = true;
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm",
+               init_x, init_y, TAG_HEIGHT_M);
+
+        clear_latest_anchor_metrics();
+        const float init_distances[3] = {init_d0, init_d1, init_d2};
+        for (uint8_t k = 0U; k < 3U; k++) {
+            uint8_t layout_idx = 0U;
+            if (active_anchor_index_for_id(best_3_anchors[k].id, &layout_idx)) {
+                s_latest_distances[layout_idx] = init_distances[k];
+            }
+        }
+
+        snapshot_latest_anchor_metrics(anchors_by_id);
+
+        sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
+        sys_sensor_fusion_set_predict_flag();
+        s_error_count = 0U;
+        return true;
+    }
+
+    CHECK_ERR(anchors_compact != NULL, false);
+    clear_latest_anchor_metrics();
+    for (uint8_t k = 0; k < compact_count; k++) {
+        uint8_t aid = anchors_compact[k].id;
+        uint8_t layout_idx = 0U;
+        if (active_anchor_index_for_id(aid, &layout_idx)) {
+            s_latest_distances[layout_idx] = (float)anchors_compact[k].distance;
+        }
+    }
+
+    snapshot_latest_anchor_metrics(anchors_by_id);
+
+    const uint8_t selected_anchor_ids[3] = {
+        best_3_anchors[0].id,
+        best_3_anchors[1].id,
+        best_3_anchors[2].id
+    };
+    if (fusion_update( p_ukf,
+                        (float)best_3_anchors[0].distance,
+                        (float)best_3_anchors[1].distance,
+                        (float)best_3_anchors[2].distance,
+                        selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
+        return false;
+    }
+
+    s_error_count = 0U;
+    return true;
+}
+
+void sys_sensor_fusion_report_error(void)
+{
+    s_error_count++;
+//    s_latest_tril_x = 0.0f;
+//    s_latest_tril_y = 0.0f;
+}
+
+uint32_t sys_sensor_fusion_get_error_count(void)
+{
+    return s_error_count;
+}
+
+void sys_sensor_fusion_reset(void)
+{
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state from thread...");
+    sys_sensor_fusion_clear_predict_flag();
+    sys_sensor_fusion_clear_update_flag();
+
+    sys_sensor_fusion_data_t reset_state = {0};
+    if (sys_sensor_fusion_init(&reset_state) != SYS_SENSOR_FUSION_OK)
+    {
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialization failed");
+    }
+    else
+    {
+        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
+    }
+}
+
+void sys_sensor_fusion_stream_test_init(network_core_t *stream)
+{
+#if TEST_UKF_STREAM_BLE
+    CHECK_VOID(stream);
+    s_stream_test_sample_idx = 0U;
+    configure_adv(stream);
+#else
+    (void)stream;
+#endif
+}
+
+void sys_sensor_fusion_stream_ble()
+{
+#if TEST_UKF_STREAM_BLE
+
+    uint32_t now_ms = HAL_GetTick();
+
+    protobuf_sensor_fusion_result_t stream_data;
+    memset(&stream_data, 0, sizeof(stream_data));
+
+    const float start_x = 1.0f;
+    const float end_x   = 3.0f;
+    const float start_y = 1.0f;
+    const float end_y   = 3.0f;
+    const float step_m  = 0.05f;
+
+    uint32_t points_per_row = (uint32_t)((end_x - start_x) / step_m) + 1U;
+    uint32_t row_count      = (uint32_t)((end_y - start_y) / step_m) + 1U;
+    uint32_t total_points   = points_per_row * row_count;
+
+    uint32_t idx = s_stream_test_sample_idx % total_points;
+    uint32_t row = idx / points_per_row;
+    uint32_t col = idx % points_per_row;
+
+    float x;
+    float y = start_y + ((float)row * step_m);
+
+    if ((row % 2U) == 0U)
+    {
+        x = start_x + ((float)col * step_m);   // hàng chẵn: đi sang phải
+        stream_data.ukf_yaw_deg = 0;
+    }
+    else
+    {
+        x = end_x - ((float)col * step_m);     // hàng lẻ: đi sang trái
+        stream_data.ukf_yaw_deg = to_proto_fixed2(180.0f);
+    }
+
+    stream_data.ukf_x_m = to_proto_fixed2(x);
+    stream_data.ukf_y_m = to_proto_fixed2(y);
+
+    /* Trilateration giả lập lệch nhẹ so với UKF */
+    stream_data.tril_x_m = to_proto_fixed2(x + 0.05f);
+    stream_data.tril_y_m = to_proto_fixed2(y - 0.05f);
+    stream_data.yaw_deg  = stream_data.ukf_yaw_deg;
+
+    stream_data.anchor_mask = 0U;
+    stream_data.ranging_error_count = s_stream_test_sample_idx;
+    stream_data.timestamp_ms = now_ms;
+    stream_data.zone_id = 0U;
+    stream_data.anchors_count = 0U;
+
+    if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data))
+    {
+        s_stream_test_sample_idx++;
+    }
+
+#else
+    if (!ukf.initialized)
+    {
+        return;
+    }
+
+    const sys_config_t *cfg = sys_config_get();
+    protobuf_sensor_fusion_result_t stream_data;
+    memset(&stream_data, 0, sizeof(stream_data));
+
+    stream_data.ukf_x_m = to_proto_fixed2(ukf.state.px);
+    stream_data.ukf_y_m = to_proto_fixed2(ukf.state.py);
+    stream_data.ukf_yaw_deg = to_proto_fixed2(sys_sensor_fusion_get_ukf_yaw_deg());
+    stream_data.tril_x_m = to_proto_fixed2(s_latest_tril_x);
+    stream_data.tril_y_m = to_proto_fixed2(s_latest_tril_y);
+    stream_data.yaw_deg = to_proto_fixed2(sys_sensor_fusion_get_yaw_deg());
+    stream_data.anchor_mask = s_last_selected_anchors_mask;
+    stream_data.ranging_error_count = s_error_count;
+    stream_data.timestamp_ms = HAL_GetTick();
+    stream_data.zone_id = cfg ? cfg->default_zone_id : 0U;
+
+    if (cfg)
+    {
+        uint32_t count = cfg->anchor_count;
+        if (count > pb_arraysize(protobuf_sensor_fusion_result_t, anchors)) {
+            count = pb_arraysize(protobuf_sensor_fusion_result_t, anchors);
+        }
+        if (count > NUM_ANCHORS) {
+            count = NUM_ANCHORS;
+        }
+
+        for (uint32_t i = 0U; i < count; i++)
+        {
+            uint32_t aid = cfg->anchor_layout[i].anchor_id;
+            if (aid == 0U) {
+                continue;
+            }
+
+            protobuf_anchor_data_t *anchor = &stream_data.anchors[stream_data.anchors_count++];
+            anchor->anchor_id = aid;
+            anchor->distance_mm = (s_latest_distances[i] > 0.0f) ? (uint32_t)(s_latest_distances[i] * 1000.0f) : 0U;
+            anchor->weight = ((aid <= 8U) && ((s_last_selected_anchors_mask & (1U << (aid - 1U))) != 0U)) ? 100 : 0;
+        }
+    }
+
+    (void)network_send_sensor_fusion_result(&g_network_core,
+                                            protobuf_PACKET_ADDR_HOST,
+                                            &stream_data);
+#endif
+}
+
+void sys_sensor_fusion_stream_uart()
+{
+#if TEST_SEND_POS
+    const float start_x = 1.0f;
+    const float end_x   = 3.0f;
+    const float start_y = 1.0f;
+    const float end_y   = 3.0f;
+    const float step_m  = 0.05f;
+
+    uint32_t points_per_row = (uint32_t)((end_x - start_x) / step_m) + 1U;
+    uint32_t row_count      = (uint32_t)((end_y - start_y) / step_m) + 1U;
+    uint32_t total_points   = points_per_row * row_count;
+
+    uint32_t idx = s_stream_test_sample_idx % total_points;
+    uint32_t row = idx / points_per_row;
+    uint32_t col = idx % points_per_row;
+
+    float x;
+    float y = start_y + ((float)row * step_m);
+    float ukf_yaw_deg = 0.0f;
+
+    if ((row % 2U) == 0U)
+    {
+        x = start_x + ((float)col * step_m);   // hàng chẵn: đi sang phải
+        ukf_yaw_deg = 0.0f;
+    }
+    else
+    {
+        x = end_x - ((float)col * step_m);     // hàng lẻ: đi sang trái
+        ukf_yaw_deg = 180.0f;
+    }
+
+    if (bsp_io_uart_send_fusion_data(0U,
+                                     to_uart_fixed2(x),
+                                     to_uart_fixed2(y),
+                                     to_uart_fixed2(ukf_yaw_deg),
+                                     to_uart_fixed2((x + 0.05f)),
+                                     to_uart_fixed2((y + 0.05f)),
+                                     to_uart_fixed2(ukf_yaw_deg),
+                                     s_error_count) == BSP_OK)
+    {
+        s_stream_test_sample_idx++;
+    }
+
+#else
+    if (!ukf.initialized) 
+    {
+        return;
+    }
+
+#if ENABLE_SYS_FUSION
+    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+    float raw_yaw = sys_sensor_fusion_get_yaw_deg();
+
+    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+                                    to_uart_fixed2(ukf.state.px),
+                                    to_uart_fixed2(ukf.state.py),
+                                    to_uart_fixed2(ukf_yaw),
+                                    to_uart_fixed2(s_latest_tril_x),
+                                    to_uart_fixed2(s_latest_tril_y),
+                                    to_uart_fixed2(raw_yaw),
+                                    s_error_count);
+#else
+    bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,
+                                         s_error_count,
+										 ukf.imu_current.ax,
+										 ukf.imu_current.ay,
+										 ukf.imu_current.gz,
+                                         (float)s_latest_tril_x,
+                                         (float)s_latest_tril_y,
+                                         s_latest_distances,
+                                         s_latest_fp_amp_norm,
+                                         s_latest_fp_snr,
+                                         s_fusion_dt);
+#endif
+#endif
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_set_update_flag()
+{
+	ukf.enable_update = true;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_clear_update_flag()
+{
+	ukf.enable_update = false;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_set_predict_flag()
+{
+	ukf.enable_predict = true;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+sys_sensor_fusion_err_t sys_sensor_fusion_clear_predict_flag()
+{
+	ukf.enable_predict = false;
+	return SYS_SENSOR_FUSION_OK;
+}
+
+bool sys_sensor_fusion_check_update_flag()
+{
+	return ukf.enable_update;
+}
+
+bool sys_sensor_fusion_check_predict_flag()
+{
+	return ukf.enable_predict;
+}
+
+float sys_sensor_fusion_get_ukf_yaw_deg()
+{
+	return ukf.state.theta * RAD2DEG;
+}
+
+float sys_sensor_fusion_get_yaw_deg()
+{
+	return yaw * RAD2DEG;
+}
+
+void sys_sensor_fusion_task()
+{
+    if (g_imu_data_queue == NULL) 
+    {
+        return;
+    }
+
+    bsp_imu_data_t imu_data = {0};
+    if (bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK) 
+    {
+        if (ukf.initialized)
+        {
+            (void)osMessageQueuePut(g_imu_data_queue, &imu_data, 0U, 0U);
+        }
+    }
+}
+
+/* Private definitions ------------------------------------------------ */
+sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                  float d0,
                                                  float d1,
                                                  float d2,
                                                  const uint8_t anchor_ids[3])
 {
-	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
+	
+#if !ENABLE_SYS_FUSION
+	return SYS_SENSOR_FUSION_OK;
+#else
+
+    CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 	CHECK_ERR(anchor_ids != NULL, SYS_SENSOR_FUSION_ERR);
 
     uint32_t sys_update_tick_ms = HAL_GetTick();
@@ -566,359 +989,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf
     ukf.is_first_frame = true;
 	update_delta_ms = HAL_GetTick() - sys_update_tick_ms;
 	return SYS_SENSOR_FUSION_OK;
-}
 
-sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0)
-{
-	ukf.state.px = x0;
-	ukf.state.py = y0;
-	if (p_ukf != NULL) *p_ukf = ukf.state;
-	return SYS_SENSOR_FUSION_OK;
-}
-
-bool sys_sensor_fusion_is_initialized(void)
-{
-    return ukf.initialized;
-}
-
-bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_ukf,
-                                                  const vec2d_t *tril_position,
-                                                  const mw_tril_anchor_t best_3_anchors[3],
-                                                  const mw_tril_anchor_t *anchors_by_id,
-                                                  const mw_tril_anchor_t *anchors_compact,
-                                                  uint8_t compact_count,
-                                                  uint8_t selected_anchor_mask)
-{
-    CHECK_ERR(p_ukf && tril_position && best_3_anchors && anchors_by_id, false);
-
-    s_last_selected_anchors_mask = selected_anchor_mask;
-    s_latest_tril_x = (float)tril_position->x;
-    s_latest_tril_y = (float)tril_position->y;
-
-    if (!ukf.initialized)
-    {
-        float init_x, init_y;
-        float init_d0, init_d1, init_d2;
-        bool pos_done = mw_filter_ukf_init_add(&s_ukf_init_filter,
-                                               (float)tril_position->x,
-                                               (float)tril_position->y,
-                                               &init_x,
-                                               &init_y);
-        bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter,
-                                                         (float)best_3_anchors[0].distance,
-                                                         (float)best_3_anchors[1].distance,
-                                                         (float)best_3_anchors[2].distance,
-                                                         &init_d0,
-                                                         &init_d1,
-                                                         &init_d2);
-
-        if (!pos_done || !dist_done) {
-            return false;
-        }
-
-        ukf.initialized = true;
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION UKF Init] Tril Px=%.3fm Py=%.3fm Z=%.2fm",
-               init_x, init_y, TAG_HEIGHT_M);
-
-        clear_latest_anchor_metrics();
-        const float init_distances[3] = {init_d0, init_d1, init_d2};
-        for (uint8_t k = 0U; k < 3U; k++) {
-            uint8_t layout_idx = 0U;
-            if (active_anchor_index_for_id(best_3_anchors[k].id, &layout_idx)) {
-                s_latest_distances[layout_idx] = init_distances[k];
-            }
-        }
-        snapshot_latest_anchor_metrics(anchors_by_id);
-
-        sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
-        sys_sensor_fusion_set_predict_flag();
-        s_error_count = 0U;
-        return true;
-    }
-
-    CHECK_ERR(anchors_compact != NULL, false);
-    clear_latest_anchor_metrics();
-    for (uint8_t k = 0; k < compact_count; k++) {
-        uint8_t aid = anchors_compact[k].id;
-        uint8_t layout_idx = 0U;
-        if (active_anchor_index_for_id(aid, &layout_idx)) {
-            s_latest_distances[layout_idx] = (float)anchors_compact[k].distance;
-        }
-    }
-
-    snapshot_latest_anchor_metrics(anchors_by_id);
-
-    const uint8_t selected_anchor_ids[3] = {
-        best_3_anchors[0].id,
-        best_3_anchors[1].id,
-        best_3_anchors[2].id
-    };
-    if (sys_sensor_fusion_update(p_ukf,
-                                 (float)best_3_anchors[0].distance,
-                                 (float)best_3_anchors[1].distance,
-                                 (float)best_3_anchors[2].distance,
-                                 selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
-        return false;
-    }
-
-    s_error_count = 0U;
-    return true;
-}
-
-void sys_sensor_fusion_report_error(void)
-{
-    s_error_count++;
-    s_latest_tril_x = 0.0f;
-    s_latest_tril_y = 0.0f;
-}
-
-uint32_t sys_sensor_fusion_get_error_count(void)
-{
-    return s_error_count;
-}
-
-void sys_sensor_fusion_reset(void)
-{
-    RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state from thread...");
-    sys_sensor_fusion_clear_predict_flag();
-    sys_sensor_fusion_clear_update_flag();
-
-    sys_sensor_fusion_data_t reset_state = {0};
-    if (sys_sensor_fusion_init(&reset_state) != SYS_SENSOR_FUSION_OK)
-    {
-        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialization failed");
-    }
-    else
-    {
-        RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
-    }
-}
-
-void sys_sensor_fusion_stream_test_init(network_core_t *stream)
-{
-#if TEST_UKF_STREAM_BLE
-    CHECK_VOID(stream);
-    s_stream_test_sample_idx = 0U;
-    configure_adv(stream);
-#else
-    (void)stream;
 #endif
+
 }
 
-void sys_sensor_fusion_stream_ble()
-{
-#if TEST_UKF_STREAM_BLE
-
-    uint32_t now_ms = HAL_GetTick();
-
-    protobuf_sensor_fusion_result_t stream_data;
-    memset(&stream_data, 0, sizeof(stream_data));
-
-    const float start_x = 1.0f;
-    const float end_x   = 3.0f;
-    const float start_y = 1.0f;
-    const float end_y   = 3.0f;
-    const float step_m  = 0.05f;
-
-    uint32_t points_per_row = (uint32_t)((end_x - start_x) / step_m) + 1U;
-    uint32_t row_count      = (uint32_t)((end_y - start_y) / step_m) + 1U;
-    uint32_t total_points   = points_per_row * row_count;
-
-    uint32_t idx = s_stream_test_sample_idx % total_points;
-    uint32_t row = idx / points_per_row;
-    uint32_t col = idx % points_per_row;
-
-    float x;
-    float y = start_y + ((float)row * step_m);
-
-    if ((row % 2U) == 0U)
-    {
-        x = start_x + ((float)col * step_m);   // hàng chẵn: đi sang phải
-        stream_data.ukf_yaw_deg = 0;
-    }
-    else
-    {
-        x = end_x - ((float)col * step_m);     // hàng lẻ: đi sang trái
-        stream_data.ukf_yaw_deg = to_proto_fixed2(180.0f);
-    }
-
-    stream_data.ukf_x_m = to_proto_fixed2(x);
-    stream_data.ukf_y_m = to_proto_fixed2(y);
-
-    /* Trilateration giả lập lệch nhẹ so với UKF */
-    stream_data.tril_x_m = to_proto_fixed2(x + 0.05f);
-    stream_data.tril_y_m = to_proto_fixed2(y - 0.05f);
-    stream_data.yaw_deg  = stream_data.ukf_yaw_deg;
-
-    stream_data.anchor_mask = 0U;
-    stream_data.ranging_error_count = s_stream_test_sample_idx;
-    stream_data.timestamp_ms = now_ms;
-    stream_data.zone_id = 0U;
-    stream_data.anchors_count = 0U;
-
-    if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data))
-    {
-        s_stream_test_sample_idx++;
-    }
-
-#else
-    if (!ukf.initialized)
-    {
-        return;
-    }
-
-    const sys_config_t *cfg = sys_config_get();
-    protobuf_sensor_fusion_result_t stream_data;
-    memset(&stream_data, 0, sizeof(stream_data));
-
-    stream_data.ukf_x_m = to_proto_fixed2(ukf.state.px);
-    stream_data.ukf_y_m = to_proto_fixed2(ukf.state.py);
-    stream_data.ukf_yaw_deg = to_proto_fixed2(sys_sensor_fusion_get_ukf_yaw_deg());
-    stream_data.tril_x_m = to_proto_fixed2(s_latest_tril_x);
-    stream_data.tril_y_m = to_proto_fixed2(s_latest_tril_y);
-    stream_data.yaw_deg = to_proto_fixed2(sys_sensor_fusion_get_yaw_deg());
-    stream_data.anchor_mask = s_last_selected_anchors_mask;
-    stream_data.ranging_error_count = s_error_count;
-    stream_data.timestamp_ms = HAL_GetTick();
-    stream_data.zone_id = cfg ? cfg->default_zone_id : 0U;
-
-    if (cfg)
-    {
-        uint32_t count = cfg->anchor_count;
-        if (count > pb_arraysize(protobuf_sensor_fusion_result_t, anchors)) {
-            count = pb_arraysize(protobuf_sensor_fusion_result_t, anchors);
-        }
-        if (count > NUM_ANCHORS) {
-            count = NUM_ANCHORS;
-        }
-
-        for (uint32_t i = 0U; i < count; i++)
-        {
-            uint32_t aid = cfg->anchor_layout[i].anchor_id;
-            if (aid == 0U) {
-                continue;
-            }
-
-            protobuf_anchor_data_t *anchor = &stream_data.anchors[stream_data.anchors_count++];
-            anchor->anchor_id = aid;
-            anchor->distance_mm = (s_latest_distances[i] > 0.0f) ? (uint32_t)(s_latest_distances[i] * 1000.0f) : 0U;
-            anchor->weight = ((aid <= 8U) && ((s_last_selected_anchors_mask & (1U << (aid - 1U))) != 0U)) ? 100 : 0;
-        }
-    }
-
-    (void)network_send_sensor_fusion_result(&g_network_core,
-                                            protobuf_PACKET_ADDR_HOST,
-                                            &stream_data);
-#endif
-}
-
-void sys_sensor_fusion_stream_uart()
-{
-#if TEST_SEND_POS
-    const float start_x = 1.0f;
-    const float end_x   = 3.0f;
-    const float start_y = 1.0f;
-    const float end_y   = 3.0f;
-    const float step_m  = 0.05f;
-
-    uint32_t points_per_row = (uint32_t)((end_x - start_x) / step_m) + 1U;
-    uint32_t row_count      = (uint32_t)((end_y - start_y) / step_m) + 1U;
-    uint32_t total_points   = points_per_row * row_count;
-
-    uint32_t idx = s_stream_test_sample_idx % total_points;
-    uint32_t row = idx / points_per_row;
-    uint32_t col = idx % points_per_row;
-
-    float x;
-    float y = start_y + ((float)row * step_m);
-    float ukf_yaw_deg = 0.0f;
-
-    if ((row % 2U) == 0U)
-    {
-        x = start_x + ((float)col * step_m);   // hàng chẵn: đi sang phải
-        ukf_yaw_deg = 0.0f;
-    }
-    else
-    {
-        x = end_x - ((float)col * step_m);     // hàng lẻ: đi sang trái
-        ukf_yaw_deg = 180.0f;
-    }
-
-    if (bsp_io_uart_send_fusion_data(to_uart_fixed2(x),
-                                     to_uart_fixed2(y),
-                                     to_uart_fixed2(ukf_yaw_deg),
-                                     to_uart_fixed2((x + 0.05f)),
-                                     to_uart_fixed2((y + 0.05f)),
-                                     to_uart_fixed2(ukf_yaw_deg),
-                                     s_error_count) == BSP_OK)
-    {
-        s_stream_test_sample_idx++;
-    }
-
-#else
-    if (!ukf.initialized) 
-    {
-        return;
-    }
-
-    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
-    float raw_yaw = sys_sensor_fusion_get_yaw_deg();
-
-    (void)bsp_io_uart_send_fusion_data(to_uart_fixed2(ukf.state.px),
-                                    to_uart_fixed2(ukf.state.py),
-                                    to_uart_fixed2(ukf_yaw),
-                                    to_uart_fixed2(s_latest_tril_x),
-                                    to_uart_fixed2(s_latest_tril_y),
-                                    to_uart_fixed2(raw_yaw),
-                                    s_error_count);
-#endif
-}
-
-sys_sensor_fusion_err_t sys_sensor_fusion_set_update_flag()
-{
-	ukf.enable_update = true;
-	return SYS_SENSOR_FUSION_OK;
-}
-
-sys_sensor_fusion_err_t sys_sensor_fusion_clear_update_flag()
-{
-	ukf.enable_update = false;
-	return SYS_SENSOR_FUSION_OK;
-}
-
-sys_sensor_fusion_err_t sys_sensor_fusion_set_predict_flag()
-{
-	ukf.enable_predict = true;
-	return SYS_SENSOR_FUSION_OK;
-}
-
-sys_sensor_fusion_err_t sys_sensor_fusion_clear_predict_flag()
-{
-	ukf.enable_predict = false;
-	return SYS_SENSOR_FUSION_OK;
-}
-
-bool sys_sensor_fusion_check_update_flag()
-{
-	return ukf.enable_update;
-}
-
-bool sys_sensor_fusion_check_predict_flag()
-{
-	return ukf.enable_predict;
-}
-
-float sys_sensor_fusion_get_ukf_yaw_deg()
-{
-	return ukf.state.theta * RAD2DEG;
-}
-
-float sys_sensor_fusion_get_yaw_deg()
-{
-	return yaw * RAD2DEG;
-}
-
-/* Private definitions ------------------------------------------------ */
 static float calc_dt(void)
 {
     uint32_t now = HAL_GetTick();
@@ -948,6 +1023,7 @@ static void reset_runtime_state(void)
     s_last_selected_anchors_mask = 0U;
     s_latest_tril_x = 0.0f;
     s_latest_tril_y = 0.0f;
+    s_fusion_dt = 0.0f;
 }
 
 static bool active_anchor_index_for_id(uint8_t anchor_id, uint8_t *index_out)

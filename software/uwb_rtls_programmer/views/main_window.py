@@ -131,7 +131,11 @@ class MainWindow(QMainWindow):
 
     def append_log(self, text: str):
         lower = text.lower()
-        if text.startswith("ERROR:") or " error:" in lower or "failed" in lower:
+        if text.startswith("[DISCONNECTED]"):
+            color = QColor("#ff6b6b")
+        elif text.startswith("[DEBUG]"):
+            color = QColor("#10B981")
+        elif text.startswith("ERROR:") or " error:" in lower or "failed" in lower:
             color = QColor("#ff6b6b")
         elif "warning" in lower:
             color = QColor("#ffd166")

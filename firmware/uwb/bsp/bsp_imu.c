@@ -19,6 +19,8 @@
 /* Private defines ---------------------------------------------------------- */
 #define GRAVITY							9.80665f
 #define DEG2RAD							3.14159265358979323846f / 180.0f
+#define IMU_TEMP_MIN_C					(-40.0f)
+#define IMU_TEMP_MAX_C					125.0f
 
 /* Public vriables --------------------------------------------------- */
 extern SPI_HandleTypeDef BSP_IMU_SPI_HANDLE;
@@ -26,7 +28,7 @@ icm42688_dev_t bsp_imu;
 
 /* Private variables -------------------------------------------------- */
 static bool s_spi1_cs_mutex_locked = false;
-static float s_cached_temp = 0.0f;
+static volatile float s_cached_temp = ICM42688_TEMP_OFFSET;
 
 static const icm42688_config_t s_default_cfg =
 {

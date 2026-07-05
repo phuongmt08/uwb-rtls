@@ -7,6 +7,7 @@
 #define APP_RTOS_HANDLES_H
 
 #include "cmsis_os.h"
+#include "bsp_imu.h"
 #include "protos/protocol.pb.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -47,12 +48,13 @@ typedef struct {
 
 /** UwbRanging → SensorFusion queue, item size follows uwb_distance_msg_t. */
 extern osMessageQueueId_t g_uwb_distance_queue;
+extern osMessageQueueId_t g_imu_data_queue;
 
 /* ── Shared state ───────────────────────────────────────────────────────── */
 
 void app_rtos_set_ranging_enabled(bool enabled);
 bool app_rtos_is_ranging_enabled(void);
-void app_rtos_apply_ranging_enabled(bool enabled);
+bool app_rtos_apply_ranging_enabled(bool enabled);
 void app_rtos_request_sensor_fusion_reset(void);
 bool app_rtos_request_zone_switch(uint32_t zone_id);
 bool app_rtos_request_active_zone_profile_update(const protobuf_zone_profile_t *profile);
