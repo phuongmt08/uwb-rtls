@@ -1047,6 +1047,7 @@ class MainWindow(QMainWindow):
                     self._protocol_service,
                     self._serial_service,
                     command_bus=self._command_bus,
+                    ble_scan_repo=getattr(self._device_info_vm, "_ble_scan_repo", None),
                 )
                 scan_vm = ScanViewModel(scan_model)
                 scan_popup = ScanPopup(scan_vm, parent=self)

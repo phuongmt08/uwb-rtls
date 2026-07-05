@@ -493,7 +493,7 @@ def main():
                 sys.exit(0)
 
             # Dongle ok -> Scan popup
-            scan_model = ScanModel(protocol_service, serial_service, command_bus=command_bus)
+            scan_model = ScanModel(protocol_service, serial_service, command_bus=command_bus, ble_scan_repo=ble_scan_repo)
             scan_vm = ScanViewModel(scan_model)
             scan_popup = ScanPopup(scan_vm)
 
@@ -546,6 +546,7 @@ def main():
         protocol_service,
         telemetry_repo=telemetry_repo,
         ble_scan_repo=ble_scan_repo,
+        config_repo=config_repo,
         command_bus=command_bus,
     )
     device_info_vm = DeviceInfoViewModel(

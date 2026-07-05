@@ -782,7 +782,7 @@ class CommunicationTab(QWidget):
         (BEFORE pkt is returned).  We use _manual_send_active flag so the seq
         is immediately tagged as a tester seq when the flag is True.
         """
-        timestamp = time.strftime("%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}"
+        timestamp = self._event_timestamp_text("tx", pkt)
         hdr = getattr(pkt, "hdr", None)
         addr = getattr(hdr, "addr", None)
         src_addr = int(getattr(addr, "src", 0) or 0)
@@ -830,7 +830,7 @@ class CommunicationTab(QWidget):
     @pyqtSlot(str, object)
     def _on_packet_received(self, param_name: str, pkt) -> None:
         """Called every time a packet is decoded & received from the device."""
-        timestamp = time.strftime("%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}"
+        timestamp = self._event_timestamp_text("rx", pkt)
         hdr = getattr(pkt, "hdr", None)
         addr = getattr(hdr, "addr", None)
         src_addr = int(getattr(addr, "src", 0) or 0)
@@ -1385,6 +1385,23 @@ class CommunicationTab(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
     #  Utility helpers
     # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _format_wallclock(timestamp_s: float) -> str:
+        base = time.localtime(timestamp_s)
+        millis = int((timestamp_s % 1) * 1000)
+        return time.strftime("%H:%M:%S", base) + f".{millis:03d}"
+
+    def _event_timestamp_text(self, direction: str, pkt) -> str:
+        event_time = None
+        if self._protocol_service and hasattr(self._protocol_service, "packet_event_time"):
+            try:
+                event_time = self._protocol_service.packet_event_time(direction, pkt)
+            except Exception:
+                event_time = None
+        if event_time is None:
+            event_time = time.time()
+        return self._format_wallclock(float(event_time))
 
     @staticmethod
     def _addr_name(addr: int) -> str:

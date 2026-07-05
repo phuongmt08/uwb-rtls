@@ -37,6 +37,7 @@ import os
 import logging
 import queue
 import threading
+from time import time
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from google.protobuf.message import DecodeError
@@ -77,6 +78,7 @@ class ProtocolService(QObject):
         self._seq_lock = threading.Lock()
         self._packet_repository = None
         self._last_log_data_seq: int | None = None
+        self._packet_event_times: dict[tuple[str, int], float] = {}
         self._rx_queue: queue.Queue[bytes | None] = queue.Queue()
         self._rx_stop = threading.Event()
         self._rx_thread = threading.Thread(
@@ -170,6 +172,8 @@ class ProtocolService(QObject):
             if param is None:
                 continue
 
+            self._remember_packet_event_time("rx", pkt, time())
+
             if param == "log_data":
                 self._warn_on_log_seq_gap(int(pkt.hdr.seq))
 
@@ -230,10 +234,18 @@ class ProtocolService(QObject):
     def send_packet(self, pkt: pb.packet_t) -> None:
         """Encode packet → HDLC frame → serial write."""
         frame = self._protocol.wrap_packet(pkt)
+        self._remember_packet_event_time("tx", pkt, time())
         self._serial.write(frame)
         param = pkt.WhichOneof("params") or "unknown"
         log.debug("TX: %s seq=%d", param, pkt.hdr.seq)
         self.packet_sent.emit(param, pkt)
+
+    def packet_event_time(self, direction: str, pkt) -> float | None:
+        """Return host-side event timestamp captured at the service boundary."""
+        return self._packet_event_times.get((direction, id(pkt)))
+
+    def _remember_packet_event_time(self, direction: str, pkt, event_time: float) -> None:
+        self._packet_event_times[(direction, id(pkt))] = float(event_time)
 
     def send_command(self, builder_name: str, dst_addr: int | None = None, src_addr: int = VvAddress.HOST, **kwargs) -> pb.packet_t:
         """Build + send command bằng tên.

@@ -680,9 +680,21 @@ class LiveTrackingTab(QWidget):
             raw_yaw = float(updated.get("raw_yaw", updated.get("yaw", 0.0)))
             updated["raw_yaw"] = raw_yaw
             updated["yaw"] = self._apply_yaw_offset(raw_yaw)
-            self._canvas.update_position(updated)
+            if updated.get("source") == "sensor_fusion":
+                self._canvas.fusion_position = updated
+            else:
+                self._canvas.position = updated
+            self._canvas.update()
             if self._map_view_stack.currentWidget() is self._map_3d:
-                self._map_3d.update_position(updated)
+                self._map_3d._tag_position = [
+                    float(updated.get("x", 0.0)),
+                    float(updated.get("y", 0.0)),
+                    float(updated.get("z", 0.0)),
+                ]
+                self._map_3d._tag_yaw = float(updated.get("yaw", 0.0))
+                if getattr(self._map_3d, "gl_widget", None):
+                    self._map_3d._update_tag_arrow()
+                    self._map_3d.gl_widget.update()
 
     def _apply_yaw_offset(self, yaw_deg: float) -> float:
         value = float(yaw_deg) + float(self._yaw_offset_deg)

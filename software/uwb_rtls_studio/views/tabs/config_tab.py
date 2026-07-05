@@ -1,12 +1,12 @@
 """
 ==============================================================================
-  UWB RTLS Studio — Config Tab View
+  UWB RTLS Studio - Config Tab View
 ==============================================================================
   File        : config_tab.py
   Description : View for config configurations (Tab 3), loaded from config_tab.ui.
                 Handles form submissions and binds input fields to ConfigViewModel.
 
-  MVVM Role   : VIEW — Pure presentation.
+  MVVM Role   : VIEW - Pure presentation.
 
   Thread Model:
     - Main GUI Thread: Renders widgets and listens to user input events strictly
@@ -29,7 +29,6 @@ from PyQt6 import uic
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'config_tab.ui')
 
 from utils.helpers import format_coord
-from utils.constants import DEVICE_TYPE_LABELS_SHORT
 from views.tabs.anchor_visual_widget import AnchorVisualWidget
 
 # --- Factory OTP constants (mirrors provision_otp.py) ---
@@ -55,12 +54,10 @@ class ConfigTab(QWidget):
         self._current_role = 1  # Default: Tag
         self._current_device_id = 0
         self._last_anchor_layout = []
-        self._scan_devices = []
-
-        # ── Load UI from .ui file ──
+        # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
 
-        # ── Post-load setup ──
+        # Post-load setup
         self._setup_dev_widgets()
         if self._has_widget("tx_power_spin"):
             if hasattr(self.tx_power_spin, "setDecimals"):
@@ -104,7 +101,7 @@ class ConfigTab(QWidget):
 
         # Setup BLE Configuration Group Box if not present in UI
         if not hasattr(self, "ble_group") or self.ble_group is None:
-            self.ble_group = QGroupBox("📶 BLE Configuration")
+            self.ble_group = QGroupBox("BLE Configuration")
             self.ble_grid = QGridLayout(self.ble_group)
             self.ble_grid.setSpacing(10)
 
@@ -112,33 +109,33 @@ class ConfigTab(QWidget):
             self.chk_enable_ble.setChecked(True)
             self.ble_grid.addWidget(self.chk_enable_ble, 0, 0, 1, 2)
 
-            self.lbl_ble_name = QLabel("🏷️ Device Name:")
+            self.lbl_ble_name = QLabel("Device Name:")
             self.txt_ble_name = QLineEdit("Mock Device")
             self.ble_grid.addWidget(self.lbl_ble_name, 1, 0)
             self.ble_grid.addWidget(self.txt_ble_name, 1, 1)
 
-            self.lbl_ble_min_int = QLabel("⏱️ Min Interval (ms):")
+            self.lbl_ble_min_int = QLabel("Min Interval (ms):")
             self.spin_ble_min_int = QSpinBox()
             self.spin_ble_min_int.setRange(20, 5000)
             self.spin_ble_min_int.setValue(20)
             self.ble_grid.addWidget(self.lbl_ble_min_int, 2, 0)
             self.ble_grid.addWidget(self.spin_ble_min_int, 2, 1)
 
-            self.lbl_ble_max_int = QLabel("⏱️ Max Interval (ms):")
+            self.lbl_ble_max_int = QLabel("Max Interval (ms):")
             self.spin_ble_max_int = QSpinBox()
             self.spin_ble_max_int.setRange(20, 5000)
             self.spin_ble_max_int.setValue(40)
             self.ble_grid.addWidget(self.lbl_ble_max_int, 3, 0)
             self.ble_grid.addWidget(self.spin_ble_max_int, 3, 1)
 
-            self.lbl_ble_latency = QLabel("⏱️ Slave Latency:")
+            self.lbl_ble_latency = QLabel("Slave Latency:")
             self.spin_ble_latency = QSpinBox()
             self.spin_ble_latency.setRange(0, 100)
             self.spin_ble_latency.setValue(0)
             self.ble_grid.addWidget(self.lbl_ble_latency, 4, 0)
             self.ble_grid.addWidget(self.spin_ble_latency, 4, 1)
 
-            self.lbl_ble_timeout = QLabel("⏱️ Sup. Timeout (ms):")
+            self.lbl_ble_timeout = QLabel("Sup. Timeout (ms):")
             self.spin_ble_timeout = QSpinBox()
             self.spin_ble_timeout.setRange(100, 30000)
             self.spin_ble_timeout.setValue(3000)
@@ -184,7 +181,7 @@ class ConfigTab(QWidget):
         self.usb_detail_layout.setContentsMargins(0, 6, 0, 0)
         self.usb_detail_layout.setHorizontalSpacing(8)
         self.usb_detail_layout.setVerticalSpacing(8)
-        self.lbl_usb_device = QLabel("Device Name:")
+        self.lbl_ble_name = QLabel("Device Name:")
         self.txt_usb_device = QLineEdit("STM32 Virtual COM Port")
         self.txt_usb_device.setReadOnly(True)
         self.lbl_usb_port = QLabel("COM Port:")
@@ -260,15 +257,10 @@ class ConfigTab(QWidget):
         self._on_usb_port_changed(self.combo_usb_port.currentIndex())
 
     def _setup_target_selector(self):
-        """Add a compact target picker fed by BLE scan results."""
-        self.lbl_target_device = QLabel("Target:")
-        self.lbl_target_device.setStyleSheet("color: #94A3B8; font-weight: bold;")
-        self.target_device_combo = QComboBox()
-        self.target_device_combo.setMinimumWidth(190)
-        self.target_device_combo.currentIndexChanged.connect(self._on_target_device_changed)
-        self.device_ops_layout.insertWidget(0, self.lbl_target_device)
-        self.device_ops_layout.insertWidget(1, self.target_device_combo)
-        self._refresh_target_devices([])
+        """Configure connection display widget from UI file."""
+        if hasattr(self, "txt_connected_device"):
+            self.txt_connected_device.setReadOnly(True)
+            self.txt_connected_device.setText("Disconnected")
 
     def _merge_ranging_into_uwb_config(self):
         """Move ranging controls under the shared UWB Configuration group."""
@@ -332,7 +324,7 @@ class ConfigTab(QWidget):
     def _setup_factory_otp_ui(self):
         # Change title
         if hasattr(self, "anchor_group"):
-            self.anchor_group.setTitle("🏭 Factory OTP Configuration")
+            self.anchor_group.setTitle("Factory OTP Configuration")
 
         if hasattr(self, "otp_type_combo") and self.otp_type_combo is not None:
             self.otp_type_combo.currentIndexChanged.connect(self.otp_stacked_widget.setCurrentIndex)
@@ -565,13 +557,12 @@ class ConfigTab(QWidget):
             self._vm.ble_conn_params_updated.connect(self._on_ble_conn_params_loaded)
         if hasattr(self._vm, "device_type_updated"):
             self._vm.device_type_updated.connect(self._on_device_type_loaded)
-        if hasattr(self._vm, "scan_devices_updated"):
-            self._vm.scan_devices_updated.connect(self._refresh_target_devices)
 
         # Connect UI buttons to viewmodel actions
         self.btn_read_device.clicked.connect(self._read_device_config)
         self.btn_write_device.clicked.connect(self._write_device_config)
         self.btn_write_all.clicked.connect(self._write_all_devices)
+        self.btn_write_all.setToolTip("Bulk target switching is disabled. This action applies to the connected device only.")
         self.btn_device_reset.clicked.connect(self._vm.device_reset)
         self.btn_bootloader.clicked.connect(self._vm.enter_bootloader)
         self.btn_set_ble.clicked.connect(self._on_set_ble_clicked)
@@ -581,10 +572,59 @@ class ConfigTab(QWidget):
         if hasattr(self._vm.model, "connection_state_changed"):
             self._vm.model.connection_state_changed.connect(self._on_connection_state_changed)
         self._vm.emit_current_state()
+        self._update_connection_display()
+        self._update_device_action_state()
 
     def _on_connection_state_changed(self, info: dict):
-        if info.get("status") in ("Disconnected", "Connecting", "Connected"):
+        status = info.get("status", "Disconnected")
+        if status in ("Disconnected", "Connecting", "Connected"):
             self._reset_display_fields()
+            self._update_connection_display()
+            self._update_device_action_state()
+
+    def _has_connected_device(self) -> bool:
+        return bool(self._vm and self._vm.model.is_connected)
+
+    def _require_connected_device(self, action_name: str) -> bool:
+        if self._has_connected_device():
+            return True
+        QMessageBox.information(self, "No Connected Device", f"Connect a device before {action_name}.")
+        return False
+
+    def _update_device_action_state(self):
+        connected = self._has_connected_device()
+        if hasattr(self, "btn_read_device"):
+            self.btn_read_device.setEnabled(connected)
+        if hasattr(self, "btn_write_device"):
+            self.btn_write_device.setEnabled(connected)
+        if hasattr(self, "btn_device_reset"):
+            self.btn_device_reset.setEnabled(connected)
+        if hasattr(self, "btn_bootloader"):
+            self.btn_bootloader.setEnabled(connected)
+        if hasattr(self, "btn_get_device_type"):
+            self.btn_get_device_type.setEnabled(connected)
+        if hasattr(self, "btn_set_device_type"):
+            self.btn_set_device_type.setEnabled(connected)
+        if hasattr(self, "btn_set_ble"):
+            self.btn_set_ble.setEnabled(connected)
+        if hasattr(self, "btn_write_all"):
+            self.btn_write_all.setEnabled(False)
+            self.btn_write_all.setToolTip("Broadcast write is not implemented yet.")
+    def _update_connection_display(self):
+        if not hasattr(self, "txt_connected_device"):
+            return
+        status = self._vm.model.connection_status if self._vm else "Disconnected"
+        if self._vm and self._vm.model.is_connected:
+            name = self._vm.model.connected_name or "Device"
+            mac = self._vm.model.connected_mac
+            if mac:
+                self.txt_connected_device.setText(f"{name} ({mac})")
+            else:
+                self.txt_connected_device.setText(name)
+        elif status == "Connecting":
+            self.txt_connected_device.setText("Connecting...")
+        else:
+            self.txt_connected_device.setText("Disconnected")
 
     def _reset_display_fields(self):
         """Show placeholder '-' for all fields initially or when disconnected."""
@@ -700,68 +740,20 @@ class ConfigTab(QWidget):
     def _sync_table_to_shared_state(self):
         pass
 
-    def _refresh_target_devices(self, devices: list):
-        self._scan_devices = [dict(d) for d in devices]
-        selected_key = None
-        current_data = self.target_device_combo.currentData()
-        if isinstance(current_data, dict):
-            selected_key = current_data.get("key")
-
-        self.target_device_combo.blockSignals(True)
-        try:
-            self.target_device_combo.clear()
-            if not self._scan_devices:
-                fallback = {
-                    "key": "manual",
-                    "label": "Manual target",
-                    "device_id": self._parse_device_id_from_ui(default=1),
-                    "role": self._role_from_ui(),
-                    "device_type": self._role_from_ui(),
-                }
-                self.target_device_combo.addItem(fallback["label"], fallback)
-            else:
-                for idx, dev in enumerate(self._scan_devices):
-                    target = self._target_from_scan_device(dev, idx)
-                    self.target_device_combo.addItem(target["label"], target)
-                    if selected_key and selected_key == target["key"]:
-                        self.target_device_combo.setCurrentIndex(self.target_device_combo.count() - 1)
-        finally:
-            self.target_device_combo.blockSignals(False)
-        self._on_target_device_changed(self.target_device_combo.currentIndex())
-
-    def _target_from_scan_device(self, dev: dict, idx: int) -> dict:
-        device_type = int(dev.get("device_type") or 0)
-        role = device_type if device_type in (1, 2, 3) else 1
-        device_id = int(dev.get("device_id") or dev.get("serial_number") or idx + 1)
-        type_label = DEVICE_TYPE_LABELS_SHORT.get(device_type, str(device_type))
-        if type_label == "-":
-            type_label = "DEVICE"
-        label = f"{type_label} 0x{device_id:08X}"
-        mac = dev.get("mac", "")
-        if mac:
-            label = f"{label} - {mac}"
-        return {
-            "key": f"{device_type}:{device_id}:{mac}",
-            "label": label,
-            "role": role,
-            "device_type": device_type,
-            "device_id": device_id,
-            "mac": mac,
-        }
-
     def _selected_target(self) -> dict:
-        data = self.target_device_combo.currentData()
-        if isinstance(data, dict):
-            return data
+        if self._vm and self._vm.model.is_connected:
+            return {
+                "mac": self._vm.model.connected_mac,
+                "role": self._role_from_ui(),
+                "device_type": self._role_from_ui(),
+                "device_id": self._parse_device_id_from_ui(default=1),
+            }
         return {
+            "mac": "",
             "role": self._role_from_ui(),
             "device_type": self._role_from_ui(),
             "device_id": self._parse_device_id_from_ui(default=1),
         }
-
-    def _on_target_device_changed(self, index: int):
-        target = self._selected_target()
-        self._apply_target_to_ui(target)
 
     def _apply_target_to_ui(self, target: dict):
         if not hasattr(self, "_last_anchor_layout"):
@@ -822,10 +814,11 @@ class ConfigTab(QWidget):
         return anchors
 
     def _read_device_config(self):
-        if self._vm:
-            target = self._selected_target()
-            self._apply_target_to_ui(target)
-            self._vm.read_device_config(target)
+        if not self._vm or not self._require_connected_device("reading configuration"):
+            return
+        target = self._selected_target()
+        self._apply_target_to_ui(target)
+        self._vm.read_device_config(target)
 
     def _on_ble_min_interval_changed(self, value: int):
         if self.spin_ble_max_int.value() < value:
@@ -855,7 +848,7 @@ class ConfigTab(QWidget):
         set_widget_value(self.spin_ble_timeout, cfg.get("sup_timeout_ms", 3000))
 
     def _on_set_ble_clicked(self):
-        if not self._vm:
+        if not self._vm or not self._require_connected_device("writing BLE configuration"):
             return
         min_int = self.spin_ble_min_int.value()
         max_int = max(self.spin_ble_max_int.value(), min_int)
@@ -877,7 +870,7 @@ class ConfigTab(QWidget):
         )
 
     def _write_device_config(self):
-        if not self._vm:
+        if not self._vm or not self._require_connected_device("writing configuration"):
             return
         target = self._selected_target()
         self._apply_target_to_ui(target)
@@ -892,7 +885,7 @@ class ConfigTab(QWidget):
         dialog_layout.setSpacing(12)
         dialog_layout.setContentsMargins(16, 16, 16, 16)
         
-        label = QLabel("Tích chọn các loại cấu hình muốn ghi xuống thiết bị:")
+        label = QLabel("Select which configuration groups to write to the connected device:")
         label.setStyleSheet("font-weight: bold;")
         dialog_layout.addWidget(label)
         
@@ -1041,12 +1034,12 @@ class ConfigTab(QWidget):
         factory_otp_config = None
         if chk_otp.isChecked():
             if not self.otp_confirm_checkbox.isChecked():
-                QMessageBox.warning(self, "Cảnh báo OTP",
-                    "Vui lòng tích chọn 'Confirm irreversible OTP write' trước khi ghi OTP!")
+                QMessageBox.warning(self, "OTP Warning",
+                    "Please enable 'Confirm irreversible OTP write' before writing OTP.")
                 return
 
             otp_type_idx = self.otp_type_combo.currentIndex()
-            # Map combo index → OTP_TYPE constant (matches provision_otp.py)
+            # Map combo index to OTP_TYPE constant (matches provision_otp.py)
             otp_type = OTP_TYPE_DEVICE_INFO if otp_type_idx == 0 else OTP_TYPE_ANTENNA_DELAY
 
             device_type    = DEVICE_TYPE_ANCHOR  # default
@@ -1068,14 +1061,14 @@ class ConfigTab(QWidget):
                 try:
                     value_u32 = int(mfg_date_str)
                 except ValueError:
-                    QMessageBox.warning(self, "Cảnh báo OTP",
-                        "Ngày sản xuất phải là số nguyên định dạng DDMMYYYY (ví dụ: 03072026)!")
+                    QMessageBox.warning(self, "OTP Warning",
+                        "Manufacturing date must be a DDMMYYYY integer, for example 03072026.")
                     return
 
                 # device_info requires a non-zero mfg_date (mirrors provision_otp.py line 118)
                 if value_u32 == 0:
-                    QMessageBox.warning(self, "Cảnh báo OTP",
-                        "device_info yêu cầu ngày sản xuất hợp lệ, ví dụ: 03072026.")
+                    QMessageBox.warning(self, "OTP Warning",
+                        "device_info requires a valid manufacturing date, for example 03072026.")
                     return
 
                 # Validate DDMMYYYY ranges (mirrors _valid_mfg_date in provision_otp.py)
@@ -1083,9 +1076,9 @@ class ConfigTab(QWidget):
                 month = (value_u32 // 10_000) % 100
                 year  = value_u32 % 10_000
                 if not (1 <= day <= 31 and 1 <= month <= 12 and 2000 <= year <= 2255):
-                    QMessageBox.warning(self, "Cảnh báo OTP",
-                        "Ngày sản xuất không hợp lệ! Định dạng DDMMYYYY, "
-                        "ngày 1..31, tháng 1..12, năm 2000..2255 (ví dụ: 03072026).")
+                    QMessageBox.warning(self, "OTP Warning",
+                        "Invalid manufacturing date. Use DDMMYYYY with "
+                        "day 1..31, month 1..12, year 2000..2255, for example 03072026.")
                     return
 
                 value_u8 = self.otp_hw_rev_spin.value()
@@ -1095,8 +1088,8 @@ class ConfigTab(QWidget):
                 rx_antenna_delay = self.otp_rx_delay_spin.value()
                 # Guard against uint16 overflow (mirrors provision_otp.py line 115)
                 if tx_antenna_delay > 0xFFFF or rx_antenna_delay > 0xFFFF:
-                    QMessageBox.warning(self, "Cảnh báo OTP",
-                        "TX/RX antenna delay phải nằm trong khoảng uint16 (0..65535).")
+                    QMessageBox.warning(self, "OTP Warning",
+                        "TX/RX antenna delay must be within the uint16 range (0..65535).")
                     return
 
             factory_otp_config = {
@@ -1119,13 +1112,7 @@ class ConfigTab(QWidget):
         )
 
     def _write_all_devices(self):
-        if not self._vm:
-            return
-        snapshot = self._collect_write_snapshot()
-        targets = [self._target_from_scan_device(dev, idx) for idx, dev in enumerate(self._scan_devices)]
-        if not targets:
-            targets = [self._selected_target()]
-        self._vm.write_all_device_configs(targets, snapshot)
+        QMessageBox.information(self, "Broadcast Write", "Write All Devices will be enabled after broadcast support is implemented.")
 
     def _collect_write_snapshot(self) -> dict:
         target = self._selected_target()
@@ -1449,11 +1436,11 @@ class ConfigTab(QWidget):
         self.txt_usb_device.setText("STM32 Virtual COM Port" if "COM" in port_name else "Unknown Device")
 
     def _on_get_device_type(self):
-        if self._vm:
+        if self._vm and self._require_connected_device("reading device type"):
             self._vm.read_device_type()
 
     def _on_set_device_type(self):
-        if self._vm:
+        if self._vm and self._require_connected_device("writing device type"):
             text_map = {
                 "Tag": 1,
                 "Anchor": 2,

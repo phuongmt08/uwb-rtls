@@ -1,11 +1,9 @@
 """
 ===============================================================================
-  UWB RTLS Studio — Scan ViewModel
+  UWB RTLS Studio - Scan ViewModel
 ===============================================================================
   File        : viewmodels/scan_viewmodel.py
-  Description : Lớp ViewModel (Strict MVVM).
-                Nhận tín hiệu từ ScanModel, format và báo cho UI (View).
-                Chuyển tiếp lệnh Connect, Start/Stop Scan xuống Model.
+  Description : Strict MVVM ViewModel for BLE scan popup presentation.
 ===============================================================================
 """
 from __future__ import annotations
@@ -16,8 +14,9 @@ from models.scan_model import ScanModel
 
 log = logging.getLogger(__name__)
 
+
 class ScanViewModel(QObject):
-    # Signals cho View
+    # Signals for the view
     scan_started = pyqtSignal()
     scan_stopped = pyqtSignal()
     device_list_updated = pyqtSignal(list)
@@ -31,15 +30,14 @@ class ScanViewModel(QObject):
     def __init__(self, model: ScanModel, parent=None):
         super().__init__(parent)
         self.model = model
-        
-        # Binds model signals -> view presentation signals
+
+        # Bind model signals to view presentation signals
         self.model.device_list_changed.connect(self._on_device_list_changed)
         self.model.connect_success.connect(self.device_connected.emit)
         self.model.connect_failed.connect(self._on_connect_failed)
         if hasattr(self.model, "connection_progress_changed"):
             self.model.connection_progress_changed.connect(self._on_connection_progress)
         self.model.dongle_disconnected.connect(self.dongle_disconnected.emit)
-
     # ── Action từ View ───────────────────────────────────────────────
     def start_scan(self) -> None:
         self.log_message.emit("Sending ble_scan_start...")
@@ -61,7 +59,7 @@ class ScanViewModel(QObject):
     def connect_device(self, mac_hex: str) -> None:
         self.device_connecting.emit(mac_hex)
         self.log_message.emit(f"Connecting to {mac_hex}...")
-        
+
         success = self.model.connect_device(mac_hex)
         if not success:
             self.connection_failed.emit(f"Device {mac_hex} not in scan list")
@@ -69,8 +67,7 @@ class ScanViewModel(QObject):
 
     def cleanup(self) -> None:
         self.model.cleanup()
-
-    # ── Presentation Logic ───────────────────────────────────────────
+# ── Presentation Logic ───────────────────────────────────────────
     def _on_device_list_changed(self, device_list: list) -> None:
         # Nếu có logic chuyển đổi format (ví dụ thêm đuôi ' dBm' hoặc dịch màu) 
         # thì sẽ xử lý ở đây. Tạm thời pass list cho View trực tiếp xử lý item text.
@@ -78,7 +75,7 @@ class ScanViewModel(QObject):
 
     def _on_connect_failed(self, msg: str) -> None:
         self.connection_failed.emit(msg)
-        self.log_message.emit(f"❌ {msg}")
+        self.log_message.emit(str(msg))
 
     def _on_connection_progress(self, info: dict) -> None:
         self.connection_progress_updated.emit(info)

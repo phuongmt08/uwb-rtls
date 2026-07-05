@@ -69,7 +69,7 @@ class LogTab(QWidget):
         self._connect_signals()
         self._vm = None
 
-        # Sáº½ sinh virtual history sau 50ms náº¿u khÃ´ng cÃ³ ViewModel nÃ o Ä‘Æ°á»£c gÃ¡n
+        # Create virtual history after 50 ms if no ViewModel is attached
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(50, self._check_and_populate_virtual)
 
@@ -285,7 +285,7 @@ class LogTab(QWidget):
             self.session_table.setItem(row, 1, self._readonly_item(s["start_time"]))
             self.session_table.setItem(row, 2, self._readonly_item(s["duration"]))
             
-            # Giá»¯ tÆ°Æ¡ng thÃ­ch sá»‘ tá»‡p tin chi tiáº¿t cá»§a UI
+            # Keep compatibility with the UI detail file naming
             ranging_count = str(s.get("ranging_count", 1 if s["type"] == "RANGING" else 0))
             session_file_count = str(s.get("session_file_count", 0))
             self.session_table.setItem(row, 3, self._readonly_item(ranging_count))

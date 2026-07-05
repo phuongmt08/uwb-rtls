@@ -966,13 +966,14 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item>
          <widget class="QLabel" name="lbl_target_device">
           <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-          <property name="text"><string>Target:</string></property>
+          <property name="text"><string>Connected Device:</string></property>
          </widget>
         </item>
         <item>
-         <widget class="QComboBox" name="target_device_combo">
+         <widget class="QLineEdit" name="txt_connected_device">
           <property name="minimumSize"><size><width>190</width><height>0</height></size></property>
-          <item><property name="text"><string>Manual target</string></property></item>
+          <property name="readOnly"><bool>true</bool></property>
+          <property name="text"><string>Disconnected</string></property>
          </widget>
         </item>
         <item>

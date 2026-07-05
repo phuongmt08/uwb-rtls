@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-UWB_RTLS_TEST_MODE = 0
+UWB_RTLS_TEST_MODE = 1
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "test", "mock"}
 _FALSE_VALUES = {"0", "false", "no", "off", "real", "hardware"}
