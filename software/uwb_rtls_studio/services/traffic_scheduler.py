@@ -95,6 +95,9 @@ class TrafficScheduler(QObject):
         if command_name in self.STREAM_CONTROL_COMMANDS:
             return TrafficDecision(True, "stream-control", self._state)
 
+        if force:
+            return TrafficDecision(True, "forced", self._state)
+
         if traffic_class in {"connection", "manual", "user", "bootstrap", "critical"}:
             return TrafficDecision(True, traffic_class, self._state)
 
@@ -113,8 +116,6 @@ class TrafficScheduler(QObject):
             self.command_skipped.emit(command_name, reason)
             return TrafficDecision(False, reason, self._state)
 
-        if force and traffic_class != "background":
-            return TrafficDecision(True, "forced", self._state)
 
         return TrafficDecision(True, "allowed", self._state)
 

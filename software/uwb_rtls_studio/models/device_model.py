@@ -27,7 +27,6 @@ from common.transport import VvAddress
 from utils.app_state import shared_app_state, JobState
 from utils.ble_hci import normalize_hci_reason
 from utils.constants import (
-    DEVICE_TIMEOUT_S,
     STOP_TO_CONNECT_DELAY_MS,
     TIME_SYNC_THRESHOLD_MS,
     DEVICE_TYPE_LABELS,
@@ -872,9 +871,9 @@ class DeviceModel(QObject):
         if not self._active_connecting_handshake:
             return
         self._handshake_time_sync_done = True
-        self._handshake_final_ble_connected = False
         self._emit_connection_progress(90, message, phase="connecting", status=JobState.RUNNING)
-        self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True, traffic_class="connection")
+        if not self._handshake_final_ble_connected:
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, cache_ttl_s=0.0, force=True, traffic_class="connection")
         self._check_handshake_completion()
 
     def _begin_end_session_confirmation(self, seq: int, reason: int) -> None:
@@ -1118,6 +1117,9 @@ class DeviceModel(QObject):
             return False
 
         duration_ms = max(0, int(duration_ms or 0))
+        if clear_results:
+            self._reset_scan_cache_for_rescan()
+
         sent = self._send_command(
             "ble_scan_start",
             src_addr=self._protocol.pb.PACKET_ADDR_HOST,
@@ -1129,14 +1131,10 @@ class DeviceModel(QObject):
             log.warning("ble_scan_start was not sent; manual scan did not start.")
             return False
 
-        if clear_results:
-            self._reset_scan_cache_for_rescan()
-
         self._is_scanning = True
         shared_app_state.ble_scan_active = True
         if duration_ms > 0:
             self._manual_scan_stop_timer.start(duration_ms + 250)
-        self._prune_timer.start(5000)
         log.info("Manual BLE scan started for %d ms", duration_ms)
         return True
 
@@ -1498,18 +1496,17 @@ class DeviceModel(QObject):
                 return
 
             if self._active_connecting_handshake:
-                if self._handshake_device_info_received and self._handshake_time_sync_done:
-                    self._handshake_final_ble_connected = True
-                    self._connect_timeout_timer.stop()
-                    self._ble_transition_timer.stop()
-                    self._check_handshake_completion()
-                else:
+                self._handshake_final_ble_connected = True
+                self._connect_timeout_timer.stop()
+                self._ble_transition_timer.stop()
+                if not (self._handshake_device_info_received and self._handshake_time_sync_done):
                     log.debug(
                         "BLE_STATE_CONNECTED received while connect handshake is waiting: "
                         "device_info=%s time_sync=%s",
                         self._handshake_device_info_received,
                         self._handshake_time_sync_done,
                     )
+                self._check_handshake_completion()
                 return
 
             log.info("Dongle confirmed BLE_STATE_CONNECTED. Initiating application handshake...")
@@ -1857,9 +1854,8 @@ class DeviceModel(QObject):
         return tuple(candidates)
 
     def _prune_devices(self):
-        """Keep discovered devices visible; only let the shared repository age metadata."""
-        if self._ble_scan_repo:
-            self._ble_scan_repo.prune_stale_devices(DEVICE_TIMEOUT_S)
+        """Do not auto-remove or age-out discovered devices during runtime."""
+        return
 
     def _clear_scan_cache(self) -> None:
         self._adv_devices.clear()

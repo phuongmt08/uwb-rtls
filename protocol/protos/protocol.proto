@@ -476,9 +476,9 @@ message ble_status_resp_t {
 }
 
 message ble_scan_result_t {
-    bytes mac_address   = 1;
-    int32 rssi_dbm      = 2;
-    string name         = 3;
+    bytes mac_address    = 1;
+    int32 rssi_dbm       = 2;
+    string name          = 3;
     uint32 serial_number = 4;
 }
 
@@ -527,8 +527,8 @@ message ble_adv_status_t {
     uint32 status_flags       = 4;
     uint32 warning_count      = 5;
     uint32 error_count        = 6;
-    uint32 local_timestamp_s = 7;
-    uint32 serial_number     = 8;
+    uint32 local_timestamp_s  = 7;
+    uint32 serial_number      = 8;
 }
 
 

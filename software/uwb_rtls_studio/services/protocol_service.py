@@ -174,11 +174,15 @@ class ProtocolService(QObject):
                 self._warn_on_log_seq_gap(int(pkt.hdr.seq))
 
             if param == "ack":
+                try:
+                    from utils.app_state import shared_app_state
+                    shared_app_state.handle_incoming_ack(pkt.ack.ack_seq, pkt.ack.response)
+                except Exception as exc:
+                    log.error("Failed to forward ACK to shared_app_state: %s", exc)
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
                 self.packet_received.emit(param, pkt)
                 log.debug("RX: %s seq=%d ack_seq=%d", param, pkt.hdr.seq, pkt.ack.ack_seq)
                 continue
-
             if self._packet_repository:
                 try:
                     self._packet_repository.handle_packet(param, pkt)

@@ -82,6 +82,7 @@ class QueryQueueManager(QObject):
         "prefilter_cfg_set": "prefilter_cfg_resp",
         "zone_profile_get": "zone_profile_resp",
     }
+    ACK_RESPONSE_OK = 1
 
     def __init__(
         self,
@@ -190,6 +191,60 @@ class QueryQueueManager(QObject):
                 return True
 
         return False
+
+    def handle_ack(self, ack_seq: int, response: int) -> bool:
+        """
+        Processes incoming ACK packets. For non-GET commands, a matching ACK can
+        resolve the current transaction even when the firmware does not send the
+        mapped response payload back immediately.
+        """
+        with self.lock:
+            if not self.is_running or not self.current_transaction:
+                return False
+
+            tx = self.current_transaction
+            if tx.seq is None or int(ack_seq) != int(tx.seq):
+                return False
+
+            if not self._command_accepts_ack_success(tx.command_name):
+                log.debug(
+                    "Ignoring ACK for query '%s' seq=%s because it still requires payload '%s'.",
+                    tx.command_name,
+                    tx.seq,
+                    tx.expected_response,
+                )
+                return False
+
+            self.timer.stop()
+            tx.received_time = time.monotonic()
+
+            if int(response) == self.ACK_RESPONSE_OK:
+                tx.status = QueryState.SUCCESS
+                log.info(
+                    "Query ACK: '%s' seq=%s accepted as success (attempt %s).",
+                    tx.command_name,
+                    ack_seq,
+                    tx.retries + 1,
+                )
+            else:
+                tx.status = QueryState.FAILED
+                log.warning(
+                    "Query ACK: '%s' seq=%s returned NACK response=%s.",
+                    tx.command_name,
+                    ack_seq,
+                    response,
+                )
+
+            self._request_send_next()
+            return True
+
+    @staticmethod
+    def _command_accepts_ack_success(command_name: str) -> bool:
+        """
+        GET queries must still wait for their response payload because the UI
+        depends on that data. Non-GET commands may complete on transport ACK.
+        """
+        return not str(command_name or "").endswith("_get")
 
     def _request_send_next(self) -> None:
         """Schedule the next TX step on this QObject's Qt thread."""

@@ -4,7 +4,7 @@
 ==============================================================================
   File        : models/scan_model.py
   Description : Model managing BLE scanning, device discovery list updates,
-                stale device pruning, and connect commands.
+                manual refresh, and connect commands.
 
   MVVM Role   : MODEL — BLE Scan and connect logic.
 
@@ -22,7 +22,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from services.protocol_service import ProtocolService
 from services.serial_service import SerialService
 from common import protocol_pb2 as pb
-from utils.constants import DEVICE_TIMEOUT_S, STOP_TO_CONNECT_DELAY_MS
+from utils.constants import STOP_TO_CONNECT_DELAY_MS
 from common.transport import VvAddress
 from utils.ble_hci import normalize_hci_reason
 
@@ -94,7 +94,6 @@ class ScanModel(QObject):
                 dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
             )
             self.is_scanning = True
-        self._prune_timer.start(5000)
 
     def restart_scan(self) -> None:
         """Force a fresh scan command sequence for the popup retry button."""
@@ -325,13 +324,8 @@ class ScanModel(QObject):
         self.connect_success.emit(info)
 
     def _prune_stale_devices(self) -> None:
-        now = time.monotonic()
-        stale = [mac for mac, d in self._devices.items() if now - d["last_seen"] > DEVICE_TIMEOUT_S]
-        if stale:
-            for mac in stale:
-                del self._devices[mac]
-                self._device_order.pop(mac, None)
-            self._emit_sorted_devices()
+        # Keep the last discovered snapshot until the user manually rescans.
+        return
 
     def _emit_sorted_devices(self) -> None:
         sorted_list = sorted(self._devices.values(), key=lambda d: d.get("order", 0))

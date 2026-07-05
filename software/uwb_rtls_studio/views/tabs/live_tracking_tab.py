@@ -561,6 +561,7 @@ class LiveTrackingTab(QWidget):
         self._last_z = 0.0
         self._last_rms = 0.0
         self._last_stats = {}
+        self._yaw_offset_deg = 0.0
         self.sidebar_expanded = True
         self._is_developer_mode = False
         self._anchor_layout_commit_pending = False
@@ -604,6 +605,7 @@ class LiveTrackingTab(QWidget):
         self.btn_start.clicked.connect(self._start_ranging)
         self.btn_stop.clicked.connect(self._stop_ranging)
         self.btn_clear.clicked.connect(self._clear_tracking_trails)
+        self._setup_yaw_offset_control()
 
         self.header_widget.raise_()
         self.right_widget.raise_()
@@ -640,6 +642,73 @@ class LiveTrackingTab(QWidget):
         )
         self.header_widget.setGeometry(10, 10, header_width, 40)
         self._position_canvas_preview_button()
+
+    def _setup_yaw_offset_control(self):
+        self.yaw_offset_group = QGroupBox("Yaw Offset", self.scroll_content)
+        self.yaw_offset_group.setStyleSheet(
+            "QGroupBox { background-color: rgba(15, 23, 42, 0.72); color: #38BDF8; "
+            "font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; "
+            "border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 8px; padding-top: 14px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; background: transparent; }"
+            "QDoubleSpinBox { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; "
+            "border-radius: 6px; padding: 4px 6px; font-family: 'Consolas'; font-size: 13px; }"
+        )
+        layout = QFormLayout(self.yaw_offset_group)
+        layout.setContentsMargins(10, 16, 10, 10)
+        layout.setSpacing(8)
+
+        self.yaw_offset_spin = QDoubleSpinBox(self.yaw_offset_group)
+        self.yaw_offset_spin.setRange(-360.0, 360.0)
+        self.yaw_offset_spin.setDecimals(1)
+        self.yaw_offset_spin.setSingleStep(1.0)
+        self.yaw_offset_spin.setSuffix(" deg")
+        self.yaw_offset_spin.setToolTip("Add this offset to the tag arrow yaw on the map.")
+        self.yaw_offset_spin.valueChanged.connect(self._on_yaw_offset_changed)
+        layout.addRow("Initial yaw:", self.yaw_offset_spin)
+
+        insert_at = self.right_panel.indexOf(self.separator_1) if hasattr(self, "separator_1") else -1
+        if insert_at >= 0:
+            self.right_panel.insertWidget(insert_at, self.yaw_offset_group)
+        else:
+            self.right_panel.addWidget(self.yaw_offset_group)
+
+    def _on_yaw_offset_changed(self, value):
+        self._yaw_offset_deg = float(value)
+        active_position = self._canvas.fusion_position if self._canvas.fusion_position is not None else self._canvas.position
+        if active_position:
+            updated = active_position.copy()
+            raw_yaw = float(updated.get("raw_yaw", updated.get("yaw", 0.0)))
+            updated["raw_yaw"] = raw_yaw
+            updated["yaw"] = self._apply_yaw_offset(raw_yaw)
+            self._canvas.update_position(updated)
+            if self._map_view_stack.currentWidget() is self._map_3d:
+                self._map_3d.update_position(updated)
+
+    def _apply_yaw_offset(self, yaw_deg: float) -> float:
+        value = float(yaw_deg) + float(self._yaw_offset_deg)
+        while value > 180.0:
+            value -= 360.0
+        while value <= -180.0:
+            value += 360.0
+        return value
+
+    def _ensure_stream_active(self):
+        if self._is_ranging:
+            return
+        self._is_ranging = True
+        self._start_time = time.time()
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+
+    @staticmethod
+    def _format_anchor_mask(mask, valid=True):
+        if not valid or mask is None or mask == "":
+            return "-"
+        try:
+            value = int(mask)
+        except (TypeError, ValueError):
+            return "-"
+        return f"0x{value:02X} ({value:08b})"
 
     def _setup_canvas_preview_button(self):
         self._preview_overlay_btn.setCheckable(True)
@@ -810,6 +879,7 @@ class LiveTrackingTab(QWidget):
             if label_widget:
                 label_widget.setText("-")
         self._last_anchor_mask = 0
+        self._last_anchor_mask_valid = False
 
     def _setup_dynamic_metrics(self):
         # Configure units for the statically loaded metric labels
@@ -965,6 +1035,7 @@ class LiveTrackingTab(QWidget):
         self._clear_live_metrics()
 
     def _on_position_updated(self, x, y, z, rms):
+        self._ensure_stream_active()
         self._frame_count += 1
         self._last_z = z
         self._last_rms = rms
@@ -973,39 +1044,38 @@ class LiveTrackingTab(QWidget):
             "y": y,
             "z": z,
             "error": rms,
-            "yaw": 0.0,
+            "yaw": self._apply_yaw_offset(0.0),
+            "raw_yaw": 0.0,
             "source": "ranging",
         }
         self._canvas.update_position(position)
         if self._map_view_stack.currentWidget() is self._map_3d:
             self._map_3d.update_position(position)
 
-        # Update Frame and Counters
         seq = None
-        anchor_mask = 0
+        anchor_mask = None
+        anchor_mask_valid = False
         timestamp_ms = None
+        payload_size = None
         if self._vm and self._vm.model._position_history:
             last_sample = self._vm.model._position_history[-1]
             seq = last_sample.get("seq")
-            anchor_mask = last_sample.get("anchor_mask", 0)
+            anchor_mask = last_sample.get("anchor_mask")
+            anchor_mask_valid = bool(last_sample.get("anchor_mask_valid", bool(last_sample.get("anchors"))))
             timestamp_ms = last_sample.get("timestamp_ms")
-            self._last_anchor_mask = anchor_mask
+            payload_size = last_sample.get("payload_size")
+            if anchor_mask_valid:
+                self._last_anchor_mask = anchor_mask
+                self._last_anchor_mask_valid = True
 
         self._set_metric_value(self.sof_label, "0xAA")
-        self._set_metric_value(self.length_label, None, "{:d}")
-        if anchor_mask:
-            self._set_metric_value(self.anchor_mask_label, f"0x{anchor_mask:02X} ({anchor_mask:08b})")
-        else:
-            self._set_metric_value(self.anchor_mask_label, "-")
-        
+        self._set_metric_value(self.length_label, payload_size, "{:d}")
+        self._set_metric_value(self.anchor_mask_label, self._format_anchor_mask(anchor_mask, anchor_mask_valid))
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
 
-        # Update Trilateration and UKF (if fusion isn't running)
         is_fusion_stale = (time.time() - getattr(self, "_last_fusion_time", 0.0) > 2.0)
-        
         if is_fusion_stale:
-            # Under raw ranging mode, show trilateration coordinates as UKF too to provide visualization
             self._set_metric_value(self.ukf_x_label, x)
             self._set_metric_value(self.ukf_y_label, y)
             self._set_metric_value(self.ukf_yaw_label, 0.0, "{:.1f}")
@@ -1017,7 +1087,7 @@ class LiveTrackingTab(QWidget):
 
         self._set_metric_value(self.z_label, z)
         self._set_metric_value(self.error_label, rms)
-        
+
         err_cnt = self._last_stats.get("failed_count", 0) + self._last_stats.get("timeout_count", 0)
         self._set_metric_value(self.error_frame_cnt_label, err_cnt, "{:d}")
 
@@ -1032,6 +1102,8 @@ class LiveTrackingTab(QWidget):
             self.warning_label.setVisible(False)
 
     def _on_sensor_fusion_updated(self, data: dict):
+        self._ensure_stream_active()
+        self._frame_count += 1
         self._last_fusion_time = time.time()
         x = float(data.get("ukf_x_m", 0.0))
         y = float(data.get("ukf_y_m", 0.0))
@@ -1044,13 +1116,15 @@ class LiveTrackingTab(QWidget):
         timestamp_ms = int(data.get("timestamp_ms", 0))
         err_count = int(data.get("ranging_error_count", 0))
         seq = int(data.get("seq", 0))
+        display_yaw = self._apply_yaw_offset(yaw)
 
         position = {
             "x": x,
             "y": y,
             "z": self._last_z,
             "error": self._last_rms,
-            "yaw": yaw,
+            "yaw": display_yaw,
+            "raw_yaw": yaw,
             "tril_x": tril_x,
             "tril_y": tril_y,
             "source": "sensor_fusion",
@@ -1059,35 +1133,34 @@ class LiveTrackingTab(QWidget):
         if self._map_view_stack.currentWidget() is self._map_3d:
             self._map_3d.update_position(position)
 
-        # Update Frame and Counters
         self._set_metric_value(self.sof_label, "0xAA")
         self._set_metric_value(self.length_label, data.get("payload_size"), "{:d}")
-        
-        anchor_mask = getattr(self, "_last_anchor_mask", 0)
-        if anchor_mask:
-            self._set_metric_value(self.anchor_mask_label, f"0x{anchor_mask:02X} ({anchor_mask:08b})")
+
+        anchor_mask = data.get("anchor_mask")
+        anchor_mask_valid = bool(data.get("anchor_mask_valid", anchor_mask is not None and anchor_mask != ""))
+        if not anchor_mask_valid:
+            anchor_mask = getattr(self, "_last_anchor_mask", None)
+            anchor_mask_valid = bool(getattr(self, "_last_anchor_mask_valid", False))
         else:
-            self._set_metric_value(self.anchor_mask_label, "-")
+            self._last_anchor_mask = anchor_mask
+            self._last_anchor_mask_valid = True
+        self._set_metric_value(self.anchor_mask_label, self._format_anchor_mask(anchor_mask, anchor_mask_valid))
 
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
         self._set_metric_value(self.error_frame_cnt_label, err_count, "{:d}")
 
-        # Update UKF
         self._set_metric_value(self.ukf_x_label, x)
         self._set_metric_value(self.ukf_y_label, y)
         self._set_metric_value(self.ukf_yaw_label, yaw, "{:.1f}")
 
-        # Update TRILATERATION
         self._set_metric_value(self.tril_x_label, tril_x)
         self._set_metric_value(self.tril_y_label, tril_y)
         self._set_metric_value(self.yaw_label, raw_yaw, "{:.1f}")
 
-        # Update MOTION
         self._set_metric_value(self.vx_label, vx)
         self._set_metric_value(self.vy_label, vy)
 
-        # Update QUALITY (Z Height and Error)
         self._set_metric_value(self.z_label, self._last_z)
         self._set_metric_value(self.error_label, self._last_rms)
 
@@ -1116,7 +1189,10 @@ class LiveTrackingTab(QWidget):
         uptime = int(time.time() - self._start_time)
         self.uptime_label.setText(f"{uptime}s")
         self._render_stats()
+
     def _on_stats_updated(self, stats: dict):
+        if stats:
+            self._ensure_stream_active()
         self._last_stats = stats.copy()
         self._render_stats()
 

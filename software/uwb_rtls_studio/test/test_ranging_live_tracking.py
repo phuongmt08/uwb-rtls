@@ -42,9 +42,13 @@ DEFAULT_ANCHORS = [
     {"anchor_id": 6, "x_m": 6.3, "y_m": 4.8, "z_m": 1.5},
 ]
 
+_QT_APP = None
+
 def _ensure_qt_app():
+    global _QT_APP
     from PyQt6.QtCore import QCoreApplication
-    return QCoreApplication.instance() or QCoreApplication([])
+    _QT_APP = QCoreApplication.instance() or _QT_APP or QCoreApplication([])
+    return _QT_APP
 
 
 def _fixed2(value: float) -> int:
@@ -53,9 +57,6 @@ def _fixed2(value: float) -> int:
 
 def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     app = _ensure_qt_app()
-    from models.ranging_model import RangingModel
-    from repository.ranging_repository import RangingRepository
-
     from models.ranging_model import RangingModel
     from repository.ranging_repository import RangingRepository
 
@@ -73,6 +74,7 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     pkt1.sensor_fusion_result.tril_x_m = _fixed2(0.9)
     pkt1.sensor_fusion_result.tril_y_m = _fixed2(2.1)
     pkt1.sensor_fusion_result.yaw_deg = _fixed2(9.0)
+    pkt1.sensor_fusion_result.anchor_mask = 0x0F
     pkt1.sensor_fusion_result.ranging_error_count = 3
     pkt1.sensor_fusion_result.timestamp_ms = 1000
 
@@ -83,6 +85,7 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     pkt2.sensor_fusion_result.tril_x_m = _fixed2(2.4)
     pkt2.sensor_fusion_result.tril_y_m = _fixed2(4.1)
     pkt2.sensor_fusion_result.yaw_deg = _fixed2(11.0)
+    pkt2.sensor_fusion_result.anchor_mask = 0x0A
     pkt2.sensor_fusion_result.ranging_error_count = 4
     pkt2.sensor_fusion_result.timestamp_ms = 2000
 
@@ -95,6 +98,9 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert math.isclose(latest["ukf_y_m"], 4.0)
     assert math.isclose(latest["tril_x_m"], 2.4, rel_tol=1e-6)
     assert math.isclose(latest["tril_y_m"], 4.1, rel_tol=1e-6)
+    assert latest["anchor_mask"] == 0x0A
+    assert latest["anchor_mask_valid"] is True
+    assert latest["payload_size"] == pkt2.sensor_fusion_result.ByteSize()
     assert latest["ranging_error_count"] == 4
     assert math.isclose(latest["vx_mps"], 1.5)
     assert math.isclose(latest["vy_mps"], 2.0)
@@ -106,6 +112,9 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
 
 def test_ranging_result_keeps_seq_and_anchor_distances_for_session_export():
     app = _ensure_qt_app()
+    from models.ranging_model import RangingModel
+    from repository.ranging_repository import RangingRepository
+
     repo = RangingRepository()
     model = RangingModel(protocol_service=None, ranging_repo=repo)
 
@@ -117,7 +126,7 @@ def test_ranging_result_keeps_seq_and_anchor_distances_for_session_export():
     pkt.ranging_result.rms_error_m = 0.03
     pkt.ranging_result.ClearField("anchors")
 
-    for anchor_id, distance_mm in [(1, 1100), (2, 2200), (3, 3300), (4, 4400)]:
+    for anchor_id, distance_mm in [(0, 1000), (1, 1100), (2, 2200), (3, 3300), (4, 4400)]:
         anchor = pkt.ranging_result.anchors.add()
         anchor.anchor_id = anchor_id
         anchor.distance_mm = distance_mm
@@ -133,7 +142,9 @@ def test_ranging_result_keeps_seq_and_anchor_distances_for_session_export():
     assert sample["d2_mm"] == 2200
     assert sample["d3_mm"] == 3300
     assert sample["d4_mm"] == 4400
-    assert sample["anchor_mask"] == 0b11110
+    assert sample["anchor_mask"] == 0b11111
+    assert sample["anchor_mask_valid"] is True
+    assert sample["payload_size"] == pkt.ranging_result.ByteSize()
     assert math.isclose(sample["x_m"], 1.2, rel_tol=1e-6)
     assert app is not None
 

@@ -426,6 +426,11 @@ class SharedAppState(QObject):
         if hasattr(self, '_query_manager') and self._query_manager:
             self._query_manager.handle_response(param_name, pkt)
 
+    def handle_incoming_ack(self, ack_seq: int, response: int) -> None:
+        """Route incoming ACK packets to the query queue manager."""
+        if hasattr(self, '_query_manager') and self._query_manager:
+            self._query_manager.handle_ack(ack_seq, response)
+
     def _on_query_complete(self, results: List[Dict[str, Any]]) -> None:
         """Called when the sequential query queue finishes execution."""
         success_count = sum(1 for r in results if r["status"] == "SUCCESS")

@@ -110,6 +110,24 @@ class DeviceInfoTab(QWidget):
         # Advertising table
         self._adv_table = self.adv_table
 
+        # Add Refresh button
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.addStretch()
+        
+        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_refresh.setObjectName("btn_refresh")
+        self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_refresh.setStyleSheet(
+            "QPushButton { background: rgba(34, 211, 238, 0.1); color: #22D3EE; border: 1px solid #334155; border-radius: 6px; font-weight: bold; padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { border-color: #22D3EE; background: rgba(34, 211, 238, 0.2); }"
+            "QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }"
+        )
+        self.btn_refresh.clicked.connect(self._on_refresh_clicked)
+        bottom_layout.addWidget(self.btn_refresh)
+        
+        self.adv_layout.addLayout(bottom_layout)
+
     def _reset_display_fields(self):
         """Show no device data until a parsed response reaches the View."""
         for group in (
@@ -183,12 +201,16 @@ class DeviceInfoTab(QWidget):
         display_state = info.get("display_state")
         if display_state is not None:
             self._ble_values["State:"].setText(str(display_state))
-            state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
-            if state_value == 5:
+            try:
+                state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
+            except (TypeError, ValueError):
+                state_value = -1
+            raw_state_label = str(info.get("state_name") or display_state or "").upper()
+            if state_value == 5 or raw_state_label in ("BLE_STATE_CONNECTED", "CONNECTED"):
                 color = "#10B981"
-            elif state_value in (2, 3, 4):
+            elif state_value in (2, 3, 4) or any(name in raw_state_label for name in ("SCANNING", "ADVERTISING", "CONNECTING")):
                 color = "#F59E0B"
-            elif state_value == 1:
+            elif state_value in (0, 1) or any(name in raw_state_label for name in ("UNSPECIFIED", "IDLE")):
                 color = "#94A3B8"
             else:
                 color = "#EF4444"
@@ -262,6 +284,15 @@ class DeviceInfoTab(QWidget):
             self._time_status.setStyleSheet("color: #EF4444; background: transparent; font-size: 12px; font-weight: bold;")
 
     def _on_advertising_devices(self, devices: list, is_scanning: bool):
+        # Update Refresh button state
+        if hasattr(self, "btn_refresh"):
+            if is_scanning:
+                self.btn_refresh.setEnabled(False)
+                self.btn_refresh.setText("⏳ Scanning...")
+            else:
+                self.btn_refresh.setEnabled(True)
+                self.btn_refresh.setText("🔄 Refresh")
+
         # Scan status removed by user
 
         # Compare existing rows to see if we can reuse the table structure and widgets
@@ -438,3 +469,7 @@ class DeviceInfoTab(QWidget):
             item.setText(text)
         else:
             self._adv_table.setItem(row, col, QTableWidgetItem(text))
+
+    def _on_refresh_clicked(self):
+        if self._vm:
+            self._vm.start_ble_scan(duration_ms=5000)
