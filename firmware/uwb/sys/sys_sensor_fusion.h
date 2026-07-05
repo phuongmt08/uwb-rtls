@@ -59,15 +59,9 @@ sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion
 
 sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_ukf);
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
-                                                 float d0,
-                                                 float d1,
-                                                 float d2,
-                                                 const uint8_t anchor_ids[3]);
-
 bool sys_sensor_fusion_is_initialized(void);
 
-bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_ukf,
+bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                   const vec2d_t *tril_position,
                                                   const mw_tril_anchor_t best_3_anchors[3],
                                                   const mw_tril_anchor_t *anchors_by_id,

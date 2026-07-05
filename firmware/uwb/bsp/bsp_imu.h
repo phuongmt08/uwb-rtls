@@ -142,8 +142,6 @@ typedef struct
 /* Public function prototypes ----------------------------------------- */
 bsp_imu_err_t bsp_imu_init(void);
 
-bsp_imu_err_t bsp_imu_task(void);
-
 bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data);
 
 bsp_imu_err_t bsp_imu_get_bias_data(bsp_imu_bias_t *p_bias);

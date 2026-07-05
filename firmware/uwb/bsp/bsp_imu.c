@@ -21,7 +21,6 @@
 #define DEG2RAD							3.14159265358979323846f / 180.0f
 #define IMU_TEMP_MIN_C					(-40.0f)
 #define IMU_TEMP_MAX_C					125.0f
-#define BSP_IMU_QUEUE_DEPTH				8U
 
 /* Public vriables --------------------------------------------------- */
 extern SPI_HandleTypeDef BSP_IMU_SPI_HANDLE;
@@ -30,7 +29,6 @@ icm42688_dev_t bsp_imu;
 /* Private variables -------------------------------------------------- */
 static bool s_spi1_cs_mutex_locked = false;
 static volatile float s_cached_temp = ICM42688_TEMP_OFFSET;
-static osMessageQueueId_t s_imu_data_queue = NULL;
 
 static const icm42688_config_t s_default_cfg =
 {
@@ -54,9 +52,6 @@ static const icm42688_config_t s_default_cfg =
 /* Private function prototypes ---------------------------------------- */
 static void bsp_cs_set(bool select);
 static bool bsp_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length);
-static bsp_imu_err_t bsp_imu_read_raw_hw(bsp_imu_data_t *p_imu_data);
-static bsp_imu_err_t bsp_imu_queue_init(void);
-static void bsp_imu_queue_push_latest(const bsp_imu_data_t *p_imu_data);
 
 /* Private function prototypes ---------------------------------------- */
 /* Function definitions ----------------------------------------------- */
@@ -64,8 +59,6 @@ static bool s_initialized = false;
 
 bsp_imu_err_t bsp_imu_init(void)
 {
-	CHECK_ERR(bsp_imu_queue_init() == BSP_IMU_OK, BSP_IMU_ERR);
-
 	if (s_initialized)
 	{
 		return BSP_IMU_OK;
@@ -91,29 +84,15 @@ bsp_imu_err_t bsp_imu_init(void)
 bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data)
 {
 	CHECK_ERR(p_imu_data != NULL, BSP_IMU_ERR);
-	CHECK_ERR(s_imu_data_queue != NULL, BSP_IMU_ERR);
 
-	bsp_imu_data_t latest;
-	CHECK_ERR(osMessageQueueGet(s_imu_data_queue, &latest, NULL, 0U) == osOK, BSP_IMU_ERR);
+	icm42688_sensor_data_t raw_data;
 
-	while (osMessageQueueGet(s_imu_data_queue, &latest, NULL, 0U) == osOK)
-	{
-	}
+	CHECK_ERR(icm42688_get_raw_data(&bsp_imu, &raw_data) == ICM42688_OK, BSP_IMU_ERR);
 
-	*p_imu_data = latest;
-
-    return BSP_IMU_OK;
-}
-
-bsp_imu_err_t bsp_imu_task(void)
-{
-	CHECK_ERR((s_initialized || bsp_imu_init() == BSP_IMU_OK), BSP_IMU_ERR);
-	CHECK_ERR(bsp_imu_queue_init() == BSP_IMU_OK, BSP_IMU_ERR);
-
-	bsp_imu_data_t imu_data;
-	CHECK_ERR(bsp_imu_read_raw_hw(&imu_data) == BSP_IMU_OK, BSP_IMU_ERR);
-
-	bsp_imu_queue_push_latest(&imu_data);
+	p_imu_data->ax = raw_data.accel.x * GRAVITY;
+	p_imu_data->ay = raw_data.accel.y * GRAVITY;
+	p_imu_data->gz = raw_data.gyro.z * DEG2RAD;
+	s_cached_temp = raw_data.temp;
 
     return BSP_IMU_OK;
 }
@@ -270,59 +249,6 @@ bsp_imu_err_t bsp_imu_get_temp(float *temp)
 bool bsp_imu_is_initialized(void)
 {
 	return s_initialized;
-}
-
-static bsp_imu_err_t bsp_imu_read_raw_hw(bsp_imu_data_t *p_imu_data)
-{
-	CHECK_ERR(p_imu_data != NULL, BSP_IMU_ERR);
-
-	icm42688_sensor_data_t raw_data;
-
-	CHECK_ERR(icm42688_get_raw_data(&bsp_imu, &raw_data) == ICM42688_OK, BSP_IMU_ERR);
-
-	p_imu_data->ax = raw_data.accel.x * GRAVITY;
-	p_imu_data->ay = raw_data.accel.y * GRAVITY;
-	p_imu_data->gz = raw_data.gyro.z * DEG2RAD;
-	if ((isnormal(raw_data.temp) || raw_data.temp == 0.0f) &&
-	    raw_data.temp >= IMU_TEMP_MIN_C &&
-	    raw_data.temp <= IMU_TEMP_MAX_C)
-	{
-		s_cached_temp = raw_data.temp;
-	}
-
-	return BSP_IMU_OK;
-}
-
-static bsp_imu_err_t bsp_imu_queue_init(void)
-{
-	if (s_imu_data_queue == NULL)
-	{
-		if (osKernelGetState() == osKernelInactive)
-		{
-			return BSP_IMU_OK;
-		}
-		s_imu_data_queue = osMessageQueueNew(BSP_IMU_QUEUE_DEPTH, sizeof(bsp_imu_data_t), NULL);
-		CHECK_ERR(s_imu_data_queue != NULL, BSP_IMU_ERR);
-	}
-
-	return BSP_IMU_OK;
-}
-
-static void bsp_imu_queue_push_latest(const bsp_imu_data_t *p_imu_data)
-{
-	if ((s_imu_data_queue == NULL) || (p_imu_data == NULL))
-	{
-		return;
-	}
-
-	while (osMessageQueuePut(s_imu_data_queue, p_imu_data, 0U, 0U) != osOK)
-	{
-		bsp_imu_data_t dropped;
-		if (osMessageQueueGet(s_imu_data_queue, &dropped, NULL, 0U) != osOK)
-		{
-			break;
-		}
-	}
 }
 
 /* End of file -------------------------------------------------------- */

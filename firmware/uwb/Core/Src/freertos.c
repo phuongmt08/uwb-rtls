@@ -75,7 +75,7 @@
 /* USER CODE BEGIN Variables */
 
 osMessageQueueId_t g_uwb_distance_queue;
-void app_rtos_request_sensor_fusion_reset(void);
+osMessageQueueId_t g_imu_data_queue;
 
 bool g_ranging_enabled = false;
 bool g_pm_ranging_blocked = false;
@@ -173,11 +173,11 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-#if ENABLE_SYS_FUSION
+
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
 static void sensor_fusion_reset_state(void);
-#endif
+
 static void drain_signal_semaphore(osSemaphoreId_t sem);
 static bool abort_uwb_ranging_locked(sys_config_t *cfg);
 static void stop_uwb_ranging_locked(void);
@@ -192,6 +192,7 @@ void sys_monitoring_entry(void *argument);
 void flash_storage_entry(void *argument);
 void io_entry(void *argument);
 void power_manage_entry(void *argument);
+void app_rtos_request_sensor_fusion_reset(void);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -238,6 +239,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
   g_uwb_distance_queue = osMessageQueueNew(4, sizeof(uwb_distance_msg_t), NULL);
+  g_imu_data_queue = osMessageQueueNew(8, sizeof(bsp_imu_data_t), NULL);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -398,34 +400,10 @@ void sensor_fusion_entry(void *argument)
   {
     osThreadExit();
   }
-  /* Khá»Ÿi táº¡o bá»™ lá»c Ä‘á»‹nh vá»‹ vÃ  prefilter */
-	const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
-	mw_filter_mahalanobis_init(&s_prefilter,
-							   prefilter_cfg->recover_d2,
-							   prefilter_cfg->reject_d2,
-							   prefilter_cfg->r_base,
-							   prefilter_cfg->r_gate,
-							   prefilter_cfg->velocity_weight,
-							   prefilter_cfg->min_covariance);
-	if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
-	{
-		RLOG_E(LOG_OBJECT_CODE_TAG, ERR_SYSTEM, "Sensor fusion initialization failed");
-	}
-	else
-	{
-		RLOG_I(LOG_OBJECT_CODE_TAG, "Sensor fusion initialized successfully");
-	}
-#if !ENABLE_SYS_FUSION
-  for (;;)
-  {
-	if(app_tag_get_ukf_init_state())
-	{
-		sys_sensor_fusion_task();
-	}
+  /* Init prefilter */
+  sensor_fusion_reset_state();
 
-    osDelay(20);
-  }
-#else
+  /* TEST */
 #if TEST_UKF_STREAM_UART
   for (;;)
   {
@@ -440,17 +418,24 @@ void sensor_fusion_entry(void *argument)
     sys_sensor_fusion_stream_ble();
     osDelay(20);
   }
-#else
+#endif
+
   for (;;)
   {
-    osDelay(20);
-    (void)bsp_imu_task();
 
     if (s_fusion_reset_requested)
     {
       s_fusion_reset_requested = false;
       (void)osMessageQueueReset(g_uwb_distance_queue);
+      (void)osMessageQueueReset(g_imu_data_queue);
       sensor_fusion_reset_state();
+      continue;
+    }
+
+    (void)sys_sensor_fusion_task();
+
+    if (!g_ranging_enabled)
+    {
       continue;
     }
 
@@ -624,13 +609,13 @@ void sensor_fusion_entry(void *argument)
                 if (err == MW_TRIL_OK)
                 {
                     SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
-                    (void)sys_sensor_fusion_apply_trilateration_result(&ukf_data,
-                                                                       &tril_position,
-                                                                       best_3_anchors,
-                                                                       anchors_by_id,
-                                                                       anchors_compact,
-                                                                       compact_idx,
-                                                                       s_last_selected_anchors_mask);
+                    (void)sys_sensor_fusion_update(   &ukf_data,
+                                                      &tril_position,
+                                                      best_3_anchors,
+                                                      anchors_by_id,
+                                                      anchors_compact,
+                                                      compact_idx,
+                                                      s_last_selected_anchors_mask);
                     SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                 }
                 else
@@ -651,11 +636,12 @@ void sensor_fusion_entry(void *argument)
         /* Update logging metrics mailbox passively when in Sensor Fusion mode */
       }
     }
+
+    osDelay(20);
   }
 
-#endif
   osThreadExit();
-#endif
+
   /* USER CODE END sensor_fusion_entry */
 }
 
@@ -1001,7 +987,6 @@ static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled)
     return true;
 }
 
-#if ENABLE_SYS_FUSION
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
 {
     if (r3d < MIN_VALID_DISTANCE_M || r3d > MAX_VALID_DISTANCE_M) {
@@ -1062,9 +1047,5 @@ static void sensor_fusion_reset_state(void)
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
 }
-#else
-void app_rtos_request_sensor_fusion_reset(void)
-{
-}
-#endif
+
 /* USER CODE END Application */

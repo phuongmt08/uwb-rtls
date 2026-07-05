@@ -376,6 +376,7 @@ void sys_config_init(void)
         }
     }
 
+#if ENABLE_OTP_ANTENNA_DELAY
     uint16_t otp_tx_delay = 0;
     uint16_t otp_rx_delay = 0;
     if (sys_config_otp_get_antenna_delay(&otp_tx_delay, &otp_rx_delay) == OTP_OK) {
@@ -385,6 +386,7 @@ void sys_config_init(void)
         RLOG_I(LOG_OBJECT_CODE_SYS_CFG, "Antenna Delays loaded from OTP: TX=%u, RX=%u", 
                cfg->uwb.tx_antenna_delay, cfg->uwb.rx_antenna_delay);
     }
+#endif
 
     sys_config_apply_forced_mode();
     sys_config_apply_dip_device_id_override();
