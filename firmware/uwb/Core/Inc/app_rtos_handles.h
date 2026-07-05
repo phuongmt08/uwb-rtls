@@ -7,6 +7,7 @@
 #define APP_RTOS_HANDLES_H
 
 #include "cmsis_os.h"
+#include "bsp_imu.h"
 #include "protos/protocol.pb.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -47,6 +48,7 @@ typedef struct {
 
 /** UwbRanging → SensorFusion queue, item size follows uwb_distance_msg_t. */
 extern osMessageQueueId_t g_uwb_distance_queue;
+extern osMessageQueueId_t g_imu_data_queue;
 
 /* ── Shared state ───────────────────────────────────────────────────────── */
 

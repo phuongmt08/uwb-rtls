@@ -26,6 +26,7 @@
 #include "ble/sys_ble_peripheral.h"
 #include "sys_logger.h"
 #include "cmsis_os2.h"
+#include "app_rtos_handles.h"
 
 /* Private defines ---------------------------------------------------- */
 #define NUM_STATE     			8
@@ -92,7 +93,25 @@ typedef struct
 
 /* Private macros ----------------------------------------------------- */
 /* Public variables --------------------------------------------------- */
-static ukf_core_t ukf = {0};
+extern network_core_t g_network_core;
+extern bool g_ranging_enabled;
+
+/* Private variables -------------------------------------------------- */
+// filter
+static ukf_init_filter_t s_ukf_init_filter;
+static ukf_init_distance_filter_t s_ukf_init_dist_filter;
+// log
+float yaw = 0.0f;
+float b_gz_t = 0.0f;
+static float 	s_latest_distances[NUM_ANCHORS] = {0.0f};
+static double 	s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
+static double 	s_latest_fp_snr[NUM_ANCHORS] = {0.0};
+static uint32_t s_error_count = 0U;
+static uint8_t 	s_last_selected_anchors_mask = 0U;
+static float 	s_latest_tril_x = 0.0f;
+static float 	s_latest_tril_y = 0.0f;
+static float 	s_fusion_dt = 0.0f;
+// debug
 static uint16_t predict_delta_ms = 0;
 static uint16_t update_delta_ms = 0;
 unsigned long sys_predict_count = 0;
@@ -101,21 +120,9 @@ unsigned long sys_predict_err_count = 0;
 unsigned long sys_update_err_count = 0;
 unsigned long sys_update_cholesky_err_count = 0;
 unsigned long sys_update_inverse_err_count = 0;
-extern network_core_t g_network_core;
-extern bool g_ranging_enabled;
+//
+static ukf_core_t ukf = {0};
 
-/* Private variables -------------------------------------------------- */
-float yaw = 0.0f;
-float b_gz_t = 0.0f;
-static ukf_init_filter_t s_ukf_init_filter;
-static ukf_init_distance_filter_t s_ukf_init_dist_filter;
-static float s_latest_distances[NUM_ANCHORS] = {0.0f};
-static double s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
-static double s_latest_fp_snr[NUM_ANCHORS] = {0.0};
-static uint32_t s_error_count = 0U;
-static uint8_t s_last_selected_anchors_mask = 0U;
-static float s_latest_tril_x = 0.0f;
-static float s_latest_tril_y = 0.0f;
 #if TEST_UKF_STREAM_BLE
 static uint32_t s_stream_test_sample_idx = 0U;
 #endif
@@ -132,6 +139,11 @@ static int32_t to_proto_fixed2(float value);
 #if TEST_UKF_STREAM_BLE
 static void configure_adv(network_core_t *stream);
 #endif
+sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
+                                                 float d0,
+                                                 float d1,
+                                                 float d2,
+                                                 const uint8_t anchor_ids[3]);
 
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
@@ -214,11 +226,15 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 
+    if (g_imu_data_queue == NULL ||
+        osMessageQueueGet(g_imu_data_queue, &ukf.imu_current, NULL, 0U) != osOK) {
+        return SYS_SENSOR_FUSION_OK;
+    }
+
     uint32_t sys_predict_tick_ms = HAL_GetTick();
     float dt = calc_dt();
+    s_fusion_dt = dt;
 	sys_predict_count++;
-
-	bsp_imu_get_raw_data(&ukf.imu_current);
 
 	/* On the first frame imu_old is still zero-initialized; pair it with the
 	 * current sample so the trapezoidal integration below does not integrate
@@ -373,201 +389,6 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	return SYS_SENSOR_FUSION_OK;
 }
 
-sys_sensor_fusion_err_t sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
-                                                 float d0,
-                                                 float d1,
-                                                 float d2,
-                                                 const uint8_t anchor_ids[3])
-{
-	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
-	CHECK_ERR(anchor_ids != NULL, SYS_SENSOR_FUSION_ERR);
-
-    uint32_t sys_update_tick_ms = HAL_GetTick();
-	sys_update_count++;
-
-    static float32_t P_aug[M * M];
-    static float32_t L_aug[M * M];
-    static arm_matrix_instance_f32 mat_Paug, mat_Laug;
-    
-    memset(P_aug, 0, sizeof(P_aug));
-    memset(L_aug, 0, sizeof(L_aug));
-    
-    arm_mat_init_f32(&mat_Paug, M, M, P_aug);
-    arm_mat_init_f32(&mat_Laug, M, M, L_aug);
-
-    // P_aug 	= [P 0]
-	// 			= [0 R]
-    for(int i=0; i<NUM_STATE; i++)
-    {
-        for(int j=0; j<NUM_STATE; j++) P_aug[i*M + j] = ukf.P_data[i*NUM_STATE + j];
-    }
-    for(int i=0; i<NUM_UPDATE_NOISE; i++)
-    {
-        for(int j=0; j<NUM_UPDATE_NOISE; j++) P_aug[(NUM_STATE+i)*M + (NUM_STATE+j)] = ukf.R_data[i*NUM_UPDATE_NOISE + j];
-    }
-
-    // L_aug = chol(P_aug)
-    arm_status status = arm_mat_cholesky_f32(&mat_Paug, &mat_Laug);
-    if(status != ARM_MATH_SUCCESS)
-    {
-        sys_update_err_count++;
-        sys_update_cholesky_err_count++;
-        return SYS_SENSOR_FUSION_ERR;
-    }
-
-    // L_aug *= GAMMA_M
-    for(int i=0; i<M*M; i++) L_aug[i] *= GAMMA_M;
-
-    static float32_t X_sigma[NUM_STATE][NUM_UPDATE_SIGMA];
-    static float32_t D_sigma[NUM_UPDATE_NOISE][NUM_UPDATE_SIGMA];
-    
-    memset(X_sigma, 0, sizeof(X_sigma));
-    memset(D_sigma, 0, sizeof(D_sigma));
-
-    float32_t x_aug[M] = {
-        ukf.state.px, ukf.state.py, ukf.state.vx, ukf.state.vy, ukf.state.theta,
-        ukf.state.b_ax, ukf.state.b_ay, ukf.state.b_gz,
-        0, 0, 0
-    };
-
-    float selected_anchor_pos[NUM_UPDATE_NOISE][2] = {0};
-    const sys_config_t *cfg = sys_config_get();
-    for (uint8_t selected = 0U; selected < NUM_UPDATE_NOISE; selected++) {
-        bool found = false;
-        for (uint32_t i = 0U; i < cfg->anchor_count; i++) {
-            if (cfg->anchor_layout[i].anchor_id == anchor_ids[selected]) {
-                selected_anchor_pos[selected][0] = cfg->anchor_layout[i].x_m;
-                selected_anchor_pos[selected][1] = cfg->anchor_layout[i].y_m;
-                found = true;
-                break;
-            }
-        }
-        CHECK_ERR(found, SYS_SENSOR_FUSION_ERR);
-    }
-
-    // if(m==0): 		x_s = x_aug
-	// else if(m<=M): 	x_s = x_aug + L_aug
-	// else: 			x_s = x_aug - L_aug
-    for(int m = 0; m < NUM_UPDATE_SIGMA; m++)
-    {
-        float32_t x_s[M];
-        if (m == 0)
-        {
-            for(int i=0; i<M; i++) x_s[i] = x_aug[i];
-        }
-        else if (m <= M)
-        {
-            for(int i=0; i<M; i++) x_s[i] = x_aug[i] + L_aug[i*M + (m-1)];
-        }
-        else
-        {
-            for(int i=0; i<M; i++) x_s[i] = x_aug[i] - L_aug[i*M + (m-1-M)];
-        }
-
-        for(int i=0; i<NUM_STATE; i++) X_sigma[i][m] = x_s[i];
-
-        // D_sigma[0][m] = sqrt((px-A1x)²+(py-A1y)²) + x_s[8] (noise term)
-        float px = x_s[0], py = x_s[1];
-        for (uint8_t d_index = 0U; d_index < NUM_UPDATE_NOISE; d_index++) {
-            float dx = px - selected_anchor_pos[d_index][0];
-            float dy = py - selected_anchor_pos[d_index][1];
-            D_sigma[d_index][m] = sqrtf(dx * dx + dy * dy) + x_s[8 + d_index];
-        }
-    }
-
-    // d_mean[i] = Σ Wm_M[m] * D_sigma[i][m]
-    float32_t d_mean[NUM_UPDATE_NOISE] = {0};
-    for(int m=0; m<NUM_UPDATE_SIGMA; m++)
-    {
-        for(int i=0; i<NUM_UPDATE_NOISE; i++) d_mean[i] += ukf.Wm_M[m] * D_sigma[i][m];
-    }
-
-    // P_dd += Wc_M[m] * diff_d * diff_dᵀ
-    // P_xd += Wc_M[m] * diff_x * diff_dᵀ
-    static float32_t P_dd[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
-    static float32_t P_xd[NUM_STATE * NUM_UPDATE_NOISE];
-    memset(P_dd, 0, sizeof(P_dd));
-    memset(P_xd, 0, sizeof(P_xd));
-
-    for(int m=0; m<NUM_UPDATE_SIGMA; m++)
-    {
-        float32_t diff_d[NUM_UPDATE_NOISE], diff_x[NUM_STATE];
-        for(int i=0; i<NUM_UPDATE_NOISE; i++) diff_d[i] = D_sigma[i][m] - d_mean[i];
-        for(int i=0; i<NUM_STATE; i++) diff_x[i] = X_sigma[i][m] - x_aug[i];
-        diff_x[4] = normalize_angle(diff_x[4]);
-
-        for(int i=0; i<NUM_UPDATE_NOISE; i++)
-        {
-            for(int j=0; j<NUM_UPDATE_NOISE; j++) P_dd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_d[i] * diff_d[j];
-        }
-
-        for(int i=0; i<NUM_STATE; i++)
-        {
-            for(int j=0; j<NUM_UPDATE_NOISE; j++) P_xd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_x[i] * diff_d[j];
-        }
-    }
-
-    static float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
-    static float32_t K_data[NUM_STATE * NUM_UPDATE_NOISE];
-    static arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
-    memset(P_dd_inv, 0, sizeof(P_dd_inv));
-    memset(K_data, 0, sizeof(K_data));
-    arm_mat_init_f32(&mat_Pdd, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd);
-    arm_mat_init_f32(&mat_Pdd_inv, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd_inv);
-    arm_mat_init_f32(&mat_Pxd, NUM_STATE, NUM_UPDATE_NOISE, P_xd);
-    arm_mat_init_f32(&mat_K, NUM_STATE, NUM_UPDATE_NOISE, K_data);
-
-    if (arm_mat_inverse_f32(&mat_Pdd, &mat_Pdd_inv) != ARM_MATH_SUCCESS) 
-    {
-        sys_update_err_count++;
-        sys_update_inverse_err_count++;
-        return SYS_SENSOR_FUSION_ERR;
-    }
-
-    arm_mat_mult_f32(&mat_Pxd, &mat_Pdd_inv, &mat_K);
-
-    float32_t D_real[3] = {d0, d1, d2};
-    for(int i=0; i<NUM_STATE; i++)
-    {
-        float update_val = 0;
-        for(int j=0; j<NUM_UPDATE_NOISE; j++)
-        {
-            update_val += K_data[i*NUM_UPDATE_NOISE + j] * (D_real[j] - d_mean[j]);
-        }
-
-        if (i == 0) ukf.state.px += update_val;
-        if (i == 1) ukf.state.py += update_val;
-        if (i == 2) ukf.state.vx += update_val;
-        if (i == 3) ukf.state.vy += update_val;
-        if (i == 4) ukf.state.theta = normalize_angle(ukf.state.theta + update_val);
-        if (i == 5) ukf.state.b_ax += update_val;
-        if (i == 6) ukf.state.b_ay += update_val;
-        if (i == 7) ukf.state.b_gz += update_val;
-    }
-
-    static float32_t Pxd_t_data[NUM_UPDATE_NOISE * NUM_STATE];
-	static float32_t K_Pxd_t_data[NUM_STATE * NUM_STATE];
-
-	static arm_matrix_instance_f32 mat_Pxd_t, mat_K_Pxd_t;
-	arm_mat_init_f32(&mat_Pxd_t, NUM_UPDATE_NOISE, NUM_STATE, Pxd_t_data);
-	arm_mat_init_f32(&mat_K_Pxd_t, NUM_STATE, NUM_STATE, K_Pxd_t_data);
-
-	// 1. Chuyển vị ma trận Pxd: (P_xd)^T
-	arm_mat_trans_f32(&mat_Pxd, &mat_Pxd_t);
-
-	// 2. Nhân K với (P_xd)^T: K * (P_xd)^T
-	arm_mat_mult_f32(&mat_K, &mat_Pxd_t, &mat_K_Pxd_t);
-
-	// 3. Cập nhật P: P = P - K * (P_xd)^T
-	arm_mat_sub_f32(&ukf.mat_P, &mat_K_Pxd_t, &ukf.mat_P);
-
-    if (p_ukf != NULL) *p_ukf = ukf.state;
-
-    ukf.is_first_frame = true;
-	update_delta_ms = HAL_GetTick() - sys_update_tick_ms;
-	return SYS_SENSOR_FUSION_OK;
-}
-
 sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0)
 {
 	ukf.state.px = x0;
@@ -598,21 +419,19 @@ static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out)
     return false;
 }
 
-bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_ukf,
-                                                  const vec2d_t *tril_position,
-                                                  const mw_tril_anchor_t best_3_anchors[3],
-                                                  const mw_tril_anchor_t *anchors_by_id,
-                                                  const mw_tril_anchor_t *anchors_compact,
-                                                  uint8_t compact_count,
-                                                  uint8_t selected_anchor_mask)
+bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
+							  const vec2d_t *tril_position,
+							  const mw_tril_anchor_t best_3_anchors[3],
+							  const mw_tril_anchor_t *anchors_by_id,
+							  const mw_tril_anchor_t *anchors_compact,
+							  uint8_t compact_count,
+							  uint8_t selected_anchor_mask)
 {
     CHECK_ERR(p_ukf && tril_position && best_3_anchors && anchors_by_id, false);
 
     s_last_selected_anchors_mask = selected_anchor_mask;
     s_latest_tril_x = (float)tril_position->x;
     s_latest_tril_y = (float)tril_position->y;
-    const sys_config_t *cfg = sys_config_get();
-    uint32_t active_count = (cfg->anchor_count > NUM_ANCHORS) ? NUM_ANCHORS : cfg->anchor_count;
 
     if (!ukf.initialized)
     {
@@ -648,13 +467,6 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
             }
         }
 
-        for (uint32_t active_slot = 0U; active_slot < active_count; active_slot++) {
-            uint8_t aid = (uint8_t)cfg->anchor_layout[active_slot].anchor_id;
-            if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
-                s_latest_fp_amp_norm[active_slot] = anchors_by_id[aid].fp_amp_norm;
-                s_latest_fp_snr[active_slot] = anchors_by_id[aid].fp_snr;
-            }
-        }
         snapshot_latest_anchor_metrics(anchors_by_id);
 
         sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
@@ -680,11 +492,11 @@ bool sys_sensor_fusion_apply_trilateration_result(sys_sensor_fusion_data_t *p_uk
         best_3_anchors[1].id,
         best_3_anchors[2].id
     };
-    if (sys_sensor_fusion_update(p_ukf,
-                                 (float)best_3_anchors[0].distance,
-                                 (float)best_3_anchors[1].distance,
-                                 (float)best_3_anchors[2].distance,
-                                 selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
+    if (fusion_update( p_ukf,
+                        (float)best_3_anchors[0].distance,
+                        (float)best_3_anchors[1].distance,
+                        (float)best_3_anchors[2].distance,
+                        selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
         return false;
     }
 
@@ -889,6 +701,7 @@ void sys_sensor_fusion_stream_uart()
         return;
     }
 
+#if ENABLE_SYS_FUSION
     float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
     float raw_yaw = sys_sensor_fusion_get_yaw_deg();
 
@@ -900,6 +713,19 @@ void sys_sensor_fusion_stream_uart()
                                     to_uart_fixed2(s_latest_tril_y),
                                     to_uart_fixed2(raw_yaw),
                                     s_error_count);
+#else
+    bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,
+                                         s_error_count,
+										 ukf.imu_current.ax,
+										 ukf.imu_current.ay,
+										 ukf.imu_current.gz,
+                                         (float)s_latest_tril_x,
+                                         (float)s_latest_tril_y,
+                                         s_latest_distances,
+                                         s_latest_fp_amp_norm,
+                                         s_latest_fp_snr,
+                                         s_fusion_dt);
+#endif
 #endif
 }
 
@@ -949,15 +775,225 @@ float sys_sensor_fusion_get_yaw_deg()
 
 void sys_sensor_fusion_task()
 {
-//    if (!ukf.initialized)
-//    {
-//        return;
-//    }
+    if (g_imu_data_queue == NULL) 
+    {
+        return;
+    }
 
-    bsp_imu_task();
+    bsp_imu_data_t imu_data = {0};
+    if (bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK) 
+    {
+        if (ukf.initialized)
+        {
+            (void)osMessageQueuePut(g_imu_data_queue, &imu_data, 0U, 0U);
+        }
+    }
 }
 
 /* Private definitions ------------------------------------------------ */
+sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
+                                                 float d0,
+                                                 float d1,
+                                                 float d2,
+                                                 const uint8_t anchor_ids[3])
+{
+	
+#if !ENABLE_SYS_FUSION
+	return SYS_SENSOR_FUSION_OK;
+#else
+
+    CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR(anchor_ids != NULL, SYS_SENSOR_FUSION_ERR);
+
+    uint32_t sys_update_tick_ms = HAL_GetTick();
+	sys_update_count++;
+
+    static float32_t P_aug[M * M];
+    static float32_t L_aug[M * M];
+    static arm_matrix_instance_f32 mat_Paug, mat_Laug;
+    
+    memset(P_aug, 0, sizeof(P_aug));
+    memset(L_aug, 0, sizeof(L_aug));
+    
+    arm_mat_init_f32(&mat_Paug, M, M, P_aug);
+    arm_mat_init_f32(&mat_Laug, M, M, L_aug);
+
+    // P_aug 	= [P 0]
+	// 			= [0 R]
+    for(int i=0; i<NUM_STATE; i++)
+    {
+        for(int j=0; j<NUM_STATE; j++) P_aug[i*M + j] = ukf.P_data[i*NUM_STATE + j];
+    }
+    for(int i=0; i<NUM_UPDATE_NOISE; i++)
+    {
+        for(int j=0; j<NUM_UPDATE_NOISE; j++) P_aug[(NUM_STATE+i)*M + (NUM_STATE+j)] = ukf.R_data[i*NUM_UPDATE_NOISE + j];
+    }
+
+    // L_aug = chol(P_aug)
+    arm_status status = arm_mat_cholesky_f32(&mat_Paug, &mat_Laug);
+    if(status != ARM_MATH_SUCCESS)
+    {
+        sys_update_err_count++;
+        sys_update_cholesky_err_count++;
+        return SYS_SENSOR_FUSION_ERR;
+    }
+
+    // L_aug *= GAMMA_M
+    for(int i=0; i<M*M; i++) L_aug[i] *= GAMMA_M;
+
+    static float32_t X_sigma[NUM_STATE][NUM_UPDATE_SIGMA];
+    static float32_t D_sigma[NUM_UPDATE_NOISE][NUM_UPDATE_SIGMA];
+    
+    memset(X_sigma, 0, sizeof(X_sigma));
+    memset(D_sigma, 0, sizeof(D_sigma));
+
+    float32_t x_aug[M] = {
+        ukf.state.px, ukf.state.py, ukf.state.vx, ukf.state.vy, ukf.state.theta,
+        ukf.state.b_ax, ukf.state.b_ay, ukf.state.b_gz,
+        0, 0, 0
+    };
+
+    float selected_anchor_pos[NUM_UPDATE_NOISE][2] = {0};
+    const sys_config_t *cfg = sys_config_get();
+    for (uint8_t selected = 0U; selected < NUM_UPDATE_NOISE; selected++) {
+        bool found = false;
+        for (uint32_t i = 0U; i < cfg->anchor_count; i++) {
+            if (cfg->anchor_layout[i].anchor_id == anchor_ids[selected]) {
+                selected_anchor_pos[selected][0] = cfg->anchor_layout[i].x_m;
+                selected_anchor_pos[selected][1] = cfg->anchor_layout[i].y_m;
+                found = true;
+                break;
+            }
+        }
+        CHECK_ERR(found, SYS_SENSOR_FUSION_ERR);
+    }
+
+    // if(m==0): 		x_s = x_aug
+	// else if(m<=M): 	x_s = x_aug + L_aug
+	// else: 			x_s = x_aug - L_aug
+    for(int m = 0; m < NUM_UPDATE_SIGMA; m++)
+    {
+        float32_t x_s[M];
+        if (m == 0)
+        {
+            for(int i=0; i<M; i++) x_s[i] = x_aug[i];
+        }
+        else if (m <= M)
+        {
+            for(int i=0; i<M; i++) x_s[i] = x_aug[i] + L_aug[i*M + (m-1)];
+        }
+        else
+        {
+            for(int i=0; i<M; i++) x_s[i] = x_aug[i] - L_aug[i*M + (m-1-M)];
+        }
+
+        for(int i=0; i<NUM_STATE; i++) X_sigma[i][m] = x_s[i];
+
+        // D_sigma[0][m] = sqrt((px-A1x)²+(py-A1y)²) + x_s[8] (noise term)
+        float px = x_s[0], py = x_s[1];
+        for (uint8_t d_index = 0U; d_index < NUM_UPDATE_NOISE; d_index++) {
+            float dx = px - selected_anchor_pos[d_index][0];
+            float dy = py - selected_anchor_pos[d_index][1];
+            D_sigma[d_index][m] = sqrtf(dx * dx + dy * dy) + x_s[8 + d_index];
+        }
+    }
+
+    // d_mean[i] = Σ Wm_M[m] * D_sigma[i][m]
+    float32_t d_mean[NUM_UPDATE_NOISE] = {0};
+    for(int m=0; m<NUM_UPDATE_SIGMA; m++)
+    {
+        for(int i=0; i<NUM_UPDATE_NOISE; i++) d_mean[i] += ukf.Wm_M[m] * D_sigma[i][m];
+    }
+
+    // P_dd += Wc_M[m] * diff_d * diff_dᵀ
+    // P_xd += Wc_M[m] * diff_x * diff_dᵀ
+    static float32_t P_dd[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
+    static float32_t P_xd[NUM_STATE * NUM_UPDATE_NOISE];
+    memset(P_dd, 0, sizeof(P_dd));
+    memset(P_xd, 0, sizeof(P_xd));
+
+    for(int m=0; m<NUM_UPDATE_SIGMA; m++)
+    {
+        float32_t diff_d[NUM_UPDATE_NOISE], diff_x[NUM_STATE];
+        for(int i=0; i<NUM_UPDATE_NOISE; i++) diff_d[i] = D_sigma[i][m] - d_mean[i];
+        for(int i=0; i<NUM_STATE; i++) diff_x[i] = X_sigma[i][m] - x_aug[i];
+        diff_x[4] = normalize_angle(diff_x[4]);
+
+        for(int i=0; i<NUM_UPDATE_NOISE; i++)
+        {
+            for(int j=0; j<NUM_UPDATE_NOISE; j++) P_dd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_d[i] * diff_d[j];
+        }
+
+        for(int i=0; i<NUM_STATE; i++)
+        {
+            for(int j=0; j<NUM_UPDATE_NOISE; j++) P_xd[i*NUM_UPDATE_NOISE + j] += ukf.Wc_M[m] * diff_x[i] * diff_d[j];
+        }
+    }
+
+    static float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
+    static float32_t K_data[NUM_STATE * NUM_UPDATE_NOISE];
+    static arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
+    memset(P_dd_inv, 0, sizeof(P_dd_inv));
+    memset(K_data, 0, sizeof(K_data));
+    arm_mat_init_f32(&mat_Pdd, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd);
+    arm_mat_init_f32(&mat_Pdd_inv, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd_inv);
+    arm_mat_init_f32(&mat_Pxd, NUM_STATE, NUM_UPDATE_NOISE, P_xd);
+    arm_mat_init_f32(&mat_K, NUM_STATE, NUM_UPDATE_NOISE, K_data);
+
+    if (arm_mat_inverse_f32(&mat_Pdd, &mat_Pdd_inv) != ARM_MATH_SUCCESS) 
+    {
+        sys_update_err_count++;
+        sys_update_inverse_err_count++;
+        return SYS_SENSOR_FUSION_ERR;
+    }
+
+    arm_mat_mult_f32(&mat_Pxd, &mat_Pdd_inv, &mat_K);
+
+    float32_t D_real[3] = {d0, d1, d2};
+    for(int i=0; i<NUM_STATE; i++)
+    {
+        float update_val = 0;
+        for(int j=0; j<NUM_UPDATE_NOISE; j++)
+        {
+            update_val += K_data[i*NUM_UPDATE_NOISE + j] * (D_real[j] - d_mean[j]);
+        }
+
+        if (i == 0) ukf.state.px += update_val;
+        if (i == 1) ukf.state.py += update_val;
+        if (i == 2) ukf.state.vx += update_val;
+        if (i == 3) ukf.state.vy += update_val;
+        if (i == 4) ukf.state.theta = normalize_angle(ukf.state.theta + update_val);
+        if (i == 5) ukf.state.b_ax += update_val;
+        if (i == 6) ukf.state.b_ay += update_val;
+        if (i == 7) ukf.state.b_gz += update_val;
+    }
+
+    static float32_t Pxd_t_data[NUM_UPDATE_NOISE * NUM_STATE];
+	static float32_t K_Pxd_t_data[NUM_STATE * NUM_STATE];
+
+	static arm_matrix_instance_f32 mat_Pxd_t, mat_K_Pxd_t;
+	arm_mat_init_f32(&mat_Pxd_t, NUM_UPDATE_NOISE, NUM_STATE, Pxd_t_data);
+	arm_mat_init_f32(&mat_K_Pxd_t, NUM_STATE, NUM_STATE, K_Pxd_t_data);
+
+	// 1. Chuyển vị ma trận Pxd: (P_xd)^T
+	arm_mat_trans_f32(&mat_Pxd, &mat_Pxd_t);
+
+	// 2. Nhân K với (P_xd)^T: K * (P_xd)^T
+	arm_mat_mult_f32(&mat_K, &mat_Pxd_t, &mat_K_Pxd_t);
+
+	// 3. Cập nhật P: P = P - K * (P_xd)^T
+	arm_mat_sub_f32(&ukf.mat_P, &mat_K_Pxd_t, &ukf.mat_P);
+
+    if (p_ukf != NULL) *p_ukf = ukf.state;
+
+    ukf.is_first_frame = true;
+	update_delta_ms = HAL_GetTick() - sys_update_tick_ms;
+	return SYS_SENSOR_FUSION_OK;
+
+#endif
+
+}
+
 static float calc_dt(void)
 {
     uint32_t now = HAL_GetTick();
@@ -987,6 +1023,7 @@ static void reset_runtime_state(void)
     s_last_selected_anchors_mask = 0U;
     s_latest_tril_x = 0.0f;
     s_latest_tril_y = 0.0f;
+    s_fusion_dt = 0.0f;
 }
 
 static bool active_anchor_index_for_id(uint8_t anchor_id, uint8_t *index_out)
