@@ -30,6 +30,9 @@ def _parse_bool(value: Any, default: bool) -> bool:
 
 def is_test_mode() -> bool:
     """Return True for offline/mock mode, False for real hardware mode."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        return False
     return _parse_bool(os.getenv("UWB_RTLS_TEST_MODE"), bool(UWB_RTLS_TEST_MODE))
 
 
