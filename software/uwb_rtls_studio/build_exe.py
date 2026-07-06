@@ -178,9 +178,36 @@ def build():
             if os.path.exists("dist"): shutil.rmtree("dist")
             spec_file = f"{app_name}.spec"
             if os.path.exists(spec_file): os.remove(spec_file)
+            
+            # Create Desktop Shortcut automatically (Clean name, no .exe extension)
+            create_desktop_shortcut(output_exe, icon_ico, app_name.replace("_", " "))
             print("[+] Build complete!")
     else:
         print("[-] PyInstaller failed.")
+
+def create_desktop_shortcut(target_exe, icon_path, shortcut_name):
+    """Creates a native Windows Desktop shortcut pointing to the built EXE."""
+    import subprocess
+    try:
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        shortcut_path = os.path.join(desktop, f"{shortcut_name}.lnk")
+        target_exe = os.path.abspath(target_exe)
+        working_dir = os.path.dirname(target_exe)
+        
+        ps_script = f"""
+        $WshShell = New-Object -ComObject WScript.Shell
+        $Shortcut = $WshShell.CreateShortcut('{shortcut_path}')
+        $Shortcut.TargetPath = '{target_exe}'
+        $Shortcut.WorkingDirectory = '{working_dir}'
+        """
+        if icon_path and os.path.exists(icon_path):
+            ps_script += f"\n$Shortcut.IconLocation = '{os.path.abspath(icon_path)}'"
+        ps_script += "\n$Shortcut.Save()"
+        
+        subprocess.run(["powershell", "-Command", ps_script], capture_output=True, check=True)
+        print(f"[+] Automatically created clean Desktop shortcut: {shortcut_path}")
+    except Exception as e:
+        print(f"[WARN] Could not create desktop shortcut automatically: {e}")
 
 if __name__ == "__main__":
     build()
