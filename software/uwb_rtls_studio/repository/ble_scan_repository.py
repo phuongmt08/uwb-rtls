@@ -31,7 +31,7 @@ class BleScanRepository(QObject):
     def parse_scan_result(self, res) -> dict:
         mac_hex = ":".join(f"{b:02X}" for b in res.mac_address)
         return {
-            "name": res.name or f"UWB-{mac_hex[-5:]}",
+            "name": str(getattr(res, "name", "") or "").strip() or "-",
             "mac": mac_hex,
             "rssi": int(getattr(res, "rssi_dbm", 0)),
             "serial_number": int(getattr(res, "serial_number", 0)),
@@ -46,9 +46,12 @@ class BleScanRepository(QObject):
             timestamp_ms = timestamp_s * 1000
         elif timestamp_s <= 0 and timestamp_ms > 0:
             timestamp_s = timestamp_ms // 1000
+        serial_number = int(getattr(res, "serial_number", 0) or 0)
         return {
             "device_type": int(getattr(res, "device", 0)),
             "device_id": int(getattr(res, "device_id", 0)),
+            "serial_number": serial_number,
+            "serial": f"0x{serial_number:08X}" if serial_number else "",
             "bat_soc_percent": int(getattr(res, "bat_soc_percent", 0)),
             "local_timestamp_s": timestamp_s,
             "local_timestamp_ms": timestamp_ms,
@@ -69,7 +72,11 @@ class BleScanRepository(QObject):
             self._device_order[mac] = self._next_device_order
             self._next_device_order += 1
         current = self._devices.get(mac, {})
+        preserved_serial_number = int(current.get("serial_number") or 0)
         current.update(data)
+        if not current.get("serial_number") and preserved_serial_number:
+            current["serial_number"] = preserved_serial_number
+            current["serial"] = f"0x{preserved_serial_number:08X}"
         current["order"] = self._device_order[mac]
         for candidate in self._merge_candidates(current):
             if candidate in self._adv_status_by_device_id:
@@ -111,13 +118,22 @@ class BleScanRepository(QObject):
         return self._devices.get(self._normalize_mac(mac), {}).copy()
 
     def save_adv_status(self, data: dict) -> None:
-        device_id = data.get("device_id")
-        if device_id is None:
+        device_id = int(data.get("device_id") or 0)
+        serial_number = int(data.get("serial_number") or 0)
+        if not device_id and not serial_number:
             return
-        self._adv_status_by_device_id[device_id] = data.copy()
+
+        cached = data.copy()
+        if device_id:
+            self._adv_status_by_device_id[device_id] = cached
+        if serial_number:
+            self._adv_status_by_device_id[serial_number] = cached
+
         for device in self._devices.values():
-            if device_id in self._merge_candidates(device):
-                device.update(data)
+            for candidate in self._merge_candidates(device):
+                if candidate in self._adv_status_by_device_id:
+                    device.update(self._adv_status_by_device_id[candidate])
+                    break
         self.scan_results_updated.emit(self.merged_results())
 
     def merged_results(self) -> list[dict]:

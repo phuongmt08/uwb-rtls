@@ -198,7 +198,8 @@ class ConfigViewModel(QObject):
             self.read_ble_conn_params()
             self.read_device_type()
 
-        return self.model.execute_for_target(target, operation)
+        operation()
+        return True
 
     def write_device_config(
         self,
@@ -237,7 +238,8 @@ class ConfigViewModel(QObject):
                     value_u8=factory_otp_config.get("value_u8", 0),
                 )
 
-        return self.model.execute_for_target(target, operation)
+        operation()
+        return True
 
     def write_factory_otp(
         self,
@@ -351,35 +353,22 @@ class ConfigViewModel(QObject):
         self.model.set_host_transport(transport)
 
     def write_all_device_configs(self, targets: list[dict], snapshot: dict, delay_ms: int = 2500):
-        self._bulk_targets = [dict(target) for target in targets] or [dict(snapshot.get("target", {}))]
-        self._bulk_snapshot = dict(snapshot)
+        _ = targets
+        _ = snapshot
+        _ = delay_ms
+        log.warning("Broadcast write is not implemented yet; ignoring write_all_device_configs request.")
+        self._bulk_targets = []
+        self._bulk_snapshot = None
         self._bulk_index = 0
-        self._bulk_delay_ms = max(250, int(delay_ms))
-        self._write_next_bulk_target()
+        self._bulk_timer.stop()
+        return False
 
     def _write_next_bulk_target(self):
-        if not self._bulk_snapshot or self._bulk_index >= len(self._bulk_targets):
-            self._bulk_targets = []
-            self._bulk_snapshot = None
-            self._bulk_index = 0
-            return
-        target = self._bulk_targets[self._bulk_index]
-        self._bulk_index += 1
-        sys_config = dict(self._bulk_snapshot.get("sys_config", {}))
-        if target.get("role"):
-            sys_config["role"] = int(target.get("role"))
-        if target.get("device_id"):
-            sys_config["device_id"] = int(target.get("device_id"))
-        self.write_device_config(
-            target=target,
-            anchors=self._bulk_snapshot.get("anchors", []),
-            ranging_config=self._bulk_snapshot.get("ranging_config", {}),
-            sys_config=sys_config,
-            sensor_fusion_config=self._bulk_snapshot.get("sensor_fusion_config", {}),
-            pos_calib_config=self._bulk_snapshot.get("pos_calib_config", {}),
-        )
-        if self._bulk_index < len(self._bulk_targets):
-            self._bulk_timer.start(self._bulk_delay_ms)
+        self._bulk_targets = []
+        self._bulk_snapshot = None
+        self._bulk_index = 0
+        self._bulk_timer.stop()
+        return False
 
     def device_reset(self):
         # BE/API: device lifecycle action from Config tab.

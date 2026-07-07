@@ -712,14 +712,18 @@ class MainWindow(QMainWindow):
             self._status_rssi.setText(f"\U0001F4E1 RSSI: {rssi} dBm")
 
         state_label = data.get("display_state") or data.get("state_name")
-        state_value = data.get("state")
+        try:
+            state_value = int(data.get("state", -1) if data.get("state") is not None else -1)
+        except (TypeError, ValueError):
+            state_value = -1
         if state_label is not None:
             self._status_ble.setText(f"BLE: {state_label}")
-            if state_value == 5:
+            raw_state_label = str(data.get("state_name") or state_label or "").upper()
+            if state_value == 5 or raw_state_label in ("BLE_STATE_CONNECTED", "CONNECTED"):
                 self._status_ble.setStyleSheet("color: #10B981; font-weight: bold;")
-            elif state_value in (2, 3, 4):
+            elif state_value in (2, 3, 4) or any(name in raw_state_label for name in ("SCANNING", "ADVERTISING", "CONNECTING")):
                 self._status_ble.setStyleSheet("color: #F59E0B; font-weight: bold;")
-            elif state_value == 1:
+            elif state_value in (0, 1) or any(name in raw_state_label for name in ("UNSPECIFIED", "IDLE")):
                 self._status_ble.setStyleSheet("color: #94A3B8; font-weight: bold;")
             else:
                 self._status_ble.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -1043,6 +1047,7 @@ class MainWindow(QMainWindow):
                     self._protocol_service,
                     self._serial_service,
                     command_bus=self._command_bus,
+                    ble_scan_repo=getattr(self._device_info_vm, "_ble_scan_repo", None),
                 )
                 scan_vm = ScanViewModel(scan_model)
                 scan_popup = ScanPopup(scan_vm, parent=self)

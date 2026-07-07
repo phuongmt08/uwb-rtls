@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 
 # Maximum number of position samples to keep in history
 _MAX_HISTORY_SIZE = 100000
-RANGING_UI_EMIT_INTERVAL_S = 0.05
+RANGING_UI_EMIT_INTERVAL_S = 0.0
 RANGING_STATS_EMIT_INTERVAL_S = 0.20
 
 
@@ -288,6 +288,13 @@ class RangingModel(QObject):
             "local_z_m": float(local_z) if local_z is not None else None,
         }
     @staticmethod
+    def _payload_size(message) -> int:
+        try:
+            return int(message.ByteSize())
+        except Exception:
+            return 0
+
+    @staticmethod
     def _parse_anchor_distances(res) -> tuple[list[dict], int, dict[int, int]]:
         anchors = []
         anchor_mask = 0
@@ -302,7 +309,7 @@ class RangingModel(QObject):
                 "distance_cm": distance_mm / 10.0,
                 "fp_amp": int(getattr(anchor, "fp_amp", 0) or 0),
             })
-            if 0 < anchor_id < 32:
+            if 0 <= anchor_id < 32:
                 anchor_mask |= 1 << anchor_id
             if anchor_id:
                 distances_by_anchor[anchor_id] = distance_mm
@@ -324,7 +331,9 @@ class RangingModel(QObject):
             "received_at": now,
             "source": "ranging",
             "seq": int(seq or 0),
+            "payload_size": self._payload_size(res),
             "anchor_mask": anchor_mask,
+            "anchor_mask_valid": bool(anchors),
             "d1_mm": distances_by_anchor.get(1, ""),
             "d2_mm": distances_by_anchor.get(2, ""),
             "d3_mm": distances_by_anchor.get(3, ""),
@@ -370,6 +379,7 @@ class RangingModel(QObject):
             "tril_y_m": float(getattr(res, "tril_y_m", 0)) / 100.0,
             "yaw_deg": float(getattr(res, "yaw_deg", 0)) / 100.0,
             "anchor_mask": int(getattr(res, "anchor_mask", 0)),
+            "anchor_mask_valid": True,
             "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
             "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
             "zone_id": int(getattr(res, "zone_id", 0)),
@@ -378,6 +388,7 @@ class RangingModel(QObject):
             "received_at": time.time(),
             "source": "sensor_fusion",
             "seq": int(seq or 0),
+            "payload_size": self._payload_size(res),
             "room_id": room_frame["room_id"],
             "local_x_m": room_frame["local_x_m"],
             "local_y_m": room_frame["local_y_m"],
@@ -441,6 +452,8 @@ class RangingModel(QObject):
         stored.setdefault("source", "ranging")
         stored.setdefault("seq", 0)
         stored.setdefault("anchor_mask", 0)
+        stored.setdefault("anchor_mask_valid", bool(stored.get("anchors")))
+        stored.setdefault("payload_size", 0)
         stored.setdefault("d1_mm", "")
         stored.setdefault("d2_mm", "")
         stored.setdefault("d3_mm", "")
@@ -464,6 +477,8 @@ class RangingModel(QObject):
         enriched = sample.copy()
         enriched.setdefault("source", "sensor_fusion")
         enriched.setdefault("seq", 0)
+        enriched.setdefault("payload_size", 0)
+        enriched.setdefault("anchor_mask_valid", True)
         enriched.setdefault("vx_mps", 0.0)
         enriched.setdefault("vy_mps", 0.0)
 
@@ -483,8 +498,15 @@ class RangingModel(QObject):
 
         self._last_fusion_sample = enriched.copy()
         self._fusion_history.append(enriched.copy())
-        self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
         now = enriched.get("received_at", time.time())
+        self._stats["total_count"] = int(self._stats.get("total_count", 0)) + 1
+        self._stats["success_count"] = int(self._stats.get("success_count", 0)) + 1
+        self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
+        if self._last_result_time > 0:
+            dt = now - self._last_result_time
+            if dt > 0:
+                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
+        self._last_result_time = now
         self._emit_sensor_fusion_if_due(enriched, now=now)
         self._emit_stats_if_due(now=now)
 

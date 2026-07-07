@@ -1,5 +1,5 @@
-"""
-UWB RTLS Studio — Calibration Tab (UI loaded from .ui file)
+﻿"""
+UWB RTLS Studio - Calibration Tab (UI loaded from .ui file)
 Tab 4: Antenna delay tuning + Calibration status (Developer only).
 
 FE: Loaded from views/ui/calibration_tab.ui (editable in Qt Designer)
@@ -25,16 +25,16 @@ class CalibrationTab(QWidget):
         self._vm = None
         self._auto_applied_delay = 0
 
-        # ── Load UI from .ui file ──
+        # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
 
         # Widgets are now accessible via objectNames:
-        # self.calib_progress  → QProgressBar
-        # self.calib_status    → QLabel "Status: Idle"
-        # self.calib_iter      → QLabel "Iteration: 0 / 20"
-        # self.btn_start_calib → QPushButton
-        # self.btn_stop_calib  → QPushButton
-        # self.btn_apply_calib → QPushButton
+        # self.calib_progress  -> QProgressBar
+        # self.calib_status    -> QLabel "Status: Idle"
+        # self.calib_iter      -> QLabel "Iteration: 0 / 20"
+        # self.btn_start_calib -> QPushButton
+        # self.btn_stop_calib  -> QPushButton
+        # self.btn_apply_calib -> QPushButton
         # self.ref_dist_spin, self.samples_spin, etc.
         self._setup_imu_controls()
         self.btn_start_calib.clicked.connect(self._start_calibration)
@@ -116,9 +116,30 @@ class CalibrationTab(QWidget):
             self._vm.model.connection_state_changed.connect(self._on_connection_state_changed)
 
         QTimer.singleShot(0, self._vm.initialize)
+        self._update_action_state()
+
+    def _has_connected_device(self) -> bool:
+        return bool(self._vm and self._vm.model.is_connected)
+
+    def _require_connected_device(self, action_name: str) -> bool:
+        if self._has_connected_device():
+            return True
+        QMessageBox.information(self, "No Connected Device", f"Connect a device before {action_name}.")
+        return False
+
+    def _update_action_state(self):
+        connected = self._has_connected_device()
+        running = bool(self._vm and getattr(self._vm, "_running", False))
+        # self.btn_start_calib -> QPushButton
+        self.btn_start_pos_calib.setEnabled(connected and not running)
+        # self.btn_stop_calib  -> QPushButton
+        self.btn_stop_pos_calib.setEnabled(connected and running)
+        # self.btn_apply_calib -> QPushButton
+        self.btn_imu_reset.setEnabled(connected)
+        self.btn_imu_calibrate.setEnabled(connected)
 
     def _start_calibration(self):
-        if not self._vm:
+        if not self._vm or not self._require_connected_device("starting calibration"):
             return
 
         # Collect values only from delay_group (Antenna Delay Calibration)
@@ -140,7 +161,7 @@ class CalibrationTab(QWidget):
         self._vm.start_calibration(config)
 
     def _start_position_calibration(self):
-        if not self._vm:
+        if not self._vm or not self._require_connected_device("starting position calibration"):
             return
 
         # Collect values from pos_calib_group (Position Calibration Options)
@@ -166,7 +187,7 @@ class CalibrationTab(QWidget):
             self._vm.stop_calibration()
 
     def _apply_calibration(self):
-        if not self._vm:
+        if not self._vm or not self._require_connected_device("applying calibration"):
             return
 
         if self._vm.is_applying:
@@ -204,22 +225,21 @@ class CalibrationTab(QWidget):
         self._vm.apply_results_sequence(tx_delay, rx_delay, pos_config)
 
     def _reset_imu(self):
-        if self._vm:
+        if self._vm and self._require_connected_device("resetting IMU"):
             self._vm.reset_imu()
 
     def _calibrate_imu(self):
-        if self._vm:
+        if self._vm and self._require_connected_device("calibrating IMU"):
             self._vm.calibrate_imu()
 
     def _on_connection_state_changed(self, info: dict):
         if info.get("status") in ("Disconnected", "Connecting", "Connected"):
             self._reset_display_fields()
+            self._update_action_state()
 
     def _on_running_changed(self, running: bool):
-        self.btn_start_calib.setEnabled(not running)
-        self.btn_stop_calib.setEnabled(running)
-        self.btn_start_pos_calib.setEnabled(not running)
-        self.btn_stop_pos_calib.setEnabled(running)
+        _ = running
+        self._update_action_state()
 
     def _on_sys_config_loaded(self, cfg: dict):
         from utils.helpers import set_widget_placeholder, set_widget_value
@@ -287,15 +307,15 @@ class CalibrationTab(QWidget):
         total = int(status.get("total_iterations", 0))
         delay = int(status.get("current_antenna_delay", 0))
 
-        self.calib_progress.setValue(max(0, min(100, progress)))
+        self.calib_progress.setValue(progress)
 
         custom_text = status.get("custom_status_text")
         if custom_text:
-            self.calib_status.setText(custom_text)
+            self.calib_status.setText(str(custom_text))
         else:
-            self.calib_status.setText(f"Status: {state_labels.get(state, state)}")
+            self.calib_status.setText(f"Status: {state_labels.get(state, 'Unknown')}")
 
-        self.calib_iter.setText(f"Iteration: {current} / {total}")
+        self.calib_iter.setText(f"Iteration: {current} / {total}" if total > 0 else "Iteration: -")
         self.val_err_mean.setText(self._format_metric(status.get("last_pair_error_mean_m"), " m"))
         self.val_err_std.setText(self._format_metric(status.get("last_pair_error_spread_m"), " m"))
         self.val_err_rms.setText(self._format_metric(status.get("last_pair_error_rms_m"), " m"))

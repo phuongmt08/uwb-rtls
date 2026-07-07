@@ -44,3 +44,8 @@ software/simulation/simulation_dashboard.html
 # Programmer builds
 software/uwb_rtls_programmer/execution/*.exe
 software/uwb_rtls_programmer/execution/*.spec
+
+# Studio builds
+software/uwb_rtls_studio/execution/*.exe
+software/uwb_rtls_studio/execution/*.spec
+software/uwb_rtls_studio/execution/legacy/

@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6 import uic
-from utils.constants import DEVICE_TYPE_LABELS_SHORT
 
 # Path to .ui file
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'device_info_tab.ui')
@@ -110,6 +109,24 @@ class DeviceInfoTab(QWidget):
         # Advertising table
         self._adv_table = self.adv_table
 
+        # Add Refresh button
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.addStretch()
+        
+        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_refresh.setObjectName("btn_refresh")
+        self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_refresh.setStyleSheet(
+            "QPushButton { background: rgba(34, 211, 238, 0.1); color: #22D3EE; border: 1px solid #334155; border-radius: 6px; font-weight: bold; padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { border-color: #22D3EE; background: rgba(34, 211, 238, 0.2); }"
+            "QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }"
+        )
+        self.btn_refresh.clicked.connect(self._on_refresh_clicked)
+        bottom_layout.addWidget(self.btn_refresh)
+        
+        self.adv_layout.addLayout(bottom_layout)
+
     def _reset_display_fields(self):
         """Show no device data until a parsed response reaches the View."""
         for group in (
@@ -132,14 +149,19 @@ class DeviceInfoTab(QWidget):
 
     def _setup_table(self):
         """Configure the advertising devices table header sizing."""
-        self._adv_table.setColumnWidth(0, 150)  # Device
-        self._adv_table.setColumnWidth(1, 150)  # MAC
+        self._adv_table.setColumnCount(9)
+        self._adv_table.setHorizontalHeaderLabels([
+            "Device", "MAC", "Bat %", "Time", "Serial", "Status", "Warn", "Error", "Action"
+        ])
+        self._adv_table.setColumnWidth(0, 120)  # Device
+        self._adv_table.setColumnWidth(1, 140)  # MAC
         self._adv_table.setColumnWidth(2, 70)   # Bat %
-        self._adv_table.setColumnWidth(3, 300)  # Time
-        self._adv_table.setColumnWidth(4, 90)   # Status
-        self._adv_table.setColumnWidth(5, 90)   # Warn
-        self._adv_table.setColumnWidth(6, 90)   # Error
-        self._adv_table.setColumnWidth(7, 145)   # Action (Connect + Set Time buttons)
+        self._adv_table.setColumnWidth(3, 150)  # Time
+        self._adv_table.setColumnWidth(4, 150)  # Serial
+        self._adv_table.setColumnWidth(5, 90)   # Status
+        self._adv_table.setColumnWidth(6, 90)   # Warn
+        self._adv_table.setColumnWidth(7, 90)   # Error
+        self._adv_table.setColumnWidth(8, 145)   # Action (Connect + Set Time buttons)
 
     def set_viewmodel(self, vm):
         self._vm = vm
@@ -183,12 +205,16 @@ class DeviceInfoTab(QWidget):
         display_state = info.get("display_state")
         if display_state is not None:
             self._ble_values["State:"].setText(str(display_state))
-            state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
-            if state_value == 5:
+            try:
+                state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
+            except (TypeError, ValueError):
+                state_value = -1
+            raw_state_label = str(info.get("state_name") or display_state or "").upper()
+            if state_value == 5 or raw_state_label in ("BLE_STATE_CONNECTED", "CONNECTED"):
                 color = "#10B981"
-            elif state_value in (2, 3, 4):
+            elif state_value in (2, 3, 4) or any(name in raw_state_label for name in ("SCANNING", "ADVERTISING", "CONNECTING")):
                 color = "#F59E0B"
-            elif state_value == 1:
+            elif state_value in (0, 1) or any(name in raw_state_label for name in ("UNSPECIFIED", "IDLE")):
                 color = "#94A3B8"
             else:
                 color = "#EF4444"
@@ -262,6 +288,15 @@ class DeviceInfoTab(QWidget):
             self._time_status.setStyleSheet("color: #EF4444; background: transparent; font-size: 12px; font-weight: bold;")
 
     def _on_advertising_devices(self, devices: list, is_scanning: bool):
+        # Update Refresh button state
+        if hasattr(self, "btn_refresh"):
+            if is_scanning:
+                self.btn_refresh.setEnabled(False)
+                self.btn_refresh.setText("⏳ Scanning...")
+            else:
+                self.btn_refresh.setEnabled(True)
+                self.btn_refresh.setText("🔄 Refresh")
+
         # Scan status removed by user
 
         # Compare existing rows to see if we can reuse the table structure and widgets
@@ -282,13 +317,9 @@ class DeviceInfoTab(QWidget):
 
         for i, dev in enumerate(devices):
             d_type = dev.get("device_type", 0)
-            d_type_label = DEVICE_TYPE_LABELS_SHORT.get(d_type, str(d_type))
             d_id = dev.get("device_id")
-
-            if d_id is not None:
-                device_str = f"{d_type_label} 0x{d_id:08X}"
-            else:
-                device_str = dev.get("name", "-")
+            device_name = str(dev.get("name") or "").strip()
+            device_str = device_name or "-"
 
             bat = dev.get("bat_soc_percent")
             bat_str = f"{bat}%" if bat is not None else "-"
@@ -311,14 +342,25 @@ class DeviceInfoTab(QWidget):
             err_cnt = dev.get("error_count")
             err_cnt_str = str(err_cnt) if err_cnt is not None else "-"
 
+            # Serial number formatting
+            sn_val = dev.get("serial_number", 0) or 0
+            sn_str = "-"
+            if sn_val:
+                sn_str = f"0x{sn_val:08X}"
+            else:
+                raw_sn = dev.get("serial")
+                if raw_sn and str(raw_sn).strip():
+                    sn_str = str(raw_sn).strip()
+
             if rebuild_needed:
                 self._adv_table.setItem(i, 0, QTableWidgetItem(device_str))
                 self._adv_table.setItem(i, 1, QTableWidgetItem(dev["mac"]))
                 self._adv_table.setItem(i, 2, QTableWidgetItem(bat_str))
                 self._adv_table.setItem(i, 3, QTableWidgetItem(t_str))
-                self._adv_table.setItem(i, 4, QTableWidgetItem(st_flags_str))
-                self._adv_table.setItem(i, 5, QTableWidgetItem(warn_cnt_str))
-                self._adv_table.setItem(i, 6, QTableWidgetItem(err_cnt_str))
+                self._adv_table.setItem(i, 4, QTableWidgetItem(sn_str))
+                self._adv_table.setItem(i, 5, QTableWidgetItem(st_flags_str))
+                self._adv_table.setItem(i, 6, QTableWidgetItem(warn_cnt_str))
+                self._adv_table.setItem(i, 7, QTableWidgetItem(err_cnt_str))
 
                 # Load custom row widget from UI Designer file
                 row_ui_path = os.path.join(os.path.dirname(__file__), '..', 'ui', 'adv_device_row.ui')
@@ -337,15 +379,16 @@ class DeviceInfoTab(QWidget):
                     "QPushButton:disabled { background: #334155; color: #94A3B8; }"
                 )
                 widget.layout().addWidget(btn_set_time)
-                self._adv_table.setCellWidget(i, 7, widget)
+                self._adv_table.setCellWidget(i, 8, widget)
             else:
                 self._set_table_item_text(i, 0, device_str)
                 self._set_table_item_text(i, 2, bat_str)
                 self._set_table_item_text(i, 3, t_str)
-                self._set_table_item_text(i, 4, st_flags_str)
-                self._set_table_item_text(i, 5, warn_cnt_str)
-                self._set_table_item_text(i, 6, err_cnt_str)
-                widget = self._adv_table.cellWidget(i, 7)
+                self._set_table_item_text(i, 4, sn_str)
+                self._set_table_item_text(i, 5, st_flags_str)
+                self._set_table_item_text(i, 6, warn_cnt_str)
+                self._set_table_item_text(i, 7, err_cnt_str)
+                widget = self._adv_table.cellWidget(i, 8)
 
             if widget:
                 # Retrieve child buttons
@@ -438,3 +481,7 @@ class DeviceInfoTab(QWidget):
             item.setText(text)
         else:
             self._adv_table.setItem(row, col, QTableWidgetItem(text))
+
+    def _on_refresh_clicked(self):
+        if self._vm:
+            self._vm.start_ble_scan(duration_ms=5000)

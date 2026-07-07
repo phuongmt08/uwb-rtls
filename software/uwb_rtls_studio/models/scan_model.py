@@ -4,7 +4,7 @@
 ==============================================================================
   File        : models/scan_model.py
   Description : Model managing BLE scanning, device discovery list updates,
-                stale device pruning, and connect commands.
+                manual refresh, and connect commands.
 
   MVVM Role   : MODEL — BLE Scan and connect logic.
 
@@ -17,12 +17,13 @@
 from __future__ import annotations
 import logging
 import time
+import re
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from services.protocol_service import ProtocolService
 from services.serial_service import SerialService
 from common import protocol_pb2 as pb
-from utils.constants import DEVICE_TIMEOUT_S, STOP_TO_CONNECT_DELAY_MS
+from utils.constants import STOP_TO_CONNECT_DELAY_MS
 from common.transport import VvAddress
 from utils.ble_hci import normalize_hci_reason
 
@@ -42,12 +43,14 @@ class ScanModel(QObject):
     connection_progress_changed = pyqtSignal(dict)
     dongle_disconnected = pyqtSignal(str)
     
-    def __init__(self, protocol_service: ProtocolService, serial_service: SerialService, command_bus=None, parent=None):
+    def __init__(self, protocol_service: ProtocolService, serial_service: SerialService, command_bus=None, ble_scan_repo=None, parent=None):
         super().__init__(parent)
         self._protocol = protocol_service
         self._serial = serial_service
         self._command_bus = command_bus
+        self._ble_scan_repo = ble_scan_repo
         self._devices: dict[str, dict] = {}
+        self._adv_status_cache: dict[int, dict] = {}
         self._device_order: dict[str, int] = {}
         self._next_device_order = 0
         self.is_scanning = False
@@ -61,6 +64,9 @@ class ScanModel(QObject):
         self._protocol.packet_received.connect(self._on_packet)
         self._protocol.ack_received.connect(self._on_ack)
         self._serial.connection_lost.connect(self._on_connection_lost)
+        if self._ble_scan_repo is not None:
+            self._ble_scan_repo.scan_results_updated.connect(self._on_repository_scan_results)
+            self._on_repository_scan_results(self._ble_scan_repo.merged_results())
         
         self._prune_timer = QTimer(self)
         self._prune_timer.timeout.connect(self._prune_stale_devices)
@@ -94,7 +100,6 @@ class ScanModel(QObject):
                 dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
             )
             self.is_scanning = True
-        self._prune_timer.start(5000)
 
     def restart_scan(self) -> None:
         """Force a fresh scan command sequence for the popup retry button."""
@@ -175,14 +180,92 @@ class ScanModel(QObject):
             self._protocol.ack_received.disconnect(self._on_ack)
         except Exception:
             pass
+        if self._ble_scan_repo is not None:
+            try:
+                self._ble_scan_repo.scan_results_updated.disconnect(self._on_repository_scan_results)
+            except Exception:
+                pass
 
     def _on_packet(self, param_name: str, pkt) -> None:
         if param_name == "ble_scan_result":
-            self._handle_scan_result(pkt.ble_scan_result)
+            if self._ble_scan_repo is None:
+                self._handle_scan_result(pkt.ble_scan_result)
+            return
+        elif param_name == "ble_adv_status":
+            if self._ble_scan_repo is None:
+                self._handle_adv_status(pkt.ble_adv_status)
+            return
         elif param_name == "ble_status_resp":
             self._handle_ble_status(pkt.ble_status_resp)
         elif param_name == "device_information_resp":
             self._handle_device_info(pkt.device_information_resp)
+
+    @staticmethod
+    def _device_name_candidate(name: str) -> int:
+        name = str(name or "").strip()
+        match = re.search(r"(\d+)$", name)
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            return 0
+
+    def _merge_candidates(self, device: dict) -> tuple[int, ...]:
+        serial_number = int(device.get("serial_number") or 0)
+        device_id = int(device.get("device_id") or 0)
+        name_candidate = self._device_name_candidate(device.get("name", ""))
+        candidates = []
+        for candidate in (
+            device_id,
+            serial_number,
+            serial_number & 0xFFFF if serial_number else 0,
+            name_candidate,
+        ):
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+        return tuple(candidates)
+
+    def _handle_adv_status(self, adv) -> None:
+        device_id = int(getattr(adv, "device_id", 0) or 0)
+        serial_number = int(getattr(adv, "serial_number", 0) or 0)
+
+        adv_data = {
+            "device_id": device_id,
+            "serial_number": serial_number,
+            "serial": f"0x{serial_number:08X}" if serial_number else "",
+            "bat_soc_percent": int(getattr(adv, "bat_soc_percent", 0) or 0),
+            "warning_count": int(getattr(adv, "warning_count", 0) or 0),
+            "error_count": int(getattr(adv, "error_count", 0) or 0),
+            # Receive timestamps for protocol completeness, but do not display them in the scan popup.
+            "local_timestamp_ms": int(getattr(adv, "local_timestamp_ms", 0) or 0),
+            "local_timestamp_s": int(getattr(adv, "local_timestamp_s", 0) or 0),
+        }
+
+        if device_id:
+            self._adv_status_cache[device_id] = adv_data
+        if serial_number:
+            self._adv_status_cache[serial_number] = adv_data
+
+        updated = False
+        for dev in self._devices.values():
+            candidates = self._merge_candidates(dev)
+            for candidate in candidates:
+                if candidate in self._adv_status_cache:
+                    cached = self._adv_status_cache[candidate]
+                    dev.update({
+                        "device_id": cached.get("device_id", 0),
+                        "serial_number": cached.get("serial_number", 0),
+                        "serial": cached.get("serial", ""),
+                        "bat_soc_percent": cached.get("bat_soc_percent", 0),
+                        "warning_count": cached.get("warning_count", 0),
+                        "error_count": cached.get("error_count", 0),
+                    })
+                    updated = True
+                    break
+
+        if updated:
+            self._emit_sorted_devices()
 
     def _handle_scan_result(self, result) -> None:
         mac_hex = ":".join(f"{b:02X}" for b in result.mac_address)
@@ -190,15 +273,34 @@ class ScanModel(QObject):
             self._device_order[mac_hex] = self._next_device_order
             self._next_device_order += 1
 
+        scan_serial_number = int(getattr(result, "serial_number", 0) or 0)
         current = self._devices.get(mac_hex, {})
+        preserved_serial_number = int(current.get("serial_number") or 0)
         current.update({
-            "name": result.name or f"UWB-{mac_hex[-5:]}",
+            "name": str(getattr(result, "name", "") or "").strip() or "-",
             "mac": mac_hex,
             "rssi": result.rssi_dbm,
-            "serial": f"0x{result.serial_number:08X}" if result.serial_number else "",
+            # Keep raw scan serial only for merge matching. Display serial comes from ble_adv_status.
+            "serial_number": scan_serial_number or preserved_serial_number,
+            "serial": current.get("serial", ""),
             "last_seen": time.monotonic(),
             "order": self._device_order[mac_hex],
         })
+
+        candidates = self._merge_candidates(current)
+        for candidate in candidates:
+            if candidate in self._adv_status_cache:
+                cached = self._adv_status_cache[candidate]
+                current.update({
+                    "device_id": cached.get("device_id", 0),
+                    "serial_number": cached.get("serial_number", scan_serial_number),
+                    "serial": cached.get("serial", ""),
+                    "bat_soc_percent": cached.get("bat_soc_percent", 0),
+                    "warning_count": cached.get("warning_count", 0),
+                    "error_count": cached.get("error_count", 0),
+                })
+                break
+
         self._devices[mac_hex] = current
         self._emit_sorted_devices()
 
@@ -325,20 +427,37 @@ class ScanModel(QObject):
         self.connect_success.emit(info)
 
     def _prune_stale_devices(self) -> None:
-        now = time.monotonic()
-        stale = [mac for mac, d in self._devices.items() if now - d["last_seen"] > DEVICE_TIMEOUT_S]
-        if stale:
-            for mac in stale:
-                del self._devices[mac]
-                self._device_order.pop(mac, None)
-            self._emit_sorted_devices()
+        # Keep the last discovered snapshot until the user manually rescans.
+        return
+
+    def _on_repository_scan_results(self, devices: list) -> None:
+        self._devices.clear()
+        self._device_order.clear()
+        self._next_device_order = 0
+
+        for index, device in enumerate(devices or []):
+            current = dict(device or {})
+            mac = str(current.get("mac") or "").strip().upper()
+            if not mac:
+                continue
+            order = int(current.get("order", index) or index)
+            current["order"] = order
+            self._devices[mac] = current
+            self._device_order[mac] = order
+            self._next_device_order = max(self._next_device_order, order + 1)
+
+        self._emit_sorted_devices()
 
     def _emit_sorted_devices(self) -> None:
         sorted_list = sorted(self._devices.values(), key=lambda d: d.get("order", 0))
         self.device_list_changed.emit(sorted_list)
 
     def _clear_devices(self) -> None:
+        if self._ble_scan_repo is not None:
+            self._ble_scan_repo.clear()
+            return
         self._devices.clear()
+        self._adv_status_cache.clear()
         self._device_order.clear()
         self._next_device_order = 0
         self.device_list_changed.emit([])

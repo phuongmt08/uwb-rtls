@@ -431,7 +431,7 @@ class DeviceInfoViewModel(QObject):
             "disconnect_reason_name": info.get("disconnect_reason_name"),
         }
         if self._telemetry_model:
-            payload.update(self._telemetry_model.handle_ble_status(payload))
+            self._telemetry_model.handle_ble_status(payload)
         self.ble_info_updated.emit(payload)
 
     def _on_ble_conn_params_parsed(self, params: dict):
@@ -443,7 +443,7 @@ class DeviceInfoViewModel(QObject):
             "phy": params.get("phy", "-"),
         }
         if self._telemetry_model:
-            payload.update(self._telemetry_model.handle_ble_conn_params(payload))
+            self._telemetry_model.handle_ble_conn_params(payload)
         self.ble_info_updated.emit(payload)
 
     def _on_connection_state_changed(self, info: dict):
