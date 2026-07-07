@@ -30,7 +30,7 @@
 #define CHG_START_SOC_PCT   60.0f
 #define CHG_STOP_SOC_PCT    95.0f
 #define CHG_MAX_TEMP_DEGC   60.0f
-#define BAT_CHARGING_CRATE_PHR 1.0f
+#define BAT_CHARGING_CRATE_PHR 1000.0f
 #define ALERT_PERIOD_MS     1000
 #define UWB_TELEMETRY_PERIOD_TICKS 50U /* sys_pm_task runs at 10 Hz -> 5 s */
 

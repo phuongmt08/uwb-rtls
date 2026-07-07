@@ -28,6 +28,7 @@ bool network_send_ble_adv_status(network_core_t *stream, uint8_t dst, const prot
 bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, const protobuf_sensor_fusion_result_t *data);
 #ifndef BOOTLOADER
 bool network_send_pm_telemetry(network_core_t *stream, uint8_t dst);
+bool network_send_rtos_resource(network_core_t *stream, uint8_t dst);
 #endif
 
 #endif /* __NETWORK_CMD_H */

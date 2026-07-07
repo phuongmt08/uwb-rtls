@@ -151,9 +151,10 @@ int32_t bsp_battery_get_remaining_time(void)
 
   if (crate > 0)
     /* Convention: positive = discharging to empty, negative = charging to full. */
-    return -((int32_t) (100 - soc) * 60) / (int32_t) crate;
+    /* crate is in m%/hr, so multiply numerator by 1000 to keep minutes unit */
+    return -((int32_t) (100 - soc) * 60000) / (int32_t) crate;
   else
-    return ((int32_t) soc * 60) / (int32_t) (-crate);
+    return ((int32_t) soc * 60000) / (int32_t) (-crate);
 }
 
 bool bsp_battery_is_present(void)

@@ -20,6 +20,7 @@
     #include "otp/otp.h"
     #include "app_calib_master.h"
     #include "app_rtos_handles.h"
+    #include "version.h"
 #else
     #include "sys_logger_bl.h"
     #include "otp/otp.h"
@@ -428,14 +429,22 @@ static void network_cmd_device_information_get(const protobuf_packet_t *pkt)
     }
     resp.params.device_information_resp.hw_version = hw_version;
 
+    resp.params.device_information_resp.has_fw_version = true;
     bsp_app_image_header_t app_hdr;
     memset(&app_hdr, 0, sizeof(app_hdr));
-    if (bsp_flash_read_app_header(&app_hdr, sizeof(app_hdr))) {
+    if (bsp_flash_read_app_header(&app_hdr, sizeof(app_hdr)) && 
+        app_hdr.fw_major != 0 && app_hdr.fw_major != 0xFFFFu) {
         resp.params.device_information_resp.fw_version.major  = app_hdr.fw_major;
         resp.params.device_information_resp.fw_version.minor  = app_hdr.fw_minor;
         resp.params.device_information_resp.fw_version.patch  = app_hdr.fw_patch;
         resp.params.device_information_resp.fw_version.build  = app_hdr.fw_build;
         resp.params.device_information_resp.fw_version.gitsha = app_hdr.fw_gitsha;
+    } else {
+        resp.params.device_information_resp.fw_version.major  = FW_VERSION_MAJOR;
+        resp.params.device_information_resp.fw_version.minor  = FW_VERSION_MINOR;
+        resp.params.device_information_resp.fw_version.patch  = FW_VERSION_PATCH;
+        resp.params.device_information_resp.fw_version.build  = FW_VERSION_BUILD;
+        resp.params.device_information_resp.fw_version.gitsha = FW_VERSION_GITSHA;
     }
 
     network_cmd_send_packet(&resp);
@@ -1715,6 +1724,36 @@ bool network_send_pm_telemetry(network_core_t *stream, uint8_t dst)
     
     // Alert flags
     resp.params.battery_info_resp.error_mask       = pm_status.error_mask;
+
+    return network_core_send_packet(stream, dst, &resp);
+}
+
+/**
+ * Send RTOS diagnostics/resources to a specific host destination.
+ */
+bool network_send_rtos_resource(network_core_t *stream, uint8_t dst)
+{
+    CHECK(stream, false);
+    if (!network_cmd_host_active()) {
+        return false;
+    }
+
+    protobuf_packet_t resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.which_params = protobuf_packet_t_rtos_resource_resp_tag;
+    resp.hdr.addr.dst = dst;
+
+    const bsp_util_rtos_snapshot_t *snapshot = bsp_util_rtos_monitor_get();
+    if (snapshot != NULL) {
+        resp.params.rtos_resource_resp.sample_window_ms = snapshot->sample_window_ms;
+        resp.params.rtos_resource_resp.cpu_busy_permille = snapshot->cpu_busy_permille;
+        resp.params.rtos_resource_resp.heap_free_bytes = snapshot->heap_free_bytes;
+        resp.params.rtos_resource_resp.heap_min_ever_free_bytes = snapshot->heap_min_ever_free_bytes;
+        resp.params.rtos_resource_resp.min_stack_free_bytes = snapshot->min_stack_free_bytes;
+        resp.params.rtos_resource_resp.min_stack_task_id = snapshot->min_stack_task_id;
+        resp.params.rtos_resource_resp.task_count = snapshot->task_count;
+        resp.params.rtos_resource_resp.health_flags = snapshot->health_flags;
+    }
 
     return network_core_send_packet(stream, dst, &resp);
 }

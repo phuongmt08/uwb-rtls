@@ -685,6 +685,7 @@ void sys_monitoring_entry(void *argument)
   {
     osDelay(monitor_interval_ms);
     bsp_util_rtos_monitor_update();
+    network_send_rtos_resource(&g_network_core, protobuf_PACKET_ADDR_HOST);
 
 #if APP_RTOS_STATS_LOG_ENABLE
     const bsp_util_rtos_snapshot_t *snap = bsp_util_rtos_monitor_get();
