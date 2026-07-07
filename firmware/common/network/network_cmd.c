@@ -1527,6 +1527,17 @@ void network_cmd_process(void)
     if (s_log_stream_enabled && network_cmd_host_active()) {
         network_send_log(s_log_stream_dst, 0xFFFFu);
     }
+
+#ifndef BOOTLOADER
+    static uint32_t last_telemetry_ms = 0;
+    uint32_t now = bsp_util_get_ticks();
+    if (network_cmd_host_active()) {
+        if (now - last_telemetry_ms >= 1000) {
+            last_telemetry_ms = now;
+            network_send_pm_telemetry(s_network_cmd.stream, protobuf_PACKET_ADDR_HOST);
+        }
+    }
+#endif
 }
 
 bool network_cmd_process_packet(const protobuf_packet_t *pkt)
@@ -1673,3 +1684,38 @@ bool network_send_ble_adv_status(network_core_t *stream, uint8_t dst, const prot
 }
 
 #endif /* HAVE_BLE_PERIPHERAL */
+
+#ifndef BOOTLOADER
+/**
+ * Send power management telemetry to a specific host destination.
+ */
+bool network_send_pm_telemetry(network_core_t *stream, uint8_t dst)
+{
+    CHECK(stream, false);
+
+    sys_pm_status_t pm_status;
+    sys_pm_get_status(&pm_status);
+
+    protobuf_packet_t resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.which_params = protobuf_packet_t_battery_info_resp_tag;
+    resp.hdr.addr.dst = dst;
+
+    resp.params.battery_info_resp.bat_voltage_mv   = (uint32_t)pm_status.bat_voltage_mv;
+    resp.params.battery_info_resp.bat_soc_percent  = (uint32_t)pm_status.soc;
+    resp.params.battery_info_resp.remaining_min    = pm_status.remaining_min;
+    resp.params.battery_info_resp.is_charging      = pm_status.is_charging;
+    
+    // Hardware telemetry fields
+    resp.params.battery_info_resp.mcu_temp_c       = pm_status.temp_degc;
+    resp.params.battery_info_resp.mcu_voltage_mv   = (uint32_t)pm_status.vdda_mv;
+    resp.params.battery_info_resp.uwb_temp_c       = pm_status.uwb_temp_c;
+    resp.params.battery_info_resp.uwb_voltage_mv   = (uint32_t)pm_status.uwb_vbat_mv;
+    resp.params.battery_info_resp.imu_temp_c       = pm_status.imu_temp_c;
+    
+    // Alert flags
+    resp.params.battery_info_resp.error_mask       = pm_status.error_mask;
+
+    return network_core_send_packet(stream, dst, &resp);
+}
+#endif

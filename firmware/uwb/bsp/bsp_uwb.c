@@ -29,12 +29,21 @@
 #define DWT_START_RX_DELAYED   1
 #define TX_MAX_PAYLOAD         120
 #define DW1000_CRC_LENGTH      2
-#define DW1000_SLEEP_WAKE_US   1200U
-#define DW1000_SLEEP_SETTLE_MS 7U
-#define DW1000_SLEEP_WAKE_RETRIES 3U
 #define DW1000_SLEEP_WAKE_SPI_BYTES 200U
-#define DW1000_SLEEP_MODE      (DWT_CONFIG | DWT_LOADUCODE | DWT_LOADLDO | DWT_LOADOPSET)
-#define DW1000_SLEEP_WAKE_CFG  (DWT_WAKE_CS | DWT_SLP_EN)
+#define DW1000_SLEEP_WAKE_RETRIES   3U
+#define DW1000_BOOT_INIT_RETRIES    3U
+#define DW1000_BOOT_RETRY_DELAY_MS  5U
+#define DW1000_RUNTIME_IRQ_MASK     ((uint32_t)(DWT_INT_TFRS | DWT_INT_RFCG | \
+                                                DWT_INT_RFTO | DWT_INT_RXPTO | \
+                                                DWT_INT_RXOVRR | DWT_INT_RFCE | \
+                                                DWT_INT_RPHE | DWT_INT_RFSL | \
+                                                DWT_INT_SFDT))
+
+/* Enabling the internal sleep counter selects true SLEEP rather than
+ * DEEPSLEEP. The MCU still wakes the IC earlier through CS; the long counter
+ * is only the SLEEP-state selector and safety wake source. */
+#define DW1000_SLEEP_COUNT     0xFFFFU
+#define DW1000_SLEEP_WAKE_CFG  (DWT_WAKE_SLPCNT | DWT_WAKE_CS | DWT_SLP_EN)
 
 #define DW_MASK_40             0x000000FFFFFFFFFFULL
 #define DW_FMT                 "0x%08lX%08lX"
@@ -58,6 +67,15 @@ static uint64_t s_last_tx_timestamp = 0;    /* Cached TX timestamp */
 static bsp_uwb_rx_quality_t s_last_rx_quality = {0};
 static uint16_t s_tx_antenna_delay  = 0;    /* Cached TX antenna delay */
 static uint16_t s_rx_antenna_delay  = 0;    /* Cached RX antenna delay */
+static protobuf_uwb_cfg_t s_runtime_cfg = {0};
+static bool s_runtime_cfg_valid = false;
+static bool s_runtime_snapshot_valid = false;
+static uint32_t s_expected_sys_cfg = 0U;
+static uint32_t s_expected_sys_mask = 0U;
+static uint32_t s_expected_chan_ctrl = 0U;
+static uint32_t s_expected_tx_power = 0U;
+static uint16_t s_expected_tx_antd = 0U;
+static uint16_t s_expected_rx_antd = 0U;
 
 /* RX error counters — incremented in bsp_uwb_rx(), read via bsp_uwb_get_rx_error_counts(). */
 static uint32_t s_rx_timeout_count  = 0;
@@ -119,6 +137,7 @@ static void     release_DW1000_reset(void);
 static void     port_set_dw1000_slowrate(void);
 static void     port_set_dw1000_fastrate(void);
 static void     configure_dw1000_sleep(void);
+static bsp_err_t apply_runtime_config_awake(const protobuf_uwb_cfg_t *cfg, bool log_config);
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms);
 static void     capture_rx_quality(bsp_uwb_rx_quality_t *out_quality);
 
@@ -231,7 +250,16 @@ static void port_set_dw1000_fastrate(void)
 
 static void configure_dw1000_sleep(void)
 {
-  dwt_configuresleep(DW1000_SLEEP_MODE, DW1000_SLEEP_WAKE_CFG);
+  uint16_t mode = DWT_PRESRV_SLEEP | DWT_CONFIG | DWT_LOADUCODE;
+
+  if ((dwt_getldotune() & 0xFFU) != 0U) {
+    mode |= DWT_LOADLDO;
+  }
+  if (s_runtime_cfg_valid && s_runtime_cfg.uwb_preamble_len == DWT_PLEN_64) {
+    mode |= DWT_LOADOPSET;
+  }
+
+  dwt_configuresleep(mode, DW1000_SLEEP_WAKE_CFG);
 }
 
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
@@ -280,25 +308,51 @@ static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
 
 bsp_err_t bsp_uwb_init(void)
 {
-  uint32_t dev_id;
+  uint32_t dev_id = 0U;
+  int init_status = DWT_ERROR;
+  int wake_status = DWT_ERROR;
+  uint8_t wake_buf[DW1000_SLEEP_WAKE_SPI_BYTES] = {0U};
 
   bsp_util_init();
+  s_initialized = false;
+  s_runtime_cfg_valid = false;
+  s_runtime_snapshot_valid = false;
   s_sleeping = false;
   s_rx_windowed = false;
-  reset_DW1000();
-  port_set_dw1000_slowrate();
 
-  /* Load LDE microcode - CRITICAL for accurate RX timestamps */
-  if (dwt_initialise(DWT_LOADUCODE) != DWT_SUCCESS)
+  for (uint32_t attempt = 0U; attempt < DW1000_BOOT_INIT_RETRIES; attempt++)
   {
-    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT, "dwt_initialise failed");
-    return BSP_ERR;
+    /* MCU reset does not prove that DW1000 also reset: its rail/AON state may
+     * survive a short power interruption while the radio was asleep. Always
+     * use the Deca wake sequence first, then establish a clean reset state. */
+    HAL_GPIO_WritePin(UWB_CS_PORT, UWB_CS_PIN, GPIO_PIN_SET);
+    port_set_dw1000_slowrate();
+    wake_status = dwt_spicswakeup(wake_buf, sizeof(wake_buf));
+    reset_DW1000();
+    port_set_dw1000_slowrate();
+
+    /* Load LDE microcode - CRITICAL for accurate RX timestamps. */
+    init_status = dwt_initialise(DWT_LOADUCODE | DWT_LOADLDOTUNE);
+    dev_id = dwt_readdevid();
+    if (init_status == DWT_SUCCESS && dev_id == DW1000_DEVICE_ID) {
+      break;
+    }
+
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+           "[INIT] DW1000 attempt %lu/%u failed: wake=%d init=%d dev_id=0x%08lX",
+           (unsigned long)(attempt + 1U),
+           (unsigned)DW1000_BOOT_INIT_RETRIES,
+           wake_status,
+           init_status,
+           (unsigned long)dev_id);
+    bsp_delay_ms(DW1000_BOOT_RETRY_DELAY_MS);
   }
 
-  dev_id = dwt_readdevid();
-  if (dev_id != DW1000_DEVICE_ID)
+  if (init_status != DWT_SUCCESS || dev_id != DW1000_DEVICE_ID)
   {
-    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT, "Wrong Device ID: 0x%08X", dev_id);
+    RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_UWB_INIT,
+           "DW1000 init failed after recovery: wake=%d init=%d dev_id=0x%08lX",
+           wake_status, init_status, (unsigned long)dev_id);
     return BSP_ERR;
   }
 
@@ -344,16 +398,9 @@ static uint16_t get_sfd_timeout(uint32_t preamble_len, uint32_t ns_sfd, uint32_t
     return (uint16_t)(plen + ns_sfd + pac - 8);
 }
 
-bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
+static bsp_err_t apply_runtime_config_awake(const protobuf_uwb_cfg_t *cfg, bool log_config)
 {
-  CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
-  CHECK_PARAM(s_initialized, BSP_ERR);
-  if (bsp_uwb_sleep_wake() != BSP_OK)
-  {
-    return BSP_ERR;
-  }
-
-    dwt_config_t dw_cfg = {
+  dwt_config_t dw_cfg = {
         .chan           = cfg->uwb_channel,
         .prf            = (cfg->uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M,
         .txPreambLength = cfg->uwb_preamble_len,
@@ -366,13 +413,17 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
         .sfdTO          = get_sfd_timeout(cfg->uwb_preamble_len, cfg->uwb_ns_sfd, cfg->uwb_rx_pac)
     };
     
+  if (log_config) {
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] CH=%u PRF=%uMHz DR=%u PCode=%u",
            dw_cfg.chan, cfg->uwb_prf, dw_cfg.dataRate, dw_cfg.txCode);
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] PLEN=%u PAC=%u SFD=%u nsSFD=%u PHR=%u",
            cfg->uwb_preamble_len, cfg->uwb_rx_pac, dw_cfg.sfdTO, dw_cfg.nsSFD, dw_cfg.phrMode);
+  }
 
   if (dwt_configure(&dw_cfg, DWT_LOADNONE) != DWT_SUCCESS)
   {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+           "[BSP][CFG] dwt_configure failed after wake/init");
     return BSP_ERR;
   }
 
@@ -390,30 +441,92 @@ bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
   s_tx_antenna_delay = cfg->tx_antenna_delay;
   s_rx_antenna_delay = cfg->rx_antenna_delay;
 
-    /* Configure interrupt mask.
-     * Event-driven TDMA needs DWT_INT_TFRS (TX frame sent) so that
-     * uwb_tx_cb fires and TX_DONE events reach the queue.
-     * bsp_uwb_configure() is called AFTER bsp_uwb_init() which already set the
-     * interrupt mask, but dwt_configure() resets the chip config so we must
-     * re-apply it here. */
-    dwt_setinterrupt((uint32)(DWT_INT_TFRS |   /* TX frame sent      */
-                              DWT_INT_RFCG |   /* RX good frame      */
-                              DWT_INT_RFTO |   /* RX frame timeout   */
-                              DWT_INT_RXPTO |  /* Preamble timeout   */
-                              DWT_INT_RXOVRR | /* RX buffer overrun  */
-                              DWT_INT_RFCE |   /* RX CRC error       */
-                              DWT_INT_RPHE |   /* RX PHR error       */
-                              DWT_INT_RFSL |   /* RX sync loss       */
-                              DWT_INT_SFDT), 1); /* RX SFD timeout   */
+  /* dwt_configure() resets the interrupt mask; restore every event used by
+   * the foreground state machine after both configure and sleep wake. */
+  dwt_setinterrupt((uint32)(DWT_INT_TFRS |
+                            DWT_INT_RFCG |
+                            DWT_INT_RFTO |
+                            DWT_INT_RXPTO |
+                            DWT_INT_RXOVRR |
+                            DWT_INT_RFCE |
+                            DWT_INT_RPHE |
+                            DWT_INT_RFSL |
+                            DWT_INT_SFDT), 1);
 
-    dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
-    dwt_forcetrxoff();
-    configure_dw1000_sleep();
-    dwt_setleds(1);
+  dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
+  dwt_forcetrxoff();
+  dwt_setleds(1);
 
+  s_expected_sys_cfg = dwt_read32bitreg(SYS_CFG_ID);
+  s_expected_sys_mask = dwt_read32bitreg(SYS_MASK_ID);
+  s_expected_chan_ctrl = dwt_read32bitreg(CHAN_CTRL_ID);
+  s_expected_tx_power = dwt_read32bitreg(TX_POWER_ID);
+  s_expected_tx_antd = dwt_read16bitoffsetreg(TX_ANTD_ID, 0U);
+  s_expected_rx_antd = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_RXANTD_OFFSET);
+  s_runtime_snapshot_valid = true;
+
+  if (log_config) {
     RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[BSP][CFG] Configuration complete (TX delay=%u, RX delay=%u)",
            cfg->tx_antenna_delay, cfg->rx_antenna_delay);
+  }
 
+  return BSP_OK;
+}
+
+static bool runtime_config_matches_awake(void)
+{
+  /* RXWTOE follows each finite RX window and is intentionally changed by
+   * dwt_setrxtimeout(). SLP2INIT/CPLOCK are temporary wake IRQ enables. None
+   * of these bits indicates that the persistent PHY configuration was lost. */
+  const uint32_t stable_sys_cfg_mask = SYS_CFG_MASK & ~SYS_CFG_RXWTOE;
+  const uint32_t stable_sys_mask_mask =
+      ~(uint32_t)(SYS_MASK_MSLP2INIT | SYS_MASK_MCPLOCK);
+  uint32_t actual_sys_cfg = dwt_read32bitreg(SYS_CFG_ID);
+  uint32_t actual_sys_mask = dwt_read32bitreg(SYS_MASK_ID);
+  uint32_t actual_chan_ctrl = dwt_read32bitreg(CHAN_CTRL_ID);
+  uint32_t actual_tx_power = dwt_read32bitreg(TX_POWER_ID);
+  uint32_t mismatch = 0U;
+
+  if (!s_runtime_snapshot_valid) mismatch |= 0x10U;
+  if ((actual_sys_cfg & stable_sys_cfg_mask) !=
+      (s_expected_sys_cfg & stable_sys_cfg_mask)) mismatch |= 0x01U;
+  if ((actual_sys_mask & stable_sys_mask_mask) !=
+      (s_expected_sys_mask & stable_sys_mask_mask)) mismatch |= 0x02U;
+  if (actual_chan_ctrl != s_expected_chan_ctrl) mismatch |= 0x04U;
+  if (actual_tx_power != s_expected_tx_power) mismatch |= 0x08U;
+
+  if (mismatch != 0U) {
+    static uint32_t last_mismatch_log_tick = 0U;
+    uint32_t now = HAL_GetTick();
+    if (last_mismatch_log_tick == 0U ||
+        (now - last_mismatch_log_tick) >= 1000U) {
+      last_mismatch_log_tick = now;
+      RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+             "[SLEEP] AON mismatch fields=0x%02lX sys=%08lX/%08lX mask=%08lX/%08lX chan=%08lX/%08lX txp=%08lX/%08lX",
+             (unsigned long)mismatch,
+             (unsigned long)actual_sys_cfg, (unsigned long)s_expected_sys_cfg,
+             (unsigned long)actual_sys_mask, (unsigned long)s_expected_sys_mask,
+             (unsigned long)actual_chan_ctrl, (unsigned long)s_expected_chan_ctrl,
+             (unsigned long)actual_tx_power, (unsigned long)s_expected_tx_power);
+    }
+  }
+
+  return mismatch == 0U;
+}
+
+bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
+{
+  CHECK_PARAM(cfg != NULL, BSP_ERR_PARAM);
+  CHECK_PARAM(s_initialized, BSP_ERR);
+
+  if (bsp_uwb_sleep_wake() != BSP_OK ||
+      apply_runtime_config_awake(cfg, true) != BSP_OK)
+  {
+    return BSP_ERR;
+  }
+
+  s_runtime_cfg = *cfg;
+  s_runtime_cfg_valid = true;
   return BSP_OK;
 }
 
@@ -720,6 +833,7 @@ void bsp_uwb_idle(void)
 bsp_err_t bsp_uwb_sleep_enter(void)
 {
   CHECK_PARAM(s_initialized, BSP_ERR);
+  CHECK_PARAM(s_runtime_cfg_valid, BSP_ERR);
 
   if (s_sleeping)
   {
@@ -727,11 +841,17 @@ bsp_err_t bsp_uwb_sleep_enter(void)
   }
 
   dwt_forcetrxoff();
+  /* Do not persist a stale finite RX-window enable into AON. The next RX
+   * operation configures its own timeout explicitly through the Deca API. */
+  dwt_setrxtimeout(0U);
   dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
   s_rx_windowed = false;
   bsp_uwb_clear_event();
 
+  /* The user manual recommends SLP2INIT or CPLOCK as the wake confirmation. */
+  dwt_setinterrupt(SYS_MASK_MSLP2INIT | SYS_MASK_MCPLOCK, 1);
   port_set_dw1000_slowrate();
+  dwt_configuresleepcnt(DW1000_SLEEP_COUNT);
   configure_dw1000_sleep();
   dwt_entersleep();
   port_set_dw1000_fastrate();
@@ -742,37 +862,95 @@ bsp_err_t bsp_uwb_sleep_enter(void)
 
 bsp_err_t bsp_uwb_sleep_wake(void)
 {
+  CHECK_PARAM(s_initialized, BSP_ERR);
+
   if (!s_sleeping)
   {
     return BSP_OK;
   }
 
-  port_set_dw1000_slowrate();
+  if (!s_runtime_cfg_valid) {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+           "[SLEEP] Wake rejected: no cached runtime configuration");
+    return BSP_ERR;
+  }
 
+  /* Keep the official driver wake sequence even though XTAL remains enabled.
+   * It guarantees the minimum CS-low interval and waits for AON restore. */
+  port_set_dw1000_slowrate();
   uint32_t dev_id = 0U;
+  uint32_t wake_sys_status = 0U;
+  int wake_status = DWT_ERROR;
   uint8_t wake_buf[DW1000_SLEEP_WAKE_SPI_BYTES] = {0U};
   for (uint32_t attempt = 0U; attempt < DW1000_SLEEP_WAKE_RETRIES; attempt++)
   {
-    (void)dwt_spicswakeup(wake_buf, sizeof(wake_buf));
-    bsp_delay_us(DW1000_SLEEP_WAKE_US);
-    bsp_delay_ms(DW1000_SLEEP_SETTLE_MS);
-
+    wake_status = dwt_spicswakeup(wake_buf, sizeof(wake_buf));
     dev_id = dwt_readdevid();
-    if (dev_id == DW1000_DEVICE_ID)
-    {
+    wake_sys_status = dwt_read32bitreg(SYS_STATUS_ID);
+    bool wake_event_seen = (wake_sys_status &
+                            (SYS_STATUS_SLP2INIT | SYS_STATUS_CPLOCK)) != 0U;
+    if (wake_status == DWT_SUCCESS &&
+        dev_id == DW1000_DEVICE_ID &&
+        wake_event_seen) {
       s_sleeping = false;
-      dwt_write32bitreg(SYS_STATUS_ID, 0xFFFFFFFFUL);
-      dwt_forcetrxoff();
-      dwt_setleds(1);
       port_set_dw1000_fastrate();
+
+      dwt_setinterrupt(SYS_MASK_MSLP2INIT | SYS_MASK_MCPLOCK, 0);
+      dwt_write32bitreg(SYS_STATUS_ID,
+                       SYS_STATUS_SLP2INIT | SYS_STATUS_CPLOCK);
+      /* SYS_MASK is runtime routing state. Restore it explicitly through the
+       * Deca API before evaluating whether the PHY configuration survived. */
+      dwt_setinterrupt(DW1000_RUNTIME_IRQ_MASK, 1);
+
+      /* AON is the normal fast path. Only use Deca driver configuration APIs
+       * when readback proves that a saved field was not restored. */
+      if (!runtime_config_matches_awake()) {
+        if (apply_runtime_config_awake(&s_runtime_cfg, false) != BSP_OK ||
+            !runtime_config_matches_awake()) {
+          RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+                 "[SLEEP] Wake PHY configure/readback failed");
+          return BSP_ERR;
+        }
+      } else {
+        /* Since AON does not restore antenna delays and LED configurations,
+         * we must always re-program them manually even when other configuration
+         * registers matched. */
+        dwt_setrxantennadelay(s_runtime_cfg.rx_antenna_delay);
+        dwt_settxantennadelay(s_runtime_cfg.tx_antenna_delay);
+        dwt_setleds(1);
+      }
+
+      const uint32_t required_irq_mask = DWT_INT_TFRS |
+                                         DWT_INT_RFCG |
+                                         DWT_INT_RFTO |
+                                         DWT_INT_RXPTO |
+                                         DWT_INT_RXOVRR |
+                                         DWT_INT_RFCE |
+                                         DWT_INT_RPHE |
+                                         DWT_INT_RFSL |
+                                         DWT_INT_SFDT;
+      uint32_t restored_irq_mask = dwt_read32bitreg(SYS_MASK_ID);
+      uint32_t verify_dev_id = dwt_readdevid();
+      if (verify_dev_id != DW1000_DEVICE_ID ||
+          (restored_irq_mask & required_irq_mask) != required_irq_mask) {
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+               "[SLEEP] Wake verify failed: dev_id=0x%08lX mask=0x%08lX required=0x%08lX",
+               (unsigned long)verify_dev_id,
+               (unsigned long)restored_irq_mask,
+               (unsigned long)required_irq_mask);
+        return BSP_ERR;
+      }
+
+      s_rx_windowed = false;
+      bsp_uwb_clear_event();
       return BSP_OK;
     }
   }
 
   port_set_dw1000_fastrate();
   RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
-         "[SLEEP] DW1000 wake verify failed: dev_id=0x%08lX",
-         (unsigned long)dev_id);
+         "[SLEEP] DW1000 sleep wake failed: status=%d dev_id=0x%08lX sys=0x%08lX",
+         wake_status, (unsigned long)dev_id, (unsigned long)wake_sys_status);
   return BSP_ERR;
 }
 

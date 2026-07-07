@@ -74,7 +74,9 @@
 \setlength{\emergencystretch}{3em} % prevent overfull lines
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-\setcounter{secnumdepth}{4}
+% Đánh số tối đa đến \subsubsection, ví dụ 3.3.4.4.
+% Các \paragraph bên dưới chỉ là tiêu đề nội bộ và không tạo cấp 3.3.4.4.x.
+\setcounter{secnumdepth}{3}
 \setcounter{tocdepth}{3}
 \ifLuaTeX
   \usepackage{selnolig}  % disable illegal ligatures
@@ -395,50 +397,92 @@ Hình 2.5. Mô hình xác định vị trí dựa trên giao điểm của các 
 
 \subsubsection{Phương pháp trilateration}
 
-Trilateration xác định vị trí của tag từ khoảng cách đến các anchor có tọa độ
-đã biết. Trong mặt phẳng hai chiều, cần tối thiểu ba anchor không thẳng hàng.
-Về mặt hình học, nghiệm là giao điểm của các đường tròn khoảng cách; khi dữ
-liệu có nhiễu, giao điểm không còn trùng tại một điểm và kết quả chỉ là một
-ước lượng.
+Trilateration là phương pháp xác định vị trí từ khoảng cách đến các điểm tham
+chiếu có tọa độ đã biết. Trong bài toán hai chiều, mỗi phép đo khoảng cách xác
+định một đường tròn có tâm tại anchor và bán kính bằng khoảng cách đo. Với ba
+anchor không thẳng hàng, vị trí của tag được xác định từ giao điểm của ba
+đường tròn trong trường hợp lý tưởng.
+
+Trilateration có ưu điểm là mô hình đơn giản, số phép đo yêu cầu ít và phù hợp
+với các hệ thống có tài nguyên tính toán hạn chế. Tuy nhiên, phương pháp phụ
+thuộc mạnh vào chất lượng từng khoảng cách và cách bố trí anchor. Khi các
+anchor gần thẳng hàng, một sai lệch nhỏ của khoảng cách có thể tạo ra sai lệch
+lớn của vị trí. Trong môi trường có nhiễu, các đường tròn thường không giao
+nhau tại cùng một điểm nên cần sử dụng nghiệm xấp xỉ.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox[c][4cm][c]{0.78\linewidth}{\centering
+  Vị trí chèn hình minh họa trilateration với ba đường tròn khoảng cách}}
+  \caption{Nguyên lý xác định vị trí bằng trilateration.}
+  \label{fig:trilateration-concept}
+\end{figure}
 
 \subsubsection{Phương pháp multilateration}
 
-Multilateration mở rộng trilateration cho trường hợp có nhiều hơn số anchor
-tối thiểu. Thay vì tìm giao điểm chính xác, phương pháp lựa chọn vị trí làm
-giảm sai khác giữa khoảng cách dự đoán và khoảng cách đo. Việc sử dụng nhiều
-anchor tạo ra hệ phương trình dư, cho phép đánh giá độ nhất quán của dữ liệu
-và giảm ảnh hưởng của một phép đo riêng lẻ. Các hàm mục tiêu LS, WLS và cách
-xây dựng trọng số được trình bày tại Chương~3.
+Multilateration mở rộng trilateration bằng cách sử dụng nhiều hơn số phép đo
+tối thiểu. Khi có $N>3$ anchor trong bài toán hai chiều, hệ thống thu được một
+hệ phương trình dư. Vị trí không còn được xác định bằng một giao điểm hình học
+duy nhất mà bằng nghiệm phù hợp nhất với toàn bộ tập khoảng cách.
+
+Thông tin dư giúp giảm sự phụ thuộc vào một anchor riêng lẻ, cho phép phát
+hiện phép đo không nhất quán và cải thiện độ ổn định của nghiệm. Đổi lại,
+multilateration cần một tiêu chuẩn tối ưu để phân phối ảnh hưởng của các phép
+đo. Bình phương tối thiểu xem các phép đo có độ tin cậy tương đương, trong khi
+bình phương tối thiểu có trọng số cho phép mỗi khoảng cách đóng góp khác nhau
+tùy theo phương sai hoặc chất lượng quan sát.
+
+Hiệu quả của multilateration vẫn phụ thuộc vào hình học anchor. Việc tăng số
+anchor không bảo đảm tăng độ chính xác nếu các anchor tập trung trên cùng một
+hướng hoặc nếu các phép đo bổ sung có sai lệch hệ thống. Vì vậy, số lượng,
+chất lượng phép đo và độ phân tán hình học cần được xem xét đồng thời.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox[c][4cm][c]{0.78\linewidth}{\centering
+  Vị trí chèn hình minh họa multilateration với hệ đường tròn dư}}
+  \caption{Nguyên lý ước lượng vị trí bằng multilateration.}
+  \label{fig:multilateration-concept}
+\end{figure}
 
 \subsection{Đánh giá sai số và độ tin cậy của kết quả định vị}
 
-Trong hệ thống định vị UWB, các phép đo khoảng cách không có độ tin cậy như
-nhau. Nhiễu, suy hao, truyền đa đường và điều kiện NLOS có thể làm sai lệch
-khoảng cách trước khi dữ liệu được đưa vào thuật toán định vị. Một số nhóm
-thông tin thường được dùng để đánh giá sơ bộ gồm:
+Khoảng cách UWB đo được không chỉ chứa khoảng cách hình học thực mà còn chịu
+ảnh hưởng của nhiễu ngẫu nhiên và sai lệch có hệ thống. Một mô hình khái quát
+cho phép đo thứ $i$ là
+\begin{equation}
+  d_i=\rho_i+b_i+\varepsilon_i,
+  \label{eq:ranging-error-model}
+\end{equation}
+trong đó $\rho_i$ là khoảng cách thực, $b_i$ là thành phần sai lệch và
+$\varepsilon_i$ là nhiễu ngẫu nhiên. Trong điều kiện LOS thuận lợi,
+$b_i$ thường nhỏ; trong điều kiện NLOS hoặc đa đường, thành phần này có thể
+tăng đáng kể và thường mang dấu dương do đường truyền bị kéo dài.
 
-\begin{itemize}
-  \item \textbf{Sai số dư:} phản ánh chênh lệch giữa khoảng cách đo được và
-  khoảng cách dự đoán từ vị trí ước lượng. Sai số dư lớn cho thấy phép đo
-  không phù hợp với các phép đo còn lại hoặc với trạng thái dự đoán.
+Độ tin cậy của một phép đo cần được xem xét từ nhiều nguồn thông tin. Sai số
+dư cho biết mức phù hợp giữa một khoảng cách và nghiệm vị trí hình học. Tuy
+nhiên, residual không đồng nhất với sai số thực: một tập phép đo cùng bị lệch
+vẫn có thể tạo residual nhỏ. Do đó residual cần được diễn giải cùng với đặc
+tính thống kê và điều kiện thu tín hiệu.
 
-  \item \textbf{Khoảng cách Mahalanobis:} đánh giá độ lớn của sai lệch có xét
-  đến mức bất định của phép đo và của trạng thái. Nhờ đó, cùng một sai lệch
-  tuyệt đối có thể được xử lý khác nhau tùy theo độ tin cậy hiện tại.
+Khoảng cách Mahalanobis là thước đo sai lệch có chuẩn hóa theo hiệp phương
+sai. Khác với khoảng cách Euclid, đại lượng này xét cả độ lớn, độ phân tán và
+tương quan giữa các biến quan sát. Vì vậy, nó phù hợp để xác định một mẫu có
+nằm trong vùng phân bố thông thường hay không, đặc biệt khi các đặc trưng có
+đơn vị và độ biến thiên khác nhau.
 
-  \item \textbf{Chất lượng tín hiệu và khoảng cách đo:} các chỉ số như tỷ số
-  tín hiệu trên nhiễu, biên độ thành phần đường truyền đầu tiên và dấu hiệu
-  NLOS cung cấp thông tin về điều kiện lan truyền. Khi khoảng cách tiến gần
-  giới hạn làm việc tin cậy, phương sai của phép đo thường tăng.
+Các chỉ số chất lượng tín hiệu như biên độ đường truyền đầu tiên, công suất
+thu, tỷ số tín hiệu trên nhiễu và dấu hiệu NLOS phản ánh điều kiện lan truyền
+nhưng không trực tiếp đồng nhất với sai số khoảng cách. Quan hệ giữa chúng
+thường phụ thuộc phần cứng, anten, khoảng cách và môi trường, do đó cần được
+đặc trưng bằng dữ liệu đo thay vì sử dụng một ngưỡng chung cho mọi điều kiện.
 
-  \item \textbf{Hình học anchor:} các anchor phân bố trên nhiều hướng tạo ra
-  giao hội tốt hơn; ngược lại, cấu hình gần thẳng hàng có thể khuếch đại sai
-  số khoảng cách thành sai số vị trí.
-\end{itemize}
-
-Các khái niệm trên là cơ sở để xây dựng prefilter, trọng số WLS, ma trận nhiễu
-đo của UKF và cơ chế lựa chọn anchor tại Chương~3. Chương này chỉ trình bày ý
-nghĩa; công thức và logic triển khai được đặt trong phần thiết kế thuật toán.
+Bên cạnh chất lượng từng phép đo, hình học anchor quyết định khả năng biến đổi
+sai số khoảng cách thành sai số tọa độ. Các đường ngắm phân bố trên nhiều
+hướng tạo điều kiện quan sát tốt; cấu hình gần thẳng hàng hoặc tập trung về
+một phía làm bài toán kém điều kiện. Vì vậy, độ tin cậy của kết quả vị trí là
+tổng hợp của sai số đo, mức bất định thống kê và hình học của toàn bộ tập
+anchor.
 
 \subsection{Bộ lọc Unscented Kalman Filter trong hệ thống định vị UWB--IMU}
 
@@ -855,171 +899,445 @@ Flash không chặn workflow UWB.
 
 \subsection{Triển khai các thuật toán định vị nhúng}
 
+Chuỗi xử lý định vị được trình bày theo thứ tự của dữ liệu. Trước hết, kiến
+trúc tầng xử lý xác định luồng trao đổi giữa các khối; tiếp theo, DS--TWR,
+TDMA và CDMA tổ chức quá trình thu thập range. Prefilter thống kê sau đó xây
+dựng measurement weight và lựa chọn layout bằng WGDOP. Cùng một tập range,
+trọng số và layout sau prefilter được đưa song song vào WLS multilateration và
+UKF để so sánh. Cách tổ chức này tách rõ bốn vấn đề: thu thập dữ liệu, đánh
+giá phép đo, đánh giá hình học và lựa chọn phương pháp ước lượng vị trí.
+
 \subsubsection{Kiến trúc tầng xử lý dữ liệu định vị}
 
 \includegraphics[width=6.5in,height=3.83264in]{media/image15.png}
 
 \subsubsection{Thuật toán đo khoảng cách và bộ lập lịch}
 
-Chuỗi đo khoảng cách được tổ chức theo ba lớp. DS--TWR tạo dữ liệu khoảng
-cách; TDMA phân khe phản hồi giữa các anchor trong cùng một vùng; preamble
-code hỗ trợ phân tách các vùng lân cận. Nhờ đó, tag thu thập nhiều phép đo
-trong một superframe có thời gian xác định.
+Đầu vào của thuật toán định vị không chỉ phụ thuộc vào độ chính xác của phép đo
+khoảng cách, mà còn phụ thuộc vào việc các phép đo có được thu nhận trong cùng
+một chu kỳ và không bị xung đột trên kênh truyền hay không. Vì vậy, khối thu
+thập dữ liệu được thiết kế như một chuỗi thống nhất gồm ba chức năng: DS--TWR
+thực hiện phép đo khoảng cách, TDMA xác lập trật tự truy nhập kênh trong một
+vùng, còn preamble code hỗ trợ phân tách các vùng UWB lân cận. Ba chức năng này
+không thay thế lẫn nhau mà giải quyết ba lớp vấn đề khác nhau, như tóm tắt trong
+Bảng~\ref{tab:ranging-scheduler-layers}.
 
-Tag phát POLL để mở đầu chu kỳ. Các anchor trả lời trong khe TDMA đã được cấu
-hình, sau đó tag phát FINAL và thu RESULT. Các mốc phát được lập lịch bằng
-chức năng delayed transmission của bộ thu phát UWB; FreeRTOS chỉ điều phối
-tác vụ và sự kiện ngắt, còn độ chính xác của khe do bộ đếm phần cứng UWB bảo
-đảm.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\linewidth]{media/image16.png}
-  \caption{Cấu trúc superframe DS--TWR kết hợp bộ lập lịch TDMA.}
-  \label{fig:tdma-superframe}
-\end{figure}
-
-Thứ tự khe được suy ra từ danh sách anchor của vùng. Guard time hấp thụ sai
-lệch đồng hồ và độ trễ xử lý. Nếu một số phản hồi bị mất, tag cập nhật mặt nạ
-anchor và chỉ tiếp tục khi số phép đo hợp lệ đạt ngưỡng tối thiểu. Khi chuyển
-vùng, preamble code, danh sách anchor và lịch TDMA được cập nhật đồng thời
-trước khi bắt đầu superframe mới.
-
-\begin{longtable}{@{}p{0.24\textwidth}p{0.18\textwidth}p{0.48\textwidth}@{}}
+\begin{longtable}{@{}p{0.19\textwidth}p{0.25\textwidth}p{0.45\textwidth}@{}}
+\caption{Vai trò của các lớp trong quá trình thu thập range.}
+\label{tab:ranging-scheduler-layers}\\
 \toprule
-\textbf{Cấp điều phối} & \textbf{Cơ chế} & \textbf{Chức năng} \\
+\textbf{Lớp} & \textbf{Phạm vi} & \textbf{Chức năng} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Lớp} & \textbf{Phạm vi} & \textbf{Chức năng} \\
 \midrule
 \endhead
-Giữa các vùng & Phân tách theo mã & Phân biệt vùng bằng preamble code \\
-Trong một vùng & TDMA & Cấp phát khe cho từng anchor \\
-Trong một phép đo & DS--TWR & Xác định khoảng cách tag--anchor \\
+DS--TWR & Một liên kết tag--anchor & Ước lượng thời gian truyền và khoảng cách \\
+TDMA & Các anchor trong cùng vùng & Ấn định thứ tự và thời điểm phát RESP \\
+Preamble code & Các vùng UWB lân cận & Phân biệt nhóm thiết bị ở tầng vật lý \\
 \bottomrule
 \end{longtable}
 
-\subsubsection{So sánh WLS multilateration và prefilter kết hợp UKF}
+\textbf{Tổ chức một chu kỳ đo.} Tag khởi tạo chu kỳ bằng gói POLL dùng chung
+cho nhóm anchor đang hoạt động. Sau khi nhận POLL, mỗi anchor chỉ phát RESP tại
+khe thời gian đã được gán. Tag thu các phản hồi trong một cửa sổ xác định rồi
+phát FINAL chứa các mốc thời gian cần thiết cho phép tính DS--TWR. Cuối cùng,
+từng anchor hoàn tất phép tính thời gian truyền và gửi RESULT về tag. Trình tự
+POLL--RESP--FINAL--RESULT tạo ra một tập range có chung chỉ số chu kỳ; nhờ đó,
+tầng định vị có thể xem các range hợp lệ như các quan sát gần đồng thời thay vì
+tập hợp những phép đo rời rạc.
 
-Từ cùng một tập khoảng cách UWB, đề tài xem xét hai hướng ước lượng. Hướng thứ
-nhất giải trực tiếp vị trí tại từng chu kỳ bằng WLS multilateration. Hướng thứ
-hai tiền lọc các phép đo không tin cậy rồi đưa dữ liệu hợp lệ vào UKF để kết
-hợp thông tin theo thời gian và dữ liệu chuyển động.
+\textbf{Quy tắc lập lịch TDMA.} Nếu anchor $i$ được gán chỉ số khe $s_i$, thời
+điểm phát RESP dự kiến được xác định bởi
 
-\paragraph{WLS multilateration.}
-Gọi $\mathbf{p}=[x\;y]^T$ là vị trí tag, $\mathbf{a}_i$ là tọa độ anchor thứ
-$i$ và $d_i$ là khoảng cách đo. Sai số dư được viết dưới dạng
 \begin{equation}
-  r_i(\mathbf{p})=\lVert\mathbf{p}-\mathbf{a}_i\rVert-d_i.
-  \label{eq:wls-residual}
+  t_{\mathrm{RESP},i}=t_{\mathrm{POLL}}+T_{\mathrm{offset}}
+  +s_iT_{\mathrm{slot}},
+  \label{eq:tdma-response-time}
 \end{equation}
-WLS tìm vị trí làm nhỏ nhất tổng bình phương sai số có trọng số:
+trong đó $T_{\mathrm{offset}}$ là thời gian từ lúc phát POLL đến đầu cửa sổ
+RESP và $T_{\mathrm{slot}}$ là độ dài một khe. Để hai phản hồi liên tiếp không
+chồng lấn, độ dài khe phải thỏa mãn
 \begin{equation}
-  \widehat{\mathbf{p}}_{\mathrm{WLS}}
-  =\arg\min_{\mathbf{p}}
-  \sum_{i\in\mathcal{A}_k} w_i r_i^2(\mathbf{p}),
-  \qquad \sum_{i\in\mathcal{A}_k}w_i=1.
-  \label{eq:wls-objective}
+  T_{\mathrm{slot}}\geq
+  T_{\mathrm{frame}}+T_{\mathrm{proc}}+T_{\mathrm{guard}},
+  \label{eq:tdma-slot-condition}
 \end{equation}
-Phương pháp không cần trạng thái từ chu kỳ trước, có độ trễ thấp và tạo một
-nghiệm vị trí độc lập ở mỗi lần cập nhật. Nhược điểm là nghiệm có thể dao động
-khi hình học anchor xấu hoặc khi một phép đo NLOS chưa được giảm trọng số đủ.
+trong đó $T_{\mathrm{frame}}$ là thời gian truyền RESP,
+$T_{\mathrm{proc}}$ là thời gian xử lý cần thiết và $T_{\mathrm{guard}}$ là
+biên dự phòng cho sai lệch đồng hồ cũng như jitter. Các mốc phát yêu cầu độ
+chính xác cao được ràng buộc theo đồng hồ UWB; bộ lập lịch mức hệ thống chỉ quản
+lý trạng thái của chu kỳ và các sự kiện hoàn thành.
 
-\paragraph{Prefilter kết hợp UKF.}
-Prefilter kiểm tra giới hạn khoảng cách, chất lượng tín hiệu, sai số dư và độ
-nhất quán thống kê trước khi dữ liệu đi vào UKF. UKF dự đoán trạng thái bằng
-mô hình chuyển động và hiệu chỉnh bằng các khoảng cách đã được chấp nhận. Vì
-khai thác quan hệ giữa nhiều chu kỳ, phương pháp cho quỹ đạo liên tục hơn và
-có thể duy trì dự đoán ngắn hạn khi một số anchor mất phép đo.
+\textbf{Khả năng mở rộng và xử lý mất gói.} Với $N_{\mathrm{anchor}}$ anchor,
+thời gian của một chu kỳ có thể xấp xỉ bởi
+\begin{equation}
+  T_{\mathrm{sf}}\approx T_{\mathrm{fixed}}+
+  N_{\mathrm{anchor}}T_{\mathrm{slot}},
+  \label{eq:tdma-superframe-duration}
+\end{equation}
+trong đó $T_{\mathrm{fixed}}$ bao gồm các pha POLL, FINAL, RESULT và khoảng bảo
+vệ chung. Biểu thức cho thấy tốc độ cập nhật giảm gần tuyến tính khi số anchor
+tăng; vì vậy số anchor tham gia, độ dài khe và tần số định vị phải được lựa chọn
+đồng thời. Nếu một anchor không phản hồi, khe của anchor đó không được dồn hoặc
+chuyển sang vị trí khác trong chính chu kỳ đang xét. Chu kỳ vẫn tiếp tục theo
+lịch ban đầu, còn range tương ứng được đánh dấu không hợp lệ. Quy tắc này giữ
+cấu trúc thời gian có tính xác định và ngăn một lỗi cục bộ làm sai lệch thời
+điểm của các anchor phía sau. Tập dữ liệu chỉ được chuyển sang bước định vị khi
+số range hợp lệ đáp ứng điều kiện quan sát tối thiểu.
 
-\begin{longtable}{@{}p{0.20\textwidth}p{0.34\textwidth}p{0.34\textwidth}@{}}
+\textbf{Phân tách nhiều vùng bằng mã.} TDMA giải quyết tranh chấp giữa các
+anchor dùng chung một vùng, nhưng không tự phân biệt các mạng UWB lân cận. Mỗi
+vùng vì vậy được liên kết với một preamble code, một danh sách anchor và một
+ánh xạ khe riêng. Xét theo nguyên lý đa truy nhập, cách tổ chức này bổ sung một
+chiều phân tách theo mã tương tự CDMA: bộ thu ưu tiên phát hiện chuỗi preamble
+đã cấu hình, trong khi TDMA vẫn quyết định thời điểm truyền trong nội vùng.
+Tuy nhiên, preamble code không được xem là cơ chế cách ly tuyệt đối; mức độ
+giao thoa giữa các mã vẫn phụ thuộc cấu hình PHY và điều kiện triển khai thực
+tế.
+
+Khi tag chuyển vùng, ba thành phần gồm preamble code, tập anchor và ánh xạ khe
+phải được cập nhật như một cấu hình thống nhất. Chu kỳ hiện tại được kết thúc
+trước khi cấu hình mới có hiệu lực; các mốc thời gian thuộc vùng cũ không được
+tái sử dụng cho chu kỳ tiếp theo. Nhờ đó, một tập range luôn thuộc về duy nhất
+một vùng và một cấu hình lập lịch, bảo đảm tính nhất quán cho dữ liệu đưa vào
+prefilter và thuật toán định vị.
+
+\subsubsection{Các hướng tiếp cận thuật toán định vị từ dữ liệu UWB}
+
+Từ dữ liệu khoảng cách UWB, bài toán định vị có thể được triển khai theo hai
+hướng chính. Hướng thứ nhất giải trực tiếp bài toán hình học tại từng chu kỳ
+đo, không duy trì trạng thái động học giữa các chu kỳ. Hướng thứ hai sử dụng
+bộ ước lượng trạng thái để khai thác tính liên tục của chuyển động và kết hợp
+thông tin từ nhiều thời điểm.
+
+Trong đề tài, prefilter là tầng dùng chung cho cả hai hướng. Tầng này đánh giá
+độ tin cậy của từng range, xây dựng measurement weight và lựa chọn layout
+anchor. Đầu ra của prefilter được giữ giống nhau khi đưa vào hai bộ ước lượng:
+WLS multilateration giải nghiệm hình học độc lập tại mỗi chu kỳ, còn UKF ước
+lượng trạng thái đệ quy dựa trên mô hình chuyển động. Nhờ đó, chênh lệch kết
+quả phản ánh phương pháp ước lượng thay vì khác biệt ở bước xử lý đầu vào.
+
+\begin{longtable}{@{}p{0.20\textwidth}p{0.33\textwidth}p{0.35\textwidth}@{}}
+\caption{So sánh sơ bộ hai phương án định vị.}
+\label{tab:wls-ukf-comparison}\\
 \toprule
-\textbf{Tiêu chí} & \textbf{WLS multilateration} & \textbf{Prefilter + UKF} \\
+\textbf{Tiêu chí} & \textbf{WLS multilateration} &
+\textbf{UKF} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Tiêu chí} & \textbf{WLS multilateration} &
+\textbf{UKF} \\
 \midrule
 \endhead
-Dữ liệu & Khoảng cách trong một chu kỳ & Khoảng cách, trạng thái trước và dữ liệu chuyển động \\
-Ngoại lai & Giảm trọng số hoặc loại phép đo & Prefilter kết hợp Mahalanobis gate \\
-Đầu ra & Vị trí độc lập theo từng chu kỳ & Trạng thái và quỹ đạo liên tục \\
-Chi phí tính toán & Thấp đến trung bình & Cao hơn do lan truyền sigma point \\
-Thiếu phép đo & Có thể mất nghiệm nếu hình học không đủ & Có thể dự đoán trong thời gian ngắn \\
-Vai trò & Đường cơ sở hình học & Phương pháp hợp nhất dữ liệu đề xuất \\
+Đầu vào & Range, weight và layout sau prefilter &
+Range, weight và layout sau prefilter \\
+Nguyên lý ước lượng & Tối ưu phi tuyến tại từng chu kỳ &
+Ước lượng trạng thái đệ quy \\
+Thông tin thời gian & Không duy trì trạng thái động học &
+Khai thác trạng thái và covariance chu kỳ trước \\
+Đầu ra & Vị trí tại thời điểm hiện tại &
+Trạng thái vị trí, vận tốc và độ bất định \\
+Mất quan sát ngắn hạn & Không tạo nghiệm mới từ dự đoán &
+Có thể duy trì bước dự đoán \\
+Chi phí tính toán & Thấp đến trung bình &
+Cao hơn do lan truyền và cập nhật trạng thái \\
 \bottomrule
 \end{longtable}
 
-Hai phương pháp được đánh giá trên cùng tập dữ liệu sau kiểm tra hợp lệ cơ
-bản. Các chỉ tiêu so sánh gồm sai số vị trí, độ ổn định quỹ đạo, tỷ lệ mất
-nghiệm, thời gian tính toán và khả năng đáp ứng thời gian thực.
+Hai phương pháp được đánh giá trên cùng log dữ liệu, tọa độ anchor, mốc thời
+gian và đầu ra prefilter. Các chỉ tiêu gồm sai số vị trí, độ ổn định quỹ đạo,
+tỷ lệ tạo được nghiệm và thời gian xử lý. Việc giữ nguyên đầu vào cho phép
+đánh giá riêng lợi ích của ước lượng trạng thái theo thời gian so với nghiệm
+hình học độc lập.
 
-\subsubsection{Thiết kế prefilter, trọng số và lựa chọn bộ anchor}
+\subsubsection{WLS multilateration}
 
-Prefilter được tổ chức thành ba tầng. Tầng thứ nhất loại khung không hợp lệ về
-giao thức hoặc khoảng cách nằm ngoài miền làm việc. Tầng thứ hai đánh giá chất
-lượng tín hiệu, khoảng cách và sai số dư. Tầng cuối kiểm tra tính nhất quán
-thống kê với trạng thái dự đoán của UKF.
-
-\paragraph{Trọng số cho WLS.}
-Mỗi phép đo được gán ba hệ số chất lượng chuẩn hóa trong $[0,1]$:
-$q_{\mathrm{sig},i}$ biểu thị chất lượng tín hiệu, $q_{\mathrm{dist},i}$ phản
-ánh mức tin cậy theo khoảng cách và $q_{\mathrm{res},i}$ giảm ảnh hưởng của
-phép đo có sai số dư lớn. Trọng số được tính bởi
+Gọi $\mathbf p=[x\;y]^T$ là vị trí cần xác định,
+$\mathbf a_i=[x_i\;y_i]^T$ là tọa độ anchor thứ $i$ và $d_i$ là range đo
+được. Khoảng cách dự đoán và residual tương ứng là
 \begin{align}
-  \widetilde{w}_i & =
-  \frac{q_{\mathrm{sig},i}q_{\mathrm{dist},i}q_{\mathrm{res},i}}
-       {\sigma_i^2+\varepsilon}, \\
-  w_i & =\frac{\widetilde{w}_i}
-  {\sum_{j\in\mathcal{A}_k}\widetilde{w}_j}.
-  \label{eq:wls-weight}
+  \widehat d_i(\mathbf p)&=
+  \lVert\mathbf p-\mathbf a_i\rVert,\\
+  r_i(\mathbf p)&=d_i-\widehat d_i(\mathbf p).
+  \label{eq:wls-range-residual}
 \end{align}
-Trong đó $\sigma_i^2$ là phương sai danh định và $\varepsilon$ tránh phép
-chia cho 0. Một lựa chọn trọng số bền vững theo residual là
+Với tập anchor hợp lệ $\mathcal A$, nghiệm WLS được xác định bởi
 \begin{equation}
-  q_{\mathrm{res},i}
-  =\min\!\left(1,\frac{\tau_r}{|r_i|+\varepsilon}\right),
-  \label{eq:residual-weight}
+  \widehat{\mathbf p}_{\mathrm{WLS}}=
+  \arg\min_{\mathbf p}
+  \frac{1}{2}\mathbf r^T\mathbf W\mathbf r
+  =\arg\min_{\mathbf p}
+  \sum_{i\in\mathcal A}w_i r_i^2(\mathbf p),
+  \label{eq:wls-objective-detailed}
 \end{equation}
-với $\tau_r$ là ngưỡng residual cần xác định từ dữ liệu thực nghiệm.
+trong đó $\mathbf W=\operatorname{diag}(w_1,\ldots,w_N)$ là ma trận trọng
+số. Khi chỉ biết mô hình phương sai, lựa chọn cơ bản là
+$w_i\propto 1/\sigma_r^2(d_i)$; các hệ số chất lượng từ prefilter có thể được
+kết hợp vào inverse-variance weight này.
 
-\paragraph{Trọng số đo trong UKF.}
-Trong UKF, chất lượng phép đo được phản ánh qua ma trận nhiễu đo. Với từng
-anchor, phương sai được điều chỉnh theo
+Do mô hình range phi tuyến theo $\mathbf p$, nghiệm được tìm lặp bằng
+Gauss--Newton. Tại nghiệm tạm $\mathbf p^{(t)}$, hàng thứ $i$ của Jacobian là
 \begin{equation}
-  R_i=\frac{\sigma_0^2}
-  {q_{\mathrm{sig},i}q_{\mathrm{dist},i}+\varepsilon}.
-  \label{eq:adaptive-measurement-noise}
+  \mathbf J_i=
+  \begin{bmatrix}
+  \dfrac{x^{(t)}-x_i}{\widehat d_i} &
+  \dfrac{y^{(t)}-y_i}{\widehat d_i}
+  \end{bmatrix},
+  \label{eq:wls-jacobian}
 \end{equation}
-Phép đo chất lượng thấp tạo $R_i$ lớn nên có ảnh hưởng nhỏ trong bước cập
-nhật; phép đo không vượt qua prefilter không được đưa vào vector đo.
-
-\paragraph{Mahalanobis gate.}
-Gọi $\nu_i=d_i-\widehat{d}_i^{-}$ là innovation và $S_i$ là phương sai
-innovation do UKF dự đoán. Khoảng cách Mahalanobis là
+và bước hiệu chỉnh được tính bởi
 \begin{equation}
-  D_i^2=\nu_i^T S_i^{-1}\nu_i.
-  \label{eq:mahalanobis-gate}
+  \Delta\mathbf p=
+  (\mathbf J^T\mathbf W\mathbf J)^{-1}
+  \mathbf J^T\mathbf W\mathbf r,
+  \qquad
+  \mathbf p^{(t+1)}=\mathbf p^{(t)}+\Delta\mathbf p.
+  \label{eq:wls-gauss-newton}
 \end{equation}
-Phép đo được chấp nhận khi $D_i^2\leq\chi^2_{m,\alpha}$, với $m$ là bậc tự
-do của phép đo và $\alpha$ là mức tin cậy. Kiểm tra này thích nghi với độ bất
-định hiện tại tốt hơn một ngưỡng sai số tuyệt đối cố định.
 
-\paragraph{Lựa chọn bộ anchor.}
-Sau prefilter, hệ thống chỉ giải vị trí khi còn đủ anchor và cấu hình hình học
-không suy biến. Khi có nhiều anchor hơn mức tối thiểu, tập con được ưu tiên
-theo chất lượng tổng hợp và độ phân bố góc quanh vị trí dự đoán; các tập gần
-thẳng hàng hoặc có điều kiện ma trận kém bị loại. Cùng một tập phép đo hợp lệ
-được cung cấp cho WLS và UKF để phép so sánh không bị thiên lệch bởi đầu vào.
+Giá trị khởi tạo có thể lấy từ nghiệm tuyến tính, trọng tâm của tập anchor
+hoặc nghiệm chu kỳ trước. Quá trình lặp dừng khi
+$\lVert\Delta\mathbf p\rVert$ nhỏ hơn ngưỡng hội tụ hoặc đạt số vòng lặp tối
+đa. Nghiệm không được sử dụng khi số anchor không đủ, ma trận
+$\mathbf J^T\mathbf W\mathbf J$ kém điều kiện hoặc residual sau hội tụ vượt
+giới hạn chấp nhận.
+
+\subsubsection{Prefilter thống kê và xây dựng measurement weight}
+
+Các phép đo UWB chịu ảnh hưởng đồng thời của nhiễu ngẫu nhiên, sai lệch NLOS
+và cấu hình hình học anchor. Ba yếu tố này có bản chất khác nhau: nhiễu đo làm
+tăng phương sai của range, NLOS tạo sai lệch có hướng, còn hình học kém khuếch
+đại sai số range thành sai số vị trí. Vì vậy, prefilter không nên quy đổi trực
+tiếp mọi đại lượng thành các điểm số độc lập rồi cộng lại. Trong đề tài, chất
+lượng phép đo được mô tả trước bằng độ chính xác tương đối của từng anchor;
+thông tin hình học chỉ được đưa vào sau thông qua ma trận thông tin của layout.
+
+Mô hình range của anchor thứ $i$ được viết dưới dạng
+\begin{equation}
+  d_i=h_i(\mathbf{x})+b_i+\varepsilon_i,
+  \qquad
+  h_i(\mathbf{x})=\lVert\mathbf{p}-\mathbf{a}_i\rVert,
+  \label{eq:prefilter-range-model}
+\end{equation}
+trong đó $\varepsilon_i$ là nhiễu ngẫu nhiên có kỳ vọng xấp xỉ bằng 0 và
+$b_i$ là thành phần bias. Trong điều kiện LOS, $b_i$ thường nhỏ; khi đường
+truyền bị che khuất, $b_i$ có thể tăng đáng kể và làm range lệch về phía
+dương. Prefilter có nhiệm vụ phát hiện các phép đo không nhất quán, giảm ảnh
+hưởng của những phép đo đáng ngờ và duy trì đủ thông tin để ước lượng vị trí.
+
+\paragraph{Kiểm tra nhất quán bằng Mahalanobis distance.}
+
+Từ trạng thái dự đoán $\widehat{\mathbf{x}}^{-}$, khoảng cách dự đoán và
+innovation của phép đo được xác định bởi
+\begin{align}
+  \widehat d_i^{-}&=h_i(\widehat{\mathbf{x}}^{-}),\\
+  \nu_i&=d_i-\widehat d_i^{-}.
+  \label{eq:prefilter-range-innovation}
+\end{align}
+Gọi $S_i$ là phương sai innovation, bao gồm bất định của trạng thái dự đoán
+và phương sai của phép đo range. Mahalanobis distance squared là
+\begin{equation}
+  D_i^2=\frac{\nu_i^2}{S_i}.
+  \label{eq:prefilter-mahalanobis}
+\end{equation}
+Nếu innovation tuân theo phân bố Gaussian và mô hình được xác định đúng,
+$D_i^2$ xấp xỉ phân bố $\chi^2$ với một bậc tự do. Do đó, ngưỡng loại ngoại
+lai có thể được lựa chọn từ phân vị của phân bố $\chi_1^2$ ứng với mức tin cậy
+mong muốn. Hai ngưỡng khác nhau được sử dụng cho quá trình loại và phục hồi
+phép đo nhằm tạo hysteresis, tránh thay đổi quyết định liên tục khi
+$D_i^2$ dao động gần biên.
+
+Ngoài quyết định gate, Mahalanobis distance còn được sử dụng như một
+độ lệch chuẩn hóa của phép đo:
+\begin{equation}
+  u_i^{\mathrm{M}}=\sqrt{D_i^2}.
+  \label{eq:mahalanobis-standardized-deviation}
+\end{equation}
+Giá trị này được chuyển thành trọng số mềm cùng với FP amplitude và residual
+bằng một hàm ảnh hưởng thống nhất được trình bày ở phần sau.
+
+\paragraph{Đánh giá đường truyền bằng FP amplitude.}
+
+FP amplitude mô tả biên độ tín hiệu tại vùng lân cận thời điểm phát hiện đường
+truyền đầu tiên. Với ba mẫu biên độ $A_{1,i}$, $A_{2,i}$ và $A_{3,i}$ cùng số
+xung preamble được tích lũy $N_{\mathrm{pacc},i}$, đại lượng sử dụng trong
+prefilter được xác định bởi
+\begin{equation}
+  A_{\mathrm{FP},i}=
+  \frac{A_{1,i}+A_{2,i}+A_{3,i}}{N_{\mathrm{pacc},i}}.
+  \label{eq:first-path-amplitude}
+\end{equation}
+Đây là đại lượng chẩn đoán biên độ của bộ thu, không phải công suất thu theo
+dBm. Giá trị của nó phụ thuộc vào khoảng cách, cấu hình PHY, anten và môi
+trường truyền; vì vậy một ngưỡng biên độ cố định không đủ để phân biệt LOS và
+NLOS.
+
+Để loại ảnh hưởng suy hao theo khoảng cách, FP amplitude được đưa về miền
+logarithm
+\begin{equation}
+  a_i=20\log_{10}(A_{\mathrm{FP},i}+\varepsilon),
+  \label{eq:fp-amplitude-log-domain}
+\end{equation}
+và so sánh với mô hình LOS đã hiệu chuẩn. Gọi $\mu_A(d)$ và $\sigma_A(d)$ lần
+lượt là giá trị trung bình và độ lệch chuẩn của $a_i$ tại khoảng cách $d$ trong
+điều kiện LOS, chỉ số chuẩn hóa là
+\begin{equation}
+  z_i^{A}=\frac{a_i-\mu_A(d_i)}{\sigma_A(d_i)+\varepsilon}.
+  \label{eq:fp-amplitude-standard-score}
+\end{equation}
+Độ suy giảm bất thường của first path được biểu diễn bằng sai lệch một
+phía
+\begin{equation}
+  u_i^{\mathrm{A}}=
+  \max\!\left(0,
+  \frac{\mu_A(d_i)-a_i}{\sigma_A(d_i)+\varepsilon}\right).
+  \label{eq:fp-amplitude-standardized-deviation}
+\end{equation}
+Giá trị bằng 0 cho biết FP amplitude không thấp hơn mức LOS kỳ vọng; giá trị
+dương cho biết mức thiếu hụt biên độ tính theo số độ lệch chuẩn. Cách định
+nghĩa một phía phù hợp hơn trị tuyệt đối vì biên độ thấp bất thường mới là dấu
+hiệu cần giảm trọng số, trong khi biên độ cao không được xem là ngoại lai xấu.
+
+\paragraph{Trọng số bền vững từ residual.}
+
+Sau bước gate, một nghiệm sơ bộ $\widehat{\mathbf p}^{(0)}$ được tính từ các
+phép đo còn lại. Residual hình học của anchor thứ $i$ là
+\begin{equation}
+  e_i=d_i-
+  \left\lVert\widehat{\mathbf p}^{(0)}-\mathbf a_i\right\rVert.
+  \label{eq:prefilter-geometric-residual}
+\end{equation}
+Độ phân tán của residual được ước lượng bền vững bằng median absolute
+deviation (MAD):
+\begin{equation}
+  s_e=1.4826\,
+  \operatorname{median}_i
+  \left|e_i-\operatorname{median}_j(e_j)\right|+\varepsilon.
+  \label{eq:residual-robust-scale}
+\end{equation}
+Residual được đưa về độ lệch chuẩn hóa bền vững
+\begin{equation}
+  u_i^{\mathrm{R}}=
+  \frac{\left|e_i-\operatorname{median}_j(e_j)\right|}{s_e}.
+  \label{eq:residual-standardized-deviation}
+\end{equation}
+
+\paragraph{Hàm trọng số bền vững thống nhất.}
+
+Ba đại lượng $u_i^{\mathrm{M}}$, $u_i^{\mathrm{A}}$ và
+$u_i^{\mathrm{R}}$ đều là độ lệch không thứ nguyên, trong đó giá trị lớn biểu
+thị phép đo kém tin cậy. Thay vì xây dựng ba công thức penalty riêng biệt, đề
+tài sử dụng cùng một hàm trọng số Huber
+\begin{equation}
+  q(u;c)=
+  \begin{cases}
+    1, & |u|\leq c,\\
+    \dfrac{c}{|u|+\varepsilon}, & |u|>c.
+  \end{cases}
+  \label{eq:unified-huber-weight}
+\end{equation}
+Các trọng số thành phần được viết gọn dưới dạng
+\begin{equation}
+  q_i^{\mathrm{M}}=q(u_i^{\mathrm{M}};c_{\mathrm{M}}),\qquad
+  q_i^{\mathrm{A}}=q(u_i^{\mathrm{A}};c_{\mathrm{A}}),\qquad
+  q_i^{\mathrm{R}}=q(u_i^{\mathrm{R}};c_{\mathrm{R}}).
+  \label{eq:component-huber-weights}
+\end{equation}
+Các hằng số $c_{\mathrm{M}}$, $c_{\mathrm{A}}$ và $c_{\mathrm{R}}$ cho phép
+điều chỉnh độ nhạy của từng nguồn thông tin nhưng không làm thay đổi dạng hàm.
+Huber được lựa chọn vì hàm mất mát lồi, giảm ảnh hưởng ngoại lai một cách liên
+tục và không đặt trọng số bằng 0. Các ngoại lai nghiêm trọng đã được xử lý bởi
+Mahalanobis gate, do đó không cần thêm một cơ chế loại cứng ở tầng residual.
+
+\paragraph{Ảnh hưởng của khoảng cách đo.}
+
+Khoảng cách không được xem là một dấu hiệu ngoại lai, bởi một phép đo xa vẫn
+có thể hoàn toàn hợp lệ. Tuy nhiên, phương sai range thường tăng theo khoảng
+cách do suy hao tín hiệu và xác suất che khuất lớn hơn. Ảnh hưởng này được mô
+tả trực tiếp bằng hàm phương sai phụ thuộc khoảng cách
+\begin{equation}
+  \sigma_r^2(d)=
+  \mathbb{E}\!\left[(d_{\mathrm{meas}}-d_{\mathrm{ref}})^2
+  \mid d,\mathrm{LOS}\right],
+  \label{eq:distance-dependent-range-variance}
+\end{equation}
+được ước lượng từ dữ liệu hiệu chuẩn LOS theo từng khoảng cách hoặc từng bin.
+Như vậy, distance tham gia measurement weight thông qua inverse variance;
+phép đo xa có phương sai lớn hơn và tự động nhận trọng số thấp hơn. Cách xử lý
+này tránh đưa distance qua Huber hoặc nhân thêm một penalty tùy ý, đồng thời
+tránh đếm lặp ảnh hưởng suy hao đã được bù trong FP amplitude.
+
+\paragraph{Xây dựng measurement weight.}
+
+Mahalanobis distance, FP amplitude và residual lần lượt phản ánh tính nhất
+quán theo thời gian, chất lượng đường truyền và tính nhất quán hình học trong
+frame hiện tại. Sau khi được đưa qua cùng hàm Huber, chúng được hợp nhất thành
+precision weight của phép đo:
+\begin{equation}
+  \widetilde w_i^{\mathrm{meas}}=
+  \frac{q_i^{\mathrm{M}}q_i^{\mathrm{A}}q_i^{\mathrm{R}}}
+       {\sigma_r^{2}(d_i)+\varepsilon},
+  \label{eq:measurement-precision-weight}
+\end{equation}
+Biểu thức tích bảo đảm một phép đo chỉ nhận trọng số cao khi đồng thời phù hợp
+với dự đoán, có first path đáng tin cậy, nhất quán với các phép đo còn lại và
+có phương sai phù hợp với khoảng cách hiện tại. Khi giải WLS,
+trọng số được chuẩn hóa trong layout:
+\begin{equation}
+  w_i^{\mathrm{meas}}=
+  \frac{\widetilde w_i^{\mathrm{meas}}}
+       {\sum_{j\in\mathcal L}\widetilde w_j^{\mathrm{meas}}}.
+  \label{eq:normalized-measurement-weight}
+\end{equation}
+Phép chuẩn hóa này không làm thay đổi nghiệm WLS; các precision weight chưa
+chuẩn hóa vẫn được giữ để xây dựng ma trận thông tin của layout.
+
+\subsubsection{Lựa chọn layout anchor bằng WGDOP}
+
+GDOP thông thường giả thiết mọi phép đo có cùng phương sai. Giả thiết này
+không còn phù hợp khi từng anchor đã có measurement weight khác nhau. Vì vậy,
+đề tài sử dụng dạng GDOP có trọng số. Với $\mathbf H_{\mathcal L}$ là ma trận
+hình học của layout $\mathcal L$ và
+$\mathbf{W}_{\mathcal L}=\operatorname{diag}
+(\widetilde w_i^{\mathrm{meas}})$, ma trận thông tin vị trí là
+\begin{equation}
+  \mathbf I_{\mathcal L}=
+  \mathbf H_{\mathcal L}^{T}
+  \mathbf W_{\mathcal L}
+  \mathbf H_{\mathcal L}.
+  \label{eq:weighted-layout-information}
+\end{equation}
+Hiệp phương sai vị trí xấp xỉ được xác định bởi
+\begin{equation}
+  \mathbf C_{\mathbf p,\mathcal L}
+  \approx \mathbf I_{\mathcal L}^{-1},
+  \label{eq:layout-position-covariance}
+\end{equation}
+và tiêu chí lựa chọn layout là
+\begin{equation}
+  \operatorname{WGDOP}(\mathcal L)=
+  \sqrt{\operatorname{tr}
+  \left(\mathbf C_{\mathbf p,\mathcal L}\right)}.
+  \label{eq:weighted-gdop}
+\end{equation}
+Layout có WGDOP nhỏ nhất được ưu tiên. Công thức này hợp nhất chất lượng phép
+đo và hình học trong một đại lượng duy nhất: measurement weight xác định độ
+tin cậy của từng hướng đo, còn $\mathbf H_{\mathcal L}$ xác định mức quan sát
+được theo không gian. Nhờ đó không cần chuẩn hóa GDOP và các chỉ số chất lượng
+về cùng miền rồi cộng bằng các hệ số tùy ý.
+
+Để tránh thay đổi layout liên tục khi nhiều ứng viên có WGDOP gần tương
+đương, layout của chu kỳ trước được giữ lại nếu mức cải thiện của ứng viên mới
+chưa vượt quá một switch margin. Quy tắc này chỉ tạo hysteresis cho quyết định
+lựa chọn layout và không làm thay đổi measurement weight đã ước lượng.
 
 \subsubsection{Thuật toán sensor fusion với UKF}
 
-Trạng thái UKF có thể được mô tả ở mức tối thiểu bởi
-$\mathbf{x}_k=[x_k\;y_k\;v_{x,k}\;v_{y,k}]^T$ và mở rộng thêm các trạng thái
-sai lệch cảm biến khi cần. Với anchor thứ $i$, mô hình đo khoảng cách là
-\begin{equation}
-  h_i(\mathbf{x}_k)=
-  \sqrt{(x_k-x_i)^2+(y_k-y_i)^2}.
-  \label{eq:ukf-range-model}
-\end{equation}
-UKF sinh sigma point từ trạng thái dự đoán, truyền chúng qua mô hình đo, rồi
-tính innovation, hiệp phương sai và Kalman gain. Chỉ các phép đo vượt qua
-prefilter và Mahalanobis gate mới tham gia cập nhật. Các tham số
-$\sigma_0$, $\tau_r$, ngưỡng chất lượng và mức tin cậy $\alpha$ sẽ được hiệu
-chỉnh bằng dữ liệu thực nghiệm và giữ cố định khi so sánh hai phương pháp.
+% Phần logic UKF được bổ sung độc lập.
+\vspace{4cm}
 
 \subsubsection{Thuật toán hiệu chuẩn antenna delay và đo đạc vị trí anchor}
 

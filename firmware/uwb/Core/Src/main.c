@@ -286,6 +286,7 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[SKIP] App init skipped (test mode)");
 #else
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[INIT] Initializing DW1000...");
+  bool uwb_startup_ready = false;
 
   if (bsp_uwb_init() != 0)
   {
@@ -319,7 +320,15 @@ int main(void)
   RLOG_I(LOG_OBJECT_CODE_APPLICATION, "[CFG] Antenna delays: TX=%u RX=%u", cfg->uwb.tx_antenna_delay,
          cfg->uwb.rx_antenna_delay);
 
-  bsp_uwb_configure(&cfg->uwb);
+  if (bsp_uwb_configure(&cfg->uwb) == BSP_OK)
+  {
+    uwb_startup_ready = true;
+  }
+  else
+  {
+    RLOG_E(LOG_OBJECT_CODE_APPLICATION, ERR_UWB_INIT,
+           "DW1000 configuration skipped/failed because init is not ready");
+  }
 #endif
 
   bsp_io_init();
@@ -340,6 +349,22 @@ int main(void)
   {
     app_anchor_init();
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
+  }
+
+  /* Ranging starts disabled. Put the DW1000 into low-power sleep instead of
+   * leaving it in idle; wake restores the cached runtime PHY configuration. */
+  if (uwb_startup_ready && bsp_uwb_sleep_enter() == BSP_OK)
+  {
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] DW1000 sleeping until ranging starts");
+  }
+  else if (!uwb_startup_ready)
+  {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+           "[SLEEP] Startup sleep skipped because DW1000 is not initialized");
+  }
+  else
+  {
+    RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] DW1000 startup sleep failed");
   }
 #endif
 

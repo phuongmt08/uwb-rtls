@@ -44,17 +44,18 @@
 #define ANCHOR_SMART_TRACK_MISS_PRE_STEP_MS 5U
 #define ANCHOR_SMART_TRACK_MISS_LATE_STEP_MS 8U
 #define ANCHOR_SMART_TRACK_MAX_PRE_POLL_MS 45U
-#define ANCHOR_SMART_TRACK_MAX_MISSES      30U
+#define ANCHOR_SMART_TRACK_MAX_MISSES      20U
 #define ANCHOR_SMART_TRACK_MIN_WINDOW_MS   40U
 #define ANCHOR_SMART_TRACK_MAX_WINDOW_MS   90U
 #define ANCHOR_SMART_LEVEL_STABLE_SUCCESSES 10U
-#define ANCHOR_SMART_DISCOVERY_DECAY_MISSES 50
+#define ANCHOR_SMART_DISCOVERY_DECAY_MISSES 25
 #define ANCHOR_SMART_TRACK_REARM_GAP_MS    10U
+#define ANCHOR_SMART_POLL_WATCHDOG_GUARD_MS 5U
 
 // Smart sleep/standby parameters
-#define ANCHOR_SMART_STANDBY_SLEEP_ENABLE   0U // Temporarily disabled while tracking is validated
-#define ANCHOR_SMART_SLEEP_MIN_GAP_MS       30U
-#define ANCHOR_SMART_SLEEP_WAKE_GUARD_MS    16U
+#define ANCHOR_SMART_STANDBY_SLEEP_ENABLE   1U
+#define ANCHOR_SMART_SLEEP_MIN_GAP_MS       60U
+#define ANCHOR_SMART_SLEEP_WAKE_GUARD_MS    40U
 #define ANCHOR_SMART_SLEEP_RETRY_MS         20U
 
 #define TAG_MIN_ANCHOR_SAMPLES             3U
@@ -82,7 +83,7 @@
 #endif
 
 /* Set to 0 to force immediate RX instead of delayed RX for debugging */
-#define SYS_RANGING_USE_RX_DELAYED 0
+#define SYS_RANGING_USE_RX_DELAYED 1
 
 /* Set to 1 when diagnosing delayed-TX slot jitter. Keep 0 in production to
  * avoid extra SPI reads and 64-bit math in the TDMA critical path. */
@@ -240,6 +241,7 @@ typedef enum {
 typedef struct {
     sys_ranging_event_step_t step;
     uint32_t                 step_start_tick;
+    uint32_t                 poll_wait_deadline_tick;
     uint64_t                 deadline_dw;
     
     uint64_t                 poll_tx_ts;     // T1
@@ -328,6 +330,9 @@ static bool                    s_anchor_transaction_poll_seen = false;
 
 static void anchor_smart_switch_discovery(uint32_t now_tick, bool log_transition);
 static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uint32_t now_tick);
+static bool anchor_smart_tick_due(uint32_t now, uint32_t due);
+static uint32_t anchor_smart_tracking_window_ms(void);
+static uint32_t anchor_smart_tracking_half_window_ms(void);
 
 static const control_msg_desc_t s_control_msg_descs[] = {
   { SYS_UWB_CTRL_CALIB_PAIR_SUMMARY, sizeof(sys_calib_pair_summary_msg_t) },
@@ -1980,6 +1985,17 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
   
   if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE) {
       s_ctx.state_entry_tick = HAL_GetTick();
+  } else if (s_sys_ranging_ev.step == SYS_RANGING_EV_ANCHOR_WAIT_POLL &&
+             s_sys_ranging_ev.poll_wait_deadline_tick != 0U) {
+    /* A delayed RX may be programmed well before the predicted POLL. Its
+     * watchdog must include that lead time; rx_timeout_ms only describes the
+     * actual antenna-on window. */
+    if (anchor_smart_tick_due(HAL_GetTick(),
+                              s_sys_ranging_ev.poll_wait_deadline_tick)) {
+      state_machine_reset();
+      s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
+      return SYS_RANGING_ERR_TIMEOUT;
+    }
   } else if (HAL_GetTick() - s_ctx.state_entry_tick > sm_watchdog_ms) {
     state_machine_reset();
     s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
@@ -1996,6 +2012,7 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
       tdma_get_slot_for_anchor(&s_tdma_anchor, s_ctx.anchor_id, &my_slot);
       s_sys_ranging_ev.my_slot_id = my_slot.slot_id;
       s_sys_ranging_ev.step = SYS_RANGING_EV_ANCHOR_WAIT_POLL;
+      uint32_t poll_wait_ms = timeout_ms;
       
       if (s_anchor_poll_rx_plan.enabled) {
           uint64_t rx_start = s_anchor_poll_rx_plan.rx_start_dw;
@@ -2008,6 +2025,9 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                   return SYS_RANGING_ERR;
               }
           } else {
+              uint32_t ahead_us = tdma_dw_to_us(ahead_dw);
+              poll_wait_ms = ((ahead_us + 999U) / 1000U) +
+                             s_anchor_poll_rx_plan.timeout_ms;
               if (RANGING_ENABLE_RX_DELAYED(rx_start, s_anchor_poll_rx_plan.timeout_ms) != BSP_OK) {
                   state_machine_reset();
                   return SYS_RANGING_ERR;
@@ -2019,6 +2039,8 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
               return SYS_RANGING_ERR;
           }
       }
+      s_sys_ranging_ev.poll_wait_deadline_tick = HAL_GetTick() + poll_wait_ms +
+          ANCHOR_SMART_POLL_WATCHDOG_GUARD_MS;
   }
   
   bsp_uwb_event_t evt;
@@ -2052,6 +2074,9 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
               s_sys_ranging_ev.poll_rx_ts = evt.rx_ts;
               s_sys_ranging_ev.poll_quality = evt.rx_quality;
               if (sys_config_get()->uwb.power_mode != ANCHOR_POWER_MODE_PERFORMANCE) {
+                  /* Phase-lock on every valid POLL immediately. Do not wait for
+                   * FINAL/RESULT: a partial exchange still provides the best
+                   * estimate for the next POLL. */
                   sys_ranging_result_t poll_sync = {0};
                   poll_sync.t2 = evt.rx_ts;
                   anchor_smart_switch_tracking(&poll_sync, HAL_GetTick());
@@ -2099,7 +2124,9 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                   return SYS_RANGING_ERR;
               }
           } else {
-              if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
+              if (s_sys_ranging_ev.poll_wait_deadline_tick != 0U &&
+                  anchor_smart_tick_due(HAL_GetTick(),
+                                        s_sys_ranging_ev.poll_wait_deadline_tick)) {
                   state_machine_reset();
                   s_sys_ranging_ev.step = SYS_RANGING_EV_SYS_IDLE;
                   return SYS_RANGING_ERR_TIMEOUT;
@@ -2453,7 +2480,7 @@ static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uin
   if (!was_tracking) {
     s_anchor_smart_rx.stable_successes = 0U;
   }
-  uint32_t pre_poll_ms = anchor_smart_tracking_pre_poll_ms();
+  uint32_t pre_poll_ms = anchor_smart_tracking_half_window_ms();
   s_anchor_smart_rx.next_poll_tick = poll_tick + period_ms;
   s_anchor_smart_rx.last_poll_tick = now_tick;
   s_anchor_smart_rx.next_poll_dw = (result && result->t2 != 0ULL)
@@ -2479,7 +2506,7 @@ static void anchor_smart_rearm_tracking_window(uint32_t now_tick)
 
   for (uint8_t i = 0U; i < 8U; i++)
   {
-    uint32_t pre_poll_ms = anchor_smart_tracking_pre_poll_ms();
+    uint32_t pre_poll_ms = anchor_smart_tracking_half_window_ms();
     uint32_t window_tick = s_anchor_smart_rx.next_poll_tick - pre_poll_ms;
 
     if (!anchor_smart_tick_due(now_tick, window_tick)) {
@@ -2514,7 +2541,18 @@ static uint32_t anchor_smart_tracking_window_ms(void)
     max_window_ms = ANCHOR_SMART_TRACK_MIN_WINDOW_MS;
   }
 
-  return anchor_smart_clamp_u32(window_ms, ANCHOR_SMART_TRACK_MIN_WINDOW_MS, max_window_ms);
+  window_ms = anchor_smart_clamp_u32(window_ms, ANCHOR_SMART_TRACK_MIN_WINDOW_MS, max_window_ms);
+
+  /* Keep an even window so the predicted POLL is exactly centered. */
+  if ((window_ms & 1U) != 0U) {
+    window_ms--;
+  }
+  return window_ms;
+}
+
+static uint32_t anchor_smart_tracking_half_window_ms(void)
+{
+  return anchor_smart_tracking_window_ms() / 2U;
 }
 
 static uint32_t anchor_smart_window_timeout_ms(uint32_t power_mode, uint32_t default_rx_timeout_ms)
@@ -2621,7 +2659,7 @@ static void anchor_smart_prepare_poll_rx_plan(void)
   s_anchor_poll_rx_plan.timeout_ms = anchor_smart_tracking_window_ms();
   s_anchor_poll_rx_plan.rx_start_dw =
       (s_anchor_smart_rx.next_poll_dw -
-       tdma_us_to_dw(anchor_smart_tracking_pre_poll_ms() * 1000U)) & DW_MASK_40;
+       tdma_us_to_dw(anchor_smart_tracking_half_window_ms() * 1000U)) & DW_MASK_40;
 }
 
 static bool anchor_smart_standby_sleep_allowed(uint32_t power_mode)
@@ -2648,10 +2686,14 @@ static void anchor_smart_service_standby_sleep(uint32_t power_mode, uint32_t now
 
   if (bsp_uwb_is_sleeping())
   {
-    if (anchor_smart_tick_due(now_tick, wake_tick) &&
-        !anchor_smart_wake_or_recover(now_tick))
-    {
-      s_anchor_smart_rx.next_window_tick = now_tick + ANCHOR_SMART_SLEEP_RETRY_MS;
+    if (anchor_smart_tick_due(now_tick, wake_tick)) {
+      if (!anchor_smart_wake_or_recover(now_tick)) {
+        s_anchor_smart_rx.next_window_tick = HAL_GetTick() + ANCHOR_SMART_SLEEP_RETRY_MS;
+      } else {
+        /* Start discovery RX in this same service pass. Waiting for the old
+         * next_window_tick would add another RTOS semaphore period after wake. */
+        s_anchor_smart_rx.next_window_tick = HAL_GetTick();
+      }
     }
     return;
   }
@@ -2727,6 +2769,9 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
     }
 
     anchor_smart_service_standby_sleep(power_mode, now);
+    /* Wake may yield for several milliseconds. Never make the window decision
+     * with the timestamp captured before waking the DW1000. */
+    now = HAL_GetTick();
 
     active_mode = anchor_smart_active_power_mode(power_mode);
     if (active_mode != ANCHOR_POWER_MODE_PERFORMANCE &&
@@ -2758,7 +2803,8 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
 
   if (err == SYS_RANGING_OK) {
     if (power_mode != ANCHOR_POWER_MODE_PERFORMANCE) {
-      anchor_smart_switch_tracking(&s_ctx.result_single, HAL_GetTick());
+      /* The next-POLL estimate was already phase-locked from the actual POLL
+       * RX timestamp, even if the remainder of the exchange later fails. */
       anchor_smart_note_success(power_mode);
     }
     return SYS_RANGING_OK;
