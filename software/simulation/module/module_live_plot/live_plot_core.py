@@ -243,25 +243,35 @@ class DataThread(QThread):
         return drained
 
     def _extract_live_frames(self, buffer):
+        from ..config import LIVE_FRAME_LENGTH_TO_SIZE, LIVE_FRAME_MIN_SIZE
         frames = []
-        while len(buffer) >= LIVE_FRAME_SIZE:
+        while len(buffer) >= LIVE_FRAME_MIN_SIZE:
             sof_idx = buffer.find(bytes((UART_SOF,)))
             if sof_idx < 0:
                 del buffer[:]
                 break
             if sof_idx > 0:
                 del buffer[:sof_idx]
-            if len(buffer) < LIVE_FRAME_SIZE:
+            if len(buffer) < 2:
                 break
 
-            frame_bytes = bytes(buffer[:LIVE_FRAME_SIZE])
+            # Legacy and new frames differ in size; the length byte decides.
+            frame_size = LIVE_FRAME_LENGTH_TO_SIZE.get(buffer[1])
+            if frame_size is None:
+                self._bad_frames += 1
+                del buffer[0]
+                continue
+            if len(buffer) < frame_size:
+                break
+
+            frame_bytes = bytes(buffer[:frame_size])
             frame_data = parse_live_frame(frame_bytes)
             if frame_data is None:
                 self._bad_frames += 1
                 del buffer[0]
                 continue
             frames.append(frame_data)
-            del buffer[:LIVE_FRAME_SIZE]
+            del buffer[:frame_size]
         return frames
 
     def _classify_frame_status(self, frame_data):

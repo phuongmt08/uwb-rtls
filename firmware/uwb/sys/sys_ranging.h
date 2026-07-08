@@ -54,7 +54,8 @@ typedef struct
   uint64_t t1, t2, t3, t4, t5, t6;
   uint8_t  anchor_id;
   uint16_t fp_amp_norm_q8;
-  uint16_t fp_snr_q8;
+  uint16_t fp_snr_q8;          /* Diagnostic only */
+  uint16_t rx_fp_delta_db_q8;  /* APS006 RX-FP power delta, NLOS indicator */
   uint8_t  quality;
   uint8_t  calib_status;
   bool     valid;

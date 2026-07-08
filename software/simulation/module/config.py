@@ -177,9 +177,18 @@ GROUND_TRUTH_D4 = 5.63
 # - 4d: 4 doubles (32 bytes) for fp_snr array
 # - I: unsigned int (4 bytes) for error_frame_cnt
 # - f: float (4 bytes) for dt
-LIVE_FRAME_FORMAT = '<BBBI5f4f4d4dIf'
+# - 4d: 4 doubles (32 bytes) for rx_fp_delta_db array (new format only)
 import struct
+LIVE_FRAME_LEGACY_FORMAT = '<BBBI5f4f4d4dIf'
+LIVE_FRAME_LEGACY_SIZE = struct.calcsize(LIVE_FRAME_LEGACY_FORMAT)
+LIVE_FRAME_FORMAT = '<BBBI5f4f4d4dIf4d'
 LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
+# Firmware stores payload length = frame size - 2 (sof + length bytes)
+LIVE_FRAME_LENGTH_TO_SIZE = {
+    (LIVE_FRAME_LEGACY_SIZE - 2) & 0xFF: LIVE_FRAME_LEGACY_SIZE,
+    (LIVE_FRAME_SIZE - 2) & 0xFF: LIVE_FRAME_SIZE,
+}
+LIVE_FRAME_MIN_SIZE = min(LIVE_FRAME_LEGACY_SIZE, LIVE_FRAME_SIZE)
 
 # ==================== FUSION FRAME CONFIGURATION ====================
 # Matches firmware uart_fusion_frame_t:

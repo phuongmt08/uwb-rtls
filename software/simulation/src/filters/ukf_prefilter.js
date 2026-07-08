@@ -734,10 +734,12 @@ class MahalanobisPrefilter {
         if (acceptedCount >= targetCount) return [];
 
         const needed = targetCount - acceptedCount;
-        // Smart Rescue: Only rescue an anchor if it has been rejected consecutively for at least 5 frames
-        // This ensures we never rescue transient noise spikes, only correct data during filter lag
+        // Smart Rescue: Only rescue an anchor if it has been rejected consecutively
+        // (RESCUE_MIN_REJECT_STREAK frames, same as firmware). This ensures we never
+        // rescue transient noise spikes, only correct data during filter lag.
+        const minStreak = SIM_CONFIG.FILTER.RESCUE_MIN_REJECT_STREAK || 5;
         const rescue = results
-            .filter(r => !r.pass && r.d2 !== null && Number.isFinite(r.d2) && r.d > 0.1 && this.reject_counts[r.index] >= 5)
+            .filter(r => !r.pass && r.d2 !== null && Number.isFinite(r.d2) && r.d > 0.1 && this.reject_counts[r.index] >= minStreak)
             .sort((a, b) => a.d2 - b.d2)
             .slice(0, needed);
 

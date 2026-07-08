@@ -1,7 +1,8 @@
 import struct
 from .config import (
-    UART_SOF, 
-    LIVE_FRAME_FORMAT, LIVE_FRAME_SIZE, 
+    UART_SOF,
+    LIVE_FRAME_FORMAT, LIVE_FRAME_SIZE,
+    LIVE_FRAME_LEGACY_FORMAT, LIVE_FRAME_LEGACY_SIZE,
     FUSION_FRAME_FORMAT, FUSION_FRAME_SIZE, FUSION_FRAME_PAYLOAD_LEN,
     IMU_FRAME_FORMAT, IMU_FRAME_SIZE,
     UWB_FRAME_FORMAT, UWB_FRAME_SIZE
@@ -23,12 +24,19 @@ def parse_uwb_frame(data_bytes):
 
 def parse_live_frame(data_bytes):
     try:
-        unpacked = struct.unpack(LIVE_FRAME_FORMAT, data_bytes[:LIVE_FRAME_SIZE])
+        # New frames append rx_fp_delta_db[4]; the length byte tells them apart.
+        is_new_format = (len(data_bytes) >= LIVE_FRAME_SIZE and
+                         len(data_bytes) >= 2 and
+                         data_bytes[1] == (LIVE_FRAME_SIZE - 2) & 0xFF)
+        if is_new_format:
+            unpacked = struct.unpack(LIVE_FRAME_FORMAT, data_bytes[:LIVE_FRAME_SIZE])
+        else:
+            unpacked = struct.unpack(LIVE_FRAME_LEGACY_FORMAT, data_bytes[:LIVE_FRAME_LEGACY_SIZE])
         if unpacked[0] != UART_SOF:
             return None
         if unpacked[2] != 0:
             print(f"[PARSER] Detected non-zero mask: {unpacked[2]} | Frame hex: {data_bytes[:10].hex()}")
-        return {
+        frame = {
             'sof': unpacked[0],
             'length': unpacked[1],
             'anchor_mask': unpacked[2],
@@ -42,8 +50,10 @@ def parse_live_frame(data_bytes):
             'fp_amp_norm': list(unpacked[13:17]),
             'fp_snr': list(unpacked[17:21]),
             'err_cnt': unpacked[21],
-            'dt': unpacked[22]
+            'dt': unpacked[22],
+            'rx_fp_delta_db': list(unpacked[23:27]) if is_new_format else [0.0, 0.0, 0.0, 0.0],
         }
+        return frame
     except struct.error:
         return None
 

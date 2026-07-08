@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* Private defines ---------------------------------------------------- */
 #define DW1000_DEVICE_ID       0xDECA0130UL
@@ -283,6 +284,7 @@ static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
   uint16_t std_noise      = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x0);
   uint16_t fp_amp2        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x2);
   uint16_t fp_amp3        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x4);
+  uint16_t cir_pwr        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x6);
   uint16_t rx_pream_count = (uint16_t)((dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXPACC_MASK) >> RX_FINFO_RXPACC_SHIFT);
 
   out_quality->fp_amp1        = fp_amp1;
@@ -290,6 +292,7 @@ static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
   out_quality->fp_amp3        = fp_amp3;
   out_quality->std_noise      = std_noise;
   out_quality->max_noise      = max_noise;
+  out_quality->cir_pwr        = cir_pwr;
   out_quality->rx_pream_count = rx_pream_count;
 
   if (rx_pream_count > 0U && (fp_amp1 != 0U || fp_amp2 != 0U || fp_amp3 != 0U))
@@ -300,6 +303,22 @@ static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
 
     out_quality->fp_amp_norm_q8 = (fp_norm_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_norm_q8;
     out_quality->fp_snr_q8      = (fp_snr_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_snr_q8;
+
+    /* APS006 NLOS indicator: RX level - FP level. The DW1000 user manual
+     * gives RX = 10log10(C*2^17/N^2)-A and FP = 10log10((F1^2+F2^2+F3^2)/N^2)-A,
+     * so the delta reduces to 10log10(C*2^17/sum(Fi^2)) — N and A cancel,
+     * making it distance- and PRF-constant independent. */
+    float fp_sq_sum = ((float)fp_amp1 * (float)fp_amp1)
+                    + ((float)fp_amp2 * (float)fp_amp2)
+                    + ((float)fp_amp3 * (float)fp_amp3);
+    if (cir_pwr > 0U && fp_sq_sum > 0.0f)
+    {
+      float delta_db = 10.0f * log10f(((float)cir_pwr * 131072.0f) / fp_sq_sum);
+      if (delta_db < 0.0f) delta_db = 0.0f;
+      if (delta_db > 200.0f) delta_db = 200.0f;
+      out_quality->rx_fp_delta_db_q8 = (uint16_t)(delta_db * 256.0f);
+    }
+
     out_quality->valid          = true;
   }
 }

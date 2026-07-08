@@ -53,6 +53,9 @@ typedef struct
   double    fp_snr[NUM_ANCHORS];
   uint32_t  error_frame_cnt;        /* Error frame count */
   float     dt;                     /* Time delta in seconds */
+  /* Appended fields keep the legacy prefix parseable; the length byte
+   * distinguishes old and new frame layouts on the host side. */
+  double    rx_fp_delta_db[NUM_ANCHORS]; /* APS006 RX-FP delta [dB] */
 } __attribute__((packed)) uart_fusion_log_frame_t;
 #endif
 
@@ -362,9 +365,10 @@ void bsp_io_usb_tx_complete(void)
 
 #if !ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_log_data(
-  uint8_t mask, uint32_t err_frame_count, 
-  float ax, float ay, float gz, float px, float py, const float *distance, 
-  const double *fp_amp_norm, const double *fp_snr, 
+  uint8_t mask, uint32_t err_frame_count,
+  float ax, float ay, float gz, float px, float py, const float *distance,
+  const double *fp_amp_norm, const double *fp_snr,
+  const double *rx_fp_delta_db,
   float dt)
 {
 
@@ -401,6 +405,14 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
     for (uint8_t id = 0; id < NUM_ANCHORS; id++)
     {
       s_fusion_log_frame.fp_snr[id] = fp_snr[id];
+    }
+  }
+
+  if (rx_fp_delta_db != NULL)
+  {
+    for (uint8_t id = 0; id < NUM_ANCHORS; id++)
+    {
+      s_fusion_log_frame.rx_fp_delta_db[id] = rx_fp_delta_db[id];
     }
   }
 

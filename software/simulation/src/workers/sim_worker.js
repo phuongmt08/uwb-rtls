@@ -676,6 +676,25 @@ self.onmessage = function(e) {
 
             // UKF Update for LPF branch
             filterLpf.update(acceptedMeasurementsLpf);
+
+            // Per-anchor measurement weight (same input feeds WLS, layout
+            // selection and adaptive UKF R). Reference position for the
+            // frame residual term: UKF predicted state when available.
+            const pRef = filter.ukf.is_initialized
+                ? { x: filter.ukf.x[0], y: filter.ukf.x[1] }
+                : null;
+            computeMeasurementWeights(v_anchors_best, { rBase: params.r_uwb, pRef });
+
+            // Adaptive R_ii = clamp(1/w_i); rescued anchors keep at least
+            // their inflated rescue noise.
+            v_anchors_best.forEach(a => {
+                const m = acceptedMeasurementsById.get(a.id);
+                if (!m) return;
+                m.r_uwb = a.rescue
+                    ? Math.max(m.r_uwb, adaptiveUkfR(a.w))
+                    : adaptiveUkfR(a.w);
+            });
+
             const pos = multilaterate(v_anchors);
             simPath.x.push(pos ? pos.x : null);
             simPath.y.push(pos ? pos.y : null);
@@ -684,7 +703,7 @@ self.onmessage = function(e) {
             simPathRuled.x.push(pos_ruled ? pos_ruled.x : null);
             simPathRuled.y.push(pos_ruled ? pos_ruled.y : null);
 
-            const pos_wls = multilaterate(v_anchors_best);
+            const pos_wls = multilaterate(v_anchors_best, { initial: pRef });
             simPathWLS.x.push(pos_wls ? pos_wls.x : null);
             simPathWLS.y.push(pos_wls ? pos_wls.y : null);
             wlsInfo.push(pos_wls ? `N=${v_anchors_best.length}<br>${v_anchors_best.map(a => `A${a.id}(w=${anchorWeight(a).toFixed(2)},amp=${(a.fp_amp || 0).toFixed(1)})`).join(', ')}` : 'None');
@@ -693,7 +712,8 @@ self.onmessage = function(e) {
                 previousKey: previousTripletKey,
                 switchMargin: params.triplet_switch_margin,
                 switchScoreEps: params.triplet_switch_score_eps,
-                healthById: anchorHealth.scoresById()
+                healthById: anchorHealth.scoresById(),
+                pRef
             });
             const tripletMeasurements = bestTriplet
                 ? bestTriplet.triplet.map(a => acceptedMeasurementsById.get(a.id)).filter(Boolean)

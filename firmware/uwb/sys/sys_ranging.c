@@ -164,6 +164,8 @@ typedef struct __attribute__((packed))
   float   distance_m; /* Calculated distance */
   uint16_t fp_amp_norm_q8;
   uint16_t fp_snr_q8;
+  /* OTA format change: anchors and tags must run the same firmware build. */
+  uint16_t rx_fp_delta_db_q8;
 } result_msg_t;
 
 typedef struct
@@ -728,6 +730,13 @@ static uint16_t min_nonzero_u16(uint16_t a, uint16_t b)
   return (a < b) ? a : b;
 }
 
+/* Worst-case combiner for the RX-FP power delta: a larger delta means a
+ * weaker first path (more likely NLOS), so keep the worse of the two legs. */
+static uint16_t max_u16(uint16_t a, uint16_t b)
+{
+  return (a > b) ? a : b;
+}
+
 static inline bool dw_time_before_deadline(uint64_t now_dw, uint64_t deadline_dw);
 
 #define TAG_RESP_TO_FINAL_HEADROOM_US 5000U
@@ -1011,6 +1020,7 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
   tr->distance_m       = res->distance_m;
   tr->fp_amp_norm_q8   = res->fp_amp_norm_q8;
   tr->fp_snr_q8        = res->fp_snr_q8;
+  tr->rx_fp_delta_db_q8 = res->rx_fp_delta_db_q8;
   tr->quality          = (res->fp_amp_norm_q8 > 0U && res->fp_snr_q8 > 0U) ? 1U : 0U;
   tr->calib_status     = calib_status;
   tr->valid            = (res->valid == 1);
@@ -2250,6 +2260,9 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                       s_ctx.result_single.fp_snr_q8 =
                           min_nonzero_u16(s_sys_ranging_ev.poll_quality.fp_snr_q8,
                                           final_evt.rx_quality.fp_snr_q8);
+                      s_ctx.result_single.rx_fp_delta_db_q8 =
+                          max_u16(s_sys_ranging_ev.poll_quality.rx_fp_delta_db_q8,
+                                  final_evt.rx_quality.rx_fp_delta_db_q8);
                       s_ctx.result_single.quality =
                           (s_sys_ranging_ev.poll_quality.valid && final_evt.rx_quality.valid) ? 1U : 0U;
                       s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
@@ -2278,6 +2291,7 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                       res.distance_m = s_ctx.result_single.distance_m;
                       res.fp_amp_norm_q8 = s_ctx.result_single.fp_amp_norm_q8;
                       res.fp_snr_q8      = s_ctx.result_single.fp_snr_q8;
+                      res.rx_fp_delta_db_q8 = s_ctx.result_single.rx_fp_delta_db_q8;
                       
                       s_sys_ranging_ev.planned_tx_dw = res_tx_dw;
 #if SYS_RANGING_VERIFY_TX_TIMING

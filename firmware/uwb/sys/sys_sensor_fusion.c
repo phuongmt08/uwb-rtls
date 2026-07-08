@@ -106,6 +106,7 @@ float b_gz_t = 0.0f;
 static float 	s_latest_distances[NUM_ANCHORS] = {0.0f};
 static double 	s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
 static double 	s_latest_fp_snr[NUM_ANCHORS] = {0.0};
+static double 	s_latest_rx_fp_delta_db[NUM_ANCHORS] = {0.0};
 static uint32_t s_error_count = 0U;
 static uint8_t 	s_last_selected_anchors_mask = 0U;
 static float 	s_latest_tril_x = 0.0f;
@@ -487,6 +488,16 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
     snapshot_latest_anchor_metrics(anchors_by_id);
 
+    /* Adaptive measurement covariance: R_ii = 1/w_i, clamped so a saturated
+     * weight can never break the Cholesky/inverse inside the update. */
+    for (uint8_t k = 0U; k < 3U; k++) {
+        float w = (float)best_3_anchors[k].measurement_weight;
+        float r_ii = (w > 0.0f && isfinite(w)) ? (1.0f / w) : (float)MW_UKF_R_MAX;
+        if (r_ii < (float)MW_UKF_R_MIN) r_ii = (float)MW_UKF_R_MIN;
+        if (r_ii > (float)MW_UKF_R_MAX) r_ii = (float)MW_UKF_R_MAX;
+        ukf.R_data[k * (NUM_UPDATE_NOISE + 1)] = r_ii;
+    }
+
     const uint8_t selected_anchor_ids[3] = {
         best_3_anchors[0].id,
         best_3_anchors[1].id,
@@ -724,6 +735,7 @@ void sys_sensor_fusion_stream_uart()
                                          s_latest_distances,
                                          s_latest_fp_amp_norm,
                                          s_latest_fp_snr,
+                                         s_latest_rx_fp_delta_db,
                                          s_fusion_dt);
 #endif
 #endif
@@ -1053,6 +1065,7 @@ static void clear_latest_anchor_metrics(void)
         s_latest_distances[i] = 0.0f;
         s_latest_fp_amp_norm[i] = 0.0;
         s_latest_fp_snr[i] = 0.0;
+        s_latest_rx_fp_delta_db[i] = 0.0;
     }
 }
 
@@ -1073,6 +1086,7 @@ static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id
         if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
             s_latest_fp_amp_norm[i] = anchors_by_id[aid].fp_amp_norm;
             s_latest_fp_snr[i] = anchors_by_id[aid].fp_snr;
+            s_latest_rx_fp_delta_db[i] = anchors_by_id[aid].rx_fp_delta_db;
         }
     }
 }

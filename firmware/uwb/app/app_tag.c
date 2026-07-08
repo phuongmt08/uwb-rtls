@@ -539,6 +539,7 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         msg.anchor_ids[entry] = aid;
         msg.fp_amp_norm[entry] = (float)r->fp_amp_norm_q8 / 256.0f;
         msg.fp_snr[entry] = (float)r->fp_snr_q8 / 256.0f;
+        msg.rx_fp_delta_db[entry] = (float)r->rx_fp_delta_db_q8 / 256.0f;
         msg.quality_valid[entry] = (r->quality != 0U) ? 1U : 0U;
 
         if (r->valid) {

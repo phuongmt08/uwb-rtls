@@ -43,8 +43,24 @@ typedef struct {
     double d2_score;   /* Mahalanobis distance squared */
     double r_adaptive; /* Adaptive covariance */
     double fp_amp_norm;
-    double fp_snr;
+    double fp_snr;          /* Diagnostic only, never used in weighting */
+    double rx_fp_delta_db;  /* APS006 RX-FP delta [dB]; log-only until calibrated */
     bool quality_valid;
+    bool rescued;      /* Recovered by frame-level rescue: keep weight low */
+
+    /* Per-anchor measurement weight (prefilter output) */
+    double q_mahalanobis;      /* Soft confidence from innovation/d2 */
+    double q_fp;               /* Soft confidence from first-path amplitude */
+    double q_residual;         /* Frame residual confidence, needs >=4 anchors */
+    double sigma_r2;           /* Estimated range variance */
+    double measurement_weight; /* Final precision weight w = qM*qFP*qR/sigma_r2 */
+
+    /* Layout selection / debug outputs (not the main estimator) */
+    double layout_score;       /* WGDOP of the selected layout */
+    double debug_residual;     /* Residual vs debug position */
+    double debug_tril_rms;     /* Debug trilateration residual RMS */
+
+    /* Legacy composite-score fields, kept for logging compatibility */
     double selection_score;
     double residual_rms;
     double gdop_penalty;
@@ -84,11 +100,58 @@ typedef enum {
  * @param[in]  max_out        Maximum number of anchors to select (usually 3 or 4)
  * @return Number of anchors successfully selected and copied to best_out
  */
-uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors, 
-                                     uint8_t total_anchors, 
-                                     mw_tril_anchor_t *best_out, 
+uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
+                                     uint8_t total_anchors,
+                                     mw_tril_anchor_t *best_out,
                                      uint8_t max_out,
                                      uint8_t prev_mask);
+
+/**
+ * @brief Huber influence weight q(u;c): 1 when |u|<=c, c/|u| otherwise.
+ */
+double mw_huber_weight(double u, double c);
+
+/**
+ * @brief Compute per-anchor measurement weights for one ranging frame.
+ *
+ * Fills q_mahalanobis, q_fp, q_residual, sigma_r2 and measurement_weight
+ * of every valid anchor. q_residual is only informative when the frame has
+ * at least 4 valid anchors and a reference position; with 3 anchors it is
+ * forced to 1 (a 3-anchor 2D fit can absorb one bad range).
+ *
+ * @param[in,out] anchors      Anchor array (valid entries are updated)
+ * @param[in]     count        Number of entries in the array
+ * @param[in]     p_ref_valid  true if p_ref holds a usable reference position
+ * @param[in]     p_ref        Reference position (UKF predicted/last state)
+ */
+void mw_anchor_compute_weights(mw_tril_anchor_t *anchors,
+                               uint8_t count,
+                               bool p_ref_valid,
+                               vec2d_t p_ref);
+
+/**
+ * @brief Select the 3-anchor layout for the UKF update by weighted geometry.
+ *
+ * Scores every candidate triplet with WGDOP = sqrt(trace(inv(H^T W H)))
+ * evaluated at a reference position (UKF predicted state when available,
+ * otherwise the candidate debug trilateration, otherwise the anchor
+ * centroid). Keeps the previous layout unless the challenger improves the
+ * score beyond MW_LAYOUT_SWITCH_MARGIN (hysteresis).
+ *
+ * @param[in]  anchors      Valid anchors with measurement_weight computed
+ * @param[in]  count        Number of anchors in the array
+ * @param[in]  p_ref_valid  true if p_ref holds a usable reference position
+ * @param[in]  p_ref        Reference position for the geometry matrix
+ * @param[out] best_out     Exactly 3 selected anchors on success
+ * @param[in]  prev_mask    Bitmask of the previously selected anchor IDs
+ * @return 3 on success, 0 when no usable layout exists
+ */
+uint8_t mw_select_ukf_layout_3(const mw_tril_anchor_t *anchors,
+                               uint8_t count,
+                               bool p_ref_valid,
+                               vec2d_t p_ref,
+                               mw_tril_anchor_t *best_out,
+                               uint8_t prev_mask);
 
 /**
  * @brief Calculate 3D position (Mathematical core)

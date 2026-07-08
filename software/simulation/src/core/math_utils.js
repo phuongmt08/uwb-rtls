@@ -11,7 +11,9 @@ function trilaterate(vAnchors) {
     };
 }
 
-function multilaterate(vAnchors) {
+// Linearized least-squares (reference-anchor differencing). Used only as
+// the initial guess for the Gauss-Newton WLS solver below.
+function linearLateration(vAnchors) {
     if (vAnchors.length < 3) return null;
 
     const ref = vAnchors[0];
@@ -24,12 +26,11 @@ function multilaterate(vAnchors) {
         const Ci = a.r*a.r - ref.r*ref.r
                  - a.x*a.x + ref.x*ref.x
                  - a.y*a.y + ref.y*ref.y;
-        const w = anchorWeight(ref) * anchorWeight(a);
-        hxx += w * Ai * Ai;
-        hxy += w * Ai * Bi;
-        hyy += w * Bi * Bi;
-        bx  += w * Ai * Ci;
-        by  += w * Bi * Ci;
+        hxx += Ai * Ai;
+        hxy += Ai * Bi;
+        hyy += Bi * Bi;
+        bx  += Ai * Ci;
+        by  += Bi * Ci;
     }
 
     const det = hxx * hyy - hxy * hxy;
@@ -38,6 +39,59 @@ function multilaterate(vAnchors) {
         x: (hyy * bx - hxy * by) / det,
         y: (hxx * by - hxy * bx) / det
     };
+}
+
+// WLS multilateration (offline baseline estimator, thesis pipeline):
+// minimize sum_i w_i * (d_i - ||p - a_i||)^2 via Gauss-Newton.
+// Anchor weights come from computeMeasurementWeights (a.w); default 1.
+function multilaterate(vAnchors, options) {
+    if (vAnchors.length < 3) return null;
+
+    let p = (options && options.initial) || linearLateration(vAnchors);
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+        p = {
+            x: vAnchors.reduce((s, a) => s + a.x, 0) / vAnchors.length,
+            y: vAnchors.reduce((s, a) => s + a.y, 0) / vAnchors.length
+        };
+    }
+
+    const maxIters = SIM_CONFIG.FILTER.WLS_MAX_ITERS || 10;
+    const convergence = SIM_CONFIG.FILTER.WLS_CONVERGENCE_M || 1.0e-4;
+
+    for (let iter = 0; iter < maxIters; iter++) {
+        let jtwj_xx = 0, jtwj_xy = 0, jtwj_yy = 0;
+        let jtwr_x = 0, jtwr_y = 0;
+
+        for (const a of vAnchors) {
+            const dx = p.x - a.x;
+            const dy = p.y - a.y;
+            const pred = Math.sqrt(dx*dx + dy*dy);
+            if (pred < 1e-6) continue;
+
+            const w = Number.isFinite(a.w) && a.w > 0 ? a.w : anchorWeight(a);
+            const jx = dx / pred;
+            const jy = dy / pred;
+            const r = a.r - pred; // range residual
+
+            jtwj_xx += w * jx * jx;
+            jtwj_xy += w * jx * jy;
+            jtwj_yy += w * jy * jy;
+            jtwr_x  += w * jx * r;
+            jtwr_y  += w * jy * r;
+        }
+
+        const det = jtwj_xx * jtwj_yy - jtwj_xy * jtwj_xy;
+        if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return null;
+
+        const dpx = (jtwj_yy * jtwr_x - jtwj_xy * jtwr_y) / det;
+        const dpy = (jtwj_xx * jtwr_y - jtwj_xy * jtwr_x) / det;
+        if (!Number.isFinite(dpx) || !Number.isFinite(dpy)) return null;
+
+        p = { x: p.x + dpx, y: p.y + dpy };
+        if (Math.sqrt(dpx*dpx + dpy*dpy) < convergence) break;
+    }
+
+    return (Number.isFinite(p.x) && Number.isFinite(p.y)) ? p : null;
 }
 
 function clamp01(v) {
@@ -54,7 +108,97 @@ function fpAmpWeight(fpAmp) {
         (1.0 - SIM_CONFIG.FILTER.FP_AMP_WEIGHT_FLOOR) * (1.0 - fpAmpPenalty(fpAmp));
 }
 
+// Unified Huber influence weight q(u;c): 1 inside the cutoff, c/|u| outside.
+function huberWeight(u, c) {
+    const au = Math.abs(u);
+    if (!Number.isFinite(au)) return SIM_CONFIG.FILTER.WEIGHT_MIN;
+    if (au <= c) return 1.0;
+    return c / (au + SIM_CONFIG.FILTER.WEIGHT_EPS);
+}
+
+// Phase-1 first-path weight: normalized amplitude vs LOS "good" level.
+// Missing diagnostics degrade softly (0.5), never hard-reject.
+function fpWeight(fpAmp) {
+    const F = SIM_CONFIG.FILTER;
+    if (!Number.isFinite(fpAmp) || fpAmp <= 0) return F.FP_UNKNOWN_WEIGHT;
+    return Math.max(F.FP_MIN_WEIGHT, Math.min(1.0, fpAmp / F.FP_AMP_GOOD));
+}
+
+// Distance-dependent range variance: sigma_r2(d) = base * (1 + k * d^2).
+// Distance is not an outlier signal; it enters through inverse variance.
+function rangeVariance(d, rBase) {
+    const base = Number.isFinite(rBase) && rBase > 0 ? rBase : 0.05;
+    const dist = Number.isFinite(d) ? d : 0;
+    return base * (1.0 + SIM_CONFIG.FILTER.SIGMA_R2_K_DIST * dist * dist);
+}
+
+// Per-anchor measurement weight (mirrors the firmware pipeline):
+//   uM = sqrt(d2)               -> qM = huber(uM, cM)
+//   fp_amp                      -> qFP
+//   MAD residual vs pRef (>=4)  -> qR (forced to 1 with only 3 anchors)
+//   w  = qM*qFP*qR / (sigma_r2(d) + eps), clamped
+// Results are stored on each anchor: w, qM, qFP, qR, sigma_r2.
+function computeMeasurementWeights(anchors, options) {
+    const F = SIM_CONFIG.FILTER;
+    const rBase = options && Number.isFinite(options.rBase) ? options.rBase : 0.05;
+    const pRef = options && options.pRef;
+
+    let residuals = null;
+    let resMedian = 0, resScale = 0;
+    const useResidual = anchors.length >= 4 && pRef &&
+        Number.isFinite(pRef.x) && Number.isFinite(pRef.y);
+    if (useResidual) {
+        residuals = anchors.map(a => {
+            const pred = Math.sqrt((pRef.x - a.x)**2 + (pRef.y - a.y)**2);
+            return a.r - pred;
+        });
+        const sorted = residuals.slice().sort((x, y) => x - y);
+        const mid = Math.floor(sorted.length / 2);
+        resMedian = sorted.length % 2 ? sorted[mid] : 0.5 * (sorted[mid-1] + sorted[mid]);
+        const dev = residuals.map(e => Math.abs(e - resMedian)).sort((x, y) => x - y);
+        const devMid = Math.floor(dev.length / 2);
+        const mad = dev.length % 2 ? dev[devMid] : 0.5 * (dev[devMid-1] + dev[devMid]);
+        resScale = 1.4826 * mad + F.WEIGHT_EPS;
+    }
+
+    anchors.forEach((a, i) => {
+        const uM = Math.sqrt(Number.isFinite(a.d2) ? Math.max(0, a.d2) : 0);
+        const qM = huberWeight(uM, F.HUBER_C_MAHALANOBIS);
+        const qFP = fpWeight(a.fp_amp);
+
+        let qR = 1.0;
+        if (useResidual) {
+            const uR = Math.abs(residuals[i] - resMedian) / resScale;
+            qR = huberWeight(uR, F.HUBER_C_RESIDUAL);
+            a.debug_residual = residuals[i];
+        }
+
+        // Rescued anchors keep the frame alive but must not be trusted:
+        // inflate their variance the same way the firmware does.
+        let sigma2 = rangeVariance(a.r, rBase);
+        if (a.rescue) sigma2 *= (F.RESCUE_SIGMA_SCALE || 4.0);
+        let w = (qM * qFP * qR) / (sigma2 + F.WEIGHT_EPS);
+        w = Math.max(F.WEIGHT_MIN, Math.min(F.WEIGHT_MAX, w));
+
+        a.qM = qM;
+        a.qFP = qFP;
+        a.qR = qR;
+        a.sigma_r2 = sigma2;
+        a.w = w;
+    });
+    return anchors;
+}
+
+// Adaptive UKF measurement covariance from the precision weight.
+function adaptiveUkfR(w) {
+    const F = SIM_CONFIG.FILTER;
+    if (!Number.isFinite(w) || w <= 0) return F.UKF_R_MAX;
+    return Math.max(F.UKF_R_MIN, Math.min(F.UKF_R_MAX, 1.0 / w));
+}
+
 function anchorWeight(anchor) {
+    // Prefer the pipeline precision weight when it has been computed.
+    if (anchor && Number.isFinite(anchor.w) && anchor.w > 0) return anchor.w;
     const d2 = Number.isFinite(anchor.d2) ? Math.max(0, anchor.d2) : 0;
     const d2Weight = 1.0 / (1.0 + d2);
     const qualityWeight = fpAmpWeight(anchor.fp_amp);
@@ -92,6 +236,28 @@ function tripletGdop(pos, triplet) {
     const det = hxx * hyy - hxy * hxy;
     if (det <= 0.000001) return Infinity;
     return Math.sqrt((hxx + hyy) / det);
+}
+
+// Weighted GDOP: sqrt(trace(inv(H^T W H))) with W = diag(measurement weight).
+// Merges range quality and geometry into one layout criterion.
+function tripletWgdop(pos, triplet) {
+    if (!pos) return Infinity;
+    let ixx = 0, ixy = 0, iyy = 0;
+    for (const a of triplet) {
+        const dx = pos.x - a.x;
+        const dy = pos.y - a.y;
+        const r = Math.sqrt(dx*dx + dy*dy);
+        if (r < 0.001) return Infinity;
+        const w = Number.isFinite(a.w) && a.w > 0 ? a.w : SIM_CONFIG.FILTER.WEIGHT_MIN;
+        const hx = dx / r;
+        const hy = dy / r;
+        ixx += w * hx * hx;
+        ixy += w * hx * hy;
+        iyy += w * hy * hy;
+    }
+    const det = ixx * iyy - ixy * ixy;
+    if (det <= 1e-9) return Infinity;
+    return Math.sqrt((ixx + iyy) / det);
 }
 
 function normalizeTripletWeights(weights) {
@@ -153,12 +319,9 @@ function scoreTripletCandidate(c, d2Reject, weights, minGdop, maxGdop) {
     const fpAmpPenaltyAvg = c.avgFpAmpPenalty;
     const distPenalty = c.rangePenalty;
     const healthPenaltyAvg = c.avgHealthPenalty;
-    const score =
-        weights.d2 * avgD2Penalty +
-        weights.fp_amp * fpAmpPenaltyAvg +
-        weights.residual * residualPenalty +
-        weights.dist * distPenalty +
-        weights.health * healthPenaltyAvg;
+    // Layout criterion is WGDOP (weighted information matrix); the legacy
+    // composite penalties are kept for debug display only.
+    const score = Number.isFinite(c.wgdop) ? c.wgdop : Infinity;
 
     return {
         triplet: c.triplet,
@@ -184,6 +347,11 @@ function selectBestTriplet(vAnchors, d2Reject, weights, options) {
     let minGdop = Infinity;
     let maxGdop = 0;
     const healthById = options && options.healthById;
+    // Reference position priority: UKF predicted state (options.pRef),
+    // then the candidate debug trilateration, then the anchor centroid.
+    const pRef = options && options.pRef &&
+        Number.isFinite(options.pRef.x) && Number.isFinite(options.pRef.y)
+        ? options.pRef : null;
 
     for (let i = 0; i < vAnchors.length - 2; i++) {
         for (let j = i + 1; j < vAnchors.length - 1; j++) {
@@ -193,6 +361,8 @@ function selectBestTriplet(vAnchors, d2Reject, weights, options) {
                 if (!pos) continue;
                 const gdop = tripletGdop(pos, triplet);
                 if (!Number.isFinite(gdop)) continue;
+                const wgdop = tripletWgdop(pRef || pos, triplet);
+                if (!Number.isFinite(wgdop)) continue;
                 const residual = residualRms(pos, triplet);
                 const avgD2Raw = triplet.reduce((s, a) => s + (a.d2 || 0), 0) / 3;
                 const avgFpAmpPenalty = triplet.reduce((s, a) => s + fpAmpPenalty(a.fp_amp), 0) / 3;
@@ -204,6 +374,7 @@ function selectBestTriplet(vAnchors, d2Reject, weights, options) {
                     key: tripletKey(triplet),
                     pos,
                     gdop,
+                    wgdop,
                     residual,
                     avgD2Raw,
                     avgFpAmpPenalty,

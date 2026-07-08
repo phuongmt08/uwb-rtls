@@ -6,6 +6,7 @@ const SIM_CONFIG = {
         DEFAULT_T2_LOW: 20.0,
         DEFAULT_RESCUE_MIN_ANCHORS: 3,
         DEFAULT_RESCUE_NOISE_MAX: 0.25,
+        RESCUE_MIN_REJECT_STREAK: 5,  // must match MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK
         DEFAULT_UKF_ALPHA: 0.1,
         DEFAULT_UKF_BETA: 2.0,
         DEFAULT_UKF_KAPPA: 0.0,
@@ -24,6 +25,25 @@ const SIM_CONFIG = {
         FP_AMP_GOOD: 40.0,
         FP_AMP_WEIGHT_FLOOR: 0.25,
         RESCUE_SORT_WEIGHT: 0.35,
+
+        // --- Per-anchor measurement weight (matches firmware pipeline) ---
+        // w = qM * qFP * qR / (sigma_r2(d) + eps), clamped to [MIN, MAX]
+        WEIGHT_EPS: 1.0e-6,
+        WEIGHT_MIN: 1.0e-3,
+        WEIGHT_MAX: 1.0e3,
+        HUBER_C_MAHALANOBIS: 2.0,
+        HUBER_C_FP: 2.0,
+        HUBER_C_RESIDUAL: 2.0,
+        FP_UNKNOWN_WEIGHT: 0.5,
+        FP_MIN_WEIGHT: 0.1,
+        SIGMA_R2_K_DIST: 0.01,
+        RESCUE_SIGMA_SCALE: 4.0,
+        // Adaptive UKF measurement covariance R_ii = clamp(1/w_i)
+        UKF_R_MIN: 0.0025,
+        UKF_R_MAX: 0.25,
+        // WLS Gauss-Newton solver (offline baseline estimator)
+        WLS_MAX_ITERS: 10,
+        WLS_CONVERGENCE_M: 1.0e-4,
         POSITION_BOUND_MARGIN: 3.0,
         MAX_UWB_POS_CORRECTION: 1.0,
         MAX_UWB_VEL_CORRECTION: 1.0

@@ -40,7 +40,8 @@ typedef struct {
     float   distances[8];     /**< Raw 3D distances [m] to anchors */
     uint8_t anchor_ids[8];    /**< Anchor IDs corresponding to each distance */
     float   fp_amp_norm[8];   /**< First path amplitude normalized */
-    float   fp_snr[8];        /**< First path SNR */
+    float   fp_snr[8];        /**< First path SNR (diagnostic only) */
+    float   rx_fp_delta_db[8];/**< RX-FP power delta [dB], APS006 NLOS indicator */
     uint8_t quality_valid[8]; /**< Non-zero when FP quality metrics are valid */
     uint8_t count;            /**< Number of valid distance entries */
     uint8_t mask;             /**< Active anchor mask (valid ranging) */

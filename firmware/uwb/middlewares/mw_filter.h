@@ -23,6 +23,7 @@ typedef struct {
 
 typedef struct {
     bool rejected;
+    uint16_t reject_streak; /* Consecutive rejected frames; 0 after accept */
 } mahalanobis_anchor_state_t;
 
 typedef struct {

@@ -149,9 +149,10 @@ bsp_err_t bsp_io_uart_send_position(float x, float y, float z, const float *dist
 
 #if !ENABLE_SYS_FUSION
 bsp_err_t bsp_io_uart_send_fusion_log_data(
-  uint8_t mask, uint32_t err_frame_count, 
-  float ax, float ay, float gz, float px, float py, const float *distance, 
-  const double *fp_amp_norm, const double *fp_snr, 
+  uint8_t mask, uint32_t err_frame_count,
+  float ax, float ay, float gz, float px, float py, const float *distance,
+  const double *fp_amp_norm, const double *fp_snr,
+  const double *rx_fp_delta_db,
   float dt);
 #endif
 

@@ -27,8 +27,12 @@ typedef struct {
     uint16_t std_noise;
     uint16_t max_noise;
     uint16_t rx_pream_count;
+    uint16_t cir_pwr;            /* RX_FQUAL CIR_PWR (C), total channel power */
     uint16_t fp_amp_norm_q8;
-    uint16_t fp_snr_q8;
+    uint16_t fp_snr_q8;          /* Diagnostic only, not used in weighting */
+    /* RX level - FP level in dB, Q8 (APS006: >10dB likely NLOS, <6dB LOS).
+     * = 10*log10(C*2^17 / (F1^2+F2^2+F3^2)); RXPACC cancels in the delta. */
+    uint16_t rx_fp_delta_db_q8;
     bool     valid;
 } bsp_uwb_rx_quality_t;
 

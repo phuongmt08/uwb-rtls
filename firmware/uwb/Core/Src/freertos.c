@@ -495,6 +495,7 @@ void sensor_fusion_entry(void *argument)
             anchor_entry.r_adaptive = (double)r_adapt;
             anchor_entry.fp_amp_norm = (double)msg.fp_amp_norm[i];
             anchor_entry.fp_snr = (double)msg.fp_snr[i];
+            anchor_entry.rx_fp_delta_db = (double)msg.rx_fp_delta_db[i];
             anchor_entry.quality_valid = (msg.quality_valid[i] != 0U);
             anchor_entry.selection_score = 0.0;
             anchor_entry.residual_rms = 0.0;
@@ -571,18 +572,29 @@ void sensor_fusion_entry(void *argument)
                 if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED || anchors_by_id[aid].valid) {
                     continue;
                 }
+                /* Smart rescue (mirrors simulation): never rescue a transient
+                 * spike or a measurement with no usable d2; only anchors that
+                 * have been rejected persistently may re-enter, at low weight. */
+                if (!isfinite(prefilter_rejects[i].d2_score) ||
+                    s_prefilter.anchors[aid - 1U].reject_streak <
+                        MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK) {
+                    continue;
+                }
+                prefilter_rejects[i].rescued = true; /* keep weight low downstream */
                 anchors_by_id[aid] = prefilter_rejects[i];
                 valid_count++;
                 RLOG_W(LOG_OBJECT_CODE_TAG,
-                       "[FUSION RESCUE] Anchor #%u rescued (d2=%.2f, valid=%u/%u)",
-                       aid, prefilter_rejects[i].d2_score, valid_count, rescue_target);
+                       "[FUSION RESCUE] Anchor #%u rescued (d2=%.2f streak=%u, valid=%u/%u)",
+                       aid, prefilter_rejects[i].d2_score,
+                       s_prefilter.anchors[aid - 1U].reject_streak,
+                       valid_count, rescue_target);
             }
         }
 #endif
 
         /* anchor_distances is unused in decoupled Sensor Fusion thread */
 
-        /* 3. Sort and Select the Best 3 anchors for UKF Update */
+        /* 3. Per-anchor measurement weight + weighted layout for UKF update */
         if (valid_count >= 3) {
             mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
             uint8_t compact_idx = 0;
@@ -592,8 +604,25 @@ void sensor_fusion_entry(void *argument)
                 }
             }
 
+            /* Reference position: UKF predicted state when available */
+            vec2d_t p_ref = { (double)ukf_data.px, (double)ukf_data.py };
+            bool p_ref_valid = sys_sensor_fusion_is_initialized();
+
+            mw_anchor_compute_weights(anchors_compact, compact_idx, p_ref_valid, p_ref);
+
+            /* Mirror weights back for logging/telemetry */
+            for (uint8_t i = 0; i < compact_idx; i++) {
+                uint8_t aid = anchors_compact[i].id;
+                if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
+                    anchors_by_id[aid] = anchors_compact[i];
+                }
+            }
+
             mw_tril_anchor_t best_3_anchors[3];
-            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3, s_last_selected_anchors_mask);
+            uint8_t best_count = mw_select_ukf_layout_3(anchors_compact, compact_idx,
+                                                        p_ref_valid, p_ref,
+                                                        best_3_anchors,
+                                                        s_last_selected_anchors_mask);
 
             if (best_count >= 3) {
                 s_last_selected_anchors_mask = 0;
@@ -602,6 +631,8 @@ void sensor_fusion_entry(void *argument)
                     s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
                 }
 
+                /* Debug/init trilateration: geometry sanity + UKF seed only,
+                 * not the runtime estimator (that is the UKF). */
                 vec2d_t tril_position = {0.0f, 0.0f};
                 SYSVIEW_START(SYSVIEW_MARK_FUSION_TRILATERATION);
                 mw_tril_result_t tril_result = {0};

@@ -240,6 +240,14 @@
 #define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   3U
 #endif
 
+/* Only rescue an anchor after it has been rejected this many consecutive
+ * frames (matches simulation "smart rescue"). Transient spikes then cause a
+ * skipped UKF update instead of injecting a bad range; persistent rejects
+ * (filter lag / real geometry change) still recover the frame. */
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  5U
+#endif
+
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
 #define MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN 4.0f
 #endif
@@ -299,6 +307,78 @@
 
 #ifndef MW_TRIL_SWITCH_SCORE_EPS
 #define MW_TRIL_SWITCH_SCORE_EPS                  0.02
+#endif
+
+/* ===================================================================
+ * PER-ANCHOR MEASUREMENT WEIGHT (prefilter -> UKF)
+ *
+ * w_i = qM * qFP * qR / (sigma_r2 + eps), clamped to [MIN, MAX].
+ * Trilateration 2D is a debug/init path only; the runtime estimator
+ * is the UKF. WLS multilateration stays offline (simulation baseline).
+ * =================================================================== */
+
+#ifndef MW_WEIGHT_EPS
+#define MW_WEIGHT_EPS                 1.0e-6
+#endif
+
+#ifndef MW_WEIGHT_MIN
+#define MW_WEIGHT_MIN                 1.0e-3
+#endif
+
+#ifndef MW_WEIGHT_MAX
+#define MW_WEIGHT_MAX                 1.0e3
+#endif
+
+/* Huber cutoffs for the unified influence function q(u;c). */
+#ifndef MW_HUBER_C_MAHALANOBIS
+#define MW_HUBER_C_MAHALANOBIS        2.0
+#endif
+
+#ifndef MW_HUBER_C_FP
+#define MW_HUBER_C_FP                 2.0
+#endif
+
+#ifndef MW_HUBER_C_RESIDUAL
+#define MW_HUBER_C_RESIDUAL           2.0
+#endif
+
+/* First-path quality weight. Missing diagnostics must not hard-reject. */
+#ifndef MW_FP_UNKNOWN_WEIGHT
+#define MW_FP_UNKNOWN_WEIGHT          0.5
+#endif
+
+#ifndef MW_FP_MIN_WEIGHT
+#define MW_FP_MIN_WEIGHT              0.1
+#endif
+
+/* Distance enters the weight via variance, not as an outlier penalty:
+ * sigma_r2(d) = BASE * (1 + K_DIST * d^2). Used when r_adaptive is not
+ * available for the anchor. */
+#ifndef MW_SIGMA_R2_BASE
+#define MW_SIGMA_R2_BASE              SYS_FUSION_UKF_R_UWB
+#endif
+
+#ifndef MW_SIGMA_R2_K_DIST
+#define MW_SIGMA_R2_K_DIST            0.01
+#endif
+
+/* Weighted layout (triplet) selection hysteresis. */
+#ifndef MW_LAYOUT_SWITCH_MARGIN
+#define MW_LAYOUT_SWITCH_MARGIN       MW_TRIL_SWITCH_MARGIN
+#endif
+
+#ifndef MW_LAYOUT_SWITCH_EPS
+#define MW_LAYOUT_SWITCH_EPS          MW_TRIL_SWITCH_SCORE_EPS
+#endif
+
+/* Adaptive UKF measurement covariance R_ii = clamp(1/w_i). Clamp keeps
+ * Cholesky/inverse well conditioned when weights saturate. */
+#ifndef MW_UKF_R_MIN
+#define MW_UKF_R_MIN                  0.0025
+#endif
+
+#ifndef MW_UKF_R_MAX
+#define MW_UKF_R_MAX                  0.25
 #endif
 
 /**
