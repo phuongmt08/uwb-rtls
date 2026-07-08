@@ -234,9 +234,9 @@ class TelemetryModel(QObject):
 
     @staticmethod
     def _fmt_remaining(value) -> str:
-        if value is None:
+        if value is None or int(value) == -2147483648:
             return "--"
-        return f"{int(value)} min"
+        return f"{abs(int(value))} min"
 
     @staticmethod
     def _fmt_bool(value) -> str:

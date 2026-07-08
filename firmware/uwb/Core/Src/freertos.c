@@ -436,6 +436,7 @@ void sensor_fusion_entry(void *argument)
 
     if (!g_ranging_enabled)
     {
+      osDelay(20);
       continue;
     }
 
@@ -684,6 +685,7 @@ void sys_monitoring_entry(void *argument)
   {
     osDelay(monitor_interval_ms);
     bsp_util_rtos_monitor_update();
+    network_send_rtos_resource(&g_network_core, protobuf_PACKET_ADDR_HOST);
 
 #if APP_RTOS_STATS_LOG_ENABLE
     const bsp_util_rtos_snapshot_t *snap = bsp_util_rtos_monitor_get();
@@ -926,17 +928,21 @@ static bool abort_uwb_ranging_locked(sys_config_t *cfg)
     if (bsp_uwb_sleep_wake() != BSP_OK) {
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] Wake failed; resetting DW1000");
         if (bsp_uwb_init() != BSP_OK) {
+            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+                   "[SLEEP] DW1000 fallback init failed");
             (void)osMutexRelease(g_spi1_mutexHandle);
             drain_signal_semaphore(g_uwb_isr_semHandle);
             return false;
         }
-    }
-    /* A valid DEV_ID confirms wakeup, but not that every AON-restored PHY
-     * register is usable. Re-apply the runtime configuration on each start. */
-    if (cfg == NULL || bsp_uwb_configure(&cfg->uwb) != BSP_OK) {
-        (void)osMutexRelease(g_spi1_mutexHandle);
-        drain_signal_semaphore(g_uwb_isr_semHandle);
-        return false;
+        /* Full configuration is only the recovery path. Normal SLEEP wake
+         * restores the saved registers through AON and must remain fast. */
+        if (cfg == NULL || bsp_uwb_configure(&cfg->uwb) != BSP_OK) {
+            RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+                   "[SLEEP] DW1000 fallback configure failed");
+            (void)osMutexRelease(g_spi1_mutexHandle);
+            drain_signal_semaphore(g_uwb_isr_semHandle);
+            return false;
+        }
     }
     bsp_uwb_idle();
     (void)osMutexRelease(g_spi1_mutexHandle);
@@ -948,7 +954,11 @@ static void stop_uwb_ranging_locked(void)
 {
     (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
     sys_ranging_abort();
-    bsp_uwb_idle();
+    if (bsp_uwb_sleep_enter() != BSP_OK) {
+        /* sleep_enter() already forces TRX off before attempting sleep. */
+        RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
+               "[SLEEP] DW1000 failed to enter sleep after ranging stopped");
+    }
     (void)osMutexRelease(g_spi1_mutexHandle);
     drain_signal_semaphore(g_uwb_isr_semHandle);
 }

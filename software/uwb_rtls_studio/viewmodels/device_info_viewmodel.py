@@ -403,9 +403,9 @@ class DeviceInfoViewModel(QObject):
 
     @staticmethod
     def _format_remaining(value):
-        if value is None:
+        if value is None or int(value) == -2147483648:
             return "-"
-        return f"{int(value)} min"
+        return f"{abs(int(value))} min"
 
     @staticmethod
     def _format_bool(value):
