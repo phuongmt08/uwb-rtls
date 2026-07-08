@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import queue
 from collections import deque
 from pathlib import Path
 from threading import Lock, Thread
 
 from data.raw_packet import RawPacket, RawSerialChunk
+
+log = logging.getLogger(__name__)
 
 
 class RawPacketStore:
@@ -191,9 +194,17 @@ class RawPacketStore:
         self._append_jsonl(self._parsed_file, parsed_record)
 
     def _append_jsonl(self, path: Path, record: dict) -> None:
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=True))
-            handle.write("\n")
+        def _serialize_fallback(obj):
+            if isinstance(obj, (bytes, bytearray)):
+                return obj.hex()
+            return str(obj)
+
+        try:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=True, default=_serialize_fallback))
+                handle.write("\n")
+        except Exception as exc:
+            log.error("Failed to append JSONL to %s: %s", path.name, exc)
 
 
 shared_raw_packet_store = RawPacketStore()
