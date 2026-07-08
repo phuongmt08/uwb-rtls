@@ -1841,8 +1841,8 @@ class DeviceModel(QObject):
         self._emit_merged_scan_data()
 
     def _handle_adv_status(self, res):
-        timestamp_ms = int(getattr(res, 'local_timestamp_ms', 0) or 0)
         timestamp_s = int(getattr(res, 'local_timestamp_s', 0) or 0)
+        timestamp_ms = int(getattr(res, 'local_timestamp_ms', 0) or 0)
         if timestamp_ms <= 0 and timestamp_s > 0:
             timestamp_ms = timestamp_s * 1000
         elif timestamp_s <= 0 and timestamp_ms > 0:

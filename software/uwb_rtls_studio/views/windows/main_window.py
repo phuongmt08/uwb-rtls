@@ -204,6 +204,7 @@ class MainWindow(QMainWindow):
         self._reconnect_popup = None
         self._conn_progress_target = 0
         self._conn_progress_display = 0
+        self._conn_progress_context = ""
         self._conn_progress_timer = QTimer(self)
         self._conn_progress_timer.setInterval(8)
         self._conn_progress_timer.timeout.connect(self._tick_connection_progress)
@@ -367,10 +368,58 @@ class MainWindow(QMainWindow):
         else:
             self._conn_progress_timer.stop()
 
+    def _reset_connection_progress(self):
+        self._conn_progress_target = 0
+        self._conn_progress_display = 0
+        self._conn_progress_bar.setValue(0)
+        self._conn_progress_timer.stop()
+
+    def _visualize_connection_progress(self, payload: dict) -> int:
+        raw_progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
+        status = str(payload.get("status") or "RUNNING").upper()
+        message = str(payload.get("message") or "").strip().lower()
+
+        if raw_progress <= 0 or status in {"IDLE", "FAILED", "ERROR"}:
+            return 0
+        if status == "SUCCESS" or raw_progress >= 100:
+            return 100
+
+        # Animate smoothly through 1..100 while still waiting on real BLE phases.
+        if "switching target device" in message:
+            return 12
+        if message.startswith("disconnecting "):
+            return 24
+        if raw_progress <= 30:
+            return 30
+        if raw_progress <= 40:
+            return 40
+        if raw_progress <= 50:
+            return 50
+        if raw_progress <= 60:
+            return 60
+        if raw_progress <= 65:
+            return 70
+        if raw_progress <= 72:
+            return 80
+        if raw_progress <= 82:
+            return 90
+        if raw_progress <= 90:
+            return 99
+        return min(raw_progress, 99)
+
     def _on_connection_progress(self, payload: dict):
-        progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
+        progress = self._visualize_connection_progress(payload)
+        raw_progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         message = str(payload.get("message") or "BLE process")
         status = str(payload.get("status") or "RUNNING")
+        mac = str(payload.get("mac") or "").strip().upper()
+        name = str(payload.get("name") or "").strip()
+        context = f"{mac}|{name}"
+
+        if raw_progress <= 30 and context and context != self._conn_progress_context:
+            self._reset_connection_progress()
+        if raw_progress > 0 and context:
+            self._conn_progress_context = context
 
         self._conn_progress_label.setText(message)
         self._conn_progress_label.setToolTip(message)
@@ -379,9 +428,8 @@ class MainWindow(QMainWindow):
             self._conn_progress_timer.start()
 
         if progress == 0:
-            self._conn_progress_display = 0
-            self._conn_progress_bar.setValue(0)
-            self._conn_progress_timer.stop()
+            self._reset_connection_progress()
+            self._conn_progress_context = ""
         else:
             self.update_progress_style(status)
 
