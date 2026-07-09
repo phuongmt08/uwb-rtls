@@ -49,6 +49,7 @@ class LogTab(QWidget):
         super().__init__(parent)
         self._is_developer = is_developer
         self._log_entry_count = 0
+        self._filtered_log_entry_count = 0
         self._all_log_lines = []
         self._filter_active = False
         self._session_records = {}
@@ -68,7 +69,7 @@ class LogTab(QWidget):
         self._connect_signals()
         self._vm = None
 
-        # Sáº½ sinh virtual history sau 50ms náº¿u khÃ´ng cÃ³ ViewModel nÃ o Ä‘Æ°á»£c gÃ¡n
+        # Create virtual history after 50 ms if no ViewModel is attached
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(50, self._check_and_populate_virtual)
 
@@ -197,26 +198,51 @@ class LogTab(QWidget):
         raw_line = entry.get("raw_line")
         if raw_line:
             line = str(raw_line)
-            self._all_log_lines.append(line)
-            self._log_entry_count = len(self._all_log_lines)
-            self._apply_filter()
-            self.log_text.moveCursor(QTextCursor.MoveOperation.End)
-            return
+        else:
+            timestamp = entry.get("timestamp", "")
+            level = entry.get("level", "")
+            message = entry.get("message", "")
+            object_code = entry.get("object_code")
+            object_text = f"0x{int(object_code):02X}" if object_code is not None else "--"
+            line = f"[{timestamp}] [{level:<5}] [{object_text}] {message}".strip()
 
-        timestamp = entry.get("timestamp", "")
-        level = entry.get("level", "")
-        message = entry.get("message", "")
-        object_code = entry.get("object_code")
-        object_text = f"0x{int(object_code):02X}" if object_code is not None else "--"
-        line = f"[{timestamp}] [{level:<5}] [{object_text}] {message}".strip()
         self._all_log_lines.append(line)
         self._log_entry_count = len(self._all_log_lines)
-        self._apply_filter()
-        self.log_text.moveCursor(QTextCursor.MoveOperation.End)
+
+        # Evaluate current filters
+        level_filter = self.filter_level.currentText().strip().upper()
+        object_code_filter = self.filter_source.currentData()
+        query = self.search_edit.text().strip().lower()
+
+        self._filter_active = level_filter != "ALL" or object_code_filter is not None or bool(query)
+
+        matches = (
+            self._line_matches_level(line, level_filter)
+            and self._line_matches_object_code(line, object_code_filter)
+            and (not query or query in line.lower())
+        )
+
+        if matches:
+            self._filtered_log_entry_count += 1
+            cursor = self.log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            if not self.log_text.document().isEmpty():
+                cursor.insertText("\n")
+            fmt = QTextCharFormat()
+            fmt.setForeground(self._line_color(line))
+            cursor.insertText(line, fmt)
+            self.log_text.setTextCursor(cursor)
+            self.log_text.moveCursor(QTextCursor.MoveOperation.End)
+
+        if self._filter_active:
+            self.log_count.setText(f"{self._filtered_log_entry_count} / {self._log_entry_count} entries")
+        else:
+            self.log_count.setText(f"{self._log_entry_count} entries")
 
     def _clear_live_log_view(self):
         self._all_log_lines.clear()
         self._log_entry_count = 0
+        self._filtered_log_entry_count = 0
         self._filter_active = False
         self.log_text.clear()
         self.log_count.setText("0 entries")
@@ -259,7 +285,7 @@ class LogTab(QWidget):
             self.session_table.setItem(row, 1, self._readonly_item(s["start_time"]))
             self.session_table.setItem(row, 2, self._readonly_item(s["duration"]))
             
-            # Giá»¯ tÆ°Æ¡ng thÃ­ch sá»‘ tá»‡p tin chi tiáº¿t cá»§a UI
+            # Keep compatibility with the UI detail file naming
             ranging_count = str(s.get("ranging_count", 1 if s["type"] == "RANGING" else 0))
             session_file_count = str(s.get("session_file_count", 0))
             self.session_table.setItem(row, 3, self._readonly_item(ranging_count))
@@ -345,8 +371,9 @@ class LogTab(QWidget):
 
         self._filter_active = level != "ALL" or object_code is not None or bool(query)
         self._render_log_lines(filtered_lines)
+        self._filtered_log_entry_count = len(filtered_lines)
         if self._filter_active:
-            self.log_count.setText(f"{len(filtered_lines)} / {self._log_entry_count} entries")
+            self.log_count.setText(f"{self._filtered_log_entry_count} / {self._log_entry_count} entries")
         else:
             self.log_count.setText(f"{self._log_entry_count} entries")
 

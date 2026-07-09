@@ -198,35 +198,70 @@ class ConfigViewModel(QObject):
             self.read_ble_conn_params()
             self.read_device_type()
 
-        return self.model.execute_for_target(target, operation)
+        operation()
+        return True
 
     def write_device_config(
         self,
         target: dict | None,
-        anchors: list,
-        ranging_config: dict,
-        sys_config: dict,
-        sensor_fusion_config: dict,
+        anchors: list | None = None,
+        ranging_config: dict | None = None,
+        sys_config: dict | None = None,
+        sensor_fusion_config: dict | None = None,
         pos_calib_config: dict | None = None,
+        factory_otp_config: dict | None = None,
     ):
         """Write one captured UI snapshot to the selected target."""
         target = dict(target or {})
-        anchors = [dict(anchor) for anchor in anchors]
-        ranging_config = dict(ranging_config)
-        sys_config = dict(sys_config)
-        sensor_fusion_config = dict(sensor_fusion_config)
-        pos_calib_config = dict(pos_calib_config or {})
 
         def operation():
-            log.info("Writing complete config for target: %s", target)
-            self.write_anchor_layout(anchors)
-            self.write_ranging_config(**ranging_config)
-            self.write_sys_config(**sys_config)
-            self.write_sensor_fusion_config(**sensor_fusion_config)
+            log.info("Writing selected config for target: %s", target)
+            if anchors is not None:
+                anchors_copied = [dict(anchor) for anchor in anchors]
+                self.write_anchor_layout(anchors_copied)
+            if ranging_config is not None:
+                self.write_ranging_config(**ranging_config)
+            if sys_config is not None:
+                self.write_sys_config(**sys_config)
+            if sensor_fusion_config is not None:
+                self.write_sensor_fusion_config(**sensor_fusion_config)
             if pos_calib_config:
                 self.write_pos_calib_config(**pos_calib_config)
+            if factory_otp_config:
+                self.write_factory_otp(
+                    confirm_magic=factory_otp_config.get("confirm_magic", 0x4F545057),
+                    otp_type=factory_otp_config.get("otp_type", 0),
+                    device_type=factory_otp_config.get("device_type", 2),
+                    tx_antenna_delay=factory_otp_config.get("tx_antenna_delay", 0),
+                    rx_antenna_delay=factory_otp_config.get("rx_antenna_delay", 0),
+                    value_u32=factory_otp_config.get("value_u32", 0),
+                    value_u8=factory_otp_config.get("value_u8", 0),
+                )
 
-        return self.model.execute_for_target(target, operation)
+        operation()
+        return True
+
+    def write_factory_otp(
+        self,
+        confirm_magic: int = 0x4F545057,
+        otp_type: int = 0,
+        device_type: int = 2,
+        tx_antenna_delay: int = 0,
+        rx_antenna_delay: int = 0,
+        value_u32: int = 0,
+        value_u8: int = 0,
+    ):
+        log.info("Sending factory OTP write command to MCU: type=%d", otp_type)
+        self.model.write_factory_otp(
+            confirm_magic=confirm_magic,
+            otp_type=otp_type,
+            device_type=device_type,
+            tx_antenna_delay=tx_antenna_delay,
+            rx_antenna_delay=rx_antenna_delay,
+            value_u32=value_u32,
+            value_u8=value_u8,
+        )
+
 
     def read_anchor_layout(self):
         # BE/API: fetch anchor layout for the Config tab.
@@ -318,35 +353,22 @@ class ConfigViewModel(QObject):
         self.model.set_host_transport(transport)
 
     def write_all_device_configs(self, targets: list[dict], snapshot: dict, delay_ms: int = 2500):
-        self._bulk_targets = [dict(target) for target in targets] or [dict(snapshot.get("target", {}))]
-        self._bulk_snapshot = dict(snapshot)
+        _ = targets
+        _ = snapshot
+        _ = delay_ms
+        log.warning("Broadcast write is not implemented yet; ignoring write_all_device_configs request.")
+        self._bulk_targets = []
+        self._bulk_snapshot = None
         self._bulk_index = 0
-        self._bulk_delay_ms = max(250, int(delay_ms))
-        self._write_next_bulk_target()
+        self._bulk_timer.stop()
+        return False
 
     def _write_next_bulk_target(self):
-        if not self._bulk_snapshot or self._bulk_index >= len(self._bulk_targets):
-            self._bulk_targets = []
-            self._bulk_snapshot = None
-            self._bulk_index = 0
-            return
-        target = self._bulk_targets[self._bulk_index]
-        self._bulk_index += 1
-        sys_config = dict(self._bulk_snapshot.get("sys_config", {}))
-        if target.get("role"):
-            sys_config["role"] = int(target.get("role"))
-        if target.get("device_id"):
-            sys_config["device_id"] = int(target.get("device_id"))
-        self.write_device_config(
-            target=target,
-            anchors=self._bulk_snapshot.get("anchors", []),
-            ranging_config=self._bulk_snapshot.get("ranging_config", {}),
-            sys_config=sys_config,
-            sensor_fusion_config=self._bulk_snapshot.get("sensor_fusion_config", {}),
-            pos_calib_config=self._bulk_snapshot.get("pos_calib_config", {}),
-        )
-        if self._bulk_index < len(self._bulk_targets):
-            self._bulk_timer.start(self._bulk_delay_ms)
+        self._bulk_targets = []
+        self._bulk_snapshot = None
+        self._bulk_index = 0
+        self._bulk_timer.stop()
+        return False
 
     def device_reset(self):
         # BE/API: device lifecycle action from Config tab.

@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-UWB_RTLS_TEST_MODE = 0
+UWB_RTLS_TEST_MODE = 1
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "test", "mock"}
 _FALSE_VALUES = {"0", "false", "no", "off", "real", "hardware"}
@@ -30,6 +30,9 @@ def _parse_bool(value: Any, default: bool) -> bool:
 
 def is_test_mode() -> bool:
     """Return True for offline/mock mode, False for real hardware mode."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        return False
     return _parse_bool(os.getenv("UWB_RTLS_TEST_MODE"), bool(UWB_RTLS_TEST_MODE))
 
 

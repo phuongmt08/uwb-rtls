@@ -62,7 +62,8 @@ class LogRepository(QObject):
         segment_info = {
             "log_type": log_type,
             "seq": int(getattr(pkt.hdr, "seq", 0)),
-            "dst_addr": int(getattr(pkt.hdr.addr, "src", 0)),
+            "src_addr": int(getattr(pkt.hdr.addr, "src", 0)),
+            "dst_addr": int(getattr(pkt.hdr.addr, "dst", 0)),
             "offset": offset,
             "length": len(raw),
             "entries": self.parse_log_payload(raw, log_type=log_type),

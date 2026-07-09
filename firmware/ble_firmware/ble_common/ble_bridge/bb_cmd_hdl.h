@@ -59,6 +59,7 @@ void bb_cmd_notify_adv_status(const protobuf_ble_adv_status_t * status);
 void bb_cmd_notify_ble_status(uint8_t state,
                               int32_t rssi_dbm,
                               uint32_t disconnect_reason);
+void bb_cmd_async_tx_process(void);
 ret_code_t bb_cmd_request_ble_adv_config(void);
 void bb_cmd_ble_adv_config_request_process(void);
 

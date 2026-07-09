@@ -40,6 +40,7 @@ class CommandBus(QObject):
         "ble_conn_params_set": "ble_conn_params_resp",
         "time_sync_set": "time_sync_resp",
     }
+    ACK_RESPONSE_OK = 1
 
     def __init__(self, protocol_service, parent=None):
         super().__init__(parent)
@@ -47,8 +48,11 @@ class CommandBus(QObject):
         self._catalog = CommandCatalog()
         self._cache: dict[str, tuple[float, object]] = {}
         self._pending: dict[str, float] = {}
+        self._pending_ack_by_seq: dict[int, tuple[str, str]] = {}
         self.manual_test_mode_enabled = False
         self._protocol.packet_received.connect(self._on_packet_received)
+        self._protocol.packet_sent.connect(self._on_packet_sent)
+        self._protocol.ack_received.connect(self._on_ack_received)
 
     def request(
         self,
@@ -126,7 +130,6 @@ class CommandBus(QObject):
             log.info("Command skipped by flag: %s", command_name)
             return None
 
-
         decision = shared_traffic_scheduler.allow_command(
             command_name,
             traffic_class=traffic_class,
@@ -148,15 +151,46 @@ class CommandBus(QObject):
             self._cache.pop(response_name, None)
             self._pending.pop(response_name, None)
 
+    def _on_packet_sent(self, param_name: str, pkt) -> None:
+        response_name = self.INVALIDATE_ON_SEND.get(param_name)
+        if not response_name:
+            return
+        seq = getattr(getattr(pkt, "hdr", None), "seq", None)
+        if seq is None:
+            return
+        self._pending_ack_by_seq[int(seq)] = (param_name, response_name)
+
+    def _on_ack_received(self, ack_seq: int, response: int) -> None:
+        entry = self._pending_ack_by_seq.pop(int(ack_seq), None)
+        if not entry:
+            return
+        command_name, response_name = entry
+        self._pending.pop(response_name, None)
+        if int(response) == self.ACK_RESPONSE_OK:
+            log.debug("CommandBus ACK resolved pending: %s -> %s seq=%s", command_name, response_name, ack_seq)
+        else:
+            log.debug(
+                "CommandBus ACK cleared pending after NACK: %s -> %s seq=%s response=%s",
+                command_name,
+                response_name,
+                ack_seq,
+                response,
+            )
+
     def _on_packet_received(self, param_name: str, pkt) -> None:
         self._cache[param_name] = (time.monotonic(), pkt)
         self._pending.pop(param_name, None)
+        # Once the payload arrives, any ACK bookkeeping for that same command is obsolete.
+        seq = getattr(getattr(pkt, "hdr", None), "seq", None)
+        if seq is not None:
+            self._pending_ack_by_seq.pop(int(seq), None)
         self.response_received.emit(param_name, pkt)
 
     def reset(self) -> None:
         """Clear cache and pending command tracking."""
         self._cache.clear()
         self._pending.clear()
+        self._pending_ack_by_seq.clear()
         log.info("CommandBus reset cache.")
 
 

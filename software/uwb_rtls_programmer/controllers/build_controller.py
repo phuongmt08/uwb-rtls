@@ -11,6 +11,7 @@ import datetime
 
 class BuildController(QObject):
     history_ready = Signal(str, str, list)
+    git_status_changed = Signal(str, str)
 
     def __init__(self, view: BuildTab, signals: WorkerSignals, main_ctrl):
 
@@ -18,9 +19,12 @@ class BuildController(QObject):
         self.view = view
         self.signals = signals
         self.main_ctrl = main_ctrl
+        self._last_git_branch = None
+        self._last_git_hash = None
         
         # Connect internal signals
         self.history_ready.connect(self.update_history_ui)
+        self.git_status_changed.connect(self.on_git_status_changed)
         
         self.view.btn_build.clicked.connect(self.on_build)
         self.view.btn_clean.clicked.connect(self.on_clean)
@@ -44,6 +48,11 @@ class BuildController(QObject):
         self.view.chk_auto_flash.stateChanged.connect(lambda: self.settings.setValue("auto_flash", self.view.chk_auto_flash.isChecked()))
 
         QTimer.singleShot(100, self.refresh_history)
+        
+        # Start git polling after initial refresh
+        self.git_timer = QTimer(self)
+        self.git_timer.timeout.connect(self.poll_git_status)
+        self.git_timer.start(3000)
 
     def refresh_history(self):
         # Scan in background to keep UI responsive
@@ -55,7 +64,11 @@ class BuildController(QObject):
                 # Emit log safely
                 self.signals.log.emit(f"[INFO] Scanning archive folder: {version_dir}")
                 
-                git_hash = BuildService.get_current_git_hash()
+                git_hash = BuildService.get_current_git_hash(force=True)
+                git_branch = BuildService.get_current_git_branch()
+                self._last_git_hash = git_hash
+                self._last_git_branch = git_branch
+                git_info = f"{git_branch} ({git_hash})"
                 
                 # Parse version.h
                 version_file = os.path.join(uwb_dir, "app", "version.h")
@@ -91,7 +104,7 @@ class BuildController(QObject):
                     archives_data.sort(reverse=True, key=lambda x: x[0])
 
                 # Emit signal safely (PySide6 converts list automatically)
-                self.history_ready.emit(git_hash, fw_ver, archives_data)
+                self.history_ready.emit(git_info, fw_ver, archives_data)
 
             except Exception as e:
                 self.signals.log.emit(f"[ERROR] History scan failed: {e}")
@@ -99,8 +112,8 @@ class BuildController(QObject):
         self.main_ctrl.run_task(scan_job)
 
     @Slot(str, str, list)
-    def update_history_ui(self, git_hash, fw_ver, archives_data):
-        self.view.lbl_git.setText(f"Git Hash: {git_hash}")
+    def update_history_ui(self, git_info, fw_ver, archives_data):
+        self.view.lbl_git.setText(f"Git: {git_info}")
         self.view.lbl_version.setText(f"Current Version: {fw_ver}")
         self.view.table_archives.setRowCount(0)
         self.view.table_archives.setRowCount(len(archives_data))
@@ -121,6 +134,26 @@ class BuildController(QObject):
             self.select_new_build_after_refresh = False
             self.view.table_archives.selectRow(0)
             self.set_active_firmware()
+
+    @Slot(str, str)
+    def on_git_status_changed(self, branch, git_hash):
+        self.view.lbl_git.setText(f"Git: {branch} ({git_hash})")
+        self.signals.log.emit(f"[GIT] Detected branch/hash change: {branch} ({git_hash})")
+        self.refresh_history()
+
+    def poll_git_status(self):
+        import threading
+        def worker():
+            try:
+                git_hash = BuildService.get_current_git_hash(force=True)
+                git_branch = BuildService.get_current_git_branch()
+                if git_hash != self._last_git_hash or git_branch != self._last_git_branch:
+                    self._last_git_hash = git_hash
+                    self._last_git_branch = git_branch
+                    self.git_status_changed.emit(git_branch, git_hash)
+            except Exception:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
 
 
 

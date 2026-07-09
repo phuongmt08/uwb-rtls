@@ -171,42 +171,6 @@ QSpinBox, QDoubleSpinBox {{
 QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {COLOR_ACCENT};
 }}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{
-    subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 22px;
-    border-left: 1px solid {COLOR_BORDER};
-    border-top-right-radius: 6px;
-    background-color: {COLOR_BG_DARKER};
-}}
-QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {{
-    background-color: {COLOR_ACCENT_DIM};
-}}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{
-    subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 22px;
-    border-left: 1px solid {COLOR_BORDER};
-    border-bottom-right-radius: 6px;
-    background-color: {COLOR_BG_DARKER};
-}}
-QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
-    background-color: {COLOR_ACCENT_DIM};
-}}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-bottom: 5px solid {COLOR_TEXT};
-}}
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {COLOR_TEXT};
-}}
 
 /* ═══════════════════ COMBO BOX ════════════════ */
 QComboBox {{

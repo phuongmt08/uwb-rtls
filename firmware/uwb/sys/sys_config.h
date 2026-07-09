@@ -77,7 +77,7 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            30     /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            32     /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
@@ -95,7 +95,7 @@ typedef struct
 #define DEFAULT_TX_ANT_DLY        16436
 #define DEFAULT_RX_ANT_DLY        16436
 #define DEFAULT_TX_POWER          0x3A5A7A9AUL /* ~-14.5 dBm with smart power on */
-#define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_ECO
+#define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_DEEP_ECO
 #define DEFAULT_UWB_PREAMBLE_LEN  0x34 /* DWT_PLEN_512 */
 #define DEFAULT_UWB_RX_PAC        1    /* DWT_PAC16 */
 #define DEFAULT_UWB_NS_SFD        1

@@ -27,6 +27,7 @@
 #include "../ble_common/ble_bridge/bb_debug.h"
 #include "../../../protocol/protos/protocol.pb.h"
 #include "nrf_delay.h"
+#include "app_timer.h"
 
 
 #define DEVICE_NAME                     SYSTEM_CONFIG_DEVICE_PREFIX "01"
@@ -50,6 +51,9 @@ BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);
 
 static bool m_is_initialized = false;
 static bool m_is_advertising = false;
+static bool m_advertising_enabled = false;
+static bool m_adv_restart_pending = false;
+static uint32_t m_adv_retry_tick = 0;
 
 static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;
 static uint8_t m_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
@@ -112,6 +116,7 @@ typedef struct {
     uint8_t  warning_count;
     uint8_t  error_count;
     uint32_t timestamp_s;
+    uint32_t serial_number;
 } ble_adv_status_packed_t;
 #pragma pack(pop)
 
@@ -299,7 +304,7 @@ static ret_code_t bcast_start_current_fragment(void)
 
 static void bcast_restore_advertising(void)
 {
-    bool restore = m_bcast_restore_advertising;
+    bool restore = m_bcast_restore_advertising && m_advertising_enabled;
     m_bcast_active = false;
     m_bcast_restore_advertising = false;
     m_bcast_pending_start = false;
@@ -308,6 +313,7 @@ static void bcast_restore_advertising(void)
     if (err_code != NRF_SUCCESS)
     {
         NRF_LOG_WARNING("BLE BCAST restore advertiser configure failed: 0x%x", err_code);
+        m_adv_restart_pending = restore;
         return;
     }
 
@@ -377,6 +383,10 @@ static void advertising_init(void)
 
     err_code = advertising_configure_current();
     APP_ERROR_CHECK(err_code);
+
+    /* advertising_init() always activates buffer 1; the next live status
+     * update must therefore be encoded into inactive buffer 2. */
+    m_adv_buffer_toggle = false;
 }
 
 static void nrf_qwr_error_handler(uint32_t nrf_error)
@@ -479,20 +489,48 @@ void ble_peripheral_init(void)
 
 void ble_peripheral_advertising_start(void)
 {
-    ret_code_t           err_code;
-
-    if (!m_is_initialized) return;
-    if (m_is_advertising) return;
-    if (m_bcast_active) return;
+    if (!m_is_initialized || !m_advertising_enabled) return;
+    if (m_is_advertising || m_bcast_active || m_bcast_pending_start) return;
     if (m_conn_handle != BLE_CONN_HANDLE_INVALID) return;
 
-    err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
-    APP_ERROR_CHECK(err_code);
+    ret_code_t err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
+    if (err_code == NRF_SUCCESS)
+    {
+        m_is_advertising = true;
+        m_adv_restart_pending = false;
+        bsp_utils_led_on();
+        return;
+    }
 
-    m_is_advertising = true;
-    bsp_utils_led_on();
+    m_adv_restart_pending = true;
+    NRF_LOG_WARNING("BLE advertising start deferred: 0x%x", err_code);
 }
 
+void ble_peripheral_process(void)
+{
+    if (!m_adv_restart_pending || !m_advertising_enabled || m_is_advertising ||
+        m_bcast_active || m_bcast_pending_start ||
+        m_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        return;
+    }
+
+    uint32_t now = app_timer_cnt_get();
+    if (app_timer_cnt_diff_compute(now, m_adv_retry_tick) < APP_TIMER_TICKS(100))
+    {
+        return;
+    }
+    m_adv_retry_tick = now;
+
+    ret_code_t err_code = advertising_configure_current();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("BLE advertising recovery configure failed: 0x%x", err_code);
+        return;
+    }
+
+    ble_peripheral_advertising_start();
+}
 static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 {
     ret_code_t err_code;
@@ -503,14 +541,15 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             BB_DEBUG_LOG_INFO("Connected");
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             m_is_advertising = false; // SoftDevice stops advertising automatically on connection
+            m_adv_restart_pending = false;
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
+            APP_ERROR_CHECK(err_code);
+            err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_CONN,
+                                                   m_conn_handle,
+                                                   SYSTEM_CONFIG_CONN_TX_POWER);
             APP_ERROR_CHECK(err_code);
             bsp_utils_led_blink_start();
             m_pending_tx_chunks = 0;
-            if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
-            {
-                APP_ERROR_CHECK(err_code);
-            }
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -519,7 +558,8 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             bsp_utils_led_blink_stop();
             m_pending_tx_chunks = 0;
-            m_is_advertising = false; // Reset flag so that advertising_start does not return early
+            m_is_advertising = false; // Ensure the software state matches the disconnected radio.
+            m_adv_restart_pending = false;
             if (m_bcast_active)
             {
                 m_bcast_restore_advertising = true;
@@ -630,26 +670,39 @@ static void ble_stack_init(void)
 
 void ble_peripheral_advertising_stop(void)
 {
-    if (m_is_advertising)
+    if (!m_is_advertising)
     {
-        sd_ble_gap_adv_stop(m_adv_handle);
-        m_is_advertising = false;
+        return;
     }
-}
 
-void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32_t serial_number)
+    ret_code_t err_code = sd_ble_gap_adv_stop(m_adv_handle);
+    if (err_code == NRF_SUCCESS || err_code == NRF_ERROR_INVALID_STATE)
+    {
+        m_is_advertising = false;
+        return;
+    }
+
+    NRF_LOG_WARNING("BLE advertising stop failed: 0x%x", err_code);
+}
+bool ble_peripheral_adv_config_set(bool enable, const char * device_name)
 {
     if (!m_is_initialized && enable)
     {
         ble_peripheral_init();
     }
     
-    BB_DEBUG_LOG_INFO("MCU Requested BLE ADV Config Set: enable=%d, device_name=%s, serial_number=%u", enable, device_name, serial_number);
+    BB_DEBUG_LOG_INFO("MCU Requested BLE ADV Config Set: enable=%d, device_name=%s", enable, device_name);
+
+    m_advertising_enabled = enable;
+    if (!enable)
+    {
+        m_adv_restart_pending = false;
+    }
 
     if (m_bcast_active)
     {
-        NRF_LOG_WARNING("BLE ADV config update skipped during BCAST burst");
-        return;
+        NRF_LOG_WARNING("BLE ADV config update deferred during BCAST burst");
+        return false;
     }
 
     if (enable)
@@ -669,9 +722,9 @@ void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32
         }
         else
         {
-            char auto_name[30];
-            snprintf(auto_name, sizeof(auto_name), "%s%02X", SYSTEM_CONFIG_DEVICE_PREFIX, (unsigned int)serial_number);
-            sd_ble_gap_device_name_set(&sec_mode, (const uint8_t *)auto_name, strlen(auto_name));
+            sd_ble_gap_device_name_set(&sec_mode,
+                                       (const uint8_t *)DEVICE_NAME,
+                                       strlen(DEVICE_NAME));
         }
 
         // Re-encode advertisement data to reflect the latest device name.
@@ -686,6 +739,8 @@ void ble_peripheral_adv_config_set(bool enable, const char * device_name, uint32
     {
         ble_peripheral_advertising_stop();
     }
+
+    return true;
 }
 
 uint8_t ble_peripheral_status_get(void)
@@ -725,6 +780,7 @@ void ble_peripheral_adv_status_update(const void * p_adv_status)
     packed_status.warning_count   = (uint8_t)status->warning_count;
     packed_status.error_count     = (uint8_t)status->error_count;
     packed_status.timestamp_s     = status->local_timestamp_s;
+    packed_status.serial_number   = status->serial_number;
 
     uint8_t manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + sizeof(packed_status)];
     manuf_payload[0] = BLE_BROADCAST_TYPE_ADV_STATUS;
@@ -812,6 +868,7 @@ uint32_t ble_peripheral_broadcast_send(uint8_t const * p_data, uint16_t length)
         if (err_code == NRF_ERROR_INVALID_STATE)
         {
             m_bcast_pending_start = false;
+            m_is_advertising = false;
             m_bcast_active = true;
             err_code = bcast_start_current_fragment();
             if (err_code != NRF_SUCCESS)
@@ -861,32 +918,31 @@ uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
     }
 
     BB_DEBUG_LOG_INFO("Forwarding %u bytes over BLE...", length);
-    
-    uint16_t offset = 0;
-    
-    while (offset < length)
+
+    // A protobuf packet must map to exactly one NUS event.
+    uint16_t current_payload_mtu = nrf_ble_gatt_eff_mtu_get(&m_gatt, m_conn_handle);
+    if (current_payload_mtu < 3 || current_payload_mtu > SYSTEM_CONFIG_MTU_SIZE)
     {
-        // Use the effective MTU and subtract the 3-byte ATT notification header.
-        uint16_t current_payload_mtu = nrf_ble_gatt_eff_mtu_get(&m_gatt, m_conn_handle);
-        if (current_payload_mtu == 0 || current_payload_mtu > SYSTEM_CONFIG_MTU_SIZE) 
-        {
-            current_payload_mtu = SYSTEM_CONFIG_MTU_SIZE; // Clamp to the configured maximum.
-        }
-        
-        current_payload_mtu -= 3; // Subtract the ATT header.
-        
-        uint16_t send_len = length - offset;
-        
-        if (send_len > current_payload_mtu) 
-        {
-            send_len = current_payload_mtu;
-        }
+        current_payload_mtu = SYSTEM_CONFIG_MTU_SIZE;
+    }
+    current_payload_mtu -= 3; // ATT notification header.
+
+    if (length > current_payload_mtu)
+    {
+        NRF_LOG_WARNING("BLE Peripheral TX rejected: protobuf len=%u exceeds payload MTU=%u",
+                        (unsigned)length,
+                        (unsigned)current_payload_mtu);
+        return NRF_ERROR_DATA_SIZE;
+    }
+
+    uint16_t send_len = length;
+    {
 
         ret_code_t err_code;
         uint32_t retries = 0;
         do
         {
-            err_code = ble_nus_data_send(&m_nus, (uint8_t *)(p_data + offset), &send_len, m_conn_handle);
+            err_code = ble_nus_data_send(&m_nus, (uint8_t *)p_data, &send_len, m_conn_handle);
             if (err_code == NRF_ERROR_RESOURCES)
             {
                 // Spin wait instead of blocking delay to prevent freezing main loop
@@ -899,7 +955,7 @@ uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
         {
             // SoftDevice notification TX buffers are full; the router will retry later.
             // This path can run from UART RX context, so do not delay here.
-            NRF_LOG_WARNING("BLE TX buffer full, dropping remaining byte: %u", length - offset);
+            NRF_LOG_WARNING("BLE TX buffer full, packet not queued: %u bytes", length);
             return err_code;
         }
         else if (err_code != NRF_SUCCESS)
@@ -910,7 +966,6 @@ uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length)
 
         m_pending_tx_chunks++;
         
-        offset += send_len;
     }
 
     return NRF_SUCCESS;

@@ -51,6 +51,7 @@
 #include "boards.h"
 #include "app_timer.h"
 #include "nrf_pwr_mgmt.h"
+#include "nrf_drv_wdt.h"
 
 // System-wide BLE configs
 #include "../ble_common/ble_config.h"
@@ -67,6 +68,7 @@
 
 #include "logger.h"
 
+#include "ble_peripheral.h"
 #include "bb_transport.h"
 
 /*
@@ -77,6 +79,24 @@ static void power_management_init(void)
     ret_code_t err_code;
     err_code = nrf_pwr_mgmt_init();
     APP_ERROR_CHECK(err_code);
+}
+
+static nrf_drv_wdt_channel_id m_wdt_channel_id;
+
+static void wdt_event_handler(void)
+{
+    // Minimal handler. Reset is imminent.
+}
+
+static void watchdog_init(void)
+{
+    ret_code_t err_code;
+    nrf_drv_wdt_config_t config = NRF_DRV_WDT_DEAFULT_CONFIG;
+    err_code = nrf_drv_wdt_init(&config, wdt_event_handler);
+    APP_ERROR_CHECK(err_code);
+    err_code = nrf_drv_wdt_channel_alloc(&m_wdt_channel_id);
+    APP_ERROR_CHECK(err_code);
+    nrf_drv_wdt_enable();
 }
 
 static void idle_state_handle(void)
@@ -108,10 +128,15 @@ int main(void)
     // Start execution.
     BB_DEBUG_LOG_INFO("BLE Peripheral started !");
 
+    // Start watchdog AFTER all initialization is complete.
+    watchdog_init();
+
     // Enter main loop.
     for (;;)
     {
+        nrf_drv_wdt_channel_feed(m_wdt_channel_id);
         bb_router_process();
+        ble_peripheral_process();
         bb_cmd_ble_adv_config_request_process();
         idle_state_handle();
     }

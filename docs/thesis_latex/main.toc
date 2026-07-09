@@ -1,0 +1,95 @@
+\xpg@aux {}{vietnamese}
+\contentsline {chapter}{\numberline {1}TỔNG QUAN}{3}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Lí do chọn đề tài}{3}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Mục tiêu nghiên cứu đề tài}{3}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Phương pháp nghiên cứu}{3}{section.1.3}%
+\contentsline {section}{\numberline {1.4}Nội dung thực hiện}{3}{section.1.4}%
+\contentsline {chapter}{\numberline {2}CƠ SỞ LÝ THUYẾT}{4}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Cơ sở lý thuyết về định vị}{4}{section.2.1}%
+\contentsline {subsection}{\numberline {2.1.1}Khái niệm Ultra-Wideband}{4}{subsection.2.1.1}%
+\contentsline {subsection}{\numberline {2.1.2}So sánh khả năng định vị của các công nghệ định vị hiện nay}{4}{subsection.2.1.2}%
+\contentsline {subsection}{\numberline {2.1.3}Nguyên lý hoạt động và mô hình đo khoảng cách}{4}{subsection.2.1.3}%
+\contentsline {subsubsection}{\numberline {2.1.3.1}Two-Way~Ranging~(TWR)~}{5}{subsubsection.2.1.3.1}%
+\contentsline {subsubsection}{\numberline {2.1.3.2}Time~Difference~of~Arrival~(TDoA)~}{6}{subsubsection.2.1.3.2}%
+\contentsline {subsubsection}{\numberline {2.1.3.3}Phase~Difference~of~Arrival~(PDoA)~}{7}{subsubsection.2.1.3.3}%
+\contentsline {subsection}{\numberline {2.1.4}Cơ chế truy nhập kênh và lập lịch truyền nhận trong hệ thống UWB nhiều anchor}{7}{subsection.2.1.4}%
+\contentsline {subsubsection}{\numberline {2.1.4.1}Vai trò của lớp MAC trong hệ thống UWB nhiều anchor}{7}{subsubsection.2.1.4.1}%
+\contentsline {subsubsection}{\numberline {2.1.4.2}Các nhóm cơ chế truy nhập kênh ở lớp MAC}{7}{subsubsection.2.1.4.2}%
+\contentsline {subsubsection}{\numberline {2.1.4.3}TDMA trong lập lịch đo khoảng cách UWB}{8}{subsubsection.2.1.4.3}%
+\contentsline {subsubsection}{\numberline {2.1.4.4}CDMA và vai trò của preamble code trong UWB}{8}{subsubsection.2.1.4.4}%
+\contentsline {section}{\numberline {2.2}Cơ sở thuật toán định vị thời gian thực}{9}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Thuật toán định vị hình học}{9}{subsection.2.2.1}%
+\contentsline {subsubsection}{\numberline {2.2.1.1}Mô hình toán học của bài toán định vị theo khoảng cách}{9}{subsubsection.2.2.1.1}%
+\contentsline {subsubsection}{\numberline {2.2.1.2}Phương pháp trilateration}{9}{subsubsection.2.2.1.2}%
+\contentsline {subsubsection}{\numberline {2.2.1.3}Phương pháp multilateration}{10}{subsubsection.2.2.1.3}%
+\contentsline {subsection}{\numberline {2.2.2}Đánh giá sai số và độ tin cậy của kết quả định vị}{10}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Bộ lọc Unscented Kalman Filter trong hệ thống định vị UWB--IMU}{11}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}Cơ sở thiết kế mạch định vị}{11}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Cơ sở lý thuyết về truyền thông và phần mềm cho hệ thống định vị UWB}{11}{section.2.4}%
+\contentsline {chapter}{\numberline {3}THIẾT KẾ HỆ THỐNG ĐỊNH VỊ THỜI GIAN THỰC}{12}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Tổng quan kiến trúc hệ thống định vị}{12}{section.3.1}%
+\contentsline {subsection}{\numberline {3.1.1}Thành phần và mô hình triển khai hệ thống}{12}{subsection.3.1.1}%
+\contentsline {subsection}{\numberline {3.1.2}Luồng dữ liệu và điều khiển tổng thể}{12}{subsection.3.1.2}%
+\contentsline {section}{\numberline {3.2}Thiết kế phần cứng và lựa chọn linh kiện cho bo mạch}{12}{section.3.2}%
+\contentsline {subsection}{\numberline {3.2.1}Sơ đồ khối phần cứng tổng thể của hệ thống định vị}{12}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.2}Tính toán và lựa chọn linh kiện}{12}{subsection.3.2.2}%
+\contentsline {subsubsection}{\numberline {3.2.2.1}Tính toán dung lượng pin và ước tính thời gian sạc}{12}{subsubsection.3.2.2.1}%
+\contentsline {subsubsection}{\numberline {3.2.2.2}Tính toán xung nhịp hệ thống và giá trị thạch anh}{12}{subsubsection.3.2.2.2}%
+\contentsline {subsubsection}{\numberline {3.2.2.3}Thiết kế và lựa chọn linh kiện cho khối nguồn}{12}{subsubsection.3.2.2.3}%
+\contentsline {subsubsection}{\numberline {3.2.2.4}Thiết kế khối điều khiển}{12}{subsubsection.3.2.2.4}%
+\contentsline {subsection}{\numberline {3.2.3}Thiết kế mạch in PCB}{12}{subsection.3.2.3}%
+\contentsline {subsubsection}{\numberline {3.2.3.1}Đặc tính vật lý và cấu trúc lớp}{12}{subsubsection.3.2.3.1}%
+\contentsline {subsubsection}{\numberline {3.2.3.2}Tính toán và thiết lập độ rộng đường dây}{12}{subsubsection.3.2.3.2}%
+\contentsline {subsubsection}{\numberline {3.2.3.3}Thiết lập quy chuẩn lỗ xuyên}{12}{subsubsection.3.2.3.3}%
+\contentsline {subsubsection}{\numberline {3.2.3.4}Sơ đồ đi dây và bố trí linh kiện}{12}{subsubsection.3.2.3.4}%
+\contentsline {subsubsection}{\numberline {3.2.3.5}Mạch in 3D}{12}{subsubsection.3.2.3.5}%
+\contentsline {subsection}{\numberline {3.2.4}Thiết kế vỏ hộp 3D}{12}{subsection.3.2.4}%
+\contentsline {subsection}{\numberline {3.2.5}Lắp ráp, kiểm tra và thử nghiệm phần cứng}{12}{subsection.3.2.5}%
+\contentsline {section}{\numberline {3.3}Thiết kế và triển khai firmware vi điều khiển trung tâm}{12}{section.3.3}%
+\contentsline {subsection}{\numberline {3.3.1}Phân bổ không gian bộ nhớ hệ thống và cấu trúc lưu trữ dữ liệu}{12}{subsection.3.3.1}%
+\contentsline {subsubsection}{\numberline {3.3.1.1}\textbf {Phân bổ vùng trong bộ nhớ Flash}}{13}{subsubsection.3.3.1.1}%
+\contentsline {subsubsection}{\numberline {3.3.1.2}Phân bổ vùng trong bộ nhớ RAM}{13}{subsubsection.3.3.1.2}%
+\contentsline {subsubsection}{\numberline {3.3.1.3}Vùng lưu trữ và nguyên lý wear-leveling}{13}{subsubsection.3.3.1.3}%
+\contentsline {subsection}{\numberline {3.3.2}Chương trình khởi động nhúng}{15}{subsection.3.3.2}%
+\contentsline {subsubsection}{\numberline {3.3.2.1}Quy trình xác thực và khởi chạy ứng dụng chính}{15}{subsubsection.3.3.2.1}%
+\contentsline {subsubsection}{\numberline {3.3.2.2}Cơ chế nâng cấp và bảo trì hệ thống}{16}{subsubsection.3.3.2.2}%
+\contentsline {subsection}{\numberline {3.3.3}Kiến trúc phần mềm ứng dụng đa nhiệm}{17}{subsection.3.3.3}%
+\contentsline {subsubsection}{\numberline {3.3.3.1}Kiến trúc phân tầng phần mềm ứng dụng}{17}{subsubsection.3.3.3.1}%
+\contentsline {subsubsection}{\numberline {3.3.3.2}Quản lý đa nhiệm và đồng bộ hóa tài nguyên với freeRTOSx}{17}{subsubsection.3.3.3.2}%
+\contentsline {subsection}{\numberline {3.3.4}Triển khai các thuật toán định vị nhúng}{19}{subsection.3.3.4}%
+\contentsline {subsubsection}{\numberline {3.3.4.1}Kiến trúc tầng xử lý dữ liệu định vị}{19}{subsubsection.3.3.4.1}%
+\contentsline {subsubsection}{\numberline {3.3.4.2}Thuật toán đo khoảng cách và bộ lập lịch}{19}{subsubsection.3.3.4.2}%
+\contentsline {paragraph}{Cấu trúc một chu kỳ đo DS--TWR nhiều anchor.}{19}{section*.4}%
+\contentsline {paragraph}{Thiết kế khe thời gian TDMA.}{20}{section*.6}%
+\contentsline {paragraph}{Trình tự vận hành của bộ lập lịch TDMA.}{21}{section*.7}%
+\contentsline {paragraph}{Xử lý mất khung và thay đổi số anchor.}{21}{section*.8}%
+\contentsline {paragraph}{Phân tách vùng bằng CDMA và preamble code.}{22}{section*.9}%
+\contentsline {paragraph}{Chuyển vùng.}{22}{section*.10}%
+\contentsline {subsubsection}{\numberline {3.3.4.3}Các hướng tiếp cận thuật toán định vị từ dữ liệu UWB}{22}{subsubsection.3.3.4.3}%
+\contentsline {paragraph}{WLS multilateration.}{22}{section*.11}%
+\contentsline {paragraph}{Phương án prefilter kết hợp UKF.}{23}{section*.12}%
+\contentsline {paragraph}{Nguyên tắc đánh giá.}{23}{section*.13}%
+\contentsline {subsubsection}{\numberline {3.3.4.4}Prefilter thống kê và lựa chọn layout anchor có trọng số}{23}{subsubsection.3.3.4.4}%
+\contentsline {paragraph}{Kiểm tra nhất quán bằng Mahalanobis distance.}{24}{section*.14}%
+\contentsline {paragraph}{Đánh giá đường truyền bằng FP amplitude.}{24}{section*.15}%
+\contentsline {paragraph}{Trọng số bền vững từ residual.}{24}{section*.16}%
+\contentsline {paragraph}{Hàm trọng số bền vững thống nhất.}{25}{section*.17}%
+\contentsline {paragraph}{Xây dựng measurement weight.}{25}{section*.18}%
+\contentsline {paragraph}{Hợp nhất measurement weight với hình học anchor.}{25}{section*.19}%
+\contentsline {subsubsection}{\numberline {3.3.4.5}Thuật toán sensor fusion với UKF}{26}{subsubsection.3.3.4.5}%
+\contentsline {subsubsection}{\numberline {3.3.4.6}Thuật toán hiệu chuẩn antenna delay và đo đạc vị trí anchor}{26}{subsubsection.3.3.4.6}%
+\contentsline {subsection}{\numberline {3.3.5}Các dịch vụ hệ thống và quản trị thiết bị}{26}{subsection.3.3.5}%
+\contentsline {section}{\numberline {3.4}Chương trình khối truyền thông không dây BLE}{26}{section.3.4}%
+\contentsline {subsection}{\numberline {3.4.1}Cấu hình BLE trên SoC NRF52}{26}{subsection.3.4.1}%
+\contentsline {subsection}{\numberline {3.4.2}Giao thức đóng gói và định tuyến dữ liệu}{26}{subsection.3.4.2}%
+\contentsline {section}{\numberline {3.5}Thiết kế và triển khai chương trình giám sát trên máy tính}{26}{section.3.5}%
+\contentsline {subsection}{\numberline {3.5.1}Kiến trúc tổng thể của phần mềm}{26}{subsection.3.5.1}%
+\contentsline {subsection}{\numberline {3.5.2}Luồng xử lý của hệ thống}{26}{subsection.3.5.2}%
+\contentsline {subsection}{\numberline {3.5.3}Thiết kế đa luồng và cơ chế đồng bộ dữ liệu}{26}{subsection.3.5.3}%
+\contentsline {chapter}{\numberline {4}KẾT QUẢ THỰC NGHIỆM VÀ ĐÁNH GIÁ}{27}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Kiểm chứng phần cứng và nguồn cấp}{27}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Đánh giá tài nguyên xử lý và khả năng đáp ứng định vị thời gian thực}{27}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Mô phỏng thuật toán định vị}{27}{section.4.3}%
+\contentsline {section}{\numberline {4.4}Thực nghiệm định vị trong nhiều môi trường}{27}{section.4.4}%
+\contentsline {section}{\numberline {4.5}Đánh giá cơ chế phân vùng không gian bằng CDMA}{27}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Tổng hợp và nhận xét kết quả thực nghiệm}{27}{section.4.6}%

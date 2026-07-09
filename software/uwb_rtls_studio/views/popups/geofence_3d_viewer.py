@@ -10,8 +10,8 @@
 import logging
 import numpy as np
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QTimer, QEvent
+from PyQt6.QtGui import QFont, QColor, QVector3D
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ class Geofence3DViewer(QDialog):
         # 3D Container or Warning label
         if OPENGL_AVAILABLE:
             self.gl_widget = gl.GLViewWidget(self)
+            self.gl_widget.installEventFilter(self)
             self.gl_widget.setStyleSheet("border: 1px solid #334155; border-radius: 8px;")
             self.gl_widget.setCameraPosition(distance=15, elevation=30, azimuth=-45)
             layout.addWidget(self.gl_widget)
@@ -226,3 +227,11 @@ class Geofence3DViewer(QDialog):
 
         self.tag_trail.setData(pos=np.array(self._trail_points))
         self.gl_widget.update()
+
+    def eventFilter(self, watched, event):
+        if hasattr(self, "gl_widget") and watched is self.gl_widget:
+            if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                self.gl_widget.setCameraPosition(pos=QVector3D(0.0, 0.0, 0.0), distance=15, elevation=30, azimuth=-45)
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)

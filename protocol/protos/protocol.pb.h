@@ -12,7 +12,7 @@
 /* Enum definitions */
 typedef enum _protobuf_common_constant_t {
     protobuf_UNSPECIFIED = 0,
-    protobuf_PROTOCOL_REV = 122
+    protobuf_PROTOCOL_REV = 123
 } protobuf_common_constant_t;
 
 typedef enum _protobuf_packet_ack_response_t {
@@ -425,7 +425,6 @@ typedef struct _protobuf_flash_verify_t {
  Useful during UWB calibration or power-saving modes. */
 typedef struct _protobuf_ble_adv_config_t {
     bool enable;
-    uint32_t serial_number;
     char device_name[32];
 } protobuf_ble_adv_config_t;
 
@@ -502,6 +501,7 @@ typedef struct _protobuf_ble_adv_status_t {
     uint32_t warning_count;
     uint32_t error_count;
     uint32_t local_timestamp_s;
+    uint32_t serial_number;
 } protobuf_ble_adv_status_t;
 
 typedef struct _protobuf_anchor_data_t {
@@ -1206,7 +1206,7 @@ extern "C" {
 #define protobuf_flash_data_t_init_default       {{0, {0}}}
 #define protobuf_flash_write_t_init_default      {0, {0, {0}}}
 #define protobuf_flash_verify_t_init_default     {0}
-#define protobuf_ble_adv_config_t_init_default   {0, 0, ""}
+#define protobuf_ble_adv_config_t_init_default   {0, ""}
 #define protobuf_ble_adv_config_request_t_init_default {0}
 #define protobuf_ble_status_get_t_init_default   {0}
 #define protobuf_ble_status_resp_t_init_default  {_protobuf_ble_state_t_MIN, 0, 0}
@@ -1219,7 +1219,7 @@ extern "C" {
 #define protobuf_ble_scan_start_t_init_default   {0, 0, 0, 0}
 #define protobuf_ble_scan_stop_t_init_default    {0}
 #define protobuf_ble_connect_t_init_default      {{0, {0}}}
-#define protobuf_ble_adv_status_t_init_default   {_protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0}
+#define protobuf_ble_adv_status_t_init_default   {_protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_anchor_data_t_init_default      {0, 0, 0}
 #define protobuf_log_data_t_init_default         {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_default        {_protobuf_log_type_t_MIN, 0, 0}
@@ -1305,7 +1305,7 @@ extern "C" {
 #define protobuf_flash_data_t_init_zero          {{0, {0}}}
 #define protobuf_flash_write_t_init_zero         {0, {0, {0}}}
 #define protobuf_flash_verify_t_init_zero        {0}
-#define protobuf_ble_adv_config_t_init_zero      {0, 0, ""}
+#define protobuf_ble_adv_config_t_init_zero      {0, ""}
 #define protobuf_ble_adv_config_request_t_init_zero {0}
 #define protobuf_ble_status_get_t_init_zero      {0}
 #define protobuf_ble_status_resp_t_init_zero     {_protobuf_ble_state_t_MIN, 0, 0}
@@ -1318,7 +1318,7 @@ extern "C" {
 #define protobuf_ble_scan_start_t_init_zero      {0, 0, 0, 0}
 #define protobuf_ble_scan_stop_t_init_zero       {0}
 #define protobuf_ble_connect_t_init_zero         {{0, {0}}}
-#define protobuf_ble_adv_status_t_init_zero      {_protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0}
+#define protobuf_ble_adv_status_t_init_zero      {_protobuf_device_type_t_MIN, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_anchor_data_t_init_zero         {0, 0, 0}
 #define protobuf_log_data_t_init_zero            {_protobuf_log_type_t_MIN, {0, {0}}}
 #define protobuf_log_clear_t_init_zero           {_protobuf_log_type_t_MIN, 0, 0}
@@ -1482,7 +1482,6 @@ extern "C" {
 #define protobuf_flash_write_t_data_tag          2
 #define protobuf_flash_verify_t_dummy_tag        1
 #define protobuf_ble_adv_config_t_enable_tag     1
-#define protobuf_ble_adv_config_t_serial_number_tag 2
 #define protobuf_ble_adv_config_t_device_name_tag 3
 #define protobuf_ble_adv_config_request_t_dummy_tag 1
 #define protobuf_ble_status_get_t_dummy_tag      1
@@ -1514,6 +1513,7 @@ extern "C" {
 #define protobuf_ble_adv_status_t_warning_count_tag 5
 #define protobuf_ble_adv_status_t_error_count_tag 6
 #define protobuf_ble_adv_status_t_local_timestamp_s_tag 7
+#define protobuf_ble_adv_status_t_serial_number_tag 8
 #define protobuf_anchor_data_t_anchor_id_tag     1
 #define protobuf_anchor_data_t_distance_mm_tag   2
 #define protobuf_anchor_data_t_weight_tag        3
@@ -2086,7 +2086,6 @@ X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
 
 #define protobuf_ble_adv_config_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enable,            1) \
-X(a, STATIC,   SINGULAR, UINT32,   serial_number,     2) \
 X(a, STATIC,   SINGULAR, STRING,   device_name,       3)
 #define protobuf_ble_adv_config_t_CALLBACK NULL
 #define protobuf_ble_adv_config_t_DEFAULT NULL
@@ -2171,7 +2170,8 @@ X(a, STATIC,   SINGULAR, UINT32,   bat_soc_percent,   3) \
 X(a, STATIC,   SINGULAR, UINT32,   status_flags,      4) \
 X(a, STATIC,   SINGULAR, UINT32,   warning_count,     5) \
 X(a, STATIC,   SINGULAR, UINT32,   error_count,       6) \
-X(a, STATIC,   SINGULAR, UINT32,   local_timestamp_s,   7)
+X(a, STATIC,   SINGULAR, UINT32,   local_timestamp_s,   7) \
+X(a, STATIC,   SINGULAR, UINT32,   serial_number,     8)
 #define protobuf_ble_adv_status_t_CALLBACK NULL
 #define protobuf_ble_adv_status_t_DEFAULT NULL
 
@@ -2836,8 +2836,8 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_battery_info_get_t_size         6
 #define protobuf_battery_info_resp_t_size        58
 #define protobuf_ble_adv_config_request_t_size   6
-#define protobuf_ble_adv_config_t_size           41
-#define protobuf_ble_adv_status_t_size           38
+#define protobuf_ble_adv_config_t_size           35
+#define protobuf_ble_adv_status_t_size           44
 #define protobuf_ble_conn_params_get_t_size      6
 #define protobuf_ble_conn_params_resp_t_size     26
 #define protobuf_ble_conn_params_set_t_size      26

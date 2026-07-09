@@ -25,7 +25,7 @@ class GeofenceZone:
     color: str = "#FF0000"  # Hex color string
     object_type: str = "zone"  # "zone" | "room" | "wall" | "object"
     thickness: float = 0.2  # Wall thickness metadata in meters
-    shape_kind: str = "polygon"  # "polygon" | "circle" for map objects
+    shape_kind: str = "polygon"  # "polygon" | "circle" | "footprint" for map objects
     object_subtype: str = "generic"  # "generic" | "stairs"
     object_direction: str = "up"  # "up" | "down" for stairs
     radius_m: float = 0.0
@@ -33,6 +33,8 @@ class GeofenceZone:
     local_frame_yaw_deg: float = 0.0
     wall_mode: str = "free_standing"  # "boundary_outside" | "internal_partition" | "free_standing"
     host_room_id: Optional[str] = None
+    label_offset_x: float = 0.0
+    label_offset_y: float = 0.0
 
     @property
     def thickness_m(self) -> float:
@@ -98,7 +100,7 @@ class GeofenceZone:
             "color": self.color,
             "thickness": self.thickness,
             "thickness_m": self.thickness,
-            "shape_kind": self.shape_kind if self.object_type == "object" else "polygon",
+            "shape_kind": self.shape_kind if self.object_type in {"wall", "object"} else "polygon",
             "object_subtype": object_subtype if self.object_type == "object" else "generic",
             "object_direction": self.object_direction if self.object_type == "object" else "up",
             "radius_m": self.radius_m if self.object_type == "object" else 0.0,
@@ -106,6 +108,8 @@ class GeofenceZone:
             "local_frame_yaw_deg": self.local_frame_yaw_deg if self.object_type == "room" else 0.0,
             "wall_mode": self.wall_mode if self.object_type == "wall" else "free_standing",
             "host_room_id": self.host_room_id if self.object_type == "wall" else None,
+            "label_offset_x": self.label_offset_x,
+            "label_offset_y": self.label_offset_y,
         }
 
     @classmethod
@@ -134,7 +138,7 @@ class GeofenceZone:
         if object_direction not in {"up", "down"}:
             object_direction = "up"
         shape_kind = str(data.get("shape_kind", "polygon")).lower()
-        if shape_kind not in {"polygon", "circle"}:
+        if shape_kind not in {"polygon", "circle", "footprint"}:
             shape_kind = "polygon"
 
         thickness_val = float(data.get("thickness_m", data.get("thickness", data.get("wall_thickness_m", 0.2))))
@@ -163,6 +167,8 @@ class GeofenceZone:
             local_frame_yaw_deg=float(data.get("local_frame_yaw_deg", 0.0)),
             wall_mode=wall_mode_val,
             host_room_id=host_room_id_val,
+            label_offset_x=float(data.get("label_offset_x", 0.0)),
+            label_offset_y=float(data.get("label_offset_y", 0.0)),
         )
 
     def contains(self, x: float, y: float, z: float) -> bool:

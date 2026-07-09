@@ -323,11 +323,12 @@ max17048_err_t max17048_read_crate(max17048_dev_t *dev, int16_t *crate_phr)
     return err;
 
   /*
-   * Datasheet p.13: CRATE, signed 16-bit, 1 LSb = 0.208 %/hr
+   * Datasheet p.13: CRATE, signed 16-bit, 1 LSb = 0.208 %/hr = 208 m%/hr
    * (int16_t)raw       — reinterpret bits as signed
    * (int32_t)(int16_t) — widen BEFORE multiplying to avoid overflow
+   * Output: rate in m%/hr, negative = discharging
    */
-  *crate_phr = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000 / 1000);
+  *crate_phr = (int16_t)((int32_t)(int16_t)raw * CRATE_LSB_X1000);
 
   return MAX17048_OK;
 }

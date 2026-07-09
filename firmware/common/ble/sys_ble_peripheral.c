@@ -247,7 +247,6 @@ bool sys_ble_peripheral_send_config(uint8_t dst)
    return network_send_ble_adv_config_set(s_ble_peri.stream,
                                           dst,
                                           s_ble_peri.enabled,
-                                          s_ble_peri.serial_number,
                                           s_ble_peri.device_name);
 }
 
@@ -303,6 +302,7 @@ void sys_ble_peripheral_send_adv_status(void)
     status.warning_count = 0;
     status.error_count = 0;
     status.local_timestamp_s = bsp_rtc_get_timestamp_s();
+    status.serial_number = s_ble_peri.serial_number;
 
     RLOG_I(OBJECT_CODE, "Sending ADV status packet: Device ID=%lu, Bat=%lu%%", 
            status.device_id, status.bat_soc_percent);

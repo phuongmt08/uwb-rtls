@@ -65,10 +65,12 @@
 #include "app_error.h"
 #include "app_usbd_serial_num.h"
 
+#include "app_timer.h"
 #include "../bsp/bsp_io.h"
 #include "../bsp/bsp_usbd.h"
 #include "app_ble_central.h"
 #include "bb_router.h"
+#include "bb_cmd_hdl.h"
 
 /* -------------------------------------------------------------------------
  * Compile-time feature flags
@@ -93,7 +95,7 @@ int main(void)
     ret_code_t err_code;
 
     /* ----- Logging ------------------------------------------------------- */
-    err_code = NRF_LOG_INIT(NULL);
+    err_code = NRF_LOG_INIT(app_timer_cnt_get);
     APP_ERROR_CHECK(err_code);
     NRF_LOG_DEFAULT_BACKENDS_INIT();
     NRF_LOG_INFO("Boot: log initialized");
@@ -142,6 +144,7 @@ int main(void)
     for (;;)
     {
         bb_router_process(); /* Check for incoming data from UART and handle state transitions */
+        bb_cmd_async_tx_process(); /* Retry asynchronous scan/status events when USB is busy. */
 #if APP_ENABLE_USB_CDC_ACM
         /* Drain the USB event queue before sleeping. */
         while (bsp_usbd_process())

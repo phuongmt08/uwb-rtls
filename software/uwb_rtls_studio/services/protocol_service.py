@@ -37,6 +37,7 @@ import os
 import logging
 import queue
 import threading
+from time import time
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from google.protobuf.message import DecodeError
@@ -48,7 +49,8 @@ _common_dir = os.path.normpath(
 if _common_dir not in sys.path:
     sys.path.insert(0, os.path.dirname(_common_dir))
 
-from common.transport import VvProtocol, HdlcCodec, FRAME_TYPE_PROTOBUF, VvAddress
+from common.parser_protocol import VvProtocol
+from common.transport import HdlcCodec, FRAME_TYPE_PROTOBUF, VvAddress
 from common.commands import CommandFactory, default_destination_for
 from common import protocol_pb2 as pb
 from data.raw_packet import RawSerialChunk
@@ -71,12 +73,12 @@ class ProtocolService(QObject):
     def __init__(self, serial_service, parent=None):
         super().__init__(parent)
         self._serial = serial_service
-        self._protocol = VvProtocol()
-        self._commands = CommandFactory()
+        self._protocol = VvProtocol()   # parser_protocol.VvProtocol — encode/decode/HDLC + build_*() methods
         self._seq = 0
         self._seq_lock = threading.Lock()
         self._packet_repository = None
         self._last_log_data_seq: int | None = None
+        self._packet_event_times: dict[tuple[str, int], float] = {}
         self._rx_queue: queue.Queue[bytes | None] = queue.Queue()
         self._rx_stop = threading.Event()
         self._rx_thread = threading.Thread(
@@ -111,7 +113,8 @@ class ProtocolService(QObject):
 
     @property
     def commands(self) -> CommandFactory:
-        return self._commands
+        """Expose CommandFactory cho external use (nằm bên trong VvProtocol)."""
+        return self._protocol._commands
 
     def set_packet_repository(self, repository) -> None:
         """Attach decoded-packet repository for raw/debug and shared parsers."""
@@ -169,15 +172,21 @@ class ProtocolService(QObject):
             if param is None:
                 continue
 
+            self._remember_packet_event_time("rx", pkt, time())
+
             if param == "log_data":
                 self._warn_on_log_seq_gap(int(pkt.hdr.seq))
 
             if param == "ack":
+                try:
+                    from utils.app_state import shared_app_state
+                    shared_app_state.handle_incoming_ack(pkt.ack.ack_seq, pkt.ack.response)
+                except Exception as exc:
+                    log.error("Failed to forward ACK to shared_app_state: %s", exc)
                 self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
                 self.packet_received.emit(param, pkt)
                 log.debug("RX: %s seq=%d ack_seq=%d", param, pkt.hdr.seq, pkt.ack.ack_seq)
                 continue
-
             if self._packet_repository:
                 try:
                     self._packet_repository.handle_packet(param, pkt)
@@ -225,16 +234,25 @@ class ProtocolService(QObject):
     def send_packet(self, pkt: pb.packet_t) -> None:
         """Encode packet → HDLC frame → serial write."""
         frame = self._protocol.wrap_packet(pkt)
+        self._remember_packet_event_time("tx", pkt, time())
         self._serial.write(frame)
         param = pkt.WhichOneof("params") or "unknown"
         log.debug("TX: %s seq=%d", param, pkt.hdr.seq)
         self.packet_sent.emit(param, pkt)
 
+    def packet_event_time(self, direction: str, pkt) -> float | None:
+        """Return host-side event timestamp captured at the service boundary."""
+        return self._packet_event_times.get((direction, id(pkt)))
+
+    def _remember_packet_event_time(self, direction: str, pkt, event_time: float) -> None:
+        self._packet_event_times[(direction, id(pkt))] = float(event_time)
+
     def send_command(self, builder_name: str, dst_addr: int | None = None, src_addr: int = VvAddress.HOST, **kwargs) -> pb.packet_t:
         """Build + send command bằng tên.
 
         Args:
-            builder_name: tên method trong CommandFactory (e.g. 'ble_scan_start')
+            builder_name: tên command (e.g. 'ble_scan_start') —
+                          method tương ứng là build_<name> trên VvProtocol (parser_protocol).
             dst_addr: Địa chỉ đích. Nếu None, tự suy ra theo command catalog.
             src_addr: Địa chỉ nguồn (mặc định ADDR_HOST)
             **kwargs: extra args cho builder
@@ -244,7 +262,7 @@ class ProtocolService(QObject):
         """
         seq = self.next_seq()
         target_addr = default_destination_for(builder_name) if dst_addr is None else dst_addr
-        builder = getattr(self._commands, builder_name)
+        builder = getattr(self._protocol, f"build_{builder_name}")
         pkt = builder(src_addr, target_addr, seq, **kwargs)
         self.send_packet(pkt)
         return pkt

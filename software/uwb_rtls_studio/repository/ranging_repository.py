@@ -32,6 +32,13 @@ class RangingRepository(QObject):
     def _decode_fixed2(value) -> float:
         return float(value) / 100.0
 
+    @staticmethod
+    def _payload_size(message) -> int:
+        try:
+            return int(message.ByteSize())
+        except Exception:
+            return 0
+
     @property
     def positions(self) -> list[dict]:
         return list(self._positions)
@@ -89,6 +96,7 @@ class RangingRepository(QObject):
         sample = {
             "source": "ranging",
             "seq": int(seq or 0),
+            "payload_size": self._payload_size(res),
             "x": float(res.pos_x_m),
             "y": float(res.pos_y_m),
             "z": float(res.pos_z_m),
@@ -101,6 +109,7 @@ class RangingRepository(QObject):
             "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": time.time(),
             "anchor_mask": anchor_mask,
+            "anchor_mask_valid": bool(anchors),
             "d1_mm": distances_by_anchor.get(1, ""),
             "d2_mm": distances_by_anchor.get(2, ""),
             "d3_mm": distances_by_anchor.get(3, ""),
@@ -127,6 +136,7 @@ class RangingRepository(QObject):
         sample = {
             "source": "sensor_fusion",
             "seq": int(seq or 0),
+            "payload_size": self._payload_size(res),
             "ukf_x_m": self._decode_fixed2(getattr(res, "ukf_x_m", 0)),
             "ukf_y_m": self._decode_fixed2(getattr(res, "ukf_y_m", 0)),
             "ukf_yaw_deg": self._decode_fixed2(getattr(res, "ukf_yaw_deg", 0)),
@@ -134,6 +144,7 @@ class RangingRepository(QObject):
             "tril_y_m": self._decode_fixed2(getattr(res, "tril_y_m", 0)),
             "yaw_deg": self._decode_fixed2(getattr(res, "yaw_deg", 0)),
             "anchor_mask": int(getattr(res, "anchor_mask", 0)),
+            "anchor_mask_valid": True,
             "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
             "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
             "zone_id": int(getattr(res, "zone_id", 0)),
@@ -150,7 +161,7 @@ class RangingRepository(QObject):
         mask = 0
         for anchor in anchors:
             anchor_id = int(anchor.get("anchor_id", 0) or 0)
-            if 0 < anchor_id < 32:
+            if 0 <= anchor_id < 32:
                 mask |= 1 << anchor_id
         return mask
 
@@ -232,6 +243,8 @@ class RangingRepository(QObject):
                 "source": "ranging",
                 "seq": 0,
                 "anchor_mask": 0,
+                "anchor_mask_valid": False,
+                "payload_size": 0,
                 "d1_mm": "",
                 "d2_mm": "",
                 "d3_mm": "",
