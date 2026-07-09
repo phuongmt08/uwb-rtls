@@ -214,36 +214,17 @@ class ScanModel(QObject):
     def _merge_candidates(self, device: dict) -> tuple[int, ...]:
         serial_number = int(device.get("serial_number") or 0)
         device_id = int(device.get("device_id") or 0)
+        name_candidate = self._device_name_candidate(device.get("name", ""))
         candidates = []
         for candidate in (
+            device_id,
             serial_number,
             serial_number & 0xFFFF if serial_number else 0,
-            device_id,
+            name_candidate,
         ):
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
         return tuple(candidates)
-
-    @staticmethod
-    def _adv_status_matches_device(device: dict, adv_data: dict, candidate: int) -> bool:
-        device_name = str(device.get("name") or "").strip().upper()
-        adv_type = int(adv_data.get("device_type") or 0)
-        if adv_type == 1 and device_name and "TAG" not in device_name:
-            return False
-        if adv_type == 2 and device_name and "ANCHOR" not in device_name:
-            return False
-
-        device_serial = int(device.get("serial_number") or 0)
-        adv_serial = int(adv_data.get("serial_number") or 0)
-        if device_serial and adv_serial and device_serial != adv_serial:
-            return False
-
-        if candidate == int(adv_data.get("device_id") or 0):
-            device_id = int(device.get("device_id") or 0)
-            if device_id and device_id != int(adv_data.get("device_id") or 0):
-                return False
-
-        return True
 
     def _handle_adv_status(self, adv) -> None:
         device_id = int(getattr(adv, "device_id", 0) or 0)
@@ -274,21 +255,18 @@ class ScanModel(QObject):
         for dev in self._devices.values():
             candidates = self._merge_candidates(dev)
             for candidate in candidates:
-                if candidate not in self._adv_status_cache:
-                    continue
-                cached = self._adv_status_cache[candidate]
-                if not self._adv_status_matches_device(dev, cached, candidate):
-                    continue
-                dev.update({
-                    "device_id": cached.get("device_id", 0),
-                    "serial_number": cached.get("serial_number", 0),
-                    "serial": cached.get("serial", ""),
-                    "bat_soc_percent": cached.get("bat_soc_percent", 0),
-                    "warning_count": cached.get("warning_count", 0),
-                    "error_count": cached.get("error_count", 0),
-                })
-                updated = True
-                break
+                if candidate in self._adv_status_cache:
+                    cached = self._adv_status_cache[candidate]
+                    dev.update({
+                        "device_id": cached.get("device_id", 0),
+                        "serial_number": dev.get("serial_number") or cached.get("serial_number", 0),
+                        "serial": dev.get("serial") or cached.get("serial", ""),
+                        "bat_soc_percent": cached.get("bat_soc_percent", 0),
+                        "warning_count": cached.get("warning_count", 0),
+                        "error_count": cached.get("error_count", 0),
+                    })
+                    updated = True
+                    break
 
         if updated:
             self._emit_sorted_devices()
@@ -306,29 +284,25 @@ class ScanModel(QObject):
             "name": str(getattr(result, "name", "") or "").strip() or "-",
             "mac": mac_hex,
             "rssi": result.rssi_dbm,
-            # Keep raw scan serial only for merge matching. Display serial comes from ble_adv_status.
             "serial_number": scan_serial_number or preserved_serial_number,
-            "serial": current.get("serial", ""),
+            "serial": (f"0x{scan_serial_number:08X}" if scan_serial_number else current.get("serial", "")),
             "last_seen": time.monotonic(),
             "order": self._device_order[mac_hex],
         })
 
         candidates = self._merge_candidates(current)
         for candidate in candidates:
-            if candidate not in self._adv_status_cache:
-                continue
-            cached = self._adv_status_cache[candidate]
-            if not self._adv_status_matches_device(current, cached, candidate):
-                continue
-            current.update({
-                "device_id": cached.get("device_id", 0),
-                "serial_number": cached.get("serial_number", scan_serial_number),
-                "serial": cached.get("serial", ""),
-                "bat_soc_percent": cached.get("bat_soc_percent", 0),
-                "warning_count": cached.get("warning_count", 0),
-                "error_count": cached.get("error_count", 0),
-            })
-            break
+            if candidate in self._adv_status_cache:
+                cached = self._adv_status_cache[candidate]
+                current.update({
+                    "device_id": cached.get("device_id", 0),
+                    "serial_number": current.get("serial_number") or cached.get("serial_number", scan_serial_number),
+                    "serial": current.get("serial") or cached.get("serial", ""),
+                    "bat_soc_percent": cached.get("bat_soc_percent", 0),
+                    "warning_count": cached.get("warning_count", 0),
+                    "error_count": cached.get("error_count", 0),
+                })
+                break
 
         self._devices[mac_hex] = current
         self._emit_sorted_devices()

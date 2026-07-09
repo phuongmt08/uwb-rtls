@@ -1935,13 +1935,9 @@ class DeviceModel(QObject):
         for d in self._adv_devices.values():
             adv_status = {}
             for candidate in self._adv_status_merge_candidates(d):
-                if candidate not in self._adv_status_by_device_id:
-                    continue
-                possible = self._adv_status_by_device_id.get(candidate, {})
-                if not self._adv_status_matches_device(d, possible, candidate):
-                    continue
-                adv_status = possible
-                break
+                if candidate in self._adv_status_by_device_id:
+                    adv_status = self._adv_status_by_device_id.get(candidate, {})
+                    break
             item = d.copy()
             item.update(adv_status)
             merged_list.append(item)
@@ -1964,34 +1960,17 @@ class DeviceModel(QObject):
     def _adv_status_merge_candidates(cls, device: dict) -> tuple[int, ...]:
         serial_number = int(device.get("serial_number") or 0)
         device_id = int(device.get("device_id") or 0)
+        name_candidate = cls._adv_status_name_candidate(device)
         candidates = []
         for candidate in (
+            device_id,
             serial_number,
             serial_number & 0xFFFF if serial_number else 0,
-            device_id,
+            name_candidate,
         ):
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
         return tuple(candidates)
-
-    @staticmethod
-    def _adv_status_matches_device(device: dict, adv_status: dict, candidate: int) -> bool:
-        device_type = int(device.get("device_type") or 0)
-        adv_type = int(adv_status.get("device_type") or 0)
-        if device_type and adv_type and device_type != adv_type:
-            return False
-
-        device_serial = int(device.get("serial_number") or 0)
-        adv_serial = int(adv_status.get("serial_number") or 0)
-        if device_serial and adv_serial and device_serial != adv_serial:
-            return False
-
-        if candidate == int(adv_status.get("device_id") or 0):
-            device_id = int(device.get("device_id") or 0)
-            if device_id and device_id != int(adv_status.get("device_id") or 0):
-                return False
-
-        return True
 
     def _prune_devices(self):
         """Do not auto-remove or age-out discovered devices during runtime."""
