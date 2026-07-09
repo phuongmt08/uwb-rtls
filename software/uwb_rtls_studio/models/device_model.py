@@ -105,7 +105,7 @@ class DeviceModel(QObject):
         self._scan_device_order: dict[str, int] = {}
         self._next_scan_device_order = 0
         self._connected_grace_until = 0.0
-        self._session_start_scheduled = False
+        self._session_start_scheduled = False
         self._connect_retry_count = 0
         self._connect_generation = 0
         self._pending_end_session_seq: int | None = None
@@ -574,6 +574,51 @@ class DeviceModel(QObject):
         self._session_bootstrap_timer.stop()
         self._session_start_scheduled = False
 
+    @staticmethod
+    def _reset_query_pipeline() -> None:
+        """Flush queued non-critical queries so connect handshake owns the wire."""
+        manager = getattr(shared_app_state, "_query_manager", None)
+        if manager is not None:
+            manager.reset()
+        try:
+            from services.command_bus import shared_command_bus
+            if shared_command_bus is not None:
+                shared_command_bus.reset()
+        except Exception as exc:
+            log.debug("Could not reset shared command bus before connect: %s", exc)
+
+    def _start_connect_handshake(self) -> None:
+        """Run the strict post-connect handshake with no unrelated queries mixed in."""
+        if not self._active_connecting_handshake:
+            return
+        if self._handshake_timeout_timer.isActive():
+            return
+
+        self._handshake_device_info_received = False
+        self._handshake_sys_config_received = False
+        self._handshake_time_sync_done = False
+        self._pending_handshake_time_sync_seq = None
+        self._handshake_time_sync_timer.stop()
+        self._session_bootstrap_timer.stop()
+        self._session_start_scheduled = False
+        self._set_background_polling_enabled(False)
+        self._reset_query_pipeline()
+        self._handshake_timeout_timer.start(6000)
+        self._emit_connection_progress(
+            65,
+            "BLE link established. Reading device information...",
+            phase="connecting",
+            status=JobState.RUNNING,
+        )
+        self._request_query(
+            "device_information_get",
+            dst_addr=VvAddress.MCU,
+            cache_ttl_s=0.0,
+            force=True,
+            traffic_class="connection",
+        )
+        log.info("Application connect handshake started: device_information_get -> time_sync_set -> ble_status_get.")
+
     def _schedule_connect_retry(
         self,
         mac_hex: str,
@@ -703,7 +748,7 @@ class DeviceModel(QObject):
         self._session_start_events_done = False
         self._log_stream_requested = False
         self._connected_grace_until = time.monotonic() + 1.5
-        self._session_start_scheduled = False
+        self._session_start_scheduled = False
         self._pending_connect_mac = ""
         self._pending_connect_name = ""
         self._connect_retry_count = 0
@@ -738,16 +783,7 @@ class DeviceModel(QObject):
     def _run_scheduled_session_start(self):
         """Run connect handshake first; normal app APIs start only after it reaches 100%."""
         if self._active_connecting_handshake:
-            self._handshake_device_info_received = False
-            self._handshake_sys_config_received = False
-            self._handshake_time_sync_done = False
-            self._handshake_final_ble_connected = False
-            self._pending_handshake_time_sync_seq = None
-            self._handshake_time_sync_timer.stop()
-            self._handshake_timeout_timer.start(6000)
-            self._emit_connection_progress(65, "BLE link established. Reading device information...", phase="connecting", status=JobState.RUNNING)
-            self._request_query("device_information_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True, traffic_class="connection")
-            log.info("Application connect handshake started: device_information_get -> time_sync_set -> ble_status_get.")
+            self._start_connect_handshake()
             return
 
         self.request_initial_telemetry(force=True)
@@ -782,6 +818,8 @@ class DeviceModel(QObject):
 
         self._set_background_polling_enabled(True)
         self._schedule_background_scan_after_connect()
+        self.request_initial_telemetry(force=True)
+        self.request_session_start_events(force=True)
 
     def _on_handshake_timeout(self):
         log.warning("Connect handshake timed out before final BLE connected confirmation.")
@@ -1183,7 +1221,6 @@ class DeviceModel(QObject):
 
         self._pending_connect_mac = mac_hex
         self._pending_connect_name = name
-        self._active_connecting_handshake = True
 
         if self._connected_mac and self._connected_mac != mac_hex:
             if self._connection_status == "Connecting":
@@ -1246,6 +1283,11 @@ class DeviceModel(QObject):
         if self._pending_connect_mac != mac_hex:
             return
 
+        self._cancel_active_connect_flow()
+        self._active_connecting_handshake = True
+        self._handshake_final_ble_connected = False
+        self._set_background_polling_enabled(False)
+        self._reset_query_pipeline()
         try:
             mac_bytes = bytes.fromhex(mac_hex.replace(":", ""))
             sent = self._send_command(
@@ -1302,7 +1344,7 @@ class DeviceModel(QObject):
         self._session_bootstrap_done = False
         self._session_start_events_done = False
         self._log_stream_requested = False
-        self._session_start_scheduled = False
+        self._session_start_scheduled = False
         self._connected_grace_until = 0.0
         self._pending_connect_mac = ""
         self._pending_connect_name = ""
@@ -1553,6 +1595,8 @@ class DeviceModel(QObject):
                 self._handshake_final_ble_connected = True
                 self._connect_timeout_timer.stop()
                 self._ble_transition_timer.stop()
+                self._connection_status = "Connecting"
+                shared_app_state.connection_status = "Connecting"
                 if not (self._handshake_device_info_received and self._handshake_time_sync_done):
                     log.debug(
                         "BLE_STATE_CONNECTED received while connect handshake is waiting: "
@@ -1560,6 +1604,7 @@ class DeviceModel(QObject):
                         self._handshake_device_info_received,
                         self._handshake_time_sync_done,
                     )
+                    self._start_connect_handshake()
                 self._check_handshake_completion()
                 return
 
@@ -1621,7 +1666,7 @@ class DeviceModel(QObject):
             self._session_bootstrap_done = False
             self._session_start_events_done = False
             self._log_stream_requested = False
-            self._session_start_scheduled = False
+            self._session_start_scheduled = False
             shared_app_state.connected_device = {}
             if not switch_requested:
                 self._active_connecting_handshake = False
