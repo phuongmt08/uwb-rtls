@@ -22,6 +22,15 @@
 #endif
 
 /*
+ * UWB sleep control.
+ * 0: keep DW1000 awake in idle when sleep is requested.
+ * 1: allow DW1000 low-power sleep and wake sequencing.
+ */
+#ifndef UWB_SLEEP_ENABLE
+#define UWB_SLEEP_ENABLE 0
+#endif
+
+/*
  * Force this firmware image to run as a TAG even when flash config storage
  * cannot be erased/written or contains an invalid role.
  */

@@ -28,11 +28,11 @@
 #endif
 
 #ifndef TEST_UKF_STREAM_UART
-#define TEST_UKF_STREAM_UART true
+#define TEST_UKF_STREAM_UART false
 #endif
 
 #ifndef TEST_UKF_DISTANCE_ZERO_SIMULATION
-#define TEST_UKF_DISTANCE_ZERO_SIMULATION 1
+#define TEST_UKF_DISTANCE_ZERO_SIMULATION 0
 #endif
 
 /* Public enumerate/structure ----------------------------------------- */

@@ -55,6 +55,10 @@
 #define SYS_SENSOR_FUSION_2PI   (2.0f * SYS_SENSOR_FUSION_PI)
 #define RAD2DEG							180.0f / 3.14159265358979323846f
 
+#define UKF_STEP_PREDICT 0U
+#define UKF_STEP_UPDATE  1U
+
+
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
 {
@@ -509,6 +513,16 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         return false;
     }
 
+    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+                                        to_uart_fixed2(ukf.state.px),
+                                        to_uart_fixed2(ukf.state.py),
+                                        0,
+                                        to_uart_fixed2(s_latest_tril_x),
+                                        to_uart_fixed2(s_latest_tril_y),
+                                        0,
+                                        UKF_STEP_UPDATE,
+                                        s_error_count);
+
     return true;
 }
 
@@ -706,6 +720,7 @@ void sys_sensor_fusion_stream_uart()
                                      to_uart_fixed2((x + 0.05f)),
                                      to_uart_fixed2((y + 0.05f)),
                                      to_uart_fixed2(ukf_yaw_deg),
+                                     UKF_STEP_PREDICT,
                                      s_error_count) == BSP_OK)
     {
         s_stream_test_sample_idx++;
@@ -728,6 +743,7 @@ void sys_sensor_fusion_stream_uart()
                                     to_uart_fixed2(s_latest_tril_x),
                                     to_uart_fixed2(s_latest_tril_y),
                                     to_uart_fixed2(raw_yaw),
+                                    UKF_STEP_PREDICT,
                                     s_error_count);
 #else
     bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,

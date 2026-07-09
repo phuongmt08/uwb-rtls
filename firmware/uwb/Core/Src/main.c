@@ -32,6 +32,7 @@
 #include "bsp_util.h"
 #include "bsp_uwb.h"
 #include "common.h"
+#include "config.h"
 #include "network/network_cmd.h"
 #include "network/network_core.h"
 #include "positioning_config.h"
@@ -351,6 +352,7 @@ int main(void)
     RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Anchor application initialized");
   }
 
+#if UWB_SLEEP_ENABLE
   /* Ranging starts disabled. Put the DW1000 into low-power sleep instead of
    * leaving it in idle; wake restores the cached runtime PHY configuration. */
   if (uwb_startup_ready && bsp_uwb_sleep_enter() == BSP_OK)
@@ -366,6 +368,13 @@ int main(void)
   {
     RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] DW1000 startup sleep failed");
   }
+#else
+  if (uwb_startup_ready)
+  {
+    bsp_uwb_idle();
+    RLOG_I(LOG_OBJECT_CODE_UWB_DRIVER, "[SLEEP] Disabled; DW1000 kept awake after init");
+  }
+#endif
 #endif
 
   if (network_stack_ready)

@@ -21,12 +21,11 @@ from ..config import (
 from ..module_parse_frame import parse_live_frame
 from ..module_csv import generate_timestamp_filename, create_csv_file, write_frame_to_csv, print_frame_data
 from ..module_ukf import create_ukf_context, ukf_predict, ukf_update, normalize_angle
-from ..module_kinematic import trilateration_2d
 from ..config import DRAW_RECTANGLE, RECT_WIDTH, RECT_HEIGHT
 
 DISTANCE_GRAPH_SLIDING_WINDOW = 100
 GROUND_TRUTH_HORIZONTAL_M = 2.8
-GROUND_TRUTH_VERTICAL_M = 5.6
+GROUND_TRUTH_VERTICAL_M = 6
 GROUND_TRUTH_START_1 = "start_1"
 GROUND_TRUTH_START_2 = "start_2"
 
@@ -392,16 +391,12 @@ class DataThread(QThread):
         self.imu_x += self.imu_vx * dt + 0.5 * ax_world * dt**2
         self.imu_y += self.imu_vy * dt + 0.5 * ay_world * dt**2
         
-        # 2. UWB Only Update
+        # 2. UWB position from STM px/py fields
         uwb_pos = self.prev_uwb_pos
-        if status == "Update":
-            d_meas_all = np.array(frame_data['distances'])
-            active_indices = [idx for idx, d in enumerate(d_meas_all) if d > 1e-6]
-            if len(active_indices) >= 3:
-                active_d_meas = d_meas_all[active_indices][:3]
-                active_anchors = ANCHOR_POSITIONS[active_indices][:3]
-                uwb_pos = trilateration_2d(active_d_meas, active_anchors, self.prev_uwb_pos)
-                self.prev_uwb_pos = uwb_pos
+        stm_pos = (frame_data['px'], frame_data['py'])
+        if abs(stm_pos[0]) > 1e-6 or abs(stm_pos[1]) > 1e-6:
+            uwb_pos = stm_pos
+            self.prev_uwb_pos = uwb_pos
                 
         # 3. UKF Predict & Update
         if status == "Predict":
@@ -564,8 +559,22 @@ class MainWindow(QMainWindow):
         
         # Add plotting lines
         self.plot_imu = self.graph_pos.plot(pen=pg.mkPen('r', width=1.5, style=pg.QtCore.Qt.DashLine), name="IMU Dead Reckoning")
-        self.plot_uwb = self.graph_pos.plot(pen=pg.mkPen('g', width=1.5), name="UWB Trilateration")
-        self.plot_ukf = self.graph_pos.plot(pen=pg.mkPen('b', width=2.5), name="UKF Filtered")
+        self.plot_uwb = self.graph_pos.plot(
+            pen=None,
+            symbol='o',
+            symbolSize=5,
+            symbolPen=pg.mkPen((0, 150, 0, 110)),
+            symbolBrush=pg.mkBrush((0, 180, 0, 70)),
+            name="UWB Trilateration"
+        )
+        self.plot_ukf = self.graph_pos.plot(
+            pen=None,
+            symbol='o',
+            symbolSize=5,
+            symbolPen=pg.mkPen('b'),
+            symbolBrush=pg.mkBrush('b'),
+            name="UKF Filtered"
+        )
         self.plot_ground_truth = self.graph_pos.plot(
             pen=pg.mkPen((230, 116, 37), width=2.0, style=pg.QtCore.Qt.DashLine),
             name="Ground truth",

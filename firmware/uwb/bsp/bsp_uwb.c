@@ -136,7 +136,9 @@ static void     drive_DW1000_reset_low(void);
 static void     release_DW1000_reset(void);
 static void     port_set_dw1000_slowrate(void);
 static void     port_set_dw1000_fastrate(void);
+#if UWB_SLEEP_ENABLE
 static void     configure_dw1000_sleep(void);
+#endif
 static bsp_err_t apply_runtime_config_awake(const protobuf_uwb_cfg_t *cfg, bool log_config);
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms);
 static void     capture_rx_quality(bsp_uwb_rx_quality_t *out_quality);
@@ -248,6 +250,7 @@ static void port_set_dw1000_fastrate(void)
   HAL_SPI_Init(&hspi1);
 }
 
+#if UWB_SLEEP_ENABLE
 static void configure_dw1000_sleep(void)
 {
   uint16_t mode = DWT_PRESRV_SLEEP | DWT_CONFIG | DWT_LOADUCODE;
@@ -261,6 +264,7 @@ static void configure_dw1000_sleep(void)
 
   dwt_configuresleep(mode, DW1000_SLEEP_WAKE_CFG);
 }
+#endif
 
 static uint16_t ms_to_dw1000_rxtimeout_units(uint32_t timeout_ms)
 {
@@ -473,6 +477,7 @@ static bsp_err_t apply_runtime_config_awake(const protobuf_uwb_cfg_t *cfg, bool 
   return BSP_OK;
 }
 
+#if UWB_SLEEP_ENABLE
 static bool runtime_config_matches_awake(void)
 {
   /* RXWTOE follows each finite RX window and is intentionally changed by
@@ -513,6 +518,7 @@ static bool runtime_config_matches_awake(void)
 
   return mismatch == 0U;
 }
+#endif
 
 bsp_err_t bsp_uwb_configure(const protobuf_uwb_cfg_t *cfg)
 {
@@ -833,6 +839,14 @@ void bsp_uwb_idle(void)
 bsp_err_t bsp_uwb_sleep_enter(void)
 {
   CHECK_PARAM(s_initialized, BSP_ERR);
+
+#if !UWB_SLEEP_ENABLE
+  if (!s_sleeping)
+  {
+    bsp_uwb_idle();
+  }
+  return BSP_OK;
+#else
   CHECK_PARAM(s_runtime_cfg_valid, BSP_ERR);
 
   if (s_sleeping)
@@ -858,12 +872,17 @@ bsp_err_t bsp_uwb_sleep_enter(void)
 
   s_sleeping = true;
   return BSP_OK;
+#endif
 }
 
 bsp_err_t bsp_uwb_sleep_wake(void)
 {
   CHECK_PARAM(s_initialized, BSP_ERR);
 
+#if !UWB_SLEEP_ENABLE
+  s_sleeping = false;
+  return BSP_OK;
+#else
   if (!s_sleeping)
   {
     return BSP_OK;
@@ -952,11 +971,16 @@ bsp_err_t bsp_uwb_sleep_wake(void)
          "[SLEEP] DW1000 sleep wake failed: status=%d dev_id=0x%08lX sys=0x%08lX",
          wake_status, (unsigned long)dev_id, (unsigned long)wake_sys_status);
   return BSP_ERR;
+#endif
 }
 
 bool bsp_uwb_is_sleeping(void)
 {
+#if !UWB_SLEEP_ENABLE
+  return false;
+#else
   return s_sleeping;
+#endif
 }
 
 

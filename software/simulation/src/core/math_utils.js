@@ -289,8 +289,53 @@ function meanFinite(values) {
 }
 
 function meanErr(arr) {
-    const valid = arr.filter(v => v !== null);
+    const valid = arr.filter(v => Number.isFinite(v));
     return valid.length ? (valid.reduce((s, v) => s + v, 0) / valid.length).toFixed(3) : "N/A";
+}
+
+function calcErrorMetrics(values) {
+    const valid = (values || [])
+        .filter(v => v !== null && v !== undefined)
+        .map(v => Number(v))
+        .filter(v => Number.isFinite(v) && v >= 0)
+        .sort((a, b) => a - b);
+
+    if (!valid.length) {
+        return {
+            count: 0,
+            mae: null,
+            rmse: null,
+            p50: null,
+            p90: null,
+            p95: null,
+            max: null
+        };
+    }
+
+    const sum = valid.reduce((acc, v) => acc + v, 0);
+    const sumSquares = valid.reduce((acc, v) => acc + v * v, 0);
+    const percentile = (p) => {
+        if (valid.length === 1) return valid[0];
+        const rank = (p / 100) * (valid.length - 1);
+        const lo = Math.floor(rank);
+        const hi = Math.ceil(rank);
+        if (lo === hi) return valid[lo];
+        return valid[lo] + (valid[hi] - valid[lo]) * (rank - lo);
+    };
+
+    return {
+        count: valid.length,
+        mae: sum / valid.length,
+        rmse: Math.sqrt(sumSquares / valid.length),
+        p50: percentile(50),
+        p90: percentile(90),
+        p95: percentile(95),
+        max: valid[valid.length - 1]
+    };
+}
+
+function formatErrorMetric(value) {
+    return Number.isFinite(value) ? `${value.toFixed(3)} m` : "N/A";
 }
 
 function computeTimeDomainSpectrum(values, times) {

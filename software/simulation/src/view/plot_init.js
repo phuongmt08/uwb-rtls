@@ -392,6 +392,6 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
 // Helper for mean calculation
 function meanErr(arr) {
-    const valid = arr.filter(v => v !== null);
+    const valid = arr.filter(v => Number.isFinite(v));
     return valid.length ? (valid.reduce((s, v) => s + v, 0) / valid.length).toFixed(3) : "N/A";
 }
