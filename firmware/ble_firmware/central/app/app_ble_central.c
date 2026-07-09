@@ -1016,7 +1016,6 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_pending_tx_chunks = 0;
 
             m_last_disconnect_reason = reason;
-            ble_state_update(protobuf_BLE_STATE_IDLE);
 
             if (m_has_pending_connect)
             {
@@ -1032,16 +1031,19 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                 if (err_code != NRF_SUCCESS)
                 {
                     NRF_LOG_WARNING("CMD: Auto-connect failed: 0x%08x", err_code);
+                    ble_state_update(protobuf_BLE_STATE_IDLE);
                     scan_start();
                 }
                 else
                 {
                     m_is_connecting = true;
+                    m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
                     ble_state_update(protobuf_BLE_STATE_CONNECTING);
                 }
             }
             else
             {
+                ble_state_update(protobuf_BLE_STATE_IDLE);
                 /* Restart scanning. */
                 scan_start();
             }
@@ -1468,6 +1470,7 @@ void app_ble_central_connect(const uint8_t *mac)
         else
         {
             m_is_connecting = true;
+            m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
             ble_state_update(protobuf_BLE_STATE_CONNECTING);
         }
     }
