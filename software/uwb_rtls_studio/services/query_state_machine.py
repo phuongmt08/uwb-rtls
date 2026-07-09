@@ -165,13 +165,12 @@ class QueryQueueManager(QObject):
                 seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
                 if tx.seq is not None and seq_val is not None and int(seq_val) != int(tx.seq):
                     log.debug(
-                        "Ignoring query response '%s' seq mismatch for '%s': expected seq=%s got seq=%s",
+                        "Accepting query response '%s' for '%s' despite seq mismatch: expected seq=%s got seq=%s",
                         param_name,
                         tx.command_name,
                         tx.seq,
                         seq_val,
                     )
-                    return False
 
                 tx.status = QueryState.SUCCESS
                 tx.received_time = time.monotonic()

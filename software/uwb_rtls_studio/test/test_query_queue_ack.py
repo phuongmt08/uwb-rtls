@@ -83,3 +83,29 @@ def test_query_queue_does_not_complete_get_query_on_ack_only():
     assert resolved is True
     assert results
     assert results[0]['status'] == 'SUCCESS'
+
+def test_query_queue_accepts_get_response_even_when_payload_seq_differs():
+    factory = CommandFactory()
+    results: list[dict] = []
+
+    def send_packet(command_name: str, dst_addr: int, **kwargs):
+        assert command_name == 'device_information_get'
+        return factory.device_information_get(int(VvAddress.HOST), dst_addr, 7)
+
+    manager = QueryQueueManager(send_packet_fn=send_packet, timeout_s=1.0, max_retries=0, on_complete_fn=results.extend)
+    manager.add_query('device_information_get', int(VvAddress.MCU))
+
+    manager.start()
+    _pump_events()
+    assert manager.current_transaction is not None
+    assert manager.current_transaction.seq == 7
+
+    # Some firmware replies use an independent packet seq instead of echoing the request seq.
+    resp = factory.device_information_resp(int(VvAddress.MCU), int(VvAddress.HOST), 155)
+    resolved = manager.handle_response('device_information_resp', resp)
+    _pump_events()
+
+    assert resolved is True
+    assert results
+    assert results[0]['status'] == 'SUCCESS'
+    assert results[0]['response_packet'].hdr.seq == 155
