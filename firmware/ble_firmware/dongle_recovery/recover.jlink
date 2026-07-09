@@ -1,0 +1,10 @@
+device NRF52840_XXAA
+if SWD
+speed 1000
+connect
+WriteDP 2 0x01000000
+WriteAP 0 1
+WriteAP 1 1
+Sleep 1000
+connect
+q

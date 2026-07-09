@@ -434,21 +434,66 @@ void sensor_fusion_entry(void *argument)
 
     (void)sys_sensor_fusion_task();
 
-    if (!g_ranging_enabled)
+    uwb_distance_msg_t msg;
+    bool has_uwb_msg = (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK);
+    if (!has_uwb_msg)
     {
-      osDelay(20);
-      continue;
+      sys_sensor_fusion_clear_latest_anchor_metrics();
     }
 
-    if (sys_sensor_fusion_check_predict_flag())
+#if TEST_UKF_DISTANCE_ZERO_SIMULATION
+    if (!has_uwb_msg)
     {
-      (void)sys_sensor_fusion_predict(&ukf_data);
-    }
+      const sys_config_t *fusion_cfg = sys_config_get();
+      mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
+      mw_tril_anchor_t anchors_compact[NUM_ANCHORS] = {0};
+      mw_tril_anchor_t best_3_anchors[3] = {0};
+      uint8_t compact_idx = 0U;
 
-    {
-      uwb_distance_msg_t msg;
-      if (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+      for (uint32_t i = 0U; i < fusion_cfg->anchor_count && compact_idx < 3U; i++)
       {
+        uint8_t aid = (uint8_t)fusion_cfg->anchor_layout[i].anchor_id;
+        if (aid < 1U || aid > MAX_ANCHORS_SUPPORTED) {
+          continue;
+        }
+
+        mw_tril_anchor_t anchor_entry = {0};
+        anchor_entry.position.x = (double)fusion_cfg->anchor_layout[i].x_m;
+        anchor_entry.position.y = (double)fusion_cfg->anchor_layout[i].y_m;
+        anchor_entry.position.z = (double)fusion_cfg->anchor_layout[i].z_m;
+        anchor_entry.distance = 0.0;
+        anchor_entry.id = aid;
+        anchor_entry.valid = true;
+
+        anchors_by_id[aid] = anchor_entry;
+        anchors_compact[compact_idx] = anchor_entry;
+        best_3_anchors[compact_idx] = anchor_entry;
+        compact_idx++;
+      }
+
+      if (compact_idx >= 3U)
+      {
+        uint8_t selected_mask = 0U;
+        for (uint8_t i = 0U; i < 3U; i++)
+        {
+          selected_mask |= (uint8_t)(1U << (best_3_anchors[i].id - 1U));
+        }
+        s_last_selected_anchors_mask = selected_mask;
+
+        vec2d_t tril_position = {0.0, 0.0};
+        (void)sys_sensor_fusion_update(&ukf_data,
+                                       &tril_position,
+                                       best_3_anchors,
+                                       anchors_by_id,
+                                       anchors_compact,
+                                       compact_idx,
+                                       selected_mask);
+      }
+    }
+#endif
+
+    if (has_uwb_msg)
+    {
         /* 1. Calculate dynamic dt for ranging if needed, and update logs */
 
         /* 2. Process, project to 2D, and Mahalanobis filter the ranges */
@@ -609,6 +654,12 @@ void sensor_fusion_entry(void *argument)
                 SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
                 if (err == MW_TRIL_OK)
                 {
+#if TEST_UKF_DISTANCE_ZERO_SIMULATION
+                    for (uint8_t i = 0U; i < 3U; i++)
+                    {
+                        best_3_anchors[i].distance = 0.0;
+                    }
+#endif
                     SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                     (void)sys_sensor_fusion_update(   &ukf_data,
                                                       &tril_position,
@@ -635,9 +686,17 @@ void sensor_fusion_entry(void *argument)
         }
 
         /* Update logging metrics mailbox passively when in Sensor Fusion mode */
-      }
     }
 
+#if TEST_UKF_DISTANCE_ZERO_SIMULATION
+    (void)sys_sensor_fusion_predict(&ukf_data);
+#else
+    if (sys_sensor_fusion_check_predict_flag())
+    {
+      (void)sys_sensor_fusion_predict(&ukf_data);
+    }
+#endif
+    
     osDelay(20);
   }
 
@@ -1037,6 +1096,7 @@ static void sensor_fusion_reset_state(void)
 {
     sys_sensor_fusion_clear_predict_flag();
     sys_sensor_fusion_clear_update_flag();
+    sys_sensor_fusion_reset_error();
     s_last_selected_anchors_mask = 0U;
 
     const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();

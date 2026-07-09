@@ -9,7 +9,7 @@
 
 /* I2C Configuration */
 #define I2C_TIMEOUT_MS             100
-#define TEMP_COMP_DEGC             40
+#define TEMP_COMP_DEGC             35
 #define EMPTY_ALERT_PCT            10
 #define CRATE_IDLE_THRESHOLD       20  /* m%/h */
 
