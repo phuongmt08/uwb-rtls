@@ -324,8 +324,12 @@ class DeviceInfoTab(QWidget):
             bat = dev.get("bat_soc_percent")
             bat_str = f"{bat}%" if bat is not None else "-"
 
-            t_ms = dev.get("local_timestamp_ms")
-            if t_ms is not None and t_ms > 0:
+            t_ms = int(dev.get("local_timestamp_ms") or 0)
+            if t_ms <= 0:
+                t_s = int(dev.get("local_timestamp_s") or 0)
+                if t_s > 0:
+                    t_ms = t_s * 1000
+            if t_ms > 0:
                 try:
                     t_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_ms / 1000.0))
                 except Exception:

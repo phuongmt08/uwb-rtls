@@ -131,7 +131,18 @@ class SessionMessageRecorder(QObject):
     def _payload_dict(param_name: str, pkt) -> dict[str, Any]:
         try:
             payload_msg = getattr(pkt, param_name)
-            return MessageToDict(payload_msg, preserving_proto_field_name=True)
+            try:
+                return MessageToDict(
+                    payload_msg,
+                    preserving_proto_field_name=True,
+                    always_print_fields_with_no_presence=True,
+                )
+            except TypeError:
+                return MessageToDict(
+                    payload_msg,
+                    preserving_proto_field_name=True,
+                    including_default_value_fields=True,
+                )
         except Exception:
             return {}
 

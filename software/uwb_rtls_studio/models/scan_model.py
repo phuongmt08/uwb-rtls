@@ -238,8 +238,12 @@ class ScanModel(QObject):
             "warning_count": int(getattr(adv, "warning_count", 0) or 0),
             "error_count": int(getattr(adv, "error_count", 0) or 0),
             # Receive timestamps for protocol completeness, but do not display them in the scan popup.
-            "local_timestamp_ms": int(getattr(adv, "local_timestamp_ms", 0) or 0),
             "local_timestamp_s": int(getattr(adv, "local_timestamp_s", 0) or 0),
+            "local_timestamp_ms": (
+                int(getattr(adv, "local_timestamp_s", 0) or 0) * 1000
+                if int(getattr(adv, "local_timestamp_s", 0) or 0) > 0
+                else int(getattr(adv, "local_timestamp_ms", 0) or 0)
+            ),
         }
 
         if device_id:
