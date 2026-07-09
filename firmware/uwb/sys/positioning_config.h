@@ -316,7 +316,7 @@
 #endif
 
 #ifndef ENABLE_SYS_FUSION
-#define ENABLE_SYS_FUSION  0
+#define ENABLE_SYS_FUSION  1
 #endif
 
 #ifndef SYS_FUSION_RAW_DEBUG_STREAM_ENABLE
@@ -352,7 +352,7 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_QG
-#define SYS_FUSION_UKF_QG      0.0012f
+#define SYS_FUSION_UKF_QG      (4.066e-5f)
 #endif
 
 #ifndef SYS_FUSION_UKF_R_UWB
