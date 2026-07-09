@@ -1024,9 +1024,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # 4. EXIT PROCESS
-        import sys
-        sys.exit(0)
+        # 4. EXIT PROCESS - quit the QApplication cleanly
+        QApplication.quit()
 
     def _start_session_timer(self):
         # Kept for compatibility if used elsewhere, but managed by _on_device_changed now

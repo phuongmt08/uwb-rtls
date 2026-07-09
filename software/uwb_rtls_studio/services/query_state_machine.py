@@ -1,6 +1,6 @@
-"""
+﻿"""
 ===============================================================================
-  UWB RTLS Studio — Query State Machine
+  UWB RTLS Studio â€” Query State Machine
 ===============================================================================
   File        : services/query_state_machine.py
   Description : Sequential Command-Response Queue & State Machine.
@@ -46,9 +46,21 @@ class QueryTransaction:
         self.received_time = 0.0
         self.response_packet = None
         self.seq = None
-
+        self.ack_received = False
+        self.ack_response = None
 
 class QueryQueueManager(QObject):
+    @staticmethod
+    def _tx_label(tx: QueryTransaction | None) -> str:
+        if tx is None:
+            return "<no-active-query>"
+        seq = "-" if tx.seq is None else str(tx.seq)
+        return f"cmd={tx.command_name} expected={tx.expected_response or '-'} dst={tx.dst_addr} seq={seq} retries={tx.retries} status={tx.status}"
+
+    @staticmethod
+    def _looks_like_response_name(param_name: str) -> bool:
+        name = str(param_name or "")
+        return name.endswith("_resp") or name == "ack" or name.endswith("_status")
     """
     Manages a queue of query transactions. Sends queries sequentially,
     waits for the expected response, and retries on timeout.
@@ -83,7 +95,7 @@ class QueryQueueManager(QObject):
         "zone_profile_get": "zone_profile_resp",
     }
     ACK_RESPONSE_OK = 1
-
+    ACKED_GET_WAIT_S = 3.0
     def __init__(
         self,
         send_packet_fn: Callable[[str, int, Dict[str, Any]], Any],
@@ -138,6 +150,7 @@ class QueryQueueManager(QObject):
 
         tx = QueryTransaction(command_name, dst_addr, expected_response, kwargs)
         with self.lock:
+            log.debug("Query queued: %s", self._tx_label(tx))
             self.queue.append(tx)
 
     def start(self) -> None:
@@ -149,6 +162,9 @@ class QueryQueueManager(QObject):
             self.is_running = True
 
         log.info(f"Starting sequential query queue with {len(self.queue)} commands...")
+        with self.lock:
+            for tx in self.queue:
+                log.debug("Queue snapshot: %s", self._tx_label(tx))
         self._request_send_next()
 
     def handle_response(self, param_name: str, pkt: Any) -> bool:
@@ -189,6 +205,15 @@ class QueryQueueManager(QObject):
                 self._request_send_next()
                 return True
 
+            if self._looks_like_response_name(param_name):
+                seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
+                log.debug(
+                    "Query RX did not resolve active query: active=%s got_param=%s got_seq=%s",
+                    self._tx_label(tx),
+                    param_name,
+                    seq_val,
+                )
+
         return False
 
     def handle_ack(self, ack_seq: int, response: int) -> bool:
@@ -203,20 +228,43 @@ class QueryQueueManager(QObject):
 
             tx = self.current_transaction
             if tx.seq is None or int(ack_seq) != int(tx.seq):
+                log.debug(
+                    "Ignoring ACK for non-active query: active=%s ack_seq=%s response=%s",
+                    self._tx_label(tx),
+                    ack_seq,
+                    response,
+                )
                 return False
 
             if not self._command_accepts_ack_success(tx.command_name):
+                tx.ack_received = True
+                tx.ack_response = int(response)
+                if int(response) != self.ACK_RESPONSE_OK:
+                    self.timer.stop()
+                    tx.status = QueryState.FAILED
+                    tx.received_time = time.monotonic()
+                    log.warning(
+                        "Query ACK: '%s' seq=%s returned NACK response=%s while waiting for payload '%s'.",
+                        tx.command_name,
+                        ack_seq,
+                        response,
+                        tx.expected_response,
+                    )
+                    self._request_send_next()
+                    return True
+
+                tx.status = QueryState.WAITING
+                self.timer.start(max(1, int(self.ACKED_GET_WAIT_S * 1000)))
                 log.debug(
-                    "Ignoring ACK for query '%s' seq=%s because it still requires payload '%s'.",
+                    "ACK received for GET query '%s' seq=%s; extending wait for payload '%s'.",
                     tx.command_name,
                     tx.seq,
                     tx.expected_response,
                 )
-                return False
+                return True
 
             self.timer.stop()
             tx.received_time = time.monotonic()
-
             if int(response) == self.ACK_RESPONSE_OK:
                 tx.status = QueryState.SUCCESS
                 log.info(
@@ -284,7 +332,8 @@ class QueryQueueManager(QObject):
             self.current_transaction = tx
             tx.status = QueryState.SENT
             tx.sent_time = time.monotonic()
-
+            tx.ack_received = False
+            tx.ack_response = None
             try:
                 sent_pkt = self.send_packet_fn(tx.command_name, tx.dst_addr, **tx.kwargs)
                 if sent_pkt is not None:
@@ -306,6 +355,7 @@ class QueryQueueManager(QObject):
 
             seq_str = f" seq={tx.seq}" if tx.seq is not None else ""
             log.info(f"Query TX: '{tx.command_name}' -> dst={tx.dst_addr}{seq_str} (attempt {tx.retries + 1})")
+            log.debug("Query armed: %s timeout_s=%.3f", self._tx_label(tx), self.timeout_s)
 
             if not tx.expected_response:
                 tx.status = QueryState.SUCCESS
@@ -322,7 +372,21 @@ class QueryQueueManager(QObject):
                 return
 
             tx = self.current_transaction
-            if tx.retries < self.max_retries:
+            if tx.ack_received and not self._command_accepts_ack_success(tx.command_name):
+                if tx.retries < self.max_retries:
+                    tx.retries += 1
+                    tx.status = QueryState.RETRY_PENDING
+                    log.warning(
+                        f"Query TIMEOUT waiting for payload '{tx.expected_response}' after ACK to '{tx.command_name}'. "
+                        f"Retrying GET request ({tx.retries}/{self.max_retries}) because payload was not observed."
+                    )
+                else:
+                    tx.status = QueryState.TIMEOUT
+                    log.error(
+                        f"Query TIMEOUT waiting for payload '{tx.expected_response}' after ACK to '{tx.command_name}'. "
+                        f"Failed after {self.max_retries} retries."
+                    )
+            elif tx.retries < self.max_retries:
                 tx.retries += 1
                 tx.status = QueryState.RETRY_PENDING
                 log.warning(

@@ -487,10 +487,12 @@ def main():
         connected_name, connected_mac = mock_device_identity()
         initial_scan_devices = [{"name": connected_name, "mac": connected_mac, "rssi": 0, "serial": "", "order": 0}]
     else:
+        app_should_exit = False
         while True:
             dongle_popup = DonglePopup(dongle_vm)
             if dongle_popup.exec() != 1:  # 1 = QDialog.DialogCode.Accepted
-                sys.exit(0)
+                app_should_exit = True
+                break
 
             # Dongle ok -> Scan popup
             scan_model = ScanModel(protocol_service, serial_service, command_bus=command_bus, ble_scan_repo=ble_scan_repo)
@@ -517,7 +519,14 @@ def main():
                 # Dongle disconnected during scan -> return to dongle popup and retry from the start
                 continue
             else:
-                sys.exit(0)
+                app_should_exit = True
+                break
+
+        if app_should_exit:
+            protocol_service.close()
+            serial_service.close()
+            shared_raw_packet_store.close()
+            sys.exit(0)
 
     # STEP 4: Main Window
     # ------------------------------------------------------------

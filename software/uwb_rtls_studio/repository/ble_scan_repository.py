@@ -216,6 +216,8 @@ class BleScanRepository(QObject):
             adv_data = self._adv_status_by_key.get(candidate)
             if not adv_data:
                 continue
+            if not self._adv_status_matches_device(device, adv_data, candidate):
+                continue
             self._merge_adv_payload(device, adv_data, match_key=str(candidate))
             return True
         return False
@@ -291,9 +293,9 @@ class BleScanRepository(QObject):
         device_id = int(data.get("device_id") or 0)
         keys = []
         for candidate in (
-            device_id,
             serial_number,
             serial_number & 0xFFFF if serial_number else 0,
+            device_id,
         ):
             if candidate and candidate not in keys:
                 keys.append(candidate)
@@ -303,14 +305,31 @@ class BleScanRepository(QObject):
     def _merge_candidates(cls, device: dict) -> tuple[int, ...]:
         serial_number = int(device.get("serial_number") or 0)
         device_id = int(device.get("device_id") or 0)
-        name_candidate = cls._device_name_candidate(device)
         candidates = []
         for candidate in (
-            device_id,
             serial_number,
             serial_number & 0xFFFF if serial_number else 0,
-            name_candidate,
+            device_id,
         ):
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
         return tuple(candidates)
+
+    @staticmethod
+    def _adv_status_matches_device(device: dict, adv_data: dict, candidate: int) -> bool:
+        device_type = int(device.get("device_type") or 0)
+        adv_type = int(adv_data.get("device_type") or 0)
+        if device_type and adv_type and device_type != adv_type:
+            return False
+
+        device_serial = int(device.get("serial_number") or 0)
+        adv_serial = int(adv_data.get("serial_number") or 0)
+        if device_serial and adv_serial and device_serial != adv_serial:
+            return False
+
+        if candidate == int(adv_data.get("device_id") or 0):
+            device_id = int(device.get("device_id") or 0)
+            if device_id and device_id != int(adv_data.get("device_id") or 0):
+                return False
+
+        return True

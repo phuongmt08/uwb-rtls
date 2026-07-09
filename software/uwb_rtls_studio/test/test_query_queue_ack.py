@@ -71,10 +71,11 @@ def test_query_queue_does_not_complete_get_query_on_ack_only():
     resolved = manager.handle_ack(7, QueryQueueManager.ACK_RESPONSE_OK)
     _pump_events()
 
-    assert resolved is False
+    assert resolved is True
     assert results == []
     assert manager.is_running is True
     assert manager.current_transaction.command_name == 'device_information_get'
+    assert manager.current_transaction.status == 'WAITING'
 
     resp = factory.device_information_resp(int(VvAddress.MCU), int(VvAddress.HOST), 7)
     resolved = manager.handle_response('device_information_resp', resp)
@@ -109,3 +110,38 @@ def test_query_queue_accepts_get_response_even_when_payload_seq_differs():
     assert results
     assert results[0]['status'] == 'SUCCESS'
     assert results[0]['response_packet'].hdr.seq == 155
+
+def test_query_queue_get_ack_retries_until_payload_arrives():
+    factory = CommandFactory()
+    results: list[dict] = []
+
+    def send_packet(command_name: str, dst_addr: int, **kwargs):
+        assert command_name == 'device_information_get'
+        return factory.device_information_get(int(VvAddress.HOST), dst_addr, 7)
+
+    manager = QueryQueueManager(send_packet_fn=send_packet, timeout_s=0.01, max_retries=3, on_complete_fn=results.extend)
+    manager.add_query('device_information_get', int(VvAddress.MCU))
+
+    manager.start()
+    _pump_events()
+    assert manager.current_transaction is not None
+
+    resolved = manager.handle_ack(7, QueryQueueManager.ACK_RESPONSE_OK)
+    assert resolved is True
+
+    manager._on_timeout()
+    _pump_events()
+
+    assert results == []
+    assert manager.is_running is True
+    assert manager.current_transaction is not None
+    assert manager.current_transaction.command_name == 'device_information_get'
+    assert manager.current_transaction.retries == 1
+
+    resp = factory.device_information_resp(int(VvAddress.MCU), int(VvAddress.HOST), 155)
+    resolved = manager.handle_response('device_information_resp', resp)
+    _pump_events()
+
+    assert resolved is True
+    assert results
+    assert results[0]['status'] == 'SUCCESS'

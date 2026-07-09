@@ -104,7 +104,7 @@ class DongleDetectWorker(QThread):
             if self._should_stop:
                 return None
             self.port_probing.emit(port_info.device)
-            result = self._service.probe_port(port_info.device)
+            result = self._service.probe_port(port_info.device, is_cancelled_fn=lambda: self._should_stop)
             if result is not None:
                 return result
 

@@ -105,10 +105,12 @@ class DeviceModel(QObject):
         self._scan_device_order: dict[str, int] = {}
         self._next_scan_device_order = 0
         self._connected_grace_until = 0.0
-        self._session_start_scheduled = False
+        self._session_start_scheduled = False
+
         self._connect_retry_count = 0
         self._connect_generation = 0
         self._pending_end_session_seq: int | None = None
+        self._pending_device_type_set_seq: int | None = None
         self._pending_end_session_reason = 0
         self._pending_end_session_ack = False
         self._pending_end_session_state_seen = False
@@ -408,7 +410,11 @@ class DeviceModel(QObject):
         device_type = int(device_type)
         shared_app_state.device_type = device_type
         self.device_type_parsed.emit(device_type)
-        return self._send_command("device_type_set", dst_addr=VvAddress.MCU, device_type=device_type)
+        pkt = self._send_command("device_type_set", dst_addr=VvAddress.MCU, device_type=device_type)
+        if pkt is not None:
+            if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq"):
+                self._pending_device_type_set_seq = int(pkt.hdr.seq)
+        return pkt
 
     def write_factory_otp(
         self,
@@ -748,7 +754,8 @@ class DeviceModel(QObject):
         self._session_start_events_done = False
         self._log_stream_requested = False
         self._connected_grace_until = time.monotonic() + 1.5
-        self._session_start_scheduled = False
+        self._session_start_scheduled = False
+
         self._pending_connect_mac = ""
         self._pending_connect_name = ""
         self._connect_retry_count = 0
@@ -959,6 +966,19 @@ class DeviceModel(QObject):
         })
 
     def _on_ack_received(self, ack_seq: int, response: int) -> None:
+        if (
+            hasattr(self, "_pending_device_type_set_seq")
+            and self._pending_device_type_set_seq is not None
+            and int(ack_seq) == int(self._pending_device_type_set_seq)
+        ):
+            self._pending_device_type_set_seq = None
+            if int(response) == int(self._protocol.pb.PACKET_ACK_RESPONSE_ACK):
+                log.info("device_type_set ACK received. Scheduling device_type_get in 1s.")
+                QTimer.singleShot(1000, lambda: self.request_device_type(force=True))
+            else:
+                log.warning("device_type_set returned NACK response=%s", response)
+            return
+
         if (
             self._pending_handshake_time_sync_seq is not None
             and int(ack_seq) == int(self._pending_handshake_time_sync_seq)
@@ -1344,7 +1364,8 @@ class DeviceModel(QObject):
         self._session_bootstrap_done = False
         self._session_start_events_done = False
         self._log_stream_requested = False
-        self._session_start_scheduled = False
+        self._session_start_scheduled = False
+
         self._connected_grace_until = 0.0
         self._pending_connect_mac = ""
         self._pending_connect_name = ""
@@ -1666,7 +1687,8 @@ class DeviceModel(QObject):
             self._session_bootstrap_done = False
             self._session_start_events_done = False
             self._log_stream_requested = False
-            self._session_start_scheduled = False
+            self._session_start_scheduled = False
+
             shared_app_state.connected_device = {}
             if not switch_requested:
                 self._active_connecting_handshake = False
@@ -1913,9 +1935,13 @@ class DeviceModel(QObject):
         for d in self._adv_devices.values():
             adv_status = {}
             for candidate in self._adv_status_merge_candidates(d):
-                if candidate in self._adv_status_by_device_id:
-                    adv_status = self._adv_status_by_device_id.get(candidate, {})
-                    break
+                if candidate not in self._adv_status_by_device_id:
+                    continue
+                possible = self._adv_status_by_device_id.get(candidate, {})
+                if not self._adv_status_matches_device(d, possible, candidate):
+                    continue
+                adv_status = possible
+                break
             item = d.copy()
             item.update(adv_status)
             merged_list.append(item)
@@ -1938,17 +1964,34 @@ class DeviceModel(QObject):
     def _adv_status_merge_candidates(cls, device: dict) -> tuple[int, ...]:
         serial_number = int(device.get("serial_number") or 0)
         device_id = int(device.get("device_id") or 0)
-        name_candidate = cls._adv_status_name_candidate(device)
         candidates = []
         for candidate in (
-            device_id,
             serial_number,
             serial_number & 0xFFFF if serial_number else 0,
-            name_candidate,
+            device_id,
         ):
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
         return tuple(candidates)
+
+    @staticmethod
+    def _adv_status_matches_device(device: dict, adv_status: dict, candidate: int) -> bool:
+        device_type = int(device.get("device_type") or 0)
+        adv_type = int(adv_status.get("device_type") or 0)
+        if device_type and adv_type and device_type != adv_type:
+            return False
+
+        device_serial = int(device.get("serial_number") or 0)
+        adv_serial = int(adv_status.get("serial_number") or 0)
+        if device_serial and adv_serial and device_serial != adv_serial:
+            return False
+
+        if candidate == int(adv_status.get("device_id") or 0):
+            device_id = int(device.get("device_id") or 0)
+            if device_id and device_id != int(adv_status.get("device_id") or 0):
+                return False
+
+        return True
 
     def _prune_devices(self):
         """Do not auto-remove or age-out discovered devices during runtime."""
