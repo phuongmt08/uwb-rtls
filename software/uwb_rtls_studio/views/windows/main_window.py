@@ -203,12 +203,17 @@ class MainWindow(QMainWindow):
         self._session_seconds = 0
         self._reconnect_popup = None
         self._conn_progress_target = 0
-        self._conn_progress_display = 0
+        self._conn_progress_display = 0 
         self._conn_progress_context = ""
         self._conn_progress_timer = QTimer(self)
         self._conn_progress_timer.setInterval(8)
         self._conn_progress_timer.timeout.connect(self._tick_connection_progress)
         self._pending_command_toasts = {}
+        self._shutdown_in_progress = False
+        self._shutdown_ticks = 0
+        self._shutdown_force_quit_timer = QTimer(self)
+        self._shutdown_force_quit_timer.setInterval(100)
+        self._shutdown_force_quit_timer.timeout.connect(self._check_shutdown_ready)
 
         # -- Load UI from .ui file --
         uic.loadUi(UI_FILE, self)
@@ -987,15 +992,27 @@ class MainWindow(QMainWindow):
         self._set_session_button_active(True)
         QMessageBox.warning(self, "Session Save Failed", message)
 
+    def request_interrupt_shutdown(self):
+        """Handle Ctrl+C / SIGTERM without showing the exit confirmation dialog."""
+        self._safe_shutdown()
+
     def _safe_shutdown(self):
-        # 1. Gửi disconnect dongle (ble_disconnect_t)
+        if self._shutdown_in_progress:
+            return
+
+        self._shutdown_in_progress = True
+
+        # Stop BLE work through the model state machine so timers stop before transport shutdown.
         if self._device_info_vm:
             try:
-                self._device_info_vm.request_ble_disconnect()
+                self._device_info_vm.shutdown_device_link()
             except Exception:
-                pass
+                try:
+                    self._device_info_vm.request_ble_disconnect()
+                except Exception:
+                    pass
 
-        # 2. Stop all session & save session
+        # Stop all session work and persist current buffers.
         if self._session_active:
             if self._main_vm:
                 try:
@@ -1016,17 +1033,38 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
+        QApplication.processEvents()
+        self.hide()
+        self._shutdown_ticks = 0
+        self._shutdown_force_quit_timer.start()
 
-        # 3. Đóng cổng COM
+    def _check_shutdown_ready(self):
+        is_disconnected = True
+        if self._device_info_vm and self._device_info_vm.model:
+            status = getattr(self._device_info_vm.model, "connection_status", "")
+            mac = getattr(self._device_info_vm.model, "connected_mac", "")
+            if mac or status in ("Connecting", "Disconnecting"):
+                is_disconnected = False
+
+        self._shutdown_ticks += 1
+        if is_disconnected or self._shutdown_ticks >= 20:  # Maximum 2.0 seconds fallback
+            self._shutdown_force_quit_timer.stop()
+            self._finish_shutdown()
+
+    def _finish_shutdown(self):
+        if self._protocol_service:
+            try:
+                self._protocol_service.close()
+            except Exception:
+                pass
+
         if self._serial_service:
             try:
                 self._serial_service.close()
             except Exception:
                 pass
 
-        # 4. EXIT PROCESS
-        import sys
-        sys.exit(0)
+        QApplication.quit()
 
     def _start_session_timer(self):
         # Kept for compatibility if used elsewhere, but managed by _on_device_changed now
@@ -1133,6 +1171,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle app close - confirmation popup and shutdown sequence."""
+        if self._shutdown_in_progress:
+            event.ignore()
+            return
+
         msg = "Are you sure you want to exit the application?\n\nThis will:\n- Disconnect device\n- Stop and save active session (if any)\n- Close COM port and release resources."
         if self._session_active:
             msg = "An active session is currently running.\nIf you exit, session data will be saved automatically.\n\nDo you want to save and exit the application?"
@@ -1148,4 +1190,4 @@ class MainWindow(QMainWindow):
             return
 
         self._safe_shutdown()
-        event.accept()
+        event.ignore()

@@ -45,16 +45,35 @@ class ConfigRepository(QObject):
 
     def handle_packet(self, param_name: str, pkt) -> bool:
         if param_name == "sys_config_resp":
-            self.save_sys_config(self.parse_sys_config(pkt.sys_config_resp.config))
+            cfg = pkt.sys_config_resp.config
+            # ByteSize()==0: firmware gửi gói nhưng config sub-message rỗng hoàn toàn
+            # → save {} để UI hiện placeholder, phân biệt với config hợp lệ có tx_delay=0
+            if cfg.ByteSize() == 0:
+                self.save_sys_config({})
+            else:
+                self.save_sys_config(self.parse_sys_config(cfg))
             return True
         if param_name == "sys_ranging_cfg_resp":
-            self.save_sys_ranging_cfg(self.parse_sys_ranging_cfg(pkt.sys_ranging_cfg_resp.config))
+            cfg = pkt.sys_ranging_cfg_resp.config
+            if cfg.ByteSize() == 0:
+                self.save_sys_ranging_cfg({})
+            else:
+                self.save_sys_ranging_cfg(self.parse_sys_ranging_cfg(cfg))
             return True
         if param_name == "sensor_fusion_cfg_resp":
-            self.save_sensor_fusion_cfg(self.parse_sensor_fusion_cfg(pkt.sensor_fusion_cfg_resp.config))
+            cfg = pkt.sensor_fusion_cfg_resp.config
+            if cfg.ByteSize() == 0:
+                self.save_sensor_fusion_cfg({})
+            else:
+                self.save_sensor_fusion_cfg(self.parse_sensor_fusion_cfg(cfg))
             return True
         if param_name == "pos_calib_cfg_resp":
-            self.save_pos_calib_cfg(self.parse_pos_calib_cfg(pkt.pos_calib_cfg_resp.config))
+            cfg = pkt.pos_calib_cfg_resp.config
+            # ByteSize()==0: firmware chưa config pos_calib → hiện placeholder thay vì 0
+            if cfg.ByteSize() == 0:
+                self.save_pos_calib_cfg({})
+            else:
+                self.save_pos_calib_cfg(self.parse_pos_calib_cfg(cfg))
             return True
         if param_name == "device_type_set":
             self.save_device_type(int(getattr(pkt.device_type_set, "device_type", 0)))

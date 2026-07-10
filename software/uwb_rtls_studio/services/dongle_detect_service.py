@@ -72,14 +72,16 @@ class DongleDetectService:
         self._proto = VvProtocol()
         self._commands = CommandFactory()
 
-    def probe_port(self, port_name: str) -> Optional[DongleInfo]:
+    def probe_port(self, port_name: str, is_cancelled_fn=None) -> Optional[DongleInfo]:
         """Mở port, gửi device_information_get, chờ ACK.
         Retry tối đa MAX_PROBE_RETRIES lần.
         Return DongleInfo nếu nhận được ACK, None nếu không.
         """
         for attempt in range(MAX_PROBE_RETRIES):
+            if is_cancelled_fn and is_cancelled_fn():
+                return None
             try:
-                result = self._single_probe(port_name, attempt)
+                result = self._single_probe(port_name, attempt, is_cancelled_fn)
                 if result is not None:
                     return result
             except (serial.SerialException, OSError) as e:
@@ -97,7 +99,7 @@ class DongleDetectService:
 
         return None
 
-    def _single_probe(self, port_name: str, attempt: int) -> Optional[DongleInfo]:
+    def _single_probe(self, port_name: str, attempt: int, is_cancelled_fn=None) -> Optional[DongleInfo]:
         """Thực hiện 1 lần probe trên port."""
         log.debug("Probing %s (attempt %d/%d)...", port_name, attempt + 1, MAX_PROBE_RETRIES)
 
@@ -109,7 +111,13 @@ class DongleDetectService:
         try:
             ser.reset_input_buffer()
             ser.reset_output_buffer()
-            time.sleep(0.06)  # Cho port ổn định
+            
+            # Thường xuyên check cancel trong các khoảng sleep ngắn
+            for _ in range(6):
+                if is_cancelled_fn and is_cancelled_fn():
+                    ser.close()
+                    return None
+                time.sleep(0.01)
 
             # Build device_information_get packet
             seq = self._proto.next_seq()
@@ -130,6 +138,9 @@ class DongleDetectService:
             hdlc_decoder = type(self._proto.hdlc)()  # Fresh decoder per probe
 
             while time.time() < deadline:
+                if is_cancelled_fn and is_cancelled_fn():
+                    ser.close()
+                    return None
                 data = ser.read(ser.in_waiting or 1)
                 if not data:
                     continue
@@ -158,6 +169,7 @@ class DongleDetectService:
                                 "✅ Dongle found on %s (received %s)",
                                 port_name, param,
                             )
+                            ser.close()
                             return DongleInfo(
                                 port=port_name,
                                 vid=port_info.vid or 0 if port_info else 0,

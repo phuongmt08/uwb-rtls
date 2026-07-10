@@ -27,19 +27,19 @@ import logging
 import signal
 
 
-def _force_exit(_signum, _frame):
-    try:
-        from data.raw_packet_store import shared_raw_packet_store
-        shared_raw_packet_store.clear()
-    except Exception:
-        pass
-    os._exit(130)
+_interrupt_requested = False
 
 
+def _request_graceful_exit(_signum, _frame):
+    global _interrupt_requested
+    if _interrupt_requested:
+        os._exit(130)
+    _interrupt_requested = True
 
-signal.signal(signal.SIGINT, _force_exit)
+
+signal.signal(signal.SIGINT, _request_graceful_exit)
 if hasattr(signal, "SIGTERM"):
-    signal.signal(signal.SIGTERM, _force_exit)
+    signal.signal(signal.SIGTERM, _request_graceful_exit)
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -416,6 +416,23 @@ def main():
 
     app = QApplication(sys.argv)
 
+    interrupt_state = {"handled": False, "callback": lambda: app.quit()}
+    interrupt_timer = QTimer()
+    interrupt_timer.setInterval(100)
+
+    def _process_pending_interrupt():
+        global _interrupt_requested
+        if not _interrupt_requested or interrupt_state["handled"]:
+            return
+        interrupt_state["handled"] = True
+        try:
+            interrupt_state["callback"]()
+        except Exception:
+            app.quit()
+
+    interrupt_timer.timeout.connect(_process_pending_interrupt)
+    interrupt_timer.start()
+
     # Apply global stylesheet (dark theme & custom scrollbars)
     from utils.theme import DARK_STYLESHEET
     app.setStyleSheet(DARK_STYLESHEET)
@@ -487,10 +504,12 @@ def main():
         connected_name, connected_mac = mock_device_identity()
         initial_scan_devices = [{"name": connected_name, "mac": connected_mac, "rssi": 0, "serial": "", "order": 0}]
     else:
+        app_should_exit = False
         while True:
             dongle_popup = DonglePopup(dongle_vm)
             if dongle_popup.exec() != 1:  # 1 = QDialog.DialogCode.Accepted
-                sys.exit(0)
+                app_should_exit = True
+                break
 
             # Dongle ok -> Scan popup
             scan_model = ScanModel(protocol_service, serial_service, command_bus=command_bus, ble_scan_repo=ble_scan_repo)
@@ -517,7 +536,14 @@ def main():
                 # Dongle disconnected during scan -> return to dongle popup and retry from the start
                 continue
             else:
-                sys.exit(0)
+                app_should_exit = True
+                break
+
+        if app_should_exit:
+            protocol_service.close()
+            serial_service.close()
+            shared_raw_packet_store.close()
+            os._exit(0)
 
     # STEP 4: Main Window
     # ------------------------------------------------------------
@@ -607,6 +633,7 @@ def main():
         protocol_service=protocol_service,
         command_bus=command_bus,
     )
+    interrupt_state["callback"] = window.request_interrupt_shutdown
     if connected_name and connected_mac:
         device_info_vm.set_connected_device(connected_name, connected_mac, initial_scan_devices)
 
@@ -626,7 +653,7 @@ def main():
     protocol_service.close()
     serial_service.close()
     shared_raw_packet_store.close()
-    sys.exit(exit_code)
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":

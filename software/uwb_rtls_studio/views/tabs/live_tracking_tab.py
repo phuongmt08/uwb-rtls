@@ -53,10 +53,10 @@ from utils.config_dim import GRID_SPACING_M
 from utils.app_state import shared_app_state
 
 DEFAULT_ANCHOR_LAYOUT = [
-    {"anchor_id": 0, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "label": "A0"},
-    {"anchor_id": 1, "x_m": 10.76, "y_m": 0.0, "z_m": 0.0, "label": "A1"},
-    {"anchor_id": 2, "x_m": 0.0, "y_m": 13.2, "z_m": 0.0, "label": "A2"},
-    {"anchor_id": 3, "x_m": 10.76, "y_m": 13.2, "z_m": 0.0, "label": "A3"},
+    {"anchor_id": 1, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "label": "A1"},
+    {"anchor_id": 2, "x_m": 10.76, "y_m": 0.0, "z_m": 0.0, "label": "A2"},
+    {"anchor_id": 3, "x_m": 0.0, "y_m": 13.2, "z_m": 0.0, "label": "A3"},
+    {"anchor_id": 4, "x_m": 10.76, "y_m": 13.2, "z_m": 0.0, "label": "A4"},
 ]
 
 
@@ -582,7 +582,7 @@ class LiveTrackingTab(QWidget):
         self._canvas = self.position_canvas
         self._canvas.parent_tab = self
         if hasattr(self._canvas, "set_render_fps"):
-            self._canvas.set_render_fps(60)
+            self._canvas.set_render_fps(120)
         self._preview_sync_dirty = False
         self._preview_sync_timer = QTimer(self)
         self._preview_sync_timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -898,6 +898,28 @@ class LiveTrackingTab(QWidget):
                 label_widget.setText("-")
         self._last_anchor_mask = 0
         self._last_anchor_mask_valid = False
+        if hasattr(self, "_canvas") and hasattr(self._canvas, "clear_anchor_telemetry"):
+            self._canvas.clear_anchor_telemetry()
+
+    def _show_anchor_telemetry(self, anchors):
+        """Render sensor-fusion distance and weight values in the four live rows."""
+        for anchor_idx in range(1, 5):
+            label_widget = getattr(self, f"d{anchor_idx}_label", None)
+            if label_widget is not None:
+                label_widget.setText("-")
+        for anchor in anchors or []:
+            anchor_id = int(anchor.get("anchor_id", 0) or 0)
+            label_widget = getattr(self, f"d{anchor_id}_label", None)
+            if label_widget is None:
+                continue
+            distance_mm = anchor.get("distance_mm")
+            if distance_mm is None:
+                label_widget.setText("-")
+                continue
+            text = f"{float(distance_mm) / 1000.0:.3f} m"
+            if anchor.get("weight") is not None:
+                text += f"  |  W: {int(anchor['weight'])}"
+            label_widget.setText(text)
 
     def _setup_dynamic_metrics(self):
         # Configure units for the statically loaded metric labels
@@ -1091,6 +1113,9 @@ class LiveTrackingTab(QWidget):
         self._set_metric_value(self.sof_label, "0xAA")
         self._set_metric_value(self.length_label, payload_size, "{:d}")
         self._set_metric_value(self.anchor_mask_label, self._format_anchor_mask(anchor_mask, anchor_mask_valid))
+        ranging_anchors = last_sample.get("anchors", []) if self._vm and self._vm.model._position_history else []
+        if hasattr(self._canvas, "set_anchor_telemetry"):
+            self._canvas.set_anchor_telemetry(anchor_mask, ranging_anchors, anchor_mask_valid)
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
 
@@ -1165,6 +1190,10 @@ class LiveTrackingTab(QWidget):
             self._last_anchor_mask = anchor_mask
             self._last_anchor_mask_valid = True
         self._set_metric_value(self.anchor_mask_label, self._format_anchor_mask(anchor_mask, anchor_mask_valid))
+        anchors = list(data.get("anchors", []) or [])
+        self._show_anchor_telemetry(anchors)
+        if hasattr(self._canvas, "set_anchor_telemetry"):
+            self._canvas.set_anchor_telemetry(anchor_mask, anchors, anchor_mask_valid)
 
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
@@ -1185,6 +1214,7 @@ class LiveTrackingTab(QWidget):
         self._set_metric_value(self.error_label, self._last_rms)
 
     def _on_anchor_distances(self, anchors):
+        self._show_anchor_telemetry(anchors)
         for anchor in anchors:
             anchor_id = anchor.get("id", "")
             idx = anchor_id.replace("A", "")

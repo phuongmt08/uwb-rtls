@@ -158,11 +158,12 @@ class RangingRepository(QObject):
 
     @staticmethod
     def _build_anchor_mask(anchors: list[dict]) -> int:
+        """Build the protocol mask (bit 0 = Anchor 1, bit 1 = Anchor 2)."""
         mask = 0
         for anchor in anchors:
             anchor_id = int(anchor.get("anchor_id", 0) or 0)
-            if 0 <= anchor_id < 32:
-                mask |= 1 << anchor_id
+            if 1 <= anchor_id <= 32:
+                mask |= 1 << (anchor_id - 1)
         return mask
 
     @staticmethod

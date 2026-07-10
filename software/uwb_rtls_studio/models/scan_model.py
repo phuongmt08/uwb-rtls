@@ -97,7 +97,8 @@ class ScanModel(QObject):
             self._send_command(
                 "ble_scan_start",
                 src_addr=self._protocol.pb.PACKET_ADDR_HOST,
-                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
+                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
+                duration_ms=0
             )
             self.is_scanning = True
 
@@ -259,8 +260,8 @@ class ScanModel(QObject):
                     cached = self._adv_status_cache[candidate]
                     dev.update({
                         "device_id": cached.get("device_id", 0),
-                        "serial_number": cached.get("serial_number", 0),
-                        "serial": cached.get("serial", ""),
+                        "serial_number": dev.get("serial_number") or cached.get("serial_number", 0),
+                        "serial": dev.get("serial") or cached.get("serial", ""),
                         "bat_soc_percent": cached.get("bat_soc_percent", 0),
                         "warning_count": cached.get("warning_count", 0),
                         "error_count": cached.get("error_count", 0),
@@ -284,9 +285,8 @@ class ScanModel(QObject):
             "name": str(getattr(result, "name", "") or "").strip() or "-",
             "mac": mac_hex,
             "rssi": result.rssi_dbm,
-            # Keep raw scan serial only for merge matching. Display serial comes from ble_adv_status.
             "serial_number": scan_serial_number or preserved_serial_number,
-            "serial": current.get("serial", ""),
+            "serial": (f"0x{scan_serial_number:08X}" if scan_serial_number else current.get("serial", "")),
             "last_seen": time.monotonic(),
             "order": self._device_order[mac_hex],
         })
@@ -297,8 +297,8 @@ class ScanModel(QObject):
                 cached = self._adv_status_cache[candidate]
                 current.update({
                     "device_id": cached.get("device_id", 0),
-                    "serial_number": cached.get("serial_number", scan_serial_number),
-                    "serial": cached.get("serial", ""),
+                    "serial_number": current.get("serial_number") or cached.get("serial_number", scan_serial_number),
+                    "serial": current.get("serial") or cached.get("serial", ""),
                     "bat_soc_percent": cached.get("bat_soc_percent", 0),
                     "warning_count": cached.get("warning_count", 0),
                     "error_count": cached.get("error_count", 0),
@@ -333,6 +333,9 @@ class ScanModel(QObject):
                 self._emit_progress(45, "Dongle is establishing BLE link...")
             return
         elif has_reason and reason_code:
+            if self._connect_stage == "selected":
+                log.debug("Ignoring disconnect reason during selected/scan-stop stage.")
+                return
             reason = normalize_hci_reason(reason_code)
             log.warning(
                 "Popup connect failed with BLE state %s reason=%s (%s).",

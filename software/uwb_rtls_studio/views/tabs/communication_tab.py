@@ -1,4 +1,4 @@
-"""
+﻿"""
 ==============================================================================
   UWB RTLS Studio — Communication Tab
 ==============================================================================
@@ -22,10 +22,10 @@
     tab_communication.set_protocol_service(protocol_service)
 
   Key design rules:
-    • NEVER touch/import anything from other tabs.
-    • NEVER create new threads — Qt signal/slot handles cross-thread delivery.
-    • Monitor tables accumulate rows; Tester rows are correlated by seq number.
-    • Manual-test seq tracking uses ONLY _tester_seqs (set of pkt.hdr.seq),
+    â€¢ NEVER touch/import anything from other tabs.
+    â€¢ NEVER create new threads — Qt signal/slot handles cross-thread delivery.
+    â€¢ Monitor tables accumulate rows; Tester rows are correlated by seq number.
+    â€¢ Manual-test seq tracking uses ONLY _tester_seqs (set of pkt.hdr.seq),
       NOT a boolean flag, to avoid false positives.
 ==============================================================================
 """
@@ -36,7 +36,7 @@ import time
 import json
 import logging
 
-from common.commands import mapped_destination_for
+from common.commands import CommandCatalog, mapped_destination_for
 from common.transport import VvAddress
 from common import protocol_pb2 as pb
 
@@ -124,8 +124,8 @@ class ToggleSwitch(QCheckBox):
 class CommunicationTab(QWidget):
     """
     Developer-mode tab with two sub-tabs:
-      • Live Monitor  — passively shows every TX/RX packet.
-      • Packet Tester — manually send any command and inspect the response.
+      â€¢ Live Monitor  — passively shows every TX/RX packet.
+      â€¢ Packet Tester — manually send any command and inspect the response.
     """
 
     def __init__(self, parent=None):
@@ -229,7 +229,7 @@ class CommunicationTab(QWidget):
         # ── Clear button row
         clear_row = QHBoxLayout()
         clear_row.addStretch()
-        self.btn_monitor_clear = QPushButton("🗑 Clear Monitor", self.tab_monitor)
+        self.btn_monitor_clear = QPushButton("🗑️ Clear Monitor", self.tab_monitor)
         self.btn_monitor_clear.setStyleSheet(self._secondary_btn_style())
         self.btn_monitor_clear.clicked.connect(self._clear_monitor)
         clear_row.addWidget(self.btn_monitor_clear)
@@ -355,7 +355,7 @@ class CommunicationTab(QWidget):
         # ── Clear tester button
         clear_row = QHBoxLayout()
         clear_row.addStretch()
-        self.btn_tester_clear = QPushButton("🗑 Clear Tester", self.tab_tester)
+        self.btn_tester_clear = QPushButton("🗑️ Clear Tester", self.tab_tester)
         self.btn_tester_clear.setStyleSheet(self._secondary_btn_style())
         self.btn_tester_clear.clicked.connect(self._clear_tester)
         clear_row.addWidget(self.btn_tester_clear)
@@ -758,7 +758,7 @@ class CommunicationTab(QWidget):
             shared_command_bus.manual_test_mode_enabled = checked
             if checked:
                 self.tester_status_label.setText(
-                    "⚠ Test Mode ACTIVE — background traffic blocked"
+                    "⚠️ Test Mode ACTIVE — background traffic blocked"
                 )
                 self.tester_status_label.setStyleSheet("color: #F59E0B; font-weight: bold;")
             else:
@@ -766,7 +766,7 @@ class CommunicationTab(QWidget):
                 self.tester_status_label.setStyleSheet("color: #10B981;")
             log.info("Manual Test Mode: %s", "ENABLED" if checked else "DISABLED")
         else:
-            self.tester_status_label.setText("⚠ CommandBus not available")
+            self.tester_status_label.setText("⚠️ CommandBus not available")
             self.tester_status_label.setStyleSheet("color: #EF4444;")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -945,6 +945,28 @@ class CommunicationTab(QWidget):
         follow_tail = self._should_follow_table_tail(sent_table, recv_table)
         row = seq_to_row.get(seq)
 
+        if row is not None:
+            # Only correlate payload responses back to the TX row when the command on that row
+            # actually expects this response type. MCU-originated packets can use an independent
+            # seq counter, so matching by seq alone can overwrite the wrong row.
+            sent_cmd = sent_table.item(row, 5).text().strip() if sent_table.item(row, 5) else ""
+            expected_resp = ""
+            if resp != "ack" and sent_cmd:
+                try:
+                    expected_resp = CommandCatalog().expected_response_for(sent_cmd)
+                except Exception:
+                    expected_resp = ""
+                if expected_resp and expected_resp != resp:
+                    log.warning(
+                        "Monitor seq collision: sent_cmd=%s expected_resp=%s got_resp=%s seq=%s src=%s dst=%s",
+                        sent_cmd,
+                        expected_resp,
+                        resp,
+                        seq,
+                        src,
+                        dst,
+                    )
+                    row = None
         if row is not None:
             # Update existing correlated row (matching Sent entry)
             existing_resp = recv_table.item(row, 5).text().strip() if recv_table.item(row, 5) else ""

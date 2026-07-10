@@ -488,15 +488,9 @@ class LogModel(QObject):
         self._append_packet_trace_entry(line)
 
     def _append_packet_trace_entry(self, line: str) -> None:
-        if not self._packet_trace_to_live_log:
-            return
-        self._append_entry({
-            "raw_line": line,
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "level": "DEBUG",
-            "source": "PROTOCOL",
-            "message": line,
-        })
+        # Protocol RX/TX traces belong to terminal/debug output only.
+        # Live Log must stay reserved for firmware/device-originated log entries.
+        return
 
     def _flush_deferred_ack_trace(self, ack_seq: int) -> None:
         line = self._deferred_ack_trace_by_ack_seq.pop(int(ack_seq), None)
