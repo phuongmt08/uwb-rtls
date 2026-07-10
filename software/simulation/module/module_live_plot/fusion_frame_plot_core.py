@@ -60,6 +60,7 @@ class FusionFrameThread(QThread):
         self._bad_frames = 0
         self._last_tx_frame_cnt = None
         self._tx_gap_count = 0
+        self._last_step_timestamp = {}
         self._stats_last_print = time.monotonic()
 
     def stop(self):
@@ -85,6 +86,7 @@ class FusionFrameThread(QThread):
 
     def _open_new_csv(self):
         self._close_csv()
+        self._last_step_timestamp.clear()
         filename = generate_timestamp_filename(CSV_UKF_FUSION_FILENAME_PREFIX, CSV_UKF_FUSION_FILENAME_SUFFIX)
         self.csv_file, self.csv_writer = create_csv_file(filename)
         self.csv_created_signal.emit()
@@ -314,6 +316,11 @@ class FusionFrameThread(QThread):
                 frame_count += 1
                 self._parsed_frames += 1
                 self._track_tx_gap(frame_data["tx_frame_cnt"])
+                ukf_step = int(frame_data.get("ukf_step", -1))
+                now = time.monotonic()
+                previous_step_time = self._last_step_timestamp.get(ukf_step)
+                frame_data["dt"] = 0.0 if previous_step_time is None else now - previous_step_time
+                self._last_step_timestamp[ukf_step] = now
                 if self.csv_writer is not None:
                     write_fusion_frame_to_csv(self.csv_writer, frame_data, frame_count)
                 if self.csv_file is not None and frame_count % 25 == 0:

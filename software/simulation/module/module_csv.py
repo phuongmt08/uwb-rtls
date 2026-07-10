@@ -230,6 +230,7 @@ def write_fusion_frame_to_csv(csv_writer, frame_data, rx_cnt):
     line = (
         f"{counter_str} {status:7s} "
         f"ukf_step: {ukf_step} "
+        f"dt: {frame_data.get('dt', 0.0):9.6f} "
         f"ukf_x: {frame_data['ukf_x']:9.6f} "
         f"ukf_y: {frame_data['ukf_y']:9.6f} "
         f"ukf_yaw: {frame_data['ukf_yaw']:9.6f} "
