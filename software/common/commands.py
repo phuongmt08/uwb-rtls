@@ -254,19 +254,19 @@ class CommandFactory:
                        rx_timeout_ms: int = 120,
                        uwb_channel: int = 5,
                        uwb_prf: int = 64,
-                       uwb_data_rate: int = 6800,
+                       uwb_data_rate: int = 2,
                        uwb_preamble_code: int = 9,
                        tx_antenna_delay: int = 16436,
                        rx_antenna_delay: int = 16436,
                        tx_power: int = 0,
                        anchor_list: bytes = b"",
-                       power_mode: int = pb.ANCHOR_POWER_MODE_PERFORMANCE,
-                       uwb_preamble_len: int = 0,
-                       uwb_rx_pac: int = 0,
-                       uwb_ns_sfd: int = 0,
+                       power_mode: int = pb.ANCHOR_POWER_MODE_DEEP_ECO,
+                       uwb_preamble_len: int = 0x34,
+                       uwb_rx_pac: int = 2,
+                       uwb_ns_sfd: int = 1,
                        uwb_phr_mode: int = 0,
-                       smart_tx_power: bool = False,
-                       pg_delay: int = 0) -> pb.packet_t:
+                       smart_tx_power: bool = True,
+                       pg_delay: int = 0xC2) -> pb.packet_t:
         # Test/mock helper: defaults are only for simulation and fixtures.
         pkt = self._base(src, dst, seq)
         resolved_role = self.default_device_role if role is None else role
@@ -927,13 +927,23 @@ class CommandFactory:
         pkt.zone_profile_resp.profile.anchor_count = 4
         return pkt
 
-    def calib_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def calib_start(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        sample_target: int = 32,
+        tag_x_m: float = 2.0,
+        tag_y_m: float = 2.0,
+        tag_z_m: float = 1.0,
+        reference_position_valid: bool = True,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.calib_start.sample_target = 32
-        pkt.calib_start.tag_x_m = 2.0
-        pkt.calib_start.tag_y_m = 2.0
-        pkt.calib_start.tag_z_m = 1.0
-        pkt.calib_start.reference_position_valid = True
+        pkt.calib_start.sample_target = max(0, int(sample_target))
+        pkt.calib_start.tag_x_m = float(tag_x_m)
+        pkt.calib_start.tag_y_m = float(tag_y_m)
+        pkt.calib_start.tag_z_m = float(tag_z_m)
+        pkt.calib_start.reference_position_valid = bool(reference_position_valid)
         return pkt
 
     def calib_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -941,9 +951,15 @@ class CommandFactory:
         pkt.calib_stop.dummy = 0
         return pkt
 
-    def calib_candidate_apply(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def calib_candidate_apply(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        anchor_mask: int = 0xF,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.calib_candidate_apply.anchor_mask = 0xF
+        pkt.calib_candidate_apply.anchor_mask = max(0, int(anchor_mask))
         return pkt
 
 
@@ -997,7 +1013,7 @@ class CommandCatalog:
             CommandSpec(45, "host_transport_set", self.factory.host_transport_set),
             # Calibration
             CommandSpec(46, "pos_calib_cfg_get", self.factory.pos_calib_cfg_get, "pos_calib_cfg_resp"),
-            CommandSpec(47, "pos_calib_cfg_set", self.factory.pos_calib_cfg_set, "pos_calib_cfg_resp"),
+            CommandSpec(47, "pos_calib_cfg_set", self.factory.pos_calib_cfg_set),
             CommandSpec(48, "pos_calib_cfg_resp", self.factory.pos_calib_cfg_resp),
             CommandSpec(49, "anchor_layout_get", self.factory.anchor_layout_get, "anchor_layout_resp"),
             CommandSpec(50, "anchor_layout_set", self.factory.anchor_layout_set, "anchor_layout_resp"),

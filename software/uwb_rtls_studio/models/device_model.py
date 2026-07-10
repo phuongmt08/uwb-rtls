@@ -231,8 +231,7 @@ class DeviceModel(QObject):
                 force=force,
                 **kwargs,
             )
-        shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
-        return True
+        return shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
 
     def _send_command(self, command_name: str, dst_addr: int, **kwargs):
         if self._command_bus:
@@ -262,17 +261,17 @@ class DeviceModel(QObject):
             "rx_timeout_ms": 120,
             "uwb_channel": 5,
             "uwb_prf": 64,
-            "uwb_data_rate": 6800,
+            "uwb_data_rate": 2,
             "uwb_preamble_code": 9,
             "tx_antenna_delay": 16436,
             "rx_antenna_delay": 16436,
             "tx_power": 0,
-            "power_mode": 0,
+            "power_mode": 3,
             "uwb_preamble_len": 0x34,
-            "uwb_rx_pac": 0,
-            "uwb_ns_sfd": 0,
+            "uwb_rx_pac": 2,
+            "uwb_ns_sfd": 1,
             "uwb_phr_mode": 0,
-            "pg_delay": 193,
+            "pg_delay": 0xC2,
         }
         for key, default in defaults.items():
             if key in sanitized:
@@ -316,12 +315,12 @@ class DeviceModel(QObject):
         # BE/API: BLE lifecycle action owned by Device Info flow.
         return self._send_command("ble_disconnect", dst_addr=VvAddress.CENTRAL, reason=reason)
 
-    def request_anchor_layout(self, force: bool = False):
+    def request_anchor_layout(self, force: bool = False, traffic_class: str = ""):
         # BE/API: legacy backend helper for Config/Calibration orchestration.
         if self._is_anchor:
             log.debug("request_anchor_layout skipped: device is ANCHOR")
             return None
-        return self._request_query("anchor_layout_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("anchor_layout_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_anchor_layout(self, anchors: list):
         # BE/API: legacy backend helper for Config/Calibration orchestration.
@@ -330,9 +329,9 @@ class DeviceModel(QObject):
             return None
         return self._send_command("anchor_layout_set", dst_addr=VvAddress.MCU, anchors=anchors)
 
-    def request_ranging_config(self, force: bool = False):
+    def request_ranging_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("sys_ranging_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_ranging_config(self, period_ms: int, timeout_ms: int):
         # BE/API: legacy backend helper for Config tab orchestration.
@@ -347,20 +346,20 @@ class DeviceModel(QObject):
             timeout_ms=timeout_ms,
         )
 
-    def request_sys_config(self, force: bool = False):
+    def request_sys_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("sys_config_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("sys_config_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_sys_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
         return self._send_command("sys_config_set", dst_addr=VvAddress.MCU, **self._sanitize_sys_config(kwargs))
 
-    def request_sensor_fusion_config(self, force: bool = False):
+    def request_sensor_fusion_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: legacy backend helper for Config tab orchestration.
         if self._is_anchor:
             log.debug("request_sensor_fusion_config skipped: device is ANCHOR")
             return None
-        return self._request_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("sensor_fusion_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_sensor_fusion_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
@@ -369,25 +368,25 @@ class DeviceModel(QObject):
             return None
         return self._send_command("sensor_fusion_cfg_set", dst_addr=VvAddress.MCU, **kwargs)
 
-    def request_pos_calib_config(self, force: bool = False):
+    def request_pos_calib_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_pos_calib_config(self, **kwargs):
         # BE/API: legacy backend helper for Config tab orchestration.
         return self._send_command("pos_calib_cfg_set", dst_addr=VvAddress.MCU, **self._sanitize_pos_calib_config(kwargs))
 
-    def request_ble_conn_params(self, force: bool = False):
+    def request_ble_conn_params(self, force: bool = False, traffic_class: str = ""):
         # BE/API: backend helper for Device Info BLE connection parameters.
-        return self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
-    def request_rtos_resource(self, force: bool = False):
+    def request_rtos_resource(self, force: bool = False, traffic_class: str = ""):
         # BE/API: MCU RTOS heap/CPU/stack resource snapshot for Device Info.
-        return self._request_query("rtos_resource_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("rtos_resource_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
-    def request_rtos_task_stats(self, force: bool = False):
+    def request_rtos_task_stats(self, force: bool = False, traffic_class: str = ""):
         # BE/API: MCU per-task CPU/stack snapshot for Device Info.
-        return self._request_query("rtos_task_stats_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("rtos_task_stats_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_ble_conn_params(
         self,
@@ -421,9 +420,9 @@ class DeviceModel(QObject):
         return self._send_command("host_transport_set", dst_addr=VvAddress.MCU, transport=transport)
 
 
-    def request_device_type(self, force: bool = False):
+    def request_device_type(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch MCU device type for the Config tab.
-        return self._request_query("device_type_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+        return self._request_query("device_type_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
 
     def set_device_type(self, device_type: int):
         # BE/API: update MCU device type from the Config tab.
@@ -476,12 +475,49 @@ class DeviceModel(QObject):
         # BE/API: lifecycle action exposed to Config tab.
         return self._send_command("enter_to_bootloader", dst_addr=VvAddress.MCU)
 
-    def request_calibration_status(self):
+    def request_calibration_status(self, force: bool = False, traffic_class: str = ""):
         return self._request_query(
             "calib_status_get",
             dst_addr=VvAddress.MCU,
-            cache_ttl_s=0.0,
-            force=False,
+            cache_ttl_s=0.0 if force else None,
+            force=force,
+            traffic_class=traffic_class,
+        )
+
+    def request_calibration_start(
+        self,
+        sample_target: int = 32,
+        tag_x_m: float = 2.0,
+        tag_y_m: float = 2.0,
+        tag_z_m: float = 1.0,
+    ):
+        if self._is_anchor:
+            log.debug("request_calibration_start skipped: device is ANCHOR")
+            return None
+        return self._send_command(
+            "calib_start",
+            dst_addr=VvAddress.MCU,
+            sample_target=sample_target,
+            tag_x_m=tag_x_m,
+            tag_y_m=tag_y_m,
+            tag_z_m=tag_z_m,
+            reference_position_valid=True,
+        )
+
+    def request_calibration_stop(self):
+        if self._is_anchor:
+            log.debug("request_calibration_stop skipped: device is ANCHOR")
+            return None
+        return self._send_command("calib_stop", dst_addr=VvAddress.MCU)
+
+    def request_calibration_candidate_apply(self, anchor_mask: int):
+        if self._is_anchor:
+            log.debug("request_calibration_candidate_apply skipped: device is ANCHOR")
+            return None
+        return self._send_command(
+            "calib_candidate_apply",
+            dst_addr=VvAddress.MCU,
+            anchor_mask=anchor_mask,
         )
 
     def request_imu_reset(self):
@@ -608,16 +644,27 @@ class DeviceModel(QObject):
 
     @staticmethod
     def _reset_query_pipeline() -> None:
-        """Flush queued non-critical queries so connect handshake owns the wire."""
-        manager = getattr(shared_app_state, "_query_manager", None)
-        if manager is not None:
-            manager.reset()
+        """Flush queued non-critical queries so connect/switch owns the wire."""
         try:
-            from services.command_bus import shared_command_bus
-            if shared_command_bus is not None:
-                shared_command_bus.reset()
-        except Exception as exc:
-            log.debug("Could not reset shared command bus before connect: %s", exc)
+            shared_app_state.cancel_query_pipeline("connect/switch flow reset")
+        except AttributeError:
+            manager = getattr(shared_app_state, "_query_manager", None)
+            if manager is not None:
+                manager.reset()
+
+    def _stop_device_session_flows(self, clear_received: bool = True) -> None:
+        """Stop bootstrap and interval flows before switching BLE targets."""
+        self._set_background_polling_enabled(False)
+        self._background_scan_resume_timer.stop()
+        self._session_bootstrap_timer.stop()
+        self._session_start_scheduled = False
+        self._session_bootstrap_done = False
+        self._session_start_events_done = False
+        self._log_stream_requested = False
+        self._reset_time_sync_flow()
+        if clear_received:
+            self._received_query_payloads.clear()
+            self._last_query_progress_report.clear()
 
     def _start_connect_handshake(self) -> None:
         """Run the strict post-connect handshake with no unrelated queries mixed in."""
@@ -792,6 +839,10 @@ class DeviceModel(QObject):
         return shared_app_state.connected_device.get("Role", "") == "ANCHOR"
 
     @property
+    def connected_role(self) -> str:
+        return self._connected_role
+
+    @property
     def _connected_role(self) -> str:
         return str(shared_app_state.connected_device.get("Role", "") or "").strip().upper()
 
@@ -799,10 +850,49 @@ class DeviceModel(QObject):
     def _role_known(self) -> bool:
         return self._connected_role in {"TAG", "ANCHOR"}
 
+    def _initial_telemetry_complete(self) -> bool:
+        required = (
+            "device_information_resp",
+            "sys_config_resp",
+            "sys_ranging_cfg_resp",
+            "pos_calib_cfg_resp",
+            "calib_status_resp",
+            "ranging_status_resp",
+            "device_type_set",
+        )
+        if not all(self._query_received(name) for name in required):
+            return False
+        if self._role_known and not self._is_anchor:
+            return self._query_received("anchor_layout_resp") and self._query_received("sensor_fusion_cfg_resp")
+        return True
+
+    def _session_start_events_complete(self) -> bool:
+        return all(
+            self._query_received(name)
+            for name in (
+                "battery_info_resp",
+                "ble_status_resp",
+                "ble_conn_params_resp",
+                "rtos_resource_resp",
+                "rtos_task_stats_resp",
+            )
+        )
+
+    def _refresh_session_query_completion(self) -> None:
+        if self._initial_telemetry_complete() and not self._session_bootstrap_done:
+            self._session_bootstrap_done = True
+            shared_app_state.update_job("initial_telemetry", JobState.SUCCESS, progress=100)
+            log.info("Initial session telemetry complete from decoded payloads.")
+        if self._session_start_events_complete() and not self._session_start_events_done:
+            self._session_start_events_done = True
+            shared_app_state.update_job("session_start_events", JobState.SUCCESS, progress=100)
+            log.info("Session-start event telemetry complete from decoded payloads.")
+
     def _mark_query_received(self, response_name: str) -> None:
         name = str(response_name or "").strip()
         if name:
             self._received_query_payloads.add(name)
+            self._refresh_session_query_completion()
 
     def _query_received(self, response_name: str) -> bool:
         return str(response_name or "").strip() in self._received_query_payloads
@@ -920,6 +1010,22 @@ class DeviceModel(QObject):
 
         self._set_background_polling_enabled(True)
         self._schedule_background_scan_after_connect()
+        self._session_start_scheduled = False
+        generation = self._connect_generation
+        QTimer.singleShot(350, lambda: self._start_post_connect_bootstrap(generation))
+
+    def _start_post_connect_bootstrap(self, generation: int) -> None:
+        if generation != self._connect_generation:
+            return
+        if self._connection_status != "Connected" or not self._connected_mac:
+            return
+        self._received_query_payloads.clear()
+        self._last_query_progress_report.clear()
+        shared_app_state.clear_query_payload_markers()
+        self._session_bootstrap_done = False
+        self._session_start_events_done = False
+        self._log_stream_requested = False
+        log.info("Starting full post-connect API bootstrap after connect settle delay.")
         self.request_initial_telemetry(force=False)
         self.request_session_start_events(force=False)
 
@@ -950,46 +1056,38 @@ class DeviceModel(QObject):
         requested = False
 
         log.info("Requesting initial device-session telemetry...")
-        shared_app_state.update_job("initial_telemetry", JobState.RUNNING)
+        if not self._session_bootstrap_done:
+            shared_app_state.update_job("initial_telemetry", JobState.RUNNING)
 
         if force or not self._query_received("device_information_resp"):
-            self._request_query("device_information_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
-            requested = True
+            requested = bool(self._request_query("device_information_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class="bootstrap")) or requested
 
         self._start_time_sync_correction(reason="session_start")
 
         if force or not self._query_received("sys_config_resp"):
-            self.request_sys_config(force=force)
-            requested = True
+            requested = bool(self.request_sys_config(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("sys_ranging_cfg_resp"):
-            self.request_ranging_config(force=force)
-            requested = True
+            requested = bool(self.request_ranging_config(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("pos_calib_cfg_resp"):
-            self.request_pos_calib_config(force=force)
-            requested = True
+            requested = bool(self.request_pos_calib_config(force=force, traffic_class="bootstrap")) or requested
         # Baseline status APIs are fetched on every device session, even when
         # their tabs have not been opened yet.
         if force or not self._query_received("calib_status_resp"):
-            self.request_calibration_status()
-            requested = True
+            requested = bool(self.request_calibration_status(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("ranging_status_resp"):
-            self._request_query("ranging_status_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
-            requested = True
+            requested = bool(self._request_query("ranging_status_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class="bootstrap")) or requested
         if force or not self._query_received("device_type_set"):
-            self.request_device_type(force=force)
-            requested = True
+            requested = bool(self.request_device_type(force=force, traffic_class="bootstrap")) or requested
         # BLE status is polled by the dedicated 10s background timer.
         # Do not mix ble_status_get into normal session bootstrap queries.
 
         if self._role_known:
             if force or not self._query_received("anchor_layout_resp"):
-                if self.request_anchor_layout(force=force) is not None:
-                    requested = True
+                requested = bool(self.request_anchor_layout(force=force, traffic_class="bootstrap")) or requested
             if force or not self._query_received("sensor_fusion_cfg_resp"):
-                if self.request_sensor_fusion_config(force=force) is not None:
-                    requested = True
+                requested = bool(self.request_sensor_fusion_config(force=force, traffic_class="bootstrap")) or requested
 
-        self._session_bootstrap_done = self._query_received("device_information_resp") and self._query_received("sys_config_resp") and self._query_received("sys_ranging_cfg_resp") and self._query_received("pos_calib_cfg_resp") and self._query_received("calib_status_resp") and self._query_received("ranging_status_resp") and self._query_received("device_type_set") and (not self._role_known or self._is_anchor or self._query_received("anchor_layout_resp")) and (not self._role_known or self._is_anchor or self._query_received("sensor_fusion_cfg_resp"))
+        self._session_bootstrap_done = self._initial_telemetry_complete()
         self._log_query_progress_report(
             "initial_telemetry",
             [
@@ -1004,9 +1102,10 @@ class DeviceModel(QObject):
                 ("sensor_fusion_cfg_resp", self._query_received("sensor_fusion_cfg_resp"), self._role_known and not self._is_anchor),
             ],
         )
-        if not requested and self._session_bootstrap_done and not force:
-            log.info("Initial session telemetry already available; skipping duplicate startup queries.")
-            return False
+        if self._session_bootstrap_done:
+            shared_app_state.update_job("initial_telemetry", JobState.SUCCESS, progress=100)
+            if not requested and not force:
+                log.info("Initial session telemetry already available; skipping duplicate startup queries.")
         return requested
 
     def _start_time_sync_correction(self, reason: str = "manual") -> bool:
@@ -1212,25 +1311,21 @@ class DeviceModel(QObject):
         requested = False
 
         log.info("Requesting Device Info session-start data...")
-        shared_app_state.update_job("session_start_events", JobState.SUCCESS)
+        if not self._session_start_events_done:
+            shared_app_state.update_job("session_start_events", JobState.RUNNING)
 
         if force or not self._query_received("battery_info_resp"):
-            self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True)
-            requested = True
+            requested = bool(self._request_query("battery_info_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True, traffic_class="bootstrap")) or requested
         if force or not self._query_received("ble_conn_params_resp"):
-            self.request_ble_conn_params(force=force)
-            requested = True
+            requested = bool(self.request_ble_conn_params(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("ble_status_resp"):
-            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None, traffic_class="bootstrap")
-            requested = True
+            requested = bool(self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None, traffic_class="bootstrap")) or requested
         if force or not self._query_received("rtos_resource_resp"):
-            self.request_rtos_resource(force=force)
-            requested = True
+            requested = bool(self.request_rtos_resource(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("rtos_task_stats_resp"):
-            self.request_rtos_task_stats(force=force)
-            requested = True
+            requested = bool(self.request_rtos_task_stats(force=force, traffic_class="bootstrap")) or requested
 
-        self._session_start_events_done = self._query_received("battery_info_resp") and self._query_received("ble_status_resp") and self._query_received("ble_conn_params_resp") and self._query_received("rtos_resource_resp") and self._query_received("rtos_task_stats_resp")
+        self._session_start_events_done = self._session_start_events_complete()
         self._log_query_progress_report(
             "session_start_events",
             [
@@ -1241,9 +1336,10 @@ class DeviceModel(QObject):
                 ("rtos_task_stats_resp", self._query_received("rtos_task_stats_resp"), True),
             ],
         )
-        if not requested and self._session_start_events_done and not force:
-            log.info("Session start events already available; skipping duplicate event queries.")
-            return False
+        if self._session_start_events_done:
+            shared_app_state.update_job("session_start_events", JobState.SUCCESS, progress=100)
+            if not requested and not force:
+                log.info("Session start events already available; skipping duplicate event queries.")
         return requested
 
     def request_log_stream(self, force: bool = False):
@@ -1406,7 +1502,7 @@ class DeviceModel(QObject):
                 self._cancel_active_connect_flow()
             log.info("Switching BLE target: stop scan before disconnecting %s and connecting %s", self._connected_mac, mac_hex)
             self._emit_connection_progress(10, f"Switching target device to {name or mac_hex}...", status=JobState.RUNNING)
-            self._background_scan_resume_timer.stop()
+            self._stop_device_session_flows(clear_received=True)
             self._connect_timeout_timer.stop()
             self._reset_query_pipeline()
             self.stop_scan()
@@ -1429,6 +1525,7 @@ class DeviceModel(QObject):
         current_name = self._connected_name or "-"
         current_mac = self._connected_mac or "-"
         self._manual_scan_stop_timer.stop()
+        self._stop_device_session_flows(clear_received=True)
         self._reset_query_pipeline()
         try:
             self._send_command(
@@ -1466,7 +1563,7 @@ class DeviceModel(QObject):
             return
 
         self._cancel_active_connect_flow()
-        self._received_query_payloads.clear()
+        self._stop_device_session_flows(clear_received=True)
         self._active_connecting_handshake = True
         self._handshake_final_ble_connected = False
         self._set_background_polling_enabled(False)
@@ -1596,7 +1693,10 @@ class DeviceModel(QObject):
                 self._handle_device_type(pkt.device_type_set)
         elif param_name == "anchor_layout_resp":
             self._mark_query_received("anchor_layout_resp")
-
+        elif param_name == "calib_status_resp":
+            self._mark_query_received("calib_status_resp")
+        elif param_name == "ranging_status_resp":
+            self._mark_query_received("ranging_status_resp")
 
     def _on_repository_battery_info(self, info: dict) -> None:
         self._mark_query_received("battery_info_resp")
@@ -1671,13 +1771,14 @@ class DeviceModel(QObject):
         dev.update(info)
         shared_app_state.connected_device = dev
 
-        if self._connected_mac:
-            self.request_initial_telemetry(force=False)
-
         if self._active_connecting_handshake and self._handshake_timeout_timer.isActive():
             self._handshake_device_info_received = True
             self._emit_connection_progress(72, "Device information received.", phase="connecting", status=JobState.RUNNING)
             self._send_connect_time_sync_set()
+            return
+
+        if self._connected_mac:
+            self.request_initial_telemetry(force=False)
 
     def _handle_device_type(self, resp):
         device_type = int(getattr(resp, 'device_type', 0))
@@ -1949,8 +2050,8 @@ class DeviceModel(QObject):
         if p is None:
             return
         self._mark_query_received("ble_conn_params_resp")
-        # ByteSize()==0: params sub-message rỗng (chưa có cấu hình BLE)
-        # → emit {} để UI hiện placeholder, tránh hiện 0 như có data thật
+        # ByteSize()==0: BLE params sub-message is empty or not configured.
+        # Emit {} so UI keeps placeholder values instead of fake zeroes.
         if p.ByteSize() == 0:
             self.ble_conn_params_parsed.emit({})
             return
@@ -1970,7 +2071,7 @@ class DeviceModel(QObject):
     def _handle_sys_config(self, resp):
         self._mark_query_received("sys_config_resp")
         if not resp.HasField("config"):
-            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            # Empty packet: emit {} so UI resets to placeholder "-".
             self.sys_config_parsed.emit({})
             return
         cfg = resp.config
@@ -2001,7 +2102,7 @@ class DeviceModel(QObject):
     def _handle_sys_ranging_cfg(self, resp):
         self._mark_query_received("sys_ranging_cfg_resp")
         if not resp.HasField("config"):
-            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            # Empty packet: emit {} so UI resets to placeholder "-".
             self.sys_ranging_cfg_parsed.emit({})
             return
         cfg = resp.config
@@ -2014,7 +2115,7 @@ class DeviceModel(QObject):
     def _handle_sensor_fusion_cfg(self, resp):
         self._mark_query_received("sensor_fusion_cfg_resp")
         if not resp.HasField("config"):
-            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            # Empty packet: emit {} so UI resets to placeholder "-".
             self.sensor_fusion_cfg_parsed.emit({})
             return
         cfg = resp.config
@@ -2039,7 +2140,7 @@ class DeviceModel(QObject):
     def _handle_pos_calib_cfg(self, resp):
         self._mark_query_received("pos_calib_cfg_resp")
         if not resp.HasField("config"):
-            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            # Empty packet: emit {} so UI resets to placeholder "-".
             self.pos_calib_cfg_parsed.emit({})
             return
         cfg = resp.config

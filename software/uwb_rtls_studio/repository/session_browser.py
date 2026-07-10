@@ -58,3 +58,6 @@ class SessionBrowser:
     def delete_session(self, session_id: str) -> bool:
         """Xóa session khỏi hệ thống."""
         return self._repo.delete_session(session_id)
+
+    def get_session_record_files(self, session_id: str, detail_type: str) -> list:
+        return self._repo.get_session_record_files(session_id, detail_type)

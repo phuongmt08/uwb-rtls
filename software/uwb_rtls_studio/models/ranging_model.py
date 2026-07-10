@@ -181,8 +181,7 @@ class RangingModel(QObject):
                 force=force,
                 **kwargs,
             )
-        shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
-        return True
+        return shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
 
     def send_command(self, command_name: str, dst_addr: int = VvAddress.MCU, **kwargs):
         """Public model command path used by ViewModels when no CommandBus is injected."""

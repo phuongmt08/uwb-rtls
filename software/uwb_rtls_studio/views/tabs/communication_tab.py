@@ -857,14 +857,6 @@ class CommunicationTab(QWidget):
         )
         self.monitor_detail_text.append(response_detail)
 
-        doc = self.monitor_detail_text.document()
-        if doc.blockCount() > 250:
-            full_text = self.monitor_detail_text.toPlainText()
-            lines = full_text.split("\n")
-            if len(lines) > 200:
-                trimmed = "\n".join(lines[-200:])
-                self.monitor_detail_text.setPlainText(trimmed)
-                self.monitor_detail_text.moveCursor(QTextCursor.MoveOperation.End)
 
         self._fill_recv_row(
             self.monitor_sent_table,

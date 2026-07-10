@@ -36,7 +36,6 @@ class CommandBus(QObject):
         "sys_ranging_cfg_set": "sys_ranging_cfg_resp",
         "sys_config_set": "sys_config_resp",
         "sensor_fusion_cfg_set": "sensor_fusion_cfg_resp",
-        "pos_calib_cfg_set": "pos_calib_cfg_resp",
         "ble_conn_params_set": "ble_conn_params_resp",
         "time_sync_set": "time_sync_resp",
     }
@@ -108,14 +107,19 @@ class CommandBus(QObject):
             log.debug("CommandBus dedupe pending: %s waits for %s", command_name, expected_response)
             return False
 
-        self._pending[expected_response] = now + self.PENDING_TTL_S
         target_addr = default_destination_for(command_name) if dst_addr is None else dst_addr
-        shared_app_state.enqueue_query(
+        enqueued = shared_app_state.enqueue_query(
             command_name,
             dst_addr=target_addr,
             traffic_class=traffic_class,
             **kwargs,
         )
+        if not enqueued:
+            self._pending.pop(expected_response, None)
+            log.debug("CommandBus enqueue skipped: %s -> %s", command_name, expected_response)
+            return False
+
+        self._pending[expected_response] = now + self.PENDING_TTL_S
         self.command_sent.emit(command_name)
         return True
 

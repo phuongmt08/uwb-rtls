@@ -34,11 +34,12 @@ class QueryState:
 class QueryTransaction:
     """Represents a single query transaction in the state machine."""
 
-    def __init__(self, command_name: str, dst_addr: int, expected_response: str, kwargs: dict):
+    def __init__(self, command_name: str, dst_addr: int, expected_response: str, kwargs: dict, priority: int = 0):
         self.command_name = command_name
         self.dst_addr = dst_addr
         self.expected_response = expected_response
         self.kwargs = kwargs
+        self.priority = int(priority)
 
         self.status = QueryState.PENDING
         self.retries = 0
@@ -54,6 +55,13 @@ class QueryTransaction:
 
 class QueryQueueManager(QObject):
     TERMINAL_STATES = {QueryState.SUCCESS, QueryState.TIMEOUT, QueryState.FAILED}
+    RESPONSE_RESCUE_STATES = {
+        QueryState.SENT,
+        QueryState.WAITING,
+        QueryState.RETRY_PENDING,
+        QueryState.TIMEOUT,
+        QueryState.FAILED,
+    }
 
     @staticmethod
     def _tx_label(tx: QueryTransaction | None) -> str:
@@ -86,7 +94,6 @@ class QueryQueueManager(QObject):
         "sensor_fusion_cfg_get": "sensor_fusion_cfg_resp",
         "sensor_fusion_cfg_set": "sensor_fusion_cfg_resp",
         "pos_calib_cfg_get": "pos_calib_cfg_resp",
-        "pos_calib_cfg_set": "pos_calib_cfg_resp",
         "ble_status_get": "ble_status_resp",
         "ble_conn_params_get": "ble_conn_params_resp",
         "ble_conn_params_set": "ble_conn_params_resp",
@@ -155,12 +162,31 @@ class QueryQueueManager(QObject):
         if not expected_response:
             log.warning(f"No expected response mapped for command '{command_name}'. Defaulting to None.")
 
-        tx = QueryTransaction(command_name, dst_addr, expected_response, kwargs)
+        tx = QueryTransaction(command_name, dst_addr, expected_response, kwargs, self._priority_for(kwargs))
         with self.lock:
             if not self.is_running:
                 self.queue = [item for item in self.queue if item.status not in self.TERMINAL_STATES]
             log.debug("Query queued: %s", self._tx_label(tx))
-            self.queue.append(tx)
+            insert_at = len(self.queue)
+            if tx.priority > 0:
+                for index, item in enumerate(self.queue):
+                    if item.status not in (QueryState.PENDING, QueryState.RETRY_PENDING):
+                        continue
+                    if item.priority < tx.priority:
+                        insert_at = index
+                        break
+            self.queue.insert(insert_at, tx)
+
+    @staticmethod
+    def _priority_for(kwargs: dict) -> int:
+        traffic_class = str((kwargs or {}).get("traffic_class", "") or "").strip().lower()
+        if traffic_class in {"connection", "critical"}:
+            return 100
+        if traffic_class in {"manual", "user"}:
+            return 80
+        if traffic_class == "bootstrap":
+            return 20
+        return 0
 
     def start(self) -> None:
         """Start the query process."""
@@ -179,56 +205,22 @@ class QueryQueueManager(QObject):
     def handle_response(self, param_name: str, pkt: Any) -> bool:
         """
         Processes incoming packet response. Returns True if the response resolved
-        the current query.
+        the current query or rescued another in-batch query that timed out early.
         """
         with self.lock:
-            if not self.is_running or not self.current_transaction:
+            if not self.is_running:
                 return False
 
             tx = self.current_transaction
-            if tx.expected_response == param_name:
-                seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
-                seq_matches = tx.seq is not None and seq_val is not None and int(seq_val) == int(tx.seq)
-                if tx.seq is not None and seq_val is not None and not seq_matches:
-                    if not tx.ack_received:
-                        tx.pending_response_name = str(param_name or "")
-                        tx.pending_response_packet = pkt
-                        tx.pending_response_seq = seq_val
-                        log.debug(
-                            "Stashing query response '%s' for '%s' until matching ACK arrives: expected seq=%s got seq=%s",
-                            param_name,
-                            tx.command_name,
-                            tx.seq,
-                            seq_val,
-                        )
-                        return False
-                    log.debug(
-                        "Accepting query response '%s' for '%s' after matching ACK despite seq mismatch: expected seq=%s got seq=%s",
-                        param_name,
-                        tx.command_name,
-                        tx.seq,
-                        seq_val,
-                    )
-
-                tx.status = QueryState.SUCCESS
-                tx.received_time = time.monotonic()
-                tx.response_packet = pkt
-                tx.pending_response_name = ""
-                tx.pending_response_packet = None
-                tx.pending_response_seq = None
-
+            if tx and tx.expected_response == param_name:
+                self._mark_response_success(tx, param_name, pkt)
                 self.timer.stop()
-
-                if seq_val is None:
-                    seq_val = tx.seq
-                seq_str = f" seq={seq_val}" if seq_val is not None else ""
-                ack_str = " acked" if tx.ack_received else ""
-                log.info(
-                    f"Query RX: '{param_name}' <- dst={tx.dst_addr}{seq_str}{ack_str} "
-                    f"(success for '{tx.command_name}', attempt {tx.retries + 1})"
-                )
-
                 self._request_send_next()
+                return True
+
+            rescued_tx = self._find_rescuable_transaction(param_name, exclude=tx)
+            if rescued_tx is not None:
+                self._mark_response_success(rescued_tx, param_name, pkt, late=True)
                 return True
 
             if self._looks_like_response_name(param_name):
@@ -241,6 +233,47 @@ class QueryQueueManager(QObject):
                 )
 
         return False
+
+    def _find_rescuable_transaction(self, param_name: str, exclude: QueryTransaction | None = None) -> QueryTransaction | None:
+        """Find an older in-flight query that this late payload can still satisfy."""
+        for item in self.queue:
+            if item is exclude:
+                continue
+            if item.expected_response != param_name:
+                continue
+            if item.status not in self.RESPONSE_RESCUE_STATES:
+                continue
+            return item
+        return None
+
+    def _mark_response_success(self, tx: QueryTransaction, param_name: str, pkt: Any, late: bool = False) -> None:
+        seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
+        seq_matches = tx.seq is not None and seq_val is not None and int(seq_val) == int(tx.seq)
+        if tx.seq is not None and seq_val is not None and not seq_matches:
+            log.debug(
+                "Accepting query response '%s' for '%s' despite seq mismatch: expected request seq=%s got response seq=%s",
+                param_name,
+                tx.command_name,
+                tx.seq,
+                seq_val,
+            )
+
+        tx.status = QueryState.SUCCESS
+        tx.received_time = time.monotonic()
+        tx.response_packet = pkt
+        tx.pending_response_name = ""
+        tx.pending_response_packet = None
+        tx.pending_response_seq = None
+
+        if seq_val is None:
+            seq_val = tx.seq
+        seq_str = f" seq={seq_val}" if seq_val is not None else ""
+        ack_str = " acked" if tx.ack_received else ""
+        late_str = " late" if late else ""
+        log.info(
+            f"Query RX{late_str}: '{param_name}' <- dst={tx.dst_addr}{seq_str}{ack_str} "
+            f"(success for '{tx.command_name}', attempt {tx.retries + 1})"
+        )
 
     def handle_ack(self, ack_seq: int, response: int) -> bool:
         """
@@ -346,12 +379,6 @@ class QueryQueueManager(QObject):
             if not self.is_running:
                 return
 
-            elapsed = time.monotonic() - self._last_send_time
-            if self._last_send_time and elapsed < self.INTER_COMMAND_GAP_S:
-                delay_ms = max(1, int((self.INTER_COMMAND_GAP_S - elapsed) * 1000))
-                QTimer.singleShot(delay_ms, self._request_send_next)
-                return
-
             self.timer.stop()
 
             pending = [tx for tx in self.queue if tx.status in (QueryState.PENDING, QueryState.RETRY_PENDING)]
@@ -371,6 +398,8 @@ class QueryQueueManager(QObject):
                             "sent_time": tx.sent_time,
                             "received_time": tx.received_time,
                             "seq": tx.seq,
+                            "kwargs": dict(tx.kwargs),
+                            "priority": tx.priority,
                             "ack_received": tx.ack_received,
                             "ack_response": tx.ack_response,
                             "response_seq": (tx.response_packet.hdr.seq if tx.response_packet is not None and hasattr(tx.response_packet, "hdr") and hasattr(tx.response_packet.hdr, "seq") else None),
@@ -380,6 +409,12 @@ class QueryQueueManager(QObject):
                 self.queue.clear()
                 if self.on_complete_fn:
                     self.on_complete_fn(results)
+                return
+
+            elapsed = time.monotonic() - self._last_send_time
+            if self._last_send_time and elapsed < self.INTER_COMMAND_GAP_S:
+                delay_ms = max(1, int((self.INTER_COMMAND_GAP_S - elapsed) * 1000))
+                QTimer.singleShot(delay_ms, self._request_send_next)
                 return
 
             tx = pending[0]

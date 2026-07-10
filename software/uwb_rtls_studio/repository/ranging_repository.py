@@ -12,6 +12,8 @@ from collections import deque
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from utils.app_state import shared_app_state
+
 
 class RangingRepository(QObject):
     position_parsed = pyqtSignal(dict)
@@ -216,6 +218,7 @@ class RangingRepository(QObject):
         total = stats["total_count"]
         stats["success_rate_percent"] = (stats["success_count"] / total * 100.0) if total else 0.0
         self._stats = stats
+        shared_app_state.ranging_stats = stats
         self.stats_parsed.emit(stats)
         return stats
 

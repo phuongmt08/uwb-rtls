@@ -22,7 +22,9 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QFrame, QCheckBox,
     QStackedWidget, QTabWidget, QAbstractItemView
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+from PyQt6.QtGui import QColor
 from PyQt6 import uic
 
 # Path to .ui file
@@ -41,6 +43,80 @@ DEVICE_TYPE_ANCHOR     = 2
 DEVICE_TYPE_GATEWAY    = 3
 DEVICE_TYPE_DEBUG_TOOL = 4
 
+UWB_DATA_RATE_TO_FW = {
+    "110 kbps": 0,
+    "850 kbps": 1,
+    "6.8 Mbps": 2,
+}
+UWB_DATA_RATE_FROM_FW = {
+    0: "110 kbps",
+    1: "850 kbps",
+    2: "6.8 Mbps",
+    # Compatibility with older app/mock values.
+    110: "110 kbps",
+    850: "850 kbps",
+    6800: "6.8 Mbps",
+}
+DEFAULT_UWB_DATA_RATE = 2
+
+UWB_PREAMBLE_LEN_TO_FW = {
+    "64 symbols": 0x04,
+    "128 symbols": 0x14,
+    "256 symbols": 0x24,
+    "512 symbols": 0x34,
+    "1024 symbols": 0x08,
+    "1536 symbols": 0x18,
+    "2048 symbols": 0x28,
+    "4096 symbols": 0x0C,
+}
+UWB_PREAMBLE_LEN_FROM_FW = {value: label for label, value in UWB_PREAMBLE_LEN_TO_FW.items()}
+DEFAULT_UWB_PREAMBLE_LEN = 0x34
+DEFAULT_UWB_PREAMBLE_LEN_TEXT = "512 symbols"
+
+UWB_RX_PAC_TO_FW = {"8": 0, "16": 1, "32": 2, "64": 3}
+UWB_RX_PAC_FROM_FW = {value: label for label, value in UWB_RX_PAC_TO_FW.items()}
+DEFAULT_UWB_RX_PAC = 2
+DEFAULT_UWB_RX_PAC_TEXT = "32"
+
+UWB_NS_SFD_TO_FW = {"Standard": 0, "Non-standard": 1}
+UWB_NS_SFD_FROM_FW = {value: label for label, value in UWB_NS_SFD_TO_FW.items()}
+DEFAULT_UWB_NS_SFD = 1
+DEFAULT_UWB_NS_SFD_TEXT = "Non-standard"
+
+UWB_PHR_MODE_TO_FW = {"Standard": 0, "Extended": 1}
+UWB_PHR_MODE_FROM_FW = {value: label for label, value in UWB_PHR_MODE_TO_FW.items()}
+DEFAULT_UWB_PHR_MODE = 0
+DEFAULT_UWB_PHR_MODE_TEXT = "Standard"
+DEFAULT_UWB_PG_DELAY = 0xC2
+
+def _flash_button(btn, color_hex: str = "#22D3EE", duration_ms: int = 450):
+    """Hiệu ứng glow phát sáng tắt dần khi nhấn nút.
+
+    Sử dụng QGraphicsDropShadowEffect + QPropertyAnimation để tạo
+    hiệu ứng viền sáng lan rộng rồi mờ dần sau khi nhấn. Không
+    ảnh hưởng đến layout vì dùng shadow effect.
+    """
+    effect = QGraphicsDropShadowEffect(btn)
+    effect.setBlurRadius(32)
+    effect.setColor(QColor(color_hex))
+    effect.setOffset(0, 0)
+    btn.setGraphicsEffect(effect)
+
+    anim = QPropertyAnimation(effect, b"blurRadius", btn)
+    anim.setDuration(duration_ms)
+    anim.setStartValue(32)
+    anim.setEndValue(0)
+    anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+    # Giữ tham chiếu Python trên widget để tránh GC hủy animation sớm
+    btn._flash_anim = anim
+    anim.finished.connect(lambda: _cleanup_flash(btn))
+    anim.start()
+
+
+def _cleanup_flash(btn):
+    """Xóa graphics effect và tham chiếu animation sau khi glow kết thúc."""
+    btn.setGraphicsEffect(None)
+    btn._flash_anim = None
 
 
 
@@ -563,8 +639,8 @@ class ConfigTab(QWidget):
         self.btn_write_device.clicked.connect(self._write_device_config)
         self.btn_write_all.clicked.connect(self._write_all_devices)
         self.btn_write_all.setToolTip("Bulk target switching is disabled. This action applies to the connected device only.")
-        self.btn_device_reset.clicked.connect(self._vm.device_reset)
-        self.btn_bootloader.clicked.connect(self._vm.enter_bootloader)
+        self.btn_device_reset.clicked.connect(self._on_device_reset_clicked)
+        self.btn_bootloader.clicked.connect(self._on_bootloader_clicked)
         self.btn_set_ble.clicked.connect(self._on_set_ble_clicked)
         self.btn_apply_host_transport.clicked.connect(self._on_apply_host_transport_clicked)
         self.btn_get_device_type.clicked.connect(self._on_get_device_type)
@@ -818,7 +894,18 @@ class ConfigTab(QWidget):
             return
         target = self._selected_target()
         self._apply_target_to_ui(target)
-        self._vm.read_device_config(target)
+        _flash_button(self.btn_read_device, "#22D3EE")   # Glow cyan khi bấm
+        self._vm.read_device_config(target, force=True)   # force=True: bypass cache, gửi thật xuống phần cứng
+
+    def _on_device_reset_clicked(self):
+        if self._vm:
+            _flash_button(self.btn_device_reset, "#EF4444")
+            self._vm.device_reset()
+
+    def _on_bootloader_clicked(self):
+        if self._vm:
+            _flash_button(self.btn_bootloader, "#F59E0B")
+            self._vm.enter_bootloader()
 
     def _on_ble_min_interval_changed(self, value: int):
         if self.spin_ble_max_int.value() < value:
@@ -874,6 +961,7 @@ class ConfigTab(QWidget):
             return
         target = self._selected_target()
         self._apply_target_to_ui(target)
+        _flash_button(self.btn_write_device, "#22D3EE")   # Glow cyan khi bấm
 
         from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QVBoxLayout
 
@@ -931,41 +1019,27 @@ class ConfigTab(QWidget):
                 uwb_channel = 5
 
             rate_str = self.val_datarate.currentText()
-            rate_map = {"110 kbps": 110, "850 kbps": 850, "6.8 Mbps": 6800}
-            uwb_data_rate = rate_map.get(rate_str, 6800)
+            uwb_data_rate = UWB_DATA_RATE_TO_FW.get(rate_str, DEFAULT_UWB_DATA_RATE)
 
             prf_str = self.val_prf.currentText()
             prf_map = {"16 MHz": 16, "64 MHz": 64}
             uwb_prf = prf_map.get(prf_str, 64)
 
             # 6 developer-mode UWB fields
-            preamble_len_map = {
-                "64 symbols": 0x04,
-                "128 symbols": 0x08,
-                "256 symbols": 0x18,
-                "512 symbols": 0x28,
-                "1024 symbols": 0x14,
-                "1536 symbols": 0x0C,
-                "2048 symbols": 0x24,
-                "4096 symbols": 0x34
-            }
-            preamble_len_text = self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else "4096 symbols"
-            uwb_preamble_len = preamble_len_map.get(preamble_len_text, 0x34)
+            preamble_len_text = self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else DEFAULT_UWB_PREAMBLE_LEN_TEXT
+            uwb_preamble_len = UWB_PREAMBLE_LEN_TO_FW.get(preamble_len_text, DEFAULT_UWB_PREAMBLE_LEN)
 
-            pac_map = {"8": 0, "16": 1, "32": 2, "64": 3}
-            rx_pac_text = self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else "8"
-            uwb_rx_pac = pac_map.get(rx_pac_text, 0)
+            rx_pac_text = self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else DEFAULT_UWB_RX_PAC_TEXT
+            uwb_rx_pac = UWB_RX_PAC_TO_FW.get(rx_pac_text, DEFAULT_UWB_RX_PAC)
 
-            sfd_map = {"Standard": 0, "Non-standard": 1}
-            ns_sfd_text = self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else "Standard"
-            uwb_ns_sfd = sfd_map.get(ns_sfd_text, 0)
+            ns_sfd_text = self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else DEFAULT_UWB_NS_SFD_TEXT
+            uwb_ns_sfd = UWB_NS_SFD_TO_FW.get(ns_sfd_text, DEFAULT_UWB_NS_SFD)
 
-            phr_map = {"Standard": 0, "Extended": 1}
-            phr_mode_text = self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else "Standard"
-            uwb_phr_mode = phr_map.get(phr_mode_text, 0)
+            phr_mode_text = self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else DEFAULT_UWB_PHR_MODE_TEXT
+            uwb_phr_mode = UWB_PHR_MODE_TO_FW.get(phr_mode_text, DEFAULT_UWB_PHR_MODE)
 
-            smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False
-            pg_delay = self._spin_value("val_pg_delay", 193)
+            smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else True
+            pg_delay = self._spin_value("val_pg_delay", DEFAULT_UWB_PG_DELAY)
 
             sys_config = dict(
                 role=role,
@@ -1112,6 +1186,7 @@ class ConfigTab(QWidget):
         )
 
     def _write_all_devices(self):
+        _flash_button(self.btn_write_all, "#22D3EE")   # Glow cyan khi bấm
         QMessageBox.information(self, "Broadcast Write", "Write All Devices will be enabled after broadcast support is implemented.")
 
     def _collect_write_snapshot(self) -> dict:
@@ -1123,26 +1198,12 @@ class ConfigTab(QWidget):
             uwb_channel = int(self.val_channel.currentText())
         except ValueError:
             uwb_channel = 5
-        rate_map = {"110 kbps": 110, "850 kbps": 850, "6.8 Mbps": 6800}
         prf_map = {"16 MHz": 16, "64 MHz": 64}
-        preamble_len_map = {
-            "64 symbols": 0x04,
-            "128 symbols": 0x08,
-            "256 symbols": 0x18,
-            "512 symbols": 0x28,
-            "1024 symbols": 0x14,
-            "1536 symbols": 0x0C,
-            "2048 symbols": 0x24,
-            "4096 symbols": 0x34,
-        }
-        pac_map = {"8": 0, "16": 1, "32": 2, "64": 3}
-        sfd_map = {"Standard": 0, "Non-standard": 1}
-        phr_map = {"Standard": 0, "Extended": 1}
         sys_config = {
             "role": role,
             "device_id": device_id,
             "uwb_channel": uwb_channel,
-            "uwb_data_rate": rate_map.get(self.val_datarate.currentText(), 6800),
+            "uwb_data_rate": UWB_DATA_RATE_TO_FW.get(self.val_datarate.currentText(), DEFAULT_UWB_DATA_RATE),
             "uwb_prf": prf_map.get(self.val_prf.currentText(), 64),
             "tx_antenna_delay": self.tx_delay_spin.value(),
             "rx_antenna_delay": self.rx_delay_spin.value(),
@@ -1150,12 +1211,12 @@ class ConfigTab(QWidget):
             "uwb_preamble_code": self.preamble_spin.value(),
             "ranging_period_ms": self.rng_period_spin.value(),
             "rx_timeout_ms": self.rx_timeout_spin.value(),
-            "uwb_preamble_len": preamble_len_map.get(self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else "4096 symbols", 0x34),
-            "uwb_rx_pac": pac_map.get(self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else "8", 0),
-            "uwb_ns_sfd": sfd_map.get(self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else "Standard", 0),
-            "uwb_phr_mode": phr_map.get(self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else "Standard", 0),
-            "smart_tx_power": self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False,
-            "pg_delay": self._spin_value("val_pg_delay", 193),
+            "uwb_preamble_len": UWB_PREAMBLE_LEN_TO_FW.get(self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else DEFAULT_UWB_PREAMBLE_LEN_TEXT, DEFAULT_UWB_PREAMBLE_LEN),
+            "uwb_rx_pac": UWB_RX_PAC_TO_FW.get(self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else DEFAULT_UWB_RX_PAC_TEXT, DEFAULT_UWB_RX_PAC),
+            "uwb_ns_sfd": UWB_NS_SFD_TO_FW.get(self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else DEFAULT_UWB_NS_SFD_TEXT, DEFAULT_UWB_NS_SFD),
+            "uwb_phr_mode": UWB_PHR_MODE_TO_FW.get(self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else DEFAULT_UWB_PHR_MODE_TEXT, DEFAULT_UWB_PHR_MODE),
+            "smart_tx_power": self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else True,
+            "pg_delay": self._spin_value("val_pg_delay", DEFAULT_UWB_PG_DELAY),
         }
         sensor_fusion_config = {
             "alpha": self.alpha_spin.value(),
@@ -1262,10 +1323,9 @@ class ConfigTab(QWidget):
         role = role_map.get(self._current_role, "Tag")
         set_widget_value(self.val_role, role)
 
-        # Map data rate (1 = 110kbps, 2 = 850kbps, 3 = 6.8Mbps)
-        rate_val = cfg.get("uwb_data_rate", 3)
-        rate_map = {1: "110 kbps", 2: "850 kbps", 3: "6.8 Mbps", 110: "110 kbps", 850: "850 kbps", 6800: "6.8 Mbps"}
-        rate = rate_map.get(rate_val, "6.8 Mbps")
+        # Firmware sys_config.h: 0=110kbps, 1=850kbps, 2=6.8Mbps.
+        rate_val = cfg.get("uwb_data_rate", DEFAULT_UWB_DATA_RATE)
+        rate = UWB_DATA_RATE_FROM_FW.get(rate_val, "6.8 Mbps")
         set_widget_value(self.val_datarate, rate)
 
         # Map PRF (1 = 16MHz, 2 = 64MHz)
@@ -1285,39 +1345,26 @@ class ConfigTab(QWidget):
         set_widget_value(self.preamble_spin, cfg.get("uwb_preamble_code", 10))
 
         # Map the 6 developer-mode UWB fields
-        preamble_len_rev = {
-            0x04: "64 symbols",
-            0x08: "128 symbols",
-            0x18: "256 symbols",
-            0x28: "512 symbols",
-            0x14: "1024 symbols",
-            0x0C: "1536 symbols",
-            0x24: "2048 symbols",
-            0x34: "4096 symbols"
-        }
-        preamble_len_val = cfg.get("uwb_preamble_len", 0x34)
+        preamble_len_val = cfg.get("uwb_preamble_len", DEFAULT_UWB_PREAMBLE_LEN)
         if self._has_widget("val_preamble_len"):
-            set_widget_value(self.val_preamble_len, preamble_len_rev.get(preamble_len_val, "4096 symbols"))
+            set_widget_value(self.val_preamble_len, UWB_PREAMBLE_LEN_FROM_FW.get(preamble_len_val, DEFAULT_UWB_PREAMBLE_LEN_TEXT))
 
-        pac_rev = {0: "8", 1: "16", 2: "32", 3: "64"}
-        pac_val = cfg.get("uwb_rx_pac", 0)
+        pac_val = cfg.get("uwb_rx_pac", DEFAULT_UWB_RX_PAC)
         if self._has_widget("val_rx_pac"):
-            set_widget_value(self.val_rx_pac, pac_rev.get(pac_val, "8"))
+            set_widget_value(self.val_rx_pac, UWB_RX_PAC_FROM_FW.get(pac_val, DEFAULT_UWB_RX_PAC_TEXT))
 
-        sfd_rev = {0: "Standard", 1: "Non-standard"}
-        sfd_val = cfg.get("uwb_ns_sfd", 0)
+        sfd_val = cfg.get("uwb_ns_sfd", DEFAULT_UWB_NS_SFD)
         if self._has_widget("val_ns_sfd"):
-            set_widget_value(self.val_ns_sfd, sfd_rev.get(sfd_val, "Standard"))
+            set_widget_value(self.val_ns_sfd, UWB_NS_SFD_FROM_FW.get(sfd_val, DEFAULT_UWB_NS_SFD_TEXT))
 
-        phr_rev = {0: "Standard", 1: "Extended"}
-        phr_val = cfg.get("uwb_phr_mode", 0)
+        phr_val = cfg.get("uwb_phr_mode", DEFAULT_UWB_PHR_MODE)
         if self._has_widget("val_phr_mode"):
-            set_widget_value(self.val_phr_mode, phr_rev.get(phr_val, "Standard"))
+            set_widget_value(self.val_phr_mode, UWB_PHR_MODE_FROM_FW.get(phr_val, DEFAULT_UWB_PHR_MODE_TEXT))
         
         if self._has_widget("chk_smart_tx_power"):
-            set_widget_value(self.chk_smart_tx_power, cfg.get("smart_tx_power", False))
+            set_widget_value(self.chk_smart_tx_power, cfg.get("smart_tx_power", True))
         if self._has_widget("val_pg_delay"):
-            set_widget_value(self.val_pg_delay, cfg.get("pg_delay", 193))
+            set_widget_value(self.val_pg_delay, cfg.get("pg_delay", DEFAULT_UWB_PG_DELAY))
             
         # if self._last_anchor_layout:
         #     self._apply_anchor_layout_to_table()
@@ -1437,7 +1484,8 @@ class ConfigTab(QWidget):
 
     def _on_get_device_type(self):
         if self._vm and self._require_connected_device("reading device type"):
-            self._vm.read_device_type()
+            _flash_button(self.btn_get_device_type, "#22D3EE")   # Glow cyan
+            self._vm.read_device_type(force=True)                 # force=True: gửi thật xuống phần cứng
 
     def _on_set_device_type(self):
         if self._vm and self._require_connected_device("writing device type"):
@@ -1448,6 +1496,7 @@ class ConfigTab(QWidget):
                 "Debug Tool": 4
             }
             dev_type = text_map.get(self.combo_device_type.currentText(), 1)
+            _flash_button(self.btn_set_device_type, "#22D3EE")   # Glow cyan
             self._vm.write_device_type(dev_type)
 
     def _on_device_type_loaded(self, device_type: int):

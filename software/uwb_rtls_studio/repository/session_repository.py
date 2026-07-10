@@ -751,6 +751,104 @@ class SessionRepository:
                 })
         return results
 
+    def get_session_record_files(self, session_id: str, detail_type: str) -> list[dict]:
+        session_folder = self.get_session_folder(session_id)
+        if not os.path.exists(session_folder):
+            return []
+
+        runs = self.list_session_runs(session_id)
+        results = []
+
+        def format_time(iso_str: str) -> str:
+            if not iso_str:
+                return "--"
+            try:
+                dt = datetime.fromisoformat(iso_str.replace("Z", ""))
+                return dt.strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                return iso_str
+
+        def get_file_time(file_path: str) -> str:
+            try:
+                mtime = os.path.getmtime(file_path)
+                dt = datetime.fromtimestamp(mtime)
+                return dt.strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                return "--"
+
+        if runs:
+            for run in runs:
+                stream_type = run.get("stream_type", "")
+                mapped_type = "ranging" if stream_type in ("ranging", "fusion") else "logs"
+                if mapped_type != detail_type:
+                    continue
+                
+                start_time = format_time(run.get("start_time_iso", ""))
+                for rel_path in run.get("files", []):
+                    full_path = os.path.join(session_folder, rel_path)
+                    if not os.path.exists(full_path):
+                        continue
+                    
+                    filename = os.path.basename(rel_path)
+                    if detail_type == "ranging" and not filename.lower().endswith(".csv"):
+                        continue
+                    if detail_type == "logs" and not filename.lower().endswith(".txt"):
+                        continue
+                    
+                    results.append({
+                        "time": start_time,
+                        "filename": filename,
+                        "relative_path": rel_path
+                    })
+            if results:
+                return results
+
+        meta = self.get_session_meta(session_id)
+        session_time = format_time(meta.get("start_time_iso", ""))
+
+        if detail_type == "ranging":
+            ranging_dir = os.path.join(session_folder, "ranging")
+            if os.path.isdir(ranging_dir):
+                for f in os.listdir(ranging_dir):
+                    if f.lower().endswith(".csv"):
+                        full_path = os.path.join(ranging_dir, f)
+                        rel_path = os.path.relpath(full_path, session_folder)
+                        results.append({
+                            "time": get_file_time(full_path) if get_file_time(full_path) != "--" else session_time,
+                            "filename": f,
+                            "relative_path": rel_path
+                        })
+            pos_path = os.path.join(session_folder, "positions.csv")
+            if os.path.exists(pos_path):
+                results.append({
+                    "time": get_file_time(pos_path) if get_file_time(pos_path) != "--" else session_time,
+                    "filename": "positions.csv",
+                    "relative_path": "positions.csv"
+                })
+        else:
+            log_dir = os.path.join(session_folder, "log")
+            if not os.path.isdir(log_dir):
+                log_dir = os.path.join(session_folder, "logs")
+            if os.path.isdir(log_dir):
+                for f in os.listdir(log_dir):
+                    if f.lower().endswith(".txt"):
+                        full_path = os.path.join(log_dir, f)
+                        rel_path = os.path.relpath(full_path, session_folder)
+                        results.append({
+                            "time": get_file_time(full_path) if get_file_time(full_path) != "--" else session_time,
+                            "filename": f,
+                            "relative_path": rel_path
+                        })
+            txt_path = os.path.join(session_folder, "logs.txt")
+            if os.path.exists(txt_path):
+                results.append({
+                    "time": get_file_time(txt_path) if get_file_time(txt_path) != "--" else session_time,
+                    "filename": "logs.txt",
+                    "relative_path": "logs.txt"
+                })
+
+        return results
+
     def _write_json(self, path: str, data) -> None:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2)

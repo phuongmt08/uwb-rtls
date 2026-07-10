@@ -40,7 +40,7 @@ class CalibrationViewModel(QObject):
         self._latest_status: dict = {}
 
         # Event-driven apply sequence state
-        self._apply_state = "idle"  # "idle" | "sending_sys" | "sending_pos"
+        self._apply_state = "idle"  # "idle" | "sending_sys" | "sending_pos" | "sending_candidate"
         self._pending_pos_config = None
         self._expected_tx_delay = 0
         self._expected_rx_delay = 0
@@ -75,63 +75,134 @@ class CalibrationViewModel(QObject):
         self._model.request_calibration_status()
 
     def start_calibration(self, config: dict):
+        """Start TAG antenna-delay calibration via firmware calib_start."""
         try:
-            payload = dict(config)
-            if "enable_anchor_auto_calib" not in payload:
-                payload["enable_anchor_auto_calib"] = True
-            self._model.set_pos_calib_config(**payload)
+            if getattr(self._model, "connected_role", "") != "TAG":
+                self.operation_failed.emit("Antenna calibration is only implemented by TAG firmware.")
+                return False
+
+            payload = dict(config or {})
+            ref_xy = float(payload.get("ref_distance_xy_m", 2.0) or 2.0)
+            sample_target = max(1, min(64, int(payload.get("samples", 32) or 32)))
+            tag_x_m = float(payload.get("tag_x_m", ref_xy))
+            tag_y_m = float(payload.get("tag_y_m", 0.0))
+            tag_z_m = float(payload.get("tag_z_m", payload.get("tag_height_m", 1.0)) or 1.0)
+
+            pkt = self._model.request_calibration_start(
+                sample_target=sample_target,
+                tag_x_m=tag_x_m,
+                tag_y_m=tag_y_m,
+                tag_z_m=tag_z_m,
+            )
+            if pkt is None:
+                self.operation_failed.emit("Failed to queue calib_start.")
+                return False
+            self._latest_status.update({
+                "state": 2,
+                "progress_percent": 0,
+                "sample_count": 0,
+                "sample_target": sample_target,
+                "custom_status_text": "TAG antenna calibration started.",
+            })
+            self.status_updated.emit(self.latest_status)
             self._set_running(True)
             self._poll_status()
+            return True
         except Exception as exc:
-            log.exception("Failed to start calibration")
+            log.exception("Failed to start TAG antenna calibration")
             self.operation_failed.emit(str(exc))
+            return False
+
+    def save_position_calibration_config(self, config: dict):
+        """Save pos_calib_cfg_t. Current firmware has no host start/stop for anchor survey."""
+        try:
+            self._model.set_pos_calib_config(**dict(config or {}))
+            self._latest_status.update({
+                "state": 0,
+                "progress_percent": 0,
+                "custom_status_text": "Position calibration config sent.",
+            })
+            self.status_updated.emit(self.latest_status)
+            QTimer.singleShot(250, lambda: self._request_pos_config_verify(force_anyway=True))
+            return True
+        except Exception as exc:
+            log.exception("Failed to save position calibration config")
+            self.operation_failed.emit(str(exc))
+            return False
 
     def stop_calibration(self):
-        """Stop host polling; the current protobuf has no calibration-stop command."""
+        try:
+            if getattr(self._model, "connected_role", "") == "TAG":
+                self._model.request_calibration_stop()
+        except Exception as exc:
+            log.warning("Failed to send calib_stop: %s", exc)
+            self.operation_failed.emit(str(exc))
         self._watchdog_timer.stop()
         self._apply_state = "idle"
         self._pending_pos_config = None
         self._set_running(False)
 
-    def apply_results_sequence(self, tx_delay: int, rx_delay: int, pos_config: dict):
+    def apply_candidate_results(self, anchor_mask: int | None = None):
         if self.is_applying:
             self.operation_failed.emit("Apply already in progress.")
             return False
-        if int(tx_delay) <= 0 or int(rx_delay) <= 0:
-            self.operation_failed.emit("Calibration has no valid antenna delay to apply.")
+        if getattr(self._model, "connected_role", "") != "TAG":
+            self.operation_failed.emit("Calibration candidate apply is only implemented by TAG firmware.")
             return False
-        log.info("Initiating apply sequence: tx_delay=%s, rx_delay=%s", tx_delay, rx_delay)
+        status = self.latest_status
+        if int(status.get("state", 0)) != 4:
+            self.operation_failed.emit("Calibration is not done yet.")
+            return False
+        mask = int(anchor_mask if anchor_mask is not None else status.get("candidate_mask", 0) or 0)
+        if mask <= 0:
+            self.operation_failed.emit("No valid calibration candidate mask to apply.")
+            return False
 
-        # Step 0: Update apply sequence state and expected values
-        self._apply_state = "sending_sys"
-        self._pending_pos_config = pos_config.copy()
-        self._expected_tx_delay = tx_delay
-        self._expected_rx_delay = rx_delay
-
-        # Emit 10% progress and custom status message
-        self._latest_status.update({
-            "state": 2,  # Collecting
-            "progress_percent": 10,
-            "custom_status_text": "Applying UWB Antenna delays (1/2)..."
-        })
-        self.status_updated.emit(self.latest_status)
-
-        # Step 1: Send sys_config_set command to update Antenna Delays
         try:
-            cfg = shared_app_state.sys_config.copy()
-            cfg.update({
-                "tx_antenna_delay": tx_delay,
-                "rx_antenna_delay": rx_delay,
-            })
+            self._apply_state = "sending_candidate"
             self._watchdog_timer.start(4000)
-            self._model.set_sys_config(**cfg)
-            QTimer.singleShot(200, self._request_sys_config_verify)
+            pkt = self._model.request_calibration_candidate_apply(mask)
+            if pkt is None:
+                self._watchdog_timer.stop()
+                self._apply_state = "idle"
+                self.operation_failed.emit("Failed to queue calib_candidate_apply.")
+                return False
+            self._latest_status.update({
+                "state": 3,
+                "progress_percent": 95,
+                "custom_status_text": f"Applying candidate mask 0x{mask:02X}...",
+            })
+            self.status_updated.emit(self.latest_status)
+            QTimer.singleShot(600, self._finish_candidate_apply)
+            return True
         except Exception as exc:
             self._watchdog_timer.stop()
             self._apply_state = "idle"
-            self._pending_pos_config = None
-            log.exception("Failed to write UWB delays during apply sequence")
-            self.operation_failed.emit(f"Failed to write UWB delays: {exc}")
+            log.exception("Failed to apply calibration candidate")
+            self.operation_failed.emit(str(exc))
+            return False
+
+    def apply_results_sequence(self, tx_delay: int, rx_delay: int, pos_config: dict):
+        # Backward-compatible entrypoint; current firmware applies computed candidates.
+        return self.apply_candidate_results()
+
+    def _finish_candidate_apply(self):
+        if self._apply_state != "sending_candidate":
+            return
+        self._watchdog_timer.stop()
+        self._apply_state = "idle"
+        self._latest_status.update({
+            "state": 4,
+            "progress_percent": 100,
+            "custom_status_text": "Calibration apply command sent. Refreshing device config...",
+        })
+        self.status_updated.emit(self.latest_status)
+        try:
+            if hasattr(self._model, "request_sys_config"):
+                self._model.request_sys_config(force=True)
+            self._model.request_calibration_status()
+        except Exception as exc:
+            log.debug("Refresh after candidate apply failed: %s", exc)
 
     def _on_sys_config_parsed(self, cfg_dict: dict):
         if self._apply_state != "sending_sys":
@@ -204,8 +275,10 @@ class CalibrationViewModel(QObject):
         except Exception as exc:
             log.debug("Forced sys_config_get failed during apply verify: %s", exc)
 
-    def _request_pos_config_verify(self):
-        if self._apply_state != "sending_pos" or not hasattr(self._model, "request_pos_calib_config"):
+    def _request_pos_config_verify(self, force_anyway: bool = False):
+        if not force_anyway and self._apply_state != "sending_pos":
+            return
+        if not hasattr(self._model, "request_pos_calib_config"):
             return
         try:
             self._model.request_pos_calib_config(force=True)
@@ -231,7 +304,7 @@ class CalibrationViewModel(QObject):
         if self._apply_state == "idle":
             return
 
-        state_name = "Antenna delays (1/2)" if self._apply_state == "sending_sys" else "Position parameters (2/2)"
+        state_name = "Calibration candidate apply" if self._apply_state == "sending_candidate" else ("Antenna delays (1/2)" if self._apply_state == "sending_sys" else "Position parameters (2/2)")
         log.warning(f"Apply calibration timed out waiting for device response in state {self._apply_state}")
 
         self._apply_state = "idle"

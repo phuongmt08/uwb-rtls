@@ -58,6 +58,7 @@ class ScanModel(QObject):
         self._is_connecting = False
         self._connect_stage = "idle"
         self._ble_connected_seen = False
+        self._ble_connecting_seen = False
         self._pending_time_sync_seq: int | None = None
         self._connected_info: dict = {}
         
@@ -133,6 +134,7 @@ class ScanModel(QObject):
         self._is_connecting = True
         self._connect_stage = "selected"
         self._ble_connected_seen = False
+        self._ble_connecting_seen = False
         self._pending_time_sync_seq = None
         self._connected_info = {}
         self._emit_progress(10, f"Selected {mac_hex}. Preparing BLE connect...")
@@ -328,6 +330,7 @@ class ScanModel(QObject):
             elif self._connect_stage == "final_status":
                 self._finish_connect_success()
         elif status.state == pb.BLE_STATE_CONNECTING:
+            self._ble_connecting_seen = True
             if self._connect_stage in ("selected", "ble_connect"):
                 self._connect_stage = "ble_connect"
                 self._emit_progress(45, "Dongle is establishing BLE link...")
@@ -335,6 +338,9 @@ class ScanModel(QObject):
         elif has_reason and reason_code:
             if self._connect_stage == "selected":
                 log.debug("Ignoring disconnect reason during selected/scan-stop stage.")
+                return
+            if self._connect_stage == "ble_connect" and not getattr(self, "_ble_connecting_seen", False):
+                log.debug("Ignoring cached disconnect reason before connecting state is seen.")
                 return
             reason = normalize_hci_reason(reason_code)
             log.warning(

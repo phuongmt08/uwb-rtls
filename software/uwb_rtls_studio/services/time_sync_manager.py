@@ -148,6 +148,7 @@ class TimeSyncManager(QObject):
             dst_addr=VvAddress.MCU,
             unix_time_ms=host_time_ms,
             timezone_offset=tz_offset_min,
+            traffic_class="bootstrap",
         )
         if pkt is None:
             log.warning("time_sync_set was not sent; waiting for future time event.")

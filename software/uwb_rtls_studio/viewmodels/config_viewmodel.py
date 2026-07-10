@@ -184,19 +184,24 @@ class ConfigViewModel(QObject):
 
     # ── Command Triggers (called by View) ───────────────────────────
 
-    def read_device_config(self, target: dict | None = None):
-        """Read all config groups after the selected target is connected."""
+    def read_device_config(self, target: dict | None = None, force: bool = True):
+        """Read all config groups after the selected target is connected.
+
+        Khi người dùng bấm thủ công, luôn dùng force=True để bypass cache
+        và đảm bảo gói tin được gửi xuống phần cứng thật.
+        """
         target = dict(target or {})
 
         def operation():
-            log.info("Reading complete config for target: %s", target)
-            self.read_anchor_layout()
-            self.read_ranging_config()
-            self.read_sys_config()
-            self.read_sensor_fusion_config()
-            self.read_pos_calib_config()
-            self.read_ble_conn_params()
-            self.read_device_type()
+            log.info("Reading complete config (force=%s) for target: %s", force, target)
+            self.read_anchor_layout(force=force, traffic_class="manual")
+            self.read_ranging_config(force=force, traffic_class="manual")
+            self.read_sys_config(force=force, traffic_class="manual")
+            self.read_sensor_fusion_config(force=force, traffic_class="manual")
+            self.read_pos_calib_config(force=force, traffic_class="manual")
+            self.read_ble_conn_params(force=force, traffic_class="manual")
+            self.read_device_type(force=force, traffic_class="manual")
+            self.read_calibration_status(force=force, traffic_class="manual")  # calib_status_get
 
         operation()
         return True
@@ -263,10 +268,10 @@ class ConfigViewModel(QObject):
         )
 
 
-    def read_anchor_layout(self):
+    def read_anchor_layout(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch anchor layout for the Config tab.
-        log.info("Requesting anchor layout from MCU via global query queue...")
-        self.model.request_anchor_layout()
+        log.info("Requesting anchor layout from MCU via global query queue... (force=%s)", force)
+        self.model.request_anchor_layout(force=force, traffic_class=traffic_class)
 
     def write_anchor_layout(self, anchors: list):
         # BE/API: persist anchor layout from Config tab.
@@ -274,40 +279,40 @@ class ConfigViewModel(QObject):
         self.ranging_model.set_anchor_layout(anchors)
         self.model.set_anchor_layout(anchors)
 
-    def read_ranging_config(self):
+    def read_ranging_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch ranging config for the Config tab.
-        log.info("Requesting system ranging config from MCU via global query queue...")
-        self.model.request_ranging_config()
+        log.info("Requesting system ranging config from MCU via global query queue... (force=%s)", force)
+        self.model.request_ranging_config(force=force, traffic_class=traffic_class)
 
     def write_ranging_config(self, period_ms: int, timeout_ms: int):
         # BE/API: update ranging config from Config tab.
         log.info("Sending ranging config set command to MCU: period=%d ms, timeout=%d ms", period_ms, timeout_ms)
         self.model.set_ranging_config(period_ms=period_ms, timeout_ms=timeout_ms)
 
-    def read_sys_config(self):
+    def read_sys_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch UWB system config for the Config tab.
-        log.info("Requesting system configuration from MCU via global query queue...")
-        self.model.request_sys_config()
+        log.info("Requesting system configuration from MCU via global query queue... (force=%s)", force)
+        self.model.request_sys_config(force=force, traffic_class=traffic_class)
 
     def write_sys_config(self, **kwargs):
         # BE/API: update UWB system config from Config tab.
         log.info("Sending sys config set command to MCU: %s", kwargs)
         self.model.set_sys_config(**kwargs)
 
-    def read_sensor_fusion_config(self):
+    def read_sensor_fusion_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch sensor-fusion config for the Config tab.
-        log.info("Requesting sensor fusion configuration from MCU via global query queue...")
-        self.model.request_sensor_fusion_config()
+        log.info("Requesting sensor fusion configuration from MCU via global query queue... (force=%s)", force)
+        self.model.request_sensor_fusion_config(force=force, traffic_class=traffic_class)
 
     def write_sensor_fusion_config(self, **kwargs):
         # BE/API: update sensor-fusion config from Config tab.
         log.info("Sending sensor fusion config set command to MCU: %s", kwargs)
         self.model.set_sensor_fusion_config(**kwargs)
 
-    def read_pos_calib_config(self):
+    def read_pos_calib_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch position-calibration config for the Config tab.
-        log.info("Requesting position calibration configuration from MCU via global query queue...")
-        self.model.request_pos_calib_config()
+        log.info("Requesting position calibration configuration from MCU via global query queue... (force=%s)", force)
+        self.model.request_pos_calib_config(force=force, traffic_class=traffic_class)
 
     def write_pos_calib_config(self, **kwargs):
         # BE/API: update position-calibration config from Config tab.
@@ -331,18 +336,23 @@ class ConfigViewModel(QObject):
             sup_timeout_ms=sup_timeout_ms,
         )
 
-    def read_ble_conn_params(self):
-        log.info("Requesting BLE connection parameters from Central via global query queue...")
+    def read_ble_conn_params(self, force: bool = False, traffic_class: str = ""):
+        log.info("Requesting BLE connection parameters from Central via global query queue... (force=%s)", force)
         if hasattr(self.model, "request_ble_conn_params"):
-            self.model.request_ble_conn_params()
+            self.model.request_ble_conn_params(force=force, traffic_class=traffic_class)
 
     def write_ble_adv_config(self, enable: bool, serial_number: int, device_name: str):
         log.info("Sending BLE advertising config: enable=%s, serial=%d, name=%s", enable, serial_number, device_name)
         self.model.set_ble_adv_config(enable=enable, serial_number=serial_number, device_name=device_name)
 
-    def read_device_type(self):
-        log.info("Requesting device type from MCU...")
-        self.model.request_device_type()
+    def read_device_type(self, force: bool = False, traffic_class: str = ""):
+        log.info("Requesting device type from MCU... (force=%s)", force)
+        self.model.request_device_type(force=force, traffic_class=traffic_class)
+
+    def read_calibration_status(self, force: bool = False, traffic_class: str = ""):
+        # BE/API: fetch calibration status for the Config tab.
+        log.info("Requesting calibration status from MCU via global query queue... (force=%s)", force)
+        self.model.request_calibration_status(force=force, traffic_class=traffic_class)
 
     def write_device_type(self, device_type: int):
         log.info("Sending set device type command: %d", device_type)

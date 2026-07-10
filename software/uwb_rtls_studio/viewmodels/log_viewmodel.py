@@ -141,12 +141,10 @@ class LogViewModel(QObject):
     def load_session_detail(self, session_id: str, detail_type: str):
         log.info("Loading details for session %s (type: %s)", session_id, detail_type)
         try:
-            if detail_type == "ranging":
-                data = self.browser.get_ranging_data(session_id)
-            elif detail_type == "fusion":
-                data = self.browser.get_fusion_data(session_id)
+            if detail_type in ("ranging", "fusion"):
+                data = self.browser.get_session_record_files(session_id, "ranging")
             else:
-                data = self.browser.get_log_data(session_id)
+                data = self.browser.get_session_record_files(session_id, "logs")
             self.session_details_loaded.emit(session_id, detail_type, data)
         except Exception as exc:
             log.error("Error loading session detail: %s", exc)
