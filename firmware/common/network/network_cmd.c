@@ -645,13 +645,18 @@ static void network_cmd_ranging_start(const protobuf_packet_t *pkt)
 {
     (void)pkt;
 
-    if(pkt->params.ranging_start.is_ukf_reinit) {
-        app_rtos_request_sensor_fusion_reset();
+    if (sys_config_get()->uwb.role == DEVICE_ROLE_TAG)
+    {
+        if(pkt->params.ranging_start.is_ukf_reinit) 
+        {
+            app_rtos_request_sensor_fusion_reset();
+        }
+
+        sys_sensor_fusion_set_initial_yaw(pkt->params.ranging_start.yaw_deg);
     }
 
-    sys_sensor_fusion_set_initial_yaw(pkt->params.ranging_start.yaw_deg);
-
-    if (!network_cmd_set_ranging_enabled(true)) {
+    if (!network_cmd_set_ranging_enabled(true)) 
+    {
         RLOG_W(OBJECT_CODE, "ranging_start rejected by platform");
     }
 }
