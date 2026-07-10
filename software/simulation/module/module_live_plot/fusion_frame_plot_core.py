@@ -31,10 +31,6 @@ GROUND_TRUTH_HORIZONTAL_M = 2.8
 GROUND_TRUTH_VERTICAL_M = 6
 GROUND_TRUTH_START_1 = "start_1"
 GROUND_TRUTH_START_2 = "start_2"
-UKF_POS_ALL = "all"
-UKF_POS_PREDICT = "predict"
-UKF_POS_UPDATE = "update"
-UKF_POS_SPLIT = "split"
 UKF_STEP_PREDICT = 0
 UKF_STEP_UPDATE = 1
 
@@ -358,14 +354,6 @@ class FusionFrameWindow(QMainWindow):
         self.graph_d.setLabel("bottom", "Frame")
         self.graph_d.addLegend()
 
-        self.plot_ukf = self.graph_pos.plot(
-            pen=None,
-            symbol="o",
-            symbolSize=5,
-            symbolPen=pg.mkPen("b"),
-            symbolBrush=pg.mkBrush("b"),
-            name="UKF Filtered",
-        )
         self.plot_ukf_predict = self.graph_pos.plot(
             pen=None,
             symbol="o",
@@ -402,8 +390,22 @@ class FusionFrameWindow(QMainWindow):
         )
         self.graph_pos.addItem(self.ground_truth_start_markers)
         self.ground_truth_labels = []
-        self.plot_ukf_yaw = self.graph_d.plot(pen=pg.mkPen("b", width=1.5), name="ukf_yaw")
-        self.plot_yaw = self.graph_d.plot(pen=pg.mkPen("g", width=1.5), name="yaw")
+        self.plot_ukf_yaw = self.graph_d.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen("b"),
+            symbolBrush=pg.mkBrush("b"),
+            name="ukf_yaw",
+        )
+        self.plot_yaw = self.graph_d.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen("g"),
+            symbolBrush=pg.mkBrush("g"),
+            name="yaw",
+        )
 
         for idx, anchor in enumerate(ANCHOR_POSITIONS, start=1):
             self.graph_pos.addItem(
@@ -417,13 +419,13 @@ class FusionFrameWindow(QMainWindow):
         self.ukf_predict_xs, self.ukf_predict_ys = [], []
         self.ukf_update_xs, self.ukf_update_ys = [], []
         self.tril_xs, self.tril_ys = [], []
+        self.yaw_frame_idxs = []
         self.ukf_yaws, self.yaws = [], []
+        self.frame_idx = 0
         self.ground_truth_start = None
         self.ground_truth_start_kind = GROUND_TRUTH_START_1
-        self.ukf_pos_mode = UKF_POS_ALL
         self.latest_data = None
 
-        self._setup_ukf_pos_controls()
         self._setup_ground_truth_controls()
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         if hasattr(self, "checkBox_createCsv"):
@@ -442,20 +444,6 @@ class FusionFrameWindow(QMainWindow):
         self.thread.csv_created_signal.connect(self.on_csv_created)
         self.thread.start()
 
-    def _setup_ukf_pos_controls(self):
-        self.ukfPosFieldLabel = QLabel("UKF pos field")
-        self.comboBox_ukfPosField = QComboBox()
-        self.comboBox_ukfPosField.addItem("all", UKF_POS_ALL)
-        self.comboBox_ukfPosField.addItem("predict step=0", UKF_POS_PREDICT)
-        self.comboBox_ukfPosField.addItem("update step=1", UKF_POS_UPDATE)
-        self.comboBox_ukfPosField.addItem("split step=0/1", UKF_POS_SPLIT)
-        self.comboBox_ukfPosField.currentIndexChanged.connect(self.on_ukf_pos_field_changed)
-
-        if hasattr(self, "gridLayout_4"):
-            row = self.gridLayout_4.rowCount()
-            self.gridLayout_4.addWidget(self.ukfPosFieldLabel, row, 0)
-            self.gridLayout_4.addWidget(self.comboBox_ukfPosField, row + 1, 0)
-
     def _setup_ground_truth_controls(self):
         self.groundTruthStartLabel = QLabel("Ground truth start")
         self.comboBox_groundTruthStart = QComboBox()
@@ -467,10 +455,6 @@ class FusionFrameWindow(QMainWindow):
             row = self.gridLayout_4.rowCount()
             self.gridLayout_4.addWidget(self.groundTruthStartLabel, row, 0)
             self.gridLayout_4.addWidget(self.comboBox_groundTruthStart, row + 1, 0)
-
-    def on_ukf_pos_field_changed(self, *_):
-        self.ukf_pos_mode = self.comboBox_ukfPosField.currentData()
-        self._update_ukf_position_plot()
 
     def _ground_truth_points(self):
         if self.ground_truth_start is None:
@@ -538,11 +522,12 @@ class FusionFrameWindow(QMainWindow):
         self.ukf_update_ys.clear()
         self.tril_xs.clear()
         self.tril_ys.clear()
+        self.yaw_frame_idxs.clear()
         self.ukf_yaws.clear()
         self.yaws.clear()
+        self.frame_idx = 0
         self.ground_truth_start = None
         self.latest_data = None
-        self.plot_ukf.setData([], [])
         self.plot_ukf_predict.setData([], [])
         self.plot_ukf_update.setData([], [])
         self.plot_tril.setData([], [])
@@ -566,13 +551,14 @@ class FusionFrameWindow(QMainWindow):
     @pyqtSlot(dict)
     def on_data(self, data):
         self.latest_data = data
+        self.frame_idx += 1
         if self.ground_truth_start is None:
             self.ground_truth_start = (data["tril_x"], data["tril_y"])
             self._update_ground_truth_plot()
 
         self.ukf_xs.append(data["ukf_x"])
         self.ukf_ys.append(data["ukf_y"])
-        ukf_step = int(data.get("ukf_step", data.get("error_count", data.get("err_cnt", data.get("error_frame_cnt", -1)))))
+        ukf_step = int(data.get("ukf_step", -1))
         self.ukf_steps.append(ukf_step)
         if ukf_step == UKF_STEP_PREDICT:
             self.ukf_predict_xs.append(data["ukf_x"])
@@ -582,8 +568,10 @@ class FusionFrameWindow(QMainWindow):
             self.ukf_update_ys.append(data["ukf_y"])
         self.tril_xs.append(data["tril_x"])
         self.tril_ys.append(data["tril_y"])
-        self.ukf_yaws.append(data["ukf_yaw"])
-        self.yaws.append(data["yaw"])
+        if ukf_step != UKF_STEP_UPDATE:
+            self.yaw_frame_idxs.append(self.frame_idx)
+            self.ukf_yaws.append(data["ukf_yaw"])
+            self.yaws.append(data["yaw"])
 
         if len(self.ukf_xs) > MAX_SAMPLES:
             old_ukf_step = self.ukf_steps.pop(0)
@@ -597,34 +585,21 @@ class FusionFrameWindow(QMainWindow):
                 self.ukf_update_ys.pop(0)
             self.tril_xs.pop(0)
             self.tril_ys.pop(0)
-            self.ukf_yaws.pop(0)
-            self.yaws.pop(0)
+            if old_ukf_step != UKF_STEP_UPDATE and self.yaw_frame_idxs:
+                self.yaw_frame_idxs.pop(0)
+                self.ukf_yaws.pop(0)
+                self.yaws.pop(0)
 
     def _update_ukf_position_plot(self):
-        mode = self.ukf_pos_mode
-        if mode == UKF_POS_PREDICT:
-            self.plot_ukf.setData([], [])
-            self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
-            self.plot_ukf_update.setData([], [])
-        elif mode == UKF_POS_UPDATE:
-            self.plot_ukf.setData([], [])
-            self.plot_ukf_predict.setData([], [])
-            self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
-        elif mode == UKF_POS_SPLIT:
-            self.plot_ukf.setData([], [])
-            self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
-            self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
-        else:
-            self.plot_ukf.setData(self.ukf_xs, self.ukf_ys)
-            self.plot_ukf_predict.setData([], [])
-            self.plot_ukf_update.setData([], [])
+        self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
+        self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
 
     def update_gui(self):
         if self.ukf_xs:
             self._update_ukf_position_plot()
             self.plot_tril.setData(self.tril_xs, self.tril_ys)
-            self.plot_ukf_yaw.setData(self.ukf_yaws)
-            self.plot_yaw.setData(self.yaws)
+            self.plot_ukf_yaw.setData(self.yaw_frame_idxs, self.ukf_yaws)
+            self.plot_yaw.setData(self.yaw_frame_idxs, self.yaws)
 
         if self.latest_data is None:
             return

@@ -572,6 +572,7 @@ class LiveTrackingTab(QWidget):
         self._pending_layout_read_for_editor = False
         self._pending_layout_read_room_id = ""
         self._clipboard = None
+        self._anchor_telemetry_cache = {}
 
         uic.loadUi(UI_FILE, self)
         self._setup_dynamic_metrics()
@@ -602,9 +603,10 @@ class LiveTrackingTab(QWidget):
 
         self.warning_label.setVisible(False)
         self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
-        self.btn_start.clicked.connect(self._start_ranging)
-        self.btn_stop.clicked.connect(self._stop_ranging)
+        self.btn_stop.hide()
+        self.btn_start.clicked.connect(self._toggle_ranging)
         self.btn_clear.clicked.connect(self._clear_tracking_trails)
+        self._sync_ranging_button()
         self._setup_yaw_offset_control()
 
         self.header_widget.raise_()
@@ -715,8 +717,7 @@ class LiveTrackingTab(QWidget):
             return
         self._is_ranging = True
         self._start_time = time.time()
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
+        self._sync_ranging_button()
 
     @staticmethod
     def _format_anchor_mask(mask, valid=True):
@@ -896,32 +897,53 @@ class LiveTrackingTab(QWidget):
             label_widget = getattr(self, w, None)
             if label_widget:
                 label_widget.setText("-")
+        self._anchor_telemetry_cache.clear()
         self._last_anchor_mask = 0
         self._last_anchor_mask_valid = False
         if hasattr(self, "_canvas") and hasattr(self._canvas, "clear_anchor_telemetry"):
             self._canvas.clear_anchor_telemetry()
 
+    @staticmethod
+    def _anchor_telemetry_text(anchor):
+        distance_m = None
+        distance_mm = anchor.get("distance_mm")
+        if distance_mm is not None:
+            distance_m = float(distance_mm) / 1000.0
+        elif anchor.get("distance_cm") is not None:
+            distance_m = float(anchor["distance_cm"]) / 100.0
+
+        if distance_m is None:
+            return "-"
+
+        text = f"{distance_m:.3f} m"
+        if anchor.get("weight") is not None:
+            text += f"  |  W: {float(anchor['weight']) / 100.0:.2f}"
+        return text
+
     def _show_anchor_telemetry(self, anchors):
-        """Render sensor-fusion distance and weight values in the four live rows."""
+        """Render cached distance and weight values in the four live rows."""
+        for anchor in anchors or []:
+            anchor_id = int(anchor.get("anchor_id", 0) or 0)
+            if anchor_id <= 0:
+                text_id = str(anchor.get("id", "")).replace("A", "")
+                anchor_id = int(text_id) if text_id.isdigit() else 0
+            if anchor_id <= 0:
+                continue
+            cached = self._anchor_telemetry_cache.get(anchor_id, {}).copy()
+            cached.update(anchor)
+            cached["anchor_id"] = anchor_id
+            self._anchor_telemetry_cache[anchor_id] = cached
+
         for anchor_idx in range(1, 5):
             label_widget = getattr(self, f"d{anchor_idx}_label", None)
             if label_widget is not None:
-                label_widget.setText("-")
-        for anchor in anchors or []:
-            anchor_id = int(anchor.get("anchor_id", 0) or 0)
-            label_widget = getattr(self, f"d{anchor_id}_label", None)
-            if label_widget is None:
-                continue
-            distance_mm = anchor.get("distance_mm")
-            if distance_mm is None:
-                label_widget.setText("-")
-                continue
-            text = f"{float(distance_mm) / 1000.0:.3f} m"
-            if anchor.get("weight") is not None:
-                text += f"  |  W: {int(anchor['weight'])}"
-            label_widget.setText(text)
+                label_widget.setText(self._anchor_telemetry_text(self._anchor_telemetry_cache[anchor_idx])
+                                     if anchor_idx in self._anchor_telemetry_cache else "-")
 
     def _setup_dynamic_metrics(self):
+        if hasattr(self, "lbl_fps"):
+            self.lbl_fps.setText("Rate:")
+
         # Configure units for the statically loaded metric labels
         self.length_label.unit = "bytes"
         self.fusion_ts_label.unit = "ms"
@@ -1059,10 +1081,32 @@ class LiveTrackingTab(QWidget):
         if self._vm:
             self._vm.stop_ranging()
 
+    def _toggle_ranging(self):
+        if self._is_ranging:
+            self._stop_ranging()
+        else:
+            self._start_ranging()
+
+    def _sync_ranging_button(self):
+        if self._is_ranging:
+            self.btn_start.setText("Stop Ranging")
+            self.btn_start.setStyleSheet(
+                "QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; "
+                "border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 14px; }"
+                "QPushButton:hover { background: #EF4444; color: #F8FAFC; }"
+            )
+        else:
+            self.btn_start.setText("Start Ranging")
+            self.btn_start.setStyleSheet(
+                "QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981; "
+                "border-radius: 8px; font-weight: bold; font-size: 14px; }"
+                "QPushButton:hover { background: #10B981; }"
+            )
+        self.btn_start.setEnabled(True)
+
     def _on_ranging_started(self):
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
         self._is_ranging = True
+        self._sync_ranging_button()
         self._frame_count = 0
         self._start_time = time.time()
         self._canvas.clear_trail()
@@ -1071,9 +1115,8 @@ class LiveTrackingTab(QWidget):
         self._render_stats()
 
     def _on_ranging_stopped(self):
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
         self._is_ranging = False
+        self._sync_ranging_button()
         self._clear_live_metrics()
 
     def _on_position_updated(self, x, y, z, rms):
@@ -1215,17 +1258,6 @@ class LiveTrackingTab(QWidget):
 
     def _on_anchor_distances(self, anchors):
         self._show_anchor_telemetry(anchors)
-        for anchor in anchors:
-            anchor_id = anchor.get("id", "")
-            idx = anchor_id.replace("A", "")
-            label_widget = getattr(self, f"d{idx}_label", None)
-            if label_widget:
-                distance_cm = anchor.get("distance_cm")
-                self._set_metric_value(
-                    label_widget,
-                    None if distance_cm is None else float(distance_cm) / 100.0,
-                    "{:.3f}"
-                )
 
     def _update_stats(self):
         if not self._is_ranging:
@@ -1269,7 +1301,7 @@ class LiveTrackingTab(QWidget):
             rate = self._frame_count / uptime
 
         self.frames_label.setText(str(total))
-        self.fps_label.setText(f"{rate:.1f}")
+        self.fps_label.setText(f"{rate:.1f} Hz")
         self.success_label.setText(str(success))
         self.failed_label.setText(str(failed))
         self.timeout_label.setText(str(timeout))

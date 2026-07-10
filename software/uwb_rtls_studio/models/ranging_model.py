@@ -86,6 +86,7 @@ log = logging.getLogger(__name__)
 _MAX_HISTORY_SIZE = 100000
 RANGING_UI_EMIT_INTERVAL_S = 0.0
 RANGING_STATS_EMIT_INTERVAL_S = 0.20
+STREAM_RATE_MIN_ELAPSED_S = 1.0
 
 
 class RangingModel(QObject):
@@ -132,6 +133,8 @@ class RangingModel(QObject):
         self._last_fusion_emit_at = 0.0
         self._last_anchor_emit_at = 0.0
         self._last_stats_emit_at = 0.0
+        self._rate_trackers = {}
+        self._reset_rate_tracking()
 
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(POLL_RANGING_STATUS_MS)
@@ -236,6 +239,7 @@ class RangingModel(QObject):
         self._last_fusion_emit_at = 0.0
         self._last_anchor_emit_at = 0.0
         self._last_stats_emit_at = 0.0
+        self._reset_rate_tracking()
         shared_app_state.ranging_stats = self._stats.copy()
 
     # ── Packet handler ───────────────────────────────────────────────
@@ -356,10 +360,7 @@ class RangingModel(QObject):
         self._stats["total_count"] += 1
         self._stats["success_count"] += 1
         self._stats["last_rms_error_m"] = sample["rms_error_m"]
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
+        self._record_stream_rate("ranging", now)
         self._last_result_time = now
 
         self._emit_position_if_due(sample, now=now)
@@ -470,10 +471,7 @@ class RangingModel(QObject):
         self._stats["last_rms_error_m"] = stored.get("rms_error_m", stored.get("rms", 0.0))
 
         now = stored.get("received_at", time.time())
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
+        self._record_stream_rate("ranging", now)
         self._last_result_time = now
 
         self._emit_position_if_due(stored, now=now)
@@ -508,12 +506,11 @@ class RangingModel(QObject):
         self._stats["total_count"] = int(self._stats.get("total_count", 0)) + 1
         self._stats["success_count"] = int(self._stats.get("success_count", 0)) + 1
         self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
+        self._record_stream_rate("sensor_fusion", now)
         self._last_result_time = now
         self._emit_sensor_fusion_if_due(enriched, now=now)
+        if enriched.get("anchors"):
+            self._emit_anchor_distances_if_due(enriched["anchors"], now=now)
         self._emit_stats_if_due(now=now)
 
     def _should_emit(self, attr_name: str, now: float, interval_s: float) -> bool:
@@ -522,6 +519,31 @@ class RangingModel(QObject):
             setattr(self, attr_name, now)
             return True
         return False
+
+    def _reset_rate_tracking(self) -> None:
+        self._rate_trackers = {
+            "ranging": {"start": 0.0, "count": 0, "rate": 0.0},
+            "sensor_fusion": {"start": 0.0, "count": 0, "rate": 0.0},
+        }
+
+    def _record_stream_rate(self, source: str, now: float) -> None:
+        tracker = self._rate_trackers.get(source)
+        if tracker is None:
+            return
+
+        if tracker["start"] <= 0.0:
+            tracker["start"] = now
+        tracker["count"] += 1
+
+        elapsed = now - tracker["start"]
+        if elapsed < STREAM_RATE_MIN_ELAPSED_S:
+            return
+
+        tracker["rate"] = tracker["count"] / max(elapsed, 0.001)
+        preferred = self._rate_trackers["sensor_fusion"]
+        fallback = self._rate_trackers["ranging"]
+        rate = preferred["rate"] if preferred["count"] > 0 else fallback["rate"]
+        self._stats["update_rate_hz"] = round(float(rate), 1)
 
     def _emit_position_if_due(self, sample: dict, now: float | None = None) -> None:
         now = time.time() if now is None else float(now)

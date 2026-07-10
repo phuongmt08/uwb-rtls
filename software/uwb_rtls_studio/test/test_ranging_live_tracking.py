@@ -110,7 +110,9 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     repo = RangingRepository()
     model = RangingModel(protocol_service=None, ranging_repo=repo)
     received = []
+    anchor_updates = []
     model.sensor_fusion_updated.connect(received.append)
+    model.anchor_distances_updated.connect(anchor_updates.append)
 
     factory = CommandFactory()
 
@@ -157,8 +159,29 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert math.isclose(latest["vy_mps"], 2.0)
     assert latest["seq"] == 2
     assert latest["anchors"] == [{"anchor_id": 2, "distance_mm": 2345, "weight": 87}]
+    assert anchor_updates[-1] == [{"anchor_id": 2, "distance_mm": 2345, "weight": 87}]
     assert len(model.fusion_history) == 2
     assert model.fusion_history[-1]["source"] == "sensor_fusion"
+    assert app is not None
+
+
+def test_sensor_fusion_rate_uses_stream_average_not_instantaneous_dt():
+    app = _ensure_qt_app()
+    from models.ranging_model import RangingModel
+    from repository.ranging_repository import RangingRepository
+
+    model = RangingModel(protocol_service=None, ranging_repo=RangingRepository())
+
+    for idx, received_at in enumerate((100.0, 100.01, 101.0), start=1):
+        model._handle_sensor_fusion_sample({
+            "ukf_x_m": float(idx),
+            "ukf_y_m": 0.0,
+            "timestamp_ms": idx * 10,
+            "received_at": received_at,
+            "anchors": [],
+        })
+
+    assert model._stats["update_rate_hz"] == 3.0
     assert app is not None
 
 
@@ -260,7 +283,7 @@ def test_ranging_status_response_parses_success_rate():
 
 
 
-def test_live_tracking_anchor_rows_clear_stale_values():
+def test_live_tracking_anchor_rows_cache_missing_values():
     from views.tabs.live_tracking_tab import LiveTrackingTab
 
     class StubLabel:
@@ -278,6 +301,7 @@ def test_live_tracking_anchor_rows_clear_stale_values():
     tab.d2_label = StubLabel()
     tab.d3_label = StubLabel()
     tab.d4_label = StubLabel()
+    tab._anchor_telemetry_cache = {}
 
     LiveTrackingTab._show_anchor_telemetry(
         tab,
@@ -286,8 +310,8 @@ def test_live_tracking_anchor_rows_clear_stale_values():
             {"anchor_id": 2, "distance_mm": 2222, "weight": 80},
         ],
     )
-    assert tab.d1_label.text() == "1.111 m  |  W: 90"
-    assert tab.d2_label.text() == "2.222 m  |  W: 80"
+    assert tab.d1_label.text() == "1.111 m  |  W: 0.90"
+    assert tab.d2_label.text() == "2.222 m  |  W: 0.80"
     assert tab.d3_label.text() == "-"
     assert tab.d4_label.text() == "-"
 
@@ -297,8 +321,8 @@ def test_live_tracking_anchor_rows_clear_stale_values():
             {"anchor_id": 1, "distance_mm": 1234, "weight": 75},
         ],
     )
-    assert tab.d1_label.text() == "1.234 m  |  W: 75"
-    assert tab.d2_label.text() == "-"
+    assert tab.d1_label.text() == "1.234 m  |  W: 0.75"
+    assert tab.d2_label.text() == "2.222 m  |  W: 0.80"
     assert tab.d3_label.text() == "-"
     assert tab.d4_label.text() == "-"
 
