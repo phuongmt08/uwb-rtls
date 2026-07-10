@@ -1,0 +1,1195 @@
+{
+  "meta": {
+    "name": "Virtual_Map_Config",
+    "version": 2,
+    "schema": "uwb_rtls_geofence_map"
+  },
+  "map_objects": {
+    "rooms": [
+      {
+        "id": "18cc1278",
+        "name": "Room 1",
+        "type": "room",
+        "object_type": "room",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": -2.4,
+            "y": 2.4
+          },
+          {
+            "x": -2.4,
+            "y": -6.0
+          },
+          {
+            "x": 6.4,
+            "y": -6.0
+          },
+          {
+            "x": 6.4,
+            "y": 2.4
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 0.0,
+        "height_m": 0.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": 1,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC"
+      },
+      {
+        "id": "cbc39752",
+        "name": "Room 2",
+        "type": "room",
+        "object_type": "room",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": 6.6,
+            "y": 2.5
+          },
+          {
+            "x": 8.7,
+            "y": 2.5
+          },
+          {
+            "x": 8.7,
+            "y": -6.0
+          },
+          {
+            "x": 6.6,
+            "y": -6.0
+          },
+          {
+            "x": 6.6,
+            "y": -0.8
+          },
+          {
+            "x": 6.4,
+            "y": -0.8
+          },
+          {
+            "x": 6.4,
+            "y": 0.8
+          },
+          {
+            "x": 6.6,
+            "y": 0.8
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 0.0,
+        "height_m": 0.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC"
+      }
+    ],
+    "walls": [
+      {
+        "id": "96ba3d18",
+        "name": "Wall Segment 1",
+        "type": "wall",
+        "object_type": "wall",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": 6.4,
+            "y": 0.8
+          },
+          {
+            "x": 6.4,
+            "y": 2.4
+          },
+          {
+            "x": -2.3,
+            "y": 2.4
+          },
+          {
+            "x": -2.3,
+            "y": -6.0
+          },
+          {
+            "x": 6.4,
+            "y": -6.0
+          },
+          {
+            "x": 6.4,
+            "y": -0.8
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.2,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "boundary_outside",
+        "host_room_id": "18cc1278",
+        "speed_limit": 0.0,
+        "color": "#787878"
+      },
+      {
+        "id": "491e4ebb",
+        "name": "Wall Segment 2",
+        "type": "wall",
+        "object_type": "wall",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": 8.7,
+            "y": 2.5
+          },
+          {
+            "x": 8.7,
+            "y": -6.0
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.2,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "boundary_outside",
+        "host_room_id": "cbc39752",
+        "speed_limit": 0.0,
+        "color": "#787878"
+      }
+    ],
+    "objects": [
+      {
+        "id": "3525de44",
+        "name": "Object 1",
+        "type": "object",
+        "object_type": "object",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": 6.1,
+            "y": 2.4
+          },
+          {
+            "x": 6.1,
+            "y": 2.1
+          },
+          {
+            "x": 6.4,
+            "y": 2.1
+          },
+          {
+            "x": 6.4,
+            "y": 2.4
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#787878"
+      },
+      {
+        "id": "7fc8182b-abf8-4be4-8c49-222264d07103",
+        "name": "Object 1",
+        "type": "object",
+        "object_type": "object",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": -2.3,
+            "y": 2.4
+          },
+          {
+            "x": -2.3,
+            "y": 2.1
+          },
+          {
+            "x": -2.0,
+            "y": 2.1
+          },
+          {
+            "x": -2.0,
+            "y": 2.4
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#787878"
+      },
+      {
+        "id": "b5754101-9f5b-42b1-830c-40418e3c5985",
+        "name": "Object 1",
+        "type": "object",
+        "object_type": "object",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": -2.3,
+            "y": -5.7
+          },
+          {
+            "x": -2.3,
+            "y": -6.0
+          },
+          {
+            "x": -2.0,
+            "y": -6.0
+          },
+          {
+            "x": -2.0,
+            "y": -5.7
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#787878"
+      },
+      {
+        "id": "5203ba76-f82c-4007-babc-9f395eb047a7",
+        "name": "Object 1",
+        "type": "object",
+        "object_type": "object",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": 6.1,
+            "y": -5.7
+          },
+          {
+            "x": 6.1,
+            "y": -6.0
+          },
+          {
+            "x": 6.4,
+            "y": -6.0
+          },
+          {
+            "x": 6.4,
+            "y": -5.7
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#787878"
+      },
+      {
+        "id": "204d5278",
+        "name": "Object 1",
+        "type": "object",
+        "object_type": "object",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": 6.4,
+            "y": -2.3
+          },
+          {
+            "x": 6.4,
+            "y": -2.8
+          },
+          {
+            "x": 6.0,
+            "y": -2.8
+          },
+          {
+            "x": 6.0,
+            "y": -2.3
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#787878"
+      },
+      {
+        "id": "f0384fd8-0904-440e-9732-64966585003c",
+        "name": "Object 1",
+        "type": "object",
+        "object_type": "object",
+        "shape_kind": "polygon",
+        "points": [
+          {
+            "x": -1.9,
+            "y": -2.3
+          },
+          {
+            "x": -1.9,
+            "y": -2.8
+          },
+          {
+            "x": -2.3,
+            "y": -2.8
+          },
+          {
+            "x": -2.3,
+            "y": -2.3
+          }
+        ],
+        "min_z": 0.0,
+        "max_z": 4.0,
+        "height_m": 4.0,
+        "radius_m": 0.0,
+        "thickness_m": 0.0,
+        "origin_vertex_idx": null,
+        "local_frame_yaw_deg": 0.0,
+        "wall_mode": "free_standing",
+        "host_room_id": null,
+        "speed_limit": 0.0,
+        "color": "#787878"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor_id": 0,
+        "label": "A0",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 0,
+        "mac": "",
+        "room_id": "18cc1278",
+        "zone_id": "18cc1278",
+        "zone_name": "Room 1",
+        "zone_ids": [
+          "18cc1278"
+        ],
+        "zone_names": [
+          "Room 1"
+        ],
+        "local_x_m": 0.7999999999999998,
+        "local_y_m": 0.0,
+        "x_m": 0.7999999999999998,
+        "y_m": 0.0,
+        "z_m": 2.5,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      },
+      {
+        "anchor_id": 1,
+        "label": "A1",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 1,
+        "mac": "",
+        "room_id": "18cc1278",
+        "zone_id": "18cc1278",
+        "zone_name": "Room 1",
+        "zone_ids": [
+          "18cc1278"
+        ],
+        "zone_names": [
+          "Room 1"
+        ],
+        "local_x_m": 0.7999999999999998,
+        "local_y_m": 8.4,
+        "x_m": 0.7999999999999998,
+        "y_m": 8.4,
+        "z_m": 2.5,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      },
+      {
+        "anchor_id": 2,
+        "label": "A2",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 2,
+        "mac": "",
+        "room_id": "18cc1278",
+        "zone_id": "18cc1278",
+        "zone_name": "Room 1",
+        "zone_ids": [
+          "18cc1278"
+        ],
+        "zone_names": [
+          "Room 1"
+        ],
+        "local_x_m": 8.4,
+        "local_y_m": 8.4,
+        "x_m": 8.4,
+        "y_m": 8.4,
+        "z_m": 2.5,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      },
+      {
+        "anchor_id": 3,
+        "label": "A3",
+        "role": "anchor",
+        "device_type": "uwb_anchor",
+        "device_id": 3,
+        "mac": "",
+        "room_id": "18cc1278",
+        "zone_id": "18cc1278",
+        "zone_name": "Room 1",
+        "zone_ids": [
+          "18cc1278"
+        ],
+        "zone_names": [
+          "Room 1"
+        ],
+        "local_x_m": 8.4,
+        "local_y_m": 0.0,
+        "x_m": 8.4,
+        "y_m": 0.0,
+        "z_m": 2.5,
+        "placed": true,
+        "is_scanned": false,
+        "sync_state": "draft"
+      }
+    ],
+    "gateways": []
+  },
+  "rule_zones": [
+    {
+      "id": "5023b5d6",
+      "name": "Rule Zone 1",
+      "type": "allowed",
+      "object_type": "zone",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": -0.8
+        },
+        {
+          "x": 6.6,
+          "y": -2.5
+        },
+        {
+          "x": 8.7,
+          "y": -2.5
+        },
+        {
+          "x": 8.7,
+          "y": -0.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 1.0,
+      "color": "#22C55E"
+    },
+    {
+      "id": "662b8451",
+      "name": "Rule Zone 2",
+      "type": "forbidden",
+      "object_type": "zone",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": -2.5
+        },
+        {
+          "x": 6.6,
+          "y": -6.0
+        },
+        {
+          "x": 8.7,
+          "y": -6.0
+        },
+        {
+          "x": 8.7,
+          "y": -2.5
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 1.0,
+      "color": "#EF4444"
+    }
+  ],
+  "map_name": "Virtual_Map_Config",
+  "anchors": [
+    {
+      "anchor_id": 0,
+      "label": "A0",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 0,
+      "mac": "",
+      "room_id": "18cc1278",
+      "zone_id": "18cc1278",
+      "zone_name": "Room 1",
+      "zone_ids": [
+        "18cc1278"
+      ],
+      "zone_names": [
+        "Room 1"
+      ],
+      "local_x_m": 0.7999999999999998,
+      "local_y_m": 0.0,
+      "x_m": 0.7999999999999998,
+      "y_m": 0.0,
+      "z_m": 2.5,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    },
+    {
+      "anchor_id": 1,
+      "label": "A1",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 1,
+      "mac": "",
+      "room_id": "18cc1278",
+      "zone_id": "18cc1278",
+      "zone_name": "Room 1",
+      "zone_ids": [
+        "18cc1278"
+      ],
+      "zone_names": [
+        "Room 1"
+      ],
+      "local_x_m": 0.7999999999999998,
+      "local_y_m": 8.4,
+      "x_m": 0.7999999999999998,
+      "y_m": 8.4,
+      "z_m": 2.5,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    },
+    {
+      "anchor_id": 2,
+      "label": "A2",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 2,
+      "mac": "",
+      "room_id": "18cc1278",
+      "zone_id": "18cc1278",
+      "zone_name": "Room 1",
+      "zone_ids": [
+        "18cc1278"
+      ],
+      "zone_names": [
+        "Room 1"
+      ],
+      "local_x_m": 8.4,
+      "local_y_m": 8.4,
+      "x_m": 8.4,
+      "y_m": 8.4,
+      "z_m": 2.5,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    },
+    {
+      "anchor_id": 3,
+      "label": "A3",
+      "role": "anchor",
+      "device_type": "uwb_anchor",
+      "device_id": 3,
+      "mac": "",
+      "room_id": "18cc1278",
+      "zone_id": "18cc1278",
+      "zone_name": "Room 1",
+      "zone_ids": [
+        "18cc1278"
+      ],
+      "zone_names": [
+        "Room 1"
+      ],
+      "local_x_m": 8.4,
+      "local_y_m": 0.0,
+      "x_m": 8.4,
+      "y_m": 0.0,
+      "z_m": 2.5,
+      "placed": true,
+      "is_scanned": false,
+      "sync_state": "draft"
+    }
+  ],
+  "objects": [
+    {
+      "id": "18cc1278",
+      "name": "Room 1",
+      "type": "room",
+      "object_type": "room",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": -2.4,
+          "y": 2.4
+        },
+        {
+          "x": -2.4,
+          "y": -6.0
+        },
+        {
+          "x": 6.4,
+          "y": -6.0
+        },
+        {
+          "x": 6.4,
+          "y": 2.4
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": 1,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC"
+    },
+    {
+      "id": "cbc39752",
+      "name": "Room 2",
+      "type": "room",
+      "object_type": "room",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": 2.5
+        },
+        {
+          "x": 8.7,
+          "y": 2.5
+        },
+        {
+          "x": 8.7,
+          "y": -6.0
+        },
+        {
+          "x": 6.6,
+          "y": -6.0
+        },
+        {
+          "x": 6.6,
+          "y": -0.8
+        },
+        {
+          "x": 6.4,
+          "y": -0.8
+        },
+        {
+          "x": 6.4,
+          "y": 0.8
+        },
+        {
+          "x": 6.6,
+          "y": 0.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC"
+    },
+    {
+      "id": "96ba3d18",
+      "name": "Wall Segment 1",
+      "type": "wall",
+      "object_type": "wall",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.4,
+          "y": 0.8
+        },
+        {
+          "x": 6.4,
+          "y": 2.4
+        },
+        {
+          "x": -2.3,
+          "y": 2.4
+        },
+        {
+          "x": -2.3,
+          "y": -6.0
+        },
+        {
+          "x": 6.4,
+          "y": -6.0
+        },
+        {
+          "x": 6.4,
+          "y": -0.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.2,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "boundary_outside",
+      "host_room_id": "18cc1278",
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "491e4ebb",
+      "name": "Wall Segment 2",
+      "type": "wall",
+      "object_type": "wall",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 8.7,
+          "y": 2.5
+        },
+        {
+          "x": 8.7,
+          "y": -6.0
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.2,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "boundary_outside",
+      "host_room_id": "cbc39752",
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "3525de44",
+      "name": "Object 1",
+      "type": "object",
+      "object_type": "object",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.1,
+          "y": 2.4
+        },
+        {
+          "x": 6.1,
+          "y": 2.1
+        },
+        {
+          "x": 6.4,
+          "y": 2.1
+        },
+        {
+          "x": 6.4,
+          "y": 2.4
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "7fc8182b-abf8-4be4-8c49-222264d07103",
+      "name": "Object 1",
+      "type": "object",
+      "object_type": "object",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": -2.3,
+          "y": 2.4
+        },
+        {
+          "x": -2.3,
+          "y": 2.1
+        },
+        {
+          "x": -2.0,
+          "y": 2.1
+        },
+        {
+          "x": -2.0,
+          "y": 2.4
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "b5754101-9f5b-42b1-830c-40418e3c5985",
+      "name": "Object 1",
+      "type": "object",
+      "object_type": "object",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": -2.3,
+          "y": -5.7
+        },
+        {
+          "x": -2.3,
+          "y": -6.0
+        },
+        {
+          "x": -2.0,
+          "y": -6.0
+        },
+        {
+          "x": -2.0,
+          "y": -5.7
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "5203ba76-f82c-4007-babc-9f395eb047a7",
+      "name": "Object 1",
+      "type": "object",
+      "object_type": "object",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.1,
+          "y": -5.7
+        },
+        {
+          "x": 6.1,
+          "y": -6.0
+        },
+        {
+          "x": 6.4,
+          "y": -6.0
+        },
+        {
+          "x": 6.4,
+          "y": -5.7
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "204d5278",
+      "name": "Object 1",
+      "type": "object",
+      "object_type": "object",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.4,
+          "y": -2.3
+        },
+        {
+          "x": 6.4,
+          "y": -2.8
+        },
+        {
+          "x": 6.0,
+          "y": -2.8
+        },
+        {
+          "x": 6.0,
+          "y": -2.3
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "f0384fd8-0904-440e-9732-64966585003c",
+      "name": "Object 1",
+      "type": "object",
+      "object_type": "object",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": -1.9,
+          "y": -2.3
+        },
+        {
+          "x": -1.9,
+          "y": -2.8
+        },
+        {
+          "x": -2.3,
+          "y": -2.8
+        },
+        {
+          "x": -2.3,
+          "y": -2.3
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 4.0,
+      "height_m": 4.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 0.0,
+      "color": "#787878"
+    },
+    {
+      "id": "5023b5d6",
+      "name": "Rule Zone 1",
+      "type": "allowed",
+      "object_type": "zone",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": -0.8
+        },
+        {
+          "x": 6.6,
+          "y": -2.5
+        },
+        {
+          "x": 8.7,
+          "y": -2.5
+        },
+        {
+          "x": 8.7,
+          "y": -0.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 1.0,
+      "color": "#22C55E"
+    },
+    {
+      "id": "662b8451",
+      "name": "Rule Zone 2",
+      "type": "forbidden",
+      "object_type": "zone",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": -2.5
+        },
+        {
+          "x": 6.6,
+          "y": -6.0
+        },
+        {
+          "x": 8.7,
+          "y": -6.0
+        },
+        {
+          "x": 8.7,
+          "y": -2.5
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 1.0,
+      "color": "#EF4444"
+    }
+  ],
+  "geofences": [
+    {
+      "id": "5023b5d6",
+      "name": "Rule Zone 1",
+      "type": "allowed",
+      "object_type": "zone",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": -0.8
+        },
+        {
+          "x": 6.6,
+          "y": -2.5
+        },
+        {
+          "x": 8.7,
+          "y": -2.5
+        },
+        {
+          "x": 8.7,
+          "y": -0.8
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 1.0,
+      "color": "#22C55E"
+    },
+    {
+      "id": "662b8451",
+      "name": "Rule Zone 2",
+      "type": "forbidden",
+      "object_type": "zone",
+      "shape_kind": "polygon",
+      "points": [
+        {
+          "x": 6.6,
+          "y": -2.5
+        },
+        {
+          "x": 6.6,
+          "y": -6.0
+        },
+        {
+          "x": 8.7,
+          "y": -6.0
+        },
+        {
+          "x": 8.7,
+          "y": -2.5
+        }
+      ],
+      "min_z": 0.0,
+      "max_z": 0.0,
+      "height_m": 0.0,
+      "radius_m": 0.0,
+      "thickness_m": 0.0,
+      "origin_vertex_idx": null,
+      "local_frame_yaw_deg": 0.0,
+      "wall_mode": "free_standing",
+      "host_room_id": null,
+      "speed_limit": 1.0,
+      "color": "#EF4444"
+    }
+  ]
+}
