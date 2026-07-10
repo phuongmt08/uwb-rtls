@@ -64,6 +64,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define SENSOR_FUSION_QUEUE_WAIT_TICKS pdMS_TO_TICKS(20U)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -434,21 +436,32 @@ void sensor_fusion_entry(void *argument)
       continue;
     }
 
-    (void)sys_sensor_fusion_task();
-
     if (!g_ranging_enabled)
 	{
+	    (void)sys_sensor_fusion_task();
     	osDelay(20);
     	continue;
 	}
 
     uwb_distance_msg_t msg;
-    bool has_uwb_msg = false;
+    bool has_uwb_msg =
+        (osMessageQueueGet(g_uwb_distance_queue,
+                           &msg,
+                           NULL,
+                           SENSOR_FUSION_QUEUE_WAIT_TICKS) == osOK);
+    uint32_t queue_latency_ms = 0U;
 
-    while (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+    if (has_uwb_msg)
     {
-        has_uwb_msg = true;
+      /* Keep only the newest ranging cycle if more than one accumulated. */
+      while (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+      {
+      }
+
+      queue_latency_ms = HAL_GetTick() - msg.timestamp_ms;
     }
+
+    (void)sys_sensor_fusion_task();
 
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
     if (g_imu_data_queue != NULL && osMessageQueueGetCount(g_imu_data_queue) > 0U)
@@ -647,6 +660,10 @@ void sensor_fusion_entry(void *argument)
                                                       s_last_selected_anchors_mask,
                                                       &msg);
                     SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
+
+                    /* RLOG_I(LOG_OBJECT_CODE_TAG,
+                           "[FUSION LATENCY] UWB Queue Latency: %lu ms",
+                           (unsigned long)queue_latency_ms); */
                 }
                 else
                 {
