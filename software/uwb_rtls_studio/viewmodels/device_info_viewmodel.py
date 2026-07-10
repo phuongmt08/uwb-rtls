@@ -231,7 +231,7 @@ class DeviceInfoViewModel(QObject):
                 "cpu_usage": data.get("cpu_usage", "-")
             }
         self._last_telemetry.update(formatted_data)
-        self.telemetry_updated.emit(self._last_telemetry.copy())
+        self._emit_rtos_telemetry()
 
     def _on_rtos_resource_changed(self, data: dict):
         """Merge RTOS resource data into the telemetry panel without clearing battery data."""

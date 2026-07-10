@@ -108,6 +108,54 @@ class SessionRepository:
             return 1 if os.path.exists(os.path.join(self.get_session_folder(session_id), "logs.csv")) else 0
         return sum(1 for name in os.listdir(log_dir) if name.lower().startswith("log_run_") and name.lower().endswith(".csv"))
 
+    def _merge_positions(
+        self,
+        positions: list[dict] | None,
+        fusion_positions: list[dict] | None,
+    ) -> list[dict]:
+        merged = []
+        pos_by_seq = {}
+        for p in (positions or []):
+            p_copy = p.copy()
+            seq = p_copy.get("seq")
+            if seq is not None and seq > 0:
+                pos_by_seq[seq] = p_copy
+            else:
+                merged.append(p_copy)
+
+        for f in (fusion_positions or []):
+            f_copy = f.copy()
+            dist_map = {a.get("anchor_id"): a.get("distance_mm", "") for a in f_copy.get("anchors", []) if a.get("anchor_id")}
+            weight_map = {a.get("anchor_id"): a.get("weight", "") for a in f_copy.get("anchors", []) if a.get("anchor_id")}
+            for k in ["d1_mm", "d2_mm", "d3_mm", "d4_mm"]:
+                if f_copy.get(k) is None or f_copy.get(k) == "":
+                    try:
+                        idx = int(k[1])
+                        if idx in dist_map:
+                            f_copy[k] = dist_map[idx]
+                    except Exception:
+                        pass
+
+            for k in ["w1", "w2", "w3", "w4"]:
+                try:
+                    idx = int(k[1])
+                    f_copy[k] = weight_map.get(idx, "")
+                except Exception:
+                    f_copy[k] = ""
+
+            seq = f_copy.get("seq")
+            if seq is not None and seq > 0:
+                if seq in pos_by_seq:
+                    pos_by_seq[seq].update(f_copy)
+                else:
+                    pos_by_seq[seq] = f_copy
+            else:
+                merged.append(f_copy)
+
+        merged.extend(pos_by_seq.values())
+        merged.sort(key=lambda x: (x.get("timestamp_ms") or 0, x.get("received_at") or 0.0))
+        return merged
+
     def save_session(
         self,
         session_meta: dict,
@@ -136,15 +184,11 @@ class SessionRepository:
         if anchors:
             self._write_json(os.path.join(session_folder, "anchors.json"), anchors)
 
-        if positions:
+        if positions or fusion_positions:
+            merged = self._merge_positions(positions, fusion_positions)
             positions_path = os.path.join(session_folder, "positions.csv")
-            self._write_positions_csv(positions_path, positions)
+            self._write_positions_csv(positions_path, merged)
             self._mirror_browser_file(positions_path, "ranging", session_id)
-
-        if fusion_positions:
-            fusion_path = os.path.join(session_folder, "sensor_fusion_positions.csv")
-            self._write_positions_csv(fusion_path, fusion_positions)
-            self._mirror_browser_file(fusion_path, "ranging", session_id)
 
         if logs:
             logs_csv_path = os.path.join(session_folder, "logs.csv")
@@ -186,15 +230,10 @@ class SessionRepository:
         os.makedirs(run_dir, exist_ok=True)
 
         files: list[str] = []
-        if positions is not None:
+        if positions or fusion_positions:
+            merged = self._merge_positions(positions, fusion_positions)
             path = os.path.join(run_dir, f"ranging_run_{run_index:03d}.csv")
-            self._write_positions_csv(path, positions)
-            self._mirror_browser_file(path, "ranging", session_id)
-            files.append(os.path.relpath(path, session_folder))
-
-        if fusion_positions:
-            path = os.path.join(run_dir, f"sensor_fusion_run_{run_index:03d}.csv")
-            self._write_positions_csv(path, fusion_positions)
+            self._write_positions_csv(path, merged)
             self._mirror_browser_file(path, "ranging", session_id)
             files.append(os.path.relpath(path, session_folder))
 
@@ -203,7 +242,7 @@ class SessionRepository:
             "stream_type": "ranging",
             "index": int(run_index),
             "files": files,
-            "sample_count": len(positions or []),
+            "sample_count": len(positions or []) if positions else len(fusion_positions or []),
         })
         self.append_or_update_run_meta(session_id, run_meta)
         return files
@@ -349,24 +388,22 @@ class SessionRepository:
             log.warning("Session folder %s does not exist.", session_folder)
             return []
 
-        if detail_type == "ranging":
+        if detail_type in ("ranging", "fusion"):
             rows = []
             for run in self.list_session_runs(session_id, "ranging"):
                 for rel_path in run.get("files", []):
-                    if os.path.basename(rel_path).lower().startswith("ranging_run_"):
+                    base = os.path.basename(rel_path).lower()
+                    if base.startswith("ranging_run_") or base.startswith("sensor_fusion_run_"):
                         rows.extend(self._read_positions_csv(os.path.join(session_folder, rel_path)))
             if rows:
                 return rows
-            return self._read_positions_csv(os.path.join(session_folder, "positions.csv"))
-        if detail_type == "fusion":
-            rows = []
-            for run in self.list_session_runs(session_id, "ranging"):
-                for rel_path in run.get("files", []):
-                    if os.path.basename(rel_path).lower().startswith("sensor_fusion_run_"):
-                        rows.extend(self._read_positions_csv(os.path.join(session_folder, rel_path)))
-            if rows:
-                return rows
-            return self._read_positions_csv(os.path.join(session_folder, "sensor_fusion_positions.csv"))
+            pos_path = os.path.join(session_folder, "positions.csv")
+            if os.path.exists(pos_path):
+                return self._read_positions_csv(pos_path)
+            fusion_path = os.path.join(session_folder, "sensor_fusion_positions.csv")
+            if os.path.exists(fusion_path):
+                return self._read_positions_csv(fusion_path)
+            return []
         if detail_type == "logs":
             rows = []
             for run in self.list_session_runs(session_id, "log"):
@@ -527,91 +564,137 @@ class SessionRepository:
         return ""
 
     def _write_positions_csv(self, path: str, positions: list[dict]) -> None:
-        fieldnames = [
-            "time",
-            "timestamp_ms",
-            "packet_timestamp_ms",
-            "seq",
-            "source",
-            "x_m",
-            "y_m",
-            "z_m",
-            "rms_error_m",
-            "anchor_mask",
-            "d1_mm",
-            "d2_mm",
-            "d3_mm",
-            "d4_mm",
-            "ukf_x_m",
-            "ukf_y_m",
-            "ukf_yaw_deg",
-            "tril_x_m",
-            "tril_y_m",
-            "yaw_deg",
-            "ranging_error_count",
-        ]
         with open(path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(fieldnames)
             for pos in positions:
                 timestamp_ms = int(pos.get("timestamp_ms", 0) or 0)
-                writer.writerow([
-                    self._display_time_from_position(pos),
-                    timestamp_ms,
-                    int(pos.get("packet_timestamp_ms", 0) or 0),
-                    pos.get("seq", 0),
-                    pos.get("source", "ranging"),
-                    pos.get("x_m", pos.get("x", 0.0)),
-                    pos.get("y_m", pos.get("y", 0.0)),
-                    pos.get("z_m", pos.get("z", 0.0)),
-                    pos.get("rms_error_m", pos.get("rms", 0.0)),
-                    pos.get("anchor_mask", 0),
-                    pos.get("d1_mm", ""),
-                    pos.get("d2_mm", ""),
-                    pos.get("d3_mm", ""),
-                    pos.get("d4_mm", ""),
-                    pos.get("ukf_x_m", ""),
-                    pos.get("ukf_y_m", ""),
-                    pos.get("ukf_yaw_deg", ""),
-                    pos.get("tril_x_m", ""),
-                    pos.get("tril_y_m", ""),
-                    pos.get("yaw_deg", ""),
-                    pos.get("ranging_error_count", ""),
-                ])
+                row_items = [
+                    f"time:{self._display_time_from_position(pos)}",
+                    f"timestamp_ms:{timestamp_ms}",
+                    f"packet_timestamp_ms:{int(pos.get('packet_timestamp_ms', 0) or 0)}",
+                    f"seq:{pos.get('seq', 0)}",
+                    f"source:{pos.get('source', 'ranging')}",
+                    f"x_m:{pos.get('x_m', pos.get('x', 0.0))}",
+                    f"y_m:{pos.get('y_m', pos.get('y', 0.0))}",
+                    f"z_m:{pos.get('z_m', pos.get('z', 0.0))}",
+                    f"rms_error_m:{pos.get('rms_error_m', pos.get('rms', 0.0))}",
+                    f"anchor_mask:{pos.get('anchor_mask', 0)}",
+                    f"d1_mm:{pos.get('d1_mm', '')}",
+                    f"d2_mm:{pos.get('d2_mm', '')}",
+                    f"d3_mm:{pos.get('d3_mm', '')}",
+                    f"d4_mm:{pos.get('d4_mm', '')}",
+                    f"w1:{pos.get('w1', '')}",
+                    f"w2:{pos.get('w2', '')}",
+                    f"w3:{pos.get('w3', '')}",
+                    f"w4:{pos.get('w4', '')}",
+                    f"ukf_x_m:{pos.get('ukf_x_m', '')}",
+                    f"ukf_y_m:{pos.get('ukf_y_m', '')}",
+                    f"ukf_yaw_deg:{pos.get('ukf_yaw_deg', '')}",
+                    f"tril_x_m:{pos.get('tril_x_m', '')}",
+                    f"tril_y_m:{pos.get('tril_y_m', '')}",
+                    f"yaw_deg:{pos.get('yaw_deg', '')}",
+                    f"ranging_error_count:{pos.get('ranging_error_count', '')}",
+                    f"zone_id:{pos.get('zone_id', '')}",
+                    f"room_id:{pos.get('room_id', '')}",
+                    f"local_x_m:{pos.get('local_x_m', '')}",
+                    f"local_y_m:{pos.get('local_y_m', '')}",
+                    f"local_z_m:{pos.get('local_z_m', '')}",
+                ]
+                writer.writerow(row_items)
 
     def _read_positions_csv(self, path: str) -> list[dict]:
         if not os.path.exists(path):
             return []
         results: list[dict] = []
         with open(path, "r", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                try:
-                    results.append({
-                        "time": row.get("time", ""),
-                        "timestamp_ms": int(row["timestamp_ms"]),
-                        "packet_timestamp_ms": int(row.get("packet_timestamp_ms", 0) or 0),
-                        "seq": int(row.get("seq", 0) or 0),
-                        "source": row.get("source", "ranging"),
-                        "x_m": float(row["x_m"]),
-                        "y_m": float(row["y_m"]),
-                        "z_m": float(row["z_m"]),
-                        "rms_error_m": float(row["rms_error_m"]),
-                        "anchor_mask": int(row.get("anchor_mask", 0) or 0),
-                        "d1_mm": row.get("d1_mm", ""),
-                        "d2_mm": row.get("d2_mm", ""),
-                        "d3_mm": row.get("d3_mm", ""),
-                        "d4_mm": row.get("d4_mm", ""),
-                        "ukf_x_m": row.get("ukf_x_m", ""),
-                        "ukf_y_m": row.get("ukf_y_m", ""),
-                        "ukf_yaw_deg": row.get("ukf_yaw_deg", ""),
-                        "tril_x_m": row.get("tril_x_m", ""),
-                        "tril_y_m": row.get("tril_y_m", ""),
-                        "yaw_deg": row.get("yaw_deg", ""),
-                        "ranging_error_count": row.get("ranging_error_count", ""),
-                    })
-                except (TypeError, ValueError, KeyError):
-                    continue
+            # Read first line to detect format
+            first_line = handle.readline()
+            handle.seek(0)
+            
+            is_key_value = ":" in first_line
+            if is_key_value:
+                reader = csv.reader(handle)
+                for row in reader:
+                    row_dict = {}
+                    for cell in row:
+                        if ":" in cell:
+                            parts = cell.split(":", 1)
+                            row_dict[parts[0].strip()] = parts[1].strip()
+                    if not row_dict:
+                        continue
+                    try:
+                        results.append({
+                            "time": row_dict.get("time", ""),
+                            "timestamp_ms": int(row_dict.get("timestamp_ms") or 0),
+                            "packet_timestamp_ms": int(row_dict.get("packet_timestamp_ms") or 0),
+                            "seq": int(row_dict.get("seq") or 0),
+                            "source": row_dict.get("source", "ranging"),
+                            "x_m": float(row_dict.get("x_m") or 0.0),
+                            "y_m": float(row_dict.get("y_m") or 0.0),
+                            "z_m": float(row_dict.get("z_m") or 0.0),
+                            "rms_error_m": float(row_dict.get("rms_error_m") or 0.0),
+                            "anchor_mask": int(row_dict.get("anchor_mask") or 0),
+                            "d1_mm": row_dict.get("d1_mm", ""),
+                            "d2_mm": row_dict.get("d2_mm", ""),
+                            "d3_mm": row_dict.get("d3_mm", ""),
+                            "d4_mm": row_dict.get("d4_mm", ""),
+                            "w1": row_dict.get("w1", ""),
+                            "w2": row_dict.get("w2", ""),
+                            "w3": row_dict.get("w3", ""),
+                            "w4": row_dict.get("w4", ""),
+                            "ukf_x_m": row_dict.get("ukf_x_m", ""),
+                            "ukf_y_m": row_dict.get("ukf_y_m", ""),
+                            "ukf_yaw_deg": row_dict.get("ukf_yaw_deg", ""),
+                            "tril_x_m": row_dict.get("tril_x_m", ""),
+                            "tril_y_m": row_dict.get("tril_y_m", ""),
+                            "yaw_deg": row_dict.get("yaw_deg", ""),
+                            "ranging_error_count": row_dict.get("ranging_error_count", ""),
+                            "zone_id": row_dict.get("zone_id", ""),
+                            "room_id": row_dict.get("room_id", ""),
+                            "local_x_m": row_dict.get("local_x_m", ""),
+                            "local_y_m": row_dict.get("local_y_m", ""),
+                            "local_z_m": row_dict.get("local_z_m", ""),
+                        })
+                    except (TypeError, ValueError, KeyError):
+                        continue
+            else:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    try:
+                        results.append({
+                            "time": row.get("time", ""),
+                            "timestamp_ms": int(row["timestamp_ms"]),
+                            "packet_timestamp_ms": int(row.get("packet_timestamp_ms", 0) or 0),
+                            "seq": int(row.get("seq", 0) or 0),
+                            "source": row.get("source", "ranging"),
+                            "x_m": float(row["x_m"]),
+                            "y_m": float(row["y_m"]),
+                            "z_m": float(row["z_m"]),
+                            "rms_error_m": float(row["rms_error_m"]),
+                            "anchor_mask": int(row.get("anchor_mask", 0) or 0),
+                            "d1_mm": row.get("d1_mm", ""),
+                            "d2_mm": row.get("d2_mm", ""),
+                            "d3_mm": row.get("d3_mm", ""),
+                            "d4_mm": row.get("d4_mm", ""),
+                            "w1": row.get("w1", ""),
+                            "w2": row.get("w2", ""),
+                            "w3": row.get("w3", ""),
+                            "w4": row.get("w4", ""),
+                            "ukf_x_m": row.get("ukf_x_m", ""),
+                            "ukf_y_m": row.get("ukf_y_m", ""),
+                            "ukf_yaw_deg": row.get("ukf_yaw_deg", ""),
+                            "tril_x_m": row.get("tril_x_m", ""),
+                            "tril_y_m": row.get("tril_y_m", ""),
+                            "yaw_deg": row.get("yaw_deg", ""),
+                            "ranging_error_count": row.get("ranging_error_count", ""),
+                            "zone_id": row.get("zone_id", ""),
+                            "room_id": row.get("room_id", ""),
+                            "local_x_m": row.get("local_x_m", ""),
+                            "local_y_m": row.get("local_y_m", ""),
+                            "local_z_m": row.get("local_z_m", ""),
+                        })
+                    except (TypeError, ValueError, KeyError):
+                        continue
         return results
 
     def _write_logs_csv(self, path: str, logs: list[dict]) -> None:

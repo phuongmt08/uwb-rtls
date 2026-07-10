@@ -55,6 +55,8 @@ class SessionMessageRecorder(QObject):
         protocol_service.packet_received.connect(lambda name, pkt: self.record_packet("rx", name, pkt))
 
     def record_packet(self, direction: str, param_name: str, pkt) -> None:
+        if param_name in ("ranging_result", "sensor_fusion_result", "log_data"):
+            return
         session_id = getattr(self._session_model, "session_id", "")
         if not session_id or not getattr(self._session_model, "is_active", False):
             return

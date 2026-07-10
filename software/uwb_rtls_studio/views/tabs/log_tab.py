@@ -313,12 +313,50 @@ class LogTab(QWidget):
             self.detail_table.setHorizontalHeaderLabels(headers)
             self.detail_table.setRowCount(len(data))
             
+            def safe_format(val) -> str:
+                if val is None or val == "":
+                    return "--"
+                try:
+                    return f"{float(val):.3f}"
+                except (ValueError, TypeError):
+                    return str(val)
+
             for row, p in enumerate(data):
-                self.detail_table.setItem(row, 0, self._readonly_item(str(p["timestamp_ms"])))
-                self.detail_table.setItem(row, 1, self._readonly_item(f"{p['x_m']:.3f}"))
-                self.detail_table.setItem(row, 2, self._readonly_item(f"{p['y_m']:.3f}"))
-                self.detail_table.setItem(row, 3, self._readonly_item(f"{p['z_m']:.3f}"))
-                self.detail_table.setItem(row, 4, self._readonly_item(f"{p['rms_error_m']:.3f}"))
+                ts = p.get("timestamp_ms", "")
+                x_val = p.get("x_m")
+                if x_val is None or x_val == "":
+                    x_val = p.get("ukf_x_m")
+                if x_val is None or x_val == "":
+                    x_val = p.get("tril_x_m", "")
+
+                y_val = p.get("y_m")
+                if y_val is None or y_val == "":
+                    y_val = p.get("ukf_y_m")
+                if y_val is None or y_val == "":
+                    y_val = p.get("tril_y_m", "")
+
+                z_val = p.get("z_m")
+                if z_val is None or z_val == "":
+                    z_val = p.get("ukf_yaw_deg")
+                if z_val is None or z_val == "":
+                    z_val = p.get("yaw_deg", "")
+
+                rms_val = p.get("rms_error_m")
+                if rms_val is None or rms_val == "":
+                    err_cnt = p.get("ranging_error_count")
+                    if err_cnt is not None and err_cnt != "":
+                        rms_val = f"err:{err_cnt}"
+                    else:
+                        rms_val = ""
+
+                self.detail_table.setItem(row, 0, self._readonly_item(str(ts)))
+                self.detail_table.setItem(row, 1, self._readonly_item(safe_format(x_val)))
+                self.detail_table.setItem(row, 2, self._readonly_item(safe_format(y_val)))
+                self.detail_table.setItem(row, 3, self._readonly_item(safe_format(z_val)))
+                self.detail_table.setItem(row, 4, self._readonly_item(
+                    safe_format(rms_val) if rms_val != "" and not str(rms_val).startswith("err:")
+                    else str(rms_val) if rms_val != "" else "--"
+                ))
                 self.detail_table.setItem(row, 5, self._readonly_item("positions.csv"))
                 self._detail_rows.append({"file": f"{session_id}:positions.csv", **p})
             self.detail_table.setColumnWidth(5, 150)

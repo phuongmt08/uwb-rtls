@@ -30,7 +30,7 @@ class CommandBus(QObject):
     command_sent = pyqtSignal(str)
 
     DEFAULT_CACHE_TTL_S = 2.0
-    PENDING_TTL_S = 2.0
+    PENDING_TTL_S = 3.0
     INVALIDATE_ON_SEND = {
         "anchor_layout_set": "anchor_layout_resp",
         "sys_ranging_cfg_set": "sys_ranging_cfg_resp",

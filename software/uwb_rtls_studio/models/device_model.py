@@ -160,6 +160,11 @@ class DeviceModel(QObject):
         self._ble_status_timer.setInterval(10000)
         self._ble_status_timer.timeout.connect(self._poll_ble_status)
 
+        # RTOS task stats poll timer (5s interval)
+        self._rtos_task_stats_timer = QTimer(self)
+        self._rtos_task_stats_timer.setInterval(5000)
+        self._rtos_task_stats_timer.timeout.connect(lambda: self.request_rtos_task_stats(force=True))
+
         # battery_info is received via device telemetry stream (1s push); no host-side poll timer needed.
 
         self._ble_transition_timer = QTimer(self)
@@ -737,8 +742,11 @@ class DeviceModel(QObject):
         if enabled:
             if not self._ble_status_timer.isActive():
                 self._ble_status_timer.start()
+            if not self._rtos_task_stats_timer.isActive():
+                self._rtos_task_stats_timer.start()
             return
         self._ble_status_timer.stop()
+        self._rtos_task_stats_timer.stop()
 
     def _schedule_background_scan_after_connect(self) -> None:
         # Disable automatic background scan after connect by user request
@@ -1529,6 +1537,7 @@ class DeviceModel(QObject):
         self._connect_generation += 1
         self._prune_timer.stop()
         self._ble_status_timer.stop()
+        self._rtos_task_stats_timer.stop()
         self._ble_transition_timer.stop()
         self._connect_timeout_timer.stop()
         self._background_scan_resume_timer.stop()
@@ -1585,6 +1594,8 @@ class DeviceModel(QObject):
         elif param_name == "device_type_set":
             if self._config_repo is None:
                 self._handle_device_type(pkt.device_type_set)
+        elif param_name == "anchor_layout_resp":
+            self._mark_query_received("anchor_layout_resp")
 
 
     def _on_repository_battery_info(self, info: dict) -> None:
@@ -1821,10 +1832,8 @@ class DeviceModel(QObject):
             pb.BLE_STATE_CONNECTED,
             pb.BLE_STATE_CONNECTING,
         ):
-            if state == pb.BLE_STATE_SCANNING and self._connection_status == "Connected" and not reason_code:
-                # Dongle is scanning normally while the BLE link is still connected; ignore it.
-                # If a reason_code exists (for example 0x08 Connection Timeout), this is a real disconnect.
-                # Handle it so the correct disconnect notification is emitted.
+            if state in (pb.BLE_STATE_SCANNING, pb.BLE_STATE_IDLE) and self._connection_status in ("Connected", "Connecting") and not reason_code:
+                # Dongle is scanning/idle normally while connected or connecting, with no error reason. Ignore it.
                 return
             previous_status = self._connection_status
             previous_name = self._connected_name
@@ -1863,6 +1872,7 @@ class DeviceModel(QObject):
                 self._handshake_time_sync_timer.stop()
                 self._pending_handshake_time_sync_seq = None
             self._ble_status_timer.stop()
+            self._rtos_task_stats_timer.stop()
             self._ble_transition_timer.stop()
             self._connect_timeout_timer.stop()
             self._background_scan_resume_timer.stop()

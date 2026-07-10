@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 # ── Centralized Retry & Timeout Configurations ────────────────────────────────
 # Modifying these values updates retry/timeout behavior across the entire app.
-QUERY_TIMEOUT_S = 1.5          # BLE response wait; avoids false retries on slow/fragmented replies
+QUERY_TIMEOUT_S = 2.5          # BLE response wait; avoids false retries on slow/fragmented replies
 QUERY_MAX_RETRIES = 3          # Maximum attempts per command on timeout
 
 # Polling intervals in milliseconds
