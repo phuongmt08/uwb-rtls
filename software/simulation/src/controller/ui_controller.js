@@ -82,6 +82,7 @@ function runSimulation() {
         q_g: parseFloat(document.getElementById('ukf_qg_range').value),
         r_uwb: parseFloat(document.getElementById('ukf_ruwb_range').value),
         r_gate: parseFloat(document.getElementById('ukf_rgate_range').value),
+        yaw_map_offset_deg: parseFloat(document.getElementById('ukf_yaw_map_offset_range').value),
         triplet_weights: {
             d2: parseFloat(document.getElementById('triplet_w_d2_range').value),
             fp_amp: parseFloat(document.getElementById('triplet_w_fp_range').value),
@@ -120,6 +121,7 @@ function runSimulation() {
     document.getElementById('ukf_qg_val').innerText    = params.q_g.toExponential(3);
     document.getElementById('ukf_ruwb_val').innerText  = params.r_uwb.toFixed(3);
     document.getElementById('ukf_rgate_val').innerText = params.r_gate.toFixed(3);
+    document.getElementById('ukf_yaw_map_offset_val').innerText = params.yaw_map_offset_deg.toFixed(1);
     document.getElementById('triplet_w_d2_val').innerText = params.triplet_weights.d2.toFixed(0);
     document.getElementById('triplet_w_fp_val').innerText = params.triplet_weights.fp_amp.toFixed(0);
     document.getElementById('triplet_w_resid_val').innerText = params.triplet_weights.residual.toFixed(0);

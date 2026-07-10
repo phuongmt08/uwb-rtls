@@ -1,5 +1,5 @@
 let ruleCounter = 0;
-const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 8;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 9;
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -424,6 +424,7 @@ function saveDefaults() {
         q_g: document.getElementById('ukf_qg_input').value,
         r_uwb: document.getElementById('ukf_ruwb_input').value,
         r_gate: document.getElementById('ukf_rgate_input').value,
+        yaw_map_offset_deg: document.getElementById('ukf_yaw_map_offset_input').value,
         triplet_w_d2: document.getElementById('triplet_w_d2_input').value,
         triplet_w_fp: document.getElementById('triplet_w_fp_input').value,
         triplet_w_resid: document.getElementById('triplet_w_resid_input').value,
@@ -566,6 +567,11 @@ function loadDefaults() {
                 document.getElementById('ukf_rgate_input').value = config.r_gate;
                 document.getElementById('ukf_rgate_range').value = config.r_gate;
                 document.getElementById('ukf_rgate_val').innerText = config.r_gate;
+            }
+            if (loadTuning && config.yaw_map_offset_deg !== undefined) {
+                document.getElementById('ukf_yaw_map_offset_input').value = config.yaw_map_offset_deg;
+                document.getElementById('ukf_yaw_map_offset_range').value = config.yaw_map_offset_deg;
+                document.getElementById('ukf_yaw_map_offset_val').innerText = parseFloat(config.yaw_map_offset_deg).toFixed(1);
             }
             if (loadTuning && config.triplet_w_d2 !== undefined) {
                 document.getElementById('triplet_w_d2_input').value = config.triplet_w_d2;

@@ -156,6 +156,9 @@ self.onmessage = function(e) {
         q_g: params.q_g,
         r_uwb: params.r_uwb,
         r_gate: params.r_gate,
+        yaw_map_offset_rad: ((Number.isFinite(params.yaw_map_offset_deg)
+            ? params.yaw_map_offset_deg
+            : SIM_CONFIG.FILTER.DEFAULT_YAW_MAP_OFFSET_DEG) * Math.PI / 180.0),
         min_frame_measurements: params.rescue_min_anchors || 3,
         tagHeight: tagHeight,
         max_update_position_step: SIM_CONFIG.FILTER.MAX_UWB_POS_CORRECTION,

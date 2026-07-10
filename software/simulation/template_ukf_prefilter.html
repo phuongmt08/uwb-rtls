@@ -277,6 +277,15 @@
                     </div>
                 </div>
             </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>Yaw->Map Offset (deg): <span id="ukf_yaw_map_offset_val" class="val">0.0</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="ukf_yaw_map_offset_range" min="-180" max="180" step="1" value="0" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="ukf_yaw_map_offset_input" min="-180" max="180" step="1" style="width:65px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="0" onchange="update()">
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div style="border-top: 1px solid #e2e8f0; margin-top: 25px; padding-top: 20px; margin-bottom: 15px;">
@@ -419,6 +428,7 @@ __APP_JS_BUNDLE__
         syncInput('ukf_qg_range', 'ukf_qg_input');
         syncInput('ukf_ruwb_range', 'ukf_ruwb_input');
         syncInput('ukf_rgate_range', 'ukf_rgate_input');
+        syncInput('ukf_yaw_map_offset_range', 'ukf_yaw_map_offset_input');
 
         // Sync Triplet Weight Inputs
         syncInput('triplet_w_d2_range', 'triplet_w_d2_input');
