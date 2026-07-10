@@ -70,8 +70,21 @@ class VvProtocol(_VvProtocol):
         return self._commands.sys_ranging_cfg_set(src, dst, seq, period_ms=period_ms, timeout_ms=timeout_ms)
     def build_sys_ranging_cfg_resp(self, src: int, dst: int, seq: int):
         return self._commands.sys_ranging_cfg_resp(src, dst, seq)
-    def build_ranging_start(self, src: int, dst: int, seq: int):
-        return self._commands.ranging_start(src, dst, seq)
+    def build_ranging_start(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        yaw_deg: int | float = 0,
+        is_ukf_reinit: bool = False,
+    ):
+        return self._commands.ranging_start(
+            src,
+            dst,
+            seq,
+            yaw_deg=yaw_deg,
+            is_ukf_reinit=is_ukf_reinit,
+        )
     def build_ranging_stop(self, src: int, dst: int, seq: int):
         return self._commands.ranging_stop(src, dst, seq)
     def build_ranging_result(self, src: int, dst: int, seq: int):

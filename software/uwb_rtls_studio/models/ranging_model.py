@@ -174,8 +174,13 @@ class RangingModel(QObject):
         """Public model command path used by ViewModels when no CommandBus is injected."""
         return self._send_command(command_name, dst_addr=dst_addr, **kwargs)
 
-    def start_ranging(self):
-        pkt = self._send_command("ranging_start", dst_addr=VvAddress.MCU)
+    def start_ranging(self, yaw_deg: int | float = 0, is_ukf_reinit: bool = False):
+        pkt = self._send_command(
+            "ranging_start",
+            dst_addr=VvAddress.MCU,
+            yaw_deg=yaw_deg,
+            is_ukf_reinit=is_ukf_reinit,
+        )
         self.is_ranging = True
         shared_app_state.ranging_active = True
         shared_app_state.update_job("ranging_session", JobState.RUNNING)

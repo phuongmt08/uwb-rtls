@@ -316,9 +316,17 @@ class CommandFactory:
         pkt.sys_ranging_cfg_resp.config.ranging_period_ms = 300
         return pkt
 
-    def ranging_start(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def ranging_start(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        yaw_deg: int | float = 0,
+        is_ukf_reinit: bool = False,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.ranging_start.dummy = 0
+        pkt.ranging_start.yaw_deg = int(round(float(yaw_deg))) % 360
+        pkt.ranging_start.is_ukf_reinit = bool(is_ukf_reinit)
         return pkt
 
     def ranging_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:

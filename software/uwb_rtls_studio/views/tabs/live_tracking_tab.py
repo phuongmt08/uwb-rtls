@@ -652,6 +652,8 @@ class LiveTrackingTab(QWidget):
             "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; background: transparent; }"
             "QDoubleSpinBox { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; "
             "border-radius: 6px; padding: 4px 6px; font-family: 'Consolas'; font-size: 13px; }"
+            "QCheckBox { color: #E2E8F0; font-weight: normal; spacing: 8px; }"
+            "QCheckBox::indicator { width: 15px; height: 15px; }"
         )
         layout = QFormLayout(self.yaw_offset_group)
         layout.setContentsMargins(10, 16, 10, 10)
@@ -662,9 +664,13 @@ class LiveTrackingTab(QWidget):
         self.yaw_offset_spin.setDecimals(1)
         self.yaw_offset_spin.setSingleStep(1.0)
         self.yaw_offset_spin.setSuffix(" deg")
-        self.yaw_offset_spin.setToolTip("Add this offset to the tag arrow yaw on the map.")
+        self.yaw_offset_spin.setToolTip("Yaw offset used locally and sent as ranging_start.yaw_deg when starting.")
         self.yaw_offset_spin.valueChanged.connect(self._on_yaw_offset_changed)
-        layout.addRow("Initial yaw:", self.yaw_offset_spin)
+        layout.addRow("Yaw offset:", self.yaw_offset_spin)
+
+        self.reinit_ukf_check = QCheckBox("Reinit UKF", self.yaw_offset_group)
+        self.reinit_ukf_check.setToolTip("Send ranging_start.is_ukf_reinit=true when starting.")
+        layout.addRow("", self.reinit_ukf_check)
 
         insert_at = self.right_panel.indexOf(self.separator_1) if hasattr(self, "separator_1") else -1
         if insert_at >= 0:
@@ -1023,7 +1029,9 @@ class LiveTrackingTab(QWidget):
 
     def _start_ranging(self):
         if self._vm:
-            self._vm.start_ranging()
+            yaw_deg = int(round(float(self.yaw_offset_spin.value()))) % 360
+            is_ukf_reinit = bool(self.reinit_ukf_check.isChecked())
+            self._vm.start_ranging(yaw_deg=yaw_deg, is_ukf_reinit=is_ukf_reinit)
 
     def _stop_ranging(self):
         if self._vm:
