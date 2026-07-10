@@ -28,7 +28,11 @@
 #endif
 
 #ifndef TEST_UKF_STREAM_UART
-#define TEST_UKF_STREAM_UART false
+#define TEST_UKF_STREAM_UART true
+#endif
+
+#ifndef TEST_UKF_DISTANCE_ZERO_SIMULATION
+#define TEST_UKF_DISTANCE_ZERO_SIMULATION 1
 #endif
 
 /* Public enumerate/structure ----------------------------------------- */
@@ -70,6 +74,10 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                   uint8_t selected_anchor_mask);
 
 void sys_sensor_fusion_report_error(void);
+
+void sys_sensor_fusion_clear_latest_anchor_metrics(void);
+
+void sys_sensor_fusion_reset_error(void);
 
 uint32_t sys_sensor_fusion_get_error_count(void);
 

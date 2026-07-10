@@ -123,7 +123,7 @@ unsigned long sys_update_inverse_err_count = 0;
 //
 static ukf_core_t ukf = {0};
 
-#if TEST_UKF_STREAM_BLE
+#if TEST_UKF_STREAM_BLE || TEST_UKF_STREAM_UART
 static uint32_t s_stream_test_sample_idx = 0U;
 #endif
 
@@ -219,6 +219,10 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
     sys_sensor_fusion_clear_predict_flag();
     reset_runtime_state();
 
+#if TEST_UKF_DISTANCE_ZERO_SIMULATION
+    ukf.initialized = true;
+#endif
+
     return SYS_SENSOR_FUSION_OK;
 }
 
@@ -234,6 +238,8 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
     uint32_t sys_predict_tick_ms = HAL_GetTick();
     float dt = calc_dt();
     s_fusion_dt = dt;
+
+#if ENABLE_SYS_FUSION
 	sys_predict_count++;
 
 	/* On the first frame imu_old is still zero-initialized; pair it with the
@@ -382,6 +388,9 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	ukf.imu_old = ukf.imu_current;
 
 	if (p_ukf != NULL) *p_ukf = ukf.state;
+
+#endif
+
     sys_sensor_fusion_stream_uart();
     sys_sensor_fusion_stream_ble();
     predict_delta_ms = HAL_GetTick() - sys_predict_tick_ms;
@@ -471,7 +480,6 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
         sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
         sys_sensor_fusion_set_predict_flag();
-        s_error_count = 0U;
         return true;
     }
 
@@ -492,6 +500,7 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         best_3_anchors[1].id,
         best_3_anchors[2].id
     };
+
     if (fusion_update( p_ukf,
                         (float)best_3_anchors[0].distance,
                         (float)best_3_anchors[1].distance,
@@ -500,15 +509,22 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         return false;
     }
 
-    s_error_count = 0U;
     return true;
 }
 
 void sys_sensor_fusion_report_error(void)
 {
     s_error_count++;
-//    s_latest_tril_x = 0.0f;
-//    s_latest_tril_y = 0.0f;
+}
+
+void sys_sensor_fusion_clear_latest_anchor_metrics(void)
+{
+    clear_latest_anchor_metrics();
+}
+
+void sys_sensor_fusion_reset_error(void)
+{
+    s_error_count = 0;
 }
 
 uint32_t sys_sensor_fusion_get_error_count(void)
@@ -521,7 +537,7 @@ void sys_sensor_fusion_reset(void)
     RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state from thread...");
     sys_sensor_fusion_clear_predict_flag();
     sys_sensor_fusion_clear_update_flag();
-
+    s_error_count = 0U;
     sys_sensor_fusion_data_t reset_state = {0};
     if (sys_sensor_fusion_init(&reset_state) != SYS_SENSOR_FUSION_OK)
     {
@@ -653,7 +669,7 @@ void sys_sensor_fusion_stream_ble()
 
 void sys_sensor_fusion_stream_uart()
 {
-#if TEST_SEND_POS
+#if TEST_UKF_STREAM_UART
     const float start_x = 1.0f;
     const float end_x   = 3.0f;
     const float start_y = 1.0f;
