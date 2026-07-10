@@ -13,6 +13,7 @@ const SIM_CONFIG = {
         DEFAULT_Q_G: 1.0e-6,
         DEFAULT_R_UWB: 0.05,
         DEFAULT_R_GATE: 0.10,
+        DEFAULT_YAW_MAP_OFFSET_DEG: 0.0,
         TRIPLET_W_D2: 0.35,
         TRIPLET_W_FP: 0.15,
         TRIPLET_W_RESIDUAL: 0.30,

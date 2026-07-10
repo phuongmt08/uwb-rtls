@@ -39,6 +39,36 @@
         .anchor-row strong { color: #1e293b; font-size: 0.85rem; grid-column: span 2; }
         .anchor-row label { text-transform: none; font-size: 0.7rem; }
         .anchor-row input { width: 100%; box-sizing: border-box; padding: 5px; border: 1px solid #cbd5e1; border-radius: 4px; }
+        #apply_btn {
+            background: #64748b;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            width: 100%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 8px;
+        }
+        #apply_btn.pending {
+            background: #8b5cf6;
+            animation: pulse 1.5s infinite;
+        }
+        #apply_btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        #apply_btn:active {
+            transform: translateY(1px);
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+        }
     </style>
 </head>
 <body>
@@ -106,6 +136,8 @@
                     <button onclick="exportTrajectoryCsv()" style="background: #8b5cf6; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Export CSV</button>
                     <button onclick="openReplayPage()" style="background: #7c3aed; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Replay Trajectory</button>
                 </div>
+
+                <button id="apply_btn" onclick="applyChanges()">Apply Changes</button>
 
                 <div style="display: flex; gap: 10px;">
                     <button onclick="saveDefaults()" style="flex: 1; background: #10b981; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Save Defaults</button>
@@ -277,6 +309,15 @@
                     </div>
                 </div>
             </div>
+            <div class="control-group">
+                <div class="control-item">
+                    <label>Yaw->Map Offset (deg): <span id="ukf_yaw_map_offset_val" class="val">0.0</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="range" id="ukf_yaw_map_offset_range" min="-180" max="180" step="1" value="0" style="flex-grow:1" oninput="update()">
+                        <input type="number" id="ukf_yaw_map_offset_input" min="-180" max="180" step="1" style="width:65px; padding:4px; border:1px solid #cbd5e1; border-radius:4px;" value="0" onchange="update()">
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div style="border-top: 1px solid #e2e8f0; margin-top: 25px; padding-top: 20px; margin-bottom: 15px;">
@@ -372,7 +413,11 @@
         <div id="path_loss" class="plot-md"></div>
     </div>
 
-    <div class="card"><h3 class="plot-title">Positioning Error (vs Ground Truth)</h3><div id="pos_error" class="plot-md"></div></div>
+    <div class="card">
+        <h3 class="plot-title">Positioning Error (vs Ground Truth)</h3>
+        <div id="pos_error" class="plot-md"></div>
+        <div id="position_error_metrics" class="stats-grid"></div>
+    </div>
     <div class="card"><h3 class="plot-title">Log Error Frames (CSV)</h3><div id="error_frame" class="plot-md"></div></div>
 
     <script>
@@ -419,6 +464,7 @@ __APP_JS_BUNDLE__
         syncInput('ukf_qg_range', 'ukf_qg_input');
         syncInput('ukf_ruwb_range', 'ukf_ruwb_input');
         syncInput('ukf_rgate_range', 'ukf_rgate_input');
+        syncInput('ukf_yaw_map_offset_range', 'ukf_yaw_map_offset_input');
 
         // Sync Triplet Weight Inputs
         syncInput('triplet_w_d2_range', 'triplet_w_d2_input');

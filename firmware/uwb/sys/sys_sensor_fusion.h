@@ -28,11 +28,11 @@
 #endif
 
 #ifndef TEST_UKF_STREAM_UART
-#define TEST_UKF_STREAM_UART true
+#define TEST_UKF_STREAM_UART false
 #endif
 
 #ifndef TEST_UKF_DISTANCE_ZERO_SIMULATION
-#define TEST_UKF_DISTANCE_ZERO_SIMULATION 1
+#define TEST_UKF_DISTANCE_ZERO_SIMULATION 0
 #endif
 
 /* Public enumerate/structure ----------------------------------------- */
@@ -104,6 +104,8 @@ sys_sensor_fusion_err_t sys_sensor_fusion_clear_predict_flag();
 bool sys_sensor_fusion_check_update_flag();
 
 bool sys_sensor_fusion_check_predict_flag();
+
+void sys_sensor_fusion_set_initial_yaw(uint32_t yaw_deg);
 
 #endif /* SYS_SENSOR_FUSION_H_ */
 

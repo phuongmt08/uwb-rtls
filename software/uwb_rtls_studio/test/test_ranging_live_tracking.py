@@ -55,6 +55,53 @@ def _fixed2(value: float) -> int:
     return int(round(value * 100.0))
 
 
+def test_ranging_start_factory_populates_init_yaw_and_ukf_reinit():
+    factory = CommandFactory()
+
+    pkt = factory.ranging_start(
+        pb.PACKET_ADDR_HOST,
+        pb.PACKET_ADDR_MCU,
+        7,
+        yaw_deg=91.7,
+        is_ukf_reinit=True,
+    )
+
+    assert pkt.WhichOneof("params") == "ranging_start"
+    assert pkt.ranging_start.yaw_deg == 92
+    assert pkt.ranging_start.is_ukf_reinit is True
+
+
+def test_ranging_model_start_ranging_sends_init_yaw_and_ukf_reinit():
+    app = _ensure_qt_app()
+    from models.ranging_model import RangingModel
+    from repository.ranging_repository import RangingRepository
+
+    class RecordingCommandBus:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, command_name, dst_addr=None, **kwargs):
+            self.sent.append((command_name, dst_addr, kwargs))
+            return object()
+
+    command_bus = RecordingCommandBus()
+    model = RangingModel(
+        protocol_service=None,
+        ranging_repo=RangingRepository(),
+        command_bus=command_bus,
+    )
+
+    model.start_ranging(yaw_deg=123, is_ukf_reinit=True)
+
+    assert len(command_bus.sent) == 1
+    command_name, dst_addr, kwargs = command_bus.sent[0]
+    assert command_name == "ranging_start"
+    assert dst_addr == VvAddress.MCU
+    assert kwargs == {"yaw_deg": 123, "is_ukf_reinit": True}
+    assert model.is_ranging is True
+    assert app is not None
+
+
 def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     app = _ensure_qt_app()
     from models.ranging_model import RangingModel

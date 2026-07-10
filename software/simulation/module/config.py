@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from typing import Tuple
 
 # TXT
-OUTPUT_TXT_ENABLED = False
+OUTPUT_TXT_ENABLED = True
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = None
+SOURCE_DATA_FILE = r"csv/05_07_26/20260705_14g05p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -184,20 +184,24 @@ LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
 # ==================== FUSION FRAME CONFIGURATION ====================
 # Matches firmware uart_fusion_frame_t:
 # sof, length, anchor_mask, tx_frame_cnt,
-# ukf_x, ukf_y, ukf_yaw, tril_x, tril_y, yaw, error_frame_cnt
+# ukf_x, ukf_y, ukf_yaw, tril_x, tril_y, yaw, ukf_step, error_frame_cnt
 # Position and yaw fields are int16 fixed-point values scaled by 100.
-FUSION_FRAME_FORMAT = '<BBBIhhhhhhI'
+FUSION_FRAME_FORMAT = '<BBBIhhhhhhBI'
 FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
 FUSION_FRAME_PAYLOAD_LEN = FUSION_FRAME_SIZE - 2
+FUSION_FRAME_NO_STEP_FORMAT = '<BBBIhhhhhhI'
+FUSION_FRAME_NO_STEP_SIZE = struct.calcsize(FUSION_FRAME_NO_STEP_FORMAT)
+FUSION_FRAME_NO_STEP_PAYLOAD_LEN = FUSION_FRAME_NO_STEP_SIZE - 2
 FUSION_FRAME_LEGACY_FORMAT = '<BBIhhhhhhI'
 FUSION_FRAME_LEGACY_SIZE = struct.calcsize(FUSION_FRAME_LEGACY_FORMAT)
 FUSION_FRAME_LEGACY_PAYLOAD_LEN = FUSION_FRAME_LEGACY_SIZE - 2
-FUSION_FRAME_MIN_SIZE = min(FUSION_FRAME_SIZE, FUSION_FRAME_LEGACY_SIZE)
+FUSION_FRAME_MIN_SIZE = min(FUSION_FRAME_SIZE, FUSION_FRAME_NO_STEP_SIZE, FUSION_FRAME_LEGACY_SIZE)
 FUSION_FRAME_LENGTH_TO_SIZE = {
+    FUSION_FRAME_LEGACY_PAYLOAD_LEN: FUSION_FRAME_LEGACY_SIZE,
+    FUSION_FRAME_NO_STEP_PAYLOAD_LEN: FUSION_FRAME_NO_STEP_SIZE,
+    FUSION_FRAME_NO_STEP_SIZE: FUSION_FRAME_NO_STEP_SIZE,
     FUSION_FRAME_PAYLOAD_LEN: FUSION_FRAME_SIZE,
     FUSION_FRAME_SIZE: FUSION_FRAME_SIZE,
-    FUSION_FRAME_LEGACY_PAYLOAD_LEN: FUSION_FRAME_LEGACY_SIZE,
-    FUSION_FRAME_LEGACY_SIZE: FUSION_FRAME_LEGACY_SIZE,
 }
 
 # ==================== IMU Q Process CONFIGURATION ====================
@@ -216,6 +220,9 @@ IMU_FRAME_SIZE = struct.calcsize(IMU_FRAME_FORMAT)
 # File naming
 CSV_UKF_FILENAME_PREFIX = "ukf_log_data"
 CSV_UKF_FILENAME_SUFFIX = ".csv"
+
+CSV_UKF_FUSION_FILENAME_PREFIX = "ukf_fusion_data"
+CSV_UKF_FUSION_FILENAME_SUFFIX = ".csv"
 
 # File naming
 CSV_IMU_FILENAME_PREFIX = "imu_log_data"

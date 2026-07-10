@@ -44,6 +44,7 @@ typedef struct {
     uint8_t quality_valid[8]; /**< Non-zero when FP quality metrics are valid */
     uint8_t count;            /**< Number of valid distance entries */
     uint8_t mask;             /**< Active anchor mask (valid ranging) */
+    uint32_t timestamp_ms;    /**< HAL_GetTick() timestamp at enqueue time */
 } uwb_distance_msg_t;
 
 /** UwbRanging → SensorFusion queue, item size follows uwb_distance_msg_t. */

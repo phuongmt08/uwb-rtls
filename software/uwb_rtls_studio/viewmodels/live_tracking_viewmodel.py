@@ -249,7 +249,7 @@ class LiveTrackingViewModel(QObject):
             return self._command_bus.send(command_name, **kwargs)
         return self.model.send_command(command_name, **kwargs)
 
-    def start_ranging(self) -> None:
+    def start_ranging(self, yaw_deg: int | float = 0, is_ukf_reinit: bool = False) -> None:
         # Gọi command tới BE từ ViewModel
         if self._session_run_manager:
             self._session_run_manager.open_ranging_run()
@@ -258,7 +258,7 @@ class LiveTrackingViewModel(QObject):
         self._pending_position_meta = None
         self._pending_sensor_fusion = None
         shared_raw_packet_store.clear()
-        self.model.start_ranging()
+        self.model.start_ranging(yaw_deg=yaw_deg, is_ukf_reinit=is_ukf_reinit)
         self.ranging_started.emit()
 
     def stop_ranging(self) -> None:

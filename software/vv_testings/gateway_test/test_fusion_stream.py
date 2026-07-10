@@ -15,6 +15,7 @@ from common.commands import CommandFactory
 from common.transport import VvAddress
 from vv_test_session import VvTestSession
 
+from serial import SerialException
 from serial.tools import list_ports
 
 
@@ -29,6 +30,8 @@ DEFAULT_EXPECTED_HZ = 100.0
 STREAM_RECV_TIMEOUT_S = 0.05
 STREAM_STAT_PERIOD_S = 1.0
 STOP_SESSION_DELAY_S = 0.2
+DEVICE_INFO_REPLY_TIMEOUT_S = 5.0
+CENTRAL_DONGLE_PROBE_PARAMS = ("ack", "device_information_resp")
 
 
 def _mac_to_str(mac: bytes) -> str:
@@ -45,34 +48,51 @@ def _parse_mac(mac: str) -> bytes:
         raise argparse.ArgumentTypeError("MAC contains non-hex byte") from exc
 
 
-def _score_dongle_port(port_info: list_ports.ListPortInfo) -> int:
-    desc = (port_info.description or "").lower()
-    manu = (port_info.manufacturer or "").lower()
-    hwid = (port_info.hwid or "").lower()
+def _print_serial_open_error(port: str, baud: int, exc: SerialException) -> None:
+    print(f"ERROR: could not open dongle serial port {port} @ {baud}: {exc}")
+    print("This usually means the port is already open in another program or the device was just unplugged/re-enumerated.")
+    print("Close UWB RTLS Studio, serial monitors, RTT Viewer/nRF tools, or any other test using the same COM port.")
+    print(f"Then retry, or pass the correct port explicitly: py ./test_fusion_stream.py --port {port}")
 
-    score = 0
-    if "j-link" in desc or "jlink" in desc or "segger" in manu:
-        score += 8
-    if "nordic" in desc or "nordic" in manu or "nrf" in desc:
-        score += 6
-    if "usb" in desc or "usb" in manu:
-        score += 3
-    if "serial" in desc or "com" in desc:
-        score += 2
-    if "bluetooth" in desc:
-        score -= 6
-    if "vid:pid=1366" in hwid:
-        score += 8
-    return score
-
-
-def _auto_select_dongle_port() -> str | None:
     ports = list(list_ports.comports())
-    ports.sort(key=_score_dongle_port, reverse=True)
+    if not ports:
+        print("No COM ports are currently visible.")
+        return
+
+    print("Visible COM ports:")
     for port_info in ports:
-        if _score_dongle_port(port_info) > 0:
-            return port_info.device
-    return None
+        desc = port_info.description or "n/a"
+        manu = port_info.manufacturer or "n/a"
+        print(f"  {port_info.device}: {desc} ({manu})")
+
+
+def _probe_dongle_port(baud: int, verbose: bool) -> tuple[str, int] | None:
+    print("[*] Probing for Central Dongle COM port automatically...")
+    probe = VvTestSession.auto_probe(
+        src=DEFAULT_SRC,
+        dst=DEFAULT_CENTRAL_DST,
+        expected_params=CENTRAL_DONGLE_PROBE_PARAMS,
+        retries=3,
+        debug=verbose,
+    )
+    if probe is None:
+        print("ERROR: no central dongle responded on available COM ports")
+        print("Connect the Central Dongle, close other serial tools, or pass the port explicitly:")
+        print("  py ./test_fusion_stream.py --port COM28")
+        return None
+
+    print(f"[+] Found Central Dongle: {probe.port} @ {probe.baud}")
+    return probe.port, probe.baud or baud
+
+
+def _disconnect_ble_quietly(session: VvTestSession) -> None:
+    print("\n[-] Disconnecting BLE...")
+    try:
+        factory = CommandFactory()
+        session.send_packet(factory.ble_disconnect(DEFAULT_SRC, DEFAULT_CENTRAL_DST, session.proto.next_seq()))
+        time.sleep(0.2)
+    except Exception as exc:
+        print(f"[WARNING] Could not send BLE disconnect: {exc}")
 
 
 def _ble_state_name(session: VvTestSession, state: int) -> str:
@@ -302,42 +322,48 @@ def _poll_stop_hotkey() -> bool:
     return False
 
 
+def _wait_device_information_reply(session: VvTestSession, verbose: bool) -> bool:
+    print("\n-- STEP 3: Send MCU device_information_get --")
+    pkt = _build_device_information_get(session)
+    session.send_packet(pkt)
+    print(
+        "[+] Sent device_information_get "
+        f"src={DEFAULT_SRC} dst={DEFAULT_MCU_DST} seq={pkt.hdr.seq}; "
+        f"waiting {DEVICE_INFO_REPLY_TIMEOUT_S:.1f}s for MCU reply..."
+    )
+
+    deadline = time.time() + DEVICE_INFO_REPLY_TIMEOUT_S
+    while time.time() < deadline:
+        for resp in session.recv_packets(timeout_s=0.1):
+            msg = resp.WhichOneof("params")
+            src = int(resp.hdr.addr.src)
+            dst = int(resp.hdr.addr.dst)
+            if verbose:
+                print(f"RX {msg} src={src} dst={dst} seq={resp.hdr.seq}")
+
+            if src != DEFAULT_MCU_DST:
+                continue
+
+            if msg == "device_information_resp":
+                info = resp.device_information_resp
+                print(
+                    "[OK] MCU device_information_resp "
+                    f"serial={info.serial_number} type={info.device_type} role={info.role} hw={info.hw_version}"
+                )
+            else:
+                print(f"[OK] Received MCU reply packet: {msg}")
+            return True
+
+    print("ERROR: No MCU reply packet received after device_information_get.")
+    return False
+
+
 def _run_stream(session: VvTestSession, seconds: float, verbose: bool, control_ranging: bool) -> bool:
-    success = False
-    for attempt in range(1, 4):
-        pkt = _build_device_information_get(session)
-        session.send_packet(pkt)
-        if verbose:
-            print(f"TX device_information_get seq={pkt.hdr.seq}")
-
-        deadline = time.time() + 2.0
-        while time.time() < deadline:
-            for resp in session.recv_packets(timeout_s=0.1):
-                msg = resp.WhichOneof("params")
-                if msg == "device_information_resp":
-                    info = resp.device_information_resp
-                    print(
-                        "MCU device_information_resp "
-                        f"serial={info.serial_number} type={info.device_type} role={info.role} hw={info.hw_version}"
-                    )
-                    success = True
-                    break
-                if verbose:
-                    print(f"RX {msg} src={resp.hdr.addr.src} dst={resp.hdr.addr.dst} seq={resp.hdr.seq}")
-            if success:
-                break
-        if success:
-            break
-        if attempt < 3:
-            print(f"Retrying device_information_get (attempt {attempt + 1}/3)...")
-            time.sleep(0.5)
-
-    if not success:
-        print("ERROR: Failed to get MCU device information and set ble_connection_active flag.")
+    if not _wait_device_information_reply(session, verbose):
         return False
 
     if control_ranging:
-        print("\n-- STEP 3: Start MCU ranging --")
+        print("\n-- Start MCU ranging --")
         _send_ranging_cmd(session, start=True, verbose=verbose)
         time.sleep(0.2)
 
@@ -386,6 +412,7 @@ def _run_stream(session: VvTestSession, seconds: float, verbose: bool, control_r
                 last_stat = now
     except KeyboardInterrupt:
         print("\n[!] User interrupted with Ctrl+C")
+        raise
     finally:
         if control_ranging:
             _send_ranging_cmd(session, start=False, verbose=verbose)
@@ -447,27 +474,35 @@ def main() -> int:
     port = args.port
     baud = args.baud
     if port is None:
-        port = _auto_select_dongle_port()
-        if port is None:
-            print("ERROR: no central dongle USB serial port found")
-            print("Pass the port explicitly, for example: py ./test_fusion_stream.py --port COM28")
+        probe = _probe_dongle_port(baud, args.verbose)
+        if probe is None:
             return 1
-        print(f"Selected dongle: {port} @ {baud}")
+        port, baud = probe
     else:
         print(f"Using dongle: {port} @ {baud}")
 
-    with VvTestSession(port, baud=baud, debug=args.verbose) as session:
-        ok = run(
-            session,
-            args.seconds,
-            args.verbose,
-            control_ranging=not args.no_control,
-            scan_timeout_s=args.scan_timeout,
-            connect_timeout_s=args.connect_timeout,
-            target_mac=args.mac,
-            name_filter=args.name,
-            skip_connect=args.skip_connect,
-        )
+    try:
+        with VvTestSession(port, baud=baud, debug=args.verbose) as session:
+            try:
+                ok = run(
+                    session,
+                    args.seconds,
+                    args.verbose,
+                    control_ranging=not args.no_control,
+                    scan_timeout_s=args.scan_timeout,
+                    connect_timeout_s=args.connect_timeout,
+                    target_mac=args.mac,
+                    name_filter=args.name,
+                    skip_connect=args.skip_connect,
+                )
+            finally:
+                _disconnect_ble_quietly(session)
+    except KeyboardInterrupt:
+        print("\n[*] Stopping...")
+        return 0
+    except SerialException as exc:
+        _print_serial_open_error(port, baud, exc)
+        return 1
 
     print("FUSION STREAM OK" if ok else "FUSION STREAM FAILED")
     return 0 if ok else 2

@@ -198,8 +198,8 @@ def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
         csv_writer.writerow([line])
         return "Init", frame_data['distances'].copy()
         
-    all_distances_zero = all(abs(d) < 1e-6 for d in frame_data['distances'])
     status = "Predict"
+    all_distances_zero = all(abs(d) < 1e-6 for d in frame_data['distances'])
     if not all_distances_zero:
         if prev_distances is not None:
             distances_changed = False
@@ -222,6 +222,26 @@ def write_uwb_frame_to_csv(csv_writer, frame_data, rx_cnt):
     line = f"{counter_str} d1: {d[0]:9.6f} d2: {d[1]:9.6f} d3: {d[2]:9.6f} d4: {d[3]:9.6f}"
     csv_writer.writerow([line])
     return line
+
+def write_fusion_frame_to_csv(csv_writer, frame_data, rx_cnt):
+    counter_str = f"({rx_cnt:4d}/{frame_data['tx_frame_cnt']:4d})"
+    ukf_step = int(frame_data.get('ukf_step', frame_data.get('error_count', 0)))
+    status = "Update" if ukf_step == 1 else "Predict"
+    line = (
+        f"{counter_str} {status:7s} "
+        f"ukf_step: {ukf_step} "
+        f"dt: {frame_data.get('dt', 0.0):9.6f} "
+        f"ukf_x: {frame_data['ukf_x']:9.6f} "
+        f"ukf_y: {frame_data['ukf_y']:9.6f} "
+        f"ukf_yaw: {frame_data['ukf_yaw']:9.6f} "
+        f"tril_x: {frame_data['tril_x']:9.6f} "
+        f"tril_y: {frame_data['tril_y']:9.6f} "
+        f"yaw: {frame_data['yaw']:9.6f} "
+        f"mask: {frame_data.get('anchor_mask', 0)} "
+        f"err: {frame_data.get('error_count', frame_data.get('err_cnt', 0))}"
+    )
+    csv_writer.writerow([line])
+    return status
 
 def print_frame_data(frame_data):
     print(f"Frame #{frame_data['tx_frame_cnt']}: "

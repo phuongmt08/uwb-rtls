@@ -21,6 +21,7 @@
     #include "app_calib_master.h"
     #include "app_rtos_handles.h"
     #include "version.h"
+    #include "sys_sensor_fusion.h"
 #else
     #include "sys_logger_bl.h"
     #include "otp/otp.h"
@@ -643,7 +644,19 @@ static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt)
 static void network_cmd_ranging_start(const protobuf_packet_t *pkt)
 {
     (void)pkt;
-    if (!network_cmd_set_ranging_enabled(true)) {
+
+    if (sys_config_get()->uwb.role == DEVICE_ROLE_TAG)
+    {
+        if(pkt->params.ranging_start.is_ukf_reinit) 
+        {
+            app_rtos_request_sensor_fusion_reset();
+        }
+
+        sys_sensor_fusion_set_initial_yaw(pkt->params.ranging_start.yaw_deg);
+    }
+
+    if (!network_cmd_set_ranging_enabled(true)) 
+    {
         RLOG_W(OBJECT_CODE, "ranging_start rejected by platform");
     }
 }
@@ -1612,9 +1625,7 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
 {
     CHECK(stream && data, false);
     CHECK(network_cmd_is_ranging_enabled(), false);
-#if !defined(TEST_UKF_STREAM_BLE) || (TEST_UKF_STREAM_BLE == 0)
     CHECK(network_cmd_is_ble_host_active(), false);
-#endif
 
 
     uint32_t now = bsp_util_get_ticks();

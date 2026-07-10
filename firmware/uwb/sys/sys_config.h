@@ -77,13 +77,13 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            32     /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            34     /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_HOST_TRANSPORT    HOST_TRANSPORT_USB
 #define DEFAULT_DEVICE_ID         0x03
-#define DEFAULT_RANGING_PERIOD_MS 75
+#define DEFAULT_RANGING_PERIOD_MS 71     /* ~14.1Hz target update rate */
 #define DEFAULT_RX_TIMEOUT_MS     60
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
@@ -97,7 +97,7 @@ typedef struct
 #define DEFAULT_TX_POWER          0x3A5A7A9AUL /* ~-14.5 dBm with smart power on */
 #define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_DEEP_ECO
 #define DEFAULT_UWB_PREAMBLE_LEN  0x34 /* DWT_PLEN_512 */
-#define DEFAULT_UWB_RX_PAC        1    /* DWT_PAC16 */
+#define DEFAULT_UWB_RX_PAC        2    /* DWT_PAC32: recommended for DWT_PLEN_512 */
 #define DEFAULT_UWB_NS_SFD        1
 #define DEFAULT_UWB_PHR_MODE      0    /* DWT_PHRMODE_STD */
 #define DEFAULT_SMART_TX_POWER    true

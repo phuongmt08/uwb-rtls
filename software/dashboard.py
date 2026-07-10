@@ -30,10 +30,20 @@ import time
 class UDPReceiver(QThread):
     """Thread to receive UDP data"""
     position_received = pyqtSignal(dict)
-    FUSION_FRAME_FORMAT = '<BBIhhhhhhI'
+    FUSION_FRAME_FORMAT = '<BBBIhhhhhhI'
     FUSION_FRAME_SIZE = struct.calcsize(FUSION_FRAME_FORMAT)
     FUSION_FRAME_PAYLOAD_SIZE = FUSION_FRAME_SIZE - 2
     FUSION_FRAME_LEGACY_PAYLOAD_SIZE = FUSION_FRAME_SIZE
+    FUSION_FRAME_OLD_FORMAT = '<BBIhhhhhhI'
+    FUSION_FRAME_OLD_SIZE = struct.calcsize(FUSION_FRAME_OLD_FORMAT)
+    FUSION_FRAME_OLD_PAYLOAD_SIZE = FUSION_FRAME_OLD_SIZE - 2
+    FUSION_FRAME_OLD_LEGACY_PAYLOAD_SIZE = FUSION_FRAME_OLD_SIZE
+    FUSION_FRAME_LENGTH_TO_SIZE = {
+        FUSION_FRAME_PAYLOAD_SIZE: FUSION_FRAME_SIZE,
+        FUSION_FRAME_LEGACY_PAYLOAD_SIZE: FUSION_FRAME_SIZE,
+        FUSION_FRAME_OLD_PAYLOAD_SIZE: FUSION_FRAME_OLD_SIZE,
+        FUSION_FRAME_OLD_LEGACY_PAYLOAD_SIZE: FUSION_FRAME_OLD_SIZE,
+    }
 
     @staticmethod
     def decode_fixed2(value):
@@ -58,38 +68,51 @@ class UDPReceiver(QThread):
                     data, addr = self.sock.recvfrom(1024)
                     
                     try:
-                        if len(data) == self.FUSION_FRAME_SIZE and data[0] == 0xAA:
-                            (
-                                sof, payload_len, tx_frame_cnt,
-                                ukf_x, ukf_y, ukf_yaw,
-                                tril_x, tril_y, yaw,
-                                error_frame_cnt
-                            ) = struct.unpack(self.FUSION_FRAME_FORMAT, data)
+                        if len(data) >= 2 and data[0] == 0xAA:
+                            frame_size = self.FUSION_FRAME_LENGTH_TO_SIZE.get(data[1])
+                            if frame_size is not None and len(data) == frame_size:
+                                if frame_size == self.FUSION_FRAME_SIZE:
+                                    (
+                                        sof, payload_len, anchor_mask, tx_frame_cnt,
+                                        ukf_x, ukf_y, ukf_yaw,
+                                        tril_x, tril_y, yaw,
+                                        error_frame_cnt
+                                    ) = struct.unpack(self.FUSION_FRAME_FORMAT, data)
+                                else:
+                                    (
+                                        sof, payload_len, tx_frame_cnt,
+                                        ukf_x, ukf_y, ukf_yaw,
+                                        tril_x, tril_y, yaw,
+                                        error_frame_cnt
+                                    ) = struct.unpack(self.FUSION_FRAME_OLD_FORMAT, data)
+                                    anchor_mask = 0
+                            else:
+                                print(f"Warning: Fusion frame length mismatch (len_field={data[1]}, received={len(data)} bytes).")
+                                frame_size = None
 
-                            if payload_len not in (self.FUSION_FRAME_PAYLOAD_SIZE, self.FUSION_FRAME_LEGACY_PAYLOAD_SIZE):
-                                print(f"Warning: Fusion frame length field mismatch ({payload_len} bytes).")
+                            if frame_size is not None:
+                                position = {
+                                    'x': self.decode_fixed2(ukf_x),
+                                    'y': self.decode_fixed2(ukf_y),
+                                    'z': 0.0,
+                                    'sof': sof,
+                                    'length': payload_len,
+                                    'anchor_mask': anchor_mask,
+                                    'ukf_x': self.decode_fixed2(ukf_x),
+                                    'ukf_y': self.decode_fixed2(ukf_y),
+                                    'ukf_yaw': self.decode_fixed2(ukf_yaw),
+                                    'tril_x': self.decode_fixed2(tril_x),
+                                    'tril_y': self.decode_fixed2(tril_y),
+                                    'yaw': self.decode_fixed2(yaw),
+                                    'tx_frame_cnt': tx_frame_cnt,
+                                    'error_frame_cnt': error_frame_cnt,
+                                    'err_cnt': error_frame_cnt,
+                                    'error': 0.0,
+                                    'frame_type': 'fusion'
+                                }
 
-                            position = {
-                                'x': self.decode_fixed2(ukf_x),
-                                'y': self.decode_fixed2(ukf_y),
-                                'z': 0.0,
-                                'sof': sof,
-                                'length': payload_len,
-                                'ukf_x': self.decode_fixed2(ukf_x),
-                                'ukf_y': self.decode_fixed2(ukf_y),
-                                'ukf_yaw': self.decode_fixed2(ukf_yaw),
-                                'tril_x': self.decode_fixed2(tril_x),
-                                'tril_y': self.decode_fixed2(tril_y),
-                                'yaw': self.decode_fixed2(yaw),
-                                'tx_frame_cnt': tx_frame_cnt,
-                                'error_frame_cnt': error_frame_cnt,
-                                'err_cnt': error_frame_cnt,
-                                'error': 0.0,
-                                'frame_type': 'fusion'
-                            }
-
-                            self.position_received.emit(position)
-                            continue
+                                self.position_received.emit(position)
+                                continue
 
                         # Try parsing as string format: Position(x=..., y=..., vx=..., vy=..., yaw=..., err=..., dists=[...])
                         msg = data.decode('utf-8').strip()
@@ -546,7 +569,7 @@ class MainWindow(QMainWindow):
             'ukf_x': 0, 'ukf_y': 0, 'ukf_yaw': 0,
             'tril_x': 0, 'tril_y': 0, 'yaw': 0,
             'sof': 0xAA, 'length': UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE, 'tx_frame_cnt': 0,
-            'error_frame_cnt': 0, 'err_cnt': 0, 'error': 0
+            'anchor_mask': 0, 'error_frame_cnt': 0, 'err_cnt': 0, 'error': 0
         }
         self.frame_count = 0
         self.start_time = time.time()
@@ -825,7 +848,8 @@ class MainWindow(QMainWindow):
         groups = [
             ("FRAME", [
                 ("SOF:", "sof_label", "#60a5fa", ""),
-                ("Length:", "length_label", "#60a5fa", "bytes")
+                ("Length:", "length_label", "#60a5fa", "bytes"),
+                ("Mask:", "anchor_mask_label", "#a78bfa", "")
             ]),
             ("COUNTERS", [
                 ("Tx Frames:", "tx_frame_cnt_label", "#2dd4bf", ""),
@@ -1029,6 +1053,8 @@ class MainWindow(QMainWindow):
         
         self.sof_label.setText(f"0x{position.get('sof', 0xAA):02X}")
         self.length_label.setText(f"{position.get('length', UDPReceiver.FUSION_FRAME_PAYLOAD_SIZE)} bytes")
+        anchor_mask = int(position.get('anchor_mask', 0) or 0)
+        self.anchor_mask_label.setText(f"0x{anchor_mask:02X} ({anchor_mask:08b})")
         self.tx_frame_cnt_label.setText(str(position.get('tx_frame_cnt', 0)))
         self.error_frame_cnt_label.setText(str(position.get('error_frame_cnt', 0)))
 

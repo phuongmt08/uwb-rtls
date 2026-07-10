@@ -40,6 +40,8 @@ software/simulation/**/*_sim.html
 software/simulation/**/*.txt
 software/simulation/**/*_log_data.html
 software/simulation/simulation_dashboard.html
+software/simulation/fusion_frame_dashboard.html
+software/simulation/simulation_dashboard/
 
 # Programmer builds
 software/uwb_rtls_programmer/execution/*.exe
