@@ -133,6 +133,9 @@ class UnscentedKalmanFilter {
         this.q_g = config.q_g !== undefined ? config.q_g : 4.78e-7;
         this.r_uwb = config.r_uwb !== undefined ? config.r_uwb : 0.01;
         this.r_gate = config.r_gate !== undefined ? config.r_gate : this.r_uwb;
+        this.yaw_map_offset_rad = Number.isFinite(config.yaw_map_offset_rad)
+            ? config.yaw_map_offset_rad
+            : 0.0;
         this.use_planar_ranges = config.use_planar_ranges !== undefined
             ? config.use_planar_ranges
             : true;
@@ -315,8 +318,9 @@ class UnscentedKalmanFilter {
             const corrected_gz = imuGz - bgz + n_gz;
 
             const theta_new = normalizeAngle(theta + corrected_gz * dt);
-            const cos_t = Math.cos(theta);
-            const sin_t = Math.sin(theta);
+            const theta_for_accel = theta + this.yaw_map_offset_rad;
+            const cos_t = Math.cos(theta_for_accel);
+            const sin_t = Math.sin(theta_for_accel);
             
             const ax_world = corrected_ax * cos_t - corrected_ay * sin_t;
             const ay_world = corrected_ax * sin_t + corrected_ay * cos_t;

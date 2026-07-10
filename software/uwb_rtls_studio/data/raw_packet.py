@@ -37,7 +37,18 @@ class RawPacket:
         try:
             one = packet.WhichOneof("params")
             payload_msg = getattr(packet, one, packet) if one else packet
-            parsed_dict = MessageToDict(payload_msg, preserving_proto_field_name=True)
+            try:
+                parsed_dict = MessageToDict(
+                    payload_msg,
+                    preserving_proto_field_name=True,
+                    always_print_fields_with_no_presence=True,
+                )
+            except TypeError:
+                parsed_dict = MessageToDict(
+                    payload_msg,
+                    preserving_proto_field_name=True,
+                    including_default_value_fields=True,
+                )
         except Exception:
             parsed_dict = {}
 

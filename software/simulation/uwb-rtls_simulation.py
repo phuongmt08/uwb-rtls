@@ -13,6 +13,25 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# --- METADATA CACHE ---
+CACHE_FILE = os.path.join(BASE_DIR, '.simulation_metadata_cache.json')
+
+def load_metadata_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_metadata_cache(cache):
+    try:
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 GT_SQUARE = {
     'x': [2.44, 7.32, 7.32, 2.44, 2.44],
     'y': [2.44, 2.44, 7.32, 7.32, 2.44]
@@ -510,7 +529,8 @@ def main():
     app_js_bundle = load_app_js_bundle()
     worker_js_bundle = load_worker_js_bundle()
 
-    files_generated = 0
+    metadata_cache = load_metadata_cache()
+    cache_dirty = False
     sim_results = []
     for lp in logs:
         try:
@@ -528,26 +548,39 @@ def main():
             
             needs_gen = not html_exists or log_mtime > html_mtime or report_source_mtime > html_mtime
             
-            p = run_gen(lp)
-            if not p: continue
-            ground_truths = load_ground_truths(p)
+            # Look up metadata in cache
+            rel_csv_path = os.path.relpath(lp, BASE_DIR).replace('\\', '/')
+            cached_item = metadata_cache.get(rel_csv_path)
             
-            if needs_gen:
-                os.makedirs(os.path.dirname(rp), exist_ok=True)
-                with open(rp, 'w', encoding='utf-8') as f:
-                    f.write(render_template(template_content, fn, p, ground_truths, app_js_bundle, worker_js_bundle))
-                files_generated += 1
+            if cached_item and cached_item.get('mtime') == log_mtime:
+                num_updates = cached_item['samples']
+                thumb_svg = cached_item['thumb']
+            else:
+                p = run_gen(lp)
+                if not p: continue
+                num_updates = len([e for e in p['all_entries'] if e['type'] == 'Update'])
+                thumb_svg = p['thumb_svg']
                 
-            num_updates = len([e for e in p['all_entries'] if e['type'] == 'Update'])
+                metadata_cache[rel_csv_path] = {
+                    'mtime': log_mtime,
+                    'samples': num_updates,
+                    'thumb': thumb_svg
+                }
+                cache_dirty = True
+                
             sim_results.append({
                 'name': fn,
                 'path': os.path.relpath(rp, BASE_DIR).replace('\\', '/'),
                 'samples': num_updates,
-                'thumb': p['thumb_svg']
+                'thumb': thumb_svg,
+                'needs_gen': needs_gen
             })
         except Exception as e:
             import traceback
             traceback.print_exc()
+
+    if cache_dirty:
+        save_metadata_cache(metadata_cache)
 
 
     # Group results by folder (date)
@@ -670,10 +703,7 @@ def main():
     with open(os.path.join(BASE_DIR, "simulation_dashboard.html"), 'w', encoding='utf-8') as f:
         f.write(dashboard_html)
     
-    if files_generated > 0:
-        print(f"\n[SUCCESS] Generated {files_generated} new simulation files.")
-    else:
-        print(f"\n[INFO] All {len(sim_results)} simulation files are up to date.")
+    print(f"\n[INFO] Loaded {len(sim_results)} simulation logs.")
     print(f"[INFO] Dashboard: {os.path.join(BASE_DIR, 'simulation_dashboard.html')}")
 
     # --- AUTO SERVER & BROWSER ---
@@ -681,6 +711,54 @@ def main():
     MAX_TRIES = 10
 
     class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            import urllib.parse
+            # Parse requested path
+            parsed_url = urllib.parse.urlparse(self.path)
+            # Remove leading slash and unquote URL-encoded path
+            rel_path = urllib.parse.unquote(parsed_url.path).lstrip('/')
+            
+            # Check if this is a simulation report request
+            if rel_path.endswith('_sim.html'):
+                # Map to potential CSV log path
+                lp = None
+                if rel_path.startswith('logs_data_reports/'):
+                    csv_name = os.path.basename(rel_path).replace('_sim.html', '.csv')
+                    lp = os.path.join(logs_data_dir, csv_name)
+                else:
+                    lp = os.path.join(BASE_DIR, rel_path.replace('_sim.html', '.csv'))
+                
+                if lp and os.path.exists(lp):
+                    # Check if it needs regeneration
+                    log_mtime = os.path.getmtime(lp)
+                    rp = os.path.join(BASE_DIR, rel_path)
+                    html_exists = os.path.exists(rp)
+                    html_mtime = os.path.getmtime(rp) if html_exists else 0
+                    
+                    needs_gen = not html_exists or log_mtime > html_mtime or report_source_mtime > html_mtime
+                    
+                    if needs_gen:
+                        print(f"[SERVER] Generating simulation report on-demand for: {os.path.basename(lp)}")
+                        p = run_gen(lp)
+                        if p:
+                            os.makedirs(os.path.dirname(rp), exist_ok=True)
+                            with open(rp, 'w', encoding='utf-8') as f:
+                                gts = load_ground_truths(p)
+                                f.write(render_template(template_content, os.path.basename(lp), p, gts, app_js_bundle, worker_js_bundle))
+                            print(f"[SERVER] Successfully generated: {os.path.basename(rp)}")
+                            
+                            # Update the metadata cache
+                            rel_csv_path = os.path.relpath(lp, BASE_DIR).replace('\\', '/')
+                            num_updates = len([e for e in p['all_entries'] if e['type'] == 'Update'])
+                            metadata_cache[rel_csv_path] = {
+                                'mtime': log_mtime,
+                                'samples': num_updates,
+                                'thumb': p['thumb_svg']
+                            }
+                            save_metadata_cache(metadata_cache)
+            
+            super().do_GET()
+
         def end_headers(self):
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
             self.send_header("Pragma", "no-cache")

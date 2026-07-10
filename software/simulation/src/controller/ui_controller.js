@@ -82,6 +82,7 @@ function runSimulation() {
         q_g: parseFloat(document.getElementById('ukf_qg_range').value),
         r_uwb: parseFloat(document.getElementById('ukf_ruwb_range').value),
         r_gate: parseFloat(document.getElementById('ukf_rgate_range').value),
+        yaw_map_offset_deg: parseFloat(document.getElementById('ukf_yaw_map_offset_range').value),
         triplet_weights: {
             d2: parseFloat(document.getElementById('triplet_w_d2_range').value),
             fp_amp: parseFloat(document.getElementById('triplet_w_fp_range').value),
@@ -120,6 +121,7 @@ function runSimulation() {
     document.getElementById('ukf_qg_val').innerText    = params.q_g.toExponential(3);
     document.getElementById('ukf_ruwb_val').innerText  = params.r_uwb.toFixed(3);
     document.getElementById('ukf_rgate_val').innerText = params.r_gate.toFixed(3);
+    document.getElementById('ukf_yaw_map_offset_val').innerText = params.yaw_map_offset_deg.toFixed(1);
     document.getElementById('triplet_w_d2_val').innerText = params.triplet_weights.d2.toFixed(0);
     document.getElementById('triplet_w_fp_val').innerText = params.triplet_weights.fp_amp.toFixed(0);
     document.getElementById('triplet_w_resid_val').innerText = params.triplet_weights.residual.toFixed(0);
@@ -149,6 +151,9 @@ function runSimulation() {
         rawData, anchors, groundTruth: activeGroundTruth, tagHeight,
         params, rules, max_samples
     });
+
+    hasChanges = false;
+    updateApplyButtonState();
 }
 
 function openReplayPage() {
@@ -193,8 +198,111 @@ function openReplayPage() {
     window.open('/trajectory_replay.html', '_blank');
 }
 
+let hasChanges = false;
+
+function updateLabels() {
+    if (!rawData) return;
+    const t2_high = parseFloat(document.getElementById('t2_high_range').value);
+    const t2_low = parseFloat(document.getElementById('t2_low_range').value);
+    const rescueNoiseMax = Math.min(5.0, Math.max(0.01, parseFloat(document.getElementById('r_range').value)));
+    const win_range = parseInt(document.getElementById('win_range').value);
+    const zupt_acc = parseFloat(document.getElementById('zupt_acc_range').value);
+    const zupt_gyr = parseFloat(document.getElementById('zupt_gyr_range').value);
+
+    const imuTiming = estimateImuTiming(rawData.all_entries);
+    const cutoffLimit = Math.max(0.05, imuTiming.nyquist_hz * SIM_CONFIG.IMU.CUTOFF_NYQUIST_MARGIN);
+    const cutoffInputValue = parseFloat(document.getElementById('imu_lpf_cutoff_range').value);
+    const requestedCutoff = Number.isFinite(cutoffInputValue) ? cutoffInputValue : SIM_CONFIG.IMU.DEFAULT_LPF_CUTOFF_HZ;
+    const imuCutoffHz = Math.min(Math.max(0.05, requestedCutoff), cutoffLimit);
+    const imuFilterOrder = Math.min(
+        SIM_CONFIG.IMU.MAX_FILTER_ORDER,
+        Math.max(SIM_CONFIG.IMU.MIN_FILTER_ORDER, parseInt(document.getElementById('imu_filter_order_range').value) || SIM_CONFIG.IMU.DEFAULT_FILTER_ORDER)
+    );
+
+    const ukf_alpha = parseFloat(document.getElementById('ukf_alpha_range').value);
+    const ukf_beta = parseFloat(document.getElementById('ukf_beta_range').value);
+    const ukf_kappa = parseFloat(document.getElementById('ukf_kappa_range').value);
+    const q_a = parseFloat(document.getElementById('ukf_qa_range').value);
+    const q_g = parseFloat(document.getElementById('ukf_qg_range').value);
+    const r_uwb = parseFloat(document.getElementById('ukf_ruwb_range').value);
+    const r_gate = parseFloat(document.getElementById('ukf_rgate_range').value);
+    const yaw_map_offset_deg = parseFloat(document.getElementById('ukf_yaw_map_offset_range').value);
+
+    const triplet_w_d2 = parseFloat(document.getElementById('triplet_w_d2_range').value);
+    const triplet_w_fp = parseFloat(document.getElementById('triplet_w_fp_range').value);
+    const triplet_w_resid = parseFloat(document.getElementById('triplet_w_resid_range').value);
+    const triplet_w_dist = parseFloat(document.getElementById('triplet_w_dist_range').value);
+    const triplet_switch_margin = parseFloat(document.getElementById('triplet_switch_margin_range').value);
+    const triplet_switch_score_eps = parseFloat(document.getElementById('triplet_switch_eps_range').value);
+
+    let max_samples = parseInt(document.getElementById('max_samples_range').value);
+    if (isNaN(max_samples)) max_samples = rawData.all_entries.length;
+
+    const t_height = parseFloat(document.getElementById('tag_height_range').value);
+
+    // Update UI elements
+    document.getElementById('t2_high_val').innerText = t2_high;
+    document.getElementById('t2_low_val').innerText  = t2_low;
+    document.getElementById('r_val').innerText       = rescueNoiseMax;
+    document.getElementById('win_val').innerText     = win_range;
+    document.getElementById('zupt_acc_val').innerText = zupt_acc;
+    document.getElementById('zupt_gyr_val').innerText = zupt_gyr;
+    document.getElementById('imu_lpf_cutoff_val').innerText = imuCutoffHz.toFixed(2);
+    document.getElementById('imu_filter_order_val').innerText = imuFilterOrder;
+    document.getElementById('imu_filter_nyquist_val').innerText = Number.isFinite(imuTiming.nyquist_hz) ? imuTiming.nyquist_hz.toFixed(2) : '--';
+    
+    document.getElementById('imu_lpf_cutoff_range').max = cutoffLimit.toFixed(2);
+    document.getElementById('imu_lpf_cutoff_input').max = cutoffLimit.toFixed(2);
+    if (requestedCutoff !== imuCutoffHz) {
+        document.getElementById('imu_lpf_cutoff_range').value = imuCutoffHz;
+        document.getElementById('imu_lpf_cutoff_input').value = imuCutoffHz.toFixed(2);
+    }
+
+    document.getElementById('ukf_alpha_val').innerText = ukf_alpha;
+    document.getElementById('ukf_beta_val').innerText  = ukf_beta.toFixed(1);
+    document.getElementById('ukf_kappa_val').innerText = ukf_kappa.toFixed(1);
+    document.getElementById('ukf_qa_val').innerText    = q_a.toFixed(3);
+    document.getElementById('ukf_qg_val').innerText    = q_g.toExponential(3);
+    document.getElementById('ukf_ruwb_val').innerText  = r_uwb.toFixed(3);
+    document.getElementById('ukf_rgate_val').innerText = r_gate.toFixed(3);
+    document.getElementById('ukf_yaw_map_offset_val').innerText = yaw_map_offset_deg.toFixed(1);
+    document.getElementById('triplet_w_d2_val').innerText = triplet_w_d2.toFixed(0);
+    document.getElementById('triplet_w_fp_val').innerText = triplet_w_fp.toFixed(0);
+    document.getElementById('triplet_w_resid_val').innerText = triplet_w_resid.toFixed(0);
+    document.getElementById('triplet_w_dist_val').innerText = triplet_w_dist.toFixed(0);
+    document.getElementById('triplet_switch_margin_val').innerText = triplet_switch_margin.toFixed(2);
+    document.getElementById('triplet_switch_eps_val').innerText = triplet_switch_score_eps.toFixed(3);
+
+    const maxRangeElem = document.getElementById('max_samples_range');
+    document.getElementById('max_samples_val').innerText = (max_samples >= parseInt(maxRangeElem.max)) ? "All" : max_samples;
+    document.getElementById('tag_height_val').innerText = t_height.toFixed(3);
+}
+
+function updateApplyButtonState() {
+    const btn = document.getElementById('apply_btn');
+    if (!btn) return;
+    if (hasChanges) {
+        btn.classList.add('pending');
+        btn.innerText = 'Apply Changes (Pending)';
+    } else {
+        btn.classList.remove('pending');
+        btn.innerText = 'Apply Changes';
+    }
+}
+
+function onParameterChange() {
+    updateLabels();
+    hasChanges = true;
+    updateApplyButtonState();
+}
+
+function applyChanges() {
+    runSimulation();
+}
+
 // Override global update for compatibility with existing UI attributes (onchange="update()")
-window.update = requestUpdate;
+window.update = onParameterChange;
+window.applyChanges = applyChanges;
 
 function estimateImuTiming(entries) {
     const dts = [];

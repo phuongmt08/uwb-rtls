@@ -263,8 +263,18 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 
-    if (g_imu_data_queue == NULL ||
-        osMessageQueueGet(g_imu_data_queue, &ukf.imu_current, NULL, 0U) != osOK) {
+    if (g_imu_data_queue == NULL) {
+        return SYS_SENSOR_FUSION_OK;
+    }
+
+    bsp_imu_data_t temp_imu;
+    bool has_imu = false;
+    while (osMessageQueueGet(g_imu_data_queue, &temp_imu, NULL, 0U) == osOK) {
+        ukf.imu_current = temp_imu;
+        has_imu = true;
+    }
+
+    if (!has_imu) {
         return SYS_SENSOR_FUSION_OK;
     }
 
@@ -864,7 +874,7 @@ void sys_sensor_fusion_task()
     bsp_imu_data_t imu_data = {0};
     if (bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK) 
     {
-        if (ukf.initialized)
+        if (ukf.initialized && ukf.enable_predict)
         {
             (void)osMessageQueuePut(g_imu_data_queue, &imu_data, 0U, 0U);
         }

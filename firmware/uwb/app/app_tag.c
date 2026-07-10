@@ -548,6 +548,8 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         msg.count++;
     }
 
+    msg.timestamp_ms = HAL_GetTick();
+
     if (valid_count < 3U) {
         record_ranging_error();
         if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {

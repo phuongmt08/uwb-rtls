@@ -40,6 +40,8 @@ software/simulation/**/*_sim.html
 software/simulation/**/*.txt
 software/simulation/**/*_log_data.html
 software/simulation/simulation_dashboard.html
+software/simulation/fusion_frame_dashboard.html
+software/simulation/simulation_dashboard/
 
 # Programmer builds
 software/uwb_rtls_programmer/execution/*.exe
@@ -49,3 +51,7 @@ software/uwb_rtls_programmer/execution/*.spec
 software/uwb_rtls_studio/execution/*.exe
 software/uwb_rtls_studio/execution/*.spec
 software/uwb_rtls_studio/execution/legacy/
+
+# UWB RTLS Studio temporary runtime packet capture logs
+software/uwb_rtls_studio/data/runtime/
+

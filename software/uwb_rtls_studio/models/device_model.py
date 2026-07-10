@@ -560,6 +560,20 @@ class DeviceModel(QObject):
         self._connect_generation += 1
         self._connect_timeout_timer.stop()
 
+    def _cancel_active_connect_flow(self) -> None:
+        """Drop any in-flight connect handshake state before changing target."""
+        self._connect_timeout_timer.stop()
+        self._handshake_timeout_timer.stop()
+        self._handshake_time_sync_timer.stop()
+        self._pending_handshake_time_sync_seq = None
+        self._active_connecting_handshake = False
+        self._handshake_device_info_received = False
+        self._handshake_sys_config_received = False
+        self._handshake_time_sync_done = False
+        self._handshake_final_ble_connected = False
+        self._session_bootstrap_timer.stop()
+        self._session_start_scheduled = False
+
     def _schedule_connect_retry(
         self,
         mac_hex: str,
@@ -1172,8 +1186,10 @@ class DeviceModel(QObject):
         self._active_connecting_handshake = True
 
         if self._connected_mac and self._connected_mac != mac_hex:
+            if self._connection_status == "Connecting":
+                self._cancel_active_connect_flow()
             log.info("Switching BLE target: stop scan before disconnecting %s and connecting %s", self._connected_mac, mac_hex)
-            self._emit_connection_progress(10, f"Switching target device...", status=JobState.RUNNING)
+            self._emit_connection_progress(10, f"Switching target device to {name or mac_hex}...", status=JobState.RUNNING)
             self._background_scan_resume_timer.stop()
             self._connect_timeout_timer.stop()
             self.stop_scan()
@@ -1209,6 +1225,7 @@ class DeviceModel(QObject):
             return False
 
         self._background_scan_resume_timer.stop()
+        self._cancel_active_connect_flow()
         self._connect_timeout_timer.stop()
         self._connection_status = "Disconnecting"
         shared_app_state.connection_status = "Disconnecting"
@@ -1509,12 +1526,15 @@ class DeviceModel(QObject):
                 log.info("Dongle reported BLE_STATE_CONNECTING for %s.", self._connected_mac)
                 self._connection_status = "Connecting"
                 shared_app_state.connection_status = "Connecting"
+                target_mac = self._pending_connect_mac or self._connected_mac or "-"
+                target_name = self._pending_connect_name or self._connected_name or "device"
                 self.connection_state_changed.emit({
-                    "name": self._connected_name or self._pending_connect_name or "-",
-                    "mac": self._connected_mac or self._pending_connect_mac or "-",
+                    "name": target_name,
+                    "mac": target_mac,
                     "status": "Connecting",
                 })
-            target_name = self._connected_name or self._pending_connect_name or "device"
+            else:
+                target_name = self._pending_connect_name or self._connected_name or "device"
             self._emit_connection_progress(
                 73,
                 f"Establishing link to {target_name}...",
@@ -1615,8 +1635,10 @@ class DeviceModel(QObject):
             self._background_scan_resume_timer.stop()
             self._session_bootstrap_timer.stop()
             self._reset_time_sync_flow()
+            display_name = (next_name or next_mac or "-") if switch_requested else (previous_name or "-")
+            display_mac = (next_mac or "-") if switch_requested else (previous_mac or "-")
             self.connection_state_changed.emit({
-                "name": previous_name or "-", "mac": previous_mac or "-", "status": self._connection_status
+                "name": display_name, "mac": display_mac, "status": self._connection_status
             })
             if switch_requested:
                 self._emit_connection_progress(40, f"Connecting to {next_name or next_mac}...", status=JobState.RUNNING)
@@ -1819,8 +1841,8 @@ class DeviceModel(QObject):
         self._emit_merged_scan_data()
 
     def _handle_adv_status(self, res):
-        timestamp_ms = int(getattr(res, 'local_timestamp_ms', 0) or 0)
         timestamp_s = int(getattr(res, 'local_timestamp_s', 0) or 0)
+        timestamp_ms = int(getattr(res, 'local_timestamp_ms', 0) or 0)
         if timestamp_ms <= 0 and timestamp_s > 0:
             timestamp_ms = timestamp_s * 1000
         elif timestamp_s <= 0 and timestamp_ms > 0:

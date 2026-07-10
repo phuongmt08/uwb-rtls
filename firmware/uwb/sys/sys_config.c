@@ -638,7 +638,7 @@ int sys_config_load(void)
     }
 
     if (temp_storage.config.uwb.uwb_rx_pac > 3) {
-        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx PAC in flash, forcing DWT_PAC16");
+        RLOG_W(LOG_OBJECT_CODE_SYS_CFG, "Invalid rx PAC in flash, forcing default");
         temp_storage.config.uwb.uwb_rx_pac = DEFAULT_UWB_RX_PAC;
         normalize_and_save = true;
     }

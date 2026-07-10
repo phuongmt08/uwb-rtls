@@ -538,11 +538,12 @@ def main() -> None:
                 pkt = commands.ble_adv_status(pb.PACKET_ADDR_CENTRAL, pb.PACKET_ADDR_HOST, adv_seq)
                 pkt.ble_adv_status.device = pb.DEVICE_TYPE_TAG
                 pkt.ble_adv_status.device_id = 98765
+                pkt.ble_adv_status.serial_number = 10001
                 pkt.ble_adv_status.bat_soc_percent = 92
                 pkt.ble_adv_status.status_flags = 0
                 pkt.ble_adv_status.warning_count = 0
                 pkt.ble_adv_status.error_count = 0
-                pkt.ble_adv_status.local_timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
+                pkt.ble_adv_status.local_timestamp_s = int(time.time()) & 0xFFFFFFFF
                 send_to_host(pkt)
             time.sleep(3.0)
     except KeyboardInterrupt:
