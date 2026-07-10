@@ -1832,10 +1832,8 @@ class DeviceModel(QObject):
             pb.BLE_STATE_CONNECTED,
             pb.BLE_STATE_CONNECTING,
         ):
-            if state == pb.BLE_STATE_SCANNING and self._connection_status == "Connected" and not reason_code:
-                # Dongle is scanning normally while the BLE link is still connected; ignore it.
-                # If a reason_code exists (for example 0x08 Connection Timeout), this is a real disconnect.
-                # Handle it so the correct disconnect notification is emitted.
+            if state in (pb.BLE_STATE_SCANNING, pb.BLE_STATE_IDLE) and self._connection_status in ("Connected", "Connecting") and not reason_code:
+                # Dongle is scanning/idle normally while connected or connecting, with no error reason. Ignore it.
                 return
             previous_status = self._connection_status
             previous_name = self._connected_name

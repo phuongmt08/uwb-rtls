@@ -582,7 +582,7 @@ class LiveTrackingTab(QWidget):
         self._canvas = self.position_canvas
         self._canvas.parent_tab = self
         if hasattr(self._canvas, "set_render_fps"):
-            self._canvas.set_render_fps(120)
+            self._canvas.set_render_fps(60)
         self._preview_sync_dirty = False
         self._preview_sync_timer = QTimer(self)
         self._preview_sync_timer.setTimerType(Qt.TimerType.PreciseTimer)

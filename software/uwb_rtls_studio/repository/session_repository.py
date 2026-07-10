@@ -126,6 +126,7 @@ class SessionRepository:
         for f in (fusion_positions or []):
             f_copy = f.copy()
             dist_map = {a.get("anchor_id"): a.get("distance_mm", "") for a in f_copy.get("anchors", []) if a.get("anchor_id")}
+            weight_map = {a.get("anchor_id"): a.get("weight", "") for a in f_copy.get("anchors", []) if a.get("anchor_id")}
             for k in ["d1_mm", "d2_mm", "d3_mm", "d4_mm"]:
                 if f_copy.get(k) is None or f_copy.get(k) == "":
                     try:
@@ -134,6 +135,13 @@ class SessionRepository:
                             f_copy[k] = dist_map[idx]
                     except Exception:
                         pass
+
+            for k in ["w1", "w2", "w3", "w4"]:
+                try:
+                    idx = int(k[1])
+                    f_copy[k] = weight_map.get(idx, "")
+                except Exception:
+                    f_copy[k] = ""
 
             seq = f_copy.get("seq")
             if seq is not None and seq > 0:
@@ -575,6 +583,10 @@ class SessionRepository:
                     f"d2_mm:{pos.get('d2_mm', '')}",
                     f"d3_mm:{pos.get('d3_mm', '')}",
                     f"d4_mm:{pos.get('d4_mm', '')}",
+                    f"w1:{pos.get('w1', '')}",
+                    f"w2:{pos.get('w2', '')}",
+                    f"w3:{pos.get('w3', '')}",
+                    f"w4:{pos.get('w4', '')}",
                     f"ukf_x_m:{pos.get('ukf_x_m', '')}",
                     f"ukf_y_m:{pos.get('ukf_y_m', '')}",
                     f"ukf_yaw_deg:{pos.get('ukf_yaw_deg', '')}",
@@ -626,6 +638,10 @@ class SessionRepository:
                             "d2_mm": row_dict.get("d2_mm", ""),
                             "d3_mm": row_dict.get("d3_mm", ""),
                             "d4_mm": row_dict.get("d4_mm", ""),
+                            "w1": row_dict.get("w1", ""),
+                            "w2": row_dict.get("w2", ""),
+                            "w3": row_dict.get("w3", ""),
+                            "w4": row_dict.get("w4", ""),
                             "ukf_x_m": row_dict.get("ukf_x_m", ""),
                             "ukf_y_m": row_dict.get("ukf_y_m", ""),
                             "ukf_yaw_deg": row_dict.get("ukf_yaw_deg", ""),
@@ -660,6 +676,10 @@ class SessionRepository:
                             "d2_mm": row.get("d2_mm", ""),
                             "d3_mm": row.get("d3_mm", ""),
                             "d4_mm": row.get("d4_mm", ""),
+                            "w1": row.get("w1", ""),
+                            "w2": row.get("w2", ""),
+                            "w3": row.get("w3", ""),
+                            "w4": row.get("w4", ""),
                             "ukf_x_m": row.get("ukf_x_m", ""),
                             "ukf_y_m": row.get("ukf_y_m", ""),
                             "ukf_yaw_deg": row.get("ukf_yaw_deg", ""),

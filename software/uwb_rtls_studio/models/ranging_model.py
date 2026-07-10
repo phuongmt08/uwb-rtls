@@ -151,6 +151,20 @@ class RangingModel(QObject):
     def anchor_layout(self):
         return self._anchor_layout
 
+    def _update_hz_stat(self, now: float) -> None:
+        if self._last_result_time > 0:
+            dt = now - self._last_result_time
+            if dt > 0:
+                instant_rate = min(50.0, 1.0 / dt)  # Cap at 50Hz to filter out OS/serial buffering spikes
+                current_rate = self._stats.get("update_rate_hz", 0.0)
+                if current_rate <= 0.0:
+                    new_rate = instant_rate
+                else:
+                    # Exponential Moving Average to smooth out instant Jitter
+                    new_rate = 0.15 * instant_rate + 0.85 * current_rate
+                self._stats["update_rate_hz"] = round(new_rate, 1)
+        self._last_result_time = now
+
     def _send_command(self, command_name: str, dst_addr: int, **kwargs):
         if self._command_bus:
             return self._command_bus.send(command_name, dst_addr=dst_addr, **kwargs)
@@ -356,11 +370,7 @@ class RangingModel(QObject):
         self._stats["total_count"] += 1
         self._stats["success_count"] += 1
         self._stats["last_rms_error_m"] = sample["rms_error_m"]
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
-        self._last_result_time = now
+        self._update_hz_stat(now)
 
         self._emit_position_if_due(sample, now=now)
         if anchors:
@@ -470,11 +480,7 @@ class RangingModel(QObject):
         self._stats["last_rms_error_m"] = stored.get("rms_error_m", stored.get("rms", 0.0))
 
         now = stored.get("received_at", time.time())
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
-        self._last_result_time = now
+        self._update_hz_stat(now)
 
         self._emit_position_if_due(stored, now=now)
         self._emit_stats_if_due(now=now)
@@ -508,11 +514,7 @@ class RangingModel(QObject):
         self._stats["total_count"] = int(self._stats.get("total_count", 0)) + 1
         self._stats["success_count"] = int(self._stats.get("success_count", 0)) + 1
         self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
-        self._last_result_time = now
+        self._update_hz_stat(now)
         self._emit_sensor_fusion_if_due(enriched, now=now)
         self._emit_stats_if_due(now=now)
 
