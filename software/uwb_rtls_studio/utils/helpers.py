@@ -83,6 +83,7 @@ def set_widget_value(widget, value):
         elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
             if hasattr(widget, "_orig_min"):
                 widget.setMinimum(widget._orig_min)
+            widget.setSpecialValueText("")
             # Try to convert value to type of spinbox
             try:
                 if isinstance(widget, QSpinBox):
@@ -96,4 +97,3 @@ def set_widget_value(widget, value):
             widget.setChecked(bool(value))
     finally:
         widget.blockSignals(was_blocked)
-

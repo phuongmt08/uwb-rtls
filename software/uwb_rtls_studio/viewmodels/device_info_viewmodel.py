@@ -114,7 +114,7 @@ class DeviceInfoViewModel(QObject):
         """
         self._emit_current_scan_devices()
         if self.model.is_connected:
-            self.model.schedule_session_start(delay_ms=1500, force=True)
+            self.model.schedule_session_start(delay_ms=1500, force=False)
 
     # ═══════════════════════════════════════════════════════════════════
     #  PUBLIC METHODS (called by main.py or View)
@@ -163,10 +163,24 @@ class DeviceInfoViewModel(QObject):
         # BE/API: BLE disconnect from Device Info flow.
         return self.model.request_ble_disconnect(reason=reason)
 
-    def start_ble_scan(self, duration_ms: int = 5000):
-        """Trigger a finite BLE scan manually from the UI."""
-        self.model.start_scan(clear_results=True, force=True, duration_ms=duration_ms)
+    def shutdown_device_link(self, reason: int = 0):
+        """Stop scan/polling and disconnect through the full model state machine."""
+        if getattr(self.model, "is_scanning", False) and hasattr(self.model, "stop_scan"):
+            self.model.stop_scan()
+        if self.model.connected_mac or self.model.connection_status in ("Connected", "Connecting", "Disconnecting"):
+            return self.model.disconnect_device(reason=reason)
+        return False
 
+    def start_ble_scan(self, duration_ms: int = 5000):
+        """Trigger a finite BLE scan manually without clearing the current advertising snapshot."""
+        self.model.start_scan(clear_results=False, force=True, duration_ms=duration_ms)
+
+    def refresh_advertising_devices(self):
+        """Refresh the advertising-device table from the cached snapshot only."""
+        if hasattr(self.model, "refresh_scan_results"):
+            self.model.refresh_scan_results()
+            return
+        self._emit_current_scan_devices()
 
 
     # ═══════════════════════════════════════════════════════════════════
@@ -457,7 +471,7 @@ class DeviceInfoViewModel(QObject):
         self.device_info_updated.emit(payload)
         self._emit_current_scan_devices()
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
-            self.model.schedule_session_start(delay_ms=1500, force=True)
+            self.model.schedule_session_start(delay_ms=1500, force=False)
 
     def _on_time_sync_result(self, data: dict):
         """Convert raw time sync data → formatted UI signal."""

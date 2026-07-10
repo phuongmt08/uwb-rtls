@@ -1,14 +1,14 @@
 ﻿"""
 ==============================================================================
-  UWB RTLS Studio â€” Communication Tab
+  UWB RTLS Studio — Communication Tab
 ==============================================================================
   File        : views/tabs/communication_tab.py
   Description : Two-sub-tab Communication panel for Developer Mode.
 
   Sub-tabs:
-    1. ðŸ“Š Live Monitor  â€” Passive observer of ALL packets (TX + RX) flowing
+    1. 📊 Live Monitor  — Passive observer of ALL packets (TX + RX) flowing
                           through the protocol service.  Nothing is sent here.
-    2. ðŸ§ª Packet Tester â€” Manual packet sender / response inspector.
+    2. 🧪 Packet Tester — Manual packet sender / response inspector.
                           Activating "Manual Test Mode" blocks background
                           auto-queries so the user can test
                           individual packets with a real dongle + hardware.
@@ -23,7 +23,7 @@
 
   Key design rules:
     â€¢ NEVER touch/import anything from other tabs.
-    â€¢ NEVER create new threads â€” Qt signal/slot handles cross-thread delivery.
+    â€¢ NEVER create new threads — Qt signal/slot handles cross-thread delivery.
     â€¢ Monitor tables accumulate rows; Tester rows are correlated by seq number.
     â€¢ Manual-test seq tracking uses ONLY _tester_seqs (set of pkt.hdr.seq),
       NOT a boolean flag, to avoid false positives.
@@ -57,9 +57,9 @@ from PyQt6.QtGui import QColor, QFont, QTextCursor, QPainter, QBrush, QPen
 log = logging.getLogger(__name__)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 #  Custom Animated Toggle Switch
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ToggleSwitch(QCheckBox):
     """Premium animated slide switch styled for dark theme."""
@@ -117,15 +117,15 @@ class ToggleSwitch(QCheckBox):
         p.drawText(52, 19, self.text())
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 #  CommunicationTab
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
 
 class CommunicationTab(QWidget):
     """
     Developer-mode tab with two sub-tabs:
-      â€¢ Live Monitor  â€” passively shows every TX/RX packet.
-      â€¢ Packet Tester â€” manually send any command and inspect the response.
+      â€¢ Live Monitor  — passively shows every TX/RX packet.
+      â€¢ Packet Tester — manually send any command and inspect the response.
     """
 
     def __init__(self, parent=None):
@@ -138,7 +138,7 @@ class CommunicationTab(QWidget):
 
         # Flag: True while _send_manual_packet is in the call stack
         # (needed because packet_sent is a Direct Connection on same thread
-        #  â†’ _on_packet_sent fires BEFORE _send_manual_packet returns pkt)
+        #  → _on_packet_sent fires BEFORE _send_manual_packet returns pkt)
         self._manual_send_active: bool = False
         self._manual_send_in_flight: bool = False
         self._manual_send_expected_name: str | None = None
@@ -146,7 +146,7 @@ class CommunicationTab(QWidget):
         self._last_manual_send_sig: tuple | None = None
         self._last_manual_send_at: float = 0.0
 
-        # seq â†’ table row index for correlated display
+        # seq → table row index for correlated display
         self._monitor_seq_to_row: dict[int, int] = {}
         self._tester_seq_to_row: dict[int, int] = {}
         self._decode_popups: list[QDialog] = []
@@ -157,9 +157,9 @@ class CommunicationTab(QWidget):
 
         self._build_ui()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  UI Construction
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         if hasattr(self, "main_layout") and self.main_layout:
@@ -180,26 +180,26 @@ class CommunicationTab(QWidget):
         """)
         self.sub_tabs.currentChanged.connect(self._on_sub_tab_changed)
 
-        # â”€â”€ Tab 1: Live Monitor
+        # ── Tab 1: Live Monitor
         self.tab_monitor = QWidget()
         self._build_monitor_tab()
-        self.sub_tabs.addTab(self.tab_monitor, "ðŸ“Š Live Monitor")
+        self.sub_tabs.addTab(self.tab_monitor, "📊 Live Monitor")
 
-        # â”€â”€ Tab 2: Packet Tester
+        # ── Tab 2: Packet Tester
         self.tab_tester = QWidget()
         self._build_tester_tab()
-        self.sub_tabs.addTab(self.tab_tester, "ðŸ§ª Packet Tester")
+        self.sub_tabs.addTab(self.tab_tester, "🧪 Packet Tester")
 
         self.main_layout.addWidget(self.sub_tabs)
 
-    # â”€â”€ Live Monitor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Live Monitor ──────────────────────────────────────────────────────────
 
     def _build_monitor_tab(self) -> None:
         layout = QVBoxLayout(self.tab_monitor)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # â”€â”€ Black box: current-packet info
+        # ── Black box: current-packet info
         self.monitor_detail_group = QGroupBox("Current Transmission", self.tab_monitor)
         self.monitor_detail_group.setStyleSheet("""
             QGroupBox {
@@ -214,7 +214,7 @@ class CommunicationTab(QWidget):
 
         self.monitor_detail_text = QTextEdit(self.monitor_detail_group)
         self.monitor_detail_text.setReadOnly(True)
-        self.monitor_detail_text.setPlaceholderText("Waiting for communication trafficâ€¦")
+        self.monitor_detail_text.setPlaceholderText("Waiting for communication traffic…")
         self.monitor_detail_text.setStyleSheet("""
             QTextEdit {
                 background-color: #05080E; color: #22D3EE;
@@ -226,16 +226,16 @@ class CommunicationTab(QWidget):
         detail_vlayout.addWidget(self.monitor_detail_text)
         layout.addWidget(self.monitor_detail_group, 1)
 
-        # â”€â”€ Clear button row
+        # ── Clear button row
         clear_row = QHBoxLayout()
         clear_row.addStretch()
-        self.btn_monitor_clear = QPushButton("ðŸ—‘ Clear Monitor", self.tab_monitor)
+        self.btn_monitor_clear = QPushButton("🗑️ Clear Monitor", self.tab_monitor)
         self.btn_monitor_clear.setStyleSheet(self._secondary_btn_style())
         self.btn_monitor_clear.clicked.connect(self._clear_monitor)
         clear_row.addWidget(self.btn_monitor_clear)
         layout.addLayout(clear_row)
 
-        # â”€â”€ Correlated tables (sent | received)
+        # ── Correlated tables (sent | received)
         self.monitor_splitter = QSplitter(Qt.Orientation.Horizontal, self.tab_monitor)
         layout.addWidget(self.monitor_splitter, 2)
 
@@ -272,14 +272,14 @@ class CommunicationTab(QWidget):
         self.monitor_sent_table.cellClicked.connect(self._on_monitor_sent_cell_clicked)
         self.monitor_received_table.cellClicked.connect(self._on_monitor_received_cell_clicked)
 
-    # â”€â”€ Packet Tester â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Packet Tester ─────────────────────────────────────────────────────────
 
     def _build_tester_tab(self) -> None:
         layout = QVBoxLayout(self.tab_tester)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # â”€â”€ Black box: Host Packet Sender controls
+        # ── Black box: Host Packet Sender controls
         self.tester_control_group = QGroupBox("Host Packet Sender", self.tab_tester)
         self.tester_control_group.setStyleSheet("""
             QGroupBox {
@@ -334,7 +334,7 @@ class CommunicationTab(QWidget):
         self.tester_status_label.setStyleSheet("color: #94A3B8; font-style: italic;")
         action_row.addWidget(self.tester_status_label, 2)
 
-        self.btn_send_packet = QPushButton("â–¶ Send Packet", self.tester_control_group)
+        self.btn_send_packet = QPushButton("▶ Send Packet", self.tester_control_group)
         self.btn_send_packet.setStyleSheet("""
             QPushButton {
                 background-color: rgba(34,211,238,0.15); color: #22D3EE;
@@ -352,16 +352,16 @@ class CommunicationTab(QWidget):
         ctrl_layout.addLayout(action_row)
         layout.addWidget(self.tester_control_group, 1)
 
-        # â”€â”€ Clear tester button
+        # ── Clear tester button
         clear_row = QHBoxLayout()
         clear_row.addStretch()
-        self.btn_tester_clear = QPushButton("ðŸ—‘ Clear Tester", self.tab_tester)
+        self.btn_tester_clear = QPushButton("🗑️ Clear Tester", self.tab_tester)
         self.btn_tester_clear.setStyleSheet(self._secondary_btn_style())
         self.btn_tester_clear.clicked.connect(self._clear_tester)
         clear_row.addWidget(self.btn_tester_clear)
         layout.addLayout(clear_row)
 
-        # â”€â”€ Correlated tester tables
+        # ── Correlated tester tables
         self.tester_splitter = QSplitter(Qt.Orientation.Horizontal, self.tab_tester)
         layout.addWidget(self.tester_splitter, 2)
 
@@ -398,9 +398,9 @@ class CommunicationTab(QWidget):
         # Trigger initial field visibility
         self._update_tester_fields()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Style helpers
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _group_style(color: str) -> str:
@@ -423,9 +423,9 @@ class CommunicationTab(QWidget):
             QPushButton:hover { background-color: #334155; color: #94A3B8; }
         """
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Table configuration
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _configure_table(self, table: QTableWidget, *, is_sent: bool) -> None:
         table.setColumnCount(7)
@@ -467,13 +467,13 @@ class CommunicationTab(QWidget):
         hdr = table.horizontalHeader()
         hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Packet list & tester parameter fields
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _populate_packet_list(self) -> None:
         commands = [
-            ("â”€â”€ GET Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€", None),
+            ("── GET Commands ──────────────────", None),
             ("device_information_get",  "device_information_get"),
             ("battery_info_get",        "battery_info_get"),
             ("time_sync_get",           "time_sync_get"),
@@ -486,7 +486,7 @@ class CommunicationTab(QWidget):
             ("calib_status_get",        "calib_status_get"),
             ("rtos_resource_get",       "rtos_resource_get"),
             ("rtos_task_stats_get",     "rtos_task_stats_get"),
-            ("â”€â”€ SET Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€", None),
+            ("── SET Commands ──────────────────", None),
             ("time_sync_set",           "time_sync_set"),
             ("time_sync_adv_set",       "time_sync_adv_set"),
             ("sys_config_set",          "sys_config_set"),
@@ -495,7 +495,7 @@ class CommunicationTab(QWidget):
             ("pos_calib_cfg_set",       "pos_calib_cfg_set"),
             ("anchor_layout_set",       "anchor_layout_set"),
             ("host_transport_set",      "host_transport_set"),
-            ("â”€â”€ Control Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€", None),
+            ("── Control Commands ──────────────", None),
             ("ranging_start",           "ranging_start"),
             ("ranging_stop",            "ranging_stop"),
             ("imu_reset",               "imu_reset"),
@@ -507,7 +507,7 @@ class CommunicationTab(QWidget):
             ("device_type_set",         "device_type_set"),
             ("enter_to_bootloader",     "enter_to_bootloader"),
             ("end_session",             "end_session"),
-            ("â”€â”€ Log Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€", None),
+            ("── Log Commands ──────────────────", None),
             ("log_data",                "log_data"),
             ("log_clear",               "log_clear"),
             ("BLE Commands",           None),
@@ -519,7 +519,7 @@ class CommunicationTab(QWidget):
             ("ble_connect",             "ble_connect"),
             ("ble_disconnect",          "ble_disconnect"),
             ("ble_adv_config_set",      "ble_adv_config_set"),
-            ("â”€â”€ Special â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€", None),
+            ("── Special ───────────────────────", None),
             ("none (keep-alive ping)",  "none"),
         ]
         for label, value in commands:
@@ -558,7 +558,7 @@ class CommunicationTab(QWidget):
 
         self.f_device_id = QLineEdit(self.tester_control_group)
         self.f_device_id.setText("1")
-        self.f_device_id.setPlaceholderText("Integer device ID (1â€“254)")
+        self.f_device_id.setPlaceholderText("Integer device ID (1–254)")
         add("device_id", "Device ID:", self.f_device_id)
         self.f_device_type = QComboBox(self.tester_control_group)
         self.f_device_type.addItem("TAG (1)", 1)
@@ -667,10 +667,10 @@ class CommunicationTab(QWidget):
 
         # Generic JSON fallback
         self.f_extra_json = QLineEdit(self.tester_control_group)
-        self.f_extra_json.setPlaceholderText('Extra JSON params â€” e.g. {"role": 1}')
+        self.f_extra_json.setPlaceholderText('Extra JSON params — e.g. {"role": 1}')
         add("extra_args_json", "Extra JSON:", self.f_extra_json)
 
-    # Mapping: command_name â†’ set of field keys to show
+    # Mapping: command_name → set of field keys to show
     _VISIBLE_FIELDS: dict[str, set[str]] = {
         "time_sync_set":       {"unix_time_ms", "timezone_offset"},
         "time_sync_adv_set":   {"device_type", "device_id", "unix_time_ms", "timezone_offset"},
@@ -701,9 +701,9 @@ class CommunicationTab(QWidget):
             lbl.setVisible(show)
             widget.setVisible(show)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Public API (called by MainWindow)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_protocol_service(self, protocol_service) -> None:
         """Wire up protocol_service signals.  Safe to call multiple times."""
@@ -738,17 +738,17 @@ class CommunicationTab(QWidget):
         from utils.app_state import shared_app_state
         shared_app_state.manual_test_mode_enabled = False
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Sub-tab switch
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _on_sub_tab_changed(self, index: int) -> None:
         # Toggle state is preserved across sub-tab switches as requested by user
         pass
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Manual Test Mode toggle
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _on_manual_test_toggled(self, checked: bool) -> None:
         from services.command_bus import shared_command_bus  # local import (avoid circular)
@@ -758,20 +758,20 @@ class CommunicationTab(QWidget):
             shared_command_bus.manual_test_mode_enabled = checked
             if checked:
                 self.tester_status_label.setText(
-                    "âš  Test Mode ACTIVE â€” background traffic blocked"
+                    "⚠️ Test Mode ACTIVE — background traffic blocked"
                 )
                 self.tester_status_label.setStyleSheet("color: #F59E0B; font-weight: bold;")
             else:
-                self.tester_status_label.setText("âœ“ Test Mode OFF â€” background queries restored")
+                self.tester_status_label.setText("✓ Test Mode OFF — background queries restored")
                 self.tester_status_label.setStyleSheet("color: #10B981;")
             log.info("Manual Test Mode: %s", "ENABLED" if checked else "DISABLED")
         else:
-            self.tester_status_label.setText("âš  CommandBus not available")
+            self.tester_status_label.setText("⚠️ CommandBus not available")
             self.tester_status_label.setStyleSheet("color: #EF4444;")
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  RX/TX slot handlers  (Main GUI Thread â€” no locking needed)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
+    #  RX/TX slot handlers  (Main GUI Thread — no locking needed)
+    # ─────────────────────────────────────────────────────────────────────────
 
     @pyqtSlot(str, object)
     def _on_packet_sent(self, param_name: str, pkt) -> None:
@@ -893,9 +893,9 @@ class CommunicationTab(QWidget):
                 self.tester_status_label.setText(f"Response received - seq={match_seq}")
                 self.tester_status_label.setStyleSheet("color: #10B981;")
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Correlated table row helpers
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _add_sent_row(
         self,
@@ -919,7 +919,7 @@ class CommunicationTab(QWidget):
         # Sent side
         self._set_row(sent_table, row, [timestamp, packet_id, src, dst, str(seq), cmd, details])
 
-        # Received side â€” placeholders (will be filled when response arrives)
+        # Received side — placeholders (will be filled when response arrives)
         for col in range(7):
             item = QTableWidgetItem("")
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -986,7 +986,7 @@ class CommunicationTab(QWidget):
             recv_table.setItem(row, 6, data_item)
             self._scroll_tables_if_following(sent_table, recv_table, follow_tail)
         else:
-            # Unsolicited / pushed-by-device packet â€” no matching sent entry
+            # Unsolicited / pushed-by-device packet — no matching sent entry
             row = sent_table.rowCount()
             sent_table.insertRow(row)
             recv_table.insertRow(row)
@@ -1037,9 +1037,9 @@ class CommunicationTab(QWidget):
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         return item
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Selection synchronization
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _sync_monitor_sel_sent(self) -> None:
         row = self.monitor_sent_table.currentRow()
@@ -1120,9 +1120,9 @@ class CommunicationTab(QWidget):
             if dialog in self._decode_popups:
                 self._decode_popups.remove(dialog)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Clear actions
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _clear_monitor(self) -> None:
         self.monitor_sent_table.setRowCount(0)
@@ -1145,9 +1145,9 @@ class CommunicationTab(QWidget):
         if hasattr(self, "btn_send_packet"):
             self.btn_send_packet.setEnabled(True)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Manual packet sender
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _send_manual_packet(self) -> None:
         if self._manual_send_in_flight:
@@ -1235,7 +1235,7 @@ class CommunicationTab(QWidget):
             QTimer.singleShot(150, self._finish_manual_send_dispatch)
 
     # Manual packet parameter collection
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _collect_params(self, packet_name: str) -> dict:
         params: dict = {}
@@ -1345,9 +1345,9 @@ class CommunicationTab(QWidget):
             return bytes.fromhex(normalized)
         except ValueError as exc:
             raise ValueError("mac_address must be valid hex") from exc
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Simulation (no dongle)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     _MOCK_SEQ: int = 200  # class-level counter shared by all instances
 
@@ -1399,14 +1399,14 @@ class CommunicationTab(QWidget):
                 self._tester_seq_to_row, seq, resp_ts, self._packet_id_text(resp_name), dst_str, self._addr_name(int(VvAddress.HOST)), resp_name, resp_data,
             )
             self._tester_seqs.discard(seq)
-            self.tester_status_label.setText(f"âœ“ [SIM] Response received â€” seq={seq}")
+            self.tester_status_label.setText(f"✓ [SIM] Response received — seq={seq}")
             self.tester_status_label.setStyleSheet("color: #10B981;")
 
         QTimer.singleShot(120, _respond)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
     #  Utility helpers
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _format_wallclock(timestamp_s: float) -> str:

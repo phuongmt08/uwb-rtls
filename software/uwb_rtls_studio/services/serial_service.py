@@ -122,6 +122,10 @@ class SerialService(QObject):
         # 1. Đóng cổng serial trước để giải phóng lệnh read() đang block trong reader thread
         if self._serial and self._serial.is_open:
             try:
+                self._serial.flush()
+            except Exception:
+                pass
+            try:
                 self._serial.close()
             except Exception:
                 pass

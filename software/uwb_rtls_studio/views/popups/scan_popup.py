@@ -356,6 +356,10 @@ class ScanPopup(QDialog):
     def _on_cancel(self):
         self.reject()
 
+    def accept(self):
+        self._vm.cleanup()
+        super().accept()
+
     def reject(self):
         self._vm.cleanup()
         super().reject()

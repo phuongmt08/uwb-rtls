@@ -441,7 +441,16 @@ class SharedAppState(QObject):
         
         log.info("--- Global Query Queue Execution Report ---")
         for r in results:
-            log.info(f"  Query: {r['command_name']} -> {r['status']} (retries: {r['retries']})")
+            log.info(
+                "  Query: %s -> %s (retries: %s, seq: %s, ack: %s, resp_seq: %s, expected: %s)",
+                r["command_name"],
+                r["status"],
+                r["retries"],
+                r.get("seq"),
+                r.get("ack_received"),
+                r.get("response_seq"),
+                r.get("expected_response"),
+            )
 
     # ── Job State Machine Implementation ─────────────────────────────
 

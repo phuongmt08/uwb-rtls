@@ -6,6 +6,7 @@ models publish parsed domain data to SharedAppState for UI synchronization.
 """
 from __future__ import annotations
 
+from datetime import datetime
 import base64
 import json
 import logging
@@ -161,7 +162,7 @@ class RawPacketStore:
 
     def _append_serial_chunk_to_disk(self, chunk: RawSerialChunk) -> None:
         record = {
-            "received_at": chunk.received_at,
+            "received_time": datetime.fromtimestamp(chunk.received_at).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
             "size": len(chunk.payload),
             "payload_hex": chunk.payload.hex(),
             "payload_base64": base64.b64encode(chunk.payload).decode("ascii"),
@@ -170,7 +171,7 @@ class RawPacketStore:
 
     def _append_packet_to_disk(self, packet: RawPacket, gap: dict | None = None) -> None:
         record = {
-            "received_at": packet.received_at,
+            "received_time": datetime.fromtimestamp(packet.received_at).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
             "param_name": packet.param_name,
             "src_addr": packet.src_addr,
             "dst_addr": packet.dst_addr,
@@ -184,7 +185,7 @@ class RawPacketStore:
         self._append_jsonl(self._packet_file, record)
 
         parsed_record = {
-            "received_at": packet.received_at,
+            "received_time": datetime.fromtimestamp(packet.received_at).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
             "param_name": packet.param_name,
             "src_addr": packet.src_addr,
             "dst_addr": packet.dst_addr,
@@ -205,6 +206,10 @@ class RawPacketStore:
                 handle.write("\n")
         except Exception as exc:
             log.error("Failed to append JSONL to %s: %s", path.name, exc)
+
+    def close(self) -> None:
+        """Graceful cleanup for raw packet store."""
+        pass
 
 
 shared_raw_packet_store = RawPacketStore()

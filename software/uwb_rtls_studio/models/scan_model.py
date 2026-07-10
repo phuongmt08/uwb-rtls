@@ -97,7 +97,8 @@ class ScanModel(QObject):
             self._send_command(
                 "ble_scan_start",
                 src_addr=self._protocol.pb.PACKET_ADDR_HOST,
-                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL
+                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
+                duration_ms=0
             )
             self.is_scanning = True
 
@@ -332,6 +333,9 @@ class ScanModel(QObject):
                 self._emit_progress(45, "Dongle is establishing BLE link...")
             return
         elif has_reason and reason_code:
+            if self._connect_stage == "selected":
+                log.debug("Ignoring disconnect reason during selected/scan-stop stage.")
+                return
             reason = normalize_hci_reason(reason_code)
             log.warning(
                 "Popup connect failed with BLE state %s reason=%s (%s).",

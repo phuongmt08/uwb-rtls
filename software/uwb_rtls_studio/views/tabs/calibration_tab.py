@@ -1,4 +1,4 @@
-﻿"""
+"""
 UWB RTLS Studio - Calibration Tab (UI loaded from .ui file)
 Tab 4: Antenna delay tuning + Calibration status (Developer only).
 
@@ -255,40 +255,81 @@ class CalibrationTab(QWidget):
             set_widget_value(self.rx_delay_spin, cfg.get("rx_antenna_delay", self.rx_delay_spin.value()))
 
     def _on_pos_calib_cfg_loaded(self, cfg: dict):
-        """Populate the Position Calibration inputs when configuration is loaded from device."""
+        """Populate ALL calibration inputs when pos_calib_cfg_t is loaded from device.
+
+        Covers both groups:
+          - Antenna Delay Calibration: ref_dist_spin, samples_spin, damping_spin, iterations_spin
+          - Position Calibration Options: all pos_* widgets
+        Source message: pos_calib_cfg_t  (tag 61/62/63  pos_calib_cfg_get/set/resp)
+        """
         from utils.helpers import set_widget_placeholder, set_widget_value
         if not cfg:
-            for widget_name in ("chk_enable_anchor_calib", "chk_enable_tag_calib", "pos_ref_dist_spin",
-                                "pos_tag_height_spin", "pos_anchor_height_spin", "pos_calib_anchor_spin",
-                                "pos_samples_spin", "pos_err_thresh_spin", "pos_min_delta_spin",
-                                "pos_max_rounds_spin", "pos_max_std_spin", "pos_damping_spin", "pos_iterations_spin"):
+            for widget_name in (
+                # --- Antenna Delay Calibration group ---
+                "ref_dist_spin", "samples_spin", "damping_spin", "iterations_spin",
+                # --- Position Calibration Options group ---
+                "chk_enable_anchor_calib", "chk_enable_tag_calib",
+                "pos_ref_dist_spin", "pos_tag_height_spin", "pos_anchor_height_spin",
+                "pos_calib_anchor_spin", "pos_samples_spin", "pos_err_thresh_spin",
+                "pos_min_delta_spin", "pos_max_rounds_spin", "pos_max_std_spin",
+                "pos_damping_spin", "pos_iterations_spin",
+            ):
                 if hasattr(self, widget_name):
                     set_widget_placeholder(getattr(self, widget_name))
             return
+
+        # ── Antenna Delay Calibration group ─────────────────────────────────
+        # pos_calib_cfg_t.ref_distance_xy_m  → ref_dist_spin
+        if hasattr(self, "ref_dist_spin"):
+            set_widget_value(self.ref_dist_spin, cfg.get("ref_distance_xy_m", 1.0))
+        # pos_calib_cfg_t.samples  → samples_spin
+        if hasattr(self, "samples_spin"):
+            set_widget_value(self.samples_spin, cfg.get("samples", 1000))
+        # pos_calib_cfg_t.damping  → damping_spin
+        if hasattr(self, "damping_spin"):
+            set_widget_value(self.damping_spin, cfg.get("damping", 0.5))
+        # pos_calib_cfg_t.iterations  → iterations_spin
+        if hasattr(self, "iterations_spin"):
+            set_widget_value(self.iterations_spin, cfg.get("iterations", 20))
+
+        # ── Position Calibration Options group ───────────────────────────────
+        # pos_calib_cfg_t.enable_anchor_auto_calib  → chk_enable_anchor_calib
         if hasattr(self, "chk_enable_anchor_calib"):
             set_widget_value(self.chk_enable_anchor_calib, cfg.get("enable_anchor_auto_calib", True))
+        # pos_calib_cfg_t.enable_tag_auto_calib  → chk_enable_tag_calib
         if hasattr(self, "chk_enable_tag_calib"):
             set_widget_value(self.chk_enable_tag_calib, cfg.get("enable_tag_auto_calib", True))
+        # pos_calib_cfg_t.ref_distance_xy_m  → pos_ref_dist_spin
         if hasattr(self, "pos_ref_dist_spin"):
             set_widget_value(self.pos_ref_dist_spin, cfg.get("ref_distance_xy_m", 2.0))
+        # pos_calib_cfg_t.tag_height_m  → pos_tag_height_spin
         if hasattr(self, "pos_tag_height_spin"):
             set_widget_value(self.pos_tag_height_spin, cfg.get("tag_height_m", 1.0))
+        # pos_calib_cfg_t.anchor_height_m  → pos_anchor_height_spin
         if hasattr(self, "pos_anchor_height_spin"):
             set_widget_value(self.pos_anchor_height_spin, cfg.get("anchor_height_m", 2.5))
+        # pos_calib_cfg_t.calib_anchor_id  → pos_calib_anchor_spin
         if hasattr(self, "pos_calib_anchor_spin"):
             set_widget_value(self.pos_calib_anchor_spin, cfg.get("calib_anchor_id", 1))
+        # pos_calib_cfg_t.samples  → pos_samples_spin
         if hasattr(self, "pos_samples_spin"):
             set_widget_value(self.pos_samples_spin, cfg.get("samples", 10))
+        # pos_calib_cfg_t.error_threshold_m  → pos_err_thresh_spin
         if hasattr(self, "pos_err_thresh_spin"):
             set_widget_value(self.pos_err_thresh_spin, cfg.get("error_threshold_m", 0.3))
+        # pos_calib_cfg_t.min_delta_step  → pos_min_delta_spin
         if hasattr(self, "pos_min_delta_spin"):
             set_widget_value(self.pos_min_delta_spin, cfg.get("min_delta_step", 1))
+        # pos_calib_cfg_t.max_rounds  → pos_max_rounds_spin
         if hasattr(self, "pos_max_rounds_spin"):
             set_widget_value(self.pos_max_rounds_spin, cfg.get("max_rounds", 10))
+        # pos_calib_cfg_t.max_std_m  → pos_max_std_spin
         if hasattr(self, "pos_max_std_spin"):
             set_widget_value(self.pos_max_std_spin, cfg.get("max_std_m", 0.2))
+        # pos_calib_cfg_t.damping  → pos_damping_spin
         if hasattr(self, "pos_damping_spin"):
             set_widget_value(self.pos_damping_spin, cfg.get("damping", 0.1))
+        # pos_calib_cfg_t.iterations  → pos_iterations_spin
         if hasattr(self, "pos_iterations_spin"):
             set_widget_value(self.pos_iterations_spin, cfg.get("iterations", 100))
 
@@ -315,12 +356,20 @@ class CalibrationTab(QWidget):
         else:
             self.calib_status.setText(f"Status: {state_labels.get(state, 'Unknown')}")
 
+        # calib_status_resp_t.current_iteration / total_iterations
         self.calib_iter.setText(f"Iteration: {current} / {total}" if total > 0 else "Iteration: -")
+        # calib_status_resp_t.last_pair_error_mean_m  → Error Mean
         self.val_err_mean.setText(self._format_metric(status.get("last_pair_error_mean_m"), " m"))
+        # calib_status_resp_t.last_pair_error_spread_m  → Error Std
         self.val_err_std.setText(self._format_metric(status.get("last_pair_error_spread_m"), " m"))
+        # calib_status_resp_t.last_pair_error_rms_m  → Error RMS
         self.val_err_rms.setText(self._format_metric(status.get("last_pair_error_rms_m"), " m"))
-        self.val_err_min.setText("-")
+        # calib_status_resp_t.last_pair_error_mean_abs_m  → Error Min
+        # (protocol không có trường error_min riêng; dùng mean_abs thay thế)
+        self.val_err_min.setText(self._format_metric(status.get("last_pair_error_mean_abs_m"), " m"))
+        # calib_status_resp_t.last_pair_error_max_abs_m  → Error Max
         self.val_err_max.setText(self._format_metric(status.get("last_pair_error_max_abs_m"), " m"))
+        # calib_status_resp_t.current_antenna_delay  → Optimized TX / RX Delay
         self.val_opt_tx.setText(str(delay) if delay > 0 else "-")
         self.val_opt_rx.setText(str(delay) if delay > 0 else "-")
 
