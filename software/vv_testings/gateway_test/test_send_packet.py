@@ -21,7 +21,6 @@ import msvcrt
 from pathlib import Path
 from typing import Callable, Optional
 
-import serial.tools.list_ports
 from google.protobuf.json_format import MessageToDict
 from serial import SerialException
 
@@ -49,6 +48,7 @@ UINT32_MAX = 0xFFFFFFFF
 BLE_STATUS_POLL_INTERVAL_S = 1.0
 BLE_STATUS_QUERY_TIMEOUT_S = 1.0
 BLE_RECONNECT_SCAN_TIMEOUT_S = 5.0
+CENTRAL_DONGLE_PROBE_PARAMS = ("ack", "device_information_resp")
 
 
 def packet_name(pkt: pb.packet_t) -> str:
@@ -304,6 +304,15 @@ def bootstrap_mcu_route(
     )
     send_and_wait(session, src, "host_transport_set", transport_pkt, timeout_s=0.5, monitor=monitor)
     time.sleep(BOOTSTRAP_GAP_S)
+
+
+def disconnect_ble_quietly(session: VvTestSession, factory: CommandFactory, src: int, central_dst: int) -> None:
+    print("\n[-] Disconnecting BLE...")
+    try:
+        session.send_packet(factory.ble_disconnect(src, central_dst, session.proto.next_seq()))
+        time.sleep(0.2)
+    except Exception as exc:
+        print(f"{COLOR_YELLOW}[WARN] Could not send BLE disconnect: {exc}{COLOR_RESET}")
 
 
 def format_config(cfg: pb.uwb_cfg_t) -> str:
@@ -578,14 +587,6 @@ def parse_mac(mac_text: Optional[str]) -> Optional[bytes]:
     return bytes(reversed([int(part, 16) for part in parts]))
 
 
-def find_fallback_port() -> Optional[str]:
-    for port_info in serial.tools.list_ports.comports():
-        desc = port_info.description or ""
-        if "USB" in desc or "JLink" in desc or "Serial" in desc:
-            return port_info.device
-    return None
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactive BLE packet sender")
     parser.add_argument("--port", default=None, help="COM port of the Central Dongle (e.g. COM7)")
@@ -615,41 +616,45 @@ def main() -> int:
     try:
         if not port:
             print("[*] Probing for Central Dongle COM port automatically...")
-            probe = VvTestSession.auto_probe(src=src_addr, debug=args.verbose)
+            probe = VvTestSession.auto_probe(
+                src=src_addr,
+                dst=central_dst,
+                expected_params=CENTRAL_DONGLE_PROBE_PARAMS,
+                retries=3,
+                debug=args.verbose,
+            )
             if probe is not None:
                 port = probe.port
                 print(f"[+] Found Central Dongle: {port} @ {probe.baud}")
                 args.baud = probe.baud
             else:
-                port = find_fallback_port()
-                if port:
-                    print(f"[+] Found USB serial port via fallback scanning: {port}")
-                else:
-                    print(f"{COLOR_RED}[ERROR] No serial port found. Connect Central Dongle or use --port COMx.{COLOR_RESET}")
-                    return 2
+                print(f"{COLOR_RED}[ERROR] No Central Dongle responded. Connect Central Dongle or use --port COMx.{COLOR_RESET}")
+                return 2
 
         factory = CommandFactory()
         with VvTestSession(port, args.baud, debug=args.verbose) as session:
-            result = step_auto_scan_and_connect(
-                session=session,
-                factory=factory,
-                src=src_addr,
-                central_dst=central_dst,
-                expected_mac=expected_mac,
-                target_name_filter=args.name,
-            )
-            if not result:
-                return 1
-            target_mac, target_name = result
+            ble_flow_started = False
+            try:
+                ble_flow_started = True
+                result = step_auto_scan_and_connect(
+                    session=session,
+                    factory=factory,
+                    src=src_addr,
+                    central_dst=central_dst,
+                    expected_mac=expected_mac,
+                    target_name_filter=args.name,
+                )
+                if not result:
+                    return 1
+                target_mac, target_name = result
 
-            monitor = BleConnectionMonitor(session, factory, src_addr, central_dst, print_changes=False)
-            monitor.mark_connected()
-            bootstrap_mcu_route(session, factory, src_addr, mcu_dst, monitor=monitor)
-            command_menu(session, factory, src_addr, mcu_dst, central_dst, target_mac, target_name)
-
-            print("\n[-] Disconnecting BLE...")
-            session.send_packet(factory.ble_disconnect(src_addr, central_dst, session.proto.next_seq()))
-            time.sleep(0.2)
+                monitor = BleConnectionMonitor(session, factory, src_addr, central_dst, print_changes=False)
+                monitor.mark_connected()
+                bootstrap_mcu_route(session, factory, src_addr, mcu_dst, monitor=monitor)
+                command_menu(session, factory, src_addr, mcu_dst, central_dst, target_mac, target_name)
+            finally:
+                if ble_flow_started:
+                    disconnect_ble_quietly(session, factory, src_addr, central_dst)
 
     except KeyboardInterrupt:
         print(f"\n{COLOR_YELLOW}[*] Stopping...{COLOR_RESET}")

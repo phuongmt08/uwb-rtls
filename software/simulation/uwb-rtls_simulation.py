@@ -36,6 +36,8 @@ GT_SQUARE = {
     'x': [2.44, 7.32, 7.32, 2.44, 2.44],
     'y': [2.44, 2.44, 7.32, 7.32, 2.44]
 }
+GT_STEP_HORIZONTAL_M = 2.8
+GT_STEP_VERTICAL_M = 5.6
 DEFAULT_ANCHORS = [
     {'id': 1, 'x': 0.0,  'y': 0.0,  'z': 0.895},
     {'id': 2, 'x': 9.76, 'y': 0.0,  'z': 0.895},
@@ -48,8 +50,8 @@ GROUND_TRUTH_PARAMS = {
         # anchor_relative: ground truth coordinates are relative to the selected anchor.
         'coordinate_frame': 'world',
         'anchor_id': 1,
-        'offset_x': 0.5,
-        'offset_y': 0.5,
+        'offset_x': 1,
+        'offset_y': 1,
     }
 }
 
@@ -89,6 +91,63 @@ def apply_groundtruth_params(track):
     transformed['coordinate_frame'] = frame
     transformed['groundtruth_offset'] = {'x': offset_x, 'y': offset_y}
     return transformed
+
+def _segments_from_points(points):
+    return [
+        [points[i][0], points[i][1], points[i + 1][0], points[i + 1][1], False]
+        for i in range(len(points) - 1)
+    ]
+
+def make_step_groundtruth(origin_x=0.0, origin_y=0.0, start_kind='start_1'):
+    if start_kind == 'start_2':
+        points = [
+            (origin_x, origin_y),
+            (origin_x - GT_STEP_HORIZONTAL_M, origin_y),
+            (origin_x - GT_STEP_HORIZONTAL_M, origin_y - GT_STEP_VERTICAL_M),
+            (origin_x - 2.0 * GT_STEP_HORIZONTAL_M, origin_y - GT_STEP_VERTICAL_M),
+        ]
+        name = 'Step 2.8-5.6-2.8 (data start = start 2)'
+    else:
+        points = [
+            (origin_x, origin_y),
+            (origin_x + GT_STEP_HORIZONTAL_M, origin_y),
+            (origin_x + GT_STEP_HORIZONTAL_M, origin_y + GT_STEP_VERTICAL_M),
+            (origin_x + 2.0 * GT_STEP_HORIZONTAL_M, origin_y + GT_STEP_VERTICAL_M),
+        ]
+        name = 'Step 2.8-5.6-2.8 (data start = start 1)'
+
+    return {
+        'id': f'step_route_{start_kind}',
+        'name': name,
+        'x': [point[0] for point in points],
+        'y': [point[1] for point in points],
+        'segments': _segments_from_points(points),
+        'coordinate_frame': 'first_data_point',
+        'start_kind': start_kind,
+        'dimensions_m': {
+            'horizontal': GT_STEP_HORIZONTAL_M,
+            'vertical': GT_STEP_VERTICAL_M,
+        },
+    }
+
+def first_payload_position(payload):
+    if not payload:
+        return 0.0, 0.0
+
+    candidate_paths = []
+    if payload.get('tril_path'):
+        candidate_paths.append(payload.get('tril_path'))
+    if payload.get('fw_path'):
+        candidate_paths.append(payload.get('fw_path'))
+
+    for path in candidate_paths:
+        xs = path.get('x', [])
+        ys = path.get('y', [])
+        for x, y in zip(xs, ys):
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)) and math.isfinite(x) and math.isfinite(y):
+                return x, y
+
+    return 0.0, 0.0
 
 def parse_graphml_groundtruth(filepath):
     if not os.path.exists(filepath):
@@ -152,7 +211,7 @@ def parse_graphml_groundtruth(filepath):
         'segments': segments
     }
 
-def load_ground_truths():
+def load_ground_truths(payload=None):
     square_segments = [
         [GT_SQUARE['x'][i], GT_SQUARE['y'][i], GT_SQUARE['x'][i + 1], GT_SQUARE['y'][i + 1], False]
         for i in range(len(GT_SQUARE['x']) - 1)
@@ -170,6 +229,10 @@ def load_ground_truths():
     custom = parse_graphml_groundtruth(os.path.join(BASE_DIR, 'custom_track_modified.xml'))
     if custom:
         tracks.append(apply_groundtruth_params(custom))
+
+    start_x, start_y = first_payload_position(payload)
+    tracks.append(make_step_groundtruth(start_x, start_y, 'start_1'))
+    tracks.append(make_step_groundtruth(start_x, start_y, 'start_2'))
 
     return tracks
 
@@ -463,7 +526,6 @@ def main():
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_ukf_prefilter.html')
     report_source_mtime = get_report_source_mtime() if os.path.exists(template_path) else 0
     template_content = load_template()
-    ground_truths = load_ground_truths()
     app_js_bundle = load_app_js_bundle()
     worker_js_bundle = load_worker_js_bundle()
 
@@ -681,7 +743,8 @@ def main():
                         if p:
                             os.makedirs(os.path.dirname(rp), exist_ok=True)
                             with open(rp, 'w', encoding='utf-8') as f:
-                                f.write(render_template(template_content, os.path.basename(lp), p, ground_truths, app_js_bundle, worker_js_bundle))
+                                gts = load_ground_truths(p)
+                                f.write(render_template(template_content, os.path.basename(lp), p, gts, app_js_bundle, worker_js_bundle))
                             print(f"[SERVER] Successfully generated: {os.path.basename(rp)}")
                             
                             # Update the metadata cache

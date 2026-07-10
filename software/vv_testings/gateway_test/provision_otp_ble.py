@@ -19,7 +19,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import serial.tools.list_ports
 from google.protobuf.json_format import MessageToDict
 from serial import SerialException
 
@@ -33,8 +32,6 @@ from common.transport import HostTransport, VvAddress
 from vv_test_session import VvTestSession
 from test_ble_log import (
     BLE_STATE_NAMES,
-    BleConnectionMonitor,
-    query_ble_status,
     step_auto_scan_and_connect,
 )
 
@@ -57,6 +54,9 @@ COLOR_CYAN = "\033[36m"
 COLOR_YELLOW = "\033[33m"
 COLOR_GRAY = "\033[90m"
 COLOR_RESET = "\033[0m"
+CENTRAL_DONGLE_PROBE_PARAMS = ("ack", "device_information_resp")
+BLE_STATUS_POLL_INTERVAL_S = 1.0
+BLE_STATUS_QUERY_TIMEOUT_S = 1.0
 
 
 def _parse_u32(text: str) -> int:
@@ -160,6 +160,81 @@ def _ack_mcu_packet_if_needed(session: VvTestSession, src: int, pkt: pb.packet_t
     session.send_packet(_build_ack(session, src, pkt))
 
 
+class BleConnectionMonitor:
+    def __init__(
+        self,
+        session: VvTestSession,
+        factory: CommandFactory,
+        src: int,
+        central_dst: int,
+        poll_interval_s: float = BLE_STATUS_POLL_INTERVAL_S,
+    ) -> None:
+        self.session = session
+        self.factory = factory
+        self.src = src
+        self.central_dst = central_dst
+        self.poll_interval_s = poll_interval_s
+        self.state: Optional[int] = None
+        self.disconnect_reason = 0
+        self.last_poll_at = 0.0
+        self.expected_connected = False
+        self.lost = False
+
+    def mark_connected(self) -> None:
+        self.expected_connected = True
+        self.lost = False
+        self.state = pb.BLE_STATE_CONNECTED
+        self.disconnect_reason = 0
+
+    def handle_packet(self, pkt: pb.packet_t) -> bool:
+        if _packet_name(pkt) != "ble_status_resp":
+            return False
+
+        self.state = int(pkt.ble_status_resp.state)
+        self.disconnect_reason = int(pkt.ble_status_resp.disconnect_reason)
+        if self.expected_connected and self.state != pb.BLE_STATE_CONNECTED:
+            self.lost = True
+        return True
+
+    def poll_if_due(self, now: Optional[float] = None, force: bool = False) -> None:
+        now = time.time() if now is None else now
+        if not force and now - self.last_poll_at < self.poll_interval_s:
+            return
+
+        pkt = self.factory.ble_status_get(self.src, self.central_dst, self.session.proto.next_seq())
+        self.session.send_packet(pkt)
+        self.last_poll_at = now
+
+
+def query_ble_status(
+    session: VvTestSession,
+    factory: CommandFactory,
+    src: int,
+    central_dst: int,
+    timeout_s: float = BLE_STATUS_QUERY_TIMEOUT_S,
+    monitor: Optional[BleConnectionMonitor] = None,
+) -> tuple[Optional[int], int]:
+    pkt = factory.ble_status_get(src, central_dst, session.proto.next_seq())
+    session.send_packet(pkt)
+
+    deadline = time.time() + timeout_s
+    state: Optional[int] = None
+    reason = 0
+    while time.time() < deadline:
+        for rx in session.recv_packets(timeout_s=0.05):
+            if monitor is not None:
+                monitor.handle_packet(rx)
+            if _packet_name(rx) == "ble_status_resp":
+                state = int(rx.ble_status_resp.state)
+                reason = int(rx.ble_status_resp.disconnect_reason)
+            else:
+                _ack_mcu_packet_if_needed(session, src, rx)
+        if state is not None:
+            break
+
+    return state, reason
+
+
 def _send_and_wait_for_ack(
     session: VvTestSession,
     src: int,
@@ -216,12 +291,13 @@ def _bootstrap_mcu_route(session: VvTestSession, factory: CommandFactory, src: i
     _send_quiet(session, transport_pkt)
 
 
-def _find_fallback_port() -> Optional[str]:
-    for port_info in serial.tools.list_ports.comports():
-        desc = port_info.description or ""
-        if "USB" in desc or "JLink" in desc or "Serial" in desc:
-            return port_info.device
-    return None
+def _disconnect_ble_quietly(session: VvTestSession, factory: CommandFactory, src: int, central_dst: int) -> None:
+    print("\n[-] Disconnecting BLE...")
+    try:
+        session.send_packet(factory.ble_disconnect(src, central_dst, session.proto.next_seq()))
+        time.sleep(0.2)
+    except Exception as exc:
+        print(f"{COLOR_YELLOW}[WARN] Could not send BLE disconnect: {exc}{COLOR_RESET}")
 
 
 def _validate_args(args: argparse.Namespace) -> Optional[str]:
@@ -270,68 +346,72 @@ def main() -> int:
     try:
         if not port:
             print("[*] Probing for Central Dongle COM port automatically...")
-            probe = VvTestSession.auto_probe(src=args.src, debug=args.verbose)
+            probe = VvTestSession.auto_probe(
+                src=args.src,
+                dst=args.central_dst,
+                expected_params=CENTRAL_DONGLE_PROBE_PARAMS,
+                retries=3,
+                debug=args.verbose,
+            )
             if probe is not None:
                 port = probe.port
                 args.baud = probe.baud
                 print(f"[+] Found Central Dongle: {port} @ {probe.baud}")
             else:
-                port = _find_fallback_port()
-                if port:
-                    print(f"[+] Found USB serial port via fallback scanning: {port}")
-                else:
-                    print(f"{COLOR_RED}[ERROR] No serial port found. Connect Central Dongle or use --port COMx.{COLOR_RESET}")
-                    return 1
+                print(f"{COLOR_RED}[ERROR] No Central Dongle responded. Connect Central Dongle or use --port COMx.{COLOR_RESET}")
+                return 1
 
         factory = CommandFactory()
         with VvTestSession(port, args.baud, debug=args.verbose) as session:
-            target = step_auto_scan_and_connect(
-                session=session,
-                factory=factory,
-                src=args.src,
-                central_dst=args.central_dst,
-                expected_mac=args.mac,
-                target_name_filter=args.name,
-            )
-            if not target:
-                return 1
+            ble_flow_started = False
+            try:
+                ble_flow_started = True
+                target = step_auto_scan_and_connect(
+                    session=session,
+                    factory=factory,
+                    src=args.src,
+                    central_dst=args.central_dst,
+                    expected_mac=args.mac,
+                    target_name_filter=args.name,
+                )
+                if not target:
+                    return 1
 
-            monitor = BleConnectionMonitor(session, factory, args.src, args.central_dst)
-            monitor.mark_connected()
-            _bootstrap_mcu_route(session, factory, args.src, args.dst)
+                monitor = BleConnectionMonitor(session, factory, args.src, args.central_dst)
+                monitor.mark_connected()
+                _bootstrap_mcu_route(session, factory, args.src, args.dst)
 
-            state, reason, _ = query_ble_status(
-                session=session,
-                factory=factory,
-                src=args.src,
-                central_dst=args.central_dst,
-                monitor=monitor,
-            )
-            if state is None:
-                print(f"{COLOR_YELLOW}[WARN] No extra ble_status_resp before OTP write; continuing with the CONNECTED status already received.{COLOR_RESET}")
-            elif state != pb.BLE_STATE_CONNECTED:
-                state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})") if state is not None else "NO_STATUS"
-                reason_part = f", reason=0x{reason:02X}" if reason else ""
-                print(f"{COLOR_RED}[FAIL] BLE is not connected before OTP write: {state_name}{reason_part}.{COLOR_RESET}")
-                return 1
+                state, reason = query_ble_status(
+                    session=session,
+                    factory=factory,
+                    src=args.src,
+                    central_dst=args.central_dst,
+                    monitor=monitor,
+                )
+                if state is None:
+                    print(f"{COLOR_YELLOW}[WARN] No extra ble_status_resp before OTP write; continuing with the CONNECTED status already received.{COLOR_RESET}")
+                elif state != pb.BLE_STATE_CONNECTED:
+                    state_name = BLE_STATE_NAMES.get(state, f"UNKNOWN({state})") if state is not None else "NO_STATUS"
+                    reason_part = f", reason=0x{reason:02X}" if reason else ""
+                    print(f"{COLOR_RED}[FAIL] BLE is not connected before OTP write: {state_name}{reason_part}.{COLOR_RESET}")
+                    return 1
 
-            seq = session.proto.next_seq()
-            pkt = _build_factory_otp_write(args, args.src, args.dst, seq)
-            print(f"\n{COLOR_YELLOW}About to write OTP field={args.field} seq={seq}.{COLOR_RESET}")
-            _print_packet("TX", pkt)
+                seq = session.proto.next_seq()
+                pkt = _build_factory_otp_write(args, args.src, args.dst, seq)
+                print(f"\n{COLOR_YELLOW}About to write OTP field={args.field} seq={seq}.{COLOR_RESET}")
+                _print_packet("TX", pkt)
 
-            ok, response = _send_and_wait_for_ack(
-                session,
-                args.src,
-                pkt,
-                timeout_s=args.timeout,
-                monitor=monitor,
-            )
-            print(f"\nACK response: {response}")
-
-            print("\n[-] Disconnecting BLE...")
-            session.send_packet(factory.ble_disconnect(args.src, args.central_dst, session.proto.next_seq()))
-            time.sleep(0.2)
+                ok, response = _send_and_wait_for_ack(
+                    session,
+                    args.src,
+                    pkt,
+                    timeout_s=args.timeout,
+                    monitor=monitor,
+                )
+                print(f"\nACK response: {response}")
+            finally:
+                if ble_flow_started:
+                    _disconnect_ble_quietly(session, factory, args.src, args.central_dst)
 
             if ok:
                 print(f"{COLOR_GREEN}[OK] OTP write accepted by MCU.{COLOR_RESET}")

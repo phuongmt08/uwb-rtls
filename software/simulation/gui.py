@@ -8,6 +8,7 @@ from PyQt5 import QtWidgets, uic, QtCore
 # Thêm thư mục hiện tại vào path để import module
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
+csv_dir = os.path.join(current_dir, "csv")
 
 from module import config
 from simulation import run_simulation_with_params
@@ -18,9 +19,36 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
         # Load file UI
         uic.loadUi(os.path.join(current_dir, "simulation.ui"), self)
         
+        self.setup_csv_browse_button()
         self.init_ui_state()
         self.connect_signals()
         self.load_config_to_ui()
+
+    def setup_csv_browse_button(self):
+        self.pushButton_browseCsv = QtWidgets.QPushButton("Browse")
+        self.pushButton_browseCsv.setObjectName("pushButton_browseCsv")
+        self.pushButton_browseCsv.setToolTip("Select CSV file")
+        self.horizontalLayout.addWidget(self.pushButton_browseCsv)
+
+    def csv_path_for_display(self, path):
+        if not path:
+            return ""
+
+        abs_path = path if os.path.isabs(path) else os.path.abspath(os.path.join(current_dir, path))
+        try:
+            rel_path = os.path.relpath(abs_path, current_dir)
+            if not rel_path.startswith("..") and not os.path.isabs(rel_path):
+                return rel_path.replace(os.sep, "/")
+        except ValueError:
+            pass
+        return path
+
+    def csv_path_for_runtime(self, path):
+        if not path:
+            return None
+        if os.path.isabs(path):
+            return path
+        return os.path.abspath(os.path.join(current_dir, path))
 
     def init_ui_state(self):
         """Khởi tạo trạng thái ban đầu của các widget"""
@@ -28,7 +56,8 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
         is_csv_set = config.SOURCE_DATA_FILE is not None
         self.checkBox_csvPath.setChecked(is_csv_set)
         self.lineEdit_csvPath.setReadOnly(not is_csv_set)
-        self.lineEdit_csvPath.setText(config.SOURCE_DATA_FILE if is_csv_set else "")
+        self.pushButton_browseCsv.setEnabled(True)
+        self.lineEdit_csvPath.setText(self.csv_path_for_display(config.SOURCE_DATA_FILE) if is_csv_set else "")
         
         self.checkBox_txtRaw.setChecked(True)
         self.checkBox_txtEMA.setChecked(True)
@@ -43,6 +72,7 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
         # CheckBox signals
         self.checkBox_csvPath.toggled.connect(self.on_csv_path_toggled)
         self.lineEdit_csvPath.editingFinished.connect(self.on_csv_path_edited)
+        self.pushButton_browseCsv.clicked.connect(self.browse_csv_file)
         self.checkBox_useQRTestParams.toggled.connect(self.on_qr_test_toggled)
         
         # LineEdit signals - Update config and SAVE TO FILE immediately on Enter/Focus lost
@@ -166,7 +196,9 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
         if not checked:
             config.SOURCE_DATA_FILE = None
         else:
-            config.SOURCE_DATA_FILE = self.lineEdit_csvPath.text()
+            csv_path = self.csv_path_for_display(self.lineEdit_csvPath.text().strip())
+            self.lineEdit_csvPath.setText(csv_path)
+            config.SOURCE_DATA_FILE = csv_path
         
         # Lưu file ngay lập tức
         self.save_to_config_file()
@@ -174,9 +206,31 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
     def on_csv_path_edited(self):
         """Xử lý khi người dùng nhập xong đường dẫn CSV và ấn Enter"""
         if self.checkBox_csvPath.isChecked():
-            config.SOURCE_DATA_FILE = self.lineEdit_csvPath.text()
+            csv_path = self.csv_path_for_display(self.lineEdit_csvPath.text().strip())
+            self.lineEdit_csvPath.setText(csv_path)
+            config.SOURCE_DATA_FILE = csv_path
             # Lưu file ngay lập tức
             self.save_to_config_file()
+
+    def browse_csv_file(self):
+        """Open file picker in software/simulation/csv and store a relative path."""
+        start_path = self.csv_path_for_runtime(self.lineEdit_csvPath.text().strip())
+        start_dir = os.path.dirname(start_path) if start_path and os.path.exists(start_path) else csv_dir
+        selected_file, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select CSV file",
+            start_dir,
+            "CSV files (*.csv);;All files (*)"
+        )
+
+        if not selected_file:
+            return
+
+        csv_path = self.csv_path_for_display(selected_file)
+        self.lineEdit_csvPath.setText(csv_path)
+        self.checkBox_csvPath.setChecked(True)
+        config.SOURCE_DATA_FILE = csv_path
+        self.save_to_config_file()
 
     def on_qr_test_toggled(self, checked):
         """Xử lý khi checkbox QR Test Params thay đổi"""
@@ -274,6 +328,8 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
             "r_uwb": config.R_UWB,
             "test_ukf_q_r_params": config.TEST_UKF_Q_R_Params
         }
+        if self.checkBox_csvPath.isChecked():
+            params["source_data_file"] = self.csv_path_for_runtime(self.lineEdit_csvPath.text().strip())
         return params
 
     def save_to_config_file(self):
@@ -304,7 +360,8 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
             # TXT
             replace_var("OUTPUT_TXT_ENABLED", self.checkBox_txtEnable.isChecked(), is_bool=True)
             if self.checkBox_csvPath.isChecked():
-                replace_var("SOURCE_DATA_FILE", config.SOURCE_DATA_FILE, is_str=True)
+                csv_path = self.csv_path_for_display(self.lineEdit_csvPath.text().strip() or config.SOURCE_DATA_FILE)
+                replace_var("SOURCE_DATA_FILE", csv_path, is_str=True)
             else:
                 replace_var("SOURCE_DATA_FILE", None, is_str=True)
 

@@ -156,7 +156,7 @@ bsp_err_t bsp_io_uart_send_fusion_log_data(
 #endif
 
 #if ENABLE_SYS_FUSION
-bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, int16_t ukf_x, int16_t ukf_y, int16_t ukf_yaw, int16_t tril_x, int16_t tril_y, int16_t yaw, uint32_t err_frame_count);
+bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, int16_t ukf_x, int16_t ukf_y, int16_t ukf_yaw, int16_t tril_x, int16_t tril_y, int16_t yaw, uint8_t ukf_step, uint32_t err_frame_count);
 #endif
 
 /**

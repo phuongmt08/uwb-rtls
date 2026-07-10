@@ -434,6 +434,12 @@ void sensor_fusion_entry(void *argument)
 
     (void)sys_sensor_fusion_task();
 
+    if (!g_ranging_enabled)
+	{
+    	osDelay(20);
+    	continue;
+	}
+
     uwb_distance_msg_t msg;
     bool has_uwb_msg = false;
 
@@ -1020,11 +1026,15 @@ static void stop_uwb_ranging_locked(void)
 {
     (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
     sys_ranging_abort();
+#if UWB_SLEEP_ENABLE
     if (bsp_uwb_sleep_enter() != BSP_OK) {
         /* sleep_enter() already forces TRX off before attempting sleep. */
         RLOG_W(LOG_OBJECT_CODE_UWB_DRIVER,
                "[SLEEP] DW1000 failed to enter sleep after ranging stopped");
     }
+#else
+    bsp_uwb_idle();
+#endif
     (void)osMutexRelease(g_spi1_mutexHandle);
     drain_signal_semaphore(g_uwb_isr_semHandle);
 }

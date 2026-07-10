@@ -20,31 +20,47 @@ from ..config import (
     ROOM_SIZE_M,
     UART_BAUDRATE,
     UART_SOF,
+    CSV_UKF_FUSION_FILENAME_PREFIX,
+    CSV_UKF_FUSION_FILENAME_SUFFIX,
 )
 from ..module_parse_frame import parse_uart_fusion_frame
+from ..module_csv import create_csv_file, generate_timestamp_filename, write_fusion_frame_to_csv
 
 
 GROUND_TRUTH_HORIZONTAL_M = 2.8
 GROUND_TRUTH_VERTICAL_M = 6
 GROUND_TRUTH_START_1 = "start_1"
 GROUND_TRUTH_START_2 = "start_2"
+UKF_POS_ALL = "all"
+UKF_POS_PREDICT = "predict"
+UKF_POS_UPDATE = "update"
+UKF_POS_SPLIT = "split"
+UKF_STEP_PREDICT = 0
+UKF_STEP_UPDATE = 1
 
 
 class FusionFrameThread(QThread):
     connected_signal = pyqtSignal(str)
     disconnected_signal = pyqtSignal()
     data_signal = pyqtSignal(dict)
+    csv_created_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.running = True
         self.serial_port = None
+        self.csv_file = None
+        self.csv_writer = None
+        self.create_csv_enabled = True
+        self.new_csv_requested = False
+        self._request_lock = threading.Lock()
         self._serial_reader = None
         self._rx_queue = queue.Queue()
         self._parsed_frames = 0
         self._bad_frames = 0
         self._last_tx_frame_cnt = None
         self._tx_gap_count = 0
+        self._last_step_timestamp = {}
         self._stats_last_print = time.monotonic()
 
     def stop(self):
@@ -57,6 +73,31 @@ class FusionFrameThread(QThread):
         if self._serial_reader and self._serial_reader.is_alive():
             self._serial_reader.join(timeout=1.0)
         self.wait()
+
+    def request_new_csv(self):
+        with self._request_lock:
+            self.new_csv_requested = True
+
+    def _take_new_csv_request(self):
+        with self._request_lock:
+            requested = self.new_csv_requested
+            self.new_csv_requested = False
+            return requested
+
+    def _open_new_csv(self):
+        self._close_csv()
+        self._last_step_timestamp.clear()
+        filename = generate_timestamp_filename(CSV_UKF_FUSION_FILENAME_PREFIX, CSV_UKF_FUSION_FILENAME_SUFFIX)
+        self.csv_file, self.csv_writer = create_csv_file(filename)
+        self.csv_created_signal.emit()
+        print("[INFO] Started new fusion data csv...")
+
+    def _close_csv(self):
+        if self.csv_file:
+            self.csv_file.flush()
+            self.csv_file.close()
+        self.csv_file = None
+        self.csv_writer = None
 
     def _close_serial(self):
         if self.serial_port:
@@ -241,7 +282,12 @@ class FusionFrameThread(QThread):
         print("=" * 60)
 
         buffer = bytearray()
+        frame_count = 0
         while self.running:
+            if self._take_new_csv_request() and self.create_csv_enabled:
+                self._open_new_csv()
+                frame_count = 0
+
             if (
                 self.serial_port is None
                 or not self.serial_port.is_open
@@ -252,6 +298,8 @@ class FusionFrameThread(QThread):
                 self.disconnected_signal.emit()
                 try:
                     self._connect_serial()
+                    if self.create_csv_enabled and self.csv_file is None:
+                        self._open_new_csv()
                     self._start_reader()
                 except serial.SerialException as e:
                     print(f"[WARNING] Failed to auto-connect USB serial: {e}")
@@ -265,13 +313,24 @@ class FusionFrameThread(QThread):
                 continue
 
             for frame_data in self._extract_frames(buffer):
+                frame_count += 1
                 self._parsed_frames += 1
                 self._track_tx_gap(frame_data["tx_frame_cnt"])
+                ukf_step = int(frame_data.get("ukf_step", -1))
+                now = time.monotonic()
+                previous_step_time = self._last_step_timestamp.get(ukf_step)
+                frame_data["dt"] = 0.0 if previous_step_time is None else now - previous_step_time
+                self._last_step_timestamp[ukf_step] = now
+                if self.csv_writer is not None:
+                    write_fusion_frame_to_csv(self.csv_writer, frame_data, frame_count)
+                if self.csv_file is not None and frame_count % 25 == 0:
+                    self.csv_file.flush()
                 self.data_signal.emit(frame_data)
 
             self._print_stats()
 
         self._close_serial()
+        self._close_csv()
 
 
 class FusionFrameWindow(QMainWindow):
@@ -299,8 +358,38 @@ class FusionFrameWindow(QMainWindow):
         self.graph_d.setLabel("bottom", "Frame")
         self.graph_d.addLegend()
 
-        self.plot_ukf = self.graph_pos.plot(pen=pg.mkPen("b", width=2.5), name="UKF")
-        self.plot_tril = self.graph_pos.plot(pen=pg.mkPen("g", width=2.0), name="Trilateration")
+        self.plot_ukf = self.graph_pos.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen("b"),
+            symbolBrush=pg.mkBrush("b"),
+            name="UKF Filtered",
+        )
+        self.plot_ukf_predict = self.graph_pos.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen((20, 90, 210)),
+            symbolBrush=pg.mkBrush((20, 90, 210, 150)),
+            name="UKF predict step=0",
+        )
+        self.plot_ukf_update = self.graph_pos.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=6,
+            symbolPen=pg.mkPen((210, 70, 20)),
+            symbolBrush=pg.mkBrush((210, 70, 20, 180)),
+            name="UKF update step=1",
+        )
+        self.plot_tril = self.graph_pos.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen((0, 150, 0, 110)),
+            symbolBrush=pg.mkBrush((0, 180, 0, 70)),
+            name="UWB Trilateration",
+        )
         self.plot_ground_truth = self.graph_pos.plot(
             pen=pg.mkPen((230, 116, 37), width=2.0, style=Qt.DashLine),
             name="Ground truth",
@@ -324,28 +413,48 @@ class FusionFrameWindow(QMainWindow):
             text.setPos(anchor[0], anchor[1])
             self.graph_pos.addItem(text)
 
-        self.ukf_xs, self.ukf_ys = [], []
+        self.ukf_xs, self.ukf_ys, self.ukf_steps = [], [], []
+        self.ukf_predict_xs, self.ukf_predict_ys = [], []
+        self.ukf_update_xs, self.ukf_update_ys = [], []
         self.tril_xs, self.tril_ys = [], []
         self.ukf_yaws, self.yaws = [], []
         self.ground_truth_start = None
         self.ground_truth_start_kind = GROUND_TRUTH_START_1
+        self.ukf_pos_mode = UKF_POS_ALL
         self.latest_data = None
 
+        self._setup_ukf_pos_controls()
         self._setup_ground_truth_controls()
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         if hasattr(self, "checkBox_createCsv"):
-            self.checkBox_createCsv.setChecked(False)
-            self.checkBox_createCsv.setEnabled(False)
+            self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_gui)
         self.timer.start(30)
 
         self.thread = FusionFrameThread()
+        if hasattr(self, "checkBox_createCsv"):
+            self.thread.create_csv_enabled = self.checkBox_createCsv.isChecked()
         self.thread.connected_signal.connect(self.on_connected)
         self.thread.disconnected_signal.connect(self.on_disconnected)
         self.thread.data_signal.connect(self.on_data)
+        self.thread.csv_created_signal.connect(self.on_csv_created)
         self.thread.start()
+
+    def _setup_ukf_pos_controls(self):
+        self.ukfPosFieldLabel = QLabel("UKF pos field")
+        self.comboBox_ukfPosField = QComboBox()
+        self.comboBox_ukfPosField.addItem("all", UKF_POS_ALL)
+        self.comboBox_ukfPosField.addItem("predict step=0", UKF_POS_PREDICT)
+        self.comboBox_ukfPosField.addItem("update step=1", UKF_POS_UPDATE)
+        self.comboBox_ukfPosField.addItem("split step=0/1", UKF_POS_SPLIT)
+        self.comboBox_ukfPosField.currentIndexChanged.connect(self.on_ukf_pos_field_changed)
+
+        if hasattr(self, "gridLayout_4"):
+            row = self.gridLayout_4.rowCount()
+            self.gridLayout_4.addWidget(self.ukfPosFieldLabel, row, 0)
+            self.gridLayout_4.addWidget(self.comboBox_ukfPosField, row + 1, 0)
 
     def _setup_ground_truth_controls(self):
         self.groundTruthStartLabel = QLabel("Ground truth start")
@@ -358,6 +467,10 @@ class FusionFrameWindow(QMainWindow):
             row = self.gridLayout_4.rowCount()
             self.gridLayout_4.addWidget(self.groundTruthStartLabel, row, 0)
             self.gridLayout_4.addWidget(self.comboBox_groundTruthStart, row + 1, 0)
+
+    def on_ukf_pos_field_changed(self, *_):
+        self.ukf_pos_mode = self.comboBox_ukfPosField.currentData()
+        self._update_ukf_position_plot()
 
     def _ground_truth_points(self):
         if self.ground_truth_start is None:
@@ -407,9 +520,22 @@ class FusionFrameWindow(QMainWindow):
         self.ground_truth_start_kind = self.comboBox_groundTruthStart.currentData()
         self._update_ground_truth_plot()
 
+    def on_checkbox_csv_changed(self, state):
+        if hasattr(self, "thread") and self.thread is not None:
+            self.thread.create_csv_enabled = (state == Qt.Checked)
+
+    def on_csv_created(self):
+        if hasattr(self, "checkBox_createCsv"):
+            self.checkBox_createCsv.setChecked(False)
+
     def clear_graph(self):
         self.ukf_xs.clear()
         self.ukf_ys.clear()
+        self.ukf_steps.clear()
+        self.ukf_predict_xs.clear()
+        self.ukf_predict_ys.clear()
+        self.ukf_update_xs.clear()
+        self.ukf_update_ys.clear()
         self.tril_xs.clear()
         self.tril_ys.clear()
         self.ukf_yaws.clear()
@@ -417,10 +543,15 @@ class FusionFrameWindow(QMainWindow):
         self.ground_truth_start = None
         self.latest_data = None
         self.plot_ukf.setData([], [])
+        self.plot_ukf_predict.setData([], [])
+        self.plot_ukf_update.setData([], [])
         self.plot_tril.setData([], [])
         self.plot_ukf_yaw.setData([])
         self.plot_yaw.setData([])
         self._update_ground_truth_plot()
+        if hasattr(self, "thread") and self.thread is not None:
+            if hasattr(self, "checkBox_createCsv") and self.checkBox_createCsv.isChecked():
+                self.thread.request_new_csv()
 
     @pyqtSlot(str)
     def on_connected(self, port):
@@ -441,22 +572,56 @@ class FusionFrameWindow(QMainWindow):
 
         self.ukf_xs.append(data["ukf_x"])
         self.ukf_ys.append(data["ukf_y"])
+        ukf_step = int(data.get("ukf_step", data.get("error_count", data.get("err_cnt", data.get("error_frame_cnt", -1)))))
+        self.ukf_steps.append(ukf_step)
+        if ukf_step == UKF_STEP_PREDICT:
+            self.ukf_predict_xs.append(data["ukf_x"])
+            self.ukf_predict_ys.append(data["ukf_y"])
+        elif ukf_step == UKF_STEP_UPDATE:
+            self.ukf_update_xs.append(data["ukf_x"])
+            self.ukf_update_ys.append(data["ukf_y"])
         self.tril_xs.append(data["tril_x"])
         self.tril_ys.append(data["tril_y"])
         self.ukf_yaws.append(data["ukf_yaw"])
         self.yaws.append(data["yaw"])
 
         if len(self.ukf_xs) > MAX_SAMPLES:
+            old_ukf_step = self.ukf_steps.pop(0)
             self.ukf_xs.pop(0)
             self.ukf_ys.pop(0)
+            if old_ukf_step == UKF_STEP_PREDICT and self.ukf_predict_xs:
+                self.ukf_predict_xs.pop(0)
+                self.ukf_predict_ys.pop(0)
+            elif old_ukf_step == UKF_STEP_UPDATE and self.ukf_update_xs:
+                self.ukf_update_xs.pop(0)
+                self.ukf_update_ys.pop(0)
             self.tril_xs.pop(0)
             self.tril_ys.pop(0)
             self.ukf_yaws.pop(0)
             self.yaws.pop(0)
 
+    def _update_ukf_position_plot(self):
+        mode = self.ukf_pos_mode
+        if mode == UKF_POS_PREDICT:
+            self.plot_ukf.setData([], [])
+            self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
+            self.plot_ukf_update.setData([], [])
+        elif mode == UKF_POS_UPDATE:
+            self.plot_ukf.setData([], [])
+            self.plot_ukf_predict.setData([], [])
+            self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
+        elif mode == UKF_POS_SPLIT:
+            self.plot_ukf.setData([], [])
+            self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
+            self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
+        else:
+            self.plot_ukf.setData(self.ukf_xs, self.ukf_ys)
+            self.plot_ukf_predict.setData([], [])
+            self.plot_ukf_update.setData([], [])
+
     def update_gui(self):
         if self.ukf_xs:
-            self.plot_ukf.setData(self.ukf_xs, self.ukf_ys)
+            self._update_ukf_position_plot()
             self.plot_tril.setData(self.tril_xs, self.tril_ys)
             self.plot_ukf_yaw.setData(self.ukf_yaws)
             self.plot_yaw.setData(self.yaws)

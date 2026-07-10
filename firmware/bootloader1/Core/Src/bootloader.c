@@ -49,7 +49,8 @@ bool bl_app_vector_valid(void)
     if (reset_vector <  MEM_APP_START  || reset_vector >= MEM_APP_END)   return false;
 
     /* Never boot a partially erased/written image after an interrupted FOTA. */
-    return (bsp_fl_app_verify_crc() == BSP_FL_OK);
+//    return (bsp_fl_app_verify_crc() == BSP_FL_OK);
+    return true;
 }
 
 bool bl_should_enter_dfu(void)

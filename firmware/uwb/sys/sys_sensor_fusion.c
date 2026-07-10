@@ -54,6 +54,11 @@
 #define SYS_SENSOR_FUSION_PI    3.14159265358979323846f
 #define SYS_SENSOR_FUSION_2PI   (2.0f * SYS_SENSOR_FUSION_PI)
 #define RAD2DEG							180.0f / 3.14159265358979323846f
+#define DEG2RAD							3.14159265358979323846f / 180.0f
+
+#define UKF_STEP_PREDICT 0U
+#define UKF_STEP_UPDATE  1U
+
 
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
@@ -91,6 +96,25 @@ typedef struct
 
 } ukf_core_t;
 
+// Filter
+typedef struct
+{
+    float32_t x1;
+    float32_t x2;
+    float32_t y1;
+    float32_t y2;
+} imu_biquad_filter_t;
+
+typedef struct
+{
+    imu_biquad_filter_t ax;
+    imu_biquad_filter_t ay;
+    imu_biquad_filter_t gz;
+    bool butterworth_initialized;
+    uint16_t zupt_count;
+    bool zupt_active;
+} imu_conditioner_t;
+
 /* Private macros ----------------------------------------------------- */
 /* Public variables --------------------------------------------------- */
 extern network_core_t g_network_core;
@@ -100,6 +124,7 @@ extern bool g_ranging_enabled;
 // filter
 static ukf_init_filter_t s_ukf_init_filter;
 static ukf_init_distance_filter_t s_ukf_init_dist_filter;
+static imu_conditioner_t s_imu_conditioner = {0};
 // log
 float yaw = 0.0f;
 float b_gz_t = 0.0f;
@@ -144,6 +169,14 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                  float d1,
                                                  float d2,
                                                  const uint8_t anchor_ids[3]);
+
+// Filter
+static void reset_imu_conditioner(void);
+static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt);
+static void reset_biquad_filter(imu_biquad_filter_t *filter, float value);
+static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, float dt);
+static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned);
+static void apply_zupt_velocity_constraint(void);
 
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
@@ -252,6 +285,9 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 #if ENABLE_SYS_FUSION
 	sys_predict_count++;
 
+    bsp_imu_data_t imu_raw = ukf.imu_current;
+    ukf.imu_current = condition_imu_sample(&imu_raw, dt);
+
 	/* On the first frame imu_old is still zero-initialized; pair it with the
 	 * current sample so the trapezoidal integration below does not integrate
 	 * against a bogus zero (which corrupts the very first yaw/motion step). */
@@ -333,6 +369,8 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	}
 
 	// LUÔN LUÔN CHẠY: Truyền các điểm Sigma ĐÃ LƯU qua mô hình động học
+    apply_zupt_velocity_constraint();
+
 	for(int m = 0; m < NUM_PREDICT_SIGMA; m++)
 	{
 		float px = ukf.X_sigma_pred[0][m], py = ukf.X_sigma_pred[1][m];
@@ -390,6 +428,21 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 	}
 
 	// Cập nhật State
+#if SYS_FUSION_IMU_ZUPT_ENABLE
+    if (s_imu_conditioner.zupt_active)
+    {
+        for (int i = 0; i < NUM_STATE; i++)
+        {
+            ukf.P_data[2 * NUM_STATE + i] = 0.0f;
+            ukf.P_data[i * NUM_STATE + 2] = 0.0f;
+            ukf.P_data[3 * NUM_STATE + i] = 0.0f;
+            ukf.P_data[i * NUM_STATE + 3] = 0.0f;
+        }
+        ukf.P_data[2 * NUM_STATE + 2] = SYS_FUSION_IMU_ZUPT_VEL_VARIANCE;
+        ukf.P_data[3 * NUM_STATE + 3] = SYS_FUSION_IMU_ZUPT_VEL_VARIANCE;
+    }
+#endif
+
 	ukf.state.px = x_mean[0]; ukf.state.py = x_mean[1];
 	ukf.state.vx = x_mean[2]; ukf.state.vy = x_mean[3];
 	ukf.state.theta = normalize_angle(x_mean[4]);
@@ -518,6 +571,16 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                         selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
         return false;
     }
+
+    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+                                        to_uart_fixed2(ukf.state.px),
+                                        to_uart_fixed2(ukf.state.py),
+                                        0,
+                                        to_uart_fixed2(s_latest_tril_x),
+                                        to_uart_fixed2(s_latest_tril_y),
+                                        0,
+                                        UKF_STEP_UPDATE,
+                                        s_error_count);
 
     return true;
 }
@@ -716,6 +779,7 @@ void sys_sensor_fusion_stream_uart()
                                      to_uart_fixed2((x + 0.05f)),
                                      to_uart_fixed2((y + 0.05f)),
                                      to_uart_fixed2(ukf_yaw_deg),
+                                     UKF_STEP_PREDICT,
                                      s_error_count) == BSP_OK)
     {
         s_stream_test_sample_idx++;
@@ -738,6 +802,7 @@ void sys_sensor_fusion_stream_uart()
                                     to_uart_fixed2(s_latest_tril_x),
                                     to_uart_fixed2(s_latest_tril_y),
                                     to_uart_fixed2(raw_yaw),
+                                    UKF_STEP_PREDICT,
                                     s_error_count);
 #else
     bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,
@@ -814,6 +879,13 @@ void sys_sensor_fusion_task()
             (void)osMessageQueuePut(g_imu_data_queue, &imu_data, 0U, 0U);
         }
     }
+}
+
+void sys_sensor_fusion_set_initial_yaw(uint32_t yaw_deg)
+{
+    float yaw_rad   = (float)(yaw_deg / 100.0f) * DEG2RAD;
+    ukf.state.theta = yaw_rad;
+    yaw             = yaw_rad;
 }
 
 /* Private definitions ------------------------------------------------ */
@@ -1038,10 +1110,197 @@ static float calc_dt(void)
     return dt;
 }
 
+static void reset_imu_conditioner(void)
+{
+    memset(&s_imu_conditioner, 0, sizeof(s_imu_conditioner));
+}
+
+static void reset_biquad_filter(imu_biquad_filter_t *filter, float value)
+{
+    if (filter == NULL)
+    {
+        return;
+    }
+
+    filter->x1 = value;
+    filter->x2 = value;
+    filter->y1 = value;
+    filter->y2 = value;
+}
+
+static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, float dt)
+{
+    if (filter == NULL)
+    {
+        return x;
+    }
+
+    float fs = SYS_FUSION_IMU_SAMPLE_RATE_HZ;
+    if (dt > 0.0f)
+    {
+        fs = 1.0f / dt;
+    }
+    if (fs <= 0.0f)
+    {
+        return x;
+    }
+
+    float margin = SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN;
+    if (margin <= 0.0f || margin > 0.99f)
+    {
+        margin = 0.95f;
+    }
+
+    const float nyquist = 0.5f * fs;
+    float max_cutoff = nyquist * margin;
+    if (max_cutoff < 0.01f)
+    {
+        max_cutoff = 0.01f;
+    }
+
+    float cutoff = SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ;
+    if (cutoff < 0.01f)
+    {
+        cutoff = 0.01f;
+    }
+    if (cutoff > max_cutoff)
+    {
+        cutoff = max_cutoff;
+    }
+
+    const float q = 0.70710678118f;
+    const float omega = SYS_SENSOR_FUSION_2PI * cutoff / fs;
+    const float sin_omega = sinf(omega);
+    const float cos_omega = cosf(omega);
+    const float alpha = sin_omega / (2.0f * q);
+    const float a0 = 1.0f + alpha;
+    const float b0 = ((1.0f - cos_omega) * 0.5f) / a0;
+    const float b1 = (1.0f - cos_omega) / a0;
+    const float b2 = b0;
+    const float a1 = (-2.0f * cos_omega) / a0;
+    const float a2 = (1.0f - alpha) / a0;
+
+    const float y = b0 * x + b1 * filter->x1 + b2 * filter->x2
+                  - a1 * filter->y1 - a2 * filter->y2;
+
+    filter->x2 = filter->x1;
+    filter->x1 = x;
+    filter->y2 = filter->y1;
+    filter->y1 = y;
+    return y;
+}
+
+static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned)
+{
+#if SYS_FUSION_IMU_ZUPT_ENABLE
+    const bsp_imu_data_t *sample = raw;
+#if SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE
+    sample = conditioned;
+#endif
+
+    if (sample == NULL)
+    {
+        s_imu_conditioner.zupt_count = 0U;
+        s_imu_conditioner.zupt_active = false;
+        return;
+    }
+
+    const float ax = sample->ax - ukf.state.b_ax;
+    const float ay = sample->ay - ukf.state.b_ay;
+    const float gz = sample->gz - ukf.state.b_gz;
+    const float acc_mag = sqrtf(ax * ax + ay * ay);
+    const float gyr_mag = fabsf(gz);
+
+    if (acc_mag < SYS_FUSION_IMU_ZUPT_ACC_THRESHOLD &&
+        gyr_mag < SYS_FUSION_IMU_ZUPT_GYR_THRESHOLD)
+    {
+        if (s_imu_conditioner.zupt_count < UINT16_MAX)
+        {
+            s_imu_conditioner.zupt_count++;
+        }
+    }
+    else
+    {
+        s_imu_conditioner.zupt_count = 0U;
+    }
+
+    s_imu_conditioner.zupt_active =
+        (s_imu_conditioner.zupt_count > SYS_FUSION_IMU_ZUPT_COUNT_THRESHOLD);
+#else
+    (void)raw;
+    (void)conditioned;
+    s_imu_conditioner.zupt_count = 0U;
+    s_imu_conditioner.zupt_active = false;
+#endif
+}
+
+static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt)
+{
+    bsp_imu_data_t out = {0};
+    if (raw == NULL)
+    {
+        return out;
+    }
+
+    out = *raw;
+
+#if SYS_FUSION_IMU_BUTTERWORTH_ENABLE
+    if (!s_imu_conditioner.butterworth_initialized)
+    {
+        reset_biquad_filter(&s_imu_conditioner.ax, raw->ax);
+        reset_biquad_filter(&s_imu_conditioner.ay, raw->ay);
+        reset_biquad_filter(&s_imu_conditioner.gz, raw->gz);
+        s_imu_conditioner.butterworth_initialized = true;
+    }
+    else
+    {
+        out.ax = apply_butterworth_2nd_order(&s_imu_conditioner.ax, raw->ax, dt);
+        out.ay = apply_butterworth_2nd_order(&s_imu_conditioner.ay, raw->ay, dt);
+        out.gz = apply_butterworth_2nd_order(&s_imu_conditioner.gz, raw->gz, dt);
+    }
+#endif
+
+    update_zupt_state(raw, &out);
+
+#if SYS_FUSION_IMU_ZUPT_ENABLE
+    if (s_imu_conditioner.zupt_active)
+    {
+        out.ax = ukf.state.b_ax;
+        out.ay = ukf.state.b_ay;
+    }
+#endif
+
+    return out;
+}
+
+static void apply_zupt_velocity_constraint(void)
+{
+#if SYS_FUSION_IMU_ZUPT_ENABLE
+    if (!s_imu_conditioner.zupt_active)
+    {
+        return;
+    }
+
+    ukf.state.vx = 0.0f;
+    ukf.state.vy = 0.0f;
+    ukf.imu_old.ax = ukf.state.b_ax;
+    ukf.imu_old.ay = ukf.state.b_ay;
+    ukf.imu_current.ax = ukf.state.b_ax;
+    ukf.imu_current.ay = ukf.state.b_ay;
+
+    for (int m = 0; m < NUM_PREDICT_SIGMA; m++)
+    {
+        ukf.X_sigma_pred[2][m] = 0.0f;
+        ukf.X_sigma_pred[3][m] = 0.0f;
+    }
+#endif
+}
+
 static void reset_runtime_state(void)
 {
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
     mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
+    reset_imu_conditioner();
 
     clear_latest_anchor_metrics();
 

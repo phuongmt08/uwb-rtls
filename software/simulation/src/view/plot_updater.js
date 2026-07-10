@@ -240,27 +240,39 @@ function updatePlots(res, samples, rawData) {
             x: [x_axis, x_axis, [], [], [], []],
             y: [trilErrors, dataUkfErrors, [], [], [], []],
             name: [
-                `Pos Error (Trilateration) Mean: ${meanErr(trilErrors)}m`,
-                `Pos Error (Data UKF) Mean: ${meanErr(dataUkfErrors)}m`,
+                `Pos Error (Trilateration) MAE: ${meanErr(trilErrors)}m`,
+                `Pos Error (Data UKF) MAE: ${meanErr(dataUkfErrors)}m`,
                 '', '', '', ''
             ],
             visible: [true, true, false, false, false, false],
             customdata: [plotData.times, plotData.times, [], [], [], []]
         }, [0, 1, 2, 3, 4, 5]);
+        updatePositionErrorMetrics([
+            { label: 'Trilateration', errors: trilErrors },
+            { label: 'Data UKF', errors: dataUkfErrors }
+        ]);
     } else {
         Plotly.restyle('pos_error', {
             x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
             y: [pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf],
             name: [
-                `Pos Error (Trilateration) Mean: ${meanErr(pos_errors_fw)}m`,
-                `Pos Error (Rules) Mean: ${meanErr(pos_errors)}m`,
-                `Pos Error (Multilateration) Mean: ${meanErr(pos_errors_wls)}m`,
-                `Pos Error (Best Triplet) Mean: ${meanErr(pos_errors_triplet)}m`,
-                `Pos Error (UKF Fusion) Mean: ${meanErr(pos_errors_ukf)}m`,
-            `Pos Error (UKF Fusion + IMU Butterworth) Mean: ${meanErr(pos_errors_ukf_lpf)}m`
+                `Pos Error (Trilateration) MAE: ${meanErr(pos_errors_fw)}m`,
+                `Pos Error (Rules) MAE: ${meanErr(pos_errors)}m`,
+                `Pos Error (Multilateration) MAE: ${meanErr(pos_errors_wls)}m`,
+                `Pos Error (Best Triplet) MAE: ${meanErr(pos_errors_triplet)}m`,
+                `Pos Error (UKF Fusion) MAE: ${meanErr(pos_errors_ukf)}m`,
+                `Pos Error (UKF Fusion + IMU Butterworth) MAE: ${meanErr(pos_errors_ukf_lpf)}m`
             ],
             customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
         }, [0, 1, 2, 3, 4, 5]);
+        updatePositionErrorMetrics([
+            { label: 'Trilateration', errors: pos_errors_fw },
+            { label: 'Rules', errors: pos_errors },
+            { label: 'Multilateration', errors: pos_errors_wls },
+            { label: 'Best Triplet', errors: pos_errors_triplet },
+            { label: 'UKF Fusion', errors: pos_errors_ukf },
+            { label: 'UKF + Butterworth', errors: pos_errors_ukf_lpf }
+        ]);
     }
 
     const csv_errors = samples.slice(0, x_axis.length).map(s => s.err);
@@ -297,6 +309,27 @@ function updatePlots(res, samples, rawData) {
             max: max.toFixed(1),
             mean: mean.toFixed(1)
         };
+    }
+
+    function updatePositionErrorMetrics(series) {
+        const elem = document.getElementById('position_error_metrics');
+        if (!elem) return;
+
+        elem.innerHTML = series.map(item => {
+            const metrics = calcErrorMetrics(item.errors);
+            return `
+                <div class="stat-box">
+                    <strong>${item.label}</strong>
+                    <div class="stat-row"><span>MAE</span><span>${formatErrorMetric(metrics.mae)}</span></div>
+                    <div class="stat-row"><span>RMSE</span><span>${formatErrorMetric(metrics.rmse)}</span></div>
+                    <div class="stat-row"><span>P50</span><span>${formatErrorMetric(metrics.p50)}</span></div>
+                    <div class="stat-row"><span>P90</span><span>${formatErrorMetric(metrics.p90)}</span></div>
+                    <div class="stat-row"><span>P95</span><span>${formatErrorMetric(metrics.p95)}</span></div>
+                    <div class="stat-row"><span>Max Error</span><span>${formatErrorMetric(metrics.max)}</span></div>
+                    <div class="stat-row"><span>Samples</span><span>${metrics.count}</span></div>
+                </div>
+            `;
+        }).join('');
     }
 
     const pathLossData = [0,1,2,3].map(i => {
