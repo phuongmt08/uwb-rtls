@@ -255,7 +255,8 @@ typedef struct _protobuf_sys_ranging_cfg_resp_t {
 } protobuf_sys_ranging_cfg_resp_t;
 
 typedef struct _protobuf_ranging_start_t {
-    uint32_t dummy;
+    uint32_t yaw_deg;
+    bool is_ukf_reinit;
 } protobuf_ranging_start_t;
 
 typedef struct _protobuf_ranging_stop_t {
@@ -1176,7 +1177,7 @@ extern "C" {
 #define protobuf_sys_ranging_cfg_get_t_init_default {0}
 #define protobuf_sys_ranging_cfg_set_t_init_default {false, protobuf_sys_ranging_cfg_t_init_default}
 #define protobuf_sys_ranging_cfg_resp_t_init_default {false, protobuf_sys_ranging_cfg_t_init_default}
-#define protobuf_ranging_start_t_init_default    {0}
+#define protobuf_ranging_start_t_init_default    {0, 0}
 #define protobuf_ranging_stop_t_init_default     {0}
 #define protobuf_anchor_ranging_t_init_default   {0, 0, 0}
 #define protobuf_ranging_result_t_init_default   {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default}, 0}
@@ -1275,7 +1276,7 @@ extern "C" {
 #define protobuf_sys_ranging_cfg_get_t_init_zero {0}
 #define protobuf_sys_ranging_cfg_set_t_init_zero {false, protobuf_sys_ranging_cfg_t_init_zero}
 #define protobuf_sys_ranging_cfg_resp_t_init_zero {false, protobuf_sys_ranging_cfg_t_init_zero}
-#define protobuf_ranging_start_t_init_zero       {0}
+#define protobuf_ranging_start_t_init_zero       {0, 0}
 #define protobuf_ranging_stop_t_init_zero        {0}
 #define protobuf_anchor_ranging_t_init_zero      {0, 0, 0}
 #define protobuf_ranging_result_t_init_zero      {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero}, 0}
@@ -1413,7 +1414,8 @@ extern "C" {
 #define protobuf_sys_ranging_cfg_get_t_dummy_tag 1
 #define protobuf_sys_ranging_cfg_set_t_config_tag 1
 #define protobuf_sys_ranging_cfg_resp_t_config_tag 1
-#define protobuf_ranging_start_t_dummy_tag       1
+#define protobuf_ranging_start_t_yaw_deg_tag     1
+#define protobuf_ranging_start_t_is_ukf_reinit_tag 2
 #define protobuf_ranging_stop_t_dummy_tag        1
 #define protobuf_anchor_ranging_t_anchor_id_tag  1
 #define protobuf_anchor_ranging_t_distance_mm_tag 2
@@ -1878,7 +1880,8 @@ X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
 #define protobuf_sys_ranging_cfg_resp_t_config_MSGTYPE protobuf_sys_ranging_cfg_t
 
 #define protobuf_ranging_start_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UINT32,   dummy,             1)
+X(a, STATIC,   SINGULAR, UINT32,   yaw_deg,           1) \
+X(a, STATIC,   SINGULAR, BOOL,     is_ukf_reinit,     2)
 #define protobuf_ranging_start_t_CALLBACK NULL
 #define protobuf_ranging_start_t_DEFAULT NULL
 
@@ -2887,7 +2890,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_prefilter_cfg_set_t_size        34
 #define protobuf_prefilter_cfg_t_size            32
 #define protobuf_ranging_result_t_size           106
-#define protobuf_ranging_start_t_size            6
+#define protobuf_ranging_start_t_size            8
 #define protobuf_ranging_status_get_t_size       6
 #define protobuf_ranging_status_resp_t_size      58
 #define protobuf_ranging_stop_t_size             6
