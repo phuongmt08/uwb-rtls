@@ -7,7 +7,7 @@ import numpy as np
 import threading
 import queue
 
-from PyQt5.QtWidgets import QApplication, QComboBox, QLabel, QMainWindow
+from PyQt5.QtWidgets import QApplication, QComboBox, QDoubleSpinBox, QLabel, QMainWindow
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QTimer
 from PyQt5.QtWidgets import QGraphicsRectItem
 from PyQt5 import uic
@@ -54,6 +54,7 @@ class DataThread(QThread):
         self.imu_vx = 0.0
         self.imu_vy = 0.0
         self.imu_theta = 0.0
+        self.initial_yaw_rad = 0.0
         
         self.ax_ema = 0.0
         self.ay_ema = 0.0
@@ -64,6 +65,7 @@ class DataThread(QThread):
         self.prev_distances = None
         self.last_active_mask = 0
         self.new_csv_requested = False
+        self.filter_reset_requested = False
         self.create_csv_enabled = True
         self._serial_reader = None
         self._rx_queue = queue.Queue()
@@ -92,11 +94,34 @@ class DataThread(QThread):
         with self._request_lock:
             self.new_csv_requested = True
 
+    def request_filter_reset(self):
+        with self._request_lock:
+            self.filter_reset_requested = True
+
     def _take_new_csv_request(self):
         with self._request_lock:
             requested = self.new_csv_requested
             self.new_csv_requested = False
             return requested
+
+    def _take_filter_reset_request(self):
+        with self._request_lock:
+            requested = self.filter_reset_requested
+            self.filter_reset_requested = False
+            return requested
+
+    def _reset_filter_state(self):
+        self.ukf_ctx = None
+        self.imu_x = 0.0
+        self.imu_y = 0.0
+        self.imu_vx = 0.0
+        self.imu_vy = 0.0
+        self.imu_theta = normalize_angle(self.initial_yaw_rad)
+        self.ax_ema = 0.0
+        self.ay_ema = 0.0
+        self.zupt_counter = 0
+        self.prev_uwb_pos = (0.0, 0.0)
+        self.last_active_mask = 0
 
     def _open_new_csv(self):
         if self.csv_file:
@@ -326,12 +351,13 @@ class DataThread(QThread):
             self.imu_y = init_y
             self.imu_vx = 0.0
             self.imu_vy = 0.0
-            self.imu_theta = 0.0
+            init_yaw = normalize_angle(self.initial_yaw_rad)
+            self.imu_theta = init_yaw
             
             self.prev_uwb_pos = (init_x, init_y)
             
             ukf_initial_state = np.array([
-                init_x, init_y, 0.0, 0.0, 0.0,
+                init_x, init_y, 0.0, 0.0, init_yaw,
                 self.imu_bias_ax, self.imu_bias_ay, self.imu_bias_gz
             ])
             self.ukf_ctx = create_ukf_context(ukf_initial_state)
@@ -339,6 +365,7 @@ class DataThread(QThread):
                 'type': 'Init', 
                 'x': init_x, 
                 'y': init_y, 
+                'yaw': init_yaw,
                 'dt': 0.0,
                 'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0)),
                 'zero_distance_counts': self._zero_distance_counts.copy()
@@ -481,6 +508,10 @@ class DataThread(QThread):
                     self._print_stats(frame_count)
                     time.sleep(0.001)
                     continue
+
+                if self._take_filter_reset_request():
+                    self._reset_filter_state()
+                    print(f"[INFO] UKF filter reset with initial yaw {np.rad2deg(self.initial_yaw_rad):.3f} deg")
 
                 for frame_data in self._extract_live_frames(buffer):
                     frame_count += 1
@@ -638,6 +669,7 @@ class MainWindow(QMainWindow):
         
         # Setup UI connections
         self._setup_ground_truth_controls()
+        self._setup_initial_yaw_controls()
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
         self.checkBox_graphDSliding.stateChanged.connect(self.on_graph_d_mode_changed)
@@ -650,6 +682,7 @@ class MainWindow(QMainWindow):
         # Start Data Thread
         self.thread = DataThread()
         self.thread.create_csv_enabled = self.checkBox_createCsv.isChecked()
+        self.thread.initial_yaw_rad = self._initial_yaw_rad()
         self.thread.connected_signal.connect(self.on_connected)
         self.thread.disconnected_signal.connect(self.on_disconnected)
         self.thread.data_signal.connect(self.on_data)
@@ -667,6 +700,26 @@ class MainWindow(QMainWindow):
             row = self.gridLayout_4.rowCount()
             self.gridLayout_4.addWidget(self.groundTruthStartLabel, row, 0)
             self.gridLayout_4.addWidget(self.comboBox_groundTruthStart, row + 1, 0)
+
+    def _setup_initial_yaw_controls(self):
+        self.initialYawLabel = QLabel("Initial yaw")
+        self.doubleSpinBox_initialYaw = QDoubleSpinBox()
+        self.doubleSpinBox_initialYaw.setRange(-360.0, 360.0)
+        self.doubleSpinBox_initialYaw.setDecimals(3)
+        self.doubleSpinBox_initialYaw.setSingleStep(1.0)
+        self.doubleSpinBox_initialYaw.setSuffix(" deg")
+        self.doubleSpinBox_initialYaw.setValue(0.0)
+        self.doubleSpinBox_initialYaw.valueChanged.connect(self.on_initial_yaw_changed)
+
+        if hasattr(self, 'gridLayout_4'):
+            row = self.gridLayout_4.rowCount()
+            self.gridLayout_4.addWidget(self.initialYawLabel, row, 0)
+            self.gridLayout_4.addWidget(self.doubleSpinBox_initialYaw, row + 1, 0)
+
+    def _initial_yaw_rad(self):
+        if not hasattr(self, 'doubleSpinBox_initialYaw'):
+            return 0.0
+        return normalize_angle(np.deg2rad(self.doubleSpinBox_initialYaw.value()))
 
     def _ground_truth_points(self):
         if self.ground_truth_start is None:
@@ -739,6 +792,11 @@ class MainWindow(QMainWindow):
         self.ground_truth_start_kind = self.comboBox_groundTruthStart.currentData()
         self._update_ground_truth_plot()
 
+    def on_initial_yaw_changed(self, *_):
+        if hasattr(self, 'thread') and self.thread is not None:
+            self.thread.initial_yaw_rad = self._initial_yaw_rad()
+            self.thread.request_filter_reset()
+
     def on_checkbox_csv_changed(self, state):
         if hasattr(self, 'thread') and self.thread is not None:
             self.thread.create_csv_enabled = (state == pg.QtCore.Qt.Checked)
@@ -780,6 +838,8 @@ class MainWindow(QMainWindow):
         self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)
         
         if hasattr(self, 'thread') and self.thread is not None:
+            self.thread.initial_yaw_rad = self._initial_yaw_rad()
+            self.thread.request_filter_reset()
             if self.checkBox_createCsv.isChecked():
                 self.thread.request_new_csv()
 
@@ -818,6 +878,10 @@ class MainWindow(QMainWindow):
                 self.graph_pos.addItem(self.ref_rect_item)
             if hasattr(self, 'lineEdit_mask'):
                 self.lineEdit_mask.setText(str(data.get('mask', 0)))
+            if 'yaw' in data:
+                yaw_deg = np.rad2deg(data['yaw'])
+                self.lineEdit_yaw.setText(f"{yaw_deg:.3f}")
+                self.lineEdit_ukf_yaw.setText(f"{yaw_deg:.3f}")
             return
 
         self.latest_data = data
