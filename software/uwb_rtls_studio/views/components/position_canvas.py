@@ -50,6 +50,9 @@ class PositionCanvas(QWidget):
         self.has_position = False
         self.fusion_position = None
         self.anchors = []
+        self.anchor_mask = 0
+        self.anchor_mask_valid = False
+        self.anchor_telemetry = {}
         self.history = []
         self.fusion_history = []
         self.tril_history = []
@@ -950,6 +953,33 @@ class PositionCanvas(QWidget):
             self.selected_anchor_idx = None
         self.auto_fit()
 
+    def set_anchor_telemetry(self, mask=None, anchors=None, valid=True):
+        """Update live anchor selection and per-anchor distance/weight data."""
+        self.anchor_mask_valid = bool(valid and mask is not None and mask != "")
+        self.anchor_mask = int(mask or 0) if self.anchor_mask_valid else 0
+        self.anchor_telemetry = {
+            int(item.get("anchor_id", 0)): {
+                "distance_mm": int(item.get("distance_mm", 0) or 0),
+                "weight": item.get("weight"),
+            }
+            for item in (anchors or [])
+            if int(item.get("anchor_id", 0) or 0) > 0
+        }
+        self.update()
+
+    def clear_anchor_telemetry(self):
+        self.anchor_mask = 0
+        self.anchor_mask_valid = False
+        self.anchor_telemetry = {}
+        self.update()
+
+    def _anchor_is_mask_selected(self, anchor):
+        anchor_id = self._coerce_int_id(anchor.get("anchor_id"), 0)
+        return bool(
+            self.anchor_mask_valid
+            and 1 <= anchor_id <= 32
+            and self.anchor_mask & (1 << (anchor_id - 1))
+        )
     def set_anchor_template(self, anchor_info):
         self._anchor_template = dict(anchor_info) if anchor_info else None
 
@@ -1784,20 +1814,26 @@ class PositionCanvas(QWidget):
 
         if draw_connections:
             for anchor in self.anchors:
+                is_mask_selected = self._anchor_is_mask_selected(anchor)
                 anchor_x, anchor_y = to_screen(anchor["x"], anchor["y"])
-                painter.setPen(QPen(QColor(99, 102, 241, 40), 1, Qt.PenStyle.DashLine))
+                color = QColor(34, 211, 238, 180) if is_mask_selected else QColor(99, 102, 241, 24)
+                painter.setPen(QPen(color, 2 if is_mask_selected else 1, Qt.PenStyle.DashLine))
                 painter.drawLine(pos_x, pos_y, anchor_x, anchor_y)
 
         painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         for idx, anchor in enumerate(self.anchors):
             center_x, center_y = to_screen(anchor["x"], anchor["y"])
             is_selected_anchor = self.selected_anchor_idx == idx
+            is_mask_selected = self._anchor_is_mask_selected(anchor)
             is_scanned = bool(anchor.get("is_scanned", False))
             is_draft = anchor.get("sync_state") == "draft"
 
             if is_selected_anchor:
                 ring = QColor(250, 204, 21)
                 fill = QColor(34, 211, 238)
+            elif is_mask_selected:
+                ring = QColor(34, 211, 238)
+                fill = QColor(6, 182, 212)
             elif is_scanned:
                 ring = QColor(34, 197, 94)
                 fill = QColor(22, 163, 74)
@@ -1808,7 +1844,7 @@ class PositionCanvas(QWidget):
                 ring = QColor(99, 102, 241)
                 fill = QColor(79, 70, 229)
 
-            painter.setPen(QPen(ring, 3 if is_selected_anchor else 2))
+            painter.setPen(QPen(ring, 4 if is_mask_selected or is_selected_anchor else 2))
             painter.setBrush(QColor(15, 23, 42, 230))
             painter.drawEllipse(center_x - 12, center_y - 12, 24, 24)
             painter.setBrush(fill)
@@ -1829,7 +1865,15 @@ class PositionCanvas(QWidget):
             else:
                 coord_text = f"G({anchor['x']:.1f}, {anchor['y']:.1f}, {anchor.get('z', 0.0):.1f})"
             painter.drawText(center_x + 16, center_y + 4, coord_text)
-
+            telemetry = self.anchor_telemetry.get(self._coerce_int_id(anchor.get("anchor_id"), 0))
+            if telemetry:
+                distance_m = telemetry["distance_mm"] / 1000.0
+                weight = telemetry.get("weight")
+                live_text = f"{distance_m:.3f} m"
+                if weight is not None:
+                    live_text += f"  W:{weight}"
+                painter.setPen(QColor(103, 232, 249) if is_mask_selected else QColor(148, 163, 184))
+                painter.drawText(center_x + 16, center_y + 17, live_text)
     def _draw_tracking_grid(self, painter, to_screen, view_x1, view_y1, view_x2, view_y2, margin, width, height):
         """Draw a fixed 1 m grid for User mode without changing Spatial settings."""
         major_step = self._tracking_grid_spacing

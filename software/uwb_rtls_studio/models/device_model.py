@@ -959,6 +959,14 @@ class DeviceModel(QObject):
         if force or not self._query_received("pos_calib_cfg_resp"):
             self.request_pos_calib_config(force=force)
             requested = True
+        # Baseline status APIs are fetched on every device session, even when
+        # their tabs have not been opened yet.
+        if force or not self._query_received("calib_status_resp"):
+            self.request_calibration_status()
+            requested = True
+        if force or not self._query_received("ranging_status_resp"):
+            self._request_query("ranging_status_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None)
+            requested = True
         if force or not self._query_received("device_type_set"):
             self.request_device_type(force=force)
             requested = True
@@ -973,7 +981,7 @@ class DeviceModel(QObject):
                 if self.request_sensor_fusion_config(force=force) is not None:
                     requested = True
 
-        self._session_bootstrap_done = self._query_received("device_information_resp") and self._query_received("sys_config_resp") and self._query_received("sys_ranging_cfg_resp") and self._query_received("pos_calib_cfg_resp") and self._query_received("device_type_set") and (not self._role_known or self._is_anchor or self._query_received("anchor_layout_resp")) and (not self._role_known or self._is_anchor or self._query_received("sensor_fusion_cfg_resp"))
+        self._session_bootstrap_done = self._query_received("device_information_resp") and self._query_received("sys_config_resp") and self._query_received("sys_ranging_cfg_resp") and self._query_received("pos_calib_cfg_resp") and self._query_received("calib_status_resp") and self._query_received("ranging_status_resp") and self._query_received("device_type_set") and (not self._role_known or self._is_anchor or self._query_received("anchor_layout_resp")) and (not self._role_known or self._is_anchor or self._query_received("sensor_fusion_cfg_resp"))
         self._log_query_progress_report(
             "initial_telemetry",
             [
@@ -981,6 +989,8 @@ class DeviceModel(QObject):
                 ("sys_config_resp", self._query_received("sys_config_resp"), True),
                 ("sys_ranging_cfg_resp", self._query_received("sys_ranging_cfg_resp"), True),
                 ("pos_calib_cfg_resp", self._query_received("pos_calib_cfg_resp"), True),
+                ("calib_status_resp", self._query_received("calib_status_resp"), True),
+                ("ranging_status_resp", self._query_received("ranging_status_resp"), True),
                 ("device_type_set", self._query_received("device_type_set"), True),
                 ("anchor_layout_resp", self._query_received("anchor_layout_resp"), self._role_known and not self._is_anchor),
                 ("sensor_fusion_cfg_resp", self._query_received("sensor_fusion_cfg_resp"), self._role_known and not self._is_anchor),
@@ -1202,6 +1212,9 @@ class DeviceModel(QObject):
         if force or not self._query_received("ble_conn_params_resp"):
             self.request_ble_conn_params(force=force)
             requested = True
+        if force or not self._query_received("ble_status_resp"):
+            self._request_query("ble_status_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None, traffic_class="bootstrap")
+            requested = True
         if force or not self._query_received("rtos_resource_resp"):
             self.request_rtos_resource(force=force)
             requested = True
@@ -1209,12 +1222,13 @@ class DeviceModel(QObject):
             self.request_rtos_task_stats(force=force)
             requested = True
 
-        self._session_start_events_done = self._query_received("battery_info_resp") and self._query_received("ble_conn_params_resp") and self._query_received("rtos_resource_resp") and self._query_received("rtos_task_stats_resp")
+        self._session_start_events_done = self._query_received("battery_info_resp") and self._query_received("ble_status_resp") and self._query_received("ble_conn_params_resp") and self._query_received("rtos_resource_resp") and self._query_received("rtos_task_stats_resp")
         self._log_query_progress_report(
             "session_start_events",
             [
                 ("battery_info_resp", self._query_received("battery_info_resp"), True),
                 ("ble_conn_params_resp", self._query_received("ble_conn_params_resp"), True),
+                ("ble_status_resp", self._query_received("ble_status_resp"), True),
                 ("rtos_resource_resp", self._query_received("rtos_resource_resp"), True),
                 ("rtos_task_stats_resp", self._query_received("rtos_task_stats_resp"), True),
             ],
@@ -1922,15 +1936,21 @@ class DeviceModel(QObject):
 
     def _handle_ble_conn_params(self, resp):
         p = getattr(resp, 'params', None)
-        if p:
-            self._mark_query_received("ble_conn_params_resp")
-            self.ble_conn_params_parsed.emit({
-                "min_interval_ms": getattr(p, 'min_interval_ms', 0),
-                "max_interval_ms": getattr(p, 'max_interval_ms', 0),
-                "slave_latency": getattr(p, 'slave_latency', 0),
-                "sup_timeout_ms": getattr(p, 'sup_timeout_ms', 0),
-                "phy": getattr(p, 'phy', "-"),
-            })
+        if p is None:
+            return
+        self._mark_query_received("ble_conn_params_resp")
+        # ByteSize()==0: params sub-message rỗng (chưa có cấu hình BLE)
+        # → emit {} để UI hiện placeholder, tránh hiện 0 như có data thật
+        if p.ByteSize() == 0:
+            self.ble_conn_params_parsed.emit({})
+            return
+        self.ble_conn_params_parsed.emit({
+            "min_interval_ms": getattr(p, 'min_interval_ms', 0),
+            "max_interval_ms": getattr(p, 'max_interval_ms', 0),
+            "slave_latency": getattr(p, 'slave_latency', 0),
+            "sup_timeout_ms": getattr(p, 'sup_timeout_ms', 0),
+            "phy": getattr(p, 'phy', "-"),
+        })
 
     def _handle_time_sync(self, resp):
         """Publish event-driven time state and correct drift only when needed."""
@@ -1940,7 +1960,8 @@ class DeviceModel(QObject):
     def _handle_sys_config(self, resp):
         self._mark_query_received("sys_config_resp")
         if not resp.HasField("config"):
-            log.warning("Received sys_config_resp without config submessage.")
+            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            self.sys_config_parsed.emit({})
             return
         cfg = resp.config
         cfg_dict = {
@@ -1970,7 +1991,8 @@ class DeviceModel(QObject):
     def _handle_sys_ranging_cfg(self, resp):
         self._mark_query_received("sys_ranging_cfg_resp")
         if not resp.HasField("config"):
-            log.warning("Received sys_ranging_cfg_resp without config submessage.")
+            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            self.sys_ranging_cfg_parsed.emit({})
             return
         cfg = resp.config
         cfg_dict = {
@@ -1982,7 +2004,8 @@ class DeviceModel(QObject):
     def _handle_sensor_fusion_cfg(self, resp):
         self._mark_query_received("sensor_fusion_cfg_resp")
         if not resp.HasField("config"):
-            log.warning("Received sensor_fusion_cfg_resp without config submessage.")
+            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            self.sensor_fusion_cfg_parsed.emit({})
             return
         cfg = resp.config
         cfg_dict = {
@@ -2006,7 +2029,8 @@ class DeviceModel(QObject):
     def _handle_pos_calib_cfg(self, resp):
         self._mark_query_received("pos_calib_cfg_resp")
         if not resp.HasField("config"):
-            log.warning("Received pos_calib_cfg_resp without config submessage.")
+            # Gói rỗng: emit {} để UI reset về placeholder "-"
+            self.pos_calib_cfg_parsed.emit({})
             return
         cfg = resp.config
         cfg_dict = {

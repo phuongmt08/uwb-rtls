@@ -334,6 +334,11 @@ class CalibrationTab(QWidget):
             set_widget_value(self.pos_iterations_spin, cfg.get("iterations", 100))
 
     def _on_status_updated(self, status: dict):
+        # status = {} khi firmware gửi gói rỗng → reset về "-"
+        if not status:
+            self._reset_display_fields()
+            return
+
         state = int(status.get("state", 0))
         state_labels = {
             0: "Unspecified",
@@ -344,9 +349,13 @@ class CalibrationTab(QWidget):
             5: "Error",
         }
         progress = int(status.get("progress_percent", 0))
-        current = int(status.get("current_iteration", 0))
-        total = int(status.get("total_iterations", 0))
         delay = int(status.get("current_antenna_delay", 0))
+
+        # sample_count/sample_target (field 13/14, active) thay thế deprecated
+        # current_iteration(3)/total_iterations(4).
+        # Parser đã tự fallback nếu firmware cũ gửi deprecated fields.
+        sample_count = int(status.get("sample_count", 0))
+        sample_target = int(status.get("sample_target", 0))
 
         self.calib_progress.setValue(progress)
 
@@ -356,20 +365,37 @@ class CalibrationTab(QWidget):
         else:
             self.calib_status.setText(f"Status: {state_labels.get(state, 'Unknown')}")
 
-        # calib_status_resp_t.current_iteration / total_iterations
-        self.calib_iter.setText(f"Iteration: {current} / {total}" if total > 0 else "Iteration: -")
-        # calib_status_resp_t.last_pair_error_mean_m  → Error Mean
-        self.val_err_mean.setText(self._format_metric(status.get("last_pair_error_mean_m"), " m"))
-        # calib_status_resp_t.last_pair_error_spread_m  → Error Std
-        self.val_err_std.setText(self._format_metric(status.get("last_pair_error_spread_m"), " m"))
-        # calib_status_resp_t.last_pair_error_rms_m  → Error RMS
-        self.val_err_rms.setText(self._format_metric(status.get("last_pair_error_rms_m"), " m"))
-        # calib_status_resp_t.last_pair_error_mean_abs_m  → Error Min
-        # (protocol không có trường error_min riêng; dùng mean_abs thay thế)
-        self.val_err_min.setText(self._format_metric(status.get("last_pair_error_mean_abs_m"), " m"))
-        # calib_status_resp_t.last_pair_error_max_abs_m  → Error Max
-        self.val_err_max.setText(self._format_metric(status.get("last_pair_error_max_abs_m"), " m"))
-        # calib_status_resp_t.current_antenna_delay  → Optimized TX / RX Delay
+        # Progress counter: dùng sample_count/sample_target (field mới).
+        # Hiện "-" khi idle/unspecified và chưa có data thực.
+        if sample_target > 0:
+            self.calib_iter.setText(f"Samples: {sample_count} / {sample_target}")
+        else:
+            self.calib_iter.setText("Samples: -")
+
+        # Hiện error metrics chỉ khi đang có quá trình (state >= Collecting)
+        # hoặc đã Done. Tránh hiện "0.000 m" khi chưa calib lần nào.
+        state_has_metrics = state in (2, 3, 4, 5)  # Collecting, Calculating, Done, Error
+
+        if state_has_metrics:
+            # calib_status_resp_t.last_pair_error_mean_m (deprecated) → Error Mean
+            self.val_err_mean.setText(self._format_metric(status.get("last_pair_error_mean_m"), " m"))
+            # calib_status_resp_t.last_pair_error_spread_m (deprecated) → Error Std
+            self.val_err_std.setText(self._format_metric(status.get("last_pair_error_spread_m"), " m"))
+            # calib_status_resp_t.last_pair_error_rms_m → Error RMS
+            self.val_err_rms.setText(self._format_metric(status.get("last_pair_error_rms_m"), " m"))
+            # calib_status_resp_t.last_pair_error_mean_abs_m → Error Min
+            self.val_err_min.setText(self._format_metric(status.get("last_pair_error_mean_abs_m"), " m"))
+            # calib_status_resp_t.last_pair_error_max_abs_m → Error Max
+            self.val_err_max.setText(self._format_metric(status.get("last_pair_error_max_abs_m"), " m"))
+        else:
+            # Idle / Unspecified: chưa chạy calib, hiện "-" thay vì "0.000 m"
+            for label_name in ("val_err_mean", "val_err_std", "val_err_rms",
+                               "val_err_min", "val_err_max"):
+                label = getattr(self, label_name, None)
+                if label is not None:
+                    label.setText("-")
+
+        # calib_status_resp_t.current_antenna_delay → Optimized TX / RX Delay
         self.val_opt_tx.setText(str(delay) if delay > 0 else "-")
         self.val_opt_rx.setText(str(delay) if delay > 0 else "-")
 

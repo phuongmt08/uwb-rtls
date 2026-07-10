@@ -1,4 +1,4 @@
-﻿"""
+"""
 ===============================================================================
   UWB RTLS Studio — Query State Machine
 ===============================================================================
@@ -101,6 +101,7 @@ class QueryQueueManager(QObject):
     }
     ACK_RESPONSE_OK = 1
     ACKED_GET_WAIT_S = 3.0
+    INTER_COMMAND_GAP_S = 0.05
     def __init__(
         self,
         send_packet_fn: Callable[[str, int, Dict[str, Any]], Any],
@@ -133,6 +134,7 @@ class QueryQueueManager(QObject):
         self._send_next_requested.connect(self._send_next, Qt.ConnectionType.QueuedConnection)
         self.is_running = False
 
+        self._last_send_time = 0.0
     @classmethod
     def _load_response_map(cls) -> Dict[str, str]:
         try:
@@ -344,6 +346,12 @@ class QueryQueueManager(QObject):
             if not self.is_running:
                 return
 
+            elapsed = time.monotonic() - self._last_send_time
+            if self._last_send_time and elapsed < self.INTER_COMMAND_GAP_S:
+                delay_ms = max(1, int((self.INTER_COMMAND_GAP_S - elapsed) * 1000))
+                QTimer.singleShot(delay_ms, self._request_send_next)
+                return
+
             self.timer.stop()
 
             pending = [tx for tx in self.queue if tx.status in (QueryState.PENDING, QueryState.RETRY_PENDING)]
@@ -378,6 +386,7 @@ class QueryQueueManager(QObject):
             self.current_transaction = tx
             tx.status = QueryState.SENT
             tx.sent_time = time.monotonic()
+            self._last_send_time = tx.sent_time
             tx.ack_received = False
             tx.ack_response = None
             tx.pending_response_name = ""
@@ -458,4 +467,5 @@ class QueryQueueManager(QObject):
             self.queue.clear()
             self.current_transaction = None
             self.is_running = False
+            self._last_send_time = 0.0
             log.info("QueryQueueManager reset successfully.")

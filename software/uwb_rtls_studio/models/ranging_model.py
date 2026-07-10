@@ -314,8 +314,9 @@ class RangingModel(QObject):
                 "distance_cm": distance_mm / 10.0,
                 "fp_amp": int(getattr(anchor, "fp_amp", 0) or 0),
             })
-            if 0 <= anchor_id < 32:
-                anchor_mask |= 1 << anchor_id
+            # Protocol convention: bit 0 selects Anchor 1, bit 1 Anchor 2, ...
+            if 1 <= anchor_id <= 32:
+                anchor_mask |= 1 << (anchor_id - 1)
             if anchor_id:
                 distances_by_anchor[anchor_id] = distance_mm
         return anchors, anchor_mask, distances_by_anchor

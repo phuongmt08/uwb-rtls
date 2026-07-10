@@ -135,6 +135,10 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     pkt2.sensor_fusion_result.anchor_mask = 0x0A
     pkt2.sensor_fusion_result.ranging_error_count = 4
     pkt2.sensor_fusion_result.timestamp_ms = 2000
+    anchor = pkt2.sensor_fusion_result.anchors.add()
+    anchor.anchor_id = 2
+    anchor.distance_mm = 2345
+    anchor.weight = 87
 
     assert repo.handle_packet("sensor_fusion_result", pkt1) is True
     assert repo.handle_packet("sensor_fusion_result", pkt2) is True
@@ -152,6 +156,7 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert math.isclose(latest["vx_mps"], 1.5)
     assert math.isclose(latest["vy_mps"], 2.0)
     assert latest["seq"] == 2
+    assert latest["anchors"] == [{"anchor_id": 2, "distance_mm": 2345, "weight": 87}]
     assert len(model.fusion_history) == 2
     assert model.fusion_history[-1]["source"] == "sensor_fusion"
     assert app is not None
@@ -173,7 +178,7 @@ def test_ranging_result_keeps_seq_and_anchor_distances_for_session_export():
     pkt.ranging_result.rms_error_m = 0.03
     pkt.ranging_result.ClearField("anchors")
 
-    for anchor_id, distance_mm in [(0, 1000), (1, 1100), (2, 2200), (3, 3300), (4, 4400)]:
+    for anchor_id, distance_mm in [(1, 1100), (2, 2200), (3, 3300), (4, 4400)]:
         anchor = pkt.ranging_result.anchors.add()
         anchor.anchor_id = anchor_id
         anchor.distance_mm = distance_mm
@@ -189,7 +194,7 @@ def test_ranging_result_keeps_seq_and_anchor_distances_for_session_export():
     assert sample["d2_mm"] == 2200
     assert sample["d3_mm"] == 3300
     assert sample["d4_mm"] == 4400
-    assert sample["anchor_mask"] == 0b11111
+    assert sample["anchor_mask"] == 0b1111
     assert sample["anchor_mask_valid"] is True
     assert sample["payload_size"] == pkt.ranging_result.ByteSize()
     assert math.isclose(sample["x_m"], 1.2, rel_tol=1e-6)
@@ -253,6 +258,49 @@ def test_ranging_status_response_parses_success_rate():
     assert stats["timeout_count"] == 2
     assert math.isclose(stats["success_rate_percent"], 95.0)
 
+
+
+def test_live_tracking_anchor_rows_clear_stale_values():
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    class StubLabel:
+        def __init__(self):
+            self._text = ""
+
+        def setText(self, value):
+            self._text = value
+
+        def text(self):
+            return self._text
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab.d1_label = StubLabel()
+    tab.d2_label = StubLabel()
+    tab.d3_label = StubLabel()
+    tab.d4_label = StubLabel()
+
+    LiveTrackingTab._show_anchor_telemetry(
+        tab,
+        [
+            {"anchor_id": 1, "distance_mm": 1111, "weight": 90},
+            {"anchor_id": 2, "distance_mm": 2222, "weight": 80},
+        ],
+    )
+    assert tab.d1_label.text() == "1.111 m  |  W: 90"
+    assert tab.d2_label.text() == "2.222 m  |  W: 80"
+    assert tab.d3_label.text() == "-"
+    assert tab.d4_label.text() == "-"
+
+    LiveTrackingTab._show_anchor_telemetry(
+        tab,
+        [
+            {"anchor_id": 1, "distance_mm": 1234, "weight": 75},
+        ],
+    )
+    assert tab.d1_label.text() == "1.234 m  |  W: 75"
+    assert tab.d2_label.text() == "-"
+    assert tab.d3_label.text() == "-"
+    assert tab.d4_label.text() == "-"
 
 class TcpSerialAdapter:
     def __init__(self, host: str, port: int):
