@@ -252,7 +252,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
                         print("\033[32m[OK] BLE CONNECTION ESTABLISHED!\033[0m")
                         connected = True
                         break
-                    elif state == pb.BLE_STATE_IDLE and p.ble_status_resp.HasField("disconnect_reason"):
+                    elif state == pb.BLE_STATE_IDLE and p.ble_status_resp.disconnect_reason != 0:
                         reason = p.ble_status_resp.disconnect_reason
                         print(f"  [WARNING] Connection attempt {attempt} failed. Reason: 0x{reason:02X}")
                         retry_needed = True

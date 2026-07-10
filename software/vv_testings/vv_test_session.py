@@ -6,6 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import time
 
 from dataclasses import dataclass
+from typing import Iterable
 
 import serial
 from serial import SerialException
@@ -124,26 +125,97 @@ class VvTestSession:
         return ports
 
     @classmethod
-    def auto_probe(cls, src: int = int(VvAddress.DEBUG), debug: bool = True) -> ProbeResult | None:
-        dst = int(VvAddress.BCAST)
+    @staticmethod
+    def _find_probe_match(packets: list, expected_params: Iterable[str], seq: int):
+        expected = set(expected_params)
+        for pkt in packets:
+            param = pkt.WhichOneof("params")
+            if param not in expected:
+                continue
+            if param == "ack" and int(pkt.ack.ack_seq) != int(seq):
+                continue
+            return pkt
+        return None
+
+    @classmethod
+    def auto_probe(
+        cls,
+        src: int = int(VvAddress.DEBUG),
+        role: int | None = None,
+        debug: bool = True,
+        dst: int = int(VvAddress.BCAST),
+        expected_params: Iterable[str] = ("device_information_resp",),
+        retries: int = 1,
+        response_timeout_s: float = 0.5,
+    ) -> ProbeResult | None:
+        expected_params = tuple(expected_params)
+
+        # If port is forced by environment variable, use it directly
+        forced_port = os.environ.get("VV_PORT")
+        if forced_port:
+            for baud in BAUD_CANDIDATES:
+                try:
+                    with cls(forced_port, baud=baud, debug=debug) as sess:
+                        for _attempt in range(retries):
+                            seq = sess.proto.next_seq()
+                            pkt = sess.proto.pb.packet_t()
+                            pkt.hdr.addr.src = src
+                            pkt.hdr.addr.dst = dst
+                            pkt.hdr.seq = seq
+                            pkt.device_information_get.dummy = 0
+                            packets = sess.send_and_wait(pkt, timeout_s=response_timeout_s)
+                            match = cls._find_probe_match(packets, expected_params, seq)
+                            if match is not None:
+                                if match.WhichOneof("params") == "device_information_resp":
+                                    dev_role = match.device_information_resp.role
+                                    serial_number = int(match.device_information_resp.serial_number)
+                                    if role is not None and dev_role != role:
+                                        if debug:
+                                            print(f"Forced port {forced_port} has role {dev_role}, expected {role}")
+                                        continue
+                                elif role is not None:
+                                    continue
+                                else:
+                                    serial_number = 0
+                                return ProbeResult(
+                                    port=forced_port,
+                                    baud=baud,
+                                    serial_number=serial_number,
+                                )
+                            time.sleep(0.1)
+                except SerialException:
+                    pass
+            return None
 
         for port_info in cls.prioritized_ports():
             for baud in BAUD_CANDIDATES:
                 try:
                     with cls(port_info.device, baud=baud, debug=debug) as sess:
-                        seq = sess.proto.next_seq()
-                        pkt = sess.proto.pb.packet_t()
-                        pkt.hdr.addr.src = src
-                        pkt.hdr.addr.dst = dst
-                        pkt.hdr.seq = seq
-                        pkt.device_information_get.dummy = 0
-                        match, _ = sess.send_expect_param(pkt, "device_information_resp", timeout_s=0.5)
-                        if match is not None:
-                            return ProbeResult(
-                                port=port_info.device,
-                                baud=baud,
-                                serial_number=int(match.device_information_resp.serial_number),
-                            )
+                        for _attempt in range(retries):
+                            seq = sess.proto.next_seq()
+                            pkt = sess.proto.pb.packet_t()
+                            pkt.hdr.addr.src = src
+                            pkt.hdr.addr.dst = dst
+                            pkt.hdr.seq = seq
+                            pkt.device_information_get.dummy = 0
+                            packets = sess.send_and_wait(pkt, timeout_s=response_timeout_s)
+                            match = cls._find_probe_match(packets, expected_params, seq)
+                            if match is not None:
+                                if match.WhichOneof("params") == "device_information_resp":
+                                    dev_role = match.device_information_resp.role
+                                    serial_number = int(match.device_information_resp.serial_number)
+                                    if role is not None and dev_role != role:
+                                        continue
+                                elif role is not None:
+                                    continue
+                                else:
+                                    serial_number = 0
+                                return ProbeResult(
+                                    port=port_info.device,
+                                    baud=baud,
+                                    serial_number=serial_number,
+                                )
+                            time.sleep(0.1)
                 except SerialException:
                     continue
 

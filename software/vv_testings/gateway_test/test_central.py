@@ -1,410 +1,377 @@
 from __future__ import annotations
 
+import queue
 import sys
-import time
 import threading
+import time
+import tkinter as tk
+from dataclasses import dataclass
 from pathlib import Path
-from datetime import datetime
+from tkinter import ttk
 
-# Add the parent directory to sys.path so we can import modules from vv_testings
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+# Allow running as a plain script from any working directory.
+THIS_FILE = Path(__file__).resolve()
+sys.path.append(str(THIS_FILE.parent.parent))
+sys.path.append(str(THIS_FILE.parent.parent.parent))
 
-from vv_commands import CommandFactory
+from common.commands import CommandFactory
+from common import protocol_pb2 as pb
 from vv_test_session import VvTestSession
-import protocol_pb2 as pb
 
-# Global variables for the Live Dashboard
-running = True
-devices = {}  # Format: "AA:BB:CC:DD:EE:FF" -> {"bytes": b'...', "name": "...", "rssi": -60, "last_seen": 1234567.89}
-factory = CommandFactory()
-LOST_DEVICE_TIMEOUT_S = 5.0
-packet_debug_enabled = False
 
-# Constants for Log Parsing
-MAX_RECORD_LEN = 512
-EPOCH_MS_MIN_FOR_DATETIME = 946684800000  # 2000-01-01 00:00:00 UTC
+BCAST_MAX_PACKET_SIZE = 250
+DEFAULT_SRC = pb.PACKET_ADDR_DEBUG
+DEFAULT_CENTRAL_DST = pb.PACKET_ADDR_CENTRAL
 
-class FlashLogStreamParser:
-    """Parse flash-log stream entries:
-    [len_lo][len_hi][raw_record(len)][pad to 4-byte].
-    raw_record = [log_type][obj_code][timestamp(6)][msg_len][msg].
-    """
-    def __init__(self) -> None:
-        self._buf = bytearray()
-
-    def feed(self, chunk: bytes) -> list[str]:
-        self._buf.extend(chunk)
-        lines: list[str] = []
-        while True:
-            if len(self._buf) < 2:
-                break
-            rec_len = int(self._buf[0]) | (int(self._buf[1]) << 8)
-            if rec_len == 0 or rec_len > MAX_RECORD_LEN:
-                del self._buf[0:1]
-                continue
-            entry_len = (2 + rec_len + 3) & ~3
-            if len(self._buf) < entry_len:
-                break
-            rec = bytes(self._buf[2 : 2 + rec_len])
-            del self._buf[:entry_len]
-            line = self._decode_record(rec)
-            if line is not None:
-                lines.append(line)
-        return lines
-
-    @staticmethod
-    def _format_timestamp(timestamp: int) -> str:
-        if timestamp >= EPOCH_MS_MIN_FOR_DATETIME:
-            try:
-                dt = datetime.fromtimestamp(timestamp / 1000.0)
-                return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            except (OverflowError, OSError, ValueError):
-                pass
-        return str(timestamp)
-
-    @staticmethod
-    def _decode_record(rec: bytes) -> str | None:
-        if len(rec) < 9:
-            return None
-        log_type = rec[0]
-        obj_code = rec[1]
-        timestamp = int.from_bytes(rec[2:8], byteorder="little", signed=False)
-        msg_len = rec[8]
-        if 9 + msg_len > len(rec):
-            return None
-        msg = rec[9 : 9 + msg_len].decode("utf-8", errors="replace")
-        if log_type == 0xFE:
-            level = "INFO"
-            color = "\033[37m"  # white
-        elif log_type == 0xFF:
-            level = "DEBUG"
-            color = "\033[36m"  # cyan
-        elif log_type == 0xFD:
-            level = "WARN"
-            color = "\033[33m"  # yellow
-        else:
-            level = "ERROR"
-            color = "\033[31m"  # red
-        ts_text = FlashLogStreamParser._format_timestamp(timestamp)
-        reset = "\033[0m"
-        return f"{color}[{ts_text}] [{level:<5}] [0x{obj_code:02X}] {msg}{reset}"
-
-log_parser = FlashLogStreamParser()
-
-BLE_STATE_NAMES = {
-    pb.BLE_STATE_UNSPECIFIED: "UNSPECIFIED",
-    pb.BLE_STATE_IDLE: "IDLE",
-    pb.BLE_STATE_SCANNING: "SCANNING",
-    pb.BLE_STATE_ADVERTISING: "ADVERTISING",
-    pb.BLE_STATE_CONNECTING: "CONNECTING",
-    pb.BLE_STATE_CONNECTED: "CONNECTED",
+DEVICE_TYPE_OPTIONS = {
+    "Any": None,
+    "TAG": pb.DEVICE_TYPE_TAG,
+    "ANCHOR": pb.DEVICE_TYPE_ANCHOR,
+    "GATEWAY": pb.DEVICE_TYPE_GATEWAY,
+    "DEBUG_TOOL": pb.DEVICE_TYPE_DEBUG_TOOL,
 }
 
-def _safe_enum_name(enum_desc, value: int) -> str:
+BCAST_KIND_OPTIONS = ("device_information_get", "time_sync_get", "none")
+
+
+@dataclass
+class GuiSettings:
+    port: str | None
+    baud: int
+    timeout_s: float
+    scan_interval_ms: int
+    scan_window_ms: int
+    device_type: int | None
+    device_id: int | None
+    min_battery: int | None
+    bcast_kind: str
+    bcast_repeat: int
+    bcast_interval_s: float
+    verbose: bool
+
+
+def enum_name(enum_desc, value: int) -> str:
     item = enum_desc.values_by_number.get(value)
-    return item.name if item else str(value)
+    return item.name if item is not None else f"UNKNOWN({value})"
 
-def _packet_debug_line(pkt: pb.packet_t) -> str:
+
+def device_type_name(value: int) -> str:
+    return enum_name(pb.device_type_t.DESCRIPTOR, value)
+
+
+def addr_name(value: int) -> str:
+    return enum_name(pb.device_addr_t.DESCRIPTOR, value)
+
+
+def packet_summary(pkt: pb.packet_t) -> str:
     ptype = pkt.WhichOneof("params") or "<none>"
+    if pkt.HasField("hdr") and pkt.hdr.HasField("addr"):
+        src = addr_name(pkt.hdr.addr.src)
+        dst = addr_name(pkt.hdr.addr.dst)
+        return f"{ptype} src={src} dst={dst} seq={pkt.hdr.seq}"
+    return ptype
 
-    seq = "-"
-    src = "-"
-    dst = "-"
-    if pkt.HasField("hdr"):
-        seq = str(pkt.hdr.seq)
-        if pkt.hdr.HasField("addr"):
-            src = _safe_enum_name(pb.device_addr_t.DESCRIPTOR, pkt.hdr.addr.src)
-            dst = _safe_enum_name(pb.device_addr_t.DESCRIPTOR, pkt.hdr.addr.dst)
 
-    detail = ""
-    if ptype == "ble_status_resp":
-        state_name = BLE_STATE_NAMES.get(pkt.ble_status_resp.state, f"UNKNOWN({pkt.ble_status_resp.state})")
-        detail = f" state={state_name} rssi={pkt.ble_status_resp.rssi_dbm}"
-        if pkt.ble_status_resp.HasField("disconnect_reason"):
-            detail += f" disconnect_reason=0x{pkt.ble_status_resp.disconnect_reason:02X}"
-    elif ptype == "ble_scan_result":
-        mac = ":".join(f"{b:02X}" for b in reversed(pkt.ble_scan_result.mac_address))
-        detail = f" mac={mac} name='{pkt.ble_scan_result.name}' rssi={pkt.ble_scan_result.rssi_dbm}"
-    elif ptype == "ble_conn_params_resp":
-        p = pkt.ble_conn_params_resp.params
-        detail = f" min={p.min_interval_ms} max={p.max_interval_ms} lat={p.slave_latency} to={p.sup_timeout_ms}"
-    elif ptype == "log_data":
-        detail = f" type={pkt.log_data.type} len={len(pkt.log_data.data)}"
-
-    return f"[RX][seq={seq}][src={src}->dst={dst}] {ptype}{detail}"
-
-def rx_thread_func(session: VvTestSession):
-    global running, devices, packet_debug_enabled
-    while running:
-        try:
-            # Liên tục đọc gói tin trả về không block, timeout nhỏ
-            pkts = session.recv_packets(timeout_s=0.1)
-            for pkt in pkts:
-                if packet_debug_enabled:
-                    print(f"\n[DBG] {_packet_debug_line(pkt)}")
-                    print("cmd> ", end="", flush=True)
-
-                # Phân loại luồng gói tin trả về
-                ptype = pkt.WhichOneof("params")
-                
-                if ptype == "ble_scan_result":
-                    p = pkt.ble_scan_result
-                    mac_str = ":".join(f"{b:02X}" for b in reversed(p.mac_address))
-                    
-                    is_new = mac_str not in devices
-                    devices[mac_str] = {
-                        "bytes": p.mac_address,
-                        "name": p.name,
-                        "rssi": p.rssi_dbm,
-                        "last_seen": time.time()
-                    }
-                    if is_new:
-                        print(f"\n[+] New Device: {mac_str} ('{p.name}') | RSSI: {p.rssi_dbm} dBm")
-                        print("cmd> ", end="", flush=True)
-                        
-                elif ptype == "ble_conn_params_resp":
-                    p = pkt.ble_conn_params_resp.params
-                    print(f"\n[!] Conn Params -> Min: {p.min_interval_ms}ms, Max: {p.max_interval_ms}ms, Latency: {p.slave_latency}, Timeout: {p.sup_timeout_ms}ms")
-                    print("cmd> ", end="", flush=True)
-                    
-                elif ptype == "ble_status_resp":
-                    state_name = BLE_STATE_NAMES.get(pkt.ble_status_resp.state, f"UNKNOWN({pkt.ble_status_resp.state})")
-                    if pkt.ble_status_resp.HasField("disconnect_reason"):
-                        print(f"\n[!] BLE Status -> {state_name} | disconnect_reason=0x{pkt.ble_status_resp.disconnect_reason:02X}")
-                    else:
-                        print(f"\n[!] BLE Status -> {state_name}")
-                    print("cmd> ", end="", flush=True)
-
-                elif ptype == "log_data":
-                    p = pkt.log_data
-                    lines = log_parser.feed(p.data)
-                    for line in lines:
-                        print(f"\n{line}")
-                    if lines:
-                        print("cmd> ", end="", flush=True)
-
-            # Firmware gửi scan_result mỗi 2s, nếu quá timeout không thấy cập nhật thì coi là mất.
-            now = time.time()
-            for mac, info in list(devices.items()):
-                if now - info["last_seen"] > LOST_DEVICE_TIMEOUT_S:
-                    print(f"\n[-] Lost Device: {mac} ('{info['name']}') | last RSSI: {info['rssi']} dBm")
-                    del devices[mac]
-                    print("cmd> ", end="", flush=True)
-                    
-        except Exception:
-            pass
-        time.sleep(0.01)
-
-def print_help():
-    print("\n--- AVAILABLE COMMANDS ---")
-    print("  scan            : Start BLE scanning")
-    print("  stop            : Stop BLE scanning")
-    print("  list            : Xem danh sách thiết bị (lọc các thiết bị đã quá cũ)")
-    print("  connect <mac>   : Kết nối tới 1 MAC (vd: connect AA:BB:CC:DD:EE:FF)")
-    print("  disconnect      : Ngắt kết nối thiết bị hiện tại")
-    print("  get             : Đọc Connection Params hiện tại (get_params)")
-    print("  set             : Ghi Connection Params mới (min=30, max=60)")
-    print("  stub [tag|anchor]: Gửi 'device_information_get' để test đường truyền")
-    print("  debug on/off    : Bật/tắt log packet RX từ central")
-    print("  help            : Hiển thị bảng lệnh này")
-    print("  exit            : Thoát")
-    print("--------------------------\n")
-
-def run_interactive(session: VvTestSession, src: int, dst: int):
-    global running, devices, packet_debug_enabled
-    
-    # 1. Start RX background thread
-    rx_th = threading.Thread(target=rx_thread_func, args=(session,), daemon=True)
-    rx_th.start()
-    
-    print("\n=== LIVE BLE CENTRAL DASHBOARD ===")
-    print_help()
-    
-    # 2. Main command loop
-    while running:
-        try:
-            cmd_line = input("cmd> ").strip().split()
-            if not cmd_line:
-                continue
-                
-            cmd = cmd_line[0].lower()
-            
-            if cmd == "exit" or cmd == "quit":
-                running = False
-                break
-                
-            elif cmd == "help":
-                print_help()
-                
-            elif cmd == "scan":
-                print("[+] Gửi lệnh Scan Start...")
-                pkt = factory.ble_scan_start(src, dst, session.proto.next_seq())
-                session.send_packet(pkt)
-                
-            elif cmd == "stop":
-                print("[-] Gửi lệnh Scan Stop...")
-                pkt = factory.ble_scan_stop(src, dst, session.proto.next_seq())
-                session.send_packet(pkt)
-                
-            elif cmd == "list":
-                print("\n--- LIVE DEVICES LIST ---")
-                now = time.time()
-                active_count = 0
-                for mac, info in list(devices.items()):
-                    # Nếu hơn LOST_DEVICE_TIMEOUT_S không có tín hiệu mới -> coi như rớt
-                    if now - info["last_seen"] > LOST_DEVICE_TIMEOUT_S:
-                        del devices[mac]
-                    else:
-                        age = now - info["last_seen"]
-                        print(f"  {mac} | RSSI: {info['rssi']:4d} | Name: '{info['name']}' (Last seen: {age:.1f}s ago)")
-                        active_count += 1
-                if active_count == 0:
-                    print("  (Empty)")
-                print("-------------------------")
-                
-            elif cmd == "connect":
-                if len(cmd_line) < 2:
-                    print("[!] Vui lòng nhập MAC. Ví dụ: connect AA:BB:CC:DD:EE:FF")
-                    continue
-                mac_target = cmd_line[1].upper()
-                if mac_target not in devices:
-                    print(f"[!] Lỗi: MAC {mac_target} chưa từng xuất hiện trong quá trình Scan.")
-                    continue
-                    
-                print(f"[+] Gửi lệnh kết nối tới {mac_target} ...")
-                packet_debug_enabled = True
-                print("[DBG] Packet debug ON (để theo dõi packet central trả về khi connect)")
-                # Nên gửi lệnh stop scan trước để an toàn!
-                session.send_packet(factory.ble_scan_stop(src, dst, session.proto.next_seq()))
-                time.sleep(0.5)
-                
-                pkt = factory.ble_connect(src, dst, session.proto.next_seq())
-                pkt.ble_connect.mac_address = devices[mac_target]["bytes"]
-                session.send_packet(pkt)
-                
-            elif cmd == "disconnect":
-                print("[-] Gửi lệnh ngắt kết nối...")
-                pkt = factory.ble_disconnect(src, dst, session.proto.next_seq())
-                session.send_packet(pkt)
-                
-            elif cmd == "get":
-                print("[+] Request Connection Params...")
-                pkt = factory.ble_conn_params_get(src, dst, session.proto.next_seq())
-                session.send_packet(pkt)
-                
-            elif cmd == "set":
-                if len(cmd_line) == 3:
-                    try:
-                        min_val = int(cmd_line[1])
-                        max_val = int(cmd_line[2])
-                    except ValueError:
-                        print("[!] Lỗi: Giá trị min hoặc max không hợp lệ.")
-                        continue
-                else:
-                    print("[!] Sử dụng: set <min_ms> <max_ms>. Ví dụ: set 15 30")
-                    continue
-                    
-                print(f"[+] Ghi đè Connection Params (min={min_val}ms, max={max_val}ms) ...")
-                pkt = factory.ble_conn_params_set(src, dst, session.proto.next_seq())
-                pkt.ble_conn_params_set.params.min_interval_ms = min_val
-                pkt.ble_conn_params_set.params.max_interval_ms = max_val
-                
-                # Bắt buộc đặt các thông số này không C nó sẽ hiểu là 0
-                pkt.ble_conn_params_set.params.slave_latency = 0
-                pkt.ble_conn_params_set.params.sup_timeout_ms = 4000
-                session.send_packet(pkt)
-
-            elif cmd == "stub":
-                target_name = cmd_line[1].lower() if len(cmd_line) > 1 else "tag"
-                if target_name == "anchor":
-                    target_dst = pb.PACKET_ADDR_ANCHOR
-                    target_label = "ANCHOR"
-                elif target_name == "tag":
-                    target_dst = pb.PACKET_ADDR_TAG
-                    target_label = "TAG"
-                else:
-                    print("[!] Sử dụng: stub [tag|anchor]")
-                    continue
-
-                print(f"[+] Gửi stub (device_information_get) tới {target_label} (0x{target_dst:02X}) ...")
-                pkt = factory.device_information_get(pb.PACKET_ADDR_HOST, target_dst, session.proto.next_seq())
-                session.send_packet(pkt)
-
-            elif cmd == "debug":
-                if len(cmd_line) < 2 or cmd_line[1].lower() not in ("on", "off"):
-                    print("[!] Sử dụng: debug on|off")
-                    continue
-                packet_debug_enabled = (cmd_line[1].lower() == "on")
-                print(f"[DBG] Packet debug {'ON' if packet_debug_enabled else 'OFF'}")
-                
-            else:
-                print(f"[?] Lệnh không hợp lệ: {cmd}. Gõ 'help' để xem các lệnh.")
-                
-        except KeyboardInterrupt:
-            running = False
-            break
-        except Exception as e:
-            print(f"[!] Error: {e}")
-
-    rx_th.join(timeout=1.0)
-    print("\n[DONE] Thoát chương trình.")
-
-import serial.tools.list_ports
-
-def auto_detect_com_port():
-    ports = serial.tools.list_ports.comports()
-    for port in ports:
-        # Tùy biến điều kiện nhận diện ở đây nếu cần, ví dụ check 'JLink'
-        # Nhưng thông thường cứ lấy cổng thiết bị USB Serial đầu tiên
-        if 'USB' in port.description or 'JLink' in port.description or 'Serial' in port.description:
-            return port.device
-    
-    # Rơi vào trường hợp không tìm thấy cổng phù hợp, lấy cổng mở được đầu tiên
-    if len(ports) > 0:
-        return ports[0].device
-    return None
-
-def main():
-    import sys
-    import argparse
-    from vv_test_session import VvTestSession
-    import protocol_pb2 as pb
-    
-    parser = argparse.ArgumentParser(description="Live BLE Central Dashboard")
-    parser.add_argument("--port", type=str, default=None, help="COM port, example COM21")
-    parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
-    args = parser.parse_args()
-    
-    port = args.port
-    baudrate = args.baud
-    
-    if not port:
-        print("[!] Đang tự động dò tìm cổng COM...")
-        try:
-            probe = VvTestSession.auto_probe(debug=False)
-            if probe:
-                port = probe.port
-                baudrate = probe.baud
-                print(f"[+] Tìm thấy thiết bị UWB tại {port} ({baudrate})")
-        except Exception:
-            pass
-            
-        if not port:
-            port = auto_detect_com_port()
-        
-    if not port:
-        print("[X] KHÔNG TÌM THẤY cổng COM nào đang cắm vào máy tính!")
-        print("    Vui lòng cắm mạch vào hoặc chỉ định thủ công qua: python -m gateway_test.test_central --port COM<số>")
-        sys.exit(1)
-    
-    print(f"Connecting to {port} at {baudrate}...")
+def auto_port() -> tuple[str | None, int]:
     try:
-        with VvTestSession(port, baudrate, debug=False) as session:
-            SRC_DEBUG = pb.PACKET_ADDR_DEBUG
-            DST_CENTRAL = pb.PACKET_ADDR_CENTRAL
-            run_interactive(session, SRC_DEBUG, DST_CENTRAL)
-    except Exception as e:
-        print(f"Error during test execution: {e}")
+        probe = VvTestSession.auto_probe(debug=False)
+        if probe is not None:
+            return probe.port, probe.baud
+    except Exception:
+        pass
+    return None, 115200
+
+
+class CentralTestGui(tk.Tk):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title("BLE Central System Test")
+        self.geometry("920x620")
+        self.minsize(820, 540)
+
+        self.log_queue: queue.Queue[str] = queue.Queue()
+        self.stop_event = threading.Event()
+        self.worker: threading.Thread | None = None
+
+        self.port_var = tk.StringVar(value="auto")
+        self.baud_var = tk.StringVar(value="115200")
+        self.timeout_var = tk.StringVar(value="20")
+        self.scan_interval_var = tk.StringVar(value="100")
+        self.scan_window_var = tk.StringVar(value="80")
+        self.device_type_var = tk.StringVar(value="Any")
+        self.device_id_var = tk.StringVar(value="")
+        self.min_battery_var = tk.StringVar(value="")
+        self.bcast_kind_var = tk.StringVar(value=BCAST_KIND_OPTIONS[0])
+        self.bcast_repeat_var = tk.StringVar(value="1")
+        self.bcast_interval_var = tk.StringVar(value="0.25")
+        self.verbose_var = tk.BooleanVar(value=False)
+        self.status_var = tk.StringVar(value="Idle")
+
+        self._build_ui()
+        self.after(80, self._drain_log_queue)
+
+    def _build_ui(self) -> None:
+        root = ttk.Frame(self, padding=12)
+        root.pack(fill=tk.BOTH, expand=True)
+
+        controls = ttk.Frame(root)
+        controls.pack(side=tk.TOP, fill=tk.X)
+
+        central = ttk.LabelFrame(controls, text="Central")
+        central.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        self._entry(central, "Port", self.port_var, 0, 0, 14)
+        self._entry(central, "Baud", self.baud_var, 0, 2, 10)
+        self._entry(central, "Timeout s", self.timeout_var, 0, 4, 8)
+        self._entry(central, "Scan int ms", self.scan_interval_var, 1, 0, 8)
+        self._entry(central, "Scan win ms", self.scan_window_var, 1, 2, 8)
+        ttk.Checkbutton(central, text="Verbose RX", variable=self.verbose_var).grid(
+            row=1, column=4, sticky="w", padx=6
+        )
+
+        adv = ttk.LabelFrame(controls, text="ADV status filter")
+        adv.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        ttk.Label(adv, text="Device").grid(row=0, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(
+            adv,
+            textvariable=self.device_type_var,
+            values=tuple(DEVICE_TYPE_OPTIONS.keys()),
+            state="readonly",
+            width=12,
+        ).grid(row=0, column=1, sticky="w", padx=6, pady=5)
+        self._entry(adv, "ID", self.device_id_var, 0, 2, 7)
+        self._entry(adv, "Min bat", self.min_battery_var, 1, 0, 7)
+
+        bcast = ttk.LabelFrame(controls, text="BCAST TX")
+        bcast.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(bcast, text="Kind").grid(row=0, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(
+            bcast,
+            textvariable=self.bcast_kind_var,
+            values=BCAST_KIND_OPTIONS,
+            state="readonly",
+            width=22,
+        ).grid(row=0, column=1, columnspan=3, sticky="w", padx=6, pady=5)
+        self._entry(bcast, "Repeat", self.bcast_repeat_var, 1, 0, 7)
+        self._entry(bcast, "Interval", self.bcast_interval_var, 1, 2, 7)
+
+        actions = ttk.Frame(root)
+        actions.pack(side=tk.TOP, fill=tk.X, pady=(10, 8))
+        ttk.Button(actions, text="Test ADV Status", command=self.start_adv_status).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(actions, text="Listen BCAST RX", command=self.start_bcast_rx).pack(side=tk.LEFT, padx=6)
+        ttk.Button(actions, text="Send BCAST", command=self.start_send_bcast).pack(side=tk.LEFT, padx=6)
+        ttk.Button(actions, text="Stop", command=self.stop_current).pack(side=tk.LEFT, padx=6)
+        ttk.Button(actions, text="Clear Log", command=self.clear_log).pack(side=tk.RIGHT)
+
+        ttk.Label(root, textvariable=self.status_var).pack(side=tk.TOP, anchor="w")
+
+        log_frame = ttk.Frame(root)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=22, undo=False)
+        scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=scroll.set)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _entry(
+        self,
+        parent: ttk.Frame,
+        label: str,
+        var: tk.StringVar,
+        row: int,
+        col: int,
+        width: int,
+    ) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=col, sticky="w", padx=6, pady=5)
+        ttk.Entry(parent, textvariable=var, width=width).grid(row=row, column=col + 1, sticky="w", padx=6, pady=5)
+
+    def log(self, text: str) -> None:
+        self.log_queue.put(text)
+
+    def _drain_log_queue(self) -> None:
+        while True:
+            try:
+                line = self.log_queue.get_nowait()
+            except queue.Empty:
+                break
+            self.log_text.insert(tk.END, line + "\n")
+            self.log_text.see(tk.END)
+        self.after(80, self._drain_log_queue)
+
+    def clear_log(self) -> None:
+        self.log_text.delete("1.0", tk.END)
+
+    def settings(self) -> GuiSettings:
+        return GuiSettings(
+            port=self._optional_text(self.port_var.get(), auto=True),
+            baud=int(self.baud_var.get(), 0),
+            timeout_s=float(self.timeout_var.get()),
+            scan_interval_ms=int(self.scan_interval_var.get(), 0),
+            scan_window_ms=int(self.scan_window_var.get(), 0),
+            device_type=DEVICE_TYPE_OPTIONS[self.device_type_var.get()],
+            device_id=self._optional_int(self.device_id_var.get()),
+            min_battery=self._optional_int(self.min_battery_var.get()),
+            bcast_kind=self.bcast_kind_var.get(),
+            bcast_repeat=max(1, int(self.bcast_repeat_var.get(), 0)),
+            bcast_interval_s=float(self.bcast_interval_var.get()),
+            verbose=self.verbose_var.get(),
+        )
+
+    @staticmethod
+    def _optional_text(value: str, auto: bool = False) -> str | None:
+        value = value.strip()
+        if value == "" or (auto and value.lower() == "auto"):
+            return None
+        return value
+
+    @staticmethod
+    def _optional_int(value: str) -> int | None:
+        value = value.strip()
+        if value == "":
+            return None
+        return int(value, 0)
+
+    def run_worker(self, title: str, fn) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            self.log("ERROR: another test is still running")
+            return
+
+        self.stop_event.clear()
+        self.status_var.set(f"Running: {title}")
+        self.log("")
+        self.log(f"=== {title} ===")
+
+        def wrapper() -> None:
+            try:
+                fn()
+            except Exception as exc:
+                self.log(f"ERROR: {exc}")
+            finally:
+                self.status_var.set("Idle")
+
+        self.worker = threading.Thread(target=wrapper, daemon=True)
+        self.worker.start()
+
+    def stop_current(self) -> None:
+        self.stop_event.set()
+        self.log("Stop requested")
+
+    def open_session(self, cfg: GuiSettings) -> VvTestSession:
+        port = cfg.port
+        baud = cfg.baud
+        if port is None:
+            port, baud = auto_port()
+        if port is None:
+            raise RuntimeError("no central serial port found")
+
+        self.log(f"Opening central serial {port} @ {baud}")
+        return VvTestSession(port, baud, debug=False)
+
+    def send_scan_start(self, session: VvTestSession, cfg: GuiSettings) -> None:
+        factory = CommandFactory()
+        pkt = factory.ble_scan_start(DEFAULT_SRC, DEFAULT_CENTRAL_DST, session.proto.next_seq())
+        pkt.ble_scan_start.duration_ms = 0
+        pkt.ble_scan_start.interval_ms = cfg.scan_interval_ms
+        pkt.ble_scan_start.window_ms = cfg.scan_window_ms
+        pkt.ble_scan_start.active_scanning = True
+        session.send_packet(pkt)
+        self.log("Central scan_start sent")
+
+    def start_adv_status(self) -> None:
+        cfg = self.settings()
+        self.run_worker("ADV status system test", lambda: self.worker_adv_status(cfg))
+
+    def worker_adv_status(self, cfg: GuiSettings) -> None:
+        observed = 0
+        matched = False
+        with self.open_session(cfg) as session:
+            self.send_scan_start(session, cfg)
+            deadline = time.time() + cfg.timeout_s
+            while time.time() < deadline and not self.stop_event.is_set():
+                for pkt in session.recv_packets(timeout_s=0.2):
+                    ptype = pkt.WhichOneof("params") or "<none>"
+                    if ptype == "ble_adv_status":
+                        observed += 1
+                        s = pkt.ble_adv_status
+                        self.log(
+                            "ADV_STATUS "
+                            f"device={device_type_name(s.device)} id={s.device_id} "
+                            f"bat={s.bat_soc_percent}% flags=0x{s.status_flags:08X} "
+                            f"warn={s.warning_count} err={s.error_count} ts={s.local_timestamp_s}"
+                        )
+                        if self.adv_status_matches(s, cfg):
+                            matched = True
+                            self.log("PASS: expected peripheral ADV status observed")
+                            return
+                    elif cfg.verbose:
+                        self.log(f"RX {packet_summary(pkt)}")
+
+        if observed == 0:
+            self.log("FAIL: central did not report any peripheral ADV status")
+        elif not matched:
+            self.log("FAIL: ADV status observed, but filter did not match")
+
+    def adv_status_matches(self, status: pb.ble_adv_status_t, cfg: GuiSettings) -> bool:
+        if cfg.device_type is not None and status.device != cfg.device_type:
+            return False
+        if cfg.device_id is not None and status.device_id != cfg.device_id:
+            return False
+        if cfg.min_battery is not None and status.bat_soc_percent < cfg.min_battery:
+            return False
+        return True
+
+    def start_bcast_rx(self) -> None:
+        cfg = self.settings()
+        self.run_worker("BCAST RX system test", lambda: self.worker_bcast_rx(cfg))
+
+    def worker_bcast_rx(self, cfg: GuiSettings) -> None:
+        with self.open_session(cfg) as session:
+            self.send_scan_start(session, cfg)
+            deadline = time.time() + cfg.timeout_s
+            while time.time() < deadline and not self.stop_event.is_set():
+                for pkt in session.recv_packets(timeout_s=0.2):
+                    self.log(f"RX {packet_summary(pkt)}")
+                    if pkt.HasField("hdr") and pkt.hdr.HasField("addr") and pkt.hdr.addr.dst == pb.PACKET_ADDR_BCAST:
+                        self.log("PASS: central received and forwarded a BCAST packet")
+                        return
+
+        self.log("FAIL: no BCAST packet observed through central")
+
+    def start_send_bcast(self) -> None:
+        cfg = self.settings()
+        self.run_worker("BCAST TX", lambda: self.worker_send_bcast(cfg))
+
+    def worker_send_bcast(self, cfg: GuiSettings) -> None:
+        with self.open_session(cfg) as session:
+            for i in range(cfg.bcast_repeat):
+                if self.stop_event.is_set():
+                    return
+                pkt = pb.packet_t()
+                pkt.hdr.addr.src = pb.PACKET_ADDR_DEBUG
+                pkt.hdr.addr.dst = pb.PACKET_ADDR_BCAST
+                pkt.hdr.seq = session.proto.next_seq()
+                if cfg.bcast_kind == "device_information_get":
+                    pkt.device_information_get.dummy = 0
+                elif cfg.bcast_kind == "time_sync_get":
+                    pkt.time_sync_get.dummy = 0
+                else:
+                    pkt.none.dummy = i
+
+                raw = pkt.SerializeToString()
+                if len(raw) > BCAST_MAX_PACKET_SIZE:
+                    self.log(f"ERROR: encoded protobuf too large: {len(raw)} > {BCAST_MAX_PACKET_SIZE}")
+                    return
+
+                self.log(f"TX BCAST {packet_summary(pkt)} encoded_len={len(raw)}")
+                session.send_packet(pkt)
+                time.sleep(cfg.bcast_interval_s)
+        self.log("PASS: BCAST TX command sent")
+
+
+def main() -> int:
+    app = CentralTestGui()
+    app.mainloop()
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

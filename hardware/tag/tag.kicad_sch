@@ -9665,7 +9665,7 @@
 	)
 	(rectangle
 		(start 17.78 132.08)
-		(end 162.56 232.41)
+		(end 173.99 232.41)
 		(stroke
 			(width 0)
 			(type dash)
@@ -9779,6 +9779,17 @@
 		)
 		(uuid "16ed3746-b5ef-4ff1-9387-bcd08973bd42")
 	)
+	(text "NOTE: Use a 5 V-tolerant MCU GPIO.\n	  Configure the pin as open-drain.\n"
+		(exclude_from_sim no)
+		(at 147.574 158.496 0)
+		(effects
+			(font
+				(size 0.762 0.762)
+			)
+			(justify left)
+		)
+		(uuid "2d304c92-acb2-41b8-a325-7d3d4aa190c9")
+	)
 	(text "MAIN CONTROLLER"
 		(exclude_from_sim no)
 		(at 191.262 149.098 0)
@@ -9798,6 +9809,17 @@
 			)
 		)
 		(uuid "31d423bf-1b66-4389-a59b-d8583fc766bf")
+	)
+	(text "PWR_LATCH low = power off."
+		(exclude_from_sim no)
+		(at 151.638 161.036 0)
+		(effects
+			(font
+				(size 0.762 0.762)
+			)
+			(justify left)
+		)
+		(uuid "39dc7b31-6e85-4b5a-ab29-19ffc832b79b")
 	)
 	(text "HEADER"
 		(exclude_from_sim no)
@@ -10398,10 +10420,6 @@
 	(no_connect
 		(at 245.11 62.23)
 		(uuid "0afc9f47-0406-440a-aded-22986af63537")
-	)
-	(no_connect
-		(at 234.95 210.82)
-		(uuid "0ba878a2-c32c-4243-b38f-9c82d3df116a")
 	)
 	(no_connect
 		(at 207.01 60.96)
@@ -14623,6 +14641,16 @@
 	)
 	(wire
 		(pts
+			(xy 147.32 154.94) (xy 153.67 154.94)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ddd9e560-e400-4e70-b4a3-826dea2bfaeb")
+	)
+	(wire
+		(pts
 			(xy 52.07 273.05) (xy 62.23 273.05)
 		)
 		(stroke
@@ -14820,6 +14848,16 @@
 			(type default)
 		)
 		(uuid "e9c04516-0499-482a-a2f4-87be6afea16d")
+	)
+	(wire
+		(pts
+			(xy 227.33 210.82) (xy 234.95 210.82)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ea3b9549-9c11-47ee-a17e-a73b60da7e73")
 	)
 	(wire
 		(pts
@@ -15351,6 +15389,16 @@
 		)
 		(uuid "236efc3e-11d2-4bf0-b5ea-6c4949b02a9f")
 	)
+	(label "PWR_LATCH"
+		(at 227.33 210.82 180)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify right bottom)
+		)
+		(uuid "25bb4ed4-6954-4f9a-b793-57e8c546d495")
+	)
 	(label "SPI_SCK"
 		(at 275.59 187.96 0)
 		(effects
@@ -15520,6 +15568,16 @@
 			(justify right bottom)
 		)
 		(uuid "58aa03eb-1076-4ca7-9ca0-310436c0270d")
+	)
+	(label "PWR_LATCH"
+		(at 153.67 154.94 0)
+		(effects
+			(font
+				(size 1 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "5b929c34-6ba5-4674-9115-d07e3ba3b56c")
 	)
 	(label "PB0 {slash} ADC_IN8"
 		(at 377.19 262.89 0)

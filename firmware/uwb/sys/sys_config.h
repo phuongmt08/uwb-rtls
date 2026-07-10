@@ -15,6 +15,7 @@
 /* Includes ----------------------------------------------------------------- */
 #include "bsp_util.h"
 #include "config.h"
+#include "otp/otp.h"
 #include "positioning_config.h"
 #include "protos/protocol.pb.h"
 
@@ -27,6 +28,7 @@ typedef protobuf_device_type_t        device_type_t;
 typedef protobuf_host_transport_t     host_transport_t;
 typedef protobuf_pos_calib_cfg_t      sys_calib_cfg_t;
 typedef protobuf_anchor_layout_item_t sys_anchor_layout_t;
+typedef protobuf_prefilter_cfg_t      sys_prefilter_cfg_t;
 
 #define DEVICE_ROLE_UNSPECIFIED      protobuf_DEVICE_ROLE_UNSPECIFIED
 #define DEVICE_ROLE_TAG              protobuf_DEVICE_ROLE_TAG
@@ -64,28 +66,43 @@ typedef struct
   device_type_t       device_type;
   host_transport_t    host_transport;
   protobuf_uwb_cfg_t  uwb; /* maps to sys_config_set/resp.config */
+  sys_prefilter_cfg_t prefilter;
   sys_calib_cfg_t     calib;
   uint32_t            anchor_count;
   sys_anchor_layout_t anchor_layout[SYS_CONFIG_MAX_ANCHORS];
+
+  /* Zone Profile configurations */
+  uint32_t            default_zone_id;
+  protobuf_zone_profile_t zone_profiles[4];
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            17   /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            34     /* bump → forces flash reset on upgrade */
 
-#define DEFAULT_DEVICE_ROLE       DEVICE_ROLE_ANCHOR
+#define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_HOST_TRANSPORT    HOST_TRANSPORT_USB
-#define DEFAULT_DEVICE_ID         0x01
-#define DEFAULT_RANGING_PERIOD_MS 80
-#define DEFAULT_RX_TIMEOUT_MS     75
+#define DEFAULT_DEVICE_ID         0x03
+#define DEFAULT_RANGING_PERIOD_MS 71     /* ~14.1Hz target update rate */
+#define DEFAULT_RX_TIMEOUT_MS     60
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
 #define DEFAULT_UWB_DATA_RATE     2 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
-#define DEFAULT_UWB_PREAMBLE_CODE 17
+#define DEFAULT_ZONE_1_PREAMBLE_CODE 17
+#define DEFAULT_ZONE_2_PREAMBLE_CODE 18
+#define DEFAULT_ZONE_3_PREAMBLE_CODE 19
+#define DEFAULT_ZONE_4_PREAMBLE_CODE 20
 #define DEFAULT_TX_ANT_DLY        16436
 #define DEFAULT_RX_ANT_DLY        16436
 #define DEFAULT_TX_POWER          0x3A5A7A9AUL /* ~-14.5 dBm with smart power on */
-#define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_BALANCED
+#define DEFAULT_ANCHOR_POWER_MODE   ANCHOR_POWER_MODE_DEEP_ECO
+#define DEFAULT_UWB_PREAMBLE_LEN  0x34 /* DWT_PLEN_512 */
+#define DEFAULT_UWB_RX_PAC        2    /* DWT_PAC32: recommended for DWT_PLEN_512 */
+#define DEFAULT_UWB_NS_SFD        1
+#define DEFAULT_UWB_PHR_MODE      0    /* DWT_PHRMODE_STD */
+#define DEFAULT_SMART_TX_POWER    true
+#define DEFAULT_PG_DELAY          0xC2
+#define DEFAULT_PREFILTER_ENABLE  ENABLE_MAHALANOBIS_PREFILTER
 
 /* ========================================================================== */
 /*                         PUBLIC FUNCTIONS                                  */
@@ -108,10 +125,19 @@ device_type_t          sys_config_get_device_type(void);
 host_transport_t       sys_config_get_host_transport(void);
 const sys_calib_cfg_t *sys_config_get_calib(void);
 int                    sys_config_set_calib(const sys_calib_cfg_t *calib);
+const sys_prefilter_cfg_t *sys_config_get_prefilter(void);
+int                    sys_config_set_prefilter(const sys_prefilter_cfg_t *prefilter);
 void                   sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);
 int                    sys_config_set_anchor_layout(const sys_anchor_layout_t *anchors, uint32_t count);
 int sys_config_set_power_mode(anchor_power_mode_t mode);
+otp_err_t sys_config_factory_otp_write(const protobuf_factory_otp_write_t *req);
+uint8_t sys_config_get_hw_rev(void);
 
+uint32_t sys_config_get_active_zone_id(void);
+void sys_config_set_active_zone_id(uint32_t zone_id);
+bool sys_config_zone_profile_valid(const protobuf_zone_profile_t *profile);
+int sys_config_set_zone_profile(const protobuf_zone_profile_t *profile);
+bool sys_config_apply_zone_profile(uint32_t zone_id);
 
 /* Storage */
 int  sys_config_save(void);

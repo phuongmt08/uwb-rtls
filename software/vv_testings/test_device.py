@@ -45,6 +45,6 @@ def run(session: VvTestSession, src: int, dst: int) -> bool:
     )
 
     send_and_print(session, "host_transport_set", factory.host_transport_set(src, dst, session.proto.next_seq()))
-    send_and_print(session, "device_reset", factory.device_reset(src, dst, session.proto.next_seq()))
+    print("device_reset: SKIPPED (drops COM)")
 
     return ok

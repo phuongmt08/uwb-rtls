@@ -17,10 +17,22 @@
 /* -------------------------------------------------------------------------
  * LED index mapping
  * ---------------------------------------------------------------------- */
+#if LEDS_NUMBER >= 4
 #define LED_SCANNING   BSP_BOARD_LED_0   /**< Blinks/on while scanning.    */
 #define LED_TX         BSP_BOARD_LED_1   /**< Pulses after TX activity.     */
 #define LED_CONNECTED  BSP_BOARD_LED_2   /**< On while a peripheral is connected. */
 #define LED_RX         BSP_BOARD_LED_3   /**< Pulses after RX activity.     */
+#elif LEDS_NUMBER == 2
+#define LED_SCANNING   BSP_BOARD_LED_0
+#define LED_CONNECTED  BSP_BOARD_LED_0
+#define LED_TX         BSP_BOARD_LED_1
+#define LED_RX         BSP_BOARD_LED_1
+#else // LEDS_NUMBER == 1
+#define LED_SCANNING   BSP_BOARD_LED_0
+#define LED_CONNECTED  BSP_BOARD_LED_0
+#define LED_TX         BSP_BOARD_LED_0
+#define LED_RX         BSP_BOARD_LED_0
+#endif
 #define LED_PULSE_INTERVAL APP_TIMER_TICKS(150)
 
 APP_TIMER_DEF(m_tx_pulse_timer_id);

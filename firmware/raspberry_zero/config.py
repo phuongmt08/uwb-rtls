@@ -11,10 +11,19 @@ class Config:
     # Frame is now dynamic: [SOF(1)] [LEN(1)] [DATA(LEN)]
     # LEN = (3 + NUM_ANCHORS + 1) * 4
     
+    # Feature Flags
+    UDP_ENABLED = True
+    WS_ENABLED = True
+    
     # UDP Configuration
     UDP_HOST = '192.168.1.100'  # Server IP address
     UDP_PORT = 5000
     UDP_TIMEOUT = 0.5
+    
+    # WebSocket Configuration
+    WS_HOST = '0.0.0.0'
+    WS_PORT = 8765
+    WS_TIMEOUT = 1.0  # seconds
     
     # Validation ranges (meters)
     POSITION_MIN = -100.0

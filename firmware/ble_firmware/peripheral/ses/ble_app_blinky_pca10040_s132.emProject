@@ -88,6 +88,7 @@
       <file file_name="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/modules/nrfx/drivers/src/prs/nrfx_prs.c" />
       <file file_name="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/modules/nrfx/drivers/src/nrfx_uart.c" />
       <file file_name="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/modules/nrfx/drivers/src/nrfx_uarte.c" />
+      <file file_name="../../../../../nRF5_SDK_17.1.0_ddde560/nRF5_SDK_17.1.0_ddde560/modules/nrfx/drivers/src/nrfx_wdt.c" />
     </folder>
     <folder Name="Application">
       <file file_name="../main.c" />
@@ -146,5 +147,11 @@
   <configuration Name="Debug"
     c_preprocessor_definitions="DEBUG; DEBUG_NRF"
     gcc_optimization_level="None"/>
+  <configuration Name="Debug_Bypass_P005"
+    inherited_configurations="Debug"
+    c_preprocessor_definitions="BLE_RX_BYPASS_P005" />
+  <configuration Name="Release_Bypass_P005"
+    inherited_configurations="Release"
+    c_preprocessor_definitions="BLE_RX_BYPASS_P005" />
 
 </solution>

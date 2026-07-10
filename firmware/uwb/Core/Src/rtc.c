@@ -42,10 +42,6 @@ void MX_RTC_Init(void)
   */
   hrtc.Instance = RTC;
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  /* RTC clock source is HSE/12.
-   * With 12 MHz HSE => RTC input = 1 MHz.
-   * Need (AsynchPrediv+1)*(SynchPrediv+1) = 1,000,000 for 1 Hz calendar tick.
-   */
   hrtc.Init.AsynchPrediv = 124;
   hrtc.Init.SynchPrediv = 7999;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;

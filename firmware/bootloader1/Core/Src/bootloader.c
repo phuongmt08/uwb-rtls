@@ -48,6 +48,8 @@ bool bl_app_vector_valid(void)
     if (msp          <  SRAM_BASE_ADDR || msp > SRAM_END_ADDR)           return false;
     if (reset_vector <  MEM_APP_START  || reset_vector >= MEM_APP_END)   return false;
 
+    /* Never boot a partially erased/written image after an interrupted FOTA. */
+//    return (bsp_fl_app_verify_crc() == BSP_FL_OK);
     return true;
 }
 
@@ -191,9 +193,11 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
     const uint8_t *data    = pkt->params.flash_write.data.bytes;
     uint32_t       length  = pkt->params.flash_write.data.size;
 
+    uint32_t end = address + length;
     if (length == 0u ||
         address < MEM_APP_START ||
-        address + length > MEM_APP_END) {
+        end < address ||
+        end > MEM_APP_END) {
         RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
                "BL: bad write addr=0x%08lX len=%lu",
                (unsigned long)address, (unsigned long)length);

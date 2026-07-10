@@ -18,6 +18,8 @@
 #include "protos/protocol.pb.h"
 #include "config.h"
 
+#include "main.h"
+
 typedef struct {
     uint16_t fp_amp1;
     uint16_t fp_amp2;
@@ -30,7 +32,6 @@ typedef struct {
     bool     valid;
 } bsp_uwb_rx_quality_t;
 
-#ifdef UWB_EVENT_DRIVEN
 typedef enum {
     BSP_UWB_EVENT_NONE = 0,
     BSP_UWB_EVENT_RX_OK,
@@ -41,13 +42,13 @@ typedef enum {
 
 typedef struct {
     bsp_uwb_event_type_t type;
+    bool                 rx_windowed;
     uint16_t             rx_len;
     uint8_t              rx_data[128];
     uint64_t             rx_ts;
     uint64_t             tx_ts;
     bsp_uwb_rx_quality_t rx_quality;
 } bsp_uwb_event_t;
-#endif
 
 /* Pin definitions (based on BU01 schematic) ------------------------- */
 /* SPI pins - connected to SPI1 peripheral */
@@ -55,14 +56,26 @@ typedef struct {
 #define UWB_SCK_PIN         GPIO_PIN_5   /* PA5 - SPICLK (Pin 20) */
 #define UWB_MISO_PIN        GPIO_PIN_6   /* PA6 - SPIMISO (Pin 19) */
 #define UWB_MOSI_PIN        GPIO_PIN_7   /* PA7 - SPIMOSI (Pin 18) */
-#define UWB_CS_PORT         GPIOB
-#define UWB_CS_PIN          GPIO_PIN_12  /* PB12 - SPICS (Pin 17) */
+#ifdef UWB_CS_PORT
+#undef UWB_CS_PORT
+#endif
+#ifdef UWB_CS_PIN
+#undef UWB_CS_PIN
+#endif
+#define UWB_CS_PORT         SPI1_CS1_GPIO_Port
+#define UWB_CS_PIN          SPI1_CS1_Pin  /* PB12 - SPICS (Pin 17) */
 
 /* Control pins */
-#define UWB_RST_PORT        GPIOB
-#define UWB_RST_PIN         GPIO_PIN_2   /* PB2 - RST (Pin 3) */
-#define UWB_IRQ_PORT        GPIOA
-#define UWB_IRQ_PIN         GPIO_PIN_4   /* PA4 - IRQ/GPIO8 (Pin 22) */
+#ifdef UWB_RST_PORT
+#undef UWB_RST_PORT
+#endif
+#ifdef UWB_RST_PIN
+#undef UWB_RST_PIN
+#endif
+#define UWB_RST_PORT        UWB_RST_GPIO_Port
+#define UWB_RST_PIN         UWB_RST_Pin   /* PB2 - RST (Pin 3) */
+#define UWB_IRQ_PORT        UWB_IRQ_GPIO_Port
+#define UWB_IRQ_PIN         UWB_IRQ_Pin   /* PA4 - IRQ/GPIO8 (Pin 22) */
 
 /* Note: RX/TX LEDs are controlled by DW1000 GPIO2/GPIO3 directly, not STM32 */
 
@@ -72,6 +85,12 @@ typedef struct {
  * @return BSP_OK on success, BSP_ERR on failure
  */
 bsp_err_t bsp_uwb_init(void);
+
+/**
+ * @brief  Check if UWB driver was successfully initialized.
+ * @retval true if initialized, false otherwise
+ */
+bool bsp_uwb_is_initialized(void);
 
 /**
  * @brief Configure UWB radio parameters from protobuf UWB config.
@@ -135,6 +154,23 @@ bsp_err_t bsp_uwb_enable_rx_delayed(uint64_t rx_timestamp_dw, uint32_t timeout_m
 void bsp_uwb_idle(void);
 
 /**
+ * @brief Put DW1000 into low-power sleep.
+ * @note Intended for long standby gaps only. Hot ranging paths should keep
+ *       using bsp_uwb_idle() so TX/RX timing is not disturbed.
+ */
+bsp_err_t bsp_uwb_sleep_enter(void);
+
+/**
+ * @brief Wake DW1000 from sleep using the SPI CS wake mechanism.
+ */
+bsp_err_t bsp_uwb_sleep_wake(void);
+
+/**
+ * @brief Return true when the BSP believes DW1000 is in sleep mode.
+ */
+bool bsp_uwb_is_sleeping(void);
+
+/**
  * @brief Get cached first-path quality diagnostics of the last RX frame.
  * @param[out] quality Output quality metrics.
  * @return BSP_OK when valid diagnostics are available.
@@ -185,6 +221,7 @@ void bsp_uwb_reset_rx_error_counts(void);
  * @brief Notify BSP about UWB IRQ edge (call from EXTI callback)
  */
 void bsp_uwb_on_irq(void);
+void bsp_uwb_dwt_isr(void);
 
 /**
  * @brief Clear pending UWB IRQ event flag
@@ -198,7 +235,6 @@ void bsp_uwb_clear_irq_event(void);
  */
 bool bsp_uwb_wait_for_irq_event(uint32_t timeout_ms);
 
-#ifdef UWB_EVENT_DRIVEN
 typedef struct
 {
   uint32_t tx_done;
@@ -224,7 +260,14 @@ void bsp_uwb_get_event_stats(bsp_uwb_event_stats_t *stats);
  * @brief Discard any pending UWB events
  */
 void bsp_uwb_clear_event(void);
-#endif
+
+/**
+ * @brief Read internal temperature and voltage of DW1000 chip.
+ * @param[out] temp  Pointer to float to store temperature in C.
+ * @param[out] vbat  Pointer to float to store battery voltage in V.
+ * @return BSP_OK on success, BSP_ERR on failure.
+ */
+bsp_err_t bsp_uwb_read_temp_vbat(float *temp, float *vbat);
 
 #endif /* __BSP_UWB_H */
 /* End of file -------------------------------------------------------- */

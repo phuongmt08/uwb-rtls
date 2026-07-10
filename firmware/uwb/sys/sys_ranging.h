@@ -15,8 +15,7 @@
 #include "config.h"
 #include "positioning_config.h"
 
-/* Public enumerate/structure ---------------------------------------- */
-
+/* Public types ------------------------------------------------------ */
 typedef enum
 {
   SYS_RANGING_OK = 0,
@@ -36,12 +35,12 @@ typedef enum
  *
  * This is intentionally 1 byte so it can fit into existing packet padding.
  * Only two states matter:
- *   NORMAL = calibration not finished (or not running)
- *   DONE   = calibration converged, antenna delay saved
- * The Anchor Master uses DONE from peers to decide when the
- * whole network is calibrated and ready to reset into normal mode.
+ *   NORMAL = local survey data is not ready
+ *   DONE   = local survey summary was acknowledged by the collector
+ * Network exit is coordinated separately by SURVEY_COMPLETE/ABORT.
  */
-typedef enum {
+typedef enum
+{
   SYS_CALIB_STATUS_NORMAL = 0,
   SYS_CALIB_STATUS_DONE   = 1
 } sys_calib_status_t;
@@ -72,8 +71,23 @@ typedef struct
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
 
-#define SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS 3U
+/**
+ * @brief Registered control-message types carried outside DS-TWR exchanges.
+ */
+typedef enum
+{
+  SYS_UWB_CTRL_CALIB_PAIR_SUMMARY = 0xE5,
+  SYS_UWB_CTRL_ACK                = 0xE6,
+  SYS_UWB_CTRL_SURVEY_FINISH      = 0xE7
+} sys_uwb_control_msg_type_t;
 
+typedef enum
+{
+  SYS_SURVEY_FINISH_ABORT    = 0,
+  SYS_SURVEY_FINISH_COMPLETE = 1
+} sys_survey_finish_outcome_t;
+
+/* Control-message wire formats ------------------------------------- */
 typedef struct __attribute__((packed))
 {
   uint8_t  peer_id;
@@ -81,7 +95,7 @@ typedef struct __attribute__((packed))
   float    mean_m;
   float    std_m;
   float    timeout_rate;
-  uint16_t valid_count;
+  uint8_t  valid_count;
 } sys_calib_pair_summary_item_t;
 
 typedef struct __attribute__((packed))
@@ -93,8 +107,25 @@ typedef struct __attribute__((packed))
   uint16_t current_tx_delay;
   uint16_t current_rx_delay;
   uint16_t current_combined_delay;
-  sys_calib_pair_summary_item_t pair[SYS_CALIB_PAIR_SUMMARY_MAX_PAIRS];
+  sys_calib_pair_summary_item_t pair[NUM_ANCHORS - 1U];
 } sys_calib_pair_summary_msg_t;
+
+typedef struct __attribute__((packed))
+{
+  uint8_t msg_type;
+  uint8_t epoch_id;
+  uint8_t sender_id;
+  uint8_t acked_msg_type;
+  uint8_t acked_value;
+} sys_uwb_control_ack_msg_t;
+
+typedef struct __attribute__((packed))
+{
+  uint8_t msg_type;
+  uint8_t epoch_id;
+  uint8_t collector_id;
+  uint8_t outcome;
+} sys_survey_finish_msg_t;
 
 /**
  * @brief Ranging configuration
@@ -110,7 +141,7 @@ typedef struct
   
   /* TDMA multi-anchor mode */
   uint8_t  num_anchors;             /* Number of anchors (1-8) */
-  uint8_t  anchor_ids[NUM_ANCHORS]; /* List of anchor IDs */
+  uint8_t  anchor_ids[MAX_ANCHORS_SUPPORTED]; /* List of anchor IDs */
   uint32_t slot_duration_ms;        /* TDMA slot duration (0 = default) */
 } sys_ranging_config_t;
 
@@ -219,17 +250,39 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
  */
 sys_ranging_err_t sys_ranging_anchor_get_result_tdma(sys_ranging_result_t *result);
 
-/**
- * @brief Send one calibration pair summary packet in a deterministic summary slot.
- */
-sys_ranging_err_t sys_ranging_send_calib_pair_summary(const sys_calib_pair_summary_msg_t *summary,
-                                                      uint8_t slot_id);
+/* ====================================================================
+ * CONTROL MESSAGE API
+ * ==================================================================== */
 
 /**
- * @brief Poll for one calibration pair summary packet.
+ * @brief Send or receive a registered control message.
+ *
+ * Control messages use byte 0 as type and byte 1 as epoch. A non-zero slot_id
+ * applies the shared deterministic control-message slot delay before TX.
  */
-sys_ranging_err_t sys_ranging_poll_calib_pair_summary(sys_calib_pair_summary_msg_t *summary,
-                                                      uint32_t timeout_ms);
+sys_ranging_err_t sys_ranging_control_send(sys_uwb_control_msg_type_t type,
+                                           const void *msg,
+                                           uint16_t msg_size,
+                                           uint8_t slot_id);
+sys_ranging_err_t sys_ranging_control_receive(sys_uwb_control_msg_type_t type,
+                                              void *msg,
+                                              uint16_t msg_size,
+                                              uint32_t timeout_ms);
+sys_ranging_err_t sys_ranging_control_send_ack(uint8_t epoch_id,
+                                               uint8_t sender_id,
+                                               sys_uwb_control_msg_type_t acked_type,
+                                               uint8_t acked_value,
+                                               uint8_t slot_id);
+sys_ranging_err_t sys_ranging_control_receive_ack(sys_uwb_control_msg_type_t acked_type,
+                                                  sys_uwb_control_ack_msg_t *ack,
+                                                  uint32_t timeout_ms);
+sys_ranging_err_t sys_ranging_control_send_wait_ack(sys_uwb_control_msg_type_t type,
+                                                    const void *msg,
+                                                    uint16_t msg_size,
+                                                    uint8_t slot_id,
+                                                    uint8_t expected_ack_sender,
+                                                    uint8_t expected_ack_value,
+                                                    uint32_t ack_timeout_ms);
 
 /* ====================================================================
  * NON-BLOCKING API - LEGACY SINGLE-ANCHOR MODE (backward compatible)
@@ -282,6 +335,18 @@ sys_ranging_err_t sys_ranging_anchor_process(void);
  * @return SYS_RANGING_OK if result available
  */
 sys_ranging_err_t sys_ranging_anchor_get_result(sys_ranging_result_t *result);
+
+/**
+ * @brief Get remaining time in milliseconds until the active ranging deadline
+ * @return Remaining time in ms (1-10 ms)
+ */
+uint32_t sys_ranging_get_ms_to_deadline(void);
+
+/**
+ * @brief Return true while the shared ranging state machine is inside a live
+ *        TAG or ANCHOR transaction.
+ */
+bool sys_ranging_is_active(void);
 
 /**
  * @brief Reset ranging statistics

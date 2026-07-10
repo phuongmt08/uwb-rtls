@@ -13,6 +13,12 @@
  * ANTENNA DELAY CONFIGURATION
  * =================================================================== */
 
+ /* Enable/Disable: Force antenna delay to otp values on startup
+ * 0 = Use calibrated values (if available)
+ * 1 = Force antenna delay to otp
+ */
+#define ENABLE_OTP_ANTENNA_DELAY    0
+
 /* Enable/Disable: Force antenna delay to default values on startup
  * 0 = Use calibrated values (if available)
  * 1 = Force antenna delay to factory defaults
@@ -22,8 +28,8 @@
 #define TAG_FACTORY_TX_ANT_DLY      16436
 #define TAG_FACTORY_RX_ANT_DLY      16436
 
-#define ANCHOR_DEFAULT_TX_ANT_DLY   16225
-#define ANCHOR_DEFAULT_RX_ANT_DLY   16225
+#define ANCHOR_DEFAULT_TX_ANT_DLY   16187
+#define ANCHOR_DEFAULT_RX_ANT_DLY   16187
 
 /* Legacy fixed RX delay used by older calibration paths. V1 A2A summary
  * solver only logs candidate delays and does not apply this value. */
@@ -36,12 +42,12 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.465f)
+#define TAG_HEIGHT_M            (0.485f)
 
 /**
  * @brief Anchor height from ground (meters)
  */
-#define ANCHOR_HEIGHT_M         (0.895f)
+#define ANCHOR_HEIGHT_M         (2.495f)
 
 /**
  * @brief Height offset between Anchor and Tag (meters)
@@ -54,7 +60,6 @@
 
 /* 0 = normal ranging mode
  * 1 = mutual anchor-to-anchor calibration summary mode (A2A V1)             */
-#define ENABLE_ANCHOR_AUTO_CALIB    0
 
 /* ------------------------------------------------------------------
  * A2A (Anchor-to-Anchor) Mutual Calibration V1
@@ -118,30 +123,73 @@
 #define MAX_ANCHORS_SUPPORTED  8
 #define NUM_ANCHORS            4
 
-#define ANCHOR_1_X   0.0f
-#define ANCHOR_1_Y   0.0f
-
-#define ANCHOR_2_X   9.76f
-#define ANCHOR_2_Y   0.0f
-
-#define ANCHOR_3_X   0.0f
-#define ANCHOR_3_Y   9.76f
-
-#define ANCHOR_4_X   9.76f
-#define ANCHOR_4_Y   9.76f
-
-#ifndef ANCHOR_1_Z
-#define ANCHOR_1_Z ANCHOR_HEIGHT_M
+/* Default active zone ID (1 or 2) */
+#ifndef DEFAULT_ZONE_ID
+#define DEFAULT_ZONE_ID        1
 #endif
-#ifndef ANCHOR_2_Z
-#define ANCHOR_2_Z ANCHOR_HEIGHT_M
+
+/* When enabled, a ranging cycle is aborted unless at least three anchors
+ * respond and return results. Keep disabled so survey and degraded-layout
+ * operation can consume partial ranging results. */
+#define SYS_RANGING_REQUIRE_MIN_ANCHOR_SAMPLES  0
+
+/* ===================================================================
+ * ZONE SWITCH STRESS TEST
+ * =================================================================== */
+
+/* 0 = normal runtime
+ * 1 = repeatedly switch between valid zone profiles to measure radio
+ *     reconfiguration latency and ranging timing disturbance. Keep this
+ *     disabled outside bench testing. */
+#ifndef SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
+#define SYS_ZONE_SWITCH_STRESS_TEST_ENABLE       0
 #endif
-#ifndef ANCHOR_3_Z
-#define ANCHOR_3_Z ANCHOR_HEIGHT_M
+
+#ifndef SYS_ZONE_SWITCH_STRESS_INTERVAL_MS
+#define SYS_ZONE_SWITCH_STRESS_INTERVAL_MS       500U
 #endif
-#ifndef ANCHOR_4_Z
-#define ANCHOR_4_Z ANCHOR_HEIGHT_M
-#endif
+
+/* Zone 1 Defaults */
+#define ZONE_1_ANCHOR_1_ID   1
+#define ZONE_1_ANCHOR_1_X    0.7f
+#define ZONE_1_ANCHOR_1_Y    0.03f
+#define ZONE_1_ANCHOR_1_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_1_ANCHOR_2_ID   2
+#define ZONE_1_ANCHOR_2_X    0.7f
+#define ZONE_1_ANCHOR_2_Y    8.37f
+#define ZONE_1_ANCHOR_2_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_1_ANCHOR_3_ID   3
+#define ZONE_1_ANCHOR_3_X    7.5f
+#define ZONE_1_ANCHOR_3_Y    8.37f
+#define ZONE_1_ANCHOR_3_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_1_ANCHOR_4_ID   4
+#define ZONE_1_ANCHOR_4_X    7.5f
+#define ZONE_1_ANCHOR_4_Y    0.03f
+#define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
+
+/* Zone 2 Defaults */
+#define ZONE_2_ANCHOR_1_ID   5
+#define ZONE_2_ANCHOR_1_X    0.0f
+#define ZONE_2_ANCHOR_1_Y    0.0f
+#define ZONE_2_ANCHOR_1_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_2_ANCHOR_2_ID   6
+#define ZONE_2_ANCHOR_2_X    10.0f
+#define ZONE_2_ANCHOR_2_Y    0.0f
+#define ZONE_2_ANCHOR_2_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_2_ANCHOR_3_ID   7
+#define ZONE_2_ANCHOR_3_X    0.0f
+#define ZONE_2_ANCHOR_3_Y    10.0f
+#define ZONE_2_ANCHOR_3_Z    ANCHOR_HEIGHT_M
+
+#define ZONE_2_ANCHOR_4_ID   8
+#define ZONE_2_ANCHOR_4_X    10.0f
+#define ZONE_2_ANCHOR_4_Y    10.0f
+#define ZONE_2_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
 /* ===================================================================
  * DISTANCE VALIDATION
@@ -155,40 +203,49 @@
  * =================================================================== */
 
 /**
- * @brief Enable/Disable Mahalanobis pre-filter on raw 3D distances.
+ * @brief Enable/Disable the mw_filter Mahalanobis pre-filter.
  *        0 = bypass Mahalanobis gate
- *        1 = apply Mahalanobis gate
+ *        1 = apply Mahalanobis gate before anchor selection
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
-#define ENABLE_MAHALANOBIS_PREFILTER  0
+#define ENABLE_MAHALANOBIS_PREFILTER  1
 #endif
 
 /**
- * @brief Mahalanobis pre-filter parameters for raw 3D distances.
+ * @brief Mahalanobis pre-filter parameters.
  *
- * The filter keeps a clean per-anchor distance history. Samples with d2 above
- * the reject threshold are not inserted into history. Once an anchor is in the
- * rejected state, it must drop below the recover threshold before it is accepted
- * again.
+ * The firmware prefilter state lives in mw_filter. It keeps a clean per-anchor
+ * rejected/accepted state. d2 is computed from the current sensor-fusion
+ * predicted range to the anchor; T2_REJECT enters rejected state, and
+ * T2_RECOVER exits that state. Rescue is a separate frame-level policy
+ * controlled by RESCUE_MIN_ANCHORS.
  */
-#ifndef MAHALANOBIS_PREFILTER_HISTORY_WINDOW
-#define MAHALANOBIS_PREFILTER_HISTORY_WINDOW       15U
-#endif
-
-#ifndef MAHALANOBIS_PREFILTER_COLD_START_COUNT
-#define MAHALANOBIS_PREFILTER_COLD_START_COUNT     3U
-#endif
-
 #ifndef MAHALANOBIS_PREFILTER_D2_RECOVER
-#define MAHALANOBIS_PREFILTER_D2_RECOVER           4.0f
+#define MAHALANOBIS_PREFILTER_D2_RECOVER           5.0f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_D2_REJECT
-#define MAHALANOBIS_PREFILTER_D2_REJECT            9.0f
+#define MAHALANOBIS_PREFILTER_D2_REJECT            7.5f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_R_BASE
 #define MAHALANOBIS_PREFILTER_R_BASE               0.05f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_R_GATE
+#define MAHALANOBIS_PREFILTER_R_GATE               0.10f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   3U
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
+#define MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN 4.0f
+#endif
+
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_MAX
+#define MAHALANOBIS_PREFILTER_RESCUE_NOISE_MAX     0.25f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT
@@ -208,6 +265,42 @@
 #define MW_TRIL_D2_REJECT                          MAHALANOBIS_PREFILTER_D2_REJECT
 #endif
 
+#ifndef MW_TRIL_RESIDUAL_SCALE_M
+#define MW_TRIL_RESIDUAL_SCALE_M                   0.30
+#endif
+
+#ifndef MW_TRIL_FP_AMP_GOOD
+#define MW_TRIL_FP_AMP_GOOD                        40.0
+#endif
+
+#ifndef MW_TRIL_WEIGHT_D2
+#define MW_TRIL_WEIGHT_D2                          0.35
+#endif
+
+#ifndef MW_TRIL_WEIGHT_FP_AMP
+#define MW_TRIL_WEIGHT_FP_AMP                      0.15
+#endif
+
+#ifndef MW_TRIL_WEIGHT_GDOP
+#define MW_TRIL_WEIGHT_GDOP                        0.20
+#endif
+
+#ifndef MW_TRIL_WEIGHT_RESIDUAL
+#define MW_TRIL_WEIGHT_RESIDUAL                    0.30
+#endif
+
+#ifndef MW_TRIL_WEIGHT_DIST
+#define MW_TRIL_WEIGHT_DIST                        0.25
+#endif
+
+#ifndef MW_TRIL_SWITCH_MARGIN
+#define MW_TRIL_SWITCH_MARGIN                      0.12
+#endif
+
+#ifndef MW_TRIL_SWITCH_SCORE_EPS
+#define MW_TRIL_SWITCH_SCORE_EPS                  0.02
+#endif
+
 /**
  * @brief Enable/Disable quality gating based on trilateration error
  *        0 = Accept all trilateration results
@@ -222,13 +315,123 @@
 #define MAX_ACCEPTABLE_ERROR_M      1.0f    /* Max trilateration error (m) */
 #endif
 
-/**
- * @brief Distance Smoother (EMA Filter) parameters
- *        ALPHA: 0.0 to 1.0 (lower = smoother/more lag, higher = jumpier/less lag)
- *        JUMP_LIMIT: Max allowed delta between consecutive samples (meters)
- */
-#define SMOOTHER_ALPHA              0.25f
-#define SMOOTHER_JUMP_LIMIT_M       0.30f
+#ifndef ENABLE_SYS_FUSION
+#define ENABLE_SYS_FUSION  1
+#endif
+
+#ifndef SYS_FUSION_RAW_DEBUG_STREAM_ENABLE
+#define SYS_FUSION_RAW_DEBUG_STREAM_ENABLE  1
+#endif
+
+#ifndef SYS_FUSION_PROTOBUF_STREAM_ENABLE
+#define SYS_FUSION_PROTOBUF_STREAM_ENABLE   1
+#endif
+
+#ifndef SYS_FUSION_PREFILTER_ENABLED
+#define SYS_FUSION_PREFILTER_ENABLED (ENABLE_SYS_FUSION && ENABLE_MAHALANOBIS_PREFILTER)
+#endif
+
+#ifndef SYS_FUSION_USE_PLANAR_RANGES
+#define SYS_FUSION_USE_PLANAR_RANGES 1
+#endif
+
+#ifndef SYS_FUSION_UKF_ALPHA
+#define SYS_FUSION_UKF_ALPHA   1.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_KAPPA
+#define SYS_FUSION_UKF_KAPPA   0.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_BETA
+#define SYS_FUSION_UKF_BETA    2.0f
+#endif
+
+#ifndef SYS_FUSION_UKF_QA
+#define SYS_FUSION_UKF_QA      0.04f
+#endif
+
+#ifndef SYS_FUSION_UKF_QG
+#define SYS_FUSION_UKF_QG      (4.066e-5f)
+#endif
+
+#ifndef SYS_FUSION_UKF_R_UWB
+#define SYS_FUSION_UKF_R_UWB   0.01f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_PX
+#define SYS_FUSION_UKF_INIT_P_PX        0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_PY
+#define SYS_FUSION_UKF_INIT_P_PY        1.0e-10f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_VX
+#define SYS_FUSION_UKF_INIT_P_VX        1.0e-10f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_VY
+#define SYS_FUSION_UKF_INIT_P_VY        0.1f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_THETA
+#define SYS_FUSION_UKF_INIT_P_THETA     1.0e-10f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_BIAS_AX
+#define SYS_FUSION_UKF_INIT_P_BIAS_AX   1.0e-5f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_BIAS_AY
+#define SYS_FUSION_UKF_INIT_P_BIAS_AY   1.0e-5f
+#endif
+
+#ifndef SYS_FUSION_UKF_INIT_P_BIAS_GZ
+#define SYS_FUSION_UKF_INIT_P_BIAS_GZ   1.0e-10f
+#endif
+
+#ifndef SYS_FUSION_IMU_BUTTERWORTH_ENABLE
+#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       1
+#endif
+
+#ifndef SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ
+#define SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ    2.0f
+#endif
+
+#ifndef SYS_FUSION_IMU_SAMPLE_RATE_HZ
+#define SYS_FUSION_IMU_SAMPLE_RATE_HZ           50.0f
+#endif
+
+#ifndef SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN
+#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    0.95f
+#endif
+
+#ifndef SYS_FUSION_IMU_ZUPT_ENABLE
+#define SYS_FUSION_IMU_ZUPT_ENABLE              0
+#endif
+
+#ifndef SYS_FUSION_IMU_ZUPT_ACC_THRESHOLD
+#define SYS_FUSION_IMU_ZUPT_ACC_THRESHOLD       0.15f
+#endif
+
+#ifndef SYS_FUSION_IMU_ZUPT_GYR_THRESHOLD
+#define SYS_FUSION_IMU_ZUPT_GYR_THRESHOLD       0.05f
+#endif
+
+#ifndef SYS_FUSION_IMU_ZUPT_COUNT_THRESHOLD
+#define SYS_FUSION_IMU_ZUPT_COUNT_THRESHOLD     10U
+#endif
+
+#ifndef SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE
+#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 0
+#endif
+
+#ifndef SYS_FUSION_IMU_ZUPT_VEL_VARIANCE
+#define SYS_FUSION_IMU_ZUPT_VEL_VARIANCE        1.0e-4f
+#endif
+
+
 
 /* ===================================================================
  * ERROR HANDLING

@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "sdk_errors.h"
+#include "../../../protocol/protos/protocol.pb.h"
 
 /* Public defines ----------------------------------------------------- */
 /* Public enumerate/structure ----------------------------------------- */
@@ -52,8 +53,14 @@ ret_code_t bb_cmd_hdl_init(void);
 bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_t max_len);
 
 void bb_cmd_notify_scan_result(const uint8_t * mac, int8_t rssi, const char * name, uint32_t serial_num);
+#if defined(BLE_CENTRAL)
+void bb_cmd_notify_adv_status(const protobuf_ble_adv_status_t * status);
+#endif
 void bb_cmd_notify_ble_status(uint8_t state,
                               int32_t rssi_dbm,
                               uint32_t disconnect_reason);
+void bb_cmd_async_tx_process(void);
+ret_code_t bb_cmd_request_ble_adv_config(void);
+void bb_cmd_ble_adv_config_request_process(void);
 
 #endif // BB_CMD_HDL_H

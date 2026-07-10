@@ -51,11 +51,14 @@
 #include "boards.h"
 #include "app_timer.h"
 #include "nrf_pwr_mgmt.h"
+#include "nrf_drv_wdt.h"
 
 // System-wide BLE configs
 #include "../ble_common/ble_config.h"
 
 #include "../ble_common/ble_bridge/bb_router.h"
+#include "../ble_common/ble_bridge/bb_cmd_hdl.h"
+#include "../ble_common/ble_bridge/bb_debug.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
@@ -65,8 +68,8 @@
 
 #include "logger.h"
 
+#include "ble_peripheral.h"
 #include "bb_transport.h"
-#include "app_uart.h"
 
 /*
 **@brief Function for initializing power management.
@@ -78,25 +81,63 @@ static void power_management_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+static nrf_drv_wdt_channel_id m_wdt_channel_id;
+
+static void wdt_event_handler(void)
+{
+    // Minimal handler. Reset is imminent.
+}
+
+static void watchdog_init(void)
+{
+    ret_code_t err_code;
+    nrf_drv_wdt_config_t config = NRF_DRV_WDT_DEAFULT_CONFIG;
+    err_code = nrf_drv_wdt_init(&config, wdt_event_handler);
+    APP_ERROR_CHECK(err_code);
+    err_code = nrf_drv_wdt_channel_alloc(&m_wdt_channel_id);
+    APP_ERROR_CHECK(err_code);
+    nrf_drv_wdt_enable();
+}
+
+static void idle_state_handle(void)
+{
+    if (NRF_LOG_PROCESS() == false)
+    {
+        nrf_pwr_mgmt_run();
+    }
+}
+
 /**@brief Function for application main entry.
  */
 int main(void)
 {
     // Initialize.
-    bsp_uart_init(NULL); // Cần truyền callback từ bb_transport (nhưng đã setup trong bb_router_init)
     logger_init();
     bsp_utils_init();
     power_management_init();
 
-    bb_router_init();
+    ret_code_t err_code = bb_router_init();
+    APP_ERROR_CHECK(err_code);
+    err_code = bb_cmd_request_ble_adv_config();
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_WARNING("ble_adv_config_request failed: 0x%08X", err_code);
+    }
     // BLE is disabled by default, initialized later via STM32 command
 
     // Start execution.
-    NRF_LOG_INFO("BLE Peripheral started !");
+    BB_DEBUG_LOG_INFO("BLE Peripheral started !");
+
+    // Start watchdog AFTER all initialization is complete.
+    watchdog_init();
 
     // Enter main loop.
     for (;;)
     {
+        nrf_drv_wdt_channel_feed(m_wdt_channel_id);
         bb_router_process();
+        ble_peripheral_process();
+        bb_cmd_ble_adv_config_request_process();
+        idle_state_handle();
     }
 }

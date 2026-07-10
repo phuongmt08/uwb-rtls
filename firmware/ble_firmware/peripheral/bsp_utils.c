@@ -9,6 +9,7 @@
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
+#include "../ble_common/ble_bridge/bb_debug.h"
 
 /* Private defines ---------------------------------------------------- */
 #define BSP_LED_STATUS    BSP_BOARD_LED_0
@@ -35,7 +36,7 @@ static void timers_init(void);
 void bsp_utils_init(void)
 {
     bsp_board_init(BSP_INIT_LEDS);
-    NRF_LOG_INFO("BSP board initialized");
+    BB_DEBUG_LOG_INFO("BSP board initialized");
 
     timers_init();
 }

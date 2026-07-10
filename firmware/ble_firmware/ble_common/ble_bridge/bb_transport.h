@@ -26,11 +26,12 @@
 typedef enum 
 {
     BB_SOURCE_SERIAL = 0,
-    BB_SOURCE_BLE  = 1,
+    BB_SOURCE_BLE = 1,
+    BB_SOURCE_BLE_BROADCAST = 2,
 } bb_packet_source_t;
 
 /**
- * @brief Header Callback khi có frame được nhận đầy đủ (Router đăng ký)
+ * @brief Router callback invoked when a complete frame is received.
  */
 typedef void (*bb_transport_state_transition_cb_t)(void);
 
@@ -40,10 +41,10 @@ typedef void (*bb_transport_state_transition_cb_t)(void);
 /**
  * @brief Initializes the transport layer (HDLC state machines, buffer allocations)
  *
- * @param[in] p_payload_buf Con trỏ trỏ tới mảng `uint8_t` do Router cấp phát để chứa dữ liệu Protobuf.
- * @param[in] p_payload_len Con trỏ lưu kích thước payload sau khi nhận xong.
- * @param[in] max_len Kích thước tối đa của buffer.
- * @param[in] cb Hàm callback được gọi khi decode HDLC thành công để chuyển State cho Router
+ * @param[in] p_payload_buf Router-owned buffer used to store protobuf payloads.
+ * @param[in] p_payload_len Pointer receiving the decoded payload length.
+ * @param[in] max_len Maximum payload buffer size.
+ * @param[in] cb Callback invoked after HDLC decode succeeds.
  * @return NRF_SUCCESS on successful initialization.
  */
 ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, uint16_t max_len, bb_transport_state_transition_cb_t cb);
@@ -55,20 +56,20 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
 void bb_transport_process(void);
 
 /**
- * @brief Kiểm tra xem đã có 1 HDLC frame giải mã xong và pass CRC nằm trong buffer không.
- * @return true nếu đã sẵn sàng.
+ * @brief Checks whether a decoded HDLC frame is ready in the shared buffer.
+ * @return true if a packet is ready.
  */
 bool bb_transport_is_packet_ready(void);
 
 /**
- * @brief Giải phóng cờ báo hiệu gói tin sẵn sàng để cho phép nhận gói tin tiếp theo.
+ * @brief Clears the packet-ready flag so the next packet can be received.
  */
 void bb_transport_clear_packet_ready(void);
 
 /**
- * @brief Truyền data theo cấu hình Source.
- *        Nếu type = SERIAL, tiến hành bọc HDLC vào gửi UART.
- *        Nếu type = BLE, gửi raw Protobuf qua môi trường radio.
+ * @brief Sends data through the selected output.
+ *        SERIAL output is HDLC-framed. BLE output carries raw protobuf.
+ *        BLE_BROADCAST output advertises raw protobuf fragments.
  *
  * @param[in] p_data Pointer to raw Protobuf payload.
  * @param[in] length Size of the payload.
@@ -76,5 +77,11 @@ void bb_transport_clear_packet_ready(void);
  * @return NRF_SUCCESS if success.
  */
 ret_code_t bb_transport_send_data(uint8_t const * p_data, uint16_t  length, bb_packet_source_t tx_source);
+
+/**
+ * @brief Returns the interface that received the packet currently being processed.
+ * @return BB_SOURCE_SERIAL or BB_SOURCE_BLE.
+ */
+bb_packet_source_t bb_transport_get_rx_source(void);
 
 #endif // BB_TRANSPORT_H

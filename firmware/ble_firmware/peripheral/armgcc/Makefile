@@ -51,6 +51,7 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/drivers/src/prs/nrfx_prs.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uart.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uarte.c \
+  $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_wdt.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_Syscalls_GCC.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_printf.c \
@@ -78,6 +79,7 @@ SRC_FILES += \
   $(PROJ_DIR)/../ble_common/boards.c \
   $(COMMON_DIR)/logger.c \
   $(COMMON_DIR)/hdlc.c \
+  $(COMMON_DIR)/ble_broadcast.c \
   $(COMMON_DIR)/ble_bridge/bb_cmd_hdl.c \
   $(COMMON_DIR)/ble_bridge/bb_router.c \
   $(COMMON_DIR)/ble_bridge/bb_transport.c \
@@ -155,6 +157,7 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/cli \
   $(SDK_ROOT)/components/ble/ble_services/ble_lbs \
   ../../../../protocol/nanopb \
+  ../../../../protocol/protos \
   $(SDK_ROOT)/components/libraries/crc16 \
   $(SDK_ROOT)/components/nfc/t4t_parser/apdu \
   $(SDK_ROOT)/components/libraries/util \
@@ -255,6 +258,12 @@ CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 # keep every function in a separate section, this allows linker to discard unused ones
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 CFLAGS += -fno-builtin -fshort-enums
+
+# Check if BLE_RX_BYPASS_P005 is requested
+ifdef BLE_RX_BYPASS_P005
+CFLAGS += -DBLE_RX_BYPASS_P005
+ASMFLAGS += -DBLE_RX_BYPASS_P005
+endif
 
 # C++ flags common to all targets
 CXXFLAGS += $(OPT)

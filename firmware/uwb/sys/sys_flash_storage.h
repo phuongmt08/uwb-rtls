@@ -33,7 +33,7 @@
 /**
  * @brief  Initialise the shared dual-sector flash handle.
  *
- *         Calls bsp_util_init() (CRC / RTC hardware), then bsp_flash_dual_init().
+ *         Calls bsp_util_init() (utility delay/timing prep), then bsp_flash_dual_init().
  *         Safe to call multiple times — subsequent calls are no-ops.
  *
  * @return  0  on success

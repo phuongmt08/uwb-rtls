@@ -347,6 +347,8 @@ icm42688_err_t icm42688_get_all_data(icm42688_dev_t *dev, icm42688_sensor_data_t
 
 icm42688_err_t icm42688_compute_hardware_offsets(icm42688_dev_t *dev, uint16_t num_samples);
 
+icm42688_err_t icm42688_reset_hardware_offsets(icm42688_dev_t *dev);
+
 icm42688_err_t icm42688_set_hardware_offsets(icm42688_dev_t *dev);
 
 icm42688_err_t icm42688_get_calibration(const icm42688_dev_t *dev, icm42688_calibration_t *calib);

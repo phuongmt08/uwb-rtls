@@ -26,8 +26,8 @@ class BuildService:
             return os.path.abspath(os.path.join(script_dir, "..", "..", ".."))
 
     @staticmethod
-    def get_current_git_hash() -> str:
-        if BuildService._cached_git_hash:
+    def get_current_git_hash(force: bool = False) -> str:
+        if not force and BuildService._cached_git_hash:
             return BuildService._cached_git_hash
         try:
             # Hide console window on Windows
@@ -47,6 +47,30 @@ class BuildService:
             val = output.strip()
             if val:
                 BuildService._cached_git_hash = val
+                return val
+            return "nogit"
+        except Exception:
+            return "nogit"
+
+    @staticmethod
+    def get_current_git_branch() -> str:
+        try:
+            # Hide console window on Windows
+            creation_flags = 0
+            if os.name == 'nt':
+                creation_flags = subprocess.CREATE_NO_WINDOW
+
+            output = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=BuildService.get_repo_root(),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stderr=subprocess.DEVNULL,
+                creationflags=creation_flags
+            )
+            val = output.strip()
+            if val:
                 return val
             return "nogit"
         except Exception:
@@ -89,7 +113,8 @@ class BuildService:
             raise DfuError(f"Missing Makefile: {makefile_path}")
 
         make_cmd = BuildService.resolve_make_command()
-        cmd = [make_cmd, "-f", "Makefile", f'OPTFLAGS="{opt_flag} -g3"', target]
+        num_jobs = os.cpu_count() or 1
+        cmd = [make_cmd, f"-j{num_jobs}", "-f", "Makefile", f'OPTFLAGS="{opt_flag} -g3"', target]
 
         log_callback(f"Running build command: {' '.join(cmd)}")
         cmd_str = " ".join(cmd)

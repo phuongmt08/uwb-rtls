@@ -95,6 +95,7 @@ typedef enum
  * @brief Common error codes (0x00-0x0F)
  */
 #define ERR_UNDEFINED          (0x00)  // Undefined error
+#define ERR_SYSTEM             (0x0A)  // General system/telemetry limit violation error
 #define WARNING_LOG            (0xFD)  // Warning log
 #define INFO_LOG               (0xFE)  // Info log
 #define DEBUG_LOG              (0xFF)  // Debug log

@@ -1193,6 +1193,17 @@ static void DFU_GetStatus(USBD_HandleTypeDef *pdev)
         {
           DfuInterface->GetStatus(hdfu->data_ptr, DFU_MEDIA_ERASE, hdfu->dev_status);
         }
+        else if (hdfu->wblock_num == 0U)
+        {
+          hdfu->dev_status[1] = 1U;
+          hdfu->dev_status[2] = 0U;
+          hdfu->dev_status[3] = 0U;
+        }
+        else if (hdfu->wblock_num > 1U)
+        {
+          uint32_t prog_addr = ((hdfu->wblock_num - 2U) * USBD_DFU_XFER_SIZE) + hdfu->data_ptr;
+          DfuInterface->GetStatus(prog_addr, DFU_MEDIA_PROGRAM, hdfu->dev_status);
+        }
         else
         {
           DfuInterface->GetStatus(hdfu->data_ptr, DFU_MEDIA_PROGRAM, hdfu->dev_status);

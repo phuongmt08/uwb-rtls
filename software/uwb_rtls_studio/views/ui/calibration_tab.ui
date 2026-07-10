@@ -1,0 +1,503 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CalibrationTab</class>
+ <widget class="QWidget" name="CalibrationTab">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>1300</width><height>800</height></rect>
+  </property>
+  <property name="styleSheet">
+   <string>QWidget#CalibrationTab {
+    background-color: #0F172A;
+    color: #F8FAFC;
+    font-family: 'Segoe UI';
+    font-size: 13px;
+}
+QLabel {
+    color: #94A3B8;
+    font-weight: bold;
+}
+QCheckBox {
+    color: #94A3B8;
+    font-weight: bold;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    background-color: #0A0F1E;
+}
+QCheckBox::indicator:hover {
+    border-color: #22D3EE;
+}
+QCheckBox::indicator:checked {
+    background-color: #0E7490;
+    border-color: #22D3EE;
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PScxMCcgdmlld0JveD0nMCAwIDEwIDEwJz48cGF0aCBkPSdNMiA1IEw0IDcgTDggMycgc3Ryb2tlPScjMjJEM0VFJyBzdHJva2Utd2lkdGg9JzInIGZpbGw9J25vbmUnIHN0cm9rZS1saW5lY2FwPSdyb3VuZCcgc3Ryb2tlLWxpbmVqb2luPSdyb3VuZCcvPjwvc3ZnPg==");
+}
+QProgressBar {
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background-color: #0A0F1E;
+    text-align: center;
+    color: #F8FAFC;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #0E7490, stop:1 #22D3EE);
+    border-radius: 7px;
+}
+QGroupBox {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    margin-top: 18px;
+    padding: 20px 12px 12px 12px;
+    font-weight: bold;
+    font-size: 13px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 4px 10px;
+    color: #22D3EE;
+    background-color: #112A3E;
+    border-left: 3px solid #22D3EE;
+    border-bottom: 1px solid rgba(34, 211, 238, 0.45);
+    border-radius: 4px;
+    font-family: 'Segoe UI';
+    font-size: 14px;
+    font-weight: bold;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 26px 6px 10px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #22D3EE;
+}
+
+
+QComboBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 100px;
+}
+QComboBox:focus {
+    border-color: #22D3EE;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+}
+QComboBox::down-arrow {
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PSc2JyB2aWV3Qm94PScwIDAgMTAgNic+PHBhdGggZD0nTTEuNSAxLjUgTDUgNC41IEw4LjUgMS41JyBzdHJva2U9JyM5NEEzQjgnIHN0cm9rZS13aWR0aD0nMS41JyBmaWxsPSdub25lJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLz48L3N2Zz4=");
+    width: 10px;
+    height: 6px;
+}
+QComboBox::down-arrow:hover {
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PSc2JyB2aWV3Qm94PScwIDAgMTAgNic+PHBhdGggZD0nTTEuNSAxLjUgTDUgNC41IEw4LjUgMS41JyBzdHJva2U9JyMyMkQzRUUnIHN0cm9rZS13aWR0aD0nMS41JyBmaWxsPSdub25lJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLz48L3N2Zz4=");
+}
+QComboBox QAbstractItemView {
+    background-color: #1E293B;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    selection-background-color: #0E7490;
+    selection-color: #F8FAFC;
+}</string>
+  </property>
+  <layout class="QVBoxLayout" name="outer_layout">
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+   <item>
+    <widget class="QScrollArea" name="scroll_area">
+     <property name="styleSheet">
+      <string notr="true">QScrollArea { background: transparent; }</string>
+     </property>
+     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+     <property name="widgetResizable"><bool>true</bool></property>
+     <widget class="QWidget" name="scroll_content">
+      <property name="styleSheet">
+       <string notr="true">QWidget { background: transparent; }</string>
+      </property>
+      <layout class="QHBoxLayout" name="main_layout">
+       <property name="spacing"><number>16</number></property>
+       <property name="leftMargin"><number>16</number></property>
+       <property name="topMargin"><number>16</number></property>
+       <property name="rightMargin"><number>16</number></property>
+       <property name="bottomMargin"><number>16</number></property>
+       <!-- ═══ LEFT: Calibration Setup ═══ -->
+       <item>
+        <layout class="QVBoxLayout" name="left_layout">
+         <property name="spacing"><number>14</number></property>
+         <item>
+          <widget class="QGroupBox" name="delay_group">
+           <property name="title"><string>🔧 Antenna Delay Calibration</string></property>
+           <layout class="QGridLayout" name="delay_grid">
+            <property name="spacing"><number>10</number></property>
+            <item row="0" column="0"><widget class="QLabel" name="lbl_ref_dist"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Reference Distance (m):</string></property></widget></item>
+            <item row="0" column="1"><widget class="QDoubleSpinBox" name="ref_dist_spin"><property name="minimum"><double>0.100000000000000</double></property><property name="maximum"><double>100.000000000000000</double></property><property name="value"><double>1.000000000000000</double></property><property name="decimals"><number>3</number></property></widget></item>
+            <item row="1" column="0"><widget class="QLabel" name="lbl_samples"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Num Samples:</string></property></widget></item>
+            <item row="1" column="1"><widget class="QSpinBox" name="samples_spin"><property name="minimum"><number>10</number></property><property name="maximum"><number>10000</number></property><property name="value"><number>1000</number></property></widget></item>
+            <item row="2" column="0"><widget class="QLabel" name="lbl_cur_tx"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Current TX Delay:</string></property></widget></item>
+            <item row="2" column="1"><widget class="QSpinBox" name="tx_delay_spin"><property name="minimum"><number>0</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>16436</number></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="lbl_cur_rx"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Current RX Delay:</string></property></widget></item>
+            <item row="3" column="1"><widget class="QSpinBox" name="rx_delay_spin"><property name="minimum"><number>0</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>16436</number></property></widget></item>
+            <item row="4" column="0"><widget class="QLabel" name="lbl_damping"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Damping Factor:</string></property></widget></item>
+            <item row="4" column="1"><widget class="QDoubleSpinBox" name="damping_spin"><property name="minimum"><double>0.000000000000000</double></property><property name="maximum"><double>1.000000000000000</double></property><property name="value"><double>0.500000000000000</double></property><property name="decimals"><number>3</number></property></widget></item>
+            <item row="5" column="0"><widget class="QLabel" name="lbl_max_iter"><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property><property name="text"><string>Max Iterations:</string></property></widget></item>
+            <item row="5" column="1"><widget class="QSpinBox" name="iterations_spin"><property name="minimum"><number>1</number></property><property name="maximum"><number>100</number></property><property name="value"><number>20</number></property></widget></item>
+            <item row="6" column="0" colspan="2">
+             <layout class="QHBoxLayout" name="calib_btns">
+              <item>
+               <widget class="QPushButton" name="btn_start_calib">
+                <property name="minimumSize"><size><width>0</width><height>38</height></size></property>
+                <property name="styleSheet"><string notr="true">QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981; border-radius: 8px; font-weight: bold; }
+QPushButton:hover { background: #10B981; }</string></property>
+                <property name="text"><string>▶ Start Calibration</string></property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_stop_calib">
+                <property name="minimumSize"><size><width>0</width><height>38</height></size></property>
+                <property name="styleSheet"><string notr="true">QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; }
+QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string></property>
+                <property name="text"><string>■ Stop</string></property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="pos_calib_group">
+           <property name="title">
+            <string>🔧 Position Calibration Options</string>
+           </property>
+           <layout class="QGridLayout" name="pos_calib_layout">
+            <property name="spacing"><number>10</number></property>
+            <!-- Checkboxes -->
+            <item row="0" column="0" colspan="2">
+             <widget class="QCheckBox" name="chk_enable_anchor_calib">
+              <property name="text"><string>Anchor Auto Calib</string></property>
+              <property name="checked"><bool>true</bool></property>
+             </widget>
+            </item>
+            <item row="0" column="2" colspan="2">
+             <widget class="QCheckBox" name="chk_enable_tag_calib">
+              <property name="text"><string>Tag Auto Calib</string></property>
+              <property name="checked"><bool>true</bool></property>
+             </widget>
+            </item>
+            
+            <!-- Row 1: ref dist, tag height -->
+            <item row="1" column="0">
+             <widget class="QLabel" name="lbl_pos_ref_dist">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Ref Dist (m):</string></property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QDoubleSpinBox" name="pos_ref_dist_spin">
+              <property name="decimals"><number>3</number></property>
+              <property name="minimum"><double>0.0</double></property>
+              <property name="maximum"><double>100.0</double></property>
+              <property name="value"><double>2.0</double></property>
+             </widget>
+            </item>
+            <item row="1" column="2">
+             <widget class="QLabel" name="lbl_pos_tag_height">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Tag Height (m):</string></property>
+             </widget>
+            </item>
+            <item row="1" column="3">
+             <widget class="QDoubleSpinBox" name="pos_tag_height_spin">
+              <property name="decimals"><number>3</number></property>
+              <property name="minimum"><double>0.0</double></property>
+              <property name="maximum"><double>50.0</double></property>
+              <property name="value"><double>1.0</double></property>
+             </widget>
+            </item>
+            
+            <!-- Row 2: anchor height, calib anchor ID -->
+            <item row="2" column="0">
+             <widget class="QLabel" name="lbl_pos_anchor_height">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Anchor H (m):</string></property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QDoubleSpinBox" name="pos_anchor_height_spin">
+              <property name="decimals"><number>3</number></property>
+              <property name="minimum"><double>0.0</double></property>
+              <property name="maximum"><double>50.0</double></property>
+              <property name="value"><double>2.5</double></property>
+             </widget>
+            </item>
+            <item row="2" column="2">
+             <widget class="QLabel" name="lbl_pos_calib_anchor">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Calib Anch ID:</string></property>
+             </widget>
+            </item>
+            <item row="2" column="3">
+             <widget class="QSpinBox" name="pos_calib_anchor_spin">
+              <property name="minimum"><number>0</number></property>
+              <property name="maximum"><number>255</number></property>
+              <property name="value"><number>1</number></property>
+             </widget>
+            </item>
+            
+            <!-- Row 3: samples, error threshold -->
+            <item row="3" column="0">
+             <widget class="QLabel" name="lbl_pos_samples">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Samples:</string></property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QSpinBox" name="pos_samples_spin">
+              <property name="minimum"><number>1</number></property>
+              <property name="maximum"><number>10000</number></property>
+              <property name="value"><number>10</number></property>
+             </widget>
+            </item>
+            <item row="3" column="2">
+             <widget class="QLabel" name="lbl_pos_err_thresh">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Err Thresh (m):</string></property>
+             </widget>
+            </item>
+            <item row="3" column="3">
+             <widget class="QDoubleSpinBox" name="pos_err_thresh_spin">
+              <property name="decimals"><number>3</number></property>
+              <property name="minimum"><double>0.0</double></property>
+              <property name="maximum"><double>10.0</double></property>
+              <property name="value"><double>0.3</double></property>
+             </widget>
+            </item>
+            
+            <!-- Row 4: min delta step, max rounds -->
+            <item row="4" column="0">
+             <widget class="QLabel" name="lbl_pos_min_delta">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Min Delta:</string></property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QSpinBox" name="pos_min_delta_spin">
+              <property name="minimum"><number>1</number></property>
+              <property name="maximum"><number>1000</number></property>
+              <property name="value"><number>1</number></property>
+             </widget>
+            </item>
+            <item row="4" column="2">
+             <widget class="QLabel" name="lbl_pos_max_rounds">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Max Rounds:</string></property>
+             </widget>
+            </item>
+            <item row="4" column="3">
+             <widget class="QSpinBox" name="pos_max_rounds_spin">
+              <property name="minimum"><number>1</number></property>
+              <property name="maximum"><number>1000</number></property>
+              <property name="value"><number>10</number></property>
+             </widget>
+            </item>
+            
+            <!-- Row 5: max std, damping -->
+            <item row="5" column="0">
+             <widget class="QLabel" name="lbl_pos_max_std">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Max Std (m):</string></property>
+             </widget>
+            </item>
+            <item row="5" column="1">
+             <widget class="QDoubleSpinBox" name="pos_max_std_spin">
+              <property name="decimals"><number>3</number></property>
+              <property name="minimum"><double>0.0</double></property>
+              <property name="maximum"><double>10.0</double></property>
+              <property name="value"><double>0.2</double></property>
+             </widget>
+            </item>
+            <item row="5" column="2">
+             <widget class="QLabel" name="lbl_pos_damping">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Damping:</string></property>
+             </widget>
+            </item>
+            <item row="5" column="3">
+             <widget class="QDoubleSpinBox" name="pos_damping_spin">
+              <property name="decimals"><number>3</number></property>
+              <property name="minimum"><double>0.0</double></property>
+              <property name="maximum"><double>1.0</double></property>
+              <property name="value"><double>0.1</double></property>
+             </widget>
+            </item>
+            
+            <!-- Row 6: iterations -->
+            <item row="6" column="0">
+             <widget class="QLabel" name="lbl_pos_iterations">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Iterations:</string></property>
+             </widget>
+            </item>
+            <item row="6" column="1">
+             <widget class="QSpinBox" name="pos_iterations_spin">
+              <property name="minimum"><number>1</number></property>
+              <property name="maximum"><number>10000</number></property>
+              <property name="value"><number>100</number></property>
+             </widget>
+            </item>
+            <item row="7" column="0" colspan="4">
+              <layout class="QHBoxLayout" name="pos_calib_btns">
+               <item>
+                <widget class="QPushButton" name="btn_start_pos_calib">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>38</height>
+                  </size>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 8px; font-weight: bold; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+                 </property>
+                 <property name="text">
+                  <string>▶ Start Position Calib</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="btn_stop_pos_calib">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>38</height>
+                  </size>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; }
+QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
+                 </property>
+                 <property name="text">
+                  <string>■ Stop</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <spacer name="left_spacer">
+           <property name="orientation"><enum>Qt::Vertical</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <!-- ═══ RIGHT: Calibration Results ═══ -->
+       <item>
+        <layout class="QVBoxLayout" name="right_layout">
+         <property name="spacing"><number>14</number></property>
+         <!-- Progress -->
+         <item>
+          <widget class="QGroupBox" name="prog_group">
+           <property name="title"><string>📊 Calibration Progress</string></property>
+           <layout class="QVBoxLayout" name="prog_layout">
+            <item>
+             <widget class="QProgressBar" name="calib_progress">
+              <property name="minimumSize"><size><width>0</width><height>20</height></size></property>
+              <property name="maximumSize"><size><width>16777215</width><height>20</height></size></property>
+              <property name="value"><number>0</number></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="calib_status">
+              <property name="styleSheet"><string notr="true">color: #94A3B8; font-size: 13px;</string></property>
+              <property name="text"><string>Status: Idle</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="calib_iter">
+              <property name="styleSheet"><string notr="true">color: #94A3B8;</string></property>
+              <property name="text"><string>Iteration: 0 / 20</string></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <!-- Diagnostics -->
+         <item>
+          <widget class="QGroupBox" name="diag_group">
+           <property name="title"><string>📈 Diagnostics</string></property>
+           <layout class="QGridLayout" name="diag_grid">
+            <property name="spacing"><number>10</number></property>
+            <item row="0" column="0"><widget class="QLabel" name="lbl_err_mean"><property name="text"><string>Error Mean:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="0" column="1"><widget class="QLabel" name="val_err_mean"><property name="text"><string>0.000 m</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+            <item row="1" column="0"><widget class="QLabel" name="lbl_err_std"><property name="text"><string>Error Std:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="1" column="1"><widget class="QLabel" name="val_err_std"><property name="text"><string>0.000 m</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+            <item row="2" column="0"><widget class="QLabel" name="lbl_err_rms"><property name="text"><string>Error RMS:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="2" column="1"><widget class="QLabel" name="val_err_rms"><property name="text"><string>0.000 m</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="lbl_err_min"><property name="text"><string>Error Min:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="3" column="1"><widget class="QLabel" name="val_err_min"><property name="text"><string>0.000 m</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+            <item row="4" column="0"><widget class="QLabel" name="lbl_err_max"><property name="text"><string>Error Max:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="4" column="1"><widget class="QLabel" name="val_err_max"><property name="text"><string>0.000 m</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+            <item row="5" column="0"><widget class="QLabel" name="lbl_opt_tx"><property name="text"><string>Optimized TX Delay:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="5" column="1"><widget class="QLabel" name="val_opt_tx"><property name="text"><string>—</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+            <item row="6" column="0"><widget class="QLabel" name="lbl_opt_rx"><property name="text"><string>Optimized RX Delay:</string></property><property name="styleSheet"><string notr="true">color: #94A3B8; font-weight: bold;</string></property></widget></item>
+            <item row="6" column="1"><widget class="QLabel" name="val_opt_rx"><property name="text"><string>—</string></property><property name="styleSheet"><string notr="true">color: #F8FAFC; font-size: 14px;</string></property></widget></item>
+           </layout>
+          </widget>
+         </item>
+         <!-- Calibration Options -->
+         <item>
+          <widget class="QGroupBox" name="opts_group">
+           <property name="title"><string>⚙ Calibration Options</string></property>
+           <layout class="QVBoxLayout" name="opts_layout">
+            <item><widget class="QCheckBox" name="chk_height"><property name="text"><string>Enable Height Calibration</string></property></widget></item>
+            <item><widget class="QCheckBox" name="chk_auto_apply"><property name="text"><string>Auto-apply delay after calibration</string></property></widget></item>
+            <item><widget class="QCheckBox" name="chk_save_flash"><property name="text"><string>Save calibration to flash</string></property></widget></item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_apply_calib">
+           <property name="minimumSize"><size><width>0</width><height>42</height></size></property>
+           <property name="styleSheet"><string notr="true">QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 8px; font-weight: bold; font-size: 14px; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string></property>
+           <property name="text"><string>✅ Apply Calibration Results</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="right_spacer">
+           <property name="orientation"><enum>Qt::Vertical</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

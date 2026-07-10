@@ -1,0 +1,1039 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ConfigTab</class>
+ <widget class="QWidget" name="ConfigTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1300</width>
+    <height>800</height>
+   </rect>
+  </property>
+  <property name="styleSheet">
+   <string>QWidget#ConfigTab {
+    background-color: #0F172A;
+    color: #F8FAFC;
+    font-family: 'Segoe UI';
+    font-size: 13px;
+}
+QGroupBox {
+    background-color: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    margin-top: 18px;
+    padding: 20px 12px 12px 12px;
+    font-weight: bold;
+    font-size: 13px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 4px 10px;
+    color: #22D3EE;
+    background-color: rgba(34, 211, 238, 0.10);
+    border-left: 3px solid #22D3EE;
+    border-bottom: 1px solid rgba(34, 211, 238, 0.45);
+    border-radius: 4px;
+    font-family: 'Segoe UI';
+    font-size: 14px;
+    font-weight: bold;
+}
+QPushButton {
+    background-color: #1E293B;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-weight: bold;
+    min-height: 20px;
+}
+QPushButton:hover {
+    background-color: #253346;
+    border-color: #22D3EE;
+}
+QPushButton:disabled {
+    background-color: #0A0F1E;
+    color: #64748B;
+    border-color: #334155;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 26px 6px 10px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #22D3EE;
+}
+QLineEdit {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+QLineEdit:focus {
+    border-color: #22D3EE;
+}
+QComboBox {
+    background-color: #0A0F1E;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 100px;
+}
+QComboBox:focus {
+    border-color: #22D3EE;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+}
+QComboBox::down-arrow {
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PSc2JyB2aWV3Qm94PScwIDAgMTAgNic+PHBhdGggZD0nTTEuNSAxLjUgTDUgNC41IEw4LjUgMS41JyBzdHJva2U9JyM5NEEzQjgnIHN0cm9rZS13aWR0aD0nMS41JyBmaWxsPSdub25lJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLz48L3N2Zz4=");
+    width: 10px;
+    height: 6px;
+}
+QComboBox::down-arrow:hover {
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PSc2JyB2aWV3Qm94PScwIDAgMTAgNic+PHBhdGggZD0nTTEuNSAxLjUgTDUgNC41IEw4LjUgMS41JyBzdHJva2U9JyMyMkQzRUUnIHN0cm9rZS13aWR0aD0nMS41JyBmaWxsPSdub25lJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLz48L3N2Zz4=");
+}
+QComboBox QAbstractItemView {
+    background-color: #1E293B;
+    color: #F8FAFC;
+    border: 1px solid #334155;
+    selection-background-color: #0E7490;
+    selection-color: #F8FAFC;
+}
+QCheckBox {
+    color: #94A3B8;
+    font-weight: bold;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    background-color: #0A0F1E;
+}
+QCheckBox::indicator:hover {
+    border-color: #22D3EE;
+}
+QCheckBox::indicator:checked {
+    background-color: #0E7490;
+    border-color: #22D3EE;
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PScxMCcgdmlld0JveD0nMCAwIDEwIDEwJz48cGF0aCBkPSdNMiA1IEw0IDcgTDggMycgc3Ryb2tlPScjMjJEM0VFJyBzdHJva2Utd2lkdGg9JzInIGZpbGw9J25vbmUnIHN0cm9rZS1saW5lY2FwPSdyb3VuZCcgc3Ryb2tlLWxpbmVqb2luPSdyb3VuZCcvPjwvc3ZnPg==");
+}
+</string>
+  </property>
+  <layout class="QVBoxLayout" name="outer_layout">
+   <property name="leftMargin"><number>16</number></property>
+   <property name="topMargin"><number>16</number></property>
+   <property name="rightMargin"><number>16</number></property>
+   <property name="bottomMargin"><number>16</number></property>
+   <item>
+    <layout class="QGridLayout" name="main_layout">
+     <property name="horizontalSpacing"><number>16</number></property>
+     <property name="verticalSpacing"><number>16</number></property>
+
+     <!-- ═══ COLUMN 0 & 1 (TOP): Factory OTP Configuration ═══ -->
+     <item row="0" column="0" colspan="2">
+      <widget class="QGroupBox" name="anchor_group">
+       <property name="title">
+        <string>🏭 Factory OTP Configuration</string>
+       </property>
+       <layout class="QFormLayout" name="anchor_layout">
+        <property name="leftMargin"><number>12</number></property>
+        <property name="topMargin"><number>12</number></property>
+        <property name="rightMargin"><number>12</number></property>
+        <property name="bottomMargin"><number>12</number></property>
+        <property name="horizontalSpacing"><number>12</number></property>
+        <property name="verticalSpacing"><number>12</number></property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="lbl_otp_field_type">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>OTP Field Type:</string></property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QComboBox" name="otp_type_combo">
+          <item><property name="text"><string>Device Info (0x01)</string></property></item>
+          <item><property name="text"><string>Antenna Delay (0x02)</string></property></item>
+         </widget>
+        </item>
+        <item row="1" column="0" colspan="2">
+         <widget class="QStackedWidget" name="otp_stacked_widget">
+          <widget class="QWidget" name="page_device_info">
+           <layout class="QFormLayout" name="layout_device_info">
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+            <property name="verticalSpacing"><number>10</number></property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lbl_otp_dev_type">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Device Type:</string></property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QComboBox" name="otp_dev_type_combo">
+              <item><property name="text"><string>Tag</string></property></item>
+              <item><property name="text"><string>Anchor</string></property></item>
+              <item><property name="text"><string>Gateway</string></property></item>
+              <item><property name="text"><string>Debug Tool</string></property></item>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="lbl_otp_mfg_date">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Mfg Date:</string></property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLineEdit" name="otp_mfg_date_input">
+              <property name="placeholderText"><string>DDMMYYYY (e.g. 03072026)</string></property>
+              <property name="inputMask"><string>99999999</string></property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="lbl_otp_hw_rev">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>HW Revision:</string></property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QSpinBox" name="otp_hw_rev_spin">
+              <property name="minimum"><number>0</number></property>
+              <property name="maximum"><number>255</number></property>
+              <property name="value"><number>1</number></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="page_antenna_delay">
+           <layout class="QFormLayout" name="layout_antenna_delay">
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+            <property name="verticalSpacing"><number>10</number></property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lbl_otp_tx_delay">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>TX Antenna Delay:</string></property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QSpinBox" name="otp_tx_delay_spin">
+              <property name="minimum"><number>0</number></property>
+              <property name="maximum"><number>65535</number></property>
+              <property name="value"><number>16436</number></property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="lbl_otp_rx_delay">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>RX Antenna Delay:</string></property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QSpinBox" name="otp_rx_delay_spin">
+              <property name="minimum"><number>0</number></property>
+              <property name="maximum"><number>65535</number></property>
+              <property name="value"><number>16436</number></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+        <item row="2" column="0" colspan="2">
+         <widget class="QCheckBox" name="otp_confirm_checkbox">
+          <property name="styleSheet"><string>QCheckBox { color: #F87171; font-weight: bold; }</string></property>
+          <property name="text"><string>Confirm irreversible OTP write</string></property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+     <!-- ═══ COLUMN 0 (ROW 1): Host Transport Interface ═══ -->
+     <item row="1" column="0">
+      <widget class="QGroupBox" name="host_group">
+       <property name="title">
+        <string>Host Transport Interface</string>
+       </property>
+       <layout class="QVBoxLayout" name="host_layout">
+        <property name="spacing"><number>8</number></property>
+        <item>
+         <widget class="QLabel" name="lbl_host_transport">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Select Interface:</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="combo_host_transport">
+          <item><property name="text"><string>USB</string></property></item>
+          <item><property name="text"><string>UART</string></property></item>
+         </widget>
+        </item>
+        <item>
+         <widget class="QStackedWidget" name="host_detail_stack">
+          <widget class="QWidget" name="usb_detail_widget">
+           <layout class="QGridLayout" name="usb_detail_layout">
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>6</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+            <property name="horizontalSpacing"><number>8</number></property>
+            <property name="verticalSpacing"><number>8</number></property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lbl_usb_device">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Device Name:</string></property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLineEdit" name="txt_usb_device">
+              <property name="readOnly"><bool>true</bool></property>
+              <property name="text"><string>STM32 Virtual COM Port</string></property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="lbl_usb_port">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>COM Port:</string></property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="combo_usb_port">
+              <item><property name="text"><string>No COM detected</string></property></item>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="lbl_usb_baud">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Baud Rate:</string></property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="combo_usb_baud">
+              <item><property name="text"><string>9600</string></property></item>
+              <item><property name="text"><string>19200</string></property></item>
+              <item><property name="text"><string>38400</string></property></item>
+              <item><property name="text"><string>57600</string></property></item>
+              <item><property name="text"><string>115200</string></property></item>
+              <item><property name="text"><string>230400</string></property></item>
+              <item><property name="text"><string>460800</string></property></item>
+              <item><property name="text"><string>921600</string></property></item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="uart_detail_widget">
+           <layout class="QGridLayout" name="uart_detail_layout">
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>6</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+            <property name="horizontalSpacing"><number>8</number></property>
+            <property name="verticalSpacing"><number>8</number></property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lbl_uart_port">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>COM Port:</string></property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QComboBox" name="combo_uart_port"/>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="lbl_uart_baud">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Baud Rate:</string></property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="combo_uart_baud">
+              <item><property name="text"><string>115200</string></property></item>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="lbl_uart_databits">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Data Bits:</string></property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="combo_uart_databits">
+              <item><property name="text"><string>8</string></property></item>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="lbl_uart_parity">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Parity:</string></property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QComboBox" name="combo_uart_parity">
+              <item><property name="text"><string>None</string></property></item>
+             </widget>
+            </item>
+            <item row="4" column="0">
+             <widget class="QLabel" name="lbl_uart_stopbits">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Stop Bits:</string></property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QComboBox" name="combo_uart_stopbits">
+              <item><property name="text"><string>1</string></property></item>
+             </widget>
+            </item>
+            <item row="5" column="0">
+             <widget class="QLabel" name="lbl_uart_flow">
+              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+              <property name="text"><string>Flow Control:</string></property>
+             </widget>
+            </item>
+            <item row="5" column="1">
+             <widget class="QComboBox" name="combo_uart_flow">
+              <item><property name="text"><string>None</string></property></item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_apply_host_transport">
+          <property name="styleSheet">
+           <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+          </property>
+          <property name="text"><string>Apply Transport</string></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="host_spacer">
+          <property name="orientation"><enum>Qt::Vertical</enum></property>
+          <property name="sizeHint" stdset="0">
+           <size><width>20</width><height>40</height></size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+     <!-- ═══ COLUMN 1 (ROW 1): BLE Configuration ═══ -->
+     <item row="1" column="1">
+      <widget class="QGroupBox" name="ble_group">
+       <property name="title">
+        <string>📶 BLE Configuration</string>
+       </property>
+       <layout class="QGridLayout" name="ble_grid">
+        <property name="spacing"><number>10</number></property>
+        <item row="0" column="0" colspan="2">
+         <widget class="QCheckBox" name="chk_enable_ble">
+          <property name="checked"><bool>true</bool></property>
+          <property name="text"><string>Enable BLE Advertising</string></property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="lbl_ble_name">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>🏷️ Device Name:</string></property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLineEdit" name="txt_ble_name">
+          <property name="text"><string>-</string></property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="lbl_ble_min_int">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>⏱️ Min Interval (ms):</string></property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QSpinBox" name="spin_ble_min_int">
+          <property name="minimum"><number>20</number></property>
+          <property name="maximum"><number>5000</number></property>
+          <property name="value"><number>20</number></property>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="lbl_ble_max_int">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>⏱️ Max Interval (ms):</string></property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QSpinBox" name="spin_ble_max_int">
+          <property name="minimum"><number>20</number></property>
+          <property name="maximum"><number>5000</number></property>
+          <property name="value"><number>40</number></property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="lbl_ble_latency">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>⏱️ Slave Latency:</string></property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QSpinBox" name="spin_ble_latency">
+          <property name="minimum"><number>0</number></property>
+          <property name="maximum"><number>100</number></property>
+          <property name="value"><number>0</number></property>
+         </widget>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="lbl_ble_timeout">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>⏱️ Sup. Timeout (ms):</string></property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="QSpinBox" name="spin_ble_timeout">
+          <property name="minimum"><number>100</number></property>
+          <property name="maximum"><number>30000</number></property>
+          <property name="value"><number>3000</number></property>
+         </widget>
+        </item>
+        <item row="6" column="0" colspan="2">
+         <widget class="QPushButton" name="btn_set_ble">
+          <property name="styleSheet">
+           <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+          </property>
+          <property name="text"><string>Set BLE Config</string></property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+     <!-- ═══ COLUMN 2 (ROWS 0 & 1): UWB Configuration & Device Type Configuration Container ═══ -->
+     <item row="0" column="2" rowspan="2">
+      <widget class="QWidget" name="col2_container">
+       <layout class="QVBoxLayout" name="col2_layout">
+        <property name="leftMargin"><number>0</number></property>
+        <property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property>
+        <property name="bottomMargin"><number>0</number></property>
+        <property name="spacing"><number>16</number></property>
+        <item>
+         <widget class="QGroupBox" name="uwb_config_group">
+          <property name="title">
+           <string>⚙️ UWB Configuration</string>
+          </property>
+          <layout class="QFormLayout" name="uwb_config_form">
+           <property name="horizontalSpacing"><number>10</number></property>
+           <property name="verticalSpacing"><number>10</number></property>
+           <item row="0" column="0">
+            <widget class="QLabel" name="lbl_channel">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>📡 Channel:</string></property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QComboBox" name="val_channel">
+             <item><property name="text"><string>-</string></property></item>
+             <item><property name="text"><string>1</string></property></item>
+             <item><property name="text"><string>2</string></property></item>
+             <item><property name="text"><string>3</string></property></item>
+             <item><property name="text"><string>4</string></property></item>
+             <item><property name="text"><string>5</string></property></item>
+             <item><property name="text"><string>7</string></property></item>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="lbl_role">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>👥 Role:</string></property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QComboBox" name="val_role">
+             <item><property name="text"><string>-</string></property></item>
+             <item><property name="text"><string>Tag</string></property></item>
+             <item><property name="text"><string>Anchor</string></property></item>
+             <item><property name="text"><string>Gateway</string></property></item>
+            </widget>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="lbl_datarate">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>📊 Data Rate:</string></property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QComboBox" name="val_datarate">
+             <item><property name="text"><string>-</string></property></item>
+             <item><property name="text"><string>110 kbps</string></property></item>
+             <item><property name="text"><string>850 kbps</string></property></item>
+             <item><property name="text"><string>6.8 Mbps</string></property></item>
+            </widget>
+           </item>
+           <item row="3" column="0">
+            <widget class="QLabel" name="lbl_prf">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>⚡ PRF:</string></property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <widget class="QComboBox" name="val_prf">
+             <item><property name="text"><string>-</string></property></item>
+             <item><property name="text"><string>16 MHz</string></property></item>
+             <item><property name="text"><string>64 MHz</string></property></item>
+            </widget>
+           </item>
+           <item row="4" column="0">
+            <widget class="QLabel" name="lbl_deviceid">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>🆔 Device ID:</string></property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <widget class="QComboBox" name="val_deviceid">
+             <property name="editable"><bool>true</bool></property>
+             <item><property name="text"><string>-</string></property></item>
+            </widget>
+           </item>
+           <item row="5" column="0">
+            <widget class="QLabel" name="lbl_rng_period">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>⏱️ Ranging Period (ms):</string></property>
+            </widget>
+           </item>
+           <item row="5" column="1">
+            <widget class="QSpinBox" name="rng_period_spin">
+             <property name="minimum"><number>10</number></property>
+             <property name="maximum"><number>10000</number></property>
+             <property name="value"><number>100</number></property>
+            </widget>
+           </item>
+           <item row="6" column="0">
+            <widget class="QLabel" name="lbl_rx_timeout">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>⏱️ RX Timeout (ms):</string></property>
+            </widget>
+           </item>
+           <item row="6" column="1">
+            <widget class="QSpinBox" name="rx_timeout_spin">
+             <property name="minimum"><number>1</number></property>
+             <property name="maximum"><number>5000</number></property>
+             <property name="value"><number>70</number></property>
+            </widget>
+           </item>
+           <item row="7" column="0" colspan="2">
+            <widget class="QLabel" name="uwb_adv_separator">
+             <property name="alignment"><set>Qt::AlignCenter</set></property>
+             <property name="styleSheet"><string>color: #475569; font-weight: bold; margin-top: 10px; margin-bottom: 5px;</string></property>
+             <property name="text"><string>─── Advanced Settings ───</string></property>
+            </widget>
+           </item>
+           <item row="8" column="0">
+            <widget class="QLabel" name="lbl_tx_delay">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>📤 TX Antenna Delay:</string></property>
+            </widget>
+           </item>
+           <item row="8" column="1">
+            <widget class="QSpinBox" name="tx_delay_spin">
+             <property name="minimum"><number>0</number></property>
+             <property name="maximum"><number>65535</number></property>
+             <property name="value"><number>16436</number></property>
+            </widget>
+           </item>
+           <item row="9" column="0">
+            <widget class="QLabel" name="lbl_rx_delay">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>📥 RX Antenna Delay:</string></property>
+            </widget>
+           </item>
+           <item row="9" column="1">
+            <widget class="QSpinBox" name="rx_delay_spin">
+             <property name="minimum"><number>0</number></property>
+             <property name="maximum"><number>65535</number></property>
+             <property name="value"><number>16436</number></property>
+            </widget>
+           </item>
+           <item row="10" column="0">
+            <widget class="QLabel" name="lbl_tx_power">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>⚡ TX Power (dBm):</string></property>
+            </widget>
+           </item>
+           <item row="10" column="1">
+            <widget class="QSpinBox" name="tx_power_spin">
+             <property name="minimum"><number>0</number></property>
+             <property name="maximum"><number>2147483647</number></property>
+             <property name="value"><number>0</number></property>
+            </widget>
+           </item>
+           <item row="11" column="0">
+            <widget class="QLabel" name="lbl_preamble">
+             <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+             <property name="text"><string>🔢 Preamble Code:</string></property>
+            </widget>
+           </item>
+           <item row="11" column="1">
+            <widget class="QSpinBox" name="preamble_spin">
+             <property name="minimum"><number>0</number></property>
+             <property name="maximum"><number>65535</number></property>
+             <property name="value"><number>10</number></property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="dev_type_group">
+          <property name="title">
+           <string>⚙️ Device Type Configuration</string>
+          </property>
+          <layout class="QGridLayout" name="dev_type_grid">
+           <property name="spacing"><number>10</number></property>
+           <item row="0" column="0">
+            <widget class="QLabel" name="lbl_device_type">
+             <property name="text"><string>🏷️ Device Type:</string></property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QComboBox" name="combo_device_type">
+             <item><property name="text"><string>-</string></property></item>
+             <item><property name="text"><string>Tag</string></property></item>
+             <item><property name="text"><string>Anchor</string></property></item>
+             <item><property name="text"><string>Gateway</string></property></item>
+             <item><property name="text"><string>Debug Tool</string></property></item>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QPushButton" name="btn_get_device_type">
+             <property name="styleSheet">
+              <string>QPushButton { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; font-weight: bold; padding: 5px; }
+QPushButton:hover { background: #475569; color: #F8FAFC; }</string>
+             </property>
+             <property name="text"><string>Get Device Type</string></property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QPushButton" name="btn_set_device_type">
+             <property name="styleSheet">
+              <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+             </property>
+             <property name="text"><string>Set Device Type</string></property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+     <!-- ═══ COLUMN 3 (ROWS 0 & 1): Sensor Fusion (UKF) ═══ -->
+     <item row="0" column="3" rowspan="2">
+      <widget class="QGroupBox" name="fusion_group">
+       <property name="title">
+        <string>🧠 Sensor Fusion (UKF)</string>
+       </property>
+       <layout class="QFormLayout" name="fusion_form">
+        <property name="horizontalSpacing"><number>10</number></property>
+        <property name="verticalSpacing"><number>10</number></property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="lbl_alpha">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Alpha:</string></property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QDoubleSpinBox" name="alpha_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>-100.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.001</double></property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="lbl_beta">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Beta:</string></property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QDoubleSpinBox" name="beta_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>-100.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>2.0</double></property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="lbl_kappa">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Kappa:</string></property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QDoubleSpinBox" name="kappa_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>-100.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.0</double></property>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="lbl_q_accel">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Q_accel:</string></property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QDoubleSpinBox" name="q_accel_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>-100.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.1</double></property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="lbl_q_gyro">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Q_gyro:</string></property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QDoubleSpinBox" name="q_gyro_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>-100.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.01</double></property>
+         </widget>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="lbl_r_uwb">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>R_uwb:</string></property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="QDoubleSpinBox" name="r_uwb_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>-100.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.05</double></property>
+         </widget>
+        </item>
+        <item row="6" column="0">
+         <widget class="QLabel" name="lbl_init_p_px">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P px:</string></property>
+         </widget>
+        </item>
+        <item row="6" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_px_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>1.0</double></property>
+         </widget>
+        </item>
+        <item row="7" column="0">
+         <widget class="QLabel" name="lbl_init_p_py">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P py:</string></property>
+         </widget>
+        </item>
+        <item row="7" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_py_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>1.0</double></property>
+         </widget>
+        </item>
+        <item row="8" column="0">
+         <widget class="QLabel" name="lbl_init_p_vx">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P vx:</string></property>
+         </widget>
+        </item>
+        <item row="8" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_vx_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.1</double></property>
+         </widget>
+        </item>
+        <item row="9" column="0">
+         <widget class="QLabel" name="lbl_init_p_vy">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P vy:</string></property>
+         </widget>
+        </item>
+        <item row="9" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_vy_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.1</double></property>
+         </widget>
+        </item>
+        <item row="10" column="0">
+         <widget class="QLabel" name="lbl_init_p_theta">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P th:</string></property>
+         </widget>
+        </item>
+        <item row="10" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_theta_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>100.0</double></property>
+          <property name="value"><double>0.1</double></property>
+         </widget>
+        </item>
+        <item row="11" column="0">
+         <widget class="QLabel" name="lbl_init_p_bias_ax">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P b_ax:</string></property>
+         </widget>
+        </item>
+        <item row="11" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_bias_ax_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>10.0</double></property>
+          <property name="value"><double>0.01</double></property>
+         </widget>
+        </item>
+        <item row="12" column="0">
+         <widget class="QLabel" name="lbl_init_p_bias_ay">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P b_ay:</string></property>
+         </widget>
+        </item>
+        <item row="12" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_bias_ay_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>10.0</double></property>
+          <property name="value"><double>0.01</double></property>
+         </widget>
+        </item>
+        <item row="13" column="0">
+         <widget class="QLabel" name="lbl_init_p_bias_gz">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Init P b_gz:</string></property>
+         </widget>
+        </item>
+        <item row="13" column="1">
+         <widget class="QDoubleSpinBox" name="init_p_bias_gz_spin">
+          <property name="decimals"><number>4</number></property>
+          <property name="minimum"><double>0.0</double></property>
+          <property name="maximum"><double>10.0</double></property>
+          <property name="value"><double>0.01</double></property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+     <!-- ═══ ROW 2 (FOOTER): Device Operations & System Commands ═══ -->
+     <item row="2" column="0" colspan="3">
+      <widget class="QGroupBox" name="device_operations_group">
+       <property name="maximumSize">
+        <size><width>16777215</width><height>100</height></size>
+       </property>
+       <property name="title">
+        <string>⚡ Device Operations</string>
+       </property>
+       <layout class="QHBoxLayout" name="device_ops_layout">
+        <item>
+         <widget class="QLabel" name="lbl_target_device">
+          <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
+          <property name="text"><string>Connected Device:</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="txt_connected_device">
+          <property name="minimumSize"><size><width>190</width><height>0</height></size></property>
+          <property name="readOnly"><bool>true</bool></property>
+          <property name="text"><string>Disconnected</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_read_device">
+          <property name="text"><string>📥 Read from Device</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_write_device">
+          <property name="styleSheet">
+           <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; }
+QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
+          </property>
+          <property name="text"><string>💾 Write to Device</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_write_all">
+          <property name="styleSheet">
+           <string>QPushButton { background: rgba(30, 41, 59, 0.5); color: #94A3B8; border: 1px solid #334155; border-radius: 6px; font-weight: bold; }
+QPushButton:hover { background: #334155; color: #F8FAFC; }</string>
+          </property>
+          <property name="text"><string>✨ Write All Devices</string></property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+     <item row="2" column="3">
+      <widget class="QGroupBox" name="sys_group">
+       <property name="maximumSize">
+        <size><width>16777215</width><height>100</height></size>
+       </property>
+       <property name="title">
+        <string>🔧 System Commands</string>
+       </property>
+       <layout class="QHBoxLayout" name="sys_layout">
+        <item>
+         <widget class="QPushButton" name="btn_device_reset">
+          <property name="text"><string>🔄 Device Reset</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_bootloader">
+          <property name="styleSheet">
+           <string>QPushButton { background: rgba(249,115,22,0.15); color: #F97316; border: 1px solid #F97316; border-radius: 6px; font-weight: bold; }
+QPushButton:hover { background: #F97316; color: #F8FAFC; }</string>
+          </property>
+          <property name="text"><string>⚡ Enter Bootloader</string></property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -9,15 +9,44 @@
 
 #define BLE_RX_BUF_SIZE  512u
 #define BLE_RX_BUF_MASK  (BLE_RX_BUF_SIZE - 1u)
+#define BLE_DMA_BUF_SIZE 256u
 
 static uint8_t  s_rx_buf[BLE_RX_BUF_SIZE];
 static volatile uint32_t s_rx_head = 0u;
 static volatile uint32_t s_rx_tail = 0u;
 
+static uint8_t s_dma_rx_buf[BLE_DMA_BUF_SIZE];
+static volatile uint32_t s_last_dma_ptr = 0;
+
 static serial_func_t s_tx_handler = 0;
 static hdlc_parser_t s_parser;
 
-static uint8_t s_rx_byte;   /* HAL IT receive target */
+extern DMA_HandleTypeDef hdma_usart2_rx;
+
+static void ble_bridge_reset_rx_state(void)
+{
+    s_rx_head = 0u;
+    s_rx_tail = 0u;
+    s_last_dma_ptr = 0u;
+    hdlc_parser_reset(&s_parser);
+}
+
+static void ble_bridge_start_dma_rx(void)
+{
+    __HAL_UART_CLEAR_OREFLAG(&huart2);
+    __HAL_UART_CLEAR_FEFLAG(&huart2);
+    __HAL_UART_CLEAR_NEFLAG(&huart2);
+    __HAL_UART_CLEAR_IDLEFLAG(&huart2);
+    __HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE);
+    (void)HAL_UART_Receive_DMA(&huart2, s_dma_rx_buf, BLE_DMA_BUF_SIZE);
+}
+
+static bool ble_bridge_dma_rx_running(void)
+{
+    return (huart2.RxState == HAL_UART_STATE_BUSY_RX) &&
+           HAL_IS_BIT_SET(huart2.Instance->CR3, USART_CR3_DMAR) &&
+           (hdma_usart2_rx.State != HAL_DMA_STATE_READY);
+}
 
 static inline bool ble_rx_pop(uint8_t *out)
 {
@@ -33,11 +62,10 @@ static inline bool ble_rx_pop(uint8_t *out)
 void ble_bridge_init(void)
 {
     hdlc_parser_init(&s_parser);
-    s_rx_head = 0u;
-    s_rx_tail = 0u;
+    ble_bridge_reset_rx_state();
 
-    /* Kick off interrupt-driven single-byte receive */
-    HAL_UART_Receive_IT(&huart2, &s_rx_byte, 1);
+    /* Start DMA circular receive */
+    ble_bridge_start_dma_rx();
 }
 
 void ble_bridge_set_tx_handler(serial_func_t handler)
@@ -46,8 +74,7 @@ void ble_bridge_set_tx_handler(serial_func_t handler)
 }
 
 /**
- * Called from HAL_UART_RxCpltCallback (ISR context).
- * Push one byte and re-arm the IT receive.
+ * Push data into the ring buffer for HDLC processing.
  */
 void ble_bridge_rx_push(const uint8_t *data, uint32_t len)
 {
@@ -59,13 +86,45 @@ void ble_bridge_rx_push(const uint8_t *data, uint32_t len)
 }
 
 /**
- * Called from HAL_UART_RxCpltCallback to re-arm the single-byte IT.
- * Keep this separate so the HAL callback stays in the BSP layer.
+ * Called from ISR (IDLE or RxCplt) to process new DMA data.
+ */
+void ble_bridge_uart_rx_check(void)
+{
+    if (!ble_bridge_dma_rx_running()) {
+        ble_bridge_uart_rx_recover();
+        return;
+    }
+
+    uint32_t curr_dma_ptr = BLE_DMA_BUF_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
+
+    if (curr_dma_ptr != s_last_dma_ptr) {
+        if (curr_dma_ptr > s_last_dma_ptr) {
+            /* Linear case */
+            ble_bridge_rx_push(&s_dma_rx_buf[s_last_dma_ptr], curr_dma_ptr - s_last_dma_ptr);
+        } else {
+            /* Wrap-around case */
+            ble_bridge_rx_push(&s_dma_rx_buf[s_last_dma_ptr], BLE_DMA_BUF_SIZE - s_last_dma_ptr);
+            if (curr_dma_ptr > 0) {
+                ble_bridge_rx_push(&s_dma_rx_buf[0], curr_dma_ptr);
+            }
+        }
+        s_last_dma_ptr = curr_dma_ptr;
+    }
+}
+
+/**
+ * Compatibility wrapper for HAL callback.
  */
 void ble_bridge_uart_rx_cplt(void)
 {
-    ble_bridge_rx_push(&s_rx_byte, 1);
-    HAL_UART_Receive_IT(&huart2, &s_rx_byte, 1);
+    ble_bridge_uart_rx_check();
+}
+
+void ble_bridge_uart_rx_recover(void)
+{
+    (void)HAL_UART_DMAStop(&huart2);
+    ble_bridge_reset_rx_state();
+    ble_bridge_start_dma_rx();
 }
 
 /**
@@ -78,6 +137,8 @@ int ble_bridge_read(int file, char *ptr, int len, uint8_t type)
     (void)type;
 
     CHECK(ptr && len > 0, -1);
+
+    ble_bridge_uart_rx_check();
 
     hdlc_data_chunk_t chunk;
     uint8_t byte;

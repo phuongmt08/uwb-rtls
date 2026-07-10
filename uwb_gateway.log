@@ -1,0 +1,8 @@
+2026-05-25 17:02:45 - Main - INFO - ============================================================
+2026-05-25 17:02:45 - Main - INFO - UWB Position Gateway for Raspberry Pi Zero
+2026-05-25 17:02:45 - Main - INFO - ============================================================
+2026-05-25 17:02:45 - Main - INFO - UART: /dev/serial0 @ 115200
+2026-05-25 17:02:45 - Main - INFO - UDP: 192.168.1.100:5000
+2026-05-25 17:02:45 - Main - INFO - ============================================================
+2026-05-25 17:02:45 - UwbGateway - ERROR - Failed to open UART: could not open port '/dev/serial0': FileNotFoundError(2, 'The system cannot find the path specified.', None, 3)
+2026-05-25 17:02:45 - Main - ERROR - Failed to connect, exiting
