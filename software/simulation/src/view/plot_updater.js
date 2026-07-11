@@ -7,7 +7,7 @@ function updatePlots(res, samples, rawData) {
         pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf,
         x_axis, total_time 
     } = res;
-    const isPathCsv = rawData.log_format === 'path_csv';
+    const isPathCsv = isRecordedPathLog(rawData);
 
     // 1. Trajectory
     if (isPathCsv) {

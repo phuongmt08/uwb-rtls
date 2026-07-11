@@ -309,7 +309,7 @@ class Geofence3DWidget(QWidget):
         color = getattr(zone, "color", "#64748B")
         zone_id = getattr(zone, "id", None)
 
-        # Active room highlight — show green tint in 3D (matches 05e6a86b)
+        # Active room highlight ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â show green tint in 3D (matches 05e6a86b)
         if object_type == "room" and zone_id in self._active_room_ids:
             return Geofence3DWidget._rgba("#22C55E", 0.60), (0.09, 0.64, 0.37, 1.0)
 
@@ -358,7 +358,7 @@ class Geofence3DWidget(QWidget):
         """Render a rule zone (allowed/forbidden) as a flat 2D planar overlay.
 
         Uses flat shading (shader=None) so the fill colour is perfectly uniform
-        from every camera angle — no balloon-shader alpha distortion.
+        from every camera angle ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no balloon-shader alpha distortion.
         A separate thick outline loop is drawn on top for clear zone boundaries.
         """
         points = list(points)
@@ -376,7 +376,7 @@ class Geofence3DWidget(QWidget):
             [[0, index + 1, index] for index in range(1, len(points) - 1)],
             dtype=int,
         )
-        # Flat shader — colour is view-angle independent
+        # Flat shader ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â colour is view-angle independent
         mesh = gl.GLMeshItem(
             vertexes=vertices, faces=faces, color=fill,
             smooth=False, shader=None, drawEdges=False,
@@ -428,6 +428,33 @@ class Geofence3DWidget(QWidget):
         if area < 0:
             return list(reversed(points))
         return points
+
+
+    @staticmethod
+    def _polygon_area_abs(points):
+        if len(points) < 3:
+            return 0.0
+        area = 0.0
+        for idx, (x1, y1) in enumerate(points):
+            x2, y2 = points[(idx + 1) % len(points)]
+            area += (x1 * y2) - (x2 * y1)
+        return abs(area) * 0.5
+
+    @staticmethod
+    def _closed_loop_points(points):
+        pts = list(points or [])
+        if len(pts) >= 2 and math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1]) <= 1e-6:
+            pts = pts[:-1]
+        return pts
+
+    def _wall_uses_polygon_footprint(self, zone):
+        points = list(getattr(zone, "points", []) or [])
+        if len(points) < 4:
+            return False
+        if getattr(zone, "wall_mode", "free_standing") == "boundary_outside":
+            return False
+        closed_points = self._closed_loop_points(points)
+        return len(closed_points) >= 3 and self._polygon_area_abs(closed_points) > 1e-6
 
     def _add_prism_outlines(self, points, min_z, max_z, edge_color, gl_options="opaque"):
         """Draw top+bottom loops and vertical pillars for a prism outline."""
@@ -568,7 +595,11 @@ class Geofence3DWidget(QWidget):
                 self._add_prism(points, bottom, top, fill, edge, gl_options="translucent")
             elif object_type == "wall":
                 thickness = max(0.0, float(getattr(zone, "thickness", 0.1)))
-                if len(points) >= 2 and thickness > 0.0:
+                if self._wall_uses_polygon_footprint(zone):
+                    closed_points = self._closed_loop_points(points)
+                    if len(closed_points) >= 3:
+                        self._add_prism(closed_points, bottom, top, fill, edge, gl_options="opaque")
+                elif len(points) >= 2 and thickness > 0.0:
                     # 1. Draw segment footprints
                     for idx in range(len(points) - 1):
                         footprint = self._wall_segment_footprint(zone, points[idx], points[idx + 1], self._zones)

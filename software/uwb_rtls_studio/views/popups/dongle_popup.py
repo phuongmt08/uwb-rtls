@@ -260,8 +260,11 @@ class DonglePopup(QDialog):
         self._vm.retry()
 
     def _on_cancel(self):
-        self._vm.cancel()
         self.reject()
+
+    def reject(self):
+        self._vm.cancel()
+        super().reject()
 
     # ── Drag support for frameless window ────────────────────────────
 

@@ -118,21 +118,30 @@ class SerialService(QObject):
     def close(self) -> None:
         """Dừng reader thread và đóng serial port."""
         self._running = False
-        if self._reader_thread and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=2.0)
-            self._reader_thread = None
-        try:
-            from utils.app_state import shared_app_state
-            shared_app_state.threads.unregister("SerialReader")
-        except Exception as exc:
-            log.debug("Could not unregister SerialReader thread: %s", exc)
+
+        # 1. Đóng cổng serial trước để giải phóng lệnh read() đang block trong reader thread
         if self._serial and self._serial.is_open:
+            try:
+                self._serial.flush()
+            except Exception:
+                pass
             try:
                 self._serial.close()
             except Exception:
                 pass
             log.info("Closed serial port")
         self._serial = None
+
+        # 2. Đợi reader thread kết thúc (sẽ kết thúc ngay lập tức vì cổng đã đóng)
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
+            self._reader_thread = None
+
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.threads.unregister("SerialReader")
+        except Exception as exc:
+            log.debug("Could not unregister SerialReader thread: %s", exc)
 
     # ── Private ──────────────────────────────────────────────────────
 

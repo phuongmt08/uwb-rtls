@@ -354,8 +354,15 @@ class ScanPopup(QDialog):
             self._vm.start_scan()
 
     def _on_cancel(self):
-        self._vm.cleanup()
         self.reject()
+
+    def accept(self):
+        self._vm.cleanup()
+        super().accept()
+
+    def reject(self):
+        self._vm.cleanup()
+        super().reject()
 
     def _on_dongle_disconnected(self, msg: str):
         self._log.setText(msg)

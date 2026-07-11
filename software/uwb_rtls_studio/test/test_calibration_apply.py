@@ -8,156 +8,185 @@ if ROOT not in sys.path:
 if PROJECT not in sys.path:
     sys.path.insert(0, PROJECT)
 
+import pytest
 from PyQt6.QtCore import QCoreApplication
-# Ensure QCoreApplication exists before anything else
+
 _app = QCoreApplication.instance() or QCoreApplication([])
 
 import utils.app_state
 try:
-    # Check if the wrapped C++ object is still valid
     utils.app_state.shared_app_state.objectName()
 except RuntimeError:
-    # If deleted (e.g. from previous pytest session teardown), re-create it
     utils.app_state.shared_app_state = utils.app_state.SharedAppState()
 
 from PyQt6.QtCore import QObject, pyqtSignal
+from common.commands import CommandFactory
+from common.parser_protocol import VvProtocol
 from viewmodels.calibration_viewmodel import CalibrationViewModel
-from utils.app_state import shared_app_state
+
+
+class MockPacket:
+    class Hdr:
+        seq = 1
+
+    hdr = Hdr()
 
 
 class MockDeviceModel(QObject):
     sys_config_parsed = pyqtSignal(dict)
     pos_calib_cfg_parsed = pyqtSignal(dict)
 
-    def __init__(self):
+    def __init__(self, role="TAG"):
         super().__init__()
-        self.sent_sys_configs = []
+        self.connected_role = role
+        self.started = []
+        self.stopped = 0
+        self.applied_masks = []
         self.sent_pos_configs = []
+        self.status_requests = 0
+        self.sys_config_requests = 0
 
-    def set_sys_config(self, **kwargs):
-        self.sent_sys_configs.append(kwargs)
+    def request_calibration_start(self, **kwargs):
+        self.started.append(kwargs)
+        return MockPacket()
+
+    def request_calibration_stop(self):
+        self.stopped += 1
+        return MockPacket()
+
+    def request_calibration_candidate_apply(self, anchor_mask: int):
+        self.applied_masks.append(anchor_mask)
+        return MockPacket()
 
     def set_pos_calib_config(self, **kwargs):
         self.sent_pos_configs.append(kwargs)
+        return MockPacket()
 
-    def request_pos_calib_config(self):
+    def request_pos_calib_config(self, force=False):
         pass
 
     def request_calibration_status(self):
-        pass
+        self.status_requests += 1
+
+    def request_sys_config(self, force=False):
+        self.sys_config_requests += 1
 
 
-def test_calibration_apply_sequence():
-    model = MockDeviceModel()
-    vm = CalibrationViewModel(model)
 
-    # Track updates received from vm.status_updated
-    statuses = []
-    vm.status_updated.connect(lambda s: statuses.append(s))
-
-    # Initiating sequence
-    pos_config = {"samples": 15, "iterations": 50}
-    vm.apply_results_sequence(tx_delay=1234, rx_delay=5678, pos_config=pos_config)
-
-    # Should emit 10% progress
-    assert len(statuses) == 1
-    assert statuses[-1]["progress_percent"] == 10
-    assert statuses[-1]["custom_status_text"] == "Applying UWB Antenna delays (1/2)..."
-    assert vm._apply_state == "sending_sys"
-    assert len(model.sent_sys_configs) == 1
-    assert model.sent_sys_configs[0]["tx_antenna_delay"] == 1234
-    assert model.sent_sys_configs[0]["rx_antenna_delay"] == 5678
-
-    # Simulate device responding with matching sys config
-    model.sys_config_parsed.emit({
-        "tx_antenna_delay": 1234,
-        "rx_antenna_delay": 5678,
-    })
-
-    # Should progress to 60% and send pos config
-    assert len(statuses) == 2
-    assert statuses[-1]["progress_percent"] == 60
-    assert statuses[-1]["custom_status_text"] == "Applying Position parameters (2/2)..."
-    assert vm._apply_state == "sending_pos"
-    assert len(model.sent_pos_configs) == 1
-    assert model.sent_pos_configs[0] == pos_config
-
-    # Simulate device responding with pos config parsed
-    model.pos_calib_cfg_parsed.emit(pos_config)
-
-    # Should progress to 100% and go back to idle
-    assert len(statuses) == 3
-    assert statuses[-1]["progress_percent"] == 100
-    assert statuses[-1]["custom_status_text"] == "Calibration applied successfully!"
-    assert vm._apply_state == "idle"
-
-
-def test_calibration_apply_sequence_wrong_sys_ignored():
-    model = MockDeviceModel()
+def test_start_calibration_uses_calib_start():
+    model = MockDeviceModel(role="TAG")
     vm = CalibrationViewModel(model)
 
     statuses = []
     vm.status_updated.connect(lambda s: statuses.append(s))
 
-    # Initiating sequence
-    pos_config = {"samples": 15}
-    vm.apply_results_sequence(tx_delay=1234, rx_delay=5678, pos_config=pos_config)
+    ok = vm.start_calibration({"samples": 1000, "ref_distance_xy_m": 3.5, "tag_height_m": 1.25})
 
-    assert statuses[-1]["progress_percent"] == 10
-
-    # Simulate device responding with DIFFERENT sys config (should be ignored)
-    model.sys_config_parsed.emit({
-        "tx_antenna_delay": 1111,
-        "rx_antenna_delay": 5678,
-    })
-
-    # State and progress shouldn't change
-    assert len(statuses) == 1
-    assert vm._apply_state == "sending_sys"
+    assert ok is True
+    assert len(model.started) == 1
+    assert model.started[0] == {
+        "sample_target": 64,
+        "tag_x_m": 3.5,
+        "tag_y_m": 0.0,
+        "tag_z_m": 1.25,
+    }
+    assert statuses[-1]["custom_status_text"] == "TAG antenna calibration started."
+    assert statuses[-1]["sample_target"] == 64
 
 
-def test_calibration_apply_sequence_timeout():
-    model = MockDeviceModel()
+
+def test_start_calibration_rejects_anchor_role():
+    model = MockDeviceModel(role="ANCHOR")
     vm = CalibrationViewModel(model)
-
-    statuses = []
-    vm.status_updated.connect(lambda s: statuses.append(s))
 
     failures = []
-    vm.operation_failed.connect(lambda f: failures.append(f))
+    vm.operation_failed.connect(lambda msg: failures.append(msg))
 
-    # Initiating sequence
-    pos_config = {"samples": 15}
-    vm.apply_results_sequence(tx_delay=1234, rx_delay=5678, pos_config=pos_config)
+    ok = vm.start_calibration({"samples": 10})
 
-    assert vm._apply_state == "sending_sys"
-
-    # Trigger watchdog timeout manually
-    vm._on_apply_timeout()
-
-    assert vm._apply_state == "idle"
-    assert len(failures) == 1
-    assert "Timeout" in failures[0]
-    assert statuses[-1]["progress_percent"] == 0
-    assert "Apply failed: Timeout" in statuses[-1]["custom_status_text"]
+    assert ok is False
+    assert model.started == []
+    assert "TAG firmware" in failures[-1]
 
 
-def test_calibration_is_applying():
-    model = MockDeviceModel()
+
+def test_stop_calibration_sends_calib_stop_for_tag():
+    model = MockDeviceModel(role="TAG")
     vm = CalibrationViewModel(model)
 
-    assert not vm.is_applying
+    vm.stop_calibration()
 
-    pos_config = {"samples": 15}
-    vm.apply_results_sequence(tx_delay=1234, rx_delay=5678, pos_config=pos_config)
+    assert model.stopped == 1
 
+
+
+def test_save_position_config_only_sends_pos_calib_cfg_set():
+    model = MockDeviceModel(role="ANCHOR")
+    vm = CalibrationViewModel(model)
+
+    statuses = []
+    vm.status_updated.connect(lambda s: statuses.append(s))
+    config = {"samples": 15, "iterations": 50}
+
+    ok = vm.save_position_calibration_config(config)
+
+    assert ok is True
+    assert model.sent_pos_configs == [config]
+    assert model.started == []
+    assert statuses[-1]["custom_status_text"] == "Position calibration config sent."
+
+
+
+def test_candidate_apply_uses_candidate_mask():
+    model = MockDeviceModel(role="TAG")
+    vm = CalibrationViewModel(model)
+    vm._latest_status = {"state": 4, "candidate_mask": 0x05}
+
+    statuses = []
+    vm.status_updated.connect(lambda s: statuses.append(s))
+
+    ok = vm.apply_candidate_results()
+
+    assert ok is True
+    assert model.applied_masks == [0x05]
     assert vm.is_applying
+    assert statuses[-1]["custom_status_text"] == "Applying candidate mask 0x05..."
 
-    model.sys_config_parsed.emit({
-        "tx_antenna_delay": 1234,
-        "rx_antenna_delay": 5678,
-    })
-    assert vm.is_applying
 
-    model.pos_calib_cfg_parsed.emit(pos_config)
-    assert not vm.is_applying
+
+def test_candidate_apply_requires_done_state_and_mask():
+    model = MockDeviceModel(role="TAG")
+    vm = CalibrationViewModel(model)
+    failures = []
+    vm.operation_failed.connect(lambda msg: failures.append(msg))
+
+    vm._latest_status = {"state": 2, "candidate_mask": 0x01}
+    assert vm.apply_candidate_results() is False
+    assert "not done" in failures[-1]
+
+    vm._latest_status = {"state": 4, "candidate_mask": 0}
+    assert vm.apply_candidate_results() is False
+    assert "candidate mask" in failures[-1]
+    assert model.applied_masks == []
+
+
+
+def test_calib_command_builders_have_firmware_fields():
+    factory = CommandFactory()
+    pkt = factory.calib_start(1, 2, 3, sample_target=12, tag_x_m=1.1, tag_y_m=2.2, tag_z_m=3.3)
+    assert pkt.WhichOneof("params") == "calib_start"
+    assert pkt.calib_start.sample_target == 12
+    assert pkt.calib_start.tag_x_m == pytest.approx(1.1)
+    assert pkt.calib_start.tag_y_m == pytest.approx(2.2)
+    assert pkt.calib_start.tag_z_m == pytest.approx(3.3)
+    assert pkt.calib_start.reference_position_valid is True
+
+    pkt = factory.calib_candidate_apply(1, 2, 4, anchor_mask=0x21)
+    assert pkt.WhichOneof("params") == "calib_candidate_apply"
+    assert pkt.calib_candidate_apply.anchor_mask == 0x21
+
+    proto = VvProtocol()
+    pkt = proto.build_calib_start(1, 2, 5, sample_target=7, tag_x_m=4.0, tag_y_m=5.0, tag_z_m=6.0)
+    assert pkt.calib_start.sample_target == 7
+    pkt = proto.build_calib_candidate_apply(1, 2, 6, anchor_mask=0x03)
+    assert pkt.calib_candidate_apply.anchor_mask == 0x03

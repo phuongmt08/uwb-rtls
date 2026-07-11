@@ -50,6 +50,9 @@ class PositionCanvas(QWidget):
         self.has_position = False
         self.fusion_position = None
         self.anchors = []
+        self.anchor_mask = 0
+        self.anchor_mask_valid = False
+        self.anchor_telemetry = {}
         self.history = []
         self.fusion_history = []
         self.tril_history = []
@@ -103,6 +106,9 @@ class PositionCanvas(QWidget):
         self._room_origins = {}
         self._origin_pick_room_id = None
         self._origin_pick_hover_idx = None
+        self._probe_dimension_mode = False
+        self._probe_dimension_start = None
+        self._probe_dimension_end = None
 
         # Snap & preview grid settings
         self._grid_spacing = GRID_SPACING_M  # meters (configured in config.py)
@@ -312,6 +318,64 @@ class PositionCanvas(QWidget):
         elif mode == "insert_vertex":
             self.setCursor(Qt.CursorShape.CrossCursor)
         self.update()
+
+    def toggle_probe_dimension_mode(self):
+        self._probe_dimension_mode = not self._probe_dimension_mode
+        if self._probe_dimension_mode:
+            self._probe_dimension_start = None
+            self._probe_dimension_end = None
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self._probe_dimension_start = None
+            self._probe_dimension_end = None
+            if self.edit_mode == "draw":
+                self.setCursor(Qt.CursorShape.CrossCursor)
+            elif self.edit_mode == "pick_zone":
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+        return self._probe_dimension_mode
+
+    def clear_probe_dimension_measurement(self):
+        self._probe_dimension_mode = False
+        self._probe_dimension_start = None
+        self._probe_dimension_end = None
+        if self.edit_mode == "draw":
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif self.edit_mode == "pick_zone":
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+
+    def _normalized_probe_endpoint(self, start_pt, end_pt):
+        if start_pt is None or end_pt is None:
+            return end_pt
+        dx = end_pt[0] - start_pt[0]
+        dy = end_pt[1] - start_pt[1]
+        if abs(dx) >= abs(dy):
+            return (end_pt[0], start_pt[1])
+        return (start_pt[0], end_pt[1])
+
+    def _probe_dimension_payload(self):
+        start_pt = self._probe_dimension_start
+        end_pt = self._probe_dimension_end
+        if start_pt is None or end_pt is None:
+            return None
+        end_pt = self._normalized_probe_endpoint(start_pt, end_pt)
+        dx = end_pt[0] - start_pt[0]
+        dy = end_pt[1] - start_pt[1]
+        length = abs(dx) if abs(dx) >= abs(dy) else abs(dy)
+        if length <= 1e-9:
+            return None
+        axis = "x" if abs(dx) >= abs(dy) else "y"
+        return {
+            "start": start_pt,
+            "end": end_pt,
+            "axis": axis,
+            "length": length,
+        }
 
     def set_selected_zone(self, zone_id):
         self.selected_zone_id = zone_id
@@ -776,20 +840,26 @@ class PositionCanvas(QWidget):
 
     def _wall_uses_polygon_footprint(self, zone):
         points = list(getattr(zone, "points", []) or [])
-        if len(points) < 3:
+        if len(points) < 4:
             return False
-        if getattr(zone, "wall_mode", "free_standing") == "boundary_outside":
+        first_x, first_y = points[0]
+        last_x, last_y = points[-1]
+        is_closed_loop = math.hypot(last_x - first_x, last_y - first_y) <= 1e-6
+        if not is_closed_loop or getattr(zone, "wall_mode", "free_standing") == "boundary_outside":
             return False
-        if getattr(zone, "shape_kind", "polygon") == "footprint":
-            return True
-        return self._polygon_area_abs(points) > 1e-6
+        core_points = points[:-1]
+        return self._polygon_area_abs(core_points) > 1e-6
 
     def _wall_polygon_footprint_path(self, points):
-        path = QPainterPath(QPointF(points[0][0], points[0][1]))
-        for x, y in points[1:]:
+        footprint_points = list(points or [])
+        if len(footprint_points) >= 2 and math.hypot(footprint_points[-1][0] - footprint_points[0][0], footprint_points[-1][1] - footprint_points[0][1]) <= 1e-6:
+            footprint_points = footprint_points[:-1]
+        path = QPainterPath(QPointF(footprint_points[0][0], footprint_points[0][1]))
+        for x, y in footprint_points[1:]:
             path.lineTo(x, y)
         path.closeSubpath()
         return path
+
 
     def _wall_footprint_path(self, zone):
         """Create one continuous wall footprint in world coordinates."""
@@ -883,7 +953,9 @@ class PositionCanvas(QWidget):
         self.has_position = True
         if source == "sensor_fusion":
             self.fusion_position = position
-            self.fusion_history.append((position["x"], position["y"]))
+            self.fusion_history.append(
+                (position["x"], position["y"], int(position.get("ukf_step", 0)))
+            )
             if len(self.fusion_history) > self.max_history:
                 self.fusion_history.pop(0)
             tril_x = position.get("tril_x")
@@ -950,6 +1022,33 @@ class PositionCanvas(QWidget):
             self.selected_anchor_idx = None
         self.auto_fit()
 
+    def set_anchor_telemetry(self, mask=None, anchors=None, valid=True):
+        """Update live anchor selection and per-anchor distance/weight data."""
+        self.anchor_mask_valid = bool(valid and mask is not None and mask != "")
+        self.anchor_mask = int(mask or 0) if self.anchor_mask_valid else 0
+        self.anchor_telemetry = {
+            int(item.get("anchor_id", 0)): {
+                "distance_mm": int(item.get("distance_mm", 0) or 0),
+                "weight": item.get("weight"),
+            }
+            for item in (anchors or [])
+            if int(item.get("anchor_id", 0) or 0) > 0
+        }
+        self.update()
+
+    def clear_anchor_telemetry(self):
+        self.anchor_mask = 0
+        self.anchor_mask_valid = False
+        self.anchor_telemetry = {}
+        self.update()
+
+    def _anchor_is_mask_selected(self, anchor):
+        anchor_id = self._coerce_int_id(anchor.get("anchor_id"), 0)
+        return bool(
+            self.anchor_mask_valid
+            and 1 <= anchor_id <= 32
+            and self.anchor_mask & (1 << (anchor_id - 1))
+        )
     def set_anchor_template(self, anchor_info):
         self._anchor_template = dict(anchor_info) if anchor_info else None
 
@@ -1178,6 +1277,18 @@ class PositionCanvas(QWidget):
         pos = event.position()
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         
+        snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
+        if self.edit_mode == "draw" and self.draw_object_type == "wall":
+            if not self.current_draw_points or self.current_draw_points[-1] != (snapped_x, snapped_y):
+                self.current_draw_points.append((snapped_x, snapped_y))
+            if len(self.current_draw_points) >= 2:
+                self._push_undo_state()
+                pts = list(self.current_draw_points)
+                self.current_draw_points.clear()
+                self.polygon_completed.emit(pts)
+            self.update()
+            return
+
         # Check if double clicked inside any zone (reverse Z-order)
         layer_order = {"room": 0, "wall": 1, "object": 2, "zone": 3}
         sorted_for_click = sorted(
@@ -1367,8 +1478,18 @@ class PositionCanvas(QWidget):
                     self.polygon_completed.emit(points)
                 self.update()
                 return
-            # Check if clicked near the first point to close the polygon
+            # Click back to the first point closes polygons, and closes wall loops by adding the last segment.
             if self.current_draw_points and self._is_close(self.current_draw_points[0], pos.x(), pos.y()):
+                if self.draw_object_type == "wall":
+                    if len(self.current_draw_points) >= 2:
+                        self._push_undo_state()
+                        pts = list(self.current_draw_points)
+                        if pts[-1] != pts[0]:
+                            pts.append(pts[0])
+                        self.current_draw_points.clear()
+                        self.polygon_completed.emit(pts)
+                    self.update()
+                    return
                 if len(self.current_draw_points) >= 3:
                     self._push_undo_state()
                     pts = list(self.current_draw_points)
@@ -1381,6 +1502,14 @@ class PositionCanvas(QWidget):
             self.update()
             return
         elif self.edit_mode == "draw" and event.button() == Qt.MouseButton.RightButton:
+            if self.draw_object_type == "wall" and len(self.current_draw_points) >= 2:
+                self._push_undo_state()
+                pts = list(self.current_draw_points)
+                self.current_draw_points.clear()
+                self._object_draw_center = None
+                self.polygon_completed.emit(pts)
+                self.update()
+                return
             # Cancel drawing
             self.current_draw_points.clear()
             self._object_draw_center = None
@@ -1519,6 +1648,17 @@ class PositionCanvas(QWidget):
             return
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
+        if self._probe_dimension_mode:
+            self.mouse_world_pos = (snapped_x, snapped_y)
+            self.snapped_grid_pt = (snapped_x, snapped_y)
+            if self._probe_dimension_start is not None:
+                self._probe_dimension_end = self._normalized_probe_endpoint(
+                    self._probe_dimension_start,
+                    (snapped_x, snapped_y),
+                )
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.update()
+            return
         if self.edit_mode == "pick_zone":
             self.mouse_world_pos = (world_x, world_y)
             self.snapped_grid_pt = None
@@ -1784,20 +1924,26 @@ class PositionCanvas(QWidget):
 
         if draw_connections:
             for anchor in self.anchors:
+                is_mask_selected = self._anchor_is_mask_selected(anchor)
                 anchor_x, anchor_y = to_screen(anchor["x"], anchor["y"])
-                painter.setPen(QPen(QColor(99, 102, 241, 40), 1, Qt.PenStyle.DashLine))
+                color = QColor(34, 211, 238, 180) if is_mask_selected else QColor(99, 102, 241, 24)
+                painter.setPen(QPen(color, 2 if is_mask_selected else 1, Qt.PenStyle.DashLine))
                 painter.drawLine(pos_x, pos_y, anchor_x, anchor_y)
 
         painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         for idx, anchor in enumerate(self.anchors):
             center_x, center_y = to_screen(anchor["x"], anchor["y"])
             is_selected_anchor = self.selected_anchor_idx == idx
+            is_mask_selected = self._anchor_is_mask_selected(anchor)
             is_scanned = bool(anchor.get("is_scanned", False))
             is_draft = anchor.get("sync_state") == "draft"
 
             if is_selected_anchor:
                 ring = QColor(250, 204, 21)
                 fill = QColor(34, 211, 238)
+            elif is_mask_selected:
+                ring = QColor(34, 211, 238)
+                fill = QColor(6, 182, 212)
             elif is_scanned:
                 ring = QColor(34, 197, 94)
                 fill = QColor(22, 163, 74)
@@ -1808,7 +1954,7 @@ class PositionCanvas(QWidget):
                 ring = QColor(99, 102, 241)
                 fill = QColor(79, 70, 229)
 
-            painter.setPen(QPen(ring, 3 if is_selected_anchor else 2))
+            painter.setPen(QPen(ring, 4 if is_mask_selected or is_selected_anchor else 2))
             painter.setBrush(QColor(15, 23, 42, 230))
             painter.drawEllipse(center_x - 12, center_y - 12, 24, 24)
             painter.setBrush(fill)
@@ -1829,7 +1975,15 @@ class PositionCanvas(QWidget):
             else:
                 coord_text = f"G({anchor['x']:.1f}, {anchor['y']:.1f}, {anchor.get('z', 0.0):.1f})"
             painter.drawText(center_x + 16, center_y + 4, coord_text)
-
+            telemetry = self.anchor_telemetry.get(self._coerce_int_id(anchor.get("anchor_id"), 0))
+            if telemetry:
+                distance_m = telemetry["distance_mm"] / 1000.0
+                weight = telemetry.get("weight")
+                live_text = f"{distance_m:.3f} m"
+                if weight is not None:
+                    live_text += f"  W:{weight}"
+                painter.setPen(QColor(103, 232, 249) if is_mask_selected else QColor(148, 163, 184))
+                painter.drawText(center_x + 16, center_y + 17, live_text)
     def _draw_tracking_grid(self, painter, to_screen, view_x1, view_y1, view_x2, view_y2, margin, width, height):
         """Draw a fixed 1 m grid for User mode without changing Spatial settings."""
         major_step = self._tracking_grid_spacing
@@ -1934,18 +2088,18 @@ class PositionCanvas(QWidget):
             painter.setPen(QColor("#FCA5A5"))
             painter.drawText(origin_x + 10, origin_y - 8, "Local (0,0)")
 
-        # 1. Draw Fusion History Trail (UKF, solid sky blue)
-        if len(self.fusion_history) > 1:
-            painter.setPen(QPen(QColor(14, 165, 233, 200), 2, Qt.PenStyle.SolidLine))
-            for idx in range(len(self.fusion_history) - 1):
-                x1, y1 = to_screen(self.fusion_history[idx][0], self.fusion_history[idx][1])
-                x2, y2 = to_screen(self.fusion_history[idx + 1][0], self.fusion_history[idx + 1][1])
-                painter.drawLine(x1, y1, x2, y2)
+        # 1. Draw UKF history as step-colored dots: predict=orange, update=blue.
+        if self.fusion_history:
+            painter.setPen(Qt.PenStyle.NoPen)
+            for xw, yw, ukf_step in self.fusion_history:
+                painter.setBrush(QColor(59, 130, 246, 210) if ukf_step == 1 else QColor(249, 115, 22, 210))
+                sx, sy = to_screen(xw, yw)
+                painter.drawEllipse(sx - 3, sy - 3, 6, 6)
 
         # 2. Draw Trilateration history as dots
         if self.tril_history:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(251, 146, 60, 180))
+            painter.setBrush(QColor(255, 255, 255, 200))
             for xw, yw in self.tril_history:
                 sx, sy = to_screen(xw, yw)
                 painter.drawEllipse(sx - 2, sy - 2, 4, 4)
@@ -1955,13 +2109,13 @@ class PositionCanvas(QWidget):
         if not self.dim_tracking_view:
             self._draw_anchor_layer(painter, to_screen, draw_connections=True)
 
-        # 5. Draw Trilateration Marker (orange circle with crosshair)
+        # 5. Draw Trilateration Marker (white circle with crosshair)
         if self.fusion_position is not None:
             tril_world_x = self.fusion_position.get("tril_x", self.fusion_position["x"])
             tril_world_y = self.fusion_position.get("tril_y", self.fusion_position["y"])
             tril_x, tril_y = to_screen(tril_world_x, tril_world_y)
-            painter.setPen(QPen(QColor(251, 146, 60), 2))
-            painter.setBrush(QColor(251, 146, 60, 80))
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.setBrush(QColor(255, 255, 255, 60))
             painter.drawEllipse(tril_x - 8, tril_y - 8, 16, 16)
             painter.drawLine(tril_x - 12, tril_y, tril_x + 12, tril_y)
             painter.drawLine(tril_x, tril_y - 12, tril_x, tril_y + 12)
@@ -1970,6 +2124,8 @@ class PositionCanvas(QWidget):
         scale_px = min(width, height) / self._view_range if self._view_range > 0 else 50
         active_tag = self.fusion_position if self.fusion_position is not None else self.position
         active_x, active_y = to_screen(active_tag["x"], active_tag["y"])
+        ukf_is_update = int(active_tag.get("ukf_step", 0)) == 1
+        ukf_color = QColor(59, 130, 246) if ukf_is_update else QColor(249, 115, 22)
 
         if active_tag.get("error", 0) > 0:
             error_radius = int(active_tag["error"] * scale_px)
@@ -1979,7 +2135,7 @@ class PositionCanvas(QWidget):
 
         # UKF center marker as a small dot
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(96, 165, 250))
+        painter.setBrush(ukf_color)
         painter.drawEllipse(active_x - 3, active_y - 3, 6, 6)
 
         # Draw the directional arrow
@@ -1988,7 +2144,7 @@ class PositionCanvas(QWidget):
         painter.rotate(-active_tag.get("yaw", 0))
         painter.setPen(
             QPen(
-                QColor(37, 99, 235),  # Blue-600
+                ukf_color,
                 2,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
@@ -1996,8 +2152,8 @@ class PositionCanvas(QWidget):
             )
         )
         gradient = QLinearGradient(0, -12, 0, 10)
-        gradient.setColorAt(0, QColor(96, 165, 250))
-        gradient.setColorAt(1, QColor(37, 99, 235))
+        gradient.setColorAt(0, ukf_color.lighter(125))
+        gradient.setColorAt(1, ukf_color.darker(115))
         painter.setBrush(gradient)
         path = QPainterPath()
         path.moveTo(14, 0)
@@ -2011,10 +2167,13 @@ class PositionCanvas(QWidget):
         painter.drawEllipse(-10, -3, 4, 6)
         painter.restore()
 
-        # Tag glow effect (sky blue)
+        # Tag glow effect follows the current UKF step color.
         glow_gradient = QRadialGradient(active_x, active_y, 18)
-        glow_gradient.setColorAt(0, QColor(96, 165, 250, 60))
-        glow_gradient.setColorAt(1, QColor(96, 165, 250, 0))
+        glow_color = QColor(ukf_color)
+        glow_color.setAlpha(60)
+        glow_gradient.setColorAt(0, glow_color)
+        glow_color.setAlpha(0)
+        glow_gradient.setColorAt(1, glow_color)
         painter.setBrush(glow_gradient)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(active_x - 18, active_y - 18, 36, 36)
@@ -2171,7 +2330,7 @@ class PositionCanvas(QWidget):
                 poly.append(QPointF(sx, sy))
 
             object_type = getattr(zone, "object_type", "zone")
-            # ── visual style from 05e6a86b ──────────────────────────────────
+            # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ visual style from 05e6a86b ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬
             if object_type == "room":
                 base_color = str(zone.color).replace("_semi", "") if getattr(zone, "color", "") else "#1D4ED8"
                 fill_color = QColor(base_color if base_color.startswith("#") else "#1D4ED8")
@@ -2210,12 +2369,21 @@ class PositionCanvas(QWidget):
                 border_width += 1.2
 
             object_height = max(0.0, zone.max_z - zone.min_z) if object_type in {"wall", "object"} else 0.0
-            if object_type == "wall" and not (self.preview_25d and object_height > 0 and len(zone.points) >= 3):
+            if object_type == "wall":
                 path = self._wall_footprint_screen_path(zone, to_screen)
-                if not path.isEmpty():
+                if self.preview_25d and object_height > 0 and not path.isEmpty():
+                    extruded = False
+                    for polygon in path.toSubpathPolygons():
+                        if polygon.count() >= 3:
+                            draw_extruded_polygon(polygon, fill_color, border_color, object_height)
+                            extruded = True
+                    if not extruded:
+                        painter.fillPath(path, QBrush(fill_color))
+                        painter.strokePath(path, QPen(border_color, border_width, pen_style))
+                elif not path.isEmpty():
                     painter.fillPath(path, QBrush(fill_color))
                     painter.strokePath(path, QPen(border_color, border_width, pen_style))
-            elif self.preview_25d and object_type in {"wall", "object"} and object_height > 0 and len(zone.points) >= 3:
+            elif self.preview_25d and object_type == "object" and object_height > 0 and len(zone.points) >= 3:
                 draw_extruded_polygon(poly, fill_color, border_color, object_height)
             else:
                 painter.setPen(QPen(border_color, border_width, pen_style))
@@ -2363,6 +2531,21 @@ class PositionCanvas(QWidget):
                     painter.setPen(QPen(preview_color, 1.5, Qt.PenStyle.DashLine))
                     painter.drawLine(x1, y1, x2, y2)
 
+                    preview_length = math.hypot(self.mouse_world_pos[0] - last_pt[0], self.mouse_world_pos[1] - last_pt[1])
+                    if preview_length > 1e-9:
+                        preview_text = f"{preview_length:.2f}m"
+                        lx = last_pt[0] + (self.mouse_world_pos[0] - last_pt[0]) * 0.65
+                        ly = last_pt[1] + (self.mouse_world_pos[1] - last_pt[1]) * 0.65
+                        slx, sly = to_screen(lx, ly)
+                        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+                        preview_rect = painter.fontMetrics().boundingRect(preview_text)
+                        preview_rect.translate(int(slx - preview_rect.width() / 2), int(sly - preview_rect.height() - 10))
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QColor(15, 23, 42, 220))
+                        painter.drawRoundedRect(preview_rect.adjusted(-4, -2, 4, 2), 4, 4)
+                        painter.setPen(QColor(34, 211, 238))
+                        painter.drawText(preview_rect.x(), preview_rect.y() + preview_rect.height() - 3, preview_text)
+                        painter.setPen(QPen(active_color, 2, Qt.PenStyle.SolidLine))
                 # Draw vertices
                 for pt in self.current_draw_points:
                     sx, sy = to_screen(pt[0], pt[1])
@@ -2373,6 +2556,35 @@ class PositionCanvas(QWidget):
         if self.dim_tracking_view:
             self._draw_anchor_layer(painter, to_screen, draw_connections=False)
 
+        probe_dimension = self._probe_dimension_payload()
+        if probe_dimension is not None:
+            start_pt = probe_dimension["start"]
+            end_pt = probe_dimension["end"]
+            sx1, sy1 = to_screen(start_pt[0], start_pt[1])
+            sx2, sy2 = to_screen(end_pt[0], end_pt[1])
+            measure_color = QColor(34, 211, 238, 230)
+            painter.setPen(QPen(measure_color, 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(sx1, sy1, sx2, sy2)
+            painter.setPen(QPen(QColor(255, 255, 255), 1.5))
+            painter.setBrush(QColor(15, 23, 42))
+            painter.drawEllipse(int(sx1 - 4), int(sy1 - 4), 8, 8)
+            painter.drawEllipse(int(sx2 - 4), int(sy2 - 4), 8, 8)
+
+            label = f"{probe_dimension['length']:.2f} m"
+            mx = (start_pt[0] + end_pt[0]) / 2.0
+            my = (start_pt[1] + end_pt[1]) / 2.0
+            smx, smy = to_screen(mx, my)
+            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            text_rect = painter.fontMetrics().boundingRect(label)
+            offset_y = -12 if probe_dimension["axis"] == "x" else -6
+            offset_x = 0 if probe_dimension["axis"] == "x" else 12
+            text_rect.translate(int(smx - text_rect.width() / 2 + offset_x), int(smy - text_rect.height() + offset_y))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(15, 23, 42, 220))
+            painter.drawRoundedRect(text_rect.adjusted(-4, -2, 4, 2), 4, 4)
+            painter.setPen(measure_color)
+            painter.drawText(text_rect.x(), text_rect.y() + text_rect.height() - 3, label)
         # --- 11. Draw edge lengths and vertex coordinates ---
         self._dimension_hitboxes = []
         def draw_dimensions(points, is_closed=True, zone=None):

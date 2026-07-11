@@ -8,7 +8,7 @@ from PyQt5 import QtWidgets, uic, QtCore
 # Thêm thư mục hiện tại vào path để import module
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-csv_dir = os.path.join(current_dir, "csv")
+csv_dir = os.path.abspath(os.path.join(current_dir, "..", "data"))
 
 from module import config
 from simulation import run_simulation_with_params
@@ -213,7 +213,7 @@ class UKFSimulationGUI(QtWidgets.QMainWindow):
             self.save_to_config_file()
 
     def browse_csv_file(self):
-        """Open file picker in software/simulation/csv and store a relative path."""
+        """Open file picker in software/data and store a relative path."""
         start_path = self.csv_path_for_runtime(self.lineEdit_csvPath.text().strip())
         start_dir = os.path.dirname(start_path) if start_path and os.path.exists(start_path) else csv_dir
         selected_file, _ = QtWidgets.QFileDialog.getOpenFileName(

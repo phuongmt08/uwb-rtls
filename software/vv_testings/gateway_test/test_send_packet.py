@@ -288,6 +288,18 @@ def bootstrap_mcu_route(
 ) -> None:
     print("\n[*] Preparing MCU route over BLE...")
 
+    dev_info_pkt = factory.device_information_get(src, dst, session.proto.next_seq())
+    send_and_wait(
+        session,
+        src,
+        "device_information_get",
+        dev_info_pkt,
+        expected_param="device_information_resp",
+        timeout_s=RESPONSE_TIMEOUT_S,
+        monitor=monitor,
+    )
+    time.sleep(BOOTSTRAP_GAP_S)
+
     none_pkt = pb.packet_t()
     none_pkt.hdr.addr.src = src
     none_pkt.hdr.addr.dst = dst

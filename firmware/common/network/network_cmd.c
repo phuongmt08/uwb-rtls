@@ -645,13 +645,18 @@ static void network_cmd_ranging_start(const protobuf_packet_t *pkt)
 {
     (void)pkt;
 
-    if(pkt->params.ranging_start.is_ukf_reinit) {
-        app_rtos_request_sensor_fusion_reset();
+    if (sys_config_get()->uwb.role == DEVICE_ROLE_TAG)
+    {
+        if(pkt->params.ranging_start.is_ukf_reinit) 
+        {
+            app_rtos_request_sensor_fusion_reset();
+        }
+
+        sys_sensor_fusion_set_initial_yaw(pkt->params.ranging_start.yaw_deg);
     }
 
-    sys_sensor_fusion_set_initial_yaw(pkt->params.ranging_start.yaw_deg);
-
-    if (!network_cmd_set_ranging_enabled(true)) {
+    if (!network_cmd_set_ranging_enabled(true)) 
+    {
         RLOG_W(OBJECT_CODE, "ranging_start rejected by platform");
     }
 }
@@ -1632,6 +1637,31 @@ bool network_send_sensor_fusion_result(network_core_t *stream, uint8_t dst, cons
     memset(&pkt, 0, sizeof(pkt));
     pkt.which_params = protobuf_packet_t_sensor_fusion_result_tag;
     pkt.params.sensor_fusion_result = *data;
+
+    if (network_core_send_packet(stream, dst, &pkt)) {
+        s_last_sensor_fusion_stream_tick = now;
+        stream_packet_cnt++;
+        return true;
+    }
+
+    return false;
+}
+
+bool network_send_calib_data(network_core_t *stream, uint8_t dst, const protobuf_calib_data_t *data)
+{
+    CHECK(stream && data, false);
+    CHECK(network_cmd_is_ranging_enabled(), false);
+    CHECK(network_cmd_is_ble_host_active(), false);
+
+    uint32_t now = bsp_util_get_ticks();
+    CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+
+    dt_s = (float)(now - s_last_sensor_fusion_stream_tick) / 1000.0f;
+
+    protobuf_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.which_params = protobuf_packet_t_calib_data_tag;
+    pkt.params.calib_data = *data;
 
     if (network_core_send_packet(stream, dst, &pkt)) {
         s_last_sensor_fusion_stream_tick = now;

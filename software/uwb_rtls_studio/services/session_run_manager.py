@@ -75,7 +75,7 @@ class SessionRunManager(QObject):
             meta=meta,
         )
         self.session_model.close_ranging_run(
-            sample_count=len(positions),
+            sample_count=max(len(positions or []), len(fusion or [])),
             files=files,
             end_reason="SESSION_END_REASON_RANGING_RESULTS",
         )

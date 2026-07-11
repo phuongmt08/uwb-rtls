@@ -4,10 +4,14 @@ import re
 import numpy as np
 from .config import SensorEvent, SOURCE_DATA_FILE
 
+def _software_data_path(*parts):
+    software_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(software_dir, "data", *parts)
+
 def find_latest_csv_file(directory: str = None, file_type: str = "ukf_log_data") -> str:
     from datetime import datetime
     if directory is None:
-        directory = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "csv")
+        directory = _software_data_path()
     
     folders = []
     if os.path.exists(directory):
@@ -140,6 +144,11 @@ def parse_csv_data(filepath: str) -> list[SensorEvent]:
     
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
+            text_event = _parse_live_text_record(line)
+            if text_event is not None:
+                events.append(text_event)
+                continue
+
             m_init = init_pattern.search(line)
             if m_init:
                 ax = float(m_init.group("ax"))
@@ -174,9 +183,7 @@ def generate_timestamp_filename(prefix, suffix):
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%Hg%Mp")
     date_folder = now.strftime("%d_%m_%y")
-    # Base directory relative to this file's location
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    directory = os.path.join(base_dir, "csv")
+    directory = _software_data_path()
     date_directory = os.path.join(directory, date_folder)
     if not os.path.exists(date_directory):
         os.makedirs(date_directory)
@@ -190,12 +197,149 @@ def create_csv_file(filename):
     print(f"[INFO] CSV file created: {filename}")
     return csv_file, csv_writer
 
+def _csv_float(value, default=0.0):
+    try:
+        if value in ("", None):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def _csv_int(value, default=0):
+    try:
+        if value in ("", None):
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+def _parse_live_text_record(line):
+    raw_line = line.strip()
+    if not raw_line.startswith("(") or "|" not in raw_line:
+        return None
+
+    status_match = re.search(r"\)\s*(?P<status>Init|Predict|Update)\b", raw_line)
+    if not status_match:
+        return None
+    status = status_match.group("status")
+
+    values = {}
+    for part in raw_line.split("|")[1:]:
+        if ":" not in part:
+            continue
+        key, value = part.split(":", 1)
+        values[key.strip()] = value.strip()
+
+    dt = _csv_float(values.get("update_dt")) or _csv_float(values.get("predict_dt"))
+    if status == "Predict" and dt == 0.0:
+        dt = 0.01
+
+    return SensorEvent(
+        type=status,
+        ax=_csv_float(values.get("ax")),
+        ay=_csv_float(values.get("ay")),
+        gz=_csv_float(values.get("gz")),
+        px=_csv_float(values.get("tril_x")),
+        py=_csv_float(values.get("tril_y")),
+        distances=np.array([_csv_float(values.get(f"d{i}")) for i in range(1, 5)]),
+        dt=dt,
+        mask=_csv_int(values.get("mask")),
+        raw_line=raw_line,
+    )
+
+def _list_value(frame_data, key, index, default=0.0):
+    values = frame_data.get(key)
+    if isinstance(values, (list, tuple)) and len(values) > index:
+        return values[index]
+    return default
+
+def _distance_m(frame_data, index):
+    distances = frame_data.get("distances")
+    if isinstance(distances, (list, tuple)) and len(distances) > index:
+        return _csv_float(distances[index])
+
+    direct = frame_data.get(f"d{index + 1}", "")
+    if direct not in ("", None):
+        return _csv_float(direct)
+
+    distance_mm = frame_data.get(f"d{index + 1}_mm", "")
+    if distance_mm not in ("", None):
+        return _csv_float(distance_mm) / 1000.0
+
+    for anchor in frame_data.get("anchors", []) or []:
+        if not isinstance(anchor, dict):
+            continue
+        if _csv_int(anchor.get("anchor_id")) == index + 1:
+            return _csv_float(anchor.get("distance_mm")) / 1000.0
+    return 0.0
+
+def _anchor_weight(frame_data, index):
+    direct = frame_data.get(f"w{index + 1}", "")
+    if direct not in ("", None):
+        return _csv_int(direct)
+
+    for anchor in frame_data.get("anchors", []) or []:
+        if not isinstance(anchor, dict):
+            continue
+        if _csv_int(anchor.get("anchor_id")) == index + 1:
+            return _csv_int(anchor.get("weight"))
+    return 0
+
+def _first_float(frame_data, *keys):
+    for key in keys:
+        value = frame_data.get(key, "")
+        if value not in ("", None):
+            return _csv_float(value)
+    return 0.0
+
+def build_live_text_record(frame_data, rx_cnt=0, tx_cnt=None, status=None):
+    if status is None:
+        ukf_step = _csv_int(frame_data.get("ukf_step", 0))
+        status = "Update" if ukf_step == 1 else "Predict"
+    else:
+        ukf_step = _csv_int(frame_data.get("ukf_step", 0))
+
+    tx_frame_cnt = _csv_int(frame_data.get("tx_frame_cnt", 0) if tx_cnt is None else tx_cnt)
+    dt = _csv_float(frame_data.get("dt", 0.0))
+    update_dt = dt if status in ("Init", "Update") else 0.0
+    predict_dt = dt if status == "Predict" else 0.0
+
+    distances = [_distance_m(frame_data, index) for index in range(4)]
+    weights = [_anchor_weight(frame_data, index) for index in range(4)]
+    fp_amp = [_csv_float(_list_value(frame_data, "fp_amp_norm", index)) for index in range(4)]
+    fp_snr = [_csv_float(_list_value(frame_data, "fp_snr", index)) for index in range(4)]
+
+    line = (
+        f"({int(rx_cnt):4d}/{tx_frame_cnt:4d}) {status:<7s} "
+        f"| ts: {_csv_int(frame_data.get('timestamp_ms', 0))} "
+        f"| zone: {_csv_int(frame_data.get('zone_id', 0))} "
+        f"| ukf_step: {ukf_step} "
+        f"| ax: {_csv_float(frame_data.get('ax', 0.0)):9.6f} "
+        f"| ay: {_csv_float(frame_data.get('ay', 0.0)):9.6f} "
+        f"| gz: {_csv_float(frame_data.get('gz', 0.0)):9.6f} "
+        f"| tril_x: {_first_float(frame_data, 'tril_x', 'tril_x_m', 'px', 'x_m', 'x'):9.6f} "
+        f"| tril_y: {_first_float(frame_data, 'tril_y', 'tril_y_m', 'py', 'y_m', 'y'):9.6f} "
+        f"| ukf_x: {_first_float(frame_data, 'ukf_x', 'ukf_x_m'):9.6f} "
+        f"| ukf_y: {_first_float(frame_data, 'ukf_y', 'ukf_y_m'):9.6f} "
+        f"| ukf_yaw: {_first_float(frame_data, 'ukf_yaw', 'ukf_yaw_deg'):9.6f} "
+        f"| yaw: {_first_float(frame_data, 'yaw', 'yaw_deg'):9.6f} "
+        f"| update_dt: {update_dt:9.6f} "
+        f"| predict_dt: {predict_dt:9.6f} "
+        f"| mask: {_csv_int(frame_data.get('anchor_mask', frame_data.get('mask', 0)))} "
+        f"| d1: {distances[0]:9.6f} | d2: {distances[1]:9.6f} "
+        f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
+        f"| w1: {weights[0]} | w2: {weights[1]} | w3: {weights[2]} | w4: {weights[3]} "
+        f"| err: {_csv_int(frame_data.get('ranging_error_count', frame_data.get('error_count', frame_data.get('err_cnt', 0))))} "
+        f"| amp1: {fp_amp[0]:9.6f} | amp2: {fp_amp[1]:9.6f} "
+        f"| amp3: {fp_amp[2]:9.6f} | amp4: {fp_amp[3]:9.6f} "
+        f"| snr1: {fp_snr[0]:9.6f} | snr2: {fp_snr[1]:9.6f} "
+        f"| snr3: {fp_snr[2]:9.6f} | snr4: {fp_snr[3]:9.6f}"
+    )
+    return line
+
 def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
-    counter_str = f"({frame_counter:4d}/{frame_data['tx_frame_cnt']:4d})"
-    
     if frame_data['tx_frame_cnt'] == 1:
-        line = f"{counter_str} Init    ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']} amp1: {frame_data['fp_amp_norm'][0]:9.6f} amp2: {frame_data['fp_amp_norm'][1]:9.6f} amp3: {frame_data['fp_amp_norm'][2]:9.6f} amp4: {frame_data['fp_amp_norm'][3]:9.6f} snr1: {frame_data['fp_snr'][0]:9.6f} snr2: {frame_data['fp_snr'][1]:9.6f} snr3: {frame_data['fp_snr'][2]:9.6f} snr4: {frame_data['fp_snr'][3]:9.6f}"
-        csv_writer.writerow([line])
+        csv_writer.writerow([build_live_text_record(frame_data, rx_cnt=frame_counter, status="Init")])
         return "Init", frame_data['distances'].copy()
         
     status = "Predict"
@@ -211,8 +355,7 @@ def write_frame_to_csv(csv_writer, frame_data, frame_counter, prev_distances):
                 status = "Update"
     
     new_prev_distances = frame_data['distances'].copy()
-    line = f"{counter_str} {status:7s} ax: {frame_data['ax']:9.6f} ay: {frame_data['ay']:9.6f} gz: {frame_data['gz']:9.6f} px: {frame_data['px']:9.6f} py: {frame_data['py']:9.6f} dt: {frame_data['dt']:9.6f} mask: {frame_data['anchor_mask']} d1: {frame_data['distances'][0]:9.6f} d2: {frame_data['distances'][1]:9.6f} d3: {frame_data['distances'][2]:9.6f} d4: {frame_data['distances'][3]:9.6f} err: {frame_data['err_cnt']} amp1: {frame_data['fp_amp_norm'][0]:9.6f} amp2: {frame_data['fp_amp_norm'][1]:9.6f} amp3: {frame_data['fp_amp_norm'][2]:9.6f} amp4: {frame_data['fp_amp_norm'][3]:9.6f} snr1: {frame_data['fp_snr'][0]:9.6f} snr2: {frame_data['fp_snr'][1]:9.6f} snr3: {frame_data['fp_snr'][2]:9.6f} snr4: {frame_data['fp_snr'][3]:9.6f}"
-    csv_writer.writerow([line])
+    csv_writer.writerow([build_live_text_record(frame_data, rx_cnt=frame_counter, status=status)])
     return status, new_prev_distances
 
 def write_uwb_frame_to_csv(csv_writer, frame_data, rx_cnt):
@@ -224,23 +367,9 @@ def write_uwb_frame_to_csv(csv_writer, frame_data, rx_cnt):
     return line
 
 def write_fusion_frame_to_csv(csv_writer, frame_data, rx_cnt):
-    counter_str = f"({rx_cnt:4d}/{frame_data['tx_frame_cnt']:4d})"
     ukf_step = int(frame_data.get('ukf_step', frame_data.get('error_count', 0)))
     status = "Update" if ukf_step == 1 else "Predict"
-    line = (
-        f"{counter_str} {status:7s} "
-        f"ukf_step: {ukf_step} "
-        f"dt: {frame_data.get('dt', 0.0):9.6f} "
-        f"ukf_x: {frame_data['ukf_x']:9.6f} "
-        f"ukf_y: {frame_data['ukf_y']:9.6f} "
-        f"ukf_yaw: {frame_data['ukf_yaw']:9.6f} "
-        f"tril_x: {frame_data['tril_x']:9.6f} "
-        f"tril_y: {frame_data['tril_y']:9.6f} "
-        f"yaw: {frame_data['yaw']:9.6f} "
-        f"mask: {frame_data.get('anchor_mask', 0)} "
-        f"err: {frame_data.get('error_count', frame_data.get('err_cnt', 0))}"
-    )
-    csv_writer.writerow([line])
+    csv_writer.writerow([build_live_text_record(frame_data, rx_cnt=rx_cnt, status=status)])
     return status
 
 def print_frame_data(frame_data):

@@ -7,12 +7,13 @@ import os
 import time
 import uuid
 import math
+import json
 import logging
 
 log = logging.getLogger(__name__)
 
 from PyQt6 import uic
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QTimer, Qt, QPointF
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QTimer, Qt, QPointF, QEvent
 from PyQt6.QtWidgets import (
     QLabel,
     QWidget,
@@ -36,15 +37,18 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QHeaderView,
     QAbstractItemView,
     QColorDialog,
     QMenu,
+    QApplication,
 )
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF, QShortcut, QKeySequence, QAction
 
 from common.transport import VvAddress
 from views.components.position_canvas import PositionCanvas
+from views.components.distance_graph import DistanceGraph
 from views.components.geofence_3d_widget import Geofence3DWidget, OPENGL_AVAILABLE
 from models.geofence_model import GeofenceZone
 from views.components.geofence_editor import GeofenceEditorWidget
@@ -53,10 +57,10 @@ from utils.config_dim import GRID_SPACING_M
 from utils.app_state import shared_app_state
 
 DEFAULT_ANCHOR_LAYOUT = [
-    {"anchor_id": 0, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "label": "A0"},
-    {"anchor_id": 1, "x_m": 10.76, "y_m": 0.0, "z_m": 0.0, "label": "A1"},
-    {"anchor_id": 2, "x_m": 0.0, "y_m": 13.2, "z_m": 0.0, "label": "A2"},
-    {"anchor_id": 3, "x_m": 10.76, "y_m": 13.2, "z_m": 0.0, "label": "A3"},
+    {"anchor_id": 1, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0, "label": "A1"},
+    {"anchor_id": 2, "x_m": 10.76, "y_m": 0.0, "z_m": 0.0, "label": "A2"},
+    {"anchor_id": 3, "x_m": 0.0, "y_m": 13.2, "z_m": 0.0, "label": "A3"},
+    {"anchor_id": 4, "x_m": 10.76, "y_m": 13.2, "z_m": 0.0, "label": "A4"},
 ]
 
 
@@ -572,6 +576,7 @@ class LiveTrackingTab(QWidget):
         self._pending_layout_read_for_editor = False
         self._pending_layout_read_room_id = ""
         self._clipboard = None
+        self._anchor_telemetry_cache = {}
 
         uic.loadUi(UI_FILE, self)
         self._setup_dynamic_metrics()
@@ -593,18 +598,27 @@ class LiveTrackingTab(QWidget):
         self._layout_emit_timer.setTimerType(Qt.TimerType.CoarseTimer)
         self._layout_emit_timer.setInterval(50)
         self._layout_emit_timer.timeout.connect(self._flush_geofence_layout_emit)
+        self._pending_probe_shortcut = False
+        self._pending_probe_shortcut_timer = QTimer(self)
+        self._pending_probe_shortcut_timer.setSingleShot(True)
+        self._pending_probe_shortcut_timer.setInterval(900)
+        self._pending_probe_shortcut_timer.timeout.connect(self._reset_probe_shortcut_state)
+        QApplication.instance().installEventFilter(self)
         self._preview_overlay_btn = self.btn_preview_overlay
         self._detail_overlay_btn = QPushButton("Detail", self)
         self._helpers_overlay_btn = QPushButton("Helpers", self)
         self._setup_map_views()
+        self._setup_live_subtabs()
 
         self._setup_geofencing_ui()
 
+        self.header_widget.hide()
         self.warning_label.setVisible(False)
         self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
-        self.btn_start.clicked.connect(self._start_ranging)
-        self.btn_stop.clicked.connect(self._stop_ranging)
+        self.btn_stop.hide()
+        self.btn_start.clicked.connect(self._toggle_ranging)
         self.btn_clear.clicked.connect(self._clear_tracking_trails)
+        self._sync_ranging_button()
         self._setup_yaw_offset_control()
 
         self.header_widget.raise_()
@@ -652,6 +666,8 @@ class LiveTrackingTab(QWidget):
             "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; background: transparent; }"
             "QDoubleSpinBox { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; "
             "border-radius: 6px; padding: 4px 6px; font-family: 'Consolas'; font-size: 13px; }"
+            "QCheckBox { color: #E2E8F0; font-weight: normal; spacing: 8px; }"
+            "QCheckBox::indicator { width: 15px; height: 15px; }"
         )
         layout = QFormLayout(self.yaw_offset_group)
         layout.setContentsMargins(10, 16, 10, 10)
@@ -662,9 +678,13 @@ class LiveTrackingTab(QWidget):
         self.yaw_offset_spin.setDecimals(1)
         self.yaw_offset_spin.setSingleStep(1.0)
         self.yaw_offset_spin.setSuffix(" deg")
-        self.yaw_offset_spin.setToolTip("Add this offset to the tag arrow yaw on the map.")
+        self.yaw_offset_spin.setToolTip("Yaw offset used locally and sent as ranging_start.yaw_deg when starting.")
         self.yaw_offset_spin.valueChanged.connect(self._on_yaw_offset_changed)
-        layout.addRow("Initial yaw:", self.yaw_offset_spin)
+        layout.addRow("Yaw offset:", self.yaw_offset_spin)
+
+        self.reinit_ukf_check = QCheckBox("Reinit UKF", self.yaw_offset_group)
+        self.reinit_ukf_check.setToolTip("Send ranging_start.is_ukf_reinit=true when starting.")
+        layout.addRow("", self.reinit_ukf_check)
 
         insert_at = self.right_panel.indexOf(self.separator_1) if hasattr(self, "separator_1") else -1
         if insert_at >= 0:
@@ -709,8 +729,7 @@ class LiveTrackingTab(QWidget):
             return
         self._is_ranging = True
         self._start_time = time.time()
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
+        self._sync_ranging_button()
 
     @staticmethod
     def _format_anchor_mask(mask, valid=True):
@@ -758,6 +777,36 @@ class LiveTrackingTab(QWidget):
         if hasattr(self._canvas, "set_overlay_detail_mode"):
             self._canvas.set_overlay_detail_mode(detailed)
 
+    def _reset_probe_shortcut_state(self):
+        self._pending_probe_shortcut = False
+        if hasattr(self, "_pending_probe_shortcut_timer"):
+            self._pending_probe_shortcut_timer.stop()
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            modifiers = event.modifiers()
+            focus = QApplication.focusWidget()
+            typing_focus = isinstance(focus, (QLineEdit, QDoubleSpinBox, QComboBox))
+            if self._pending_probe_shortcut:
+                if key == Qt.Key.Key_D and modifiers == Qt.KeyboardModifier.NoModifier and not typing_focus:
+                    self._reset_probe_shortcut_state()
+                    self._toggle_probe_dimension_mode()
+                    return True
+                if key not in (Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+                    self._reset_probe_shortcut_state()
+            if key == Qt.Key.Key_P and modifiers == Qt.KeyboardModifier.NoModifier and not typing_focus:
+                self._pending_probe_shortcut = True
+                self._pending_probe_shortcut_timer.start()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _toggle_probe_dimension_mode(self):
+        enabled = self._canvas.toggle_probe_dimension_mode()
+        if enabled:
+            self._set_canvas_tool_status("Dimension probe / Click 2 points")
+        else:
+            self._set_canvas_tool_status("Dimension probe cleared")
     def _show_canvas_helpers(self):
         helper_text = (
             "Mouse helpers\n"
@@ -778,7 +827,9 @@ class LiveTrackingTab(QWidget):
             "- Alt+Delete: remove anchor\n"
             "- Alt+L: open Anchor Layout menu\n"
             "- Alt+R: read anchor layout\n"
-            "- Alt+W: write anchor layout"
+            "- Alt+W: write anchor layout\n"
+            "- P, D: measure between 2 snapped points (horizontal/vertical)\n"
+            "- Right click while measuring: cancel probe"
         )
         QMessageBox.information(self, "Canvas Helpers & Shortcuts", helper_text)
 
@@ -790,6 +841,29 @@ class LiveTrackingTab(QWidget):
         self._map_view_stack.addWidget(self._map_3d)
         self.main_layout.addWidget(self._map_view_stack, 0, 0, 2, 2)
         self._map_view_stack.setCurrentWidget(self._canvas)
+
+    def _setup_live_subtabs(self):
+        self._live_sub_tabs = QTabWidget(self)
+        self._live_sub_tabs.setDocumentMode(True)
+        self._live_sub_tabs.setStyleSheet(
+            "QTabWidget::pane { border: 0; background: #0F172A; }"
+            "QTabBar::tab { background: #1E293B; color: #94A3B8; padding: 8px 18px; "
+            "border: 1px solid #334155; border-bottom: 0; }"
+            "QTabBar::tab:selected { color: #22D3EE; background: #0F172A; }"
+        )
+        self.main_layout.removeWidget(self._map_view_stack)
+        self._live_sub_tabs.addTab(self._map_view_stack, "2D Tracking")
+        self._distance_graph = DistanceGraph(self._live_sub_tabs)
+        self._live_sub_tabs.addTab(self._distance_graph, "Distance Log")
+        self._live_sub_tabs.currentChanged.connect(self._on_live_subtab_changed)
+        self.main_layout.addWidget(self._live_sub_tabs, 0, 0, 2, 2)
+        self._on_live_subtab_changed(0)
+
+    def _on_live_subtab_changed(self, index):
+        map_visible = index == 0
+        self._preview_overlay_btn.setVisible(map_visible)
+        self._detail_overlay_btn.setVisible(map_visible)
+        self._helpers_overlay_btn.setVisible(map_visible)
 
     def _toggle_map_view(self, show_3d):
         if show_3d and not OPENGL_AVAILABLE:
@@ -830,6 +904,7 @@ class LiveTrackingTab(QWidget):
     def _clear_tracking_trails(self):
         self._canvas.clear_trail()
         self._map_3d.clear_trail()
+        self._distance_graph.clear()
 
     def _position_canvas_preview_button(self):
         if not hasattr(self, "_preview_overlay_btn"):
@@ -890,10 +965,53 @@ class LiveTrackingTab(QWidget):
             label_widget = getattr(self, w, None)
             if label_widget:
                 label_widget.setText("-")
+        self._anchor_telemetry_cache.clear()
         self._last_anchor_mask = 0
         self._last_anchor_mask_valid = False
+        if hasattr(self, "_canvas") and hasattr(self._canvas, "clear_anchor_telemetry"):
+            self._canvas.clear_anchor_telemetry()
+
+    @staticmethod
+    def _anchor_telemetry_text(anchor):
+        distance_m = None
+        distance_mm = anchor.get("distance_mm")
+        if distance_mm is not None:
+            distance_m = float(distance_mm) / 1000.0
+        elif anchor.get("distance_cm") is not None:
+            distance_m = float(anchor["distance_cm"]) / 100.0
+
+        if distance_m is None:
+            return "-"
+
+        text = f"{distance_m:.3f} m"
+        if anchor.get("weight") is not None:
+            text += f"  |  W: {float(anchor['weight']) / 100.0:.2f}"
+        return text
+
+    def _show_anchor_telemetry(self, anchors):
+        """Render cached distance and weight values in the four live rows."""
+        for anchor in anchors or []:
+            anchor_id = int(anchor.get("anchor_id", 0) or 0)
+            if anchor_id <= 0:
+                text_id = str(anchor.get("id", "")).replace("A", "")
+                anchor_id = int(text_id) if text_id.isdigit() else 0
+            if anchor_id <= 0:
+                continue
+            cached = self._anchor_telemetry_cache.get(anchor_id, {}).copy()
+            cached.update(anchor)
+            cached["anchor_id"] = anchor_id
+            self._anchor_telemetry_cache[anchor_id] = cached
+
+        for anchor_idx in range(1, 5):
+            label_widget = getattr(self, f"d{anchor_idx}_label", None)
+            if label_widget is not None:
+                label_widget.setText(self._anchor_telemetry_text(self._anchor_telemetry_cache[anchor_idx])
+                                     if anchor_idx in self._anchor_telemetry_cache else "-")
 
     def _setup_dynamic_metrics(self):
+        if hasattr(self, "lbl_fps"):
+            self.lbl_fps.setText("Rate:")
+
         # Configure units for the statically loaded metric labels
         self.length_label.unit = "bytes"
         self.fusion_ts_label.unit = "ms"
@@ -976,6 +1094,7 @@ class LiveTrackingTab(QWidget):
         self._vm.ranging_stopped.connect(self._on_ranging_stopped)
         self._vm.position_updated.connect(self._on_position_updated)
         self._vm.sensor_fusion_updated.connect(self._on_sensor_fusion_updated)
+        self._vm.calib_data_updated.connect(self._on_calib_data_updated)
         self._vm.anchor_distances_updated.connect(self._on_anchor_distances)
         self._vm.anchor_layout_updated.connect(self._on_anchor_layout_updated)
         self._vm.stats_updated.connect(self._on_stats_updated)
@@ -1023,16 +1142,42 @@ class LiveTrackingTab(QWidget):
 
     def _start_ranging(self):
         if self._vm:
-            self._vm.start_ranging()
+            self._distance_graph.start_session()
+            yaw_deg = int(round(float(self.yaw_offset_spin.value()))) % 360
+            is_ukf_reinit = bool(self.reinit_ukf_check.isChecked())
+            self._vm.start_ranging(yaw_deg=yaw_deg, is_ukf_reinit=is_ukf_reinit)
 
     def _stop_ranging(self):
         if self._vm:
             self._vm.stop_ranging()
+            self._distance_graph.stop_session()
+
+    def _toggle_ranging(self):
+        if self._is_ranging:
+            self._stop_ranging()
+        else:
+            self._start_ranging()
+
+    def _sync_ranging_button(self):
+        if self._is_ranging:
+            self.btn_start.setText("Stop Ranging")
+            self.btn_start.setStyleSheet(
+                "QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; "
+                "border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 14px; }"
+                "QPushButton:hover { background: #EF4444; color: #F8FAFC; }"
+            )
+        else:
+            self.btn_start.setText("Start Ranging")
+            self.btn_start.setStyleSheet(
+                "QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981; "
+                "border-radius: 8px; font-weight: bold; font-size: 14px; }"
+                "QPushButton:hover { background: #10B981; }"
+            )
+        self.btn_start.setEnabled(True)
 
     def _on_ranging_started(self):
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
         self._is_ranging = True
+        self._sync_ranging_button()
         self._frame_count = 0
         self._start_time = time.time()
         self._canvas.clear_trail()
@@ -1041,9 +1186,9 @@ class LiveTrackingTab(QWidget):
         self._render_stats()
 
     def _on_ranging_stopped(self):
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
         self._is_ranging = False
+        self._distance_graph.stop_session()
+        self._sync_ranging_button()
         self._clear_live_metrics()
 
     def _on_position_updated(self, x, y, z, rms):
@@ -1083,6 +1228,9 @@ class LiveTrackingTab(QWidget):
         self._set_metric_value(self.sof_label, "0xAA")
         self._set_metric_value(self.length_label, payload_size, "{:d}")
         self._set_metric_value(self.anchor_mask_label, self._format_anchor_mask(anchor_mask, anchor_mask_valid))
+        ranging_anchors = last_sample.get("anchors", []) if self._vm and self._vm.model._position_history else []
+        if hasattr(self._canvas, "set_anchor_telemetry"):
+            self._canvas.set_anchor_telemetry(anchor_mask, ranging_anchors, anchor_mask_valid)
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
 
@@ -1128,15 +1276,16 @@ class LiveTrackingTab(QWidget):
         timestamp_ms = int(data.get("timestamp_ms", 0))
         err_count = int(data.get("ranging_error_count", 0))
         seq = int(data.get("seq", 0))
-        display_yaw = self._apply_yaw_offset(yaw)
+        ukf_step = int(data.get("ukf_step", 0))
 
         position = {
             "x": x,
             "y": y,
             "z": self._last_z,
             "error": self._last_rms,
-            "yaw": display_yaw,
+            "yaw": yaw,
             "raw_yaw": yaw,
+            "ukf_step": ukf_step,
             "tril_x": tril_x,
             "tril_y": tril_y,
             "source": "sensor_fusion",
@@ -1157,6 +1306,10 @@ class LiveTrackingTab(QWidget):
             self._last_anchor_mask = anchor_mask
             self._last_anchor_mask_valid = True
         self._set_metric_value(self.anchor_mask_label, self._format_anchor_mask(anchor_mask, anchor_mask_valid))
+        anchors = list(data.get("anchors", []) or [])
+        self._show_anchor_telemetry(anchors)
+        if hasattr(self._canvas, "set_anchor_telemetry"):
+            self._canvas.set_anchor_telemetry(anchor_mask, anchors, anchor_mask_valid)
 
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
@@ -1177,17 +1330,11 @@ class LiveTrackingTab(QWidget):
         self._set_metric_value(self.error_label, self._last_rms)
 
     def _on_anchor_distances(self, anchors):
-        for anchor in anchors:
-            anchor_id = anchor.get("id", "")
-            idx = anchor_id.replace("A", "")
-            label_widget = getattr(self, f"d{idx}_label", None)
-            if label_widget:
-                distance_cm = anchor.get("distance_cm")
-                self._set_metric_value(
-                    label_widget,
-                    None if distance_cm is None else float(distance_cm) / 100.0,
-                    "{:.3f}"
-                )
+        self._show_anchor_telemetry(anchors)
+
+    def _on_calib_data_updated(self, data: dict):
+        self._ensure_stream_active()
+        self._distance_graph.append_sample(data)
 
     def _update_stats(self):
         if not self._is_ranging:
@@ -1231,7 +1378,7 @@ class LiveTrackingTab(QWidget):
             rate = self._frame_count / uptime
 
         self.frames_label.setText(str(total))
-        self.fps_label.setText(f"{rate:.1f}")
+        self.fps_label.setText(f"{rate:.1f} Hz")
         self.success_label.setText(str(success))
         self.failed_label.setText(str(failed))
         self.timeout_label.setText(str(timeout))
@@ -1639,8 +1786,7 @@ class LiveTrackingTab(QWidget):
     def _refresh_map_list(self):
         self.cmb_user_map.clear()
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        maps_dir = os.path.join(base_dir, "data", "runtime")
+        maps_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
 
         if not os.path.exists(maps_dir):
             os.makedirs(maps_dir, exist_ok=True)
@@ -1739,6 +1885,7 @@ class LiveTrackingTab(QWidget):
         self._paste_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._paste_shortcut.activated.connect(self._paste_object)
 
+
         self._update_grid_settings()
         self._sync_map_height_visibility()
         self._set_editor_tool("room", "draw")
@@ -1773,6 +1920,7 @@ class LiveTrackingTab(QWidget):
         editor.cmb_zone_type.setItemText(0, "Allowed / Speed Limited")
         editor.cmb_zone_type.setItemText(1, "Banned (No Entry)")
         editor.cmb_zone_type.currentIndexChanged.connect(self._on_rule_zone_type_changed)
+        self._install_property_extensions(editor)
         self._on_rule_zone_type_changed(editor.cmb_zone_type.currentIndex())
 
         self._geometry_button = QPushButton("Add Point on Edge", self._properties_panel)
@@ -1793,6 +1941,83 @@ class LiveTrackingTab(QWidget):
         if delete_index >= 0:
             content_layout.insertStretch(delete_index, 1)
 
+    def _install_property_extensions(self, editor):
+        if not hasattr(editor, "cmb_wall_mode"):
+            editor.cmb_wall_mode = QComboBox(editor.gb_map_properties)
+            editor.cmb_wall_mode.addItem("Boundary outside room", "boundary_outside")
+            editor.cmb_wall_mode.addItem("Internal partition", "internal_partition")
+            editor.cmb_wall_mode.addItem("Free-standing", "free_standing")
+            editor.cmb_wall_host_room = QComboBox(editor.gb_map_properties)
+            editor.map_properties_form_layout.addRow("Wall behavior:", editor.cmb_wall_mode)
+            editor.map_properties_form_layout.addRow("Host room:", editor.cmb_wall_host_room)
+        if not hasattr(editor, "lbl_map_geometry"):
+            editor.lbl_map_geometry = QLabel(editor.tab_map_layout)
+            editor.lbl_map_geometry.setWordWrap(True)
+            editor.lbl_map_geometry.setStyleSheet("color: #93C5FD; font-family: Consolas; padding: 5px;")
+            editor.map_tab_layout.insertWidget(1, editor.lbl_map_geometry)
+
+    @staticmethod
+    def _polygon_metrics(points, closed=True):
+        pts = list(points or [])
+        if len(pts) < 2:
+            return 0.0, 0.0, []
+        edge_count = len(pts) if closed and len(pts) >= 3 else len(pts) - 1
+        edges = []
+        perimeter = 0.0
+        for idx in range(edge_count):
+            x1, y1 = pts[idx]
+            x2, y2 = pts[(idx + 1) % len(pts)]
+            length = math.hypot(x2 - x1, y2 - y1)
+            angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+            edges.append((length, angle))
+            perimeter += length
+        area = 0.0
+        if closed and len(pts) >= 3:
+            area = abs(sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts))) * 0.5)
+        return area, perimeter, edges
+
+    def _update_geometry_inspector(self, zone=None):
+        editor = self.geofence_editor_widget
+        label = getattr(editor, "lbl_map_geometry", None)
+        if label is None:
+            return
+        if zone is None and self._vm and self._canvas.selected_zone_id:
+            zone = next((z for z in self._vm.get_geofence_zones() if z.id == self._canvas.selected_zone_id), None)
+        if zone is None:
+            label.setText("Select an object to inspect dimensions.")
+            return
+        object_type = getattr(zone, "object_type", "zone")
+        area, perimeter, edges = self._polygon_metrics(zone.points, closed=object_type != "wall")
+        edge_parts = [f"S{i + 1} {length:.2f}m @ {angle:.0f}deg" for i, (length, angle) in enumerate(edges[:6])]
+        if len(edges) > 6:
+            edge_parts.append(f"+{len(edges) - 6} more")
+        edge_line = " | ".join(edge_parts)
+        if object_type == "wall":
+            text = f"Length {perimeter:.2f} m | Height {max(0.0, zone.max_z - zone.min_z):.2f} m | Thickness {float(getattr(zone, 'thickness', 0.2)):.2f} m"
+        elif object_type == "object":
+            text = f"{getattr(zone, 'object_subtype', 'generic').title()} | {getattr(zone, 'shape_kind', 'polygon').title()} | H {max(0.0, zone.max_z - zone.min_z):.2f} m | R {float(getattr(zone, 'radius_m', 0.0)):.2f} m"
+        else:
+            text = f"Area {area:.2f} m2 | Perimeter {perimeter:.2f} m"
+        if edge_line:
+            text += "\nEdges: " + edge_line
+        label.setText(text)
+
+    def _refresh_wall_host_rooms(self, selected_host_id=None):
+        combo = getattr(self.geofence_editor_widget, "cmb_wall_host_room", None)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("None", "")
+            if self._vm:
+                for room in self._vm.get_geofence_zones():
+                    if getattr(room, "object_type", "zone") == "room":
+                        combo.addItem(room.name, room.id)
+            idx = combo.findData(selected_host_id or "")
+            combo.setCurrentIndex(max(idx, 0))
+        finally:
+            combo.blockSignals(False)
     def _sync_room_origins(self, zones):
         for zone in zones or []:
             if getattr(zone, "object_type", "zone") != "room":
@@ -2669,7 +2894,9 @@ class LiveTrackingTab(QWidget):
                 self.geofence_editor_widget.cmb_map_type.blockSignals(True)
                 self.geofence_editor_widget.cmb_map_type.setCurrentIndex(idx)
                 self.geofence_editor_widget.cmb_map_type.blockSignals(False)
+            self._refresh_wall_host_rooms()
             self._sync_map_height_visibility()
+            self._update_geometry_inspector()
         if object_type == "object":
             self._sync_object_drawing_options()
         if object_type == "anchor":
@@ -2692,10 +2919,13 @@ class LiveTrackingTab(QWidget):
         self.geofence_editor_widget.btn_mode_room.setChecked(is_draw and draw_type == "room")
         self.geofence_editor_widget.btn_mode_wall.setChecked(is_draw and draw_type == "wall")
         self.geofence_editor_widget.btn_mode_object.setChecked(is_draw and draw_type == "object")
-        self.geofence_editor_widget.btn_mode_anchor.setChecked(draw_type == "anchor" and mode in {"draw", "pick_zone", "edit_vertices"})
+        self.geofence_editor_widget.btn_mode_anchor.setChecked(draw_type == "anchor" and mode in {"draw", "pick_zone"})
         self.geofence_editor_widget.btn_mode_draw.setChecked(is_draw and draw_type == "zone")
         self.geofence_editor_widget.btn_mode_edit_map.setChecked(is_edit and is_map_tab)
         self.geofence_editor_widget.btn_mode_edit.setChecked(is_edit and not is_map_tab)
+        if is_edit and draw_type == "anchor":
+            self.geofence_editor_widget.gb_map_properties.hide()
+            self._set_anchor_authoring_visible(False)
 
     def _sync_map_height_visibility(self, *_args):
         object_type = self.geofence_editor_widget.cmb_map_type.currentText().strip().lower()
@@ -2790,7 +3020,7 @@ class LiveTrackingTab(QWidget):
                     zone_type=object_type, points=wall_points, min_z=0.0, max_z=height, speed_limit=0.0,
                     color=draft_color or ("#F8FAFC" if object_type == "room" else "#0F172A"),
                     object_type=object_type,
-                    shape_kind=("footprint" if object_type == "wall" and wall_mode != "boundary_outside" and len(wall_points) >= 3 else "polygon"),
+                    shape_kind="polygon",
                     thickness=thickness if object_type == "wall" else 0.2,
                     wall_mode=wall_mode,
                     host_room_id=host_room_id,
@@ -2830,8 +3060,14 @@ class LiveTrackingTab(QWidget):
             self._refresh_rule_zone_colors(selected_color=zone.color)
             self._canvas.set_draw_object_type("zone")
         else:
+            self.geofence_editor_widget.editor_tabs.setCurrentIndex(0)
             self.geofence_editor_widget.txt_map_name.setText(zone.name)
-            type_index = self.geofence_editor_widget.cmb_map_type.findText(object_type.title())
+            if object_type == "room":
+                type_index = self.geofence_editor_widget.cmb_map_type.findText("Room", Qt.MatchFlag.MatchStartsWith)
+            elif object_type == "wall":
+                type_index = self.geofence_editor_widget.cmb_map_type.findText("Wall", Qt.MatchFlag.MatchStartsWith)
+            else:
+                type_index = self.geofence_editor_widget.cmb_map_type.findText("Object", Qt.MatchFlag.MatchStartsWith)
             if type_index >= 0:
                 self.geofence_editor_widget.cmb_map_type.setCurrentIndex(type_index)
             if object_type in {"wall", "object"}:
@@ -2839,13 +3075,14 @@ class LiveTrackingTab(QWidget):
             self._canvas.set_draw_object_type(object_type)
             if object_type == "object":
                 self._canvas.set_draw_object_shape(getattr(zone, "shape_kind", "polygon"))
+            self._refresh_wall_host_rooms(getattr(zone, "host_room_id", None))
             self._sync_map_height_visibility()
+            self._update_geometry_inspector(zone)
             if object_type == "room":
                 self._anchor_table_room_id = zone.id
                 self._refresh_active_rooms()
                 self._refresh_anchor_layout_table()
         self._set_editor_mode("edit_vertices")
-
     def _apply_map_properties_from_enter(self):
         """Apply the visible map-object/anchor editor exactly like the Update button."""
         if not self.geofence_editor_widget.gb_map_properties.isVisible():
@@ -2892,7 +3129,7 @@ class LiveTrackingTab(QWidget):
 
         selected_id = self._canvas.selected_zone_id
         if not selected_id or not self._vm:
-            QMessageBox.warning(self, "No Selection", "Select a room or wall on the map first.")
+            QMessageBox.warning(self, "No Selection", "Select a room, wall, or object on the map first.")
             return
 
         objects = self._vm.get_geofence_zones()
@@ -2905,15 +3142,88 @@ class LiveTrackingTab(QWidget):
         if selected_type == "anchor":
             QMessageBox.warning(self, "Wrong Object Type", "Select an anchor on the map first.")
             return
-        object_type = "wall" if selected_type == "wall" else "room"
+        if selected_type.startswith("wall"):
+            object_type = "wall"
+        elif selected_type.startswith("object"):
+            object_type = "object"
+        else:
+            object_type = "room"
+
         zone.object_type = object_type
         zone.zone_type = object_type
         zone.name = self.geofence_editor_widget.txt_map_name.text().strip() or object_type.title()
         zone.min_z = 0.0
-        zone.max_z = self.geofence_editor_widget.sb_map_height.value() if object_type == "wall" else 0.0
+        zone.max_z = self.geofence_editor_widget.sb_map_height.value() if object_type in {"wall", "object"} else 0.0
         zone.speed_limit = 0.0
+
+        panel = getattr(self, "_properties_panel", None)
+        color_value = None
+        if panel is not None and hasattr(panel, "cmb_color") and panel.cmb_color.count() > 0:
+            color_value = panel.cmb_color.currentData()
+        if not color_value:
+            color_value = getattr(zone, "color", None)
+        if object_type == "room":
+            zone.color = color_value or "#F8FAFC"
+            zone.wall_mode = "free_standing"
+            zone.host_room_id = None
+            zone.shape_kind = "polygon"
+            zone.object_subtype = "generic"
+            zone.object_direction = "up"
+            zone.radius_m = 0.0
+        elif object_type == "wall":
+            thickness_val = float(getattr(zone, "thickness", 0.2))
+            if panel is not None and hasattr(panel, "sb_thickness"):
+                thickness_val = max(0.01, float(panel.sb_thickness.value()))
+            wall_mode_val = getattr(zone, "wall_mode", "free_standing")
+            if panel is not None and hasattr(panel, "cmb_wall_mode"):
+                wall_mode_val = panel.cmb_wall_mode.currentData() or wall_mode_val
+            host_room_val = getattr(zone, "host_room_id", None)
+            if panel is not None and hasattr(panel, "cmb_wall_host_room"):
+                host_room_val = panel.cmb_wall_host_room.currentData() or None
+            zone.color = color_value or "#0F172A"
+            zone.thickness = thickness_val
+            zone.wall_mode = wall_mode_val
+            zone.host_room_id = host_room_val
+            zone.shape_kind = "polygon"
+            zone.object_subtype = "generic"
+            zone.object_direction = "up"
+            zone.radius_m = 0.0
+        else:
+            shape_kind_val = getattr(zone, "shape_kind", "polygon")
+            if panel is not None and hasattr(panel, "cmb_object_shape"):
+                shape_kind_val = panel.cmb_object_shape.currentData() or shape_kind_val
+            object_subtype_val = getattr(zone, "object_subtype", "generic")
+            if panel is not None and hasattr(panel, "cmb_object_kind"):
+                object_subtype_val = panel.cmb_object_kind.currentData() or object_subtype_val
+            object_direction_val = getattr(zone, "object_direction", "up")
+            if panel is not None and hasattr(panel, "cmb_object_direction"):
+                object_direction_val = panel.cmb_object_direction.currentData() or object_direction_val
+            if object_subtype_val == "stairs":
+                shape_kind_val = "polygon"
+            zone.color = color_value or "#F59E0B"
+            zone.wall_mode = "free_standing"
+            zone.host_room_id = None
+            zone.shape_kind = shape_kind_val
+            zone.object_subtype = object_subtype_val
+            zone.object_direction = object_direction_val
+            if shape_kind_val == "circle":
+                points = list(getattr(zone, "points", []) or [])
+                if len(points) >= 3:
+                    center_x = sum(point[0] for point in points) / len(points)
+                    center_y = sum(point[1] for point in points) / len(points)
+                    zone.radius_m = max(0.01, sum(math.hypot(point[0] - center_x, point[1] - center_y) for point in points) / len(points))
+                else:
+                    zone.radius_m = max(0.01, float(getattr(zone, "radius_m", 0.0)) or 0.5)
+            else:
+                zone.radius_m = 0.0
+
         self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
+        if hasattr(self, "_properties_panel"):
+            if object_type == "wall":
+                self._properties_panel.set_rooms_list(self._room_zones())
+            self._properties_panel.load_zone(zone)
         self._canvas.update()
+        self._update_geometry_inspector(zone)
         if object_type == "room":
             self._refresh_anchor_membership_from_canvas()
             self._refresh_active_rooms()
@@ -2923,7 +3233,6 @@ class LiveTrackingTab(QWidget):
                     "Room Needs Anchors",
                     "This room has no complete anchor layout. Open the Anchor tool and place at least 3 anchors inside it.",
                 )
-
     def _apply_zone_properties(self):
         selected_id = self._canvas.selected_zone_id
         if not selected_id or not self._vm:
@@ -3205,6 +3514,7 @@ class LiveTrackingTab(QWidget):
             self._schedule_geofence_layout_emit()
             if getattr(zone, "object_type", "zone") == "room":
                 self._refresh_anchor_membership_from_canvas()
+            self._update_geometry_inspector(zone)
 
     def _on_canvas_zone_properties_updated(self, zone_id, props):
         if not self._vm:
@@ -3250,13 +3560,13 @@ class LiveTrackingTab(QWidget):
                 self.geofence_editor_widget.blockSignals(False)
                 
             self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
+            self._update_geometry_inspector(zone)
 
     def _load_map(self):
         if not self._vm:
             return
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        default_dir = os.path.join(base_dir, "data", "runtime")
+        default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
         os.makedirs(default_dir, exist_ok=True)
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -3295,8 +3605,7 @@ class LiveTrackingTab(QWidget):
             QMessageBox.warning(self, "Invalid Map", "\n".join(errors))
             return
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        default_dir = os.path.join(base_dir, "data", "runtime")
+        default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
         os.makedirs(default_dir, exist_ok=True)
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -3390,7 +3699,7 @@ class LiveTrackingTab(QWidget):
             )
             self.warning_label.setVisible(True)
         elif status == "overspeed":
-            self.warning_label.setText(f"⚠️ OVERSPEED IN {zone_name.upper()}! (Limit: {speed_limit:.1f} m/s)")
+            self.warning_label.setText(f"OVERSPEED IN {zone_name.upper()}! (Limit: {speed_limit:.1f} m/s)")
             self.warning_label.setStyleSheet(
                 "color: white; font-size: 14px; font-weight: bold; background-color: #F59E0B; padding: 2px 10px; border-radius: 4px;"
             )

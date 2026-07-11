@@ -91,6 +91,7 @@ RANGING_STATS_EMIT_INTERVAL_S = 0.20
 class RangingModel(QObject):
     position_updated = pyqtSignal(float, float, float, float) # x, y, z, rms
     sensor_fusion_updated = pyqtSignal(dict)
+    calib_data_updated = pyqtSignal(dict)
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
     anchor_layout_updated = pyqtSignal(list)
@@ -103,6 +104,7 @@ class RangingModel(QObject):
         if self._ranging_repo:
             self._ranging_repo.position_parsed.connect(self._handle_position_sample)
             self._ranging_repo.sensor_fusion_parsed.connect(self._handle_sensor_fusion_sample)
+            self._ranging_repo.calib_data_parsed.connect(self._handle_calib_data_sample)
             self._ranging_repo.anchor_distances_parsed.connect(self._handle_anchor_distances)
             self._ranging_repo.anchor_layout_parsed.connect(self._handle_anchor_layout_data)
             self._ranging_repo.stats_parsed.connect(self._handle_stats_data)
@@ -151,6 +153,20 @@ class RangingModel(QObject):
     def anchor_layout(self):
         return self._anchor_layout
 
+    def _update_hz_stat(self, now: float) -> None:
+        if self._last_result_time > 0:
+            dt = now - self._last_result_time
+            if dt > 0:
+                instant_rate = min(50.0, 1.0 / dt)  # Cap at 50Hz to filter out OS/serial buffering spikes
+                current_rate = self._stats.get("update_rate_hz", 0.0)
+                if current_rate <= 0.0:
+                    new_rate = instant_rate
+                else:
+                    # Exponential Moving Average to smooth out instant Jitter
+                    new_rate = 0.15 * instant_rate + 0.85 * current_rate
+                self._stats["update_rate_hz"] = round(new_rate, 1)
+        self._last_result_time = now
+
     def _send_command(self, command_name: str, dst_addr: int, **kwargs):
         if self._command_bus:
             return self._command_bus.send(command_name, dst_addr=dst_addr, **kwargs)
@@ -167,15 +183,19 @@ class RangingModel(QObject):
                 force=force,
                 **kwargs,
             )
-        shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
-        return True
+        return shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
 
     def send_command(self, command_name: str, dst_addr: int = VvAddress.MCU, **kwargs):
         """Public model command path used by ViewModels when no CommandBus is injected."""
         return self._send_command(command_name, dst_addr=dst_addr, **kwargs)
 
-    def start_ranging(self):
-        pkt = self._send_command("ranging_start", dst_addr=VvAddress.MCU)
+    def start_ranging(self, yaw_deg: int | float = 0, is_ukf_reinit: bool = False):
+        pkt = self._send_command(
+            "ranging_start",
+            dst_addr=VvAddress.MCU,
+            yaw_deg=yaw_deg,
+            is_ukf_reinit=is_ukf_reinit,
+        )
         self.is_ranging = True
         shared_app_state.ranging_active = True
         shared_app_state.update_job("ranging_session", JobState.RUNNING)
@@ -249,6 +269,12 @@ class RangingModel(QObject):
                 seq=seq,
                 packet_timestamp_ms=packet_timestamp_ms,
             )
+        elif param_name == "calib_data":
+            self._handle_calib_data(
+                pkt.calib_data,
+                seq=seq,
+                packet_timestamp_ms=packet_timestamp_ms,
+            )
         elif param_name == "anchor_layout_resp":
             self._handle_anchor_layout(pkt.anchor_layout_resp)
         elif param_name == "ranging_status_resp":
@@ -309,8 +335,9 @@ class RangingModel(QObject):
                 "distance_cm": distance_mm / 10.0,
                 "fp_amp": int(getattr(anchor, "fp_amp", 0) or 0),
             })
-            if 0 <= anchor_id < 32:
-                anchor_mask |= 1 << anchor_id
+            # Protocol convention: bit 0 selects Anchor 1, bit 1 Anchor 2, ...
+            if 1 <= anchor_id <= 32:
+                anchor_mask |= 1 << (anchor_id - 1)
             if anchor_id:
                 distances_by_anchor[anchor_id] = distance_mm
         return anchors, anchor_mask, distances_by_anchor
@@ -350,11 +377,7 @@ class RangingModel(QObject):
         self._stats["total_count"] += 1
         self._stats["success_count"] += 1
         self._stats["last_rms_error_m"] = sample["rms_error_m"]
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
-        self._last_result_time = now
+        self._update_hz_stat(now)
 
         self._emit_position_if_due(sample, now=now)
         if anchors:
@@ -372,6 +395,7 @@ class RangingModel(QObject):
         ]
         room_frame = self._extract_room_frame_fields(res)
         sample = {
+            "ukf_step": int(getattr(res, "ukf_step", 0)),
             "ukf_x_m": float(getattr(res, "ukf_x_m", 0)) / 100.0,
             "ukf_y_m": float(getattr(res, "ukf_y_m", 0)) / 100.0,
             "ukf_yaw_deg": float(getattr(res, "ukf_yaw_deg", 0)) / 100.0,
@@ -464,11 +488,7 @@ class RangingModel(QObject):
         self._stats["last_rms_error_m"] = stored.get("rms_error_m", stored.get("rms", 0.0))
 
         now = stored.get("received_at", time.time())
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
-        self._last_result_time = now
+        self._update_hz_stat(now)
 
         self._emit_position_if_due(stored, now=now)
         self._emit_stats_if_due(now=now)
@@ -502,13 +522,35 @@ class RangingModel(QObject):
         self._stats["total_count"] = int(self._stats.get("total_count", 0)) + 1
         self._stats["success_count"] = int(self._stats.get("success_count", 0)) + 1
         self._stats["ranging_error_count"] = enriched.get("ranging_error_count", 0)
-        if self._last_result_time > 0:
-            dt = now - self._last_result_time
-            if dt > 0:
-                self._stats["update_rate_hz"] = round(1.0 / dt, 1)
-        self._last_result_time = now
+        self._update_hz_stat(now)
         self._emit_sensor_fusion_if_due(enriched, now=now)
+        if enriched.get("anchors"):
+            self._emit_anchor_distances_if_due(enriched["anchors"], now=now)
         self._emit_stats_if_due(now=now)
+
+    def _handle_calib_data_sample(self, sample: dict):
+        self.calib_data_updated.emit(sample.copy())
+
+    def _handle_calib_data(self, data, seq: int = 0, packet_timestamp_ms: int = 0):
+        sample = {
+            "source": "calib_data",
+            "seq": int(seq or 0),
+            "packet_timestamp_ms": int(packet_timestamp_ms or 0),
+            "received_at": time.time(),
+            "anchor_mask": int(getattr(data, "anchor_mask", 0)),
+            "tx_frame_cnt": int(getattr(data, "tx_frame_cnt", 0)),
+            "ax": float(getattr(data, "ax", 0.0)),
+            "ay": float(getattr(data, "ay", 0.0)),
+            "gz": float(getattr(data, "gz", 0.0)),
+            "px": float(getattr(data, "px", 0.0)),
+            "py": float(getattr(data, "py", 0.0)),
+            "distance": [float(value) for value in getattr(data, "distance", [])],
+            "fp_amp_norm": [float(value) for value in getattr(data, "fp_amp_norm", [])],
+            "fp_snr": [float(value) for value in getattr(data, "fp_snr", [])],
+            "error_frame_cnt": int(getattr(data, "error_frame_cnt", 0)),
+            "dt": float(getattr(data, "dt", 0.0)),
+        }
+        self._handle_calib_data_sample(sample)
 
     def _should_emit(self, attr_name: str, now: float, interval_s: float) -> bool:
         last = float(getattr(self, attr_name, 0.0) or 0.0)

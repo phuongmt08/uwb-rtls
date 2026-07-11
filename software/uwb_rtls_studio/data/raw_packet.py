@@ -49,8 +49,16 @@ class RawPacket:
                     preserving_proto_field_name=True,
                     including_default_value_fields=True,
                 )
+            if not parsed_dict:
+                parsed_dict = {
+                    "__message_name__": str(param_name or ""),
+                    "__empty_message__": True,
+                }
         except Exception:
-            parsed_dict = {}
+            parsed_dict = {
+                "__message_name__": str(param_name or ""),
+                "__decode_failed__": True,
+            }
 
         return cls(
             param_name=param_name,

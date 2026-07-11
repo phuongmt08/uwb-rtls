@@ -6,7 +6,7 @@ from typing import Tuple
 OUTPUT_TXT_ENABLED = True
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"csv/05_07_26/20260705_14g05p_ukf_log_data.csv"
+SOURCE_DATA_FILE = r"D:/HOC/S/STM32/IDE/DATN/uwb-rtls/software/data/11_07_26/20260711_14g59p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ TEST_UKF_Q_R_Params = False
 ANCHOR_1_X = 0.7
 ANCHOR_1_Y = 0.03
 
-ANCHOR_2_X = 0.7
+ANCHOR_2_X = 2.70
 ANCHOR_2_Y = 8.37
 
 ANCHOR_3_X = 7.5
@@ -59,7 +59,7 @@ ANCHOR_POSITIONS = np.array([
 UKF_STATE_SIZE = 8
 UKF_PROCESS_NOISE_SIZE = 3
 UKF_MEASUREMENT_SIZE = 3
-UKF_ALPHA = 0.001
+UKF_ALPHA = 1.0
 UKF_KAPPA = 0.0
 UKF_BETA = 2.0
 
@@ -157,10 +157,10 @@ TARGET_PORT = "COM15"
 UART_SOF = 0xAA
 
 # ==================== LIVE PLOT CONFIGURATION ====================
-GROUND_TRUTH_D1 = 5.63
-GROUND_TRUTH_D2 = 5.63
-GROUND_TRUTH_D3 = 5.63
-GROUND_TRUTH_D4 = 5.63
+GROUND_TRUTH_D1 = 5.357
+GROUND_TRUTH_D2 = 4.370
+GROUND_TRUTH_D3 = 5.357
+GROUND_TRUTH_D4 = 5.357
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
@@ -221,7 +221,7 @@ IMU_FRAME_SIZE = struct.calcsize(IMU_FRAME_FORMAT)
 CSV_UKF_FILENAME_PREFIX = "ukf_log_data"
 CSV_UKF_FILENAME_SUFFIX = ".csv"
 
-CSV_UKF_FUSION_FILENAME_PREFIX = "ukf_fusion_data"
+CSV_UKF_FUSION_FILENAME_PREFIX = "fusion_frame_log_data"
 CSV_UKF_FUSION_FILENAME_SUFFIX = ".csv"
 
 # File naming

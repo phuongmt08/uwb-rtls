@@ -216,15 +216,21 @@ class BleScanRepository(QObject):
             adv_data = self._adv_status_by_key.get(candidate)
             if not adv_data:
                 continue
+            # Ensure device_types match if both are specified to prevent Tag-3 / Anchor-3 collision
+            dev_type = device.get("device_type")
+            adv_type = adv_data.get("device_type")
+            if dev_type and adv_type and dev_type != adv_type:
+                continue
             self._merge_adv_payload(device, adv_data, match_key=str(candidate))
             return True
         return False
 
     def _merge_adv_payload(self, device: dict, adv_data: dict, *, match_key: str = "") -> None:
-        serial_number = int(adv_data.get("serial_number") or device.get("serial_number") or 0)
+        serial_number = int(device.get("serial_number") or adv_data.get("serial_number") or 0)
         if serial_number:
             device["serial_number"] = serial_number
-            device["serial"] = f"0x{serial_number:08X}"
+            if not device.get("serial"):
+                device["serial"] = f"0x{serial_number:08X}"
         elif not device.get("serial") and adv_data.get("serial"):
             device["serial"] = str(adv_data.get("serial") or "")
 

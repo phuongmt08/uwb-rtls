@@ -39,19 +39,19 @@ class VvProtocol(_VvProtocol):
         rx_timeout_ms: int = 120,
         uwb_channel: int = 5,
         uwb_prf: int = 64,
-        uwb_data_rate: int = 6800,
+        uwb_data_rate: int = 2,
         uwb_preamble_code: int = 9,
         tx_antenna_delay: int = 16436,
         rx_antenna_delay: int = 16436,
         tx_power: int = 0,
         anchor_list: bytes = b"",
-        power_mode: int = 0,
-        uwb_preamble_len: int = 0,
-        uwb_rx_pac: int = 0,
-        uwb_ns_sfd: int = 0,
+        power_mode: int = 3,
+        uwb_preamble_len: int = 0x34,
+        uwb_rx_pac: int = 2,
+        uwb_ns_sfd: int = 1,
         uwb_phr_mode: int = 0,
-        smart_tx_power: bool = False,
-        pg_delay: int = 0,
+        smart_tx_power: bool = True,
+        pg_delay: int = 0xC2,
     ):
         return self._commands.sys_config_set(
             src, dst, seq,
@@ -70,8 +70,21 @@ class VvProtocol(_VvProtocol):
         return self._commands.sys_ranging_cfg_set(src, dst, seq, period_ms=period_ms, timeout_ms=timeout_ms)
     def build_sys_ranging_cfg_resp(self, src: int, dst: int, seq: int):
         return self._commands.sys_ranging_cfg_resp(src, dst, seq)
-    def build_ranging_start(self, src: int, dst: int, seq: int):
-        return self._commands.ranging_start(src, dst, seq)
+    def build_ranging_start(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        yaw_deg: int | float = 0,
+        is_ukf_reinit: bool = False,
+    ):
+        return self._commands.ranging_start(
+            src,
+            dst,
+            seq,
+            yaw_deg=yaw_deg,
+            is_ukf_reinit=is_ukf_reinit,
+        )
     def build_ranging_stop(self, src: int, dst: int, seq: int):
         return self._commands.ranging_stop(src, dst, seq)
     def build_ranging_result(self, src: int, dst: int, seq: int):
@@ -228,6 +241,31 @@ class VvProtocol(_VvProtocol):
         return self._commands.calib_status_get(src, dst, seq)
     def build_calib_status_resp(self, src: int, dst: int, seq: int):
         return self._commands.calib_status_resp(src, dst, seq)
+    def build_calib_start(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        sample_target: int = 32,
+        tag_x_m: float = 2.0,
+        tag_y_m: float = 2.0,
+        tag_z_m: float = 1.0,
+        reference_position_valid: bool = True,
+    ):
+        return self._commands.calib_start(
+            src,
+            dst,
+            seq,
+            sample_target=sample_target,
+            tag_x_m=tag_x_m,
+            tag_y_m=tag_y_m,
+            tag_z_m=tag_z_m,
+            reference_position_valid=reference_position_valid,
+        )
+    def build_calib_stop(self, src: int, dst: int, seq: int):
+        return self._commands.calib_stop(src, dst, seq)
+    def build_calib_candidate_apply(self, src: int, dst: int, seq: int, anchor_mask: int = 0xF):
+        return self._commands.calib_candidate_apply(src, dst, seq, anchor_mask=anchor_mask)
     def build_end_session(self, src: int, dst: int, seq: int, reason: int = 0):
         return self._commands.end_session(src, dst, seq, reason=reason)
     def build_factory_otp_write(

@@ -1,6 +1,6 @@
 """
 ===============================================================================
-  UWB RTLS Studio — Unified Application State & Thread Registry
+  UWB RTLS Studio - Unified Application State & Thread Registry
 ===============================================================================
   File        : utils/app_state.py
   Description : Centralized state management ("Shared Memory"), Job State Machine,
@@ -13,16 +13,16 @@ from __future__ import annotations
 import logging
 import threading
 from typing import Dict, Any, List, Optional, Callable
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from services.query_state_machine import QueryQueueManager, QueryState
 from utils.command_flags import is_command_enabled
 
 log = logging.getLogger(__name__)
 
-# ── Centralized Retry & Timeout Configurations ────────────────────────────────
+# Centralized Retry & Timeout Configurations
 # Modifying these values updates retry/timeout behavior across the entire app.
-QUERY_TIMEOUT_S = 1.0          # Time to wait for expected response (seconds)
+QUERY_TIMEOUT_S = 2.5          # BLE response wait; avoids false retries on slow/fragmented replies
 QUERY_MAX_RETRIES = 3          # Maximum attempts per command on timeout
 
 # Polling intervals in milliseconds
@@ -93,7 +93,7 @@ class SharedAppState(QObject):
     Singleton Shared Memory & Reactive State.
     Any tab can read/write and connect to signals to stay fully synchronized.
     """
-    # ── Reactive State Signals ───────────────────────────────────────
+    # Reactive State Signals
     connection_status_changed = pyqtSignal(str)   # "Disconnected", "Connecting", "Connected"
     connected_device_changed = pyqtSignal(dict)    # Device info (mac, name, role, fw_version, hw_version, serial)
     battery_info_changed = pyqtSignal(dict)       # Voltage, SOC, remains, charging, temps...
@@ -129,7 +129,7 @@ class SharedAppState(QObject):
             self._initialized = True
             self.threads = ThreadRegistry()
 
-        # ── State Store (Private Variables) ───────────────────────────
+        # State Store (Private Variables)
         self._connection_status = "Disconnected"
         self._connected_device: Dict[str, Any] = {}
         self._battery_info: Dict[str, Any] = {}
@@ -153,8 +153,10 @@ class SharedAppState(QObject):
         # Job State Machine storage
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._query_manager: QueryQueueManager | None = None
+        self._query_generation = 0
+        self._received_payload_names: set[str] = set()
 
-    # ── Getters / Setters with Reactive Signaling ──────────────────────
+    # Getters / Setters with Reactive Signaling
 
     @property
     def connection_status(self) -> str:
@@ -316,8 +318,7 @@ class SharedAppState(QObject):
         if self._manual_test_mode_enabled != enabled:
             self._manual_test_mode_enabled = enabled
             if enabled and self._query_manager:
-                self._query_manager.reset()
-                self.update_job("query_queue", JobState.IDLE, progress=0)
+                self.cancel_query_pipeline("manual test mode enabled")
             self.manual_test_mode_changed.emit(enabled)
 
     @property
@@ -329,16 +330,13 @@ class SharedAppState(QObject):
         self._rtos_task_stats = [item.copy() for item in val]
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
+    def clear_query_payload_markers(self) -> None:
+        """Forget decoded response markers without clearing UI state."""
+        self._received_payload_names.clear()
+
     def clear_device_session_state(self) -> None:
         """Clear all device-specific configurations and telemetry states."""
-        if hasattr(self, '_query_manager') and self._query_manager:
-            self._query_manager.reset()
-        try:
-            from services.command_bus import shared_command_bus
-            if shared_command_bus:
-                shared_command_bus.reset()
-        except Exception:
-            pass
+        self.cancel_query_pipeline("device session state cleared")
         self._connected_device = {}
         self._battery_info = {}
         self._ble_status = {}
@@ -355,6 +353,7 @@ class SharedAppState(QObject):
         self._rtos_resource = {}
         self._rtos_task_stats = []
         self._device_type = 0
+        self._received_payload_names.clear()
 
         # Emit the changes so that the Views are notified
         self.connected_device_changed.emit(self._connected_device)
@@ -374,7 +373,23 @@ class SharedAppState(QObject):
         self.rtos_resource_changed.emit(self._rtos_resource)
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
-    # ── Global Query Queue Management (Retry/Timeout logic) ─────────
+    # Global Query Queue Management (Retry/Timeout logic)
+
+    def cancel_query_pipeline(self, reason: str = "") -> None:
+        """Cancel queued/active queries and invalidate delayed recovery retries."""
+        self._query_generation += 1
+        if hasattr(self, '_query_manager') and self._query_manager:
+            self._query_manager.reset()
+        try:
+            from services.command_bus import shared_command_bus
+            if shared_command_bus:
+                shared_command_bus.reset()
+        except Exception as exc:
+            log.debug("Could not reset command bus while cancelling query pipeline: %s", exc)
+        if hasattr(self, '_jobs'):
+            self.update_job("query_queue", JobState.IDLE, progress=0)
+        if reason:
+            log.info("[SharedAppState] Query pipeline cancelled: %s", reason)
 
     def init_query_manager(self, send_packet_fn: Callable[[str, int, Dict[str, Any]], Any]) -> None:
         """Initialize the global query queue manager with the packet sending function."""
@@ -386,16 +401,19 @@ class SharedAppState(QObject):
         )
         log.info("[SharedAppState] Query manager initialized.")
 
-    def enqueue_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
-        """Add a query to the sequential execution queue."""
+    def enqueue_query(self, command_name: str, dst_addr: int, **kwargs) -> bool:
+        """Add a query to the sequential execution queue.
+
+        Returns True only when the query was actually queued.
+        """
         traffic_class = kwargs.pop("traffic_class", kwargs.pop("_traffic_class", ""))
         if self._manual_test_mode_enabled:
             log.debug("[SharedAppState] Query skipped by manual test mode: %s", command_name)
-            return
+            return False
 
         if not is_command_enabled(command_name):
             log.info("[SharedAppState] Query skipped by command flag: %s", command_name)
-            return
+            return False
 
         try:
             from services.traffic_scheduler import shared_traffic_scheduler
@@ -406,13 +424,13 @@ class SharedAppState(QObject):
             )
             if not decision.allowed:
                 log.debug("[SharedAppState] Query skipped by traffic scheduler: %s (%s)", command_name, decision.reason)
-                return
+                return False
         except ImportError:
             pass
 
         if not hasattr(self, '_query_manager') or not self._query_manager:
             log.warning("[SharedAppState] Query manager not initialized. Can't enqueue.")
-            return
+            return False
         
         if traffic_class:
             kwargs["traffic_class"] = traffic_class
@@ -420,9 +438,13 @@ class SharedAppState(QObject):
         if not self._query_manager.is_running:
             self.update_job("query_queue", JobState.RUNNING)
             self._query_manager.start()
+        return True
 
     def handle_incoming_packet(self, param_name: str, pkt: Any) -> None:
         """Route incoming packets to the query queue manager to check for response matches."""
+        name = str(param_name or "")
+        if name.endswith("_resp") or name == "device_type_set":
+            self._received_payload_names.add(name)
         if hasattr(self, '_query_manager') and self._query_manager:
             self._query_manager.handle_response(param_name, pkt)
 
@@ -435,15 +457,102 @@ class SharedAppState(QObject):
         """Called when the sequential query queue finishes execution."""
         success_count = sum(1 for r in results if r["status"] == "SUCCESS")
         total_count = len(results)
-        
-        status = JobState.SUCCESS if success_count == total_count else JobState.FAILED
-        self.update_job("query_queue", status, progress=100)
-        
+        failed = [r for r in results if r["status"] != "SUCCESS"]
+        retryable = [
+            r for r in failed
+            if r.get("expected_response") and str(r.get("command_name") or "").endswith("_get")
+        ]
+
         log.info("--- Global Query Queue Execution Report ---")
         for r in results:
-            log.info(f"  Query: {r['command_name']} -> {r['status']} (retries: {r['retries']})")
+            log.info(
+                "  Query: %s -> %s (retries: %s, seq: %s, ack: %s, resp_seq: %s, expected: %s)",
+                r["command_name"],
+                r["status"],
+                r["retries"],
+                r.get("seq"),
+                r.get("ack_received"),
+                r.get("response_seq"),
+                r.get("expected_response"),
+            )
 
-    # ── Job State Machine Implementation ─────────────────────────────
+        if retryable:
+            missing = ", ".join(str(r.get("command_name")) for r in retryable)
+            message = f"[GlobalQueue] Missing GET payload(s), scheduling recovery: {missing}"
+            print(message, flush=True)
+            log.warning(message)
+            self.update_job("query_queue", JobState.RETRYING, progress=95, retries=len(retryable), error_msg=missing)
+            self._schedule_query_recovery(retryable, self._query_generation)
+            return
+
+        status = JobState.SUCCESS if success_count == total_count else JobState.FAILED
+        self.update_job("query_queue", status, progress=100)
+        if status == JobState.SUCCESS and total_count:
+            message = f"FULL PACKET: Global query queue received all {total_count}/{total_count} packet(s)."
+            print(message, flush=True)
+            log.info(message)
+
+    def _response_payload_available(self, expected_response: str) -> bool:
+        """Return True when a late packet already updated shared state."""
+        payload_map = {
+            "anchor_layout_resp": self._anchor_layout,
+            "sys_config_resp": self._sys_config,
+            "sys_ranging_cfg_resp": self._sys_ranging_cfg,
+            "ranging_status_resp": self._ranging_stats,
+            "sensor_fusion_cfg_resp": self._sensor_fusion_cfg,
+            "pos_calib_cfg_resp": self._pos_calib_cfg,
+            "calib_status_resp": self._calib_status,
+            "rtos_resource_resp": self._rtos_resource,
+            "rtos_task_stats_resp": self._rtos_task_stats,
+        }
+        expected = str(expected_response or "")
+        if expected in self._received_payload_names:
+            return True
+        if expected == "device_type_set":
+            return bool(self._device_type)
+        payload = payload_map.get(expected)
+        return bool(payload)
+
+    def _schedule_query_recovery(self, retryable: List[Dict[str, Any]], generation: int) -> None:
+        def _retry_missing_queries() -> None:
+            if generation != self._query_generation:
+                log.debug("Skipping stale query recovery wave generation=%s current=%s", generation, self._query_generation)
+                return
+            if self._connection_status != "Connected":
+                log.info("Skipping query recovery because connection_status=%s", self._connection_status)
+                return
+
+            still_missing = []
+            for item in retryable:
+                expected = str(item.get("expected_response") or "")
+                if self._response_payload_available(expected):
+                    log.info(
+                        "[GlobalQueue] Recovery skipped for %s because payload %s is already in app state.",
+                        item.get("command_name"),
+                        expected,
+                    )
+                    continue
+                still_missing.append(item)
+
+            if not still_missing:
+                self.update_job("query_queue", JobState.SUCCESS, progress=100)
+                message = "FULL PACKET: Global query queue recovered all missing packet(s) from late payloads."
+                print(message, flush=True)
+                log.info(message)
+                return
+
+            for item in still_missing:
+                kwargs = dict(item.get("kwargs") or {})
+                kwargs["traffic_class"] = "bootstrap"
+                self.enqueue_query(
+                    str(item.get("command_name") or ""),
+                    int(item.get("dst_addr") or 0),
+                    **kwargs,
+                )
+
+        QTimer.singleShot(750, _retry_missing_queries)
+
+    # Job State Machine Implementation
 
     def update_job(self, job_name: str, status: str, progress: int = 0, retries: int = 0, error_msg: str = "") -> None:
         """Update job status and notify listeners across all tabs."""

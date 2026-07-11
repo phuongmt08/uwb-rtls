@@ -1,5 +1,6 @@
 import os
 import queue
+import sys
 import threading
 import time
 
@@ -10,7 +11,14 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5 import uic
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt5.QtWidgets import QComboBox, QLabel, QMainWindow
+from PyQt5.QtWidgets import QComboBox, QDoubleSpinBox, QLabel, QMainWindow, QPushButton
+
+SOFTWARE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if SOFTWARE_DIR not in sys.path:
+    sys.path.insert(0, SOFTWARE_DIR)
+
+from common.commands import CommandFactory
+from common.transport import VvAddress, VvProtocol
 
 from ..config import (
     ANCHOR_POSITIONS,
@@ -31,12 +39,9 @@ GROUND_TRUTH_HORIZONTAL_M = 2.8
 GROUND_TRUTH_VERTICAL_M = 6
 GROUND_TRUTH_START_1 = "start_1"
 GROUND_TRUTH_START_2 = "start_2"
-UKF_POS_ALL = "all"
-UKF_POS_PREDICT = "predict"
-UKF_POS_UPDATE = "update"
-UKF_POS_SPLIT = "split"
 UKF_STEP_PREDICT = 0
 UKF_STEP_UPDATE = 1
+HEADING_ARROW_LEN_M = 0.45
 
 
 class FusionFrameThread(QThread):
@@ -44,6 +49,7 @@ class FusionFrameThread(QThread):
     disconnected_signal = pyqtSignal()
     data_signal = pyqtSignal(dict)
     csv_created_signal = pyqtSignal()
+    tx_status_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -56,12 +62,15 @@ class FusionFrameThread(QThread):
         self._request_lock = threading.Lock()
         self._serial_reader = None
         self._rx_queue = queue.Queue()
+        self._tx_queue = queue.Queue()
         self._parsed_frames = 0
         self._bad_frames = 0
         self._last_tx_frame_cnt = None
         self._tx_gap_count = 0
         self._last_step_timestamp = {}
         self._stats_last_print = time.monotonic()
+        self._protocol = VvProtocol()
+        self._command_factory = CommandFactory()
 
     def stop(self):
         self.running = False
@@ -77,6 +86,24 @@ class FusionFrameThread(QThread):
     def request_new_csv(self):
         with self._request_lock:
             self.new_csv_requested = True
+
+    def request_ranging_start(self, yaw_deg):
+        yaw_deg = int(round(float(yaw_deg))) % 360
+        pkt = self._command_factory.ranging_start(
+            int(VvAddress.HOST),
+            int(VvAddress.MCU),
+            self._protocol.next_seq(),
+            yaw_deg=yaw_deg,
+        )
+        self._tx_queue.put(("ranging_start", self._protocol.wrap_packet(pkt)))
+
+    def request_ranging_stop(self):
+        pkt = self._command_factory.ranging_stop(
+            int(VvAddress.HOST),
+            int(VvAddress.MCU),
+            self._protocol.next_seq(),
+        )
+        self._tx_queue.put(("ranging_stop", self._protocol.wrap_packet(pkt)))
 
     def _take_new_csv_request(self):
         with self._request_lock:
@@ -224,6 +251,27 @@ class FusionFrameThread(QThread):
                 break
         return drained
 
+    def _drain_tx_queue(self, max_packets=16):
+        if self.serial_port is None or not self.serial_port.is_open:
+            return
+
+        sent = 0
+        while sent < max_packets:
+            try:
+                command_name, payload = self._tx_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            try:
+                self.serial_port.write(payload)
+                sent += 1
+                self.tx_status_signal.emit(f"TX {command_name}")
+                print(f"[INFO] TX {command_name} ({len(payload)} bytes)")
+            except (serial.SerialException, OSError) as e:
+                self.tx_status_signal.emit(f"TX failed: {e}")
+                print(f"[WARNING] Failed to send command: {e}")
+                break
+
     def _extract_frames(self, buffer):
         frames = []
         while len(buffer) >= FUSION_FRAME_MIN_SIZE:
@@ -306,6 +354,7 @@ class FusionFrameThread(QThread):
                     time.sleep(1.0)
                     continue
 
+            self._drain_tx_queue()
             drained = self._drain_rx_queue(buffer)
             if drained == 0:
                 self._print_stats()
@@ -358,14 +407,6 @@ class FusionFrameWindow(QMainWindow):
         self.graph_d.setLabel("bottom", "Frame")
         self.graph_d.addLegend()
 
-        self.plot_ukf = self.graph_pos.plot(
-            pen=None,
-            symbol="o",
-            symbolSize=5,
-            symbolPen=pg.mkPen("b"),
-            symbolBrush=pg.mkBrush("b"),
-            name="UKF Filtered",
-        )
         self.plot_ukf_predict = self.graph_pos.plot(
             pen=None,
             symbol="o",
@@ -402,8 +443,36 @@ class FusionFrameWindow(QMainWindow):
         )
         self.graph_pos.addItem(self.ground_truth_start_markers)
         self.ground_truth_labels = []
-        self.plot_ukf_yaw = self.graph_d.plot(pen=pg.mkPen("b", width=1.5), name="ukf_yaw")
-        self.plot_yaw = self.graph_d.plot(pen=pg.mkPen("g", width=1.5), name="yaw")
+        self.plot_ukf_yaw = self.graph_d.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen("b"),
+            symbolBrush=pg.mkBrush("b"),
+            name="ukf_yaw",
+        )
+        self.plot_yaw = self.graph_d.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolPen=pg.mkPen("g"),
+            symbolBrush=pg.mkBrush("g"),
+            name="yaw",
+        )
+        self.plot_ukf_heading = self.graph_pos.plot(
+            pen=pg.mkPen((220, 40, 40), width=2.5),
+            name="UKF heading",
+        )
+        self.ukf_heading_arrow = pg.ArrowItem(
+            angle=180,
+            headLen=18,
+            tailLen=16,
+            tailWidth=4,
+            pen=pg.mkPen((160, 20, 20)),
+            brush=pg.mkBrush((220, 40, 40)),
+        )
+        self.ukf_heading_arrow.hide()
+        self.graph_pos.addItem(self.ukf_heading_arrow)
 
         for idx, anchor in enumerate(ANCHOR_POSITIONS, start=1):
             self.graph_pos.addItem(
@@ -417,14 +486,16 @@ class FusionFrameWindow(QMainWindow):
         self.ukf_predict_xs, self.ukf_predict_ys = [], []
         self.ukf_update_xs, self.ukf_update_ys = [], []
         self.tril_xs, self.tril_ys = [], []
+        self.yaw_frame_idxs = []
         self.ukf_yaws, self.yaws = [], []
+        self.frame_idx = 0
         self.ground_truth_start = None
         self.ground_truth_start_kind = GROUND_TRUTH_START_1
-        self.ukf_pos_mode = UKF_POS_ALL
         self.latest_data = None
+        self.ranging_active = False
 
-        self._setup_ukf_pos_controls()
         self._setup_ground_truth_controls()
+        self._setup_ranging_controls()
         self.pushButton_clearGraph.clicked.connect(self.clear_graph)
         if hasattr(self, "checkBox_createCsv"):
             self.checkBox_createCsv.stateChanged.connect(self.on_checkbox_csv_changed)
@@ -440,21 +511,8 @@ class FusionFrameWindow(QMainWindow):
         self.thread.disconnected_signal.connect(self.on_disconnected)
         self.thread.data_signal.connect(self.on_data)
         self.thread.csv_created_signal.connect(self.on_csv_created)
+        self.thread.tx_status_signal.connect(self.on_tx_status)
         self.thread.start()
-
-    def _setup_ukf_pos_controls(self):
-        self.ukfPosFieldLabel = QLabel("UKF pos field")
-        self.comboBox_ukfPosField = QComboBox()
-        self.comboBox_ukfPosField.addItem("all", UKF_POS_ALL)
-        self.comboBox_ukfPosField.addItem("predict step=0", UKF_POS_PREDICT)
-        self.comboBox_ukfPosField.addItem("update step=1", UKF_POS_UPDATE)
-        self.comboBox_ukfPosField.addItem("split step=0/1", UKF_POS_SPLIT)
-        self.comboBox_ukfPosField.currentIndexChanged.connect(self.on_ukf_pos_field_changed)
-
-        if hasattr(self, "gridLayout_4"):
-            row = self.gridLayout_4.rowCount()
-            self.gridLayout_4.addWidget(self.ukfPosFieldLabel, row, 0)
-            self.gridLayout_4.addWidget(self.comboBox_ukfPosField, row + 1, 0)
 
     def _setup_ground_truth_controls(self):
         self.groundTruthStartLabel = QLabel("Ground truth start")
@@ -468,9 +526,49 @@ class FusionFrameWindow(QMainWindow):
             self.gridLayout_4.addWidget(self.groundTruthStartLabel, row, 0)
             self.gridLayout_4.addWidget(self.comboBox_groundTruthStart, row + 1, 0)
 
-    def on_ukf_pos_field_changed(self, *_):
-        self.ukf_pos_mode = self.comboBox_ukfPosField.currentData()
-        self._update_ukf_position_plot()
+    def _setup_ranging_controls(self):
+        self.yawOffsetLabel = QLabel("Yaw offset (deg)")
+        self.doubleSpinBox_yawOffset = QDoubleSpinBox()
+        self.doubleSpinBox_yawOffset.setRange(-360.0, 360.0)
+        self.doubleSpinBox_yawOffset.setDecimals(1)
+        self.doubleSpinBox_yawOffset.setSingleStep(1.0)
+        self.doubleSpinBox_yawOffset.setValue(0.0)
+
+        self.pushButton_rangingToggle = QPushButton("Start Ranging")
+        self.pushButton_rangingToggle.clicked.connect(self.on_ranging_toggle_clicked)
+        self._sync_ranging_button()
+
+        if hasattr(self, "gridLayout_4"):
+            row = self.gridLayout_4.rowCount()
+            self.gridLayout_4.addWidget(self.yawOffsetLabel, row, 0)
+            self.gridLayout_4.addWidget(self.doubleSpinBox_yawOffset, row + 1, 0)
+            self.gridLayout_4.addWidget(self.pushButton_rangingToggle, row + 2, 0)
+
+    def _sync_ranging_button(self):
+        if not hasattr(self, "pushButton_rangingToggle"):
+            return
+        if self.ranging_active:
+            self.pushButton_rangingToggle.setText("Stop Ranging")
+            self.pushButton_rangingToggle.setStyleSheet(
+                "QPushButton { background-color: #EF4444; color: white; font-weight: bold; padding: 6px; }"
+            )
+        else:
+            self.pushButton_rangingToggle.setText("Start Ranging")
+            self.pushButton_rangingToggle.setStyleSheet(
+                "QPushButton { background-color: #059669; color: white; font-weight: bold; padding: 6px; }"
+            )
+
+    def on_ranging_toggle_clicked(self):
+        if not hasattr(self, "thread") or self.thread is None:
+            return
+
+        if self.ranging_active:
+            self.thread.request_ranging_stop()
+            self.ranging_active = False
+        else:
+            self.thread.request_ranging_start(self.doubleSpinBox_yawOffset.value())
+            self.ranging_active = True
+        self._sync_ranging_button()
 
     def _ground_truth_points(self):
         if self.ground_truth_start is None:
@@ -528,6 +626,13 @@ class FusionFrameWindow(QMainWindow):
         if hasattr(self, "checkBox_createCsv"):
             self.checkBox_createCsv.setChecked(False)
 
+    @pyqtSlot(str)
+    def on_tx_status(self, text):
+        if hasattr(self, "lineEdit_COM"):
+            current = self.lineEdit_COM.text()
+            if "Connected:" in current:
+                self.lineEdit_COM.setText(f"{current.split(' | ')[0]} | {text}")
+
     def clear_graph(self):
         self.ukf_xs.clear()
         self.ukf_ys.clear()
@@ -538,14 +643,17 @@ class FusionFrameWindow(QMainWindow):
         self.ukf_update_ys.clear()
         self.tril_xs.clear()
         self.tril_ys.clear()
+        self.yaw_frame_idxs.clear()
         self.ukf_yaws.clear()
         self.yaws.clear()
+        self.frame_idx = 0
         self.ground_truth_start = None
         self.latest_data = None
-        self.plot_ukf.setData([], [])
         self.plot_ukf_predict.setData([], [])
         self.plot_ukf_update.setData([], [])
         self.plot_tril.setData([], [])
+        self.plot_ukf_heading.setData([], [])
+        self.ukf_heading_arrow.hide()
         self.plot_ukf_yaw.setData([])
         self.plot_yaw.setData([])
         self._update_ground_truth_plot()
@@ -566,13 +674,14 @@ class FusionFrameWindow(QMainWindow):
     @pyqtSlot(dict)
     def on_data(self, data):
         self.latest_data = data
+        self.frame_idx += 1
         if self.ground_truth_start is None:
             self.ground_truth_start = (data["tril_x"], data["tril_y"])
             self._update_ground_truth_plot()
 
         self.ukf_xs.append(data["ukf_x"])
         self.ukf_ys.append(data["ukf_y"])
-        ukf_step = int(data.get("ukf_step", data.get("error_count", data.get("err_cnt", data.get("error_frame_cnt", -1)))))
+        ukf_step = int(data.get("ukf_step", -1))
         self.ukf_steps.append(ukf_step)
         if ukf_step == UKF_STEP_PREDICT:
             self.ukf_predict_xs.append(data["ukf_x"])
@@ -582,8 +691,10 @@ class FusionFrameWindow(QMainWindow):
             self.ukf_update_ys.append(data["ukf_y"])
         self.tril_xs.append(data["tril_x"])
         self.tril_ys.append(data["tril_y"])
-        self.ukf_yaws.append(data["ukf_yaw"])
-        self.yaws.append(data["yaw"])
+        if ukf_step != UKF_STEP_UPDATE:
+            self.yaw_frame_idxs.append(self.frame_idx)
+            self.ukf_yaws.append(data["ukf_yaw"])
+            self.yaws.append(data["yaw"])
 
         if len(self.ukf_xs) > MAX_SAMPLES:
             old_ukf_step = self.ukf_steps.pop(0)
@@ -597,34 +708,34 @@ class FusionFrameWindow(QMainWindow):
                 self.ukf_update_ys.pop(0)
             self.tril_xs.pop(0)
             self.tril_ys.pop(0)
-            self.ukf_yaws.pop(0)
-            self.yaws.pop(0)
+            if old_ukf_step != UKF_STEP_UPDATE and self.yaw_frame_idxs:
+                self.yaw_frame_idxs.pop(0)
+                self.ukf_yaws.pop(0)
+                self.yaws.pop(0)
 
     def _update_ukf_position_plot(self):
-        mode = self.ukf_pos_mode
-        if mode == UKF_POS_PREDICT:
-            self.plot_ukf.setData([], [])
-            self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
-            self.plot_ukf_update.setData([], [])
-        elif mode == UKF_POS_UPDATE:
-            self.plot_ukf.setData([], [])
-            self.plot_ukf_predict.setData([], [])
-            self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
-        elif mode == UKF_POS_SPLIT:
-            self.plot_ukf.setData([], [])
-            self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
-            self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
-        else:
-            self.plot_ukf.setData(self.ukf_xs, self.ukf_ys)
-            self.plot_ukf_predict.setData([], [])
-            self.plot_ukf_update.setData([], [])
+        self.plot_ukf_predict.setData(self.ukf_predict_xs, self.ukf_predict_ys)
+        self.plot_ukf_update.setData(self.ukf_update_xs, self.ukf_update_ys)
+
+    def _update_heading_arrow(self, data):
+        x = float(data["ukf_x"])
+        y = float(data["ukf_y"])
+        yaw_deg = float(data["ukf_yaw"])
+        yaw_rad = np.deg2rad(yaw_deg)
+        tip_x = x + HEADING_ARROW_LEN_M * np.cos(yaw_rad)
+        tip_y = y + HEADING_ARROW_LEN_M * np.sin(yaw_rad)
+
+        self.plot_ukf_heading.setData([x, tip_x], [y, tip_y])
+        self.ukf_heading_arrow.setPos(tip_x, tip_y)
+        self.ukf_heading_arrow.setStyle(angle=180.0 - yaw_deg)
+        self.ukf_heading_arrow.show()
 
     def update_gui(self):
         if self.ukf_xs:
             self._update_ukf_position_plot()
             self.plot_tril.setData(self.tril_xs, self.tril_ys)
-            self.plot_ukf_yaw.setData(self.ukf_yaws)
-            self.plot_yaw.setData(self.yaws)
+            self.plot_ukf_yaw.setData(self.yaw_frame_idxs, self.ukf_yaws)
+            self.plot_yaw.setData(self.yaw_frame_idxs, self.yaws)
 
         if self.latest_data is None:
             return
@@ -641,6 +752,7 @@ class FusionFrameWindow(QMainWindow):
         self.lineEdit_err.setText(str(data["err_cnt"]))
         if hasattr(self, "lineEdit_mask"):
             self.lineEdit_mask.setText(str(data.get("anchor_mask", 0)))
+        self._update_heading_arrow(data)
 
     def closeEvent(self, event):
         self.thread.stop()

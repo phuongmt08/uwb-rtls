@@ -25,7 +25,7 @@ MAX_PROBE_RETRIES = 3           # Số lần retry probe mỗi port
 # ── Serial Communication ──────────────────────────────────────────
 SERIAL_BAUD_RATE = 115200
 SERIAL_READ_TIMEOUT_S = 0.1     # Non-blocking read timeout
-SERIAL_WRITE_TIMEOUT_S = 1.0
+SERIAL_WRITE_TIMEOUT_S = 0.1
 
 # ── Protocol Addresses ────────────────────────────────────────────
 # Sync voi protocol.proto device_addr_t

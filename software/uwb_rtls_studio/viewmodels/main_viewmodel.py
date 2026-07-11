@@ -53,26 +53,26 @@ class MainViewModel(QObject):
     def set_mode(self, is_developer: bool) -> None:
         self.mode_changed.emit("developer" if is_developer else "user")
 
-    def end_session(self, duration_sec: float = 0.0, reason: int = 0) -> str:
-        """Stop recording locally, then wait for device end-session confirmation."""
+    def end_session(self, duration_sec: float = 0.0, reason: int = 0, await_device_completion: bool = True) -> str:
+        """Stop recording locally, then optionally wait for device end-session confirmation."""
         end_reason = int(reason or pb.SESSION_END_REASON_UNSPECIFIED)
         if self._session_run_manager:
             session_id = self._session_run_manager.end_all_active(
                 duration_sec=duration_sec,
-                send_device_end=False,
+                send_device_end=True,
             )
             self._clear_live_session_buffers()
             if self.log_vm:
                 self.log_vm.refresh_sessions()
             self.session_saved.emit(session_id)
-            self._pending_end_session_id = session_id
-            self._request_device_end_session(reason=end_reason, await_completion=True)
+            self._pending_end_session_id = ""
+            self.session_ended.emit(session_id)
             return session_id
 
         session_id = self.save_active_session(duration_sec=duration_sec)
         self._clear_live_session_buffers()
         self._pending_end_session_id = session_id
-        self._request_device_end_session(reason=end_reason, await_completion=True)
+        self._request_device_end_session(reason=end_reason, await_completion=await_device_completion)
         return session_id
 
     def start_session(self) -> str:
@@ -236,7 +236,7 @@ class MainViewModel(QObject):
                     "y_m": float(item.get("ukf_y_m", 0.0)),
                     "z_m": 0.0,
                     "rms_error_m": 0.0,
-                    "anchor_mask": 0,
+                    "anchor_mask": int(item.get("anchor_mask", 0) or 0),
                     "ukf_x_m": float(item.get("ukf_x_m", 0.0)),
                     "ukf_y_m": float(item.get("ukf_y_m", 0.0)),
                     "ukf_yaw_deg": float(item.get("ukf_yaw_deg", 0.0)),
@@ -244,6 +244,12 @@ class MainViewModel(QObject):
                     "tril_y_m": float(item.get("tril_y_m", 0.0)),
                     "yaw_deg": float(item.get("yaw_deg", 0.0)),
                     "ranging_error_count": int(item.get("ranging_error_count", 0)),
+                    "zone_id": item.get("zone_id", ""),
+                    "room_id": item.get("room_id", ""),
+                    "local_x_m": item.get("local_x_m", ""),
+                    "local_y_m": item.get("local_y_m", ""),
+                    "local_z_m": item.get("local_z_m", ""),
+                    "anchors": item.get("anchors", []),
                 }
             )
         return positions

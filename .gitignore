@@ -22,6 +22,7 @@ _build/
 
 # IDE
 .vscode/
+**/.history/
 *.swp
 *.swo
 *~
@@ -29,9 +30,12 @@ _build/
 # Data and Logs
 *.csv
 logs_data/
+software/data/
 # UWB RTLS Studio runtime data
 software/uwb_rtls_studio/data/sessions/
 !software/uwb_rtls_studio/data/sessions/.gitkeep
+software/uwb_rtls_studio/data/session_store/
+!software/uwb_rtls_studio/data/session_store/.gitkeep
 software/uwb_rtls_studio/session_browser/
 !software/uwb_rtls_studio/session_browser/.gitkeep
 # Data logs
@@ -40,6 +44,8 @@ software/simulation/**/*_sim.html
 software/simulation/**/*.txt
 software/simulation/**/*_log_data.html
 software/simulation/simulation_dashboard.html
+software/simulation/fusion_frame_dashboard.html
+software/simulation/simulation_dashboard/
 
 # Programmer builds
 software/uwb_rtls_programmer/execution/*.exe

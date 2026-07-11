@@ -307,35 +307,23 @@ class LogTab(QWidget):
         self.detail_table.clear()
         self._detail_rows = []
         
-        if detail_type == "ranging":
-            headers = ["Timestamp (ms)", "X (m)", "Y (m)", "Z (m)", "RMS (m)", "Ranging Files"]
-            self.detail_table.setColumnCount(len(headers))
-            self.detail_table.setHorizontalHeaderLabels(headers)
-            self.detail_table.setRowCount(len(data))
+        headers = ["Time", "Session File Name"]
+        self.detail_table.setColumnCount(len(headers))
+        self.detail_table.setHorizontalHeaderLabels(headers)
+        self.detail_table.setRowCount(len(data))
+        
+        for row, item in enumerate(data):
+            time_str = item.get("time", "")
+            filename = item.get("filename", "")
+            self.detail_table.setItem(row, 0, self._readonly_item(time_str))
+            self.detail_table.setItem(row, 1, self._readonly_item(filename))
+            self._detail_rows.append({
+                "file": filename,
+                "path": item.get("relative_path", "")
+            })
             
-            for row, p in enumerate(data):
-                self.detail_table.setItem(row, 0, self._readonly_item(str(p["timestamp_ms"])))
-                self.detail_table.setItem(row, 1, self._readonly_item(f"{p['x_m']:.3f}"))
-                self.detail_table.setItem(row, 2, self._readonly_item(f"{p['y_m']:.3f}"))
-                self.detail_table.setItem(row, 3, self._readonly_item(f"{p['z_m']:.3f}"))
-                self.detail_table.setItem(row, 4, self._readonly_item(f"{p['rms_error_m']:.3f}"))
-                self.detail_table.setItem(row, 5, self._readonly_item("positions.csv"))
-                self._detail_rows.append({"file": f"{session_id}:positions.csv", **p})
-            self.detail_table.setColumnWidth(5, 150)
-        else:  # logs
-            headers = ["Timestamp", "Level", "Source", "Message", "Log Files"]
-            self.detail_table.setColumnCount(len(headers))
-            self.detail_table.setHorizontalHeaderLabels(headers)
-            self.detail_table.setRowCount(len(data))
-            
-            for row, l in enumerate(data):
-                self.detail_table.setItem(row, 0, self._readonly_item(l["timestamp"]))
-                self.detail_table.setItem(row, 1, self._readonly_item(l["level"]))
-                self.detail_table.setItem(row, 2, self._readonly_item(l["source"]))
-                self.detail_table.setItem(row, 3, self._readonly_item(l["message"]))
-                self.detail_table.setItem(row, 4, self._readonly_item("logs.txt"))
-                self._detail_rows.append({"file": f"{session_id}:logs.txt", **l})
-            self.detail_table.setColumnWidth(4, 150)
+        self.detail_table.setColumnWidth(0, 200)
+        self.detail_table.setColumnWidth(1, 300)
 
         self.detail_title.setText(f"Session Details - {session_id}")
         self.detail_selection_label.setText(f"Loaded {len(data)} items")
@@ -568,7 +556,24 @@ class LogTab(QWidget):
         record = self._session_records.get(session_name)
         self._current_session_name = session_name if record else None
         self.detail_title.setText(f"Session Details - {session_name}" if record else "Session Details")
-        self._detail_rows = list(record[self._detail_mode]) if record else []
+        
+        self._detail_rows = []
+        raw_rows = record[self._detail_mode] if record else []
+        for r in raw_rows:
+            time_val = r.get("started") or r.get("first_connected") or "--"
+            try:
+                parts = time_val.split(" ")
+                if len(parts) == 2:
+                    ymd = parts[0].split("-")
+                    if len(ymd) == 3:
+                        time_val = f"{ymd[2]}/{ymd[1]}/{ymd[0]} {parts[1]}"
+            except Exception:
+                pass
+            self._detail_rows.append({
+                "time": time_val,
+                "file": r.get("file", ""),
+                "path": r.get("path", "")
+            })
         self._render_detail_table()
 
     def _render_detail_table(self):
@@ -582,35 +587,19 @@ class LogTab(QWidget):
             for col, value in enumerate(self._detail_values(item)):
                 self.detail_table.setItem(row, col, self._readonly_item(value))
 
-        self.detail_table.setColumnWidth(len(headers) - 1, 150)
+        self.detail_table.setColumnWidth(0, 200)
+        self.detail_table.setColumnWidth(1, 300)
 
         self._set_detail_actions_enabled(self._current_session_name is not None)
         self.detail_selection_label.setText("No file selected")
 
     def _detail_headers(self):
-        if self._detail_mode == "logs":
-            return ["Device", "MCU ID", "First Connected", "Last Seen", "Lines", "File", "Log Files"]
-        return ["Run", "Started", "Ended", "Elapsed", "Samples", "File", "Ranging Files"]
+        return ["Time", "Session File Name"]
 
     def _detail_values(self, item):
-        if self._detail_mode == "logs":
-            return [
-                item["device"],
-                item["mcu_id"],
-                item["first_connected"],
-                item["last_seen"],
-                item["lines"],
-                item["file"],
-                "logs.txt",
-            ]
         return [
-            item["run"],
-            item["started"],
-            item["ended"],
-            item["elapsed"],
-            item["samples"],
-            item["file"],
-            "positions.csv",
+            item.get("time", ""),
+            item.get("file", ""),
         ]
 
     def _selected_detail_item(self):
@@ -629,35 +618,34 @@ class LogTab(QWidget):
         self.btn_detail_browse.setEnabled(enabled)
         self.btn_detail_remove.setEnabled(enabled)
 
+    def _current_session_folder(self):
+        if self._vm and self._current_session_name:
+            try:
+                return self._vm.get_session_folder(self._current_session_name)
+            except Exception:
+                pass
+        from repository.session_repository import SESSIONS_DIR
+        return os.path.join(SESSIONS_DIR, self._current_session_name or "")
+
+    def _detail_file_path(self, item):
+        file_path = item.get("path", "") if item else ""
+        if file_path and os.path.isabs(file_path):
+            return file_path
+        session_path = self._current_session_folder()
+        return os.path.join(session_path, file_path) if file_path else session_path
+
     def _open_selected_detail(self):
         item = self._selected_detail_item()
+        session_path = self._current_session_folder()
         if item:
             self.detail_selection_label.setText(f"Selected: {item['file']}")
-            if self._current_session_name:
-                import os
-                from repository.session_repository import SESSIONS_DIR
-                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
-                
-                # Determine file path
-                if self._detail_mode == "logs":
-                    file_path = os.path.join(session_path, "log", item.get("file", ""))
-                    if not os.path.exists(file_path):
-                        file_path = os.path.join(session_path, item.get("file", ""))
-                else:
-                    file_path = os.path.join(session_path, "ranging", item.get("file", ""))
-                    if not os.path.exists(file_path):
-                        file_path = os.path.join(session_path, item.get("file", ""))
-                
-                if os.path.exists(file_path):
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
-                else:
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
-        else:
-            if self._current_session_name:
-                import os
-                from repository.session_repository import SESSIONS_DIR
-                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
+            file_path = self._detail_file_path(item)
+            if os.path.exists(file_path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+            elif os.path.isdir(session_path):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
+        elif self._current_session_name and os.path.isdir(session_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
 
     def _export_session_to_custom_folder(self, session_id: str):
         if not self._vm:
@@ -680,16 +668,14 @@ class LogTab(QWidget):
             QMessageBox.warning(self, "Export Failed", f"Could not export session '{session_id}'.")
 
     def _browse_selected_detail(self):
-        if self._vm:
-            if self._current_session_name:
-                import os
-                from repository.session_repository import SESSIONS_DIR
-                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
-                self._browse_session_folder(session_path)
-        else:
-            item = self._selected_detail_item()
-            if item:
-                self._browse_session_folder(item["path"])
+        item = self._selected_detail_item()
+        if item:
+            file_path = self._detail_file_path(item)
+            browse_path = os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
+            self._browse_session_folder(browse_path)
+            return
+        if self._current_session_name:
+            self._browse_session_folder(self._current_session_folder())
 
     def _remove_selected_detail(self):
         if self._vm:

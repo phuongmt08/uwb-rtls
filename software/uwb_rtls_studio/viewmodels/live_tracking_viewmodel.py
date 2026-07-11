@@ -74,6 +74,7 @@ class LiveTrackingViewModel(QObject):
     ranging_stopped = pyqtSignal()
     position_updated = pyqtSignal(float, float, float, float)
     sensor_fusion_updated = pyqtSignal(dict)
+    calib_data_updated = pyqtSignal(dict)
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
     anchor_layout_updated = pyqtSignal(list)
@@ -110,6 +111,7 @@ class LiveTrackingViewModel(QObject):
         # Connect position updates to custom handler to run geofencing checks
         self.model.position_updated.connect(self._on_model_position_updated)
         self.model.sensor_fusion_updated.connect(self._on_model_sensor_fusion_updated)
+        self.model.calib_data_updated.connect(self.calib_data_updated.emit)
             
         self.model.anchor_distances_updated.connect(self.anchor_distances_updated.emit)
         self.model.stats_updated.connect(self.stats_updated.emit)
@@ -249,7 +251,7 @@ class LiveTrackingViewModel(QObject):
             return self._command_bus.send(command_name, **kwargs)
         return self.model.send_command(command_name, **kwargs)
 
-    def start_ranging(self) -> None:
+    def start_ranging(self, yaw_deg: int | float = 0, is_ukf_reinit: bool = False) -> None:
         # Gọi command tới BE từ ViewModel
         if self._session_run_manager:
             self._session_run_manager.open_ranging_run()
@@ -258,7 +260,7 @@ class LiveTrackingViewModel(QObject):
         self._pending_position_meta = None
         self._pending_sensor_fusion = None
         shared_raw_packet_store.clear()
-        self.model.start_ranging()
+        self.model.start_ranging(yaw_deg=yaw_deg, is_ukf_reinit=is_ukf_reinit)
         self.ranging_started.emit()
 
     def stop_ranging(self) -> None:
@@ -285,6 +287,13 @@ class LiveTrackingViewModel(QObject):
 
     def get_map_anchors(self) -> list:
         return self.geofence_repo.get_anchors()
+
+    def get_active_room_id(self) -> str:
+        active_ids = self.get_active_room_ids()
+        return active_ids[0] if active_ids else ""
+
+    def set_active_room_id(self, room_id: str) -> None:
+        self.set_active_room_ids([room_id] if room_id else [])
 
     def get_active_room_ids(self) -> list[str]:
         return self.geofence_repo.get_active_room_ids()

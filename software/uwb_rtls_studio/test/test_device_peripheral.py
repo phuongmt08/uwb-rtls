@@ -179,7 +179,7 @@ def handle_host_packet(pkt: pb.packet_t) -> None:
             cfg.rx_timeout_ms = 150
             cfg.uwb_channel = 5
             cfg.uwb_prf = 64
-            cfg.uwb_data_rate = 6800
+            cfg.uwb_data_rate = 2
             cfg.uwb_preamble_code = 9
             cfg.tx_antenna_delay = 16384
             cfg.rx_antenna_delay = 16384

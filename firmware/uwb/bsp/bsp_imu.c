@@ -59,10 +59,11 @@ static bool s_initialized = false;
 
 bsp_imu_err_t bsp_imu_init(void)
 {
-	if (s_initialized)
-	{
-		return BSP_IMU_OK;
-	}
+	// if (s_initialized)
+	// {
+	// 	icm42688_compute_hardware_offsets(&bsp_imu, ICM42688_CALIB_SAMPLES);
+	// 	return BSP_IMU_OK;
+	// }
 
 	bsp_imu.bus.set_cs       = bsp_cs_set;
 	bsp_imu.bus.spi_transfer = bsp_spi_transfer;

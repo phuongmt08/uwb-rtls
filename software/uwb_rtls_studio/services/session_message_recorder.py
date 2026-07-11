@@ -55,6 +55,8 @@ class SessionMessageRecorder(QObject):
         protocol_service.packet_received.connect(lambda name, pkt: self.record_packet("rx", name, pkt))
 
     def record_packet(self, direction: str, param_name: str, pkt) -> None:
+        if param_name in ("ranging_result", "sensor_fusion_result", "log_data"):
+            return
         session_id = getattr(self._session_model, "session_id", "")
         if not session_id or not getattr(self._session_model, "is_active", False):
             return
@@ -132,19 +134,28 @@ class SessionMessageRecorder(QObject):
         try:
             payload_msg = getattr(pkt, param_name)
             try:
-                return MessageToDict(
+                payload = MessageToDict(
                     payload_msg,
                     preserving_proto_field_name=True,
                     always_print_fields_with_no_presence=True,
                 )
             except TypeError:
-                return MessageToDict(
+                payload = MessageToDict(
                     payload_msg,
                     preserving_proto_field_name=True,
                     including_default_value_fields=True,
                 )
+            if not payload:
+                return {
+                    "__message_name__": str(param_name or ""),
+                    "__empty_message__": True,
+                }
+            return payload
         except Exception:
-            return {}
+            return {
+                "__message_name__": str(param_name or ""),
+                "__decode_failed__": True,
+            }
 
     @staticmethod
     def _payload_summary(payload: dict[str, Any]) -> str:

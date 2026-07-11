@@ -148,6 +148,7 @@ class TimeSyncManager(QObject):
             dst_addr=VvAddress.MCU,
             unix_time_ms=host_time_ms,
             timezone_offset=tz_offset_min,
+            traffic_class="bootstrap",
         )
         if pkt is None:
             log.warning("time_sync_set was not sent; waiting for future time event.")
@@ -163,15 +164,17 @@ class TimeSyncManager(QObject):
     def _queue_verify(self) -> bool:
         if not self._active and not self._waiting_for_post_set_resp:
             return False
-        if not self._send_command:
-            log.warning("time_sync_get skipped: send command path is unavailable.")
+        if not self._request_query:
+            log.warning("time_sync_get skipped: query path is unavailable.")
             return False
         self.verify_requested.emit()
-        pkt = self._send_command("time_sync_get", dst_addr=VvAddress.MCU)
-        if pkt is None:
-            log.warning("time_sync_get was not sent; waiting for future time event.")
+        # Route verification through the shared sequential query queue. Sending
+        # directly can interleave with sys_cfg/pos_calib/configuration GETs.
+        queued = self._request_query("time_sync_get", dst_addr=VvAddress.MCU, cache_ttl_s=0.0, force=True, traffic_class="bootstrap")
+        if not queued:
+            log.warning("time_sync_get was not queued; waiting for future time event.")
             return False
-        log.info("time_sync_get sent seq=%s; waiting for time_sync_resp event.", int(pkt.hdr.seq))
+        log.info("time_sync_get queued through the shared query pipeline.")
         return True
 
     def _handle_drift(self, time_diff_ms: int) -> None:

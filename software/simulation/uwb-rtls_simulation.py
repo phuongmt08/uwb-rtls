@@ -13,6 +13,33 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SOFTWARE_DIR = os.path.abspath(os.path.join(BASE_DIR, '..'))
+DATA_DIR = os.path.join(SOFTWARE_DIR, 'data')
+CSV_LOG_CATEGORIES = (
+    {'key': 'log', 'title': 'Log', 'suffix': 'ukf_log_data'},
+    {'key': 'fusion', 'title': 'Fusion', 'suffix': 'fusion_frame_log_data'},
+    {'key': 'studio', 'title': 'Studio', 'suffix': 'sensor_fusion_result'},
+)
+
+def classify_csv_log(filename):
+    if not filename.endswith('.csv'):
+        return None
+    for category in CSV_LOG_CATEGORIES:
+        if filename.endswith(f"_{category['suffix']}.csv"):
+            return category
+    return None
+
+def date_sort_key(folder_name):
+    try:
+        return datetime.datetime.strptime(folder_name, '%d_%m_%y')
+    except ValueError:
+        return datetime.datetime.min
+
+def date_folder_for_csv(path):
+    rel_parent = os.path.relpath(os.path.dirname(path), DATA_DIR).replace('\\', '/')
+    if not rel_parent or rel_parent == '.':
+        return 'Root'
+    return rel_parent.split('/')[0]
 
 # --- METADATA CACHE ---
 CACHE_FILE = os.path.join(BASE_DIR, '.simulation_metadata_cache.json')
@@ -263,6 +290,62 @@ def parse_log(filepath):
         with open(filepath, 'r', encoding='utf-8') as f:
             for line_no, line in enumerate(f, 1):
                 raw_line = line.rstrip('\r\n')
+                if raw_line.lstrip().startswith('(') and '|' in raw_line:
+                    status_match = re.search(r"\)\s*(?P<type>Update|Init|Predict)\b", raw_line)
+                    if status_match:
+                        fields = {}
+                        for part in raw_line.split('|')[1:]:
+                            if ':' in part:
+                                key, value = part.split(':', 1)
+                                fields[key.strip()] = value.strip()
+                        counter_match = re.search(r"\(\s*(?P<frame>\d+)\s*/\s*(?P<tx>\d+)\s*\)", raw_line)
+                        frame_counter = int(counter_match.group('frame')) if counter_match else (len(data) + 1)
+                        tx_frame_cnt = int(counter_match.group('tx')) if counter_match else frame_counter
+                        update_dt = safe_float(fields.get('update_dt'))
+                        predict_dt = safe_float(fields.get('predict_dt'))
+                        has_fusion_path = 'ukf_x' in fields or 'ukf_y' in fields or 'ukf_step' in fields
+                        tril_x = safe_float(fields.get('tril_x'))
+                        tril_y = safe_float(fields.get('tril_y'))
+                        ukf_x = safe_float(fields.get('ukf_x'), tril_x)
+                        ukf_y = safe_float(fields.get('ukf_y'), tril_y)
+                        
+                        category = classify_csv_log(os.path.basename(filepath))
+                        is_log_cat = category and category['key'] == 'log'
+                        source_format = 'ukf_log' if is_log_cat else ('fusion_frame_csv' if has_fusion_path else 'ukf_log')
+                        px_fw = tril_x if is_log_cat else (ukf_x if has_fusion_path else tril_x)
+                        py_fw = tril_y if is_log_cat else (ukf_y if has_fusion_path else tril_y)
+                        
+                        data.append({
+                            'line_no': line_no,
+                            'raw_line': raw_line,
+                            'frame_counter': frame_counter,
+                            'tx_frame_cnt': tx_frame_cnt,
+                            'type': status_match.group('type'),
+                            'source_format': source_format,
+                            'ukf_step': safe_int(fields.get('ukf_step'), 1 if status_match.group('type') == 'Update' else 0),
+                            'ax': safe_float(fields.get('ax')),
+                            'ay': safe_float(fields.get('ay')),
+                            'gz': safe_float(fields.get('gz')),
+                            'px_fw': px_fw,
+                            'py_fw': py_fw,
+                            'dt': update_dt or predict_dt,
+                            'update_dt': update_dt,
+                            'predict_dt': predict_dt,
+                            'tril_x': tril_x,
+                            'tril_y': tril_y,
+                            'ukf_x': ukf_x,
+                            'ukf_y': ukf_y,
+                            'yaw': safe_float(fields.get('yaw')),
+                            'ukf_yaw': safe_float(fields.get('ukf_yaw')),
+                            'fp_amp_norm': [safe_float(fields.get(f'amp{i}')) for i in range(1, 5)],
+                            'fp_snr': [safe_float(fields.get(f'snr{i}')) for i in range(1, 5)],
+                            'mask': safe_int(fields.get('mask'), 15),
+                            'distances': [safe_float(fields.get(f'd{i}')) for i in range(1, 5)],
+                            'weights': [safe_int(fields.get(f'w{i}')) for i in range(1, 5)],
+                            'err': safe_int(fields.get('err')),
+                        })
+                        continue
+
                 m = pattern.search(line)
                 if m:
                     d = m.groupdict()
@@ -370,6 +453,7 @@ def run_gen(log_file):
     log_data = parse_log(log_file)
     if not log_data: return None
     log_format = log_data[0].get('source_format', 'ukf_log')
+    is_recorded_path = log_format in ('path_csv', 'fusion_frame_csv')
     bias = {'ax': 0.0, 'ay': 0.0, 'gz': 0.0}
     fw_path = {'x': [], 'y': [], 'mask': []}
     tril_path = {'x': [], 'y': []}
@@ -377,13 +461,13 @@ def run_gen(log_file):
     for entry in log_data:
         if entry['type'] == 'Init':
             bias['ax'], bias['ay'], bias['gz'] = entry['ax'], entry['ay'], entry['gz']
-        if entry['type'] == 'Update':
+        if entry['type'] == 'Update' or is_recorded_path:
             fw_path['x'].append(entry['px_fw'])
             fw_path['y'].append(entry['py_fw'])
             fw_path['mask'].append(entry.get('mask', 15))
-            if log_format == 'path_csv':
-                tril_path['x'].append(entry.get('tril_x'))
-                tril_path['y'].append(entry.get('tril_y'))
+            if is_recorded_path:
+                tril_path['x'].append(entry.get('tril_x', entry.get('px_fw')))
+                tril_path['y'].append(entry.get('tril_y', entry.get('py_fw')))
             for i in range(4):
                 val_amp = entry['fp_amp_norm'][i] if len(entry.get('fp_amp_norm', [])) > i else 0
                 val_snr = entry['fp_snr'][i] if len(entry.get('fp_snr', [])) > i else 0
@@ -508,20 +592,14 @@ def render_template(template_content, filename, payload, ground_truths, app_js_b
     return html
 
 def main():
-    logs_data_dir = os.path.abspath(os.path.join(BASE_DIR, '..', 'logs_data'))
-    search_dirs = [BASE_DIR]
-    if os.path.isdir(logs_data_dir):
-        search_dirs.append(logs_data_dir)
-
-    logs = [
-        os.path.join(root, f)
-        for search_dir in search_dirs
-        for root, _, files in os.walk(search_dir)
-        for f in files
-        if f.endswith('.csv') and ('ukf_log' in f or f.startswith('uwb_data_'))
-    ]
-    logs.sort(reverse=True)
-    if not logs: return
+    logs = []
+    if os.path.isdir(DATA_DIR):
+        for root, _, files in os.walk(DATA_DIR):
+            for filename in files:
+                category = classify_csv_log(filename)
+                if category:
+                    logs.append((os.path.join(root, filename), category))
+    logs.sort(key=lambda item: (date_folder_for_csv(item[0]), os.path.basename(item[0])), reverse=True)
 
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_ukf_prefilter.html')
     report_source_mtime = get_report_source_mtime() if os.path.exists(template_path) else 0
@@ -532,14 +610,11 @@ def main():
     metadata_cache = load_metadata_cache()
     cache_dirty = False
     sim_results = []
-    for lp in logs:
+    for lp, category in logs:
         try:
             fn  = os.path.basename(lp)
             rn  = fn.replace('.csv', '_sim.html')
-            if os.path.abspath(lp).startswith(os.path.abspath(BASE_DIR)):
-                rp = os.path.join(os.path.dirname(lp), rn)
-            else:
-                rp = os.path.join(BASE_DIR, 'logs_data_reports', rn)
+            rp = os.path.join(os.path.dirname(lp), rn)
             
             # Check if we need to regenerate
             log_mtime = os.path.getmtime(lp)
@@ -571,6 +646,10 @@ def main():
             sim_results.append({
                 'name': fn,
                 'path': os.path.relpath(rp, BASE_DIR).replace('\\', '/'),
+                'date': date_folder_for_csv(lp),
+                'category': category['key'],
+                'category_title': category['title'],
+                'suffix': category['suffix'],
                 'samples': num_updates,
                 'thumb': thumb_svg,
                 'needs_gen': needs_gen
@@ -583,39 +662,49 @@ def main():
         save_metadata_cache(metadata_cache)
 
 
-    # Group results by folder (date)
-    grouped_results = {}
+    grouped_results = {category['key']: {} for category in CSV_LOG_CATEGORIES}
     for r in sim_results:
-        folder = os.path.dirname(r['path'])
-        if not folder or folder == ".": folder = "Root"
-        if folder not in grouped_results:
-            grouped_results[folder] = []
-        grouped_results[folder].append(r)
-
-    # Sort groups by name (date) descending
-    sorted_folders = sorted(grouped_results.keys(), reverse=True)
+        grouped_results.setdefault(r['category'], {}).setdefault(r['date'], []).append(r)
 
     html_sections = []
     cache_token = str(int(report_source_mtime))
-    for folder in sorted_folders:
-        items = grouped_results[folder]
-        items_html = "".join([
-            f'<a href="{r["path"]}?v={cache_token}" class="log-item">'
-            f'  <div style="display:flex;align-items:center;gap:15px;">'
-            f'    <div class="thumb">{r["thumb"]}</div>'
-            f'    <span>{r["name"]}</span>'
-            f'  </div>'
-            f'  <span class="sample-count">{r["samples"]} samples</span>'
-            f'</a>'
-            for r in items
-        ])
+    for category in CSV_LOG_CATEGORIES:
+        date_groups = grouped_results.get(category['key'], {})
+        sorted_dates = sorted(date_groups.keys(), key=date_sort_key, reverse=True)
+        if not sorted_dates:
+            category_body = '<div class="empty-state">No CSV files found.</div>'
+        else:
+            date_sections = []
+            for folder in sorted_dates:
+                items = sorted(date_groups[folder], key=lambda item: item['name'], reverse=True)
+                items_html = "".join([
+                    f'<a href="{r["path"]}?v={cache_token}" class="log-item">'
+                    f'  <div style="display:flex;align-items:center;gap:15px;">'
+                    f'    <div class="thumb">{r["thumb"]}</div>'
+                    f'    <span>{r["name"]}</span>'
+                    f'  </div>'
+                    f'  <span class="sample-count">{r["samples"]} samples</span>'
+                    f'</a>'
+                    for r in items
+                ])
+                date_sections.append(f"""
+                <div class="date-group">
+                    <div class="date-header">{folder}</div>
+                    <div class="log-list">
+                        {items_html}
+                    </div>
+                </div>
+                """)
+            category_body = "\n".join(date_sections)
+
         section = f"""
-        <div class="date-group">
-            <div class="date-header">{folder}</div>
-            <div class="log-list">
-                {items_html}
+        <section class="category-group category-{category['key']}">
+            <div class="category-header">
+                <h2>{category['title']}</h2>
+                <span>_{category['suffix']}.csv</span>
             </div>
-        </div>
+            {category_body}
+        </section>
         """
         html_sections.append(section)
 
@@ -646,7 +735,19 @@ def main():
         }}
         h1 {{ margin-top: 0; color: #1e293b; font-size: 2.25rem; }}
         p {{ color: #64748b; margin-bottom: 30px; }}
-        .date-group {{ margin-bottom: 30px; }}
+        .category-group {{ margin-top: 34px; }}
+        .category-header {{
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 14px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 8px;
+        }}
+        .category-header h2 {{ margin: 0; font-size: 1.45rem; color: #0f172a; }}
+        .category-header span {{ color: #64748b; font-family: monospace; font-size: 0.9rem; }}
+        .date-group {{ margin-bottom: 22px; }}
         .date-header {{ 
             background: #f1f5f9; 
             padding: 10px 20px; 
@@ -689,6 +790,13 @@ def main():
         }}
         .thumb svg {{ width: 100%; height: 100%; }}
         .sample-count {{ color: #64748b; font-weight: normal; font-size: 0.9rem; }}
+        .empty-state {{
+            border: 1px dashed #cbd5e1;
+            border-radius: 8px;
+            padding: 18px 20px;
+            color: #94a3b8;
+            background: #f8fafc;
+        }}
     </style>
 </head>
 <body>
@@ -721,17 +829,18 @@ def main():
             # Check if this is a simulation report request
             if rel_path.endswith('_sim.html'):
                 # Map to potential CSV log path
-                lp = None
-                if rel_path.startswith('logs_data_reports/'):
-                    csv_name = os.path.basename(rel_path).replace('_sim.html', '.csv')
-                    lp = os.path.join(logs_data_dir, csv_name)
-                else:
-                    lp = os.path.join(BASE_DIR, rel_path.replace('_sim.html', '.csv'))
+                report_path = os.path.abspath(os.path.join(SOFTWARE_DIR, rel_path))
+                lp = report_path.replace('_sim.html', '.csv')
+                data_root = os.path.abspath(DATA_DIR)
                 
-                if lp and os.path.exists(lp):
+                if (
+                    os.path.exists(lp)
+                    and os.path.abspath(lp).startswith(data_root + os.sep)
+                    and classify_csv_log(os.path.basename(lp))
+                ):
                     # Check if it needs regeneration
                     log_mtime = os.path.getmtime(lp)
-                    rp = os.path.join(BASE_DIR, rel_path)
+                    rp = report_path
                     html_exists = os.path.exists(rp)
                     html_mtime = os.path.getmtime(rp) if html_exists else 0
                     
@@ -767,8 +876,8 @@ def main():
 
     Handler = NoCacheHTTPRequestHandler
     
-    # Change directory to BASE_DIR to serve files correctly
-    os.chdir(BASE_DIR)
+    # Serve from software/ so both simulation dashboard and data logs are available.
+    os.chdir(SOFTWARE_DIR)
 
     httpd = None
     for attempt in range(MAX_TRIES):
@@ -796,7 +905,7 @@ def main():
     thread.start()
 
     # Open the dashboard in the default browser
-    webbrowser.open(f"http://localhost:{PORT}/simulation_dashboard.html")
+    webbrowser.open(f"http://localhost:{PORT}/simulation/simulation_dashboard.html")
     
     # Keep the main thread alive so the server continues to run
     try:
