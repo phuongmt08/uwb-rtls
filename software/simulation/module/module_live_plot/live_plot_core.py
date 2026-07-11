@@ -21,6 +21,7 @@ from ..config import (
 from ..module_parse_frame import parse_live_frame
 from ..module_csv import generate_timestamp_filename, create_csv_file, write_frame_to_csv, print_frame_data
 from ..module_ukf import create_ukf_context, ukf_predict, ukf_update, normalize_angle
+from ..module_kinematic import trilateration_2d
 from ..config import DRAW_RECTANGLE, RECT_WIDTH, RECT_HEIGHT
 
 DISTANCE_GRAPH_SLIDING_WINDOW = 100
@@ -62,6 +63,7 @@ class DataThread(QThread):
         self.zupt_counter = 0
         
         self.prev_uwb_pos = (0.0, 0.0)
+        self.prev_tril_pos = (0.0, 0.0)
         self.prev_distances = None
         self.last_active_mask = 0
         self.new_csv_requested = False
@@ -121,6 +123,7 @@ class DataThread(QThread):
         self.ay_ema = 0.0
         self.zupt_counter = 0
         self.prev_uwb_pos = (0.0, 0.0)
+        self.prev_tril_pos = (0.0, 0.0)
         self.last_active_mask = 0
 
     def _open_new_csv(self):
@@ -355,6 +358,7 @@ class DataThread(QThread):
             self.imu_theta = init_yaw
             
             self.prev_uwb_pos = (init_x, init_y)
+            self.prev_tril_pos = (init_x, init_y)
             
             ukf_initial_state = np.array([
                 init_x, init_y, 0.0, 0.0, init_yaw,
@@ -418,20 +422,34 @@ class DataThread(QThread):
         self.imu_x += self.imu_vx * dt + 0.5 * ax_world * dt**2
         self.imu_y += self.imu_vy * dt + 0.5 * ay_world * dt**2
         
-        # 2. UWB position from STM px/py fields
-        uwb_pos = self.prev_uwb_pos
+        # 2. MCU position received directly from STM px/py.
+        mcu_pos = self.prev_uwb_pos
         stm_pos = (frame_data['px'], frame_data['py'])
         if abs(stm_pos[0]) > 1e-6 or abs(stm_pos[1]) > 1e-6:
-            uwb_pos = stm_pos
-            self.prev_uwb_pos = uwb_pos
+            mcu_pos = stm_pos
+            self.prev_uwb_pos = mcu_pos
+
+        # 3. Host-side trilateration calculated independently from distances.
+        d_meas_all = np.asarray(frame_data['distances'], dtype=float)
+        active_indices = [
+            idx for idx, distance in enumerate(d_meas_all)
+            if np.isfinite(distance) and distance > 1e-6
+        ]
+        if len(active_indices) >= 3:
+            tril_indices = active_indices[:3]
+            self.prev_tril_pos = trilateration_2d(
+                d_meas_all[tril_indices],
+                ANCHOR_POSITIONS[tril_indices],
+                self.prev_tril_pos,
+            )
+        tril_pos = self.prev_tril_pos
                 
-        # 3. UKF Predict & Update
+        # 4. UKF Predict & Update
         if status == "Predict":
             imu_sample = IMUSample(ax=frame_data['ax'], ay=frame_data['ay'], gz=frame_data['gz'])
             ukf_predict(self.ukf_ctx, imu_sample, dt)
         
         if status == "Update":
-            d_meas_all = np.array(frame_data['distances'])
             active_indices = [idx for idx, d in enumerate(d_meas_all) if d > 1e-6]
             if len(active_indices) >= 3:
                 active_d_meas = d_meas_all[active_indices][:3]
@@ -441,8 +459,10 @@ class DataThread(QThread):
         res = {
             'imu_x': self.imu_x,
             'imu_y': self.imu_y,
-            'uwb_x': uwb_pos[0],
-            'uwb_y': uwb_pos[1],
+            'mcu_x': mcu_pos[0],
+            'mcu_y': mcu_pos[1],
+            'tril_x': tril_pos[0],
+            'tril_y': tril_pos[1],
             'ukf_x': self.ukf_ctx.x[0],
             'ukf_y': self.ukf_ctx.x[1],
             'ukf_vx': self.ukf_ctx.x[2],
@@ -589,23 +609,27 @@ class MainWindow(QMainWindow):
         self.ref_rect_item = None
         
         # Add plotting lines
-        self.plot_imu = self.graph_pos.plot(pen=pg.mkPen('r', width=1.5, style=pg.QtCore.Qt.DashLine), name="IMU Dead Reckoning")
-        self.plot_uwb = self.graph_pos.plot(
-            pen=None,
-            symbol='o',
-            symbolSize=5,
-            symbolPen=pg.mkPen((0, 150, 0, 110)),
-            symbolBrush=pg.mkBrush((0, 180, 0, 70)),
-            name="UWB Trilateration"
+        self.plot_mcu = self.graph_pos.plot(
+            pen=pg.mkPen('r', width=1.5), name="MCU px/py"
+        )
+        self.plot_tril = self.graph_pos.plot(
+            pen=pg.mkPen((0, 150, 0), width=1.5), name="Trilateration (distance)"
         )
         self.plot_ukf = self.graph_pos.plot(
-            pen=None,
-            symbol='o',
-            symbolSize=5,
-            symbolPen=pg.mkPen('b'),
-            symbolBrush=pg.mkBrush('b'),
+            pen=pg.mkPen('b', width=1.5),
             name="UKF Filtered"
         )
+        self.current_mcu_marker = pg.ScatterPlotItem(
+            size=13, symbol='o', pen=pg.mkPen('r', width=2), brush=pg.mkBrush('r')
+        )
+        self.current_tril_marker = pg.ScatterPlotItem(
+            size=15, symbol='t', pen=pg.mkPen((0, 120, 0), width=2), brush=pg.mkBrush((0, 190, 0))
+        )
+        self.current_ukf_marker = pg.ScatterPlotItem(
+            size=15, symbol='s', pen=pg.mkPen('b', width=2), brush=pg.mkBrush('b')
+        )
+        for marker in (self.current_mcu_marker, self.current_tril_marker, self.current_ukf_marker):
+            self.graph_pos.addItem(marker)
         self.plot_ground_truth = self.graph_pos.plot(
             pen=pg.mkPen((230, 116, 37), width=2.0, style=pg.QtCore.Qt.DashLine),
             name="Ground truth",
@@ -655,8 +679,8 @@ class MainWindow(QMainWindow):
             self.graph_pos.addItem(text)
             
         # Data storage for plots
-        self.imu_xs, self.imu_ys = [], []
-        self.uwb_xs, self.uwb_ys = [], []
+        self.mcu_xs, self.mcu_ys = [], []
+        self.tril_xs, self.tril_ys = [], []
         self.ukf_xs, self.ukf_ys = [], []
         self.d1_data, self.d2_data, self.d3_data, self.d4_data = [], [], [], []
         self.distance_xs = []
@@ -808,10 +832,10 @@ class MainWindow(QMainWindow):
         self._update_distance_plot()
 
     def clear_graph(self):
-        self.imu_xs.clear()
-        self.imu_ys.clear()
-        self.uwb_xs.clear()
-        self.uwb_ys.clear()
+        self.mcu_xs.clear()
+        self.mcu_ys.clear()
+        self.tril_xs.clear()
+        self.tril_ys.clear()
         self.ukf_xs.clear()
         self.ukf_ys.clear()
         self.d1_data.clear()
@@ -827,9 +851,11 @@ class MainWindow(QMainWindow):
             self.graph_pos.removeItem(self.ref_rect_item)
             self.ref_rect_item = None
             
-        self.plot_imu.setData([], [])
-        self.plot_uwb.setData([], [])
+        self.plot_mcu.setData([], [])
+        self.plot_tril.setData([], [])
         self.plot_ukf.setData([], [])
+        for marker in (self.current_mcu_marker, self.current_tril_marker, self.current_ukf_marker):
+            marker.setData([], [])
         self.plot_d1.setData([])
         self.plot_d2.setData([])
         self.plot_d3.setData([])
@@ -886,10 +912,10 @@ class MainWindow(QMainWindow):
 
         self.latest_data = data
         
-        self.imu_xs.append(data['imu_x'])
-        self.imu_ys.append(data['imu_y'])
-        self.uwb_xs.append(data['uwb_x'])
-        self.uwb_ys.append(data['uwb_y'])
+        self.mcu_xs.append(data['mcu_x'])
+        self.mcu_ys.append(data['mcu_y'])
+        self.tril_xs.append(data['tril_x'])
+        self.tril_ys.append(data['tril_y'])
         self.ukf_xs.append(data['ukf_x'])
         self.ukf_ys.append(data['ukf_y'])
         
@@ -901,11 +927,11 @@ class MainWindow(QMainWindow):
         self.distance_xs.append(time.monotonic() - self.distance_time_origin)
         
         # Keep maximum defined samples
-        if len(self.imu_xs) > MAX_SAMPLES:
-            self.imu_xs.pop(0)
-            self.imu_ys.pop(0)
-            self.uwb_xs.pop(0)
-            self.uwb_ys.pop(0)
+        if len(self.mcu_xs) > MAX_SAMPLES:
+            self.mcu_xs.pop(0)
+            self.mcu_ys.pop(0)
+            self.tril_xs.pop(0)
+            self.tril_ys.pop(0)
             self.ukf_xs.pop(0)
             self.ukf_ys.pop(0)
             self.d1_data.pop(0)
@@ -958,10 +984,13 @@ class MainWindow(QMainWindow):
 
     def update_gui(self):
         # Update Plots
-        if len(self.imu_xs) > 0:
-            self.plot_imu.setData(self.imu_xs, self.imu_ys)
-            self.plot_uwb.setData(self.uwb_xs, self.uwb_ys)
+        if len(self.mcu_xs) > 0:
+            self.plot_mcu.setData(self.mcu_xs, self.mcu_ys)
+            self.plot_tril.setData(self.tril_xs, self.tril_ys)
             self.plot_ukf.setData(self.ukf_xs, self.ukf_ys)
+            self.current_mcu_marker.setData([self.mcu_xs[-1]], [self.mcu_ys[-1]])
+            self.current_tril_marker.setData([self.tril_xs[-1]], [self.tril_ys[-1]])
+            self.current_ukf_marker.setData([self.ukf_xs[-1]], [self.ukf_ys[-1]])
             self._update_distance_plot()
             
         # Update Text Fields

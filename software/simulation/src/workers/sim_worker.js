@@ -307,13 +307,20 @@ self.onmessage = function(e) {
         ay_lpf: []
     };
 
-    if (rawData.log_format === 'path_csv') {
+    if (rawData.log_format === 'path_csv' || rawData.log_format === 'fusion_frame_csv') {
         const entriesToProcess = rawData.all_entries.slice(0, max_samples);
         const x_axis = entriesToProcess.map((_, i) => i);
         let total_time = 0;
+        const toDegrees = (value) => {
+            if (!Number.isFinite(value)) return 0;
+            return Math.abs(value) <= (2 * Math.PI + 0.001) ? value * 180 / Math.PI : value;
+        };
 
         entriesToProcess.forEach((entry) => {
             if (entry.dt > 0) total_time += entry.dt;
+            const mode = Number.isFinite(entry.ukf_step)
+                ? (entry.ukf_step === 1 ? 1 : 0)
+                : (entry.type === 'Update' ? 1 : 0);
 
             simPath.x.push(null);
             simPath.y.push(null);
@@ -337,13 +344,21 @@ self.onmessage = function(e) {
             simPathUKF_plot.y.push(ukfY);
             simPathUKF_lpf_plot.x.push(ukfX);
             simPathUKF_lpf_plot.y.push(ukfY);
-            simPathUKF_modes.push(1);
-            simPathUKF_lpf_modes.push(1);
-            simPathUKF_allModes.push(1);
+            simPathUKF_modes.push(mode);
+            simPathUKF_lpf_modes.push(mode);
+            simPathUKF_allModes.push(mode);
             simPathUKF_allTimes.push(total_time);
 
-            const yawDeg = Number.isFinite(entry.yaw) ? entry.yaw * 180 / Math.PI : 0;
-            const ukfYawDeg = Number.isFinite(entry.ukf_yaw) ? entry.ukf_yaw * 180 / Math.PI : yawDeg;
+            for (let i = 0; i < 4; i++) {
+                const distance = Array.isArray(entry.distances) && Number.isFinite(entry.distances[i]) && entry.distances[i] > 0.1
+                    ? entry.distances[i]
+                    : null;
+                gatedDist[i].push(distance);
+                d2Scores[i].push(null);
+            }
+
+            const yawDeg = toDegrees(entry.yaw);
+            const ukfYawDeg = Number.isFinite(entry.ukf_yaw) ? toDegrees(entry.ukf_yaw) : yawDeg;
             plotData.vx_raw.push(0);
             plotData.vy_raw.push(0);
             plotData.vx.push(0);
@@ -351,12 +366,12 @@ self.onmessage = function(e) {
             plotData.vx_lpf.push(0);
             plotData.vy_lpf.push(0);
             plotData.zupt.push(0);
-            plotData.ax.push(0);
-            plotData.ay.push(0);
-            plotData.gz.push(0);
-            plotData.ax_lpf.push(0);
-            plotData.ay_lpf.push(0);
-            plotData.gz_lpf.push(0);
+            plotData.ax.push(Number.isFinite(entry.ax) ? entry.ax : 0);
+            plotData.ay.push(Number.isFinite(entry.ay) ? entry.ay : 0);
+            plotData.gz.push(Number.isFinite(entry.gz) ? entry.gz : 0);
+            plotData.ax_lpf.push(Number.isFinite(entry.ax) ? entry.ax : 0);
+            plotData.ay_lpf.push(Number.isFinite(entry.ay) ? entry.ay : 0);
+            plotData.gz_lpf.push(Number.isFinite(entry.gz) ? entry.gz : 0);
             plotData.yaw.push(yawDeg);
             plotData.ukf_yaw.push(ukfYawDeg);
             plotData.times.push(total_time);
