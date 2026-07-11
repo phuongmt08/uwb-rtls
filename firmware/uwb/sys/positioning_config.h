@@ -42,7 +42,7 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.485f)
+#define TAG_HEIGHT_M            (0.510f)
 
 /**
  * @brief Anchor height from ground (meters)
@@ -156,7 +156,7 @@
 #define ZONE_1_ANCHOR_1_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_2_ID   2
-#define ZONE_1_ANCHOR_2_X    0.7f
+#define ZONE_1_ANCHOR_2_X    2.70f
 #define ZONE_1_ANCHOR_2_Y    8.37f
 #define ZONE_1_ANCHOR_2_Z    ANCHOR_HEIGHT_M
 
@@ -208,7 +208,7 @@
  *        1 = apply Mahalanobis gate before anchor selection
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
-#define ENABLE_MAHALANOBIS_PREFILTER  1
+#define ENABLE_MAHALANOBIS_PREFILTER  0
 #endif
 
 /**
@@ -364,11 +364,11 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_PY
-#define SYS_FUSION_UKF_INIT_P_PY        1.0e-10f
+#define SYS_FUSION_UKF_INIT_P_PY        0.1f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_VX
-#define SYS_FUSION_UKF_INIT_P_VX        1.0e-10f
+#define SYS_FUSION_UKF_INIT_P_VX        0.1f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_VY
@@ -380,11 +380,11 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_BIAS_AX
-#define SYS_FUSION_UKF_INIT_P_BIAS_AX   1.0e-5f
+#define SYS_FUSION_UKF_INIT_P_BIAS_AX   1.0e-8f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_BIAS_AY
-#define SYS_FUSION_UKF_INIT_P_BIAS_AY   1.0e-5f
+#define SYS_FUSION_UKF_INIT_P_BIAS_AY   1.0e-8f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_BIAS_GZ
@@ -392,11 +392,13 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_ENABLE
-#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       1
+/* Diagnostic bypass: keep raw IMU samples unchanged while isolating the
+ * UKF-to-trilateration position offset. */
+#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       0
 #endif
 
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ
-#define SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ    2.0f
+#define SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ    0.5f
 #endif
 
 #ifndef SYS_FUSION_IMU_SAMPLE_RATE_HZ
@@ -404,10 +406,12 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN
-#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    0.95f
+#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    25.0f
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_ENABLE
+/* Diagnostic bypass: do not force velocity/acceleration to zero while
+ * comparing the UKF prediction and UWB correction paths. */
 #define SYS_FUSION_IMU_ZUPT_ENABLE              0
 #endif
 

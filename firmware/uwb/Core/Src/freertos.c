@@ -407,7 +407,7 @@ void sensor_fusion_entry(void *argument)
 #if TEST_UKF_STREAM_UART
   for (;;)
   {
-    sys_sensor_fusion_stream_uart();
+    sys_sensor_fusion_stream_uart(UKF_STEP_PREDICT);
     osDelay(20);
   }
 #endif
@@ -415,13 +415,15 @@ void sensor_fusion_entry(void *argument)
 #if TEST_UKF_STREAM_BLE
   for (;;)
   {
-    sys_sensor_fusion_stream_ble();
+    sys_sensor_fusion_stream_ble(UKF_STEP_UPDATE);
     osDelay(20);
   }
 #endif
 
   for (;;)
   {
+    bool fusion_predict_performed = false;
+    bool fusion_update_performed = false;
 
     if (s_fusion_reset_requested)
     {
@@ -449,11 +451,16 @@ void sensor_fusion_entry(void *argument)
     }
 
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
-    (void)sys_sensor_fusion_predict(&ukf_data);
-#else
-    if (sys_sensor_fusion_check_predict_flag())
+    if (g_imu_data_queue != NULL && osMessageQueueGetCount(g_imu_data_queue) > 0U)
     {
-      (void)sys_sensor_fusion_predict(&ukf_data);
+      fusion_predict_performed = (sys_sensor_fusion_predict(&ukf_data) == SYS_SENSOR_FUSION_OK);
+    }
+#else
+    if (sys_sensor_fusion_check_predict_flag() &&
+        g_imu_data_queue != NULL &&
+        osMessageQueueGetCount(g_imu_data_queue) > 0U)
+    {
+      fusion_predict_performed = (sys_sensor_fusion_predict(&ukf_data) == SYS_SENSOR_FUSION_OK);
     }
 #endif
 
@@ -627,16 +634,18 @@ void sensor_fusion_entry(void *argument)
 #endif
                     uint32_t current_time = HAL_GetTick();
                     uint32_t latency_ms = current_time - msg.timestamp_ms;
-                    RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION LATENCY] UWB Queue Latency: %u ms", latency_ms);
+                    // RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION LATENCY] UWB Queue Latency: %u ms", latency_ms);
 
                     SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
-                    (void)sys_sensor_fusion_update(   &ukf_data,
+                    fusion_update_performed = sys_sensor_fusion_update(
+                                                      &ukf_data,
                                                       &tril_position,
                                                       best_3_anchors,
                                                       anchors_by_id,
                                                       anchors_compact,
                                                       compact_idx,
-                                                      s_last_selected_anchors_mask);
+                                                      s_last_selected_anchors_mask,
+                                                      &msg);
                     SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                 }
                 else
@@ -699,15 +708,21 @@ void sensor_fusion_entry(void *argument)
           s_last_selected_anchors_mask = selected_mask;
 
           vec2d_t tril_position = {0.0, 0.0};
-          (void)sys_sensor_fusion_update(&ukf_data,
-                                         &tril_position,
-                                         best_3_anchors,
-                                         anchors_by_id,
-                                         anchors_compact,
-                                         compact_idx,
-                                         selected_mask);
+          fusion_update_performed = sys_sensor_fusion_update(&ukf_data,
+                                                             &tril_position,
+                                                             best_3_anchors,
+                                                             anchors_by_id,
+                                                             anchors_compact,
+                                                             compact_idx,
+                                                             selected_mask,
+                                                             NULL);
         }
 #endif
+    }
+
+    if (fusion_update_performed || fusion_predict_performed)
+    {
+      sys_sensor_fusion_stream_ble(fusion_update_performed ? UKF_STEP_UPDATE : UKF_STEP_PREDICT);
     }
     
     osDelay(20);
