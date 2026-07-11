@@ -1,6 +1,6 @@
 protobuf.device_information_resp_t.uid              max_size:12
 protobuf.uwb_cfg_t.anchor_list                      max_size:8
-protobuf.ranging_result_t.anchors                   max_count:4
+protobuf.ranging_result_t.anchors                   max_count:6
 protobuf.log_data_t.data                            max_size:192
 protobuf.flash_write_t.data                         max_size:200
 protobuf.flash_data_t.data                          max_size:200
@@ -34,4 +34,4 @@ protobuf.session_end_reason_t                       long_names:false
 protobuf.vehicle_command_type_t                     long_names:false
 
 protobuf.zone_profile_t.anchors max_count:6
-protobuf.calib_status_resp_t.candidates max_count:4
+protobuf.calib_status_resp_t.candidates max_count:6

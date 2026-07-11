@@ -275,7 +275,7 @@ typedef struct _protobuf_ranging_result_t {
     float pos_z_m;
     float rms_error_m;
     pb_size_t anchors_count;
-    protobuf_anchor_ranging_t anchors[4];
+    protobuf_anchor_ranging_t anchors[6];
     uint32_t timestamp_ms;
 } protobuf_ranging_result_t;
 
@@ -651,7 +651,7 @@ typedef struct _protobuf_calib_status_resp_t {
     uint32_t sample_target;
     uint32_t candidate_mask;
     pb_size_t candidates_count;
-    protobuf_calib_anchor_candidate_t candidates[4];
+    protobuf_calib_anchor_candidate_t candidates[6];
 } protobuf_calib_status_resp_t;
 
 /* Compact RTOS health snapshot. This is intentionally pull-only and contains
@@ -1201,7 +1201,7 @@ extern "C" {
 #define protobuf_ranging_start_t_init_default    {0, 0}
 #define protobuf_ranging_stop_t_init_default     {0}
 #define protobuf_anchor_ranging_t_init_default   {0, 0, 0}
-#define protobuf_ranging_result_t_init_default   {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default}, 0}
+#define protobuf_ranging_result_t_init_default   {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default, protobuf_anchor_ranging_t_init_default}, 0}
 #define protobuf_sensor_fusion_cfg_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_sensor_fusion_cfg_get_t_init_default {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
@@ -1256,7 +1256,7 @@ extern "C" {
 #define protobuf_anchor_layout_resp_t_init_default {0, {protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default, protobuf_anchor_layout_item_t_init_default}}
 #define protobuf_calib_status_get_t_init_default {0}
 #define protobuf_calib_anchor_candidate_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-#define protobuf_calib_status_resp_t_init_default {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default}}
+#define protobuf_calib_status_resp_t_init_default {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default, protobuf_calib_anchor_candidate_t_init_default}}
 #define protobuf_rtos_resource_get_t_init_default {0}
 #define protobuf_rtos_resource_resp_t_init_default {0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_rtos_task_stats_get_t_init_default {0}
@@ -1301,7 +1301,7 @@ extern "C" {
 #define protobuf_ranging_start_t_init_zero       {0, 0}
 #define protobuf_ranging_stop_t_init_zero        {0}
 #define protobuf_anchor_ranging_t_init_zero      {0, 0, 0}
-#define protobuf_ranging_result_t_init_zero      {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero}, 0}
+#define protobuf_ranging_result_t_init_zero      {0, 0, 0, 0, 0, {protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero, protobuf_anchor_ranging_t_init_zero}, 0}
 #define protobuf_sensor_fusion_cfg_t_init_zero   {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_sensor_fusion_cfg_get_t_init_zero {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
@@ -1356,7 +1356,7 @@ extern "C" {
 #define protobuf_anchor_layout_resp_t_init_zero  {0, {protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero, protobuf_anchor_layout_item_t_init_zero}}
 #define protobuf_calib_status_get_t_init_zero    {0}
 #define protobuf_calib_anchor_candidate_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-#define protobuf_calib_status_resp_t_init_zero   {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero}}
+#define protobuf_calib_status_resp_t_init_zero   {_protobuf_calib_state_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero, protobuf_calib_anchor_candidate_t_init_zero}}
 #define protobuf_rtos_resource_get_t_init_zero   {0}
 #define protobuf_rtos_resource_resp_t_init_zero  {0, 0, 0, 0, 0, 0, 0, 0}
 #define protobuf_rtos_task_stats_get_t_init_zero {0}
@@ -2915,7 +2915,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_calib_data_t_size               232
 #define protobuf_calib_start_t_size              23
 #define protobuf_calib_status_get_t_size         6
-#define protobuf_calib_status_resp_t_size        357
+#define protobuf_calib_status_resp_t_size        495
 #define protobuf_calib_stop_t_size               6
 #define protobuf_device_information_get_t_size   6
 #define protobuf_device_information_resp_t_size  67
@@ -2939,7 +2939,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_log_clear_t_size                14
 #define protobuf_log_data_t_size                 197
 #define protobuf_none_t_size                     6
-#define protobuf_packet_t_size                   381
+#define protobuf_packet_t_size                   519
 #define protobuf_pos_calib_cfg_get_t_size        6
 #define protobuf_pos_calib_cfg_resp_t_size       128
 #define protobuf_pos_calib_cfg_set_t_size        128
@@ -2948,7 +2948,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_prefilter_cfg_resp_t_size       34
 #define protobuf_prefilter_cfg_set_t_size        34
 #define protobuf_prefilter_cfg_t_size            32
-#define protobuf_ranging_result_t_size           106
+#define protobuf_ranging_result_t_size           146
 #define protobuf_ranging_start_t_size            8
 #define protobuf_ranging_status_get_t_size       6
 #define protobuf_ranging_status_resp_t_size      58

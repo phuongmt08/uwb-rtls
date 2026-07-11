@@ -107,7 +107,7 @@ typedef struct __attribute__((packed))
   uint16_t current_tx_delay;
   uint16_t current_rx_delay;
   uint16_t current_combined_delay;
-  sys_calib_pair_summary_item_t pair[NUM_ANCHORS - 1U];
+  sys_calib_pair_summary_item_t pair[SURVEY_NUM_ANCHORS - 1U];
 } sys_calib_pair_summary_msg_t;
 
 typedef struct __attribute__((packed))

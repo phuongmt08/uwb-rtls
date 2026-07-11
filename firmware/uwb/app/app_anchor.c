@@ -465,7 +465,7 @@ static bool calib_build_pair_summary(uint8_t sender_id, sys_calib_pair_summary_m
   uint8_t expected_pairs = (anchor_count > 0U) ? (uint8_t)(anchor_count - 1U) : 0U;
   uint8_t sender_slot = 0U;
   if (!summary || !calib_anchor_id_to_slot(sender_id, &sender_slot) ||
-      expected_pairs > (NUM_ANCHORS - 1U)) {
+      expected_pairs > (SURVEY_NUM_ANCHORS - 1U)) {
     return false;
   }
 
@@ -517,7 +517,7 @@ static bool calib_store_pair_summary(const sys_calib_pair_summary_msg_t *summary
   if (!summary || summary->epoch_id != s_summary_epoch_id ||
       !calib_anchor_id_to_slot(summary->sender_id, &sender_slot) ||
       summary->pair_count != expected_pairs ||
-      summary->pair_count > (NUM_ANCHORS - 1U)) {
+      summary->pair_count > (SURVEY_NUM_ANCHORS - 1U)) {
     return false;
   }
   for (uint8_t i = 0U; i < summary->pair_count; i++) {
@@ -607,14 +607,14 @@ extern void app_rtos_request_sensor_fusion_reset(void);
 
 static void run_anchor_survey_solver(sys_config_t *cfg) {
   const uint8_t expected_mask = calib_all_anchor_mask();
-  uint8_t active_ids[NUM_ANCHORS] = {0U};
+  uint8_t active_ids[SURVEY_NUM_ANCHORS] = {0U};
 
-  if (!cfg || calib_anchor_count() != NUM_ANCHORS) {
+  if (!cfg || calib_anchor_count() != SURVEY_NUM_ANCHORS) {
     calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
     return;
   }
 
-  for (uint8_t slot = 0U; slot < NUM_ANCHORS; slot++) {
+  for (uint8_t slot = 0U; slot < SURVEY_NUM_ANCHORS; slot++) {
     if (!calib_slot_to_anchor_id(slot, &active_ids[slot])) {
       calib_finish_v1(SYS_CALIB_STATUS_NORMAL);
       return;
@@ -630,8 +630,8 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   }
 
   // 1. Map measured distances
-  float d_meas[NUM_ANCHORS][NUM_ANCHORS] = {0};
-  for (uint8_t sender_slot = 0U; sender_slot < NUM_ANCHORS; sender_slot++) {
+  float d_meas[SURVEY_NUM_ANCHORS][SURVEY_NUM_ANCHORS] = {0};
+  for (uint8_t sender_slot = 0U; sender_slot < SURVEY_NUM_ANCHORS; sender_slot++) {
     uint8_t sender_id = active_ids[sender_slot];
     const sys_calib_pair_summary_msg_t *summary = &s_summary_by_anchor[sender_id - 1U];
     for (uint8_t p = 0U; p < summary->pair_count; p++) {
@@ -646,9 +646,9 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   }
 
   // 2. Verify bidirectional measurements and apply reciprocal filter
-  float d[NUM_ANCHORS][NUM_ANCHORS] = {0};
-  for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-    for (uint8_t j = i + 1; j < NUM_ANCHORS; j++) {
+  float d[SURVEY_NUM_ANCHORS][SURVEY_NUM_ANCHORS] = {0};
+  for (uint8_t i = 0; i < SURVEY_NUM_ANCHORS; i++) {
+    for (uint8_t j = i + 1; j < SURVEY_NUM_ANCHORS; j++) {
       float d_ij = d_meas[i][j];
       float d_ji = d_meas[j][i];
       if (d_ij <= 0.0f && d_ji <= 0.0f) {
@@ -688,15 +688,15 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   }
   protobuf_zone_profile_t *active_profile = &cfg->zone_profiles[active_zone - 1];
 
-  float z[NUM_ANCHORS];
-  for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+  float z[SURVEY_NUM_ANCHORS];
+  for (uint8_t i = 0; i < SURVEY_NUM_ANCHORS; i++) {
       z[i] = cfg->anchor_layout[i].z_m;
   }
 
   // 4. Convert to horizontal planar 2D distances
-  float r[NUM_ANCHORS][NUM_ANCHORS] = {0};
-  for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
-    for (uint8_t j = i + 1; j < NUM_ANCHORS; j++) {
+  float r[SURVEY_NUM_ANCHORS][SURVEY_NUM_ANCHORS] = {0};
+  for (uint8_t i = 0; i < SURVEY_NUM_ANCHORS; i++) {
+    for (uint8_t j = i + 1; j < SURVEY_NUM_ANCHORS; j++) {
       float dz = z[i] - z[j];
       float dz2 = dz * dz;
       float d2 = d[i][j] * d[i][j];
@@ -746,13 +746,13 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   float x4 = (r14_2 - r24_2 + x2 * x2) / (2.0f * x2);
   float y4 = (r14_2 + r13_2 - r34_2 - 2.0f * x4 * x3) / (2.0f * y3);
 
-  const float solved_x[NUM_ANCHORS] = {0.0f, x2, x3, x4};
-  const float solved_y[NUM_ANCHORS] = {0.0f, 0.0f, y3, y4};
+  const float solved_x[SURVEY_NUM_ANCHORS] = {0.0f, x2, x3, x4};
+  const float solved_y[SURVEY_NUM_ANCHORS] = {0.0f, 0.0f, y3, y4};
   float residual_sq_sum = 0.0f;
   float residual_max = 0.0f;
   uint8_t residual_count = 0U;
-  for (uint8_t i = 0U; i < NUM_ANCHORS; i++) {
-    for (uint8_t j = (uint8_t)(i + 1U); j < NUM_ANCHORS; j++) {
+  for (uint8_t i = 0U; i < SURVEY_NUM_ANCHORS; i++) {
+    for (uint8_t j = (uint8_t)(i + 1U); j < SURVEY_NUM_ANCHORS; j++) {
       float dx = solved_x[i] - solved_x[j];
       float dy = solved_y[i] - solved_y[j];
       float dz = z[i] - z[j];
@@ -785,9 +785,9 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
          residual_rms, residual_max);
 
   // 6. Save solved layout to the active zone profile
-  active_profile->anchor_count = NUM_ANCHORS;
-  active_profile->anchors_count = NUM_ANCHORS;
-  for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+  active_profile->anchor_count = SURVEY_NUM_ANCHORS;
+  active_profile->anchors_count = SURVEY_NUM_ANCHORS;
+  for (uint8_t i = 0; i < SURVEY_NUM_ANCHORS; i++) {
       active_profile->anchors[i].anchor_id = active_ids[i];
       active_profile->anchors[i].z_m = z[i];
   }
@@ -804,8 +804,8 @@ static void run_anchor_survey_solver(sys_config_t *cfg) {
   active_profile->anchors[3].y_m = y4;
 
   // Sync to active live layout in RAM:
-  cfg->anchor_count = NUM_ANCHORS;
-  for (uint8_t i = 0; i < NUM_ANCHORS; i++) {
+  cfg->anchor_count = SURVEY_NUM_ANCHORS;
+  for (uint8_t i = 0; i < SURVEY_NUM_ANCHORS; i++) {
       cfg->anchor_layout[i] = active_profile->anchors[i];
   }
 
@@ -1142,8 +1142,8 @@ static void calib_log_status(uint32_t now, uint8_t my_id) {
   const char *role = (s_app_state == ANCHOR_STATE_CALIB_DONE)
                        ? "DONE"
                        : ((my_id == s_current_turn) ? "INITIATOR" : "RESPONDER");
-  uint16_t sample_counts[NUM_ANCHORS] = {0U};
-  for (uint8_t slot = 0U; slot < NUM_ANCHORS; slot++) {
+  uint16_t sample_counts[SURVEY_NUM_ANCHORS] = {0U};
+  for (uint8_t slot = 0U; slot < SURVEY_NUM_ANCHORS; slot++) {
     uint8_t anchor_id = 0U;
     if (calib_slot_to_anchor_id(slot, &anchor_id) &&
         anchor_id > 0U &&
@@ -1166,11 +1166,11 @@ app_err_t app_anchor_init(void) {
 
   if (s_survey_active) {
     uint8_t anchor_count = calib_anchor_count();
-    if (anchor_count != NUM_ANCHORS) {
+    if (anchor_count != SURVEY_NUM_ANCHORS) {
       RLOG_E(LOG_OBJECT_CODE_ANCHOR, ERR_SYSTEM,
              "[SURVEY] Unsupported anchor_count=%lu; solver requires %u",
              (unsigned long)cfg->anchor_count,
-             NUM_ANCHORS);
+             SURVEY_NUM_ANCHORS);
       app_anchor_set_survey_active(false);
       s_app_state = ANCHOR_STATE_NORMAL;
       return APP_ERR;

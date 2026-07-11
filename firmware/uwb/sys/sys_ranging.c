@@ -1671,6 +1671,23 @@ sys_ranging_err_t sys_ranging_tag_start_tdma(uint8_t        num_anchors,
 
 static uint32_t anchor_smart_discovery_interval_ms(uint32_t power_mode);
 
+static uint32_t tdma_cycle_watchdog_ms(uint8_t num_anchors, uint32_t configured_timeout_ms)
+{
+  uint32_t n = (num_anchors == 0U) ? 1U : (uint32_t)num_anchors;
+  uint32_t effective_slot_us = TDMA_DEFAULT_SLOT_DURATION_US + TDMA_DEFAULT_GUARD_TIME_US;
+  uint32_t active_us = TDMA_DEFAULT_POLL_TO_RESP_DELAY_US +
+                       (n * effective_slot_us) +
+                       TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US +
+                       TDMA_DEFAULT_SLOT_DURATION_US +
+                       TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US +
+                       (n * effective_slot_us) +
+                       TDMA_DEFAULT_SLOT_DURATION_US;
+  /* Preserve 10 ms for foreground/ISR scheduling jitter. Six anchors need
+   * about 53.5 ms on air, so the minimum whole-cycle watchdog becomes 64 ms. */
+  uint32_t required_ms = (active_us + 10000U + 999U) / 1000U;
+  return (configured_timeout_ms < required_ms) ? required_ms : configured_timeout_ms;
+}
+
 sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
 {
   event_tag_diag_maybe_log();
@@ -1679,6 +1696,7 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
   if (s_ctx.state != STATE_TAG_RANGING_TDMA) return SYS_RANGING_ERR;
   
   uint32_t timeout_ms = (rx_timeout_ms == 0) ? DEFAULT_RX_TIMEOUT_MS : rx_timeout_ms;
+  timeout_ms = tdma_cycle_watchdog_ms(num_anchors, timeout_ms);
   /* Use the configured timeout as the whole-cycle watchdog. */
   if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
     state_machine_reset();
@@ -1981,7 +1999,7 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
   if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA) return SYS_RANGING_ERR;
   
   uint32_t timeout_ms = (rx_timeout_ms == 0) ? DEFAULT_RX_TIMEOUT_MS : rx_timeout_ms;
-  uint32_t sm_watchdog_ms = timeout_ms;
+  uint32_t sm_watchdog_ms = tdma_cycle_watchdog_ms(num_anchors, timeout_ms);
   
   if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE) {
       s_ctx.state_entry_tick = HAL_GetTick();

@@ -9,6 +9,8 @@
 #ifndef __POSITIONING_CONFIG_H
 #define __POSITIONING_CONFIG_H
 
+#include "config.h"
+
 /* ===================================================================
  * ANTENNA DELAY CONFIGURATION
  * =================================================================== */
@@ -121,7 +123,18 @@
  * =================================================================== */
 
 #define MAX_ANCHORS_SUPPORTED  8
-#define NUM_ANCHORS            4
+/* Maximum number of anchors participating in one zone/ranging cycle. */
+#define NUM_ANCHORS            6
+/* The anchor-to-anchor survey solver is geometrically fixed to four anchors. */
+#define SURVEY_NUM_ANCHORS     4
+
+#if NUM_ANCHORS > MAX_ZONE_ANCHORS
+#error "NUM_ANCHORS exceeds protobuf zone-profile capacity"
+#endif
+
+#if NUM_ANCHORS > MAX_ANCHORS_SUPPORTED
+#error "NUM_ANCHORS exceeds ranging anchor-ID capacity"
+#endif
 
 /* Default active zone ID (1 or 2) */
 #ifndef DEFAULT_ZONE_ID
@@ -170,26 +183,17 @@
 #define ZONE_1_ANCHOR_4_Y    0.03f
 #define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
-/* Zone 2 Defaults */
-#define ZONE_2_ANCHOR_1_ID   5
-#define ZONE_2_ANCHOR_1_X    0.0f
-#define ZONE_2_ANCHOR_1_Y    0.0f
-#define ZONE_2_ANCHOR_1_Z    ANCHOR_HEIGHT_M
+#define ZONE_1_ANCHOR_5_ID   5
+#define ZONE_1_ANCHOR_5_X    0.0f
+#define ZONE_1_ANCHOR_5_Y    0.0f
+#define ZONE_1_ANCHOR_5_Z    ANCHOR_HEIGHT_M
 
-#define ZONE_2_ANCHOR_2_ID   6
-#define ZONE_2_ANCHOR_2_X    10.0f
-#define ZONE_2_ANCHOR_2_Y    0.0f
-#define ZONE_2_ANCHOR_2_Z    ANCHOR_HEIGHT_M
+#define ZONE_1_ANCHOR_6_ID   6
+#define ZONE_1_ANCHOR_6_X    10.0f
+#define ZONE_1_ANCHOR_6_Y    0.0f
+#define ZONE_1_ANCHOR_6_Z    ANCHOR_HEIGHT_M
 
-#define ZONE_2_ANCHOR_3_ID   7
-#define ZONE_2_ANCHOR_3_X    0.0f
-#define ZONE_2_ANCHOR_3_Y    10.0f
-#define ZONE_2_ANCHOR_3_Z    ANCHOR_HEIGHT_M
-
-#define ZONE_2_ANCHOR_4_ID   8
-#define ZONE_2_ANCHOR_4_X    10.0f
-#define ZONE_2_ANCHOR_4_Y    10.0f
-#define ZONE_2_ANCHOR_4_Z    ANCHOR_HEIGHT_M
+/* Zone 2 is intentionally left unconfigured for now. */
 
 /* ===================================================================
  * DISTANCE VALIDATION

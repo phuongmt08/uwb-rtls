@@ -84,7 +84,7 @@ bool g_pm_ranging_blocked = false;
 
 /* Network objects â€” non-static so main.c can init via extern */
 network_core_t g_network_core;
-uint8_t        g_network_rx_buf[512];
+uint8_t        g_network_rx_buf[NETWORK_CORE_PACKET_BUFFER_SIZE];
 uint8_t        uwb_entry_cnt = 0;
 uint8_t        fusion_entry_cnt = 0;
 bsp_imu_data_t imu_test_mutex_lock = {0};
