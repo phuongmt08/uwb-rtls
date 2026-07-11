@@ -20,6 +20,8 @@
 #include "mw_trilateration.h"
 #include "network/network_core.h"
 
+typedef struct uwb_distance_msg uwb_distance_msg_t;
+
 /* Public defines ----------------------------------------------------- */
 #define SYS_SENSOR_FUSION_PI 3.14159265358979323846f
 
@@ -34,6 +36,9 @@
 #ifndef TEST_UKF_DISTANCE_ZERO_SIMULATION
 #define TEST_UKF_DISTANCE_ZERO_SIMULATION 0
 #endif
+
+#define UKF_STEP_PREDICT 0U
+#define UKF_STEP_UPDATE  1U
 
 /* Public enumerate/structure ----------------------------------------- */
 typedef enum
@@ -71,7 +76,8 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                   const mw_tril_anchor_t *anchors_by_id,
                                                   const mw_tril_anchor_t *anchors_compact,
                                                   uint8_t compact_count,
-                                                  uint8_t selected_anchor_mask);
+                                                  uint8_t selected_anchor_mask,
+                                                  const uwb_distance_msg_t *ranging_msg);
 
 void sys_sensor_fusion_report_error(void);
 
@@ -83,9 +89,9 @@ uint32_t sys_sensor_fusion_get_error_count(void);
 
 void sys_sensor_fusion_reset(void);
 
-void sys_sensor_fusion_stream_ble();
+void sys_sensor_fusion_stream_ble(uint8_t ukf_step);
 
-void sys_sensor_fusion_stream_uart();
+void sys_sensor_fusion_stream_uart(uint8_t ukf_step);
 
 void sys_sensor_fusion_task();
 

@@ -307,17 +307,18 @@ message sensor_fusion_cfg_resp_t {
 }
 
 message sensor_fusion_result_t {
-    sint32 ukf_x_m      = 1;
-    sint32 ukf_y_m      = 2;
-    sint32 ukf_yaw_deg  = 3;
-    sint32 tril_x_m     = 4;
-    sint32 tril_y_m     = 5;
-    sint32 yaw_deg      = 6;
-    uint32 anchor_mask  = 7;
-    uint32 ranging_error_count  = 8;
-    uint32 timestamp_ms = 9;
-    uint32 zone_id      = 10;
-    repeated anchor_data_t  anchors = 11;
+    uint32 ukf_step                 = 1;
+    sint32 ukf_x_m                  = 2;
+    sint32 ukf_y_m                  = 3;
+    sint32 ukf_yaw_deg              = 4;
+    sint32 tril_x_m                 = 5;
+    sint32 tril_y_m                 = 6;
+    sint32 yaw_deg                  = 7;
+    uint32 anchor_mask              = 8;
+    uint32 ranging_error_count      = 9;
+    uint32 timestamp_ms             = 10;
+    uint32 zone_id                  = 11;
+    repeated anchor_data_t  anchors = 12;
 }
 
 /* Positioning prefilter ---------------------------------------------------- */
@@ -833,6 +834,21 @@ message calib_candidate_apply_t {
     uint32 anchor_mask = 1;
 }
 
+message calib_data_t {
+    uint32 anchor_mask               = 1;
+    uint32 tx_frame_cnt              = 2;
+    float ax                         = 3;
+    float ay                         = 4;
+    float gz                         = 5;
+    float px                         = 6;
+    float py                         = 7;
+    repeated float distance          = 8;
+    repeated double fp_amp_norm      = 9;
+    repeated double fp_snr           = 10;
+    uint32 error_frame_cnt           = 11;
+    float dt                         = 12;
+}
+
 /* Packet ------------------------------------------------------------------- */
 
 message packet_t {
@@ -976,6 +992,7 @@ message packet_t {
         calib_start_t             calib_start             = 84;
         calib_stop_t              calib_stop              = 85;
         calib_candidate_apply_t   calib_candidate_apply   = 86;
+        calib_data_t              calib_data              = 87;
 
     }
 }

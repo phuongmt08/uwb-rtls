@@ -431,7 +431,9 @@ __APP_JS_BUNDLE__
         let activeGroundTruth = groundTruths[0];
         let tagHeight = SIM_CONFIG.ENV.TAG_HEIGHT;
         const sourceFilename = "__FILENAME__";
-        const samples = rawData.all_entries.filter(e => e.type === 'Update');
+        const samples = isRecordedPathLog(rawData)
+            ? rawData.all_entries
+            : rawData.all_entries.filter(e => e.type === 'Update');
         
         document.getElementById('max_samples_range').max = rawData.all_entries.length;
         document.getElementById('max_samples_range').value = rawData.all_entries.length;

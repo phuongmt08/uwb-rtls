@@ -288,7 +288,7 @@ function countTrilaterationUpdates(entries, isPathCsv) {
     let prevY = null;
     
     entries.forEach(entry => {
-        if (entry.type === 'Update') {
+        if (isPathCsv || entry.type === 'Update') {
             const x = isPathCsv ? entry.tril_x : entry.px_fw;
             const y = isPathCsv ? entry.tril_y : entry.py_fw;
             if (x !== undefined && y !== undefined && (x !== prevX || y !== prevY)) {
@@ -299,6 +299,10 @@ function countTrilaterationUpdates(entries, isPathCsv) {
         }
     });
     return count;
+}
+
+function isRecordedPathLog(rawData) {
+    return rawData && (rawData.log_format === 'path_csv' || rawData.log_format === 'fusion_frame_csv');
 }
 
 function countRangingErrorDelta(entries) {
@@ -320,7 +324,7 @@ function countRangingErrorDelta(entries) {
 
 function updatePositionRateDisplay(totalTimeOverride) {
     if (Number.isFinite(totalTimeOverride)) latestTotalTime = totalTimeOverride;
-    const isPathCsv = rawData.log_format === 'path_csv';
+    const isPathCsv = isRecordedPathLog(rawData);
     const processedCount = latestSimulationResult && latestSimulationResult.simPathUKF_allTimes
         ? latestSimulationResult.simPathUKF_allTimes.length
         : rawData.all_entries.length;

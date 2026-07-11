@@ -64,6 +64,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define SENSOR_FUSION_QUEUE_WAIT_TICKS pdMS_TO_TICKS(20U)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -407,7 +409,7 @@ void sensor_fusion_entry(void *argument)
 #if TEST_UKF_STREAM_UART
   for (;;)
   {
-    sys_sensor_fusion_stream_uart();
+    sys_sensor_fusion_stream_uart(UKF_STEP_PREDICT);
     osDelay(20);
   }
 #endif
@@ -415,13 +417,15 @@ void sensor_fusion_entry(void *argument)
 #if TEST_UKF_STREAM_BLE
   for (;;)
   {
-    sys_sensor_fusion_stream_ble();
+    sys_sensor_fusion_stream_ble(UKF_STEP_UPDATE);
     osDelay(20);
   }
 #endif
 
   for (;;)
   {
+    bool fusion_predict_performed = false;
+    bool fusion_update_performed = false;
 
     if (s_fusion_reset_requested)
     {
@@ -432,28 +436,44 @@ void sensor_fusion_entry(void *argument)
       continue;
     }
 
-    (void)sys_sensor_fusion_task();
-
     if (!g_ranging_enabled)
 	{
+	    (void)sys_sensor_fusion_task();
     	osDelay(20);
     	continue;
 	}
 
     uwb_distance_msg_t msg;
-    bool has_uwb_msg = false;
+    bool has_uwb_msg =
+        (osMessageQueueGet(g_uwb_distance_queue,
+                           &msg,
+                           NULL,
+                           SENSOR_FUSION_QUEUE_WAIT_TICKS) == osOK);
+    uint32_t queue_latency_ms = 0U;
 
-    while (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+    if (has_uwb_msg)
     {
-        has_uwb_msg = true;
+      /* Keep only the newest ranging cycle if more than one accumulated. */
+      while (osMessageQueueGet(g_uwb_distance_queue, &msg, NULL, 0U) == osOK)
+      {
+      }
+
+      queue_latency_ms = HAL_GetTick() - msg.timestamp_ms;
     }
 
+    (void)sys_sensor_fusion_task();
+
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
-    (void)sys_sensor_fusion_predict(&ukf_data);
-#else
-    if (sys_sensor_fusion_check_predict_flag())
+    if (g_imu_data_queue != NULL && osMessageQueueGetCount(g_imu_data_queue) > 0U)
     {
-      (void)sys_sensor_fusion_predict(&ukf_data);
+      fusion_predict_performed = (sys_sensor_fusion_predict(&ukf_data) == SYS_SENSOR_FUSION_OK);
+    }
+#else
+    if (sys_sensor_fusion_check_predict_flag() &&
+        g_imu_data_queue != NULL &&
+        osMessageQueueGetCount(g_imu_data_queue) > 0U)
+    {
+      fusion_predict_performed = (sys_sensor_fusion_predict(&ukf_data) == SYS_SENSOR_FUSION_OK);
     }
 #endif
 
@@ -627,17 +647,23 @@ void sensor_fusion_entry(void *argument)
 #endif
                     uint32_t current_time = HAL_GetTick();
                     uint32_t latency_ms = current_time - msg.timestamp_ms;
-                    RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION LATENCY] UWB Queue Latency: %u ms", latency_ms);
+                    // RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION LATENCY] UWB Queue Latency: %u ms", latency_ms);
 
                     SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
-                    (void)sys_sensor_fusion_update(   &ukf_data,
+                    fusion_update_performed = sys_sensor_fusion_update(
+                                                      &ukf_data,
                                                       &tril_position,
                                                       best_3_anchors,
                                                       anchors_by_id,
                                                       anchors_compact,
                                                       compact_idx,
-                                                      s_last_selected_anchors_mask);
+                                                      s_last_selected_anchors_mask,
+                                                      &msg);
                     SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
+
+                    /* RLOG_I(LOG_OBJECT_CODE_TAG,
+                           "[FUSION LATENCY] UWB Queue Latency: %lu ms",
+                           (unsigned long)queue_latency_ms); */
                 }
                 else
                 {
@@ -699,15 +725,21 @@ void sensor_fusion_entry(void *argument)
           s_last_selected_anchors_mask = selected_mask;
 
           vec2d_t tril_position = {0.0, 0.0};
-          (void)sys_sensor_fusion_update(&ukf_data,
-                                         &tril_position,
-                                         best_3_anchors,
-                                         anchors_by_id,
-                                         anchors_compact,
-                                         compact_idx,
-                                         selected_mask);
+          fusion_update_performed = sys_sensor_fusion_update(&ukf_data,
+                                                             &tril_position,
+                                                             best_3_anchors,
+                                                             anchors_by_id,
+                                                             anchors_compact,
+                                                             compact_idx,
+                                                             selected_mask,
+                                                             NULL);
         }
 #endif
+    }
+
+    if (fusion_update_performed || fusion_predict_performed)
+    {
+      sys_sensor_fusion_stream_ble(fusion_update_performed ? UKF_STEP_UPDATE : UKF_STEP_PREDICT);
     }
     
     osDelay(20);

@@ -15,7 +15,7 @@ function initSimulation() {
         simWorker.onmessage = function(e) {
             const res = e.data;
             latestSimulationResult = res;
-            const isPathCsv = rawData.log_format === 'path_csv';
+            const isPathCsv = isRecordedPathLog(rawData);
             latestTrajectoryPaths = {
                 firmware: isPathCsv
                     ? { x: rawData.tril_path.x.slice(0, res.x_axis.length), y: rawData.tril_path.y.slice(0, res.x_axis.length) }
@@ -164,7 +164,7 @@ function openReplayPage() {
     const imuLpfCutoffInput = document.getElementById('imu_lpf_cutoff_range');
     const enableImuLpfInput = document.getElementById('enable_imu_lpf');
     const imuFilterOrderInput = document.getElementById('imu_filter_order_range');
-    const isPathCsv = rawData.log_format === 'path_csv';
+    const isPathCsv = isRecordedPathLog(rawData);
 
     // Package data for replay
     const replayData = {
@@ -195,7 +195,7 @@ function openReplayPage() {
         simPageUrl: window.location.pathname
     };
     localStorage.setItem('uwb_replay_data', JSON.stringify(replayData));
-    window.open('/trajectory_replay.html', '_blank');
+    window.open('/simulation/trajectory_replay.html', '_blank');
 }
 
 let hasChanges = false;

@@ -56,10 +56,6 @@
 #define RAD2DEG							180.0f / 3.14159265358979323846f
 #define DEG2RAD							3.14159265358979323846f / 180.0f
 
-#define UKF_STEP_PREDICT 0U
-#define UKF_STEP_UPDATE  1U
-
-
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
 {
@@ -131,6 +127,8 @@ float b_gz_t = 0.0f;
 static float 	s_latest_distances[NUM_ANCHORS] = {0.0f};
 static double 	s_latest_fp_amp_norm[NUM_ANCHORS] = {0.0};
 static double 	s_latest_fp_snr[NUM_ANCHORS] = {0.0};
+static protobuf_anchor_data_t s_latest_anchor_data[pb_arraysize(protobuf_sensor_fusion_result_t, anchors)] = {0};
+static pb_size_t s_latest_anchor_data_count = 0U;
 static uint32_t s_error_count = 0U;
 static uint8_t 	s_last_selected_anchors_mask = 0U;
 static float 	s_latest_tril_x = 0.0f;
@@ -146,7 +144,8 @@ unsigned long sys_update_err_count = 0;
 unsigned long sys_update_cholesky_err_count = 0;
 unsigned long sys_update_inverse_err_count = 0;
 //
-static ukf_core_t ukf = {0};
+static ukf_core_t ukf 	= {0};
+float yaw_rad_cached   	= 0.0f;
 
 #if TEST_UKF_STREAM_BLE || TEST_UKF_STREAM_UART
 static uint32_t s_stream_test_sample_idx = 0U;
@@ -159,9 +158,10 @@ static void reset_runtime_state(void);
 static bool active_anchor_index_for_id(uint8_t anchor_id, uint8_t *index_out);
 static void clear_latest_anchor_metrics(void);
 static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id);
+static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging_msg);
 static int16_t to_uart_fixed2(float value);
 static int32_t to_proto_fixed2(float value);
-#if TEST_UKF_STREAM_BLE
+#if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
 static void configure_adv(network_core_t *stream);
 #endif
 sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
@@ -182,7 +182,7 @@ static void apply_zupt_velocity_constraint(void);
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
-	CHECK_ERR((bsp_imu_is_initialized() || bsp_imu_init() == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
+	CHECK_ERR((bsp_imu_init() == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
 
 	bsp_imu_bias_t imu_bias;
 
@@ -454,8 +454,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 #endif
 
-    sys_sensor_fusion_stream_uart();
-    sys_sensor_fusion_stream_ble();
+    sys_sensor_fusion_stream_uart(UKF_STEP_PREDICT);
     predict_delta_ms = HAL_GetTick() - sys_predict_tick_ms;
 
 	return SYS_SENSOR_FUSION_OK;
@@ -497,7 +496,8 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
 							  const mw_tril_anchor_t *anchors_by_id,
 							  const mw_tril_anchor_t *anchors_compact,
 							  uint8_t compact_count,
-							  uint8_t selected_anchor_mask)
+							  uint8_t selected_anchor_mask,
+							  const uwb_distance_msg_t *ranging_msg)
 {
     CHECK_ERR(p_ukf && tril_position && best_3_anchors && anchors_by_id, false);
 
@@ -540,9 +540,12 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         }
 
         snapshot_latest_anchor_metrics(anchors_by_id);
+        update_latest_anchor_data_snapshot(ranging_msg);
 
         sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
         sys_sensor_fusion_set_predict_flag();
+       ukf.state.theta = yaw_rad_cached;
+       yaw             = yaw_rad_cached;
         return true;
     }
 
@@ -557,6 +560,7 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
     }
 
     snapshot_latest_anchor_metrics(anchors_by_id);
+    update_latest_anchor_data_snapshot(ranging_msg);
 
     const uint8_t selected_anchor_ids[3] = {
         best_3_anchors[0].id,
@@ -572,15 +576,7 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         return false;
     }
 
-    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
-                                        to_uart_fixed2(ukf.state.px),
-                                        to_uart_fixed2(ukf.state.py),
-                                        0,
-                                        to_uart_fixed2(s_latest_tril_x),
-                                        to_uart_fixed2(s_latest_tril_y),
-                                        0,
-                                        UKF_STEP_UPDATE,
-                                        s_error_count);
+    sys_sensor_fusion_stream_uart(UKF_STEP_UPDATE);
 
     return true;
 }
@@ -624,7 +620,7 @@ void sys_sensor_fusion_reset(void)
 
 void sys_sensor_fusion_stream_test_init(network_core_t *stream)
 {
-#if TEST_UKF_STREAM_BLE
+#if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
     CHECK_VOID(stream);
     s_stream_test_sample_idx = 0U;
     configure_adv(stream);
@@ -632,15 +628,16 @@ void sys_sensor_fusion_stream_test_init(network_core_t *stream)
     (void)stream;
 #endif
 }
-
-void sys_sensor_fusion_stream_ble()
+protobuf_sensor_fusion_result_t stream_data;
+void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
 {
-#if TEST_UKF_STREAM_BLE
+#if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
 
     uint32_t now_ms = HAL_GetTick();
 
     protobuf_sensor_fusion_result_t stream_data;
     memset(&stream_data, 0, sizeof(stream_data));
+    stream_data.ukf_step = ukf_step;
 
     const float start_x = 1.0f;
     const float end_x   = 3.0f;
@@ -682,7 +679,9 @@ void sys_sensor_fusion_stream_ble()
     stream_data.ranging_error_count = s_stream_test_sample_idx;
     stream_data.timestamp_ms = now_ms;
     stream_data.zone_id = 0U;
-    stream_data.anchors_count = 0U;
+    stream_data.anchors_count = s_latest_anchor_data_count;
+    memcpy(stream_data.anchors, s_latest_anchor_data,
+           (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));
 
     if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data))
     {
@@ -695,52 +694,60 @@ void sys_sensor_fusion_stream_ble()
         return;
     }
 
+#if ENABLE_SYS_FUSION
     const sys_config_t *cfg = sys_config_get();
-    protobuf_sensor_fusion_result_t stream_data;
+
     memset(&stream_data, 0, sizeof(stream_data));
 
-    stream_data.ukf_x_m = to_proto_fixed2(ukf.state.px);
-    stream_data.ukf_y_m = to_proto_fixed2(ukf.state.py);
-    stream_data.ukf_yaw_deg = to_proto_fixed2(sys_sensor_fusion_get_ukf_yaw_deg());
-    stream_data.tril_x_m = to_proto_fixed2(s_latest_tril_x);
-    stream_data.tril_y_m = to_proto_fixed2(s_latest_tril_y);
-    stream_data.yaw_deg = to_proto_fixed2(sys_sensor_fusion_get_yaw_deg());
-    stream_data.anchor_mask = s_last_selected_anchors_mask;
+    stream_data.ukf_step            = ukf_step;
+    stream_data.ukf_x_m 			= to_proto_fixed2(ukf.state.px);
+    stream_data.ukf_y_m 			= to_proto_fixed2(ukf.state.py);
+    stream_data.ukf_yaw_deg 		= to_proto_fixed2(sys_sensor_fusion_get_ukf_yaw_deg());
+    stream_data.tril_x_m 			= to_proto_fixed2(s_latest_tril_x);
+    stream_data.tril_y_m 			= to_proto_fixed2(s_latest_tril_y);
+    stream_data.yaw_deg 			= to_proto_fixed2(sys_sensor_fusion_get_yaw_deg());
+    stream_data.anchor_mask 		= s_last_selected_anchors_mask;
     stream_data.ranging_error_count = s_error_count;
-    stream_data.timestamp_ms = HAL_GetTick();
-    stream_data.zone_id = cfg ? cfg->default_zone_id : 0U;
-
-    if (cfg)
-    {
-        uint32_t count = cfg->anchor_count;
-        if (count > pb_arraysize(protobuf_sensor_fusion_result_t, anchors)) {
-            count = pb_arraysize(protobuf_sensor_fusion_result_t, anchors);
-        }
-        if (count > NUM_ANCHORS) {
-            count = NUM_ANCHORS;
-        }
-
-        for (uint32_t i = 0U; i < count; i++)
-        {
-            uint32_t aid = cfg->anchor_layout[i].anchor_id;
-            if (aid == 0U) {
-                continue;
-            }
-
-            protobuf_anchor_data_t *anchor = &stream_data.anchors[stream_data.anchors_count++];
-            anchor->anchor_id = aid;
-            anchor->distance_mm = (s_latest_distances[i] > 0.0f) ? (uint32_t)(s_latest_distances[i] * 1000.0f) : 0U;
-            anchor->weight = ((aid <= 8U) && ((s_last_selected_anchors_mask & (1U << (aid - 1U))) != 0U)) ? 100 : 0;
-        }
-    }
+    stream_data.timestamp_ms 		= HAL_GetTick();
+    stream_data.zone_id 			= cfg ? cfg->default_zone_id : 0U;
+    stream_data.anchors_count 		= s_latest_anchor_data_count;
+    memcpy(stream_data.anchors, s_latest_anchor_data,
+    (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));
 
     (void)network_send_sensor_fusion_result(&g_network_core,
                                             protobuf_PACKET_ADDR_HOST,
                                             &stream_data);
+#else
+    static uint32_t tx_frame_cnt = 0U;
+    protobuf_calib_data_t stream_data;
+    memset(&stream_data, 0, sizeof(stream_data));
+
+    stream_data.anchor_mask = s_last_selected_anchors_mask;
+    stream_data.tx_frame_cnt = tx_frame_cnt;
+    stream_data.ax = ukf.imu_current.ax;
+    stream_data.ay = ukf.imu_current.ay;
+    stream_data.gz = ukf.imu_current.gz;
+    stream_data.px = s_latest_tril_x;
+    stream_data.py = s_latest_tril_y;
+    stream_data.distance_count = NUM_ANCHORS;
+    stream_data.fp_amp_norm_count = NUM_ANCHORS;
+    stream_data.fp_snr_count = NUM_ANCHORS;
+    memcpy(stream_data.distance, s_latest_distances, sizeof(s_latest_distances));
+    memcpy(stream_data.fp_amp_norm, s_latest_fp_amp_norm, sizeof(s_latest_fp_amp_norm));
+    memcpy(stream_data.fp_snr, s_latest_fp_snr, sizeof(s_latest_fp_snr));
+    stream_data.error_frame_cnt = s_error_count;
+    stream_data.dt = s_fusion_dt;
+
+    if (network_send_calib_data(&g_network_core,
+                                protobuf_PACKET_ADDR_HOST,
+                                &stream_data)) {
+        tx_frame_cnt++;
+    }
+#endif
 #endif
 }
 
-void sys_sensor_fusion_stream_uart()
+void sys_sensor_fusion_stream_uart(uint8_t ukf_step)
 {
 #if TEST_UKF_STREAM_UART
     const float start_x = 1.0f;
@@ -792,18 +799,34 @@ void sys_sensor_fusion_stream_uart()
     }
 
 #if ENABLE_SYS_FUSION
-    float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
-    float raw_yaw = sys_sensor_fusion_get_yaw_deg();
+    if(ukf_step == UKF_STEP_PREDICT)
+    {
+    	float ukf_yaw = sys_sensor_fusion_get_ukf_yaw_deg();
+		float raw_yaw = sys_sensor_fusion_get_yaw_deg();
 
-    (void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
-                                    to_uart_fixed2(ukf.state.px),
-                                    to_uart_fixed2(ukf.state.py),
-                                    to_uart_fixed2(ukf_yaw),
-                                    to_uart_fixed2(s_latest_tril_x),
-                                    to_uart_fixed2(s_latest_tril_y),
-                                    to_uart_fixed2(raw_yaw),
-                                    UKF_STEP_PREDICT,
-                                    s_error_count);
+		(void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+										to_uart_fixed2(ukf.state.px),
+										to_uart_fixed2(ukf.state.py),
+										to_uart_fixed2(ukf_yaw),
+										to_uart_fixed2(s_latest_tril_x),
+										to_uart_fixed2(s_latest_tril_y),
+										to_uart_fixed2(raw_yaw),
+										UKF_STEP_PREDICT,
+										s_error_count);
+    }
+    else if(ukf_step == UKF_STEP_UPDATE)
+    {
+    	(void)bsp_io_uart_send_fusion_data(s_last_selected_anchors_mask,
+    	                                        to_uart_fixed2(ukf.state.px),
+    	                                        to_uart_fixed2(ukf.state.py),
+    	                                        0,
+    	                                        to_uart_fixed2(s_latest_tril_x),
+    	                                        to_uart_fixed2(s_latest_tril_y),
+    	                                        0,
+    	                                        UKF_STEP_UPDATE,
+    	                                        s_error_count);
+    }
+
 #else
     bsp_io_uart_send_fusion_log_data(s_last_selected_anchors_mask,
                                          s_error_count,
@@ -883,9 +906,7 @@ void sys_sensor_fusion_task()
 
 void sys_sensor_fusion_set_initial_yaw(uint32_t yaw_deg)
 {
-    float yaw_rad   = (float)(yaw_deg / 100.0f) * DEG2RAD;
-    ukf.state.theta = yaw_rad;
-    yaw             = yaw_rad;
+    yaw_rad_cached   = (float)(yaw_deg) * DEG2RAD;
 }
 
 /* Private definitions ------------------------------------------------ */
@@ -1339,6 +1360,9 @@ static void clear_latest_anchor_metrics(void)
         s_latest_fp_amp_norm[i] = 0.0;
         s_latest_fp_snr[i] = 0.0;
     }
+
+    memset(s_latest_anchor_data, 0, sizeof(s_latest_anchor_data));
+    s_latest_anchor_data_count = 0U;
 }
 
 static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id)
@@ -1362,6 +1386,39 @@ static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id
     }
 }
 
+static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging_msg)
+{
+    memset(s_latest_anchor_data, 0, sizeof(s_latest_anchor_data));
+    s_latest_anchor_data_count = 0U;
+
+    if (!ranging_msg) {
+        return;
+    }
+
+    uint32_t count = ranging_msg->count;
+    if (count > pb_arraysize(protobuf_sensor_fusion_result_t, anchors)) {
+        count = pb_arraysize(protobuf_sensor_fusion_result_t, anchors);
+    }
+    if (count > MAX_ANCHORS_SUPPORTED) {
+        count = MAX_ANCHORS_SUPPORTED;
+    }
+
+    for (uint32_t i = 0U; i < count; i++) {
+        uint32_t aid = ranging_msg->anchor_ids[i];
+        if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED ||
+            (ranging_msg->mask & (1U << (aid - 1U))) == 0U) {
+            continue;
+        }
+
+        protobuf_anchor_data_t *anchor = &s_latest_anchor_data[s_latest_anchor_data_count++];
+        anchor->anchor_id   = aid;
+        anchor->distance_mm = (ranging_msg->distances[i] > 0.0f)
+                            ? (uint32_t)(ranging_msg->distances[i] * 1000.0f)
+                            : 0U;
+        anchor->weight      = ((aid <= 8U) && ((s_last_selected_anchors_mask & (1U << (aid - 1U))) != 0U)) ? 100 : 0;
+    }
+}
+
 static int16_t to_uart_fixed2(float value)
 {
     float scaled = value * 100.0f;
@@ -1381,7 +1438,7 @@ static int32_t to_proto_fixed2(float value)
     return (int32_t)(value * 100.0f);
 }
 
-#if TEST_UKF_STREAM_BLE
+#if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
 static void configure_adv(network_core_t *stream)
 {
 #ifdef HAVE_BLE_PERIPHERAL

@@ -51,7 +51,8 @@ static uint8_t s_pending_num_anchors = 0;
 static uint8_t s_pending_anchor_ids[NUM_ANCHORS] = {0};
 static uint32_t s_next_due_tick = 0;
 static uint32_t s_cycle_start_tick = 0;
-static uint32_t s_last_cycle_done_tick = 0;
+static uint32_t s_success_rate_window_tick = 0;
+static uint32_t s_successful_cycles_in_window = 0;
 static uint32_t s_period_miss_count = 0;
 static uint32_t s_period_overrun_count = 0;
 static volatile app_tag_uwb_control_op_t s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
@@ -634,7 +635,8 @@ app_err_t app_tag_init(void)
     s_last_ranging_tick = HAL_GetTick();
     s_next_due_tick = s_last_ranging_tick + cfg->uwb.ranging_period_ms;
     s_cycle_start_tick = 0;
-    s_last_cycle_done_tick = 0;
+    s_success_rate_window_tick = s_last_ranging_tick;
+    s_successful_cycles_in_window = 0;
     s_period_miss_count = 0;
     s_period_overrun_count = 0;
 
@@ -736,18 +738,28 @@ void app_tag_process(void)
         uint32_t cycle_done_tick = HAL_GetTick();
         if (s_cycle_start_tick != 0U) {
             uint32_t cycle_ms = cycle_done_tick - s_cycle_start_tick;
-            uint32_t interval_ms = (s_last_cycle_done_tick == 0U)
-                                   ? cfg->uwb.ranging_period_ms
-                                   : (cycle_done_tick - s_last_cycle_done_tick);
-            float current_hz = (interval_ms > 0U) ? (1000.0f / (float)interval_ms) : 0.0f;
+            if (multi_results.count >= 3U) {
+                s_successful_cycles_in_window++;
+            }
+
+            uint32_t success_window_ms = cycle_done_tick - s_success_rate_window_tick;
+            float success_rate_hz = (success_window_ms > 0U)
+                                  ? (1000.0f * (float)s_successful_cycles_in_window /
+                                     (float)success_window_ms)
+                                  : 0.0f;
 
             RLOG_I(LOG_OBJECT_CODE_TAG,
                    "Cycle duration=%lums period=%ums success rate=%.2fHz anchors=%u valid=%u",
                    (unsigned long)cycle_ms,
                    (unsigned)cfg->uwb.ranging_period_ms,
-                   current_hz,
+                   success_rate_hz,
                    (unsigned)s_pending_num_anchors,
                    (unsigned)multi_results.count);
+
+            if (success_window_ms >= 1000U) {
+                s_success_rate_window_tick = cycle_done_tick;
+                s_successful_cycles_in_window = 0U;
+            }
 
             if (cycle_ms > cfg->uwb.ranging_period_ms) {
                 s_period_overrun_count++;
@@ -760,7 +772,6 @@ void app_tag_process(void)
                 }
             }
         }
-        s_last_cycle_done_tick = cycle_done_tick;
         s_last_ranging_tick = cycle_done_tick;
         update_period_schedule(s_last_ranging_tick, period_ms);
         if (s_period_miss_count != s_reported_period_miss_count
@@ -793,7 +804,8 @@ void app_tag_reset_fusion(void)
     s_last_ranging_tick = HAL_GetTick();
     s_next_due_tick = s_last_ranging_tick + sys_config_get()->uwb.ranging_period_ms;
     s_cycle_start_tick = 0U;
-    s_last_cycle_done_tick = 0U;
+    s_success_rate_window_tick = s_last_ranging_tick;
+    s_successful_cycles_in_window = 0U;
 
 #if ENABLE_SYS_FUSION
     app_rtos_request_sensor_fusion_reset();

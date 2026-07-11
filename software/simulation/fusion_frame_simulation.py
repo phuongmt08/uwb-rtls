@@ -1,4 +1,5 @@
 import http.server
+import csv
 import importlib.util
 import json
 import math
@@ -11,7 +12,7 @@ import webbrowser
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FUSION_FILE_PATTERNS = ("ukf_fusion_data", "fusion_frame")
+FUSION_FILE_PATTERNS = ("fusion_frame_log_data",)
 
 
 def _load_base_report_module():
@@ -49,6 +50,52 @@ def parse_fusion_frame_log(filepath):
     entries = []
     prev_step_tx = {}
     with open(filepath, "r", encoding="utf-8") as f:
+        first_line = f.readline()
+        f.seek(0)
+        if "frame_counter" in first_line and "ukf_x_m" in first_line:
+            reader = csv.DictReader(f)
+            for line_no, row in enumerate(reader, 2):
+                ukf_x = _safe_float(row.get("ukf_x_m", row.get("ukf_x", 0.0)))
+                ukf_y = _safe_float(row.get("ukf_y_m", row.get("ukf_y", 0.0)))
+                tril_x = _safe_float(row.get("tril_x_m", row.get("tril_x", ukf_x)), ukf_x)
+                tril_y = _safe_float(row.get("tril_y_m", row.get("tril_y", ukf_y)), ukf_y)
+                ukf_step = _safe_int(row.get("ukf_step", 0), 0)
+                tx_frame_cnt = _safe_int(row.get("tx_frame_cnt", row.get("frame_counter", 0)), 0)
+
+                dt = _safe_float(row.get("dt"), -1.0)
+                if dt < 0:
+                    prev_tx = prev_step_tx.get(ukf_step)
+                    dt = 0.0 if prev_tx is None else max(1, tx_frame_cnt - prev_tx) * 0.02
+                prev_step_tx[ukf_step] = tx_frame_cnt
+
+                entries.append({
+                    "line_no": line_no,
+                    "raw_line": ",".join(str(row.get(key, "")) for key in (reader.fieldnames or [])),
+                    "frame_counter": _safe_int(row.get("frame_counter", len(entries) + 1), len(entries) + 1),
+                    "tx_frame_cnt": tx_frame_cnt,
+                    "type": row.get("status") or ("Update" if ukf_step == 1 else "Predict"),
+                    "source_format": row.get("frame_type") or "unified_csv",
+                    "ukf_step": ukf_step,
+                    "ax": _safe_float(row.get("ax")),
+                    "ay": _safe_float(row.get("ay")),
+                    "gz": _safe_float(row.get("gz")),
+                    "px_fw": ukf_x,
+                    "py_fw": ukf_y,
+                    "dt": dt,
+                    "ukf_x": ukf_x,
+                    "ukf_y": ukf_y,
+                    "tril_x": tril_x,
+                    "tril_y": tril_y,
+                    "yaw": _safe_float(row.get("yaw_deg"), _safe_float(row.get("ukf_yaw_deg"))),
+                    "ukf_yaw": _safe_float(row.get("ukf_yaw_deg"), _safe_float(row.get("yaw_deg"))),
+                    "fp_amp_norm": [_safe_float(row.get(f"fp_amp_norm{i}")) for i in range(1, 5)],
+                    "fp_snr": [_safe_float(row.get(f"fp_snr{i}")) for i in range(1, 5)],
+                    "mask": _safe_int(row.get("anchor_mask", row.get("mask", 15)), 15),
+                    "distances": [_safe_float(row.get(f"d{i}")) for i in range(1, 5)],
+                    "err": _safe_int(row.get("ranging_error_count", row.get("err", 0)), 0),
+                })
+            return entries
+
         for line_no, line in enumerate(f, 1):
             raw_line = line.rstrip("\r\n")
             if "ukf_x:" not in raw_line:
@@ -58,8 +105,13 @@ def parse_fusion_frame_log(filepath):
             frame_counter = int(counter_match.group("rx")) if counter_match else len(entries) + 1
             tx_frame_cnt = int(counter_match.group("tx")) if counter_match else frame_counter
             ukf_step = _safe_int(_extract_number(raw_line, "ukf_step", 0), 0)
+            status_match = re.search(r"\)\s*(?P<type>Update|Init|Predict)\b", raw_line)
 
             dt = _extract_number(raw_line, "dt", -1.0)
+            if dt < 0:
+                update_dt = _extract_number(raw_line, "update_dt", -1.0)
+                predict_dt = _extract_number(raw_line, "predict_dt", -1.0)
+                dt = update_dt if update_dt >= 0 else predict_dt
             if dt < 0:
                 prev_tx = prev_step_tx.get(ukf_step)
                 dt = 0.0 if prev_tx is None else max(1, tx_frame_cnt - prev_tx) * 0.02
@@ -76,7 +128,7 @@ def parse_fusion_frame_log(filepath):
                 "raw_line": raw_line,
                 "frame_counter": frame_counter,
                 "tx_frame_cnt": tx_frame_cnt,
-                "type": "Update",
+                "type": status_match.group("type") if status_match else ("Update" if ukf_step == 1 else "Predict"),
                 "source_format": "path_csv",
                 "ukf_step": ukf_step,
                 "ax": 0.0,
@@ -164,10 +216,8 @@ def _is_fusion_csv(filename):
 
 
 def _find_logs():
-    logs_data_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "logs_data"))
-    search_dirs = [BASE_DIR]
-    if os.path.isdir(logs_data_dir):
-        search_dirs.append(logs_data_dir)
+    data_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
+    search_dirs = [data_dir] if os.path.isdir(data_dir) else []
 
     logs = [
         os.path.join(root, filename)
@@ -182,7 +232,11 @@ def _find_logs():
 
 def _report_path_for(log_path):
     report_name = os.path.basename(log_path).replace(".csv", "_sim.html")
-    if os.path.abspath(log_path).startswith(os.path.abspath(BASE_DIR)):
+    data_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
+    if (
+        os.path.abspath(log_path).startswith(os.path.abspath(BASE_DIR))
+        or os.path.abspath(log_path).startswith(data_dir)
+    ):
         return os.path.join(os.path.dirname(log_path), report_name)
     return os.path.join(BASE_DIR, "logs_data_reports", report_name)
 
@@ -279,7 +333,7 @@ def _write_dashboard(results, files_generated, cache_token):
     <h1>Fusion Frame Reports</h1>
     <p>Generated {files_generated} report(s). Showing {len(results)} fusion CSV file(s).</p>
   </div>
-  {''.join(sections) if sections else '<p>No ukf_fusion_data CSV files found.</p>'}
+  {''.join(sections) if sections else '<p>No fusion_frame_log_data CSV files found.</p>'}
 </body>
 </html>"""
 
