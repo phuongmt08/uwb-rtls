@@ -19,9 +19,8 @@ log = logging.getLogger(__name__)
 class GeofenceRepository:
     def __init__(self, default_file_path: Optional[str] = None):
         if default_file_path is None:
-            # Save inside data/runtime folder
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.default_file_path = os.path.join(base_dir, "data", "runtime", "geofence_map.json")
+            app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.default_file_path = os.path.join(app_dir, "data", "runtime", "geofence_map.json")
         else:
             self.default_file_path = default_file_path
 

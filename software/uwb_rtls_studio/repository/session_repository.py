@@ -11,15 +11,17 @@ import csv
 import json
 import logging
 import os
+import re
 import shutil
 from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(APP_DIR, "data")
+SHARED_DATA_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "data"))
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
 INDEX_FILE = os.path.join(SESSIONS_DIR, "index.json")
-APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SESSION_BROWSER_DIR = os.path.join(APP_DIR, "session_browser")
 BROWSER_RANGING_DIR = os.path.join(SESSION_BROWSER_DIR, "ranging")
 BROWSER_LOG_DIR = os.path.join(SESSION_BROWSER_DIR, "log")
@@ -235,6 +237,7 @@ class SessionRepository:
             path = os.path.join(run_dir, f"ranging_run_{run_index:03d}.csv")
             self._write_positions_csv(path, merged)
             self._mirror_browser_file(path, "ranging", session_id)
+            self._write_sensor_fusion_result_export(fusion_positions)
             files.append(os.path.relpath(path, session_folder))
 
         run_meta = dict(meta or {})
@@ -566,41 +569,184 @@ class SessionRepository:
     def _write_positions_csv(self, path: str, positions: list[dict]) -> None:
         with open(path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            for pos in positions:
-                timestamp_ms = int(pos.get("timestamp_ms", 0) or 0)
-                row_items = [
-                    f"time:{self._display_time_from_position(pos)}",
-                    f"timestamp_ms:{timestamp_ms}",
-                    f"packet_timestamp_ms:{int(pos.get('packet_timestamp_ms', 0) or 0)}",
-                    f"seq:{pos.get('seq', 0)}",
-                    f"source:{pos.get('source', 'ranging')}",
-                    f"x_m:{pos.get('x_m', pos.get('x', 0.0))}",
-                    f"y_m:{pos.get('y_m', pos.get('y', 0.0))}",
-                    f"z_m:{pos.get('z_m', pos.get('z', 0.0))}",
-                    f"rms_error_m:{pos.get('rms_error_m', pos.get('rms', 0.0))}",
-                    f"anchor_mask:{pos.get('anchor_mask', 0)}",
-                    f"d1_mm:{pos.get('d1_mm', '')}",
-                    f"d2_mm:{pos.get('d2_mm', '')}",
-                    f"d3_mm:{pos.get('d3_mm', '')}",
-                    f"d4_mm:{pos.get('d4_mm', '')}",
-                    f"w1:{pos.get('w1', '')}",
-                    f"w2:{pos.get('w2', '')}",
-                    f"w3:{pos.get('w3', '')}",
-                    f"w4:{pos.get('w4', '')}",
-                    f"ukf_x_m:{pos.get('ukf_x_m', '')}",
-                    f"ukf_y_m:{pos.get('ukf_y_m', '')}",
-                    f"ukf_yaw_deg:{pos.get('ukf_yaw_deg', '')}",
-                    f"tril_x_m:{pos.get('tril_x_m', '')}",
-                    f"tril_y_m:{pos.get('tril_y_m', '')}",
-                    f"yaw_deg:{pos.get('yaw_deg', '')}",
-                    f"ranging_error_count:{pos.get('ranging_error_count', '')}",
-                    f"zone_id:{pos.get('zone_id', '')}",
-                    f"room_id:{pos.get('room_id', '')}",
-                    f"local_x_m:{pos.get('local_x_m', '')}",
-                    f"local_y_m:{pos.get('local_y_m', '')}",
-                    f"local_z_m:{pos.get('local_z_m', '')}",
-                ]
-                writer.writerow(row_items)
+            for index, pos in enumerate(positions, start=1):
+                writer.writerow([self._build_position_text_record(pos, index)])
+
+    def _write_sensor_fusion_result_export(self, fusion_positions: list[dict] | None) -> str | None:
+        if not fusion_positions:
+            return None
+
+        now = datetime.now()
+        output_dir = os.path.join(SHARED_DATA_DIR, now.strftime("%d_%m_%y"))
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(
+            output_dir,
+            f"{now.strftime('%Y%m%d_%Hg%Mp')}_sensor_fusion_result.csv",
+        )
+        self._write_positions_csv(output_path, fusion_positions)
+        return output_path
+
+    @staticmethod
+    def _csv_int(row: dict, key: str, default: int = 0) -> int:
+        try:
+            return int(float(row.get(key, default) or default))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _csv_float(row: dict, key: str, default: float = 0.0) -> float:
+        try:
+            return float(row.get(key, default) or default)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _value_float(value, default: float = 0.0) -> float:
+        try:
+            if value in ("", None):
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _value_int(value, default: int = 0) -> int:
+        try:
+            if value in ("", None):
+                return default
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+    def _first_float(self, data: dict, *keys) -> float:
+        for key in keys:
+            value = data.get(key, "")
+            if value not in ("", None):
+                return self._value_float(value)
+        return 0.0
+
+    def _anchor_maps(self, data: dict) -> tuple[dict[int, int], dict[int, int]]:
+        distances: dict[int, int] = {}
+        weights: dict[int, int] = {}
+        for anchor in data.get("anchors", []) or []:
+            if not isinstance(anchor, dict):
+                continue
+            anchor_id = self._value_int(anchor.get("anchor_id"))
+            if anchor_id:
+                distances[anchor_id] = self._value_int(anchor.get("distance_mm"))
+                weights[anchor_id] = self._value_int(anchor.get("weight"))
+        return distances, weights
+
+    def _distance_m(self, data: dict, anchor_index: int, distances_by_anchor: dict[int, int]) -> float:
+        d_mm = data.get(f"d{anchor_index}_mm", "")
+        if d_mm in ("", None):
+            d_mm = distances_by_anchor.get(anchor_index, "")
+        if d_mm not in ("", None):
+            return self._value_float(d_mm) / 1000.0
+        return self._first_float(data, f"d{anchor_index}")
+
+    def _weight_raw(self, data: dict, anchor_index: int, weights_by_anchor: dict[int, int]) -> int:
+        value = data.get(f"w{anchor_index}", "")
+        if value not in ("", None):
+            return self._value_int(value)
+        return self._value_int(weights_by_anchor.get(anchor_index, 0))
+
+    def _build_position_text_record(self, pos: dict, index: int) -> str:
+        distances_by_anchor, weights_by_anchor = self._anchor_maps(pos)
+        distances = [self._distance_m(pos, i, distances_by_anchor) for i in range(1, 5)]
+        weights = [self._weight_raw(pos, i, weights_by_anchor) for i in range(1, 5)]
+
+        status = str(pos.get("status") or "Update")
+        dt = self._value_float(pos.get("dt", 0.0))
+        update_dt = dt if status in ("Init", "Update") else 0.0
+        predict_dt = dt if status == "Predict" else 0.0
+
+        line = (
+            f"({int(index):4d}/{self._value_int(pos.get('tx_frame_cnt', 0)):4d}) {status:<7s} "
+            f"| ts: {self._value_int(pos.get('timestamp_ms', 0))} "
+            f"| zone: {self._value_int(pos.get('zone_id', 0))} "
+            f"| ukf_step: {self._value_int(pos.get('ukf_step', 0))} "
+            f"| ax: {self._value_float(pos.get('ax', 0.0)):9.6f} "
+            f"| ay: {self._value_float(pos.get('ay', 0.0)):9.6f} "
+            f"| gz: {self._value_float(pos.get('gz', 0.0)):9.6f} "
+            f"| tril_x: {self._first_float(pos, 'tril_x_m', 'tril_x', 'x_m', 'x'):9.6f} "
+            f"| tril_y: {self._first_float(pos, 'tril_y_m', 'tril_y', 'y_m', 'y'):9.6f} "
+            f"| ukf_x: {self._first_float(pos, 'ukf_x_m', 'ukf_x'):9.6f} "
+            f"| ukf_y: {self._first_float(pos, 'ukf_y_m', 'ukf_y'):9.6f} "
+            f"| ukf_yaw: {self._first_float(pos, 'ukf_yaw_deg', 'ukf_yaw'):9.6f} "
+            f"| yaw: {self._first_float(pos, 'yaw_deg', 'yaw'):9.6f} "
+            f"| update_dt: {update_dt:9.6f} "
+            f"| predict_dt: {predict_dt:9.6f} "
+            f"| mask: {self._value_int(pos.get('anchor_mask', pos.get('mask', 0)))} "
+            f"| d1: {distances[0]:9.6f} | d2: {distances[1]:9.6f} "
+            f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
+            f"| w1: {weights[0]} | w2: {weights[1]} | w3: {weights[2]} | w4: {weights[3]} "
+            f"| err: {self._value_int(pos.get('ranging_error_count', pos.get('err_cnt', 0)))} "
+            f"| amp1: {self._value_float(pos.get('fp_amp_norm1', 0.0)):9.6f} "
+            f"| amp2: {self._value_float(pos.get('fp_amp_norm2', 0.0)):9.6f} "
+            f"| amp3: {self._value_float(pos.get('fp_amp_norm3', 0.0)):9.6f} "
+            f"| amp4: {self._value_float(pos.get('fp_amp_norm4', 0.0)):9.6f} "
+            f"| snr1: {self._value_float(pos.get('fp_snr1', 0.0)):9.6f} "
+            f"| snr2: {self._value_float(pos.get('fp_snr2', 0.0)):9.6f} "
+            f"| snr3: {self._value_float(pos.get('fp_snr3', 0.0)):9.6f} "
+            f"| snr4: {self._value_float(pos.get('fp_snr4', 0.0)):9.6f}"
+        )
+        return line
+
+    def _parse_position_text_record(self, raw_line: str) -> dict | None:
+        line_text = (raw_line or "").strip()
+        if not line_text.startswith("(") or "|" not in line_text:
+            return None
+
+        status_match = re.search(r"\)\s*(?P<status>Init|Predict|Update)\b", line_text)
+        if not status_match:
+            return None
+
+        fields = {}
+        for part in line_text.split("|")[1:]:
+            if ":" not in part:
+                continue
+            key, value = part.split(":", 1)
+            fields[key.strip()] = value.strip()
+
+        ukf_x = self._value_float(fields.get("ukf_x"))
+        ukf_y = self._value_float(fields.get("ukf_y"))
+        tril_x = self._value_float(fields.get("tril_x"))
+        tril_y = self._value_float(fields.get("tril_y"))
+        distances_m = [self._value_float(fields.get(f"d{i}")) for i in range(1, 5)]
+
+        return {
+            "time": "",
+            "timestamp_ms": self._value_int(fields.get("ts")),
+            "packet_timestamp_ms": 0,
+            "seq": 0,
+            "source": "sensor_fusion" if ukf_x or ukf_y else "ranging",
+            "x_m": ukf_x if ukf_x or ukf_y else tril_x,
+            "y_m": ukf_y if ukf_x or ukf_y else tril_y,
+            "z_m": 0.0,
+            "rms_error_m": 0.0,
+            "anchor_mask": self._value_int(fields.get("mask")),
+            "d1_mm": str(int(round(distances_m[0] * 1000.0))) if distances_m[0] else "",
+            "d2_mm": str(int(round(distances_m[1] * 1000.0))) if distances_m[1] else "",
+            "d3_mm": str(int(round(distances_m[2] * 1000.0))) if distances_m[2] else "",
+            "d4_mm": str(int(round(distances_m[3] * 1000.0))) if distances_m[3] else "",
+            "w1": fields.get("w1", ""),
+            "w2": fields.get("w2", ""),
+            "w3": fields.get("w3", ""),
+            "w4": fields.get("w4", ""),
+            "ukf_x_m": ukf_x,
+            "ukf_y_m": ukf_y,
+            "ukf_yaw_deg": fields.get("ukf_yaw", ""),
+            "tril_x_m": tril_x,
+            "tril_y_m": tril_y,
+            "yaw_deg": fields.get("yaw", ""),
+            "ranging_error_count": fields.get("err", ""),
+            "zone_id": fields.get("zone", ""),
+            "room_id": "",
+            "local_x_m": "",
+            "local_y_m": "",
+            "local_z_m": "",
+        }
 
     def _read_positions_csv(self, path: str) -> list[dict]:
         if not os.path.exists(path):
@@ -610,6 +756,16 @@ class SessionRepository:
             # Read first line to detect format
             first_line = handle.readline()
             handle.seek(0)
+
+            if first_line.lstrip().startswith("(") and "|" in first_line:
+                reader = csv.reader(handle)
+                for row in reader:
+                    if not row:
+                        continue
+                    parsed = self._parse_position_text_record(row[0])
+                    if parsed is not None:
+                        results.append(parsed)
+                return results
             
             is_key_value = ":" in first_line
             if is_key_value:
@@ -663,15 +819,15 @@ class SessionRepository:
                     try:
                         results.append({
                             "time": row.get("time", ""),
-                            "timestamp_ms": int(row["timestamp_ms"]),
-                            "packet_timestamp_ms": int(row.get("packet_timestamp_ms", 0) or 0),
-                            "seq": int(row.get("seq", 0) or 0),
+                            "timestamp_ms": self._csv_int(row, "timestamp_ms"),
+                            "packet_timestamp_ms": self._csv_int(row, "packet_timestamp_ms"),
+                            "seq": self._csv_int(row, "seq"),
                             "source": row.get("source", "ranging"),
-                            "x_m": float(row["x_m"]),
-                            "y_m": float(row["y_m"]),
-                            "z_m": float(row["z_m"]),
-                            "rms_error_m": float(row["rms_error_m"]),
-                            "anchor_mask": int(row.get("anchor_mask", 0) or 0),
+                            "x_m": self._csv_float(row, "x_m"),
+                            "y_m": self._csv_float(row, "y_m"),
+                            "z_m": self._csv_float(row, "z_m"),
+                            "rms_error_m": self._csv_float(row, "rms_error_m"),
+                            "anchor_mask": self._csv_int(row, "anchor_mask"),
                             "d1_mm": row.get("d1_mm", ""),
                             "d2_mm": row.get("d2_mm", ""),
                             "d3_mm": row.get("d3_mm", ""),

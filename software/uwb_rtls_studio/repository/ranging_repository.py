@@ -16,6 +16,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 class RangingRepository(QObject):
     position_parsed = pyqtSignal(dict)
     sensor_fusion_parsed = pyqtSignal(dict)
+    calib_data_parsed = pyqtSignal(dict)
     ranging_data_updated = pyqtSignal(dict)
     anchor_distances_parsed = pyqtSignal(list)
     anchor_layout_parsed = pyqtSignal(list)
@@ -25,6 +26,7 @@ class RangingRepository(QObject):
         super().__init__(parent)
         self._positions = deque(maxlen=max_positions)
         self._fusion_samples = deque(maxlen=max_positions)
+        self._calib_samples = deque(maxlen=max_positions)
         self._anchor_layout: list[dict] = []
         self._stats: dict = {}
 
@@ -68,6 +70,13 @@ class RangingRepository(QObject):
         if param_name == "sensor_fusion_result":
             self.parse_sensor_fusion_result(
                 pkt.sensor_fusion_result,
+                seq=seq,
+                packet_timestamp_ms=packet_timestamp_ms,
+            )
+            return True
+        if param_name == "calib_data":
+            self.parse_calib_data(
+                pkt.calib_data,
                 seq=seq,
                 packet_timestamp_ms=packet_timestamp_ms,
             )
@@ -137,6 +146,7 @@ class RangingRepository(QObject):
             "source": "sensor_fusion",
             "seq": int(seq or 0),
             "payload_size": self._payload_size(res),
+            "ukf_step": int(getattr(res, "ukf_step", 0)),
             "ukf_x_m": self._decode_fixed2(getattr(res, "ukf_x_m", 0)),
             "ukf_y_m": self._decode_fixed2(getattr(res, "ukf_y_m", 0)),
             "ukf_yaw_deg": self._decode_fixed2(getattr(res, "ukf_yaw_deg", 0)),
@@ -154,6 +164,30 @@ class RangingRepository(QObject):
         }
         self._fusion_samples.append(sample)
         self.sensor_fusion_parsed.emit(sample)
+        return sample
+
+    def parse_calib_data(self, data, seq: int = 0, packet_timestamp_ms: int = 0) -> dict:
+        sample = {
+            "source": "calib_data",
+            "seq": int(seq or 0),
+            "payload_size": self._payload_size(data),
+            "packet_timestamp_ms": int(packet_timestamp_ms or 0),
+            "received_at": time.time(),
+            "anchor_mask": int(getattr(data, "anchor_mask", 0)),
+            "tx_frame_cnt": int(getattr(data, "tx_frame_cnt", 0)),
+            "ax": float(getattr(data, "ax", 0.0)),
+            "ay": float(getattr(data, "ay", 0.0)),
+            "gz": float(getattr(data, "gz", 0.0)),
+            "px": float(getattr(data, "px", 0.0)),
+            "py": float(getattr(data, "py", 0.0)),
+            "distance": [float(value) for value in getattr(data, "distance", [])],
+            "fp_amp_norm": [float(value) for value in getattr(data, "fp_amp_norm", [])],
+            "fp_snr": [float(value) for value in getattr(data, "fp_snr", [])],
+            "error_frame_cnt": int(getattr(data, "error_frame_cnt", 0)),
+            "dt": float(getattr(data, "dt", 0.0)),
+        }
+        self._calib_samples.append(sample)
+        self.calib_data_parsed.emit(sample)
         return sample
 
     @staticmethod

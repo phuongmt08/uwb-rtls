@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QHeaderView,
     QAbstractItemView,
     QColorDialog,
@@ -45,6 +46,7 @@ from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF, QShort
 
 from common.transport import VvAddress
 from views.components.position_canvas import PositionCanvas
+from views.components.distance_graph import DistanceGraph
 from views.components.geofence_3d_widget import Geofence3DWidget, OPENGL_AVAILABLE
 from models.geofence_model import GeofenceZone
 from views.components.geofence_editor import GeofenceEditorWidget
@@ -598,9 +600,11 @@ class LiveTrackingTab(QWidget):
         self._detail_overlay_btn = QPushButton("Detail", self)
         self._helpers_overlay_btn = QPushButton("Helpers", self)
         self._setup_map_views()
+        self._setup_live_subtabs()
 
         self._setup_geofencing_ui()
 
+        self.header_widget.hide()
         self.warning_label.setVisible(False)
         self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
         self.btn_stop.hide()
@@ -798,6 +802,29 @@ class LiveTrackingTab(QWidget):
         self.main_layout.addWidget(self._map_view_stack, 0, 0, 2, 2)
         self._map_view_stack.setCurrentWidget(self._canvas)
 
+    def _setup_live_subtabs(self):
+        self._live_sub_tabs = QTabWidget(self)
+        self._live_sub_tabs.setDocumentMode(True)
+        self._live_sub_tabs.setStyleSheet(
+            "QTabWidget::pane { border: 0; background: #0F172A; }"
+            "QTabBar::tab { background: #1E293B; color: #94A3B8; padding: 8px 18px; "
+            "border: 1px solid #334155; border-bottom: 0; }"
+            "QTabBar::tab:selected { color: #22D3EE; background: #0F172A; }"
+        )
+        self.main_layout.removeWidget(self._map_view_stack)
+        self._live_sub_tabs.addTab(self._map_view_stack, "2D Tracking")
+        self._distance_graph = DistanceGraph(self._live_sub_tabs)
+        self._live_sub_tabs.addTab(self._distance_graph, "Distance Log")
+        self._live_sub_tabs.currentChanged.connect(self._on_live_subtab_changed)
+        self.main_layout.addWidget(self._live_sub_tabs, 0, 0, 2, 2)
+        self._on_live_subtab_changed(0)
+
+    def _on_live_subtab_changed(self, index):
+        map_visible = index == 0
+        self._preview_overlay_btn.setVisible(map_visible)
+        self._detail_overlay_btn.setVisible(map_visible)
+        self._helpers_overlay_btn.setVisible(map_visible)
+
     def _toggle_map_view(self, show_3d):
         if show_3d and not OPENGL_AVAILABLE:
             self._preview_overlay_btn.blockSignals(True)
@@ -837,6 +864,7 @@ class LiveTrackingTab(QWidget):
     def _clear_tracking_trails(self):
         self._canvas.clear_trail()
         self._map_3d.clear_trail()
+        self._distance_graph.clear()
 
     def _position_canvas_preview_button(self):
         if not hasattr(self, "_preview_overlay_btn"):
@@ -1026,6 +1054,7 @@ class LiveTrackingTab(QWidget):
         self._vm.ranging_stopped.connect(self._on_ranging_stopped)
         self._vm.position_updated.connect(self._on_position_updated)
         self._vm.sensor_fusion_updated.connect(self._on_sensor_fusion_updated)
+        self._vm.calib_data_updated.connect(self._on_calib_data_updated)
         self._vm.anchor_distances_updated.connect(self._on_anchor_distances)
         self._vm.anchor_layout_updated.connect(self._on_anchor_layout_updated)
         self._vm.stats_updated.connect(self._on_stats_updated)
@@ -1073,6 +1102,7 @@ class LiveTrackingTab(QWidget):
 
     def _start_ranging(self):
         if self._vm:
+            self._distance_graph.start_session()
             yaw_deg = int(round(float(self.yaw_offset_spin.value()))) % 360
             is_ukf_reinit = bool(self.reinit_ukf_check.isChecked())
             self._vm.start_ranging(yaw_deg=yaw_deg, is_ukf_reinit=is_ukf_reinit)
@@ -1080,6 +1110,7 @@ class LiveTrackingTab(QWidget):
     def _stop_ranging(self):
         if self._vm:
             self._vm.stop_ranging()
+            self._distance_graph.stop_session()
 
     def _toggle_ranging(self):
         if self._is_ranging:
@@ -1116,6 +1147,7 @@ class LiveTrackingTab(QWidget):
 
     def _on_ranging_stopped(self):
         self._is_ranging = False
+        self._distance_graph.stop_session()
         self._sync_ranging_button()
         self._clear_live_metrics()
 
@@ -1204,15 +1236,16 @@ class LiveTrackingTab(QWidget):
         timestamp_ms = int(data.get("timestamp_ms", 0))
         err_count = int(data.get("ranging_error_count", 0))
         seq = int(data.get("seq", 0))
-        display_yaw = self._apply_yaw_offset(yaw)
+        ukf_step = int(data.get("ukf_step", 0))
 
         position = {
             "x": x,
             "y": y,
             "z": self._last_z,
             "error": self._last_rms,
-            "yaw": display_yaw,
+            "yaw": yaw,
             "raw_yaw": yaw,
+            "ukf_step": ukf_step,
             "tril_x": tril_x,
             "tril_y": tril_y,
             "source": "sensor_fusion",
@@ -1258,6 +1291,10 @@ class LiveTrackingTab(QWidget):
 
     def _on_anchor_distances(self, anchors):
         self._show_anchor_telemetry(anchors)
+
+    def _on_calib_data_updated(self, data: dict):
+        self._ensure_stream_active()
+        self._distance_graph.append_sample(data)
 
     def _update_stats(self):
         if not self._is_ranging:
@@ -1709,8 +1746,7 @@ class LiveTrackingTab(QWidget):
     def _refresh_map_list(self):
         self.cmb_user_map.clear()
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        maps_dir = os.path.join(base_dir, "data", "runtime")
+        maps_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
 
         if not os.path.exists(maps_dir):
             os.makedirs(maps_dir, exist_ok=True)
@@ -3325,8 +3361,7 @@ class LiveTrackingTab(QWidget):
         if not self._vm:
             return
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        default_dir = os.path.join(base_dir, "data", "runtime")
+        default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
         os.makedirs(default_dir, exist_ok=True)
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -3365,8 +3400,7 @@ class LiveTrackingTab(QWidget):
             QMessageBox.warning(self, "Invalid Map", "\n".join(errors))
             return
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        default_dir = os.path.join(base_dir, "data", "runtime")
+        default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
         os.makedirs(default_dir, exist_ok=True)
 
         file_path, _ = QFileDialog.getSaveFileName(

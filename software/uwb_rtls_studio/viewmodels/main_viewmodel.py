@@ -236,7 +236,7 @@ class MainViewModel(QObject):
                     "y_m": float(item.get("ukf_y_m", 0.0)),
                     "z_m": 0.0,
                     "rms_error_m": 0.0,
-                    "anchor_mask": 0,
+                    "anchor_mask": int(item.get("anchor_mask", 0) or 0),
                     "ukf_x_m": float(item.get("ukf_x_m", 0.0)),
                     "ukf_y_m": float(item.get("ukf_y_m", 0.0)),
                     "ukf_yaw_deg": float(item.get("ukf_yaw_deg", 0.0)),
@@ -244,6 +244,12 @@ class MainViewModel(QObject):
                     "tril_y_m": float(item.get("tril_y_m", 0.0)),
                     "yaw_deg": float(item.get("yaw_deg", 0.0)),
                     "ranging_error_count": int(item.get("ranging_error_count", 0)),
+                    "zone_id": item.get("zone_id", ""),
+                    "room_id": item.get("room_id", ""),
+                    "local_x_m": item.get("local_x_m", ""),
+                    "local_y_m": item.get("local_y_m", ""),
+                    "local_z_m": item.get("local_z_m", ""),
+                    "anchors": item.get("anchors", []),
                 }
             )
         return positions
