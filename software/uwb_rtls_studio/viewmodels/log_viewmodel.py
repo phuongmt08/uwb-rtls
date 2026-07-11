@@ -112,7 +112,7 @@ class LogViewModel(QObject):
                     "avg_rms": s.get("avg_rms_error_m", 0.0),
                     "ranging_count": self._count_ranging_runs(session_id),
                     "session_file_count": self._count_ranging_runs(session_id) + self._count_log_runs(session_id),
-                    "browser_path": self.browser.get_browser_root(),
+                    "browser_path": self.browser.get_session_storage_folder(session_id) if hasattr(self.browser, "get_session_storage_folder") else self.browser.get_browser_root(),
                 })
             self.session_list_updated.emit(formatted_sessions)
         except Exception as exc:

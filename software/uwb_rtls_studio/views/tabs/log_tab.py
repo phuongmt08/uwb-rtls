@@ -618,29 +618,34 @@ class LogTab(QWidget):
         self.btn_detail_browse.setEnabled(enabled)
         self.btn_detail_remove.setEnabled(enabled)
 
+    def _current_session_folder(self):
+        if self._vm and self._current_session_name:
+            try:
+                return self._vm.get_session_folder(self._current_session_name)
+            except Exception:
+                pass
+        from repository.session_repository import SESSIONS_DIR
+        return os.path.join(SESSIONS_DIR, self._current_session_name or "")
+
+    def _detail_file_path(self, item):
+        file_path = item.get("path", "") if item else ""
+        if file_path and os.path.isabs(file_path):
+            return file_path
+        session_path = self._current_session_folder()
+        return os.path.join(session_path, file_path) if file_path else session_path
+
     def _open_selected_detail(self):
         item = self._selected_detail_item()
+        session_path = self._current_session_folder()
         if item:
             self.detail_selection_label.setText(f"Selected: {item['file']}")
-            if self._current_session_name:
-                import os
-                from repository.session_repository import SESSIONS_DIR
-                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
-                
-                file_path = item.get("path", "")
-                if file_path and not os.path.isabs(file_path):
-                    file_path = os.path.join(session_path, file_path)
-                
-                if os.path.exists(file_path):
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
-                else:
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
-        else:
-            if self._current_session_name:
-                import os
-                from repository.session_repository import SESSIONS_DIR
-                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
+            file_path = self._detail_file_path(item)
+            if os.path.exists(file_path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+            elif os.path.isdir(session_path):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
+        elif self._current_session_name and os.path.isdir(session_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(session_path))
 
     def _export_session_to_custom_folder(self, session_id: str):
         if not self._vm:
@@ -663,16 +668,14 @@ class LogTab(QWidget):
             QMessageBox.warning(self, "Export Failed", f"Could not export session '{session_id}'.")
 
     def _browse_selected_detail(self):
-        if self._vm:
-            if self._current_session_name:
-                import os
-                from repository.session_repository import SESSIONS_DIR
-                session_path = os.path.join(SESSIONS_DIR, self._current_session_name)
-                self._browse_session_folder(session_path)
-        else:
-            item = self._selected_detail_item()
-            if item:
-                self._browse_session_folder(item["path"])
+        item = self._selected_detail_item()
+        if item:
+            file_path = self._detail_file_path(item)
+            browse_path = os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
+            self._browse_session_folder(browse_path)
+            return
+        if self._current_session_name:
+            self._browse_session_folder(self._current_session_folder())
 
     def _remove_selected_detail(self):
         if self._vm:

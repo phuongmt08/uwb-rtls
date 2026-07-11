@@ -40,6 +40,9 @@ class SessionBrowser:
     def get_browser_root(self) -> str:
         return self._repo.get_browser_root()
 
+    def get_session_storage_folder(self, session_id: str) -> str:
+        return self._repo.get_session_storage_folder(session_id)
+
     def session_file_exists(self, session_id: str, filename: str) -> bool:
         return self._repo.session_file_exists(session_id, filename)
 

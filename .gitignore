@@ -22,6 +22,7 @@ _build/
 
 # IDE
 .vscode/
+**/.history/
 *.swp
 *.swo
 *~
@@ -32,6 +33,8 @@ logs_data/
 # UWB RTLS Studio runtime data
 software/uwb_rtls_studio/data/sessions/
 !software/uwb_rtls_studio/data/sessions/.gitkeep
+software/uwb_rtls_studio/data/session_store/
+!software/uwb_rtls_studio/data/session_store/.gitkeep
 software/uwb_rtls_studio/session_browser/
 !software/uwb_rtls_studio/session_browser/.gitkeep
 # Data logs

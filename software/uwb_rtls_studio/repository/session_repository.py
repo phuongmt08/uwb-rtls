@@ -19,6 +19,11 @@ log = logging.getLogger(__name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
 INDEX_FILE = os.path.join(SESSIONS_DIR, "index.json")
+SESSION_STORE_DIR = os.path.join(DATA_DIR, "session_store")
+HOT_STORE_DIR = os.path.join(SESSION_STORE_DIR, "hot")
+ARCHIVE_STORE_DIR = os.path.join(SESSION_STORE_DIR, "archive")
+HOT_STORAGE_DAYS = int(os.environ.get("UWB_RTLS_HOT_STORAGE_DAYS", "7"))
+HOT_RUNS_PER_DAY = int(os.environ.get("UWB_RTLS_HOT_RUNS_PER_DAY", "20"))
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SESSION_BROWSER_DIR = os.path.join(APP_DIR, "session_browser")
 BROWSER_RANGING_DIR = os.path.join(SESSION_BROWSER_DIR, "ranging")
@@ -28,10 +33,13 @@ BROWSER_LOG_DIR = os.path.join(SESSION_BROWSER_DIR, "log")
 class SessionRepository:
     def __init__(self):
         os.makedirs(SESSIONS_DIR, exist_ok=True)
+        os.makedirs(HOT_STORE_DIR, exist_ok=True)
+        os.makedirs(ARCHIVE_STORE_DIR, exist_ok=True)
         os.makedirs(BROWSER_RANGING_DIR, exist_ok=True)
         os.makedirs(BROWSER_LOG_DIR, exist_ok=True)
         self._ensure_index_file()
         self._rebuild_index_if_needed()
+        self._apply_hot_retention()
 
     def get_sessions_dir(self) -> str:
         return SESSIONS_DIR
@@ -39,6 +47,10 @@ class SessionRepository:
     def get_session_folder(self, session_id: str) -> str:
         return os.path.join(SESSIONS_DIR, session_id)
 
+    def get_session_storage_folder(self, session_id: str) -> str:
+        storage = self._read_storage_meta(session_id)
+        run_dir = self._run_dir_from_storage(storage) if storage else ""
+        return run_dir if run_dir and os.path.isdir(run_dir) else self.get_session_folder(session_id)
     def get_browser_root(self) -> str:
         return SESSION_BROWSER_DIR
 
@@ -54,19 +66,24 @@ class SessionRepository:
     def session_file_exists(self, session_id: str, filename: str) -> bool:
         if not session_id or not filename:
             return False
-        return os.path.exists(os.path.join(self.get_session_folder(session_id), filename))
+        return os.path.exists(self._resolve_session_file(session_id, filename))
 
     def count_session_files(self, session_id: str) -> int:
         if not session_id:
             return 0
+        paths = set()
         session_folder = self.get_session_folder(session_id)
-        if not os.path.isdir(session_folder):
-            return 0
-
-        total = 0
-        for _, _, filenames in os.walk(session_folder):
-            total += len(filenames)
-        return total
+        if os.path.isdir(session_folder):
+            for root, _, filenames in os.walk(session_folder):
+                for filename in filenames:
+                    paths.add(os.path.abspath(os.path.join(root, filename)))
+        storage = self._read_storage_meta(session_id)
+        run_dir = self._run_dir_from_storage(storage) if storage else ""
+        if run_dir and os.path.isdir(run_dir):
+            for root, _, filenames in os.walk(run_dir):
+                for filename in filenames:
+                    paths.add(os.path.abspath(os.path.join(root, filename)))
+        return len(paths)
 
     def count_ranging_runs(self, session_id: str) -> int:
         if not session_id:
@@ -105,9 +122,293 @@ class SessionRepository:
 
         log_dir = os.path.join(self.get_session_folder(session_id), "log")
         if not os.path.isdir(log_dir):
-            return 1 if os.path.exists(os.path.join(self.get_session_folder(session_id), "logs.csv")) else 0
-        return sum(1 for name in os.listdir(log_dir) if name.lower().startswith("log_run_") and name.lower().endswith(".csv"))
+            return 1 if (os.path.exists(os.path.join(self.get_session_folder(session_id), "logs.csv")) or os.path.exists(os.path.join(self.get_session_folder(session_id), "logs.txt"))) else 0
+        return sum(1 for name in os.listdir(log_dir) if name.lower().startswith("log_run_") and name.lower().endswith((".csv", ".txt")))
 
+    def _storage_meta_path(self, session_id: str) -> str:
+        return os.path.join(self.get_session_folder(session_id), "storage_meta.json")
+
+    def _session_date_from_meta(self, session_meta: dict | None = None) -> str:
+        raw_value = str((session_meta or {}).get("start_time_iso", "") or "").strip()
+        if raw_value:
+            try:
+                return datetime.fromisoformat(raw_value.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        return datetime.now().strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _parse_day_folder(name: str):
+        try:
+            return datetime.strptime(name, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _parse_run_index(name: str) -> int:
+        if not name.startswith("run_"):
+            return 0
+        try:
+            return int(name.split("_", 2)[1])
+        except Exception:
+            return 0
+
+    def _day_runs_dir(self, root_dir: str, date_key: str) -> str:
+        return os.path.join(root_dir, date_key, "runs")
+
+    def _run_dir_from_storage(self, storage: dict, prefer_existing: bool = True) -> str:
+        date_key = storage.get("date", "")
+        run_label = storage.get("run_label", "")
+        if not date_key or not run_label:
+            return ""
+        candidates = [
+            os.path.join(HOT_STORE_DIR, date_key, "runs", run_label),
+            os.path.join(ARCHIVE_STORE_DIR, date_key, "runs", run_label),
+        ]
+        if prefer_existing:
+            for candidate in candidates:
+                if os.path.isdir(candidate):
+                    return candidate
+        tier = storage.get("tier", "hot")
+        root = ARCHIVE_STORE_DIR if tier == "archive" else HOT_STORE_DIR
+        return os.path.join(root, date_key, "runs", run_label)
+
+    def _list_day_run_dirs(self, root_dir: str, date_key: str) -> list[tuple[int, str]]:
+        runs_dir = self._day_runs_dir(root_dir, date_key)
+        if not os.path.isdir(runs_dir):
+            return []
+        runs = []
+        for name in os.listdir(runs_dir):
+            path = os.path.join(runs_dir, name)
+            if not os.path.isdir(path):
+                continue
+            index = self._parse_run_index(name)
+            if index <= 0:
+                continue
+            runs.append((index, path))
+        runs.sort(key=lambda item: item[0])
+        return runs
+
+    def _next_daily_run_index(self, date_key: str) -> int:
+        max_index = 0
+        for root_dir in (HOT_STORE_DIR, ARCHIVE_STORE_DIR):
+            for index, _ in self._list_day_run_dirs(root_dir, date_key):
+                max_index = max(max_index, index)
+        return max_index + 1
+
+    def _read_storage_meta(self, session_id: str) -> dict:
+        data = self._read_json(self._storage_meta_path(session_id), default={})
+        return data if isinstance(data, dict) else {}
+
+    def _write_storage_meta(self, session_id: str, storage: dict) -> None:
+        os.makedirs(self.get_session_folder(session_id), exist_ok=True)
+        self._write_json(self._storage_meta_path(session_id), storage)
+
+    def _find_storage_for_session(self, session_id: str) -> dict:
+        for root_dir, tier in ((HOT_STORE_DIR, "hot"), (ARCHIVE_STORE_DIR, "archive")):
+            if not os.path.isdir(root_dir):
+                continue
+            for date_key in os.listdir(root_dir):
+                for run_index, run_dir in self._list_day_run_dirs(root_dir, date_key):
+                    meta = self._read_json(os.path.join(run_dir, "meta.json"), default={})
+                    if isinstance(meta, dict) and meta.get("session_id") == session_id:
+                        return {
+                            "session_id": session_id,
+                            "date": date_key,
+                            "tier": tier,
+                            "run_index": run_index,
+                            "run_label": os.path.basename(run_dir),
+                        }
+        return {}
+
+    def _ensure_session_storage(self, session_id: str, session_meta: dict | None = None) -> dict:
+        storage = self._read_storage_meta(session_id)
+        if storage and self._run_dir_from_storage(storage):
+            self._write_storage_run_meta(session_id, session_meta=session_meta)
+            return storage
+
+        found = self._find_storage_for_session(session_id)
+        if found:
+            self._write_storage_meta(session_id, found)
+            self._write_storage_run_meta(session_id, session_meta=session_meta)
+            return found
+
+        date_key = self._session_date_from_meta(session_meta)
+        run_index = self._next_daily_run_index(date_key)
+        storage = {
+            "session_id": session_id,
+            "date": date_key,
+            "tier": "hot",
+            "run_index": run_index,
+            "run_label": f"run_{run_index:03d}",
+        }
+        run_dir = self._run_dir_from_storage(storage, prefer_existing=False)
+        os.makedirs(run_dir, exist_ok=True)
+        self._write_storage_meta(session_id, storage)
+        self._write_storage_run_meta(session_id, session_meta=session_meta)
+        self._apply_hot_retention()
+        return storage
+
+    def _write_storage_run_meta(self, session_id: str, session_meta: dict | None = None) -> None:
+        storage = self._read_storage_meta(session_id)
+        if not storage:
+            return
+        run_dir = self._run_dir_from_storage(storage)
+        if not run_dir:
+            return
+        actual_tier = "archive" if os.path.abspath(run_dir).startswith(os.path.abspath(ARCHIVE_STORE_DIR)) else "hot"
+        if storage.get("tier") != actual_tier:
+            storage["tier"] = actual_tier
+            self._write_storage_meta(session_id, storage)
+        os.makedirs(run_dir, exist_ok=True)
+        existing = self._read_json(os.path.join(run_dir, "meta.json"), default={})
+        data = existing if isinstance(existing, dict) else {}
+        data.update({
+            "session_id": session_id,
+            "date": storage.get("date", ""),
+            "run_index": int(storage.get("run_index", 0) or 0),
+            "run_label": storage.get("run_label", ""),
+            "storage_tier": "archive" if run_dir.startswith(ARCHIVE_STORE_DIR) else "hot",
+            "updated_at_iso": datetime.now().isoformat(),
+        })
+        if session_meta:
+            data["session_meta"] = session_meta
+        runs = self._read_runs(session_id)
+        if runs:
+            data["runs"] = runs
+        self._write_json(os.path.join(run_dir, "meta.json"), data)
+        self._upsert_day_manifest(storage, session_meta=session_meta)
+
+    def _upsert_day_manifest(self, storage: dict, session_meta: dict | None = None) -> None:
+        run_dir = self._run_dir_from_storage(storage)
+        if not run_dir:
+            return
+        date_key = storage.get("date", "")
+        day_dir = os.path.dirname(os.path.dirname(run_dir))
+        manifest_path = os.path.join(day_dir, "manifest.json")
+        manifest = self._read_json(manifest_path, default={})
+        if not isinstance(manifest, dict):
+            manifest = {}
+        runs = manifest.get("runs", [])
+        if not isinstance(runs, list):
+            runs = []
+        session_id = storage.get("session_id", "")
+        runs = [item for item in runs if item.get("session_id") != session_id]
+        runs.append({
+            "session_id": session_id,
+            "date": date_key,
+            "run_index": int(storage.get("run_index", 0) or 0),
+            "run_label": storage.get("run_label", ""),
+            "storage_tier": "archive" if run_dir.startswith(ARCHIVE_STORE_DIR) else "hot",
+            "run_dir": os.path.relpath(run_dir, day_dir),
+            "start_time_iso": (session_meta or {}).get("start_time_iso", ""),
+            "updated_at_iso": datetime.now().isoformat(),
+        })
+        runs.sort(key=lambda item: int(item.get("run_index", 0) or 0), reverse=True)
+        manifest.update({"date": date_key, "runs": runs})
+        self._write_json(manifest_path, manifest)
+
+    def _apply_hot_retention(self) -> None:
+        self._archive_old_hot_days()
+        self._archive_overflow_hot_runs()
+
+    def _archive_old_hot_days(self) -> None:
+        if HOT_STORAGE_DAYS <= 0 or not os.path.isdir(HOT_STORE_DIR):
+            return
+        today = datetime.now().date()
+        for date_key in os.listdir(HOT_STORE_DIR):
+            day = self._parse_day_folder(date_key)
+            if day is None:
+                continue
+            if (today - day).days < HOT_STORAGE_DAYS:
+                continue
+            for _, run_dir in self._list_day_run_dirs(HOT_STORE_DIR, date_key):
+                self._archive_run_dir(date_key, run_dir)
+
+    def _archive_overflow_hot_runs(self) -> None:
+        if HOT_RUNS_PER_DAY <= 0 or not os.path.isdir(HOT_STORE_DIR):
+            return
+        for date_key in os.listdir(HOT_STORE_DIR):
+            runs = self._list_day_run_dirs(HOT_STORE_DIR, date_key)
+            if len(runs) <= HOT_RUNS_PER_DAY:
+                continue
+            overflow = runs[: max(0, len(runs) - HOT_RUNS_PER_DAY)]
+            for _, run_dir in overflow:
+                self._archive_run_dir(date_key, run_dir)
+
+    def _archive_run_dir(self, date_key: str, source_dir: str) -> str:
+        if not os.path.isdir(source_dir):
+            return ""
+        archive_runs_dir = self._day_runs_dir(ARCHIVE_STORE_DIR, date_key)
+        os.makedirs(archive_runs_dir, exist_ok=True)
+        base_name = os.path.basename(source_dir)
+        destination = os.path.join(archive_runs_dir, base_name)
+        if os.path.exists(destination):
+            suffix = datetime.now().strftime("%H%M%S")
+            destination = os.path.join(archive_runs_dir, f"{base_name}_archived_{suffix}")
+        shutil.move(source_dir, destination)
+        meta = self._read_json(os.path.join(destination, "meta.json"), default={})
+        session_id = meta.get("session_id", "") if isinstance(meta, dict) else ""
+        if session_id:
+            hot_manifest_path = os.path.join(HOT_STORE_DIR, date_key, "manifest.json")
+            hot_manifest = self._read_json(hot_manifest_path, default={})
+            if isinstance(hot_manifest, dict) and isinstance(hot_manifest.get("runs"), list):
+                hot_manifest["runs"] = [item for item in hot_manifest["runs"] if item.get("session_id") != session_id]
+                self._write_json(hot_manifest_path, hot_manifest)
+            storage = self._read_storage_meta(session_id)
+            if storage:
+                storage["tier"] = "archive"
+                storage["run_label"] = os.path.basename(destination)
+                self._write_storage_meta(session_id, storage)
+                session_meta = meta.get("session_meta", {}) if isinstance(meta, dict) else {}
+                if isinstance(session_meta, dict) and session_meta:
+                    session_meta["storage"] = storage.copy()
+                    session_folder = self.get_session_folder(session_id)
+                    self._write_json(os.path.join(session_folder, "session_meta.json"), session_meta)
+                    self._upsert_index_entry(self._build_index_entry(session_meta, session_folder))
+                self._write_storage_run_meta(session_id, session_meta=session_meta)
+        return destination
+
+    def _resolve_session_file(self, session_id: str, rel_path: str) -> str:
+        if not rel_path:
+            return ""
+        if os.path.isabs(rel_path):
+            return rel_path if os.path.exists(rel_path) else rel_path
+        session_folder = self.get_session_folder(session_id)
+        candidate = os.path.normpath(os.path.join(session_folder, rel_path))
+        if os.path.exists(candidate):
+            return candidate
+        filename = os.path.basename(rel_path)
+        storage = self._read_storage_meta(session_id)
+        for root_dir in (HOT_STORE_DIR, ARCHIVE_STORE_DIR):
+            run_label = storage.get("run_label", "")
+            date_key = storage.get("date", "")
+            if not run_label or not date_key:
+                continue
+            candidate = os.path.join(root_dir, date_key, "runs", run_label, filename)
+            if os.path.exists(candidate):
+                return candidate
+        return os.path.normpath(os.path.join(session_folder, rel_path))
+
+    def _resolve_run_file(self, session_id: str, run: dict, rel_path: str) -> str:
+        if not rel_path:
+            return ""
+        if os.path.isabs(rel_path):
+            return rel_path
+        session_path = self._resolve_session_file(session_id, rel_path)
+        if os.path.exists(session_path):
+            return session_path
+        storage = run.get("storage") if isinstance(run.get("storage"), dict) else self._read_storage_meta(session_id)
+        filename = os.path.basename(rel_path)
+        for root_dir in (HOT_STORE_DIR, ARCHIVE_STORE_DIR):
+            date_key = storage.get("date", "")
+            run_label = storage.get("run_label", "")
+            if not date_key or not run_label:
+                continue
+            candidate = os.path.join(root_dir, date_key, "runs", run_label, filename)
+            if os.path.exists(candidate):
+                return candidate
+        return session_path
     def _merge_positions(
         self,
         positions: list[dict] | None,
@@ -176,6 +477,8 @@ class SessionRepository:
         os.makedirs(session_folder, exist_ok=True)
 
         normalized_meta = self._normalize_session_meta(session_meta)
+        storage = self._ensure_session_storage(session_id, normalized_meta)
+        normalized_meta["storage"] = storage.copy()
         self._write_json(os.path.join(session_folder, "session_meta.json"), normalized_meta)
 
         if device_config:
@@ -185,25 +488,41 @@ class SessionRepository:
             self._write_json(os.path.join(session_folder, "anchors.json"), anchors)
 
         if positions or fusion_positions:
-            merged = self._merge_positions(positions, fusion_positions)
-            positions_path = os.path.join(session_folder, "positions.csv")
-            self._write_positions_csv(positions_path, merged)
-            self._mirror_browser_file(positions_path, "ranging", session_id)
+            self.save_ranging_run(
+                session_id,
+                1,
+                positions=positions,
+                fusion_positions=fusion_positions,
+                meta={
+                    "run_id": "ranging_run_001",
+                    "start_time_iso": normalized_meta.get("start_time_iso", ""),
+                    "end_time_iso": normalized_meta.get("end_time_iso", ""),
+                    "duration_sec": normalized_meta.get("duration_sec", 0.0),
+                    "end_reason": normalized_meta.get("end_reason", "USER_END_SESSION"),
+                },
+            )
 
         if logs:
-            logs_csv_path = os.path.join(session_folder, "logs.csv")
-            logs_txt_path = os.path.join(session_folder, "logs.txt")
-            self._write_logs_csv(logs_csv_path, logs)
-            self._write_logs_txt(logs_txt_path, logs)
-            self._mirror_browser_file(logs_csv_path, "log", session_id)
-            self._mirror_browser_file(logs_txt_path, "log", session_id)
+            self.save_log_run(
+                session_id,
+                1,
+                logs=logs,
+                meta={
+                    "run_id": "log_run_001",
+                    "start_time_iso": normalized_meta.get("start_time_iso", ""),
+                    "end_time_iso": normalized_meta.get("end_time_iso", ""),
+                    "duration_sec": normalized_meta.get("duration_sec", 0.0),
+                    "end_reason": normalized_meta.get("end_reason", "USER_END_SESSION"),
+                },
+            )
 
+        self._write_storage_run_meta(session_id, session_meta=normalized_meta)
         self._upsert_index_entry(self._build_index_entry(normalized_meta, session_folder))
-        log.info("Session %s saved successfully to file repository.", session_id)
+        log.info("Session %s saved successfully to session_store.", session_id)
         return session_id
 
     def ensure_session(self, session_meta: dict) -> str:
-        """Create/update only session metadata and index."""
+        """Create/update session metadata, index, and daily storage mapping."""
         session_id = session_meta.get("session_id")
         if not session_id:
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -213,7 +532,10 @@ class SessionRepository:
         session_folder = self.get_session_folder(session_id)
         os.makedirs(session_folder, exist_ok=True)
         normalized_meta = self._normalize_session_meta(session_meta)
+        storage = self._ensure_session_storage(session_id, normalized_meta)
+        normalized_meta["storage"] = storage.copy()
         self._write_json(os.path.join(session_folder, "session_meta.json"), normalized_meta)
+        self._write_storage_run_meta(session_id, session_meta=normalized_meta)
         self._upsert_index_entry(self._build_index_entry(normalized_meta, session_folder))
         return session_id
 
@@ -225,24 +547,28 @@ class SessionRepository:
         fusion_positions: list[dict] | None = None,
         meta: dict | None = None,
     ) -> list[str]:
-        session_folder = self.get_session_folder(session_id)
-        run_dir = os.path.join(session_folder, "ranging")
+        session_meta = self.get_session_meta(session_id)
+        storage = self._ensure_session_storage(session_id, session_meta)
+        run_dir = self._run_dir_from_storage(storage)
         os.makedirs(run_dir, exist_ok=True)
 
         files: list[str] = []
-        if positions or fusion_positions:
-            merged = self._merge_positions(positions, fusion_positions)
-            path = os.path.join(run_dir, f"ranging_run_{run_index:03d}.csv")
+        merged = self._merge_positions(positions, fusion_positions)
+        if merged:
+            filename = f"ranging_{run_index:03d}.csv"
+            path = os.path.join(run_dir, filename)
             self._write_positions_csv(path, merged)
             self._mirror_browser_file(path, "ranging", session_id)
-            files.append(os.path.relpath(path, session_folder))
+            files.append(filename)
 
         run_meta = dict(meta or {})
         run_meta.update({
             "stream_type": "ranging",
             "index": int(run_index),
             "files": files,
-            "sample_count": len(positions or []) if positions else len(fusion_positions or []),
+            "storage": storage.copy(),
+            "data_source": "sensor_fusion_result",
+            "sample_count": len(merged),
         })
         self.append_or_update_run_meta(session_id, run_meta)
         return files
@@ -254,27 +580,25 @@ class SessionRepository:
         logs: list[dict] | None = None,
         meta: dict | None = None,
     ) -> list[str]:
-        session_folder = self.get_session_folder(session_id)
-        run_dir = os.path.join(session_folder, "log")
+        session_meta = self.get_session_meta(session_id)
+        storage = self._ensure_session_storage(session_id, session_meta)
+        run_dir = self._run_dir_from_storage(storage)
         os.makedirs(run_dir, exist_ok=True)
 
         logs = list(logs or [])
-        csv_path = os.path.join(run_dir, f"log_run_{run_index:03d}.csv")
-        txt_path = os.path.join(run_dir, f"log_run_{run_index:03d}.txt")
-        self._write_logs_csv(csv_path, logs)
+        filename = f"log_{run_index:03d}.txt"
+        txt_path = os.path.join(run_dir, filename)
         self._write_logs_txt(txt_path, logs)
-        self._mirror_browser_file(csv_path, "log", session_id)
         self._mirror_browser_file(txt_path, "log", session_id)
-        files = [
-            os.path.relpath(csv_path, session_folder),
-            os.path.relpath(txt_path, session_folder),
-        ]
+        files = [filename]
 
         run_meta = dict(meta or {})
         run_meta.update({
             "stream_type": "log",
             "index": int(run_index),
             "files": files,
+            "storage": storage.copy(),
+            "data_source": "log_data",
             "sample_count": len(logs),
         })
         self.append_or_update_run_meta(session_id, run_meta)
@@ -296,6 +620,7 @@ class SessionRepository:
             runs.append(run_meta.copy())
         runs.sort(key=lambda item: (item.get("stream_type", ""), int(item.get("index", 0) or 0)))
         self._write_runs(session_id, runs)
+        self._write_storage_run_meta(session_id)
 
     def list_session_runs(self, session_id: str, stream_type: str | None = None) -> list[dict]:
         runs = self._read_runs(session_id)
@@ -308,23 +633,38 @@ class SessionRepository:
             return ""
 
         source = self.get_session_folder(session_id)
-        if not os.path.isdir(source):
+        storage = self._read_storage_meta(session_id)
+        storage_run_dir = self._run_dir_from_storage(storage) if storage else ""
+        if not os.path.isdir(source) and not os.path.isdir(storage_run_dir):
             return ""
 
         os.makedirs(destination_dir, exist_ok=True)
         destination = os.path.join(destination_dir, session_id)
         os.makedirs(destination, exist_ok=True)
 
-        metadata_files = ("session_meta.json", "config_snapshot.json", "anchors.json")
+        metadata_files = ("session_meta.json", "storage_meta.json", "runs.json", "config_snapshot.json", "anchors.json")
         for filename in metadata_files:
             self._copy_file_if_exists(os.path.join(source, filename), destination)
 
         ranging_destination = os.path.join(destination, "ranging")
         log_destination = os.path.join(destination, "log")
         messages_destination = os.path.join(destination, "messages")
+        runs_destination = os.path.join(destination, "runs", storage.get("run_label", "run") if storage else "run")
         os.makedirs(ranging_destination, exist_ok=True)
         os.makedirs(log_destination, exist_ok=True)
         os.makedirs(messages_destination, exist_ok=True)
+
+        if storage_run_dir and os.path.isdir(storage_run_dir):
+            self._copy_folder_files(storage_run_dir, runs_destination)
+            for filename in os.listdir(storage_run_dir):
+                source_file = os.path.join(storage_run_dir, filename)
+                if not os.path.isfile(source_file):
+                    continue
+                lowered = filename.lower()
+                if lowered.endswith(".csv") and lowered.startswith(("ranging", "sensor_fusion")):
+                    shutil.copy2(source_file, os.path.join(ranging_destination, filename))
+                elif lowered.endswith(".txt") and lowered.startswith("log"):
+                    shutil.copy2(source_file, os.path.join(log_destination, filename))
 
         self._copy_folder_files(self.get_browser_ranging_folder(session_id), ranging_destination)
         self._copy_folder_files(self.get_browser_log_folder(session_id), log_destination)
@@ -384,7 +724,8 @@ class SessionRepository:
 
     def load_session_details(self, session_id: str, detail_type: str) -> list[dict]:
         session_folder = self.get_session_folder(session_id)
-        if not os.path.exists(session_folder):
+        storage = self._read_storage_meta(session_id)
+        if not os.path.exists(session_folder) and not storage:
             log.warning("Session folder %s does not exist.", session_folder)
             return []
 
@@ -393,8 +734,13 @@ class SessionRepository:
             for run in self.list_session_runs(session_id, "ranging"):
                 for rel_path in run.get("files", []):
                     base = os.path.basename(rel_path).lower()
-                    if base.startswith("ranging_run_") or base.startswith("sensor_fusion_run_"):
-                        rows.extend(self._read_positions_csv(os.path.join(session_folder, rel_path)))
+                    if not base.endswith(".csv"):
+                        continue
+                    if not (base.startswith("ranging") or base.startswith("sensor_fusion") or base == "positions.csv"):
+                        continue
+                    full_path = self._resolve_run_file(session_id, run, rel_path)
+                    if os.path.exists(full_path):
+                        rows.extend(self._read_positions_csv(full_path))
             if rows:
                 return rows
             pos_path = os.path.join(session_folder, "positions.csv")
@@ -404,12 +750,19 @@ class SessionRepository:
             if os.path.exists(fusion_path):
                 return self._read_positions_csv(fusion_path)
             return []
+
         if detail_type == "logs":
             rows = []
             for run in self.list_session_runs(session_id, "log"):
                 for rel_path in run.get("files", []):
-                    if rel_path.lower().endswith(".csv"):
-                        rows.extend(self._read_logs_csv(os.path.join(session_folder, rel_path)))
+                    full_path = self._resolve_run_file(session_id, run, rel_path)
+                    if not os.path.exists(full_path):
+                        continue
+                    lowered = full_path.lower()
+                    if lowered.endswith(".txt"):
+                        rows.extend(self._read_logs_txt(full_path))
+                    elif lowered.endswith(".csv"):
+                        rows.extend(self._read_logs_csv(full_path))
             if rows:
                 return rows
             csv_path = os.path.join(session_folder, "logs.csv")
@@ -430,8 +783,26 @@ class SessionRepository:
 
     def delete_session(self, session_id: str) -> bool:
         session_folder = self.get_session_folder(session_id)
+        storage = self._read_storage_meta(session_id) or self._find_storage_for_session(session_id)
+        storage_run_dir = self._run_dir_from_storage(storage) if storage else ""
         index_entries = [item for item in self._read_index() if item.get("session_id") != session_id]
         self._write_index(index_entries)
+
+        if storage_run_dir and os.path.isdir(storage_run_dir):
+            try:
+                shutil.rmtree(storage_run_dir)
+            except Exception as exc:
+                log.error("Error removing session storage folder %s: %s", storage_run_dir, exc)
+                return False
+
+        date_key = storage.get("date", "") if storage else ""
+        if date_key:
+            for root_dir in (HOT_STORE_DIR, ARCHIVE_STORE_DIR):
+                manifest_path = os.path.join(root_dir, date_key, "manifest.json")
+                manifest = self._read_json(manifest_path, default={})
+                if isinstance(manifest, dict) and isinstance(manifest.get("runs"), list):
+                    manifest["runs"] = [item for item in manifest["runs"] if item.get("session_id") != session_id]
+                    self._write_json(manifest_path, manifest)
 
         if os.path.exists(session_folder):
             try:
@@ -504,6 +875,7 @@ class SessionRepository:
     def _build_index_entry(self, session_meta: dict, session_folder: str) -> dict:
         device_info = session_meta.get("device_info", {})
         statistics = session_meta.get("statistics", {})
+        storage = session_meta.get("storage", {}) if isinstance(session_meta.get("storage", {}), dict) else {}
         return {
             "session_id": session_meta.get("session_id", ""),
             "session_type": session_meta.get("session_type", "SESSION"),
@@ -521,6 +893,9 @@ class SessionRepository:
             "success_packets_rx": int(statistics.get("success_packets_rx", 0) or 0),
             "avg_rms_error_m": float(statistics.get("avg_rms_error_m", 0.0) or 0.0),
             "session_folder": session_folder,
+            "storage_date": storage.get("date", ""),
+            "storage_run_label": storage.get("run_label", ""),
+            "storage_tier": storage.get("tier", ""),
         }
 
     def _normalize_session_meta(self, session_meta: dict) -> dict:
@@ -753,7 +1128,7 @@ class SessionRepository:
 
     def get_session_record_files(self, session_id: str, detail_type: str) -> list[dict]:
         session_folder = self.get_session_folder(session_id)
-        if not os.path.exists(session_folder):
+        if not os.path.exists(session_folder) and not self._read_storage_meta(session_id):
             return []
 
         runs = self.list_session_runs(session_id)
@@ -782,23 +1157,29 @@ class SessionRepository:
                 mapped_type = "ranging" if stream_type in ("ranging", "fusion") else "logs"
                 if mapped_type != detail_type:
                     continue
-                
+
                 start_time = format_time(run.get("start_time_iso", ""))
                 for rel_path in run.get("files", []):
-                    full_path = os.path.join(session_folder, rel_path)
+                    full_path = self._resolve_run_file(session_id, run, rel_path)
                     if not os.path.exists(full_path):
                         continue
-                    
-                    filename = os.path.basename(rel_path)
-                    if detail_type == "ranging" and not filename.lower().endswith(".csv"):
+
+                    filename = os.path.basename(full_path)
+                    lowered = filename.lower()
+                    if detail_type == "ranging" and not lowered.endswith(".csv"):
                         continue
-                    if detail_type == "logs" and not filename.lower().endswith(".txt"):
+                    if detail_type == "logs" and not lowered.endswith((".txt", ".csv")):
                         continue
-                    
+                    if detail_type == "logs" and lowered.endswith(".csv"):
+                        txt_candidate = os.path.splitext(full_path)[0] + ".txt"
+                        if os.path.exists(txt_candidate):
+                            continue
+
+                    file_time = get_file_time(full_path)
                     results.append({
-                        "time": start_time,
+                        "time": start_time if start_time != "--" else file_time,
                         "filename": filename,
-                        "relative_path": rel_path
+                        "relative_path": full_path,
                     })
             if results:
                 return results
@@ -812,18 +1193,17 @@ class SessionRepository:
                 for f in os.listdir(ranging_dir):
                     if f.lower().endswith(".csv"):
                         full_path = os.path.join(ranging_dir, f)
-                        rel_path = os.path.relpath(full_path, session_folder)
                         results.append({
                             "time": get_file_time(full_path) if get_file_time(full_path) != "--" else session_time,
                             "filename": f,
-                            "relative_path": rel_path
+                            "relative_path": full_path,
                         })
             pos_path = os.path.join(session_folder, "positions.csv")
             if os.path.exists(pos_path):
                 results.append({
                     "time": get_file_time(pos_path) if get_file_time(pos_path) != "--" else session_time,
                     "filename": "positions.csv",
-                    "relative_path": "positions.csv"
+                    "relative_path": pos_path,
                 })
         else:
             log_dir = os.path.join(session_folder, "log")
@@ -831,20 +1211,23 @@ class SessionRepository:
                 log_dir = os.path.join(session_folder, "logs")
             if os.path.isdir(log_dir):
                 for f in os.listdir(log_dir):
-                    if f.lower().endswith(".txt"):
+                    if f.lower().endswith((".txt", ".csv")):
                         full_path = os.path.join(log_dir, f)
-                        rel_path = os.path.relpath(full_path, session_folder)
+                        if f.lower().endswith(".csv"):
+                            txt_candidate = os.path.splitext(full_path)[0] + ".txt"
+                            if os.path.exists(txt_candidate):
+                                continue
                         results.append({
                             "time": get_file_time(full_path) if get_file_time(full_path) != "--" else session_time,
                             "filename": f,
-                            "relative_path": rel_path
+                            "relative_path": full_path,
                         })
             txt_path = os.path.join(session_folder, "logs.txt")
             if os.path.exists(txt_path):
                 results.append({
                     "time": get_file_time(txt_path) if get_file_time(txt_path) != "--" else session_time,
                     "filename": "logs.txt",
-                    "relative_path": "logs.txt"
+                    "relative_path": txt_path,
                 })
 
         return results

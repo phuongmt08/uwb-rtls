@@ -945,7 +945,7 @@ class MainWindow(QMainWindow):
 
             if self._main_vm:
                 try:
-                    self._main_vm.end_session(duration_sec=self._session_seconds)
+                    self._main_vm.end_session(duration_sec=self._session_seconds, await_device_completion=False)
                 except Exception as exc:
                     self.btn_end_session.setEnabled(True)
                     QMessageBox.warning(self, "Session Save Failed", str(exc))
@@ -996,6 +996,8 @@ class MainWindow(QMainWindow):
         self._status_session.setText("\u23F2 Session: End Failed")
         self._status_session.setStyleSheet("color: #EF4444;")
         self._set_session_button_active(True)
+        if self._shutdown_in_progress:
+            return
         QMessageBox.warning(self, "Session Save Failed", message)
 
     def request_interrupt_shutdown(self):
@@ -1008,21 +1010,11 @@ class MainWindow(QMainWindow):
 
         self._shutdown_in_progress = True
 
-        # Stop BLE work through the model state machine so timers stop before transport shutdown.
-        if self._device_info_vm:
-            try:
-                self._device_info_vm.shutdown_device_link()
-            except Exception:
-                try:
-                    self._device_info_vm.request_ble_disconnect()
-                except Exception:
-                    pass
-
-        # Stop all session work and persist current buffers.
+        # Stop all session work first so active streams send the correct end_session reasons.
         if self._session_active:
             if self._main_vm:
                 try:
-                    self._main_vm.end_session(duration_sec=self._session_seconds)
+                    self._main_vm.end_session(duration_sec=self._session_seconds, await_device_completion=False)
                 except Exception:
                     pass
             else:
@@ -1036,6 +1028,16 @@ class MainWindow(QMainWindow):
             if self._main_vm:
                 try:
                     self._main_vm._clear_live_session_buffers()
+                except Exception:
+                    pass
+
+        # After end_session packets are queued, disconnect BLE and continue shutdown.
+        if self._device_info_vm:
+            try:
+                self._device_info_vm.shutdown_device_link()
+            except Exception:
+                try:
+                    self._device_info_vm.request_ble_disconnect()
                 except Exception:
                     pass
 
