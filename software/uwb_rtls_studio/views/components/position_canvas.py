@@ -953,7 +953,9 @@ class PositionCanvas(QWidget):
         self.has_position = True
         if source == "sensor_fusion":
             self.fusion_position = position
-            self.fusion_history.append((position["x"], position["y"]))
+            self.fusion_history.append(
+                (position["x"], position["y"], int(position.get("ukf_step", 0)))
+            )
             if len(self.fusion_history) > self.max_history:
                 self.fusion_history.pop(0)
             tril_x = position.get("tril_x")
@@ -2086,18 +2088,18 @@ class PositionCanvas(QWidget):
             painter.setPen(QColor("#FCA5A5"))
             painter.drawText(origin_x + 10, origin_y - 8, "Local (0,0)")
 
-        # 1. Draw Fusion History Trail (UKF, solid sky blue)
-        if len(self.fusion_history) > 1:
-            painter.setPen(QPen(QColor(14, 165, 233, 200), 2, Qt.PenStyle.SolidLine))
-            for idx in range(len(self.fusion_history) - 1):
-                x1, y1 = to_screen(self.fusion_history[idx][0], self.fusion_history[idx][1])
-                x2, y2 = to_screen(self.fusion_history[idx + 1][0], self.fusion_history[idx + 1][1])
-                painter.drawLine(x1, y1, x2, y2)
+        # 1. Draw UKF history as step-colored dots: predict=orange, update=blue.
+        if self.fusion_history:
+            painter.setPen(Qt.PenStyle.NoPen)
+            for xw, yw, ukf_step in self.fusion_history:
+                painter.setBrush(QColor(59, 130, 246, 210) if ukf_step == 1 else QColor(249, 115, 22, 210))
+                sx, sy = to_screen(xw, yw)
+                painter.drawEllipse(sx - 3, sy - 3, 6, 6)
 
         # 2. Draw Trilateration history as dots
         if self.tril_history:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(251, 146, 60, 180))
+            painter.setBrush(QColor(255, 255, 255, 200))
             for xw, yw in self.tril_history:
                 sx, sy = to_screen(xw, yw)
                 painter.drawEllipse(sx - 2, sy - 2, 4, 4)
@@ -2107,13 +2109,13 @@ class PositionCanvas(QWidget):
         if not self.dim_tracking_view:
             self._draw_anchor_layer(painter, to_screen, draw_connections=True)
 
-        # 5. Draw Trilateration Marker (orange circle with crosshair)
+        # 5. Draw Trilateration Marker (white circle with crosshair)
         if self.fusion_position is not None:
             tril_world_x = self.fusion_position.get("tril_x", self.fusion_position["x"])
             tril_world_y = self.fusion_position.get("tril_y", self.fusion_position["y"])
             tril_x, tril_y = to_screen(tril_world_x, tril_world_y)
-            painter.setPen(QPen(QColor(251, 146, 60), 2))
-            painter.setBrush(QColor(251, 146, 60, 80))
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.setBrush(QColor(255, 255, 255, 60))
             painter.drawEllipse(tril_x - 8, tril_y - 8, 16, 16)
             painter.drawLine(tril_x - 12, tril_y, tril_x + 12, tril_y)
             painter.drawLine(tril_x, tril_y - 12, tril_x, tril_y + 12)
@@ -2122,6 +2124,8 @@ class PositionCanvas(QWidget):
         scale_px = min(width, height) / self._view_range if self._view_range > 0 else 50
         active_tag = self.fusion_position if self.fusion_position is not None else self.position
         active_x, active_y = to_screen(active_tag["x"], active_tag["y"])
+        ukf_is_update = int(active_tag.get("ukf_step", 0)) == 1
+        ukf_color = QColor(59, 130, 246) if ukf_is_update else QColor(249, 115, 22)
 
         if active_tag.get("error", 0) > 0:
             error_radius = int(active_tag["error"] * scale_px)
@@ -2131,7 +2135,7 @@ class PositionCanvas(QWidget):
 
         # UKF center marker as a small dot
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(96, 165, 250))
+        painter.setBrush(ukf_color)
         painter.drawEllipse(active_x - 3, active_y - 3, 6, 6)
 
         # Draw the directional arrow
@@ -2140,7 +2144,7 @@ class PositionCanvas(QWidget):
         painter.rotate(-active_tag.get("yaw", 0))
         painter.setPen(
             QPen(
-                QColor(37, 99, 235),  # Blue-600
+                ukf_color,
                 2,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
@@ -2148,8 +2152,8 @@ class PositionCanvas(QWidget):
             )
         )
         gradient = QLinearGradient(0, -12, 0, 10)
-        gradient.setColorAt(0, QColor(96, 165, 250))
-        gradient.setColorAt(1, QColor(37, 99, 235))
+        gradient.setColorAt(0, ukf_color.lighter(125))
+        gradient.setColorAt(1, ukf_color.darker(115))
         painter.setBrush(gradient)
         path = QPainterPath()
         path.moveTo(14, 0)
@@ -2163,10 +2167,13 @@ class PositionCanvas(QWidget):
         painter.drawEllipse(-10, -3, 4, 6)
         painter.restore()
 
-        # Tag glow effect (sky blue)
+        # Tag glow effect follows the current UKF step color.
         glow_gradient = QRadialGradient(active_x, active_y, 18)
-        glow_gradient.setColorAt(0, QColor(96, 165, 250, 60))
-        glow_gradient.setColorAt(1, QColor(96, 165, 250, 0))
+        glow_color = QColor(ukf_color)
+        glow_color.setAlpha(60)
+        glow_gradient.setColorAt(0, glow_color)
+        glow_color.setAlpha(0)
+        glow_gradient.setColorAt(1, glow_color)
         painter.setBrush(glow_gradient)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(active_x - 18, active_y - 18, 36, 36)

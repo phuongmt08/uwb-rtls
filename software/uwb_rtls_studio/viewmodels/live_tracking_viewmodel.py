@@ -74,6 +74,7 @@ class LiveTrackingViewModel(QObject):
     ranging_stopped = pyqtSignal()
     position_updated = pyqtSignal(float, float, float, float)
     sensor_fusion_updated = pyqtSignal(dict)
+    calib_data_updated = pyqtSignal(dict)
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
     anchor_layout_updated = pyqtSignal(list)
@@ -110,6 +111,7 @@ class LiveTrackingViewModel(QObject):
         # Connect position updates to custom handler to run geofencing checks
         self.model.position_updated.connect(self._on_model_position_updated)
         self.model.sensor_fusion_updated.connect(self._on_model_sensor_fusion_updated)
+        self.model.calib_data_updated.connect(self.calib_data_updated.emit)
             
         self.model.anchor_distances_updated.connect(self.anchor_distances_updated.emit)
         self.model.stats_updated.connect(self.stats_updated.emit)

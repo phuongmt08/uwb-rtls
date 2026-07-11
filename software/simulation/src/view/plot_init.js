@@ -145,12 +145,16 @@ function initPlots(anchors, gt_square, rawData, samples) {
         distTraces.push({
             x: samples.map((_, idx) => idx), y: samples.map(e => e.distances[i]),
             name: `A${a.id} Raw`, mode: 'lines', type: 'scattergl',
-            line: { color: colors[i], width: 1, opacity: 0.3 }, visible: 'legendonly'
+            line: { color: colors[i], width: 1.5 },
+            opacity: 0.45,
+            connectgaps: true,
+            visible: 'legendonly'
         });
         // i*4+1: Gated
         distTraces.push({
             x: [], y: [], name: `A${a.id} Gated`, mode: 'lines', type: 'scattergl',
-            line: { color: colors[i], width: 2 }
+            line: { color: colors[i], width: 2.5 },
+            connectgaps: true
         });
         // i*4+2: Rejected
         distTraces.push({
@@ -176,7 +180,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
 
     // 3. D2 Scores
     const sTraces = [];
-    for (let i = 0; i < 4; i++) sTraces.push({ x: [], y: [], name: 'A'+(i+1), mode: 'lines', type: 'scattergl', line: { color: colors[i] } });
+    for (let i = 0; i < 4; i++) sTraces.push({ x: [], y: [], name: 'A'+(i+1), mode: 'lines', type: 'scattergl', line: { color: colors[i], width: 1.5 }, connectgaps: true });
     sTraces.push({ x: [], y: [], mode: 'lines', name: 'T2 Reject', line: { color: '#ef4444', dash: 'dash' } });
     sTraces.push({ x: [], y: [], mode: 'lines', name: 'T2 Recover', line: { color: '#f59e0b', dash: 'dash' } });
     sTraces.push({ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' });

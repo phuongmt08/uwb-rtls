@@ -69,7 +69,7 @@ typedef struct
   int16_t   tril_x;                 /* X position in meters */
   int16_t   tril_y;                 /* Y position in meters */
   int16_t   yaw;                    /* Yaw angle in degrees */
-  uint8_t   ukf_step;               /* UKF step: 0=predict, 1=update */
+  // uint8_t   ukf_step;               /* UKF step: 0=predict, 1=update */
   uint32_t  error_frame_cnt;        /* Error frame count */
 } __attribute__((packed)) uart_fusion_frame_t;
 #endif
@@ -427,7 +427,7 @@ bsp_err_t bsp_io_uart_send_fusion_data(uint8_t anchor_mask, int16_t ukf_x, int16
   s_fusion_frame.tril_x             = tril_x;
   s_fusion_frame.tril_y             = tril_y;
   s_fusion_frame.yaw            = yaw;
-  s_fusion_frame.ukf_step       = ukf_step;
+  // s_fusion_frame.ukf_step       = ukf_step;
   s_fusion_frame.error_frame_cnt = err_frame_count;
 
   /* Mark as busy before starting transmission */

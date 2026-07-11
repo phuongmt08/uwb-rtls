@@ -512,6 +512,7 @@ typedef struct _protobuf_anchor_data_t {
 } protobuf_anchor_data_t;
 
 typedef struct _protobuf_sensor_fusion_result_t {
+    uint32_t ukf_step;
     int32_t ukf_x_m;
     int32_t ukf_y_m;
     int32_t ukf_yaw_deg;
@@ -790,6 +791,24 @@ typedef struct _protobuf_calib_candidate_apply_t {
     uint32_t anchor_mask;
 } protobuf_calib_candidate_apply_t;
 
+typedef struct _protobuf_calib_data_t {
+    uint32_t anchor_mask;
+    uint32_t tx_frame_cnt;
+    float ax;
+    float ay;
+    float gz;
+    float px;
+    float py;
+    pb_size_t distance_count;
+    float distance[8];
+    pb_size_t fp_amp_norm_count;
+    double fp_amp_norm[8];
+    pb_size_t fp_snr_count;
+    double fp_snr[8];
+    uint32_t error_frame_cnt;
+    float dt;
+} protobuf_calib_data_t;
+
 typedef struct _protobuf_packet_t {
     bool has_hdr;
     protobuf_hdr_t hdr;
@@ -900,6 +919,7 @@ typedef struct _protobuf_packet_t {
         protobuf_calib_start_t calib_start;
         protobuf_calib_stop_t calib_stop;
         protobuf_calib_candidate_apply_t calib_candidate_apply;
+        protobuf_calib_data_t calib_data;
     } params;
 } protobuf_packet_t;
 
@@ -1157,6 +1177,7 @@ extern "C" {
 
 
 
+
 /* Initializer values for message structs */
 #define protobuf_addr_t_init_default             {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
 #define protobuf_hdr_t_init_default              {false, protobuf_addr_t_init_default, 0, 0}
@@ -1185,7 +1206,7 @@ extern "C" {
 #define protobuf_sensor_fusion_cfg_get_t_init_default {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
 #define protobuf_sensor_fusion_cfg_resp_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
-#define protobuf_sensor_fusion_result_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default}}
+#define protobuf_sensor_fusion_result_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default}}
 #define protobuf_prefilter_cfg_t_init_default    {0, 0, 0, 0, 0, 0, 0}
 #define protobuf_prefilter_cfg_get_t_init_default {0}
 #define protobuf_prefilter_cfg_set_t_init_default {false, protobuf_prefilter_cfg_t_init_default}
@@ -1256,6 +1277,7 @@ extern "C" {
 #define protobuf_calib_start_t_init_default      {0, 0, 0, 0, 0}
 #define protobuf_calib_stop_t_init_default       {0}
 #define protobuf_calib_candidate_apply_t_init_default {0}
+#define protobuf_calib_data_t_init_default       {0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, 0}
 #define protobuf_packet_t_init_default           {false, protobuf_hdr_t_init_default, 0, {protobuf_none_t_init_default}}
 #define protobuf_addr_t_init_zero                {_protobuf_device_addr_t_MIN, _protobuf_device_addr_t_MIN}
 #define protobuf_hdr_t_init_zero                 {false, protobuf_addr_t_init_zero, 0, 0}
@@ -1284,7 +1306,7 @@ extern "C" {
 #define protobuf_sensor_fusion_cfg_get_t_init_zero {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
 #define protobuf_sensor_fusion_cfg_resp_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
-#define protobuf_sensor_fusion_result_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero}}
+#define protobuf_sensor_fusion_result_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero}}
 #define protobuf_prefilter_cfg_t_init_zero       {0, 0, 0, 0, 0, 0, 0}
 #define protobuf_prefilter_cfg_get_t_init_zero   {0}
 #define protobuf_prefilter_cfg_set_t_init_zero   {false, protobuf_prefilter_cfg_t_init_zero}
@@ -1355,6 +1377,7 @@ extern "C" {
 #define protobuf_calib_start_t_init_zero         {0, 0, 0, 0, 0}
 #define protobuf_calib_stop_t_init_zero          {0}
 #define protobuf_calib_candidate_apply_t_init_zero {0}
+#define protobuf_calib_data_t_init_zero          {0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, 0}
 #define protobuf_packet_t_init_zero              {false, protobuf_hdr_t_init_zero, 0, {protobuf_none_t_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -1519,17 +1542,18 @@ extern "C" {
 #define protobuf_anchor_data_t_anchor_id_tag     1
 #define protobuf_anchor_data_t_distance_mm_tag   2
 #define protobuf_anchor_data_t_weight_tag        3
-#define protobuf_sensor_fusion_result_t_ukf_x_m_tag 1
-#define protobuf_sensor_fusion_result_t_ukf_y_m_tag 2
-#define protobuf_sensor_fusion_result_t_ukf_yaw_deg_tag 3
-#define protobuf_sensor_fusion_result_t_tril_x_m_tag 4
-#define protobuf_sensor_fusion_result_t_tril_y_m_tag 5
-#define protobuf_sensor_fusion_result_t_yaw_deg_tag 6
-#define protobuf_sensor_fusion_result_t_anchor_mask_tag 7
-#define protobuf_sensor_fusion_result_t_ranging_error_count_tag 8
-#define protobuf_sensor_fusion_result_t_timestamp_ms_tag 9
-#define protobuf_sensor_fusion_result_t_zone_id_tag 10
-#define protobuf_sensor_fusion_result_t_anchors_tag 11
+#define protobuf_sensor_fusion_result_t_ukf_step_tag 1
+#define protobuf_sensor_fusion_result_t_ukf_x_m_tag 2
+#define protobuf_sensor_fusion_result_t_ukf_y_m_tag 3
+#define protobuf_sensor_fusion_result_t_ukf_yaw_deg_tag 4
+#define protobuf_sensor_fusion_result_t_tril_x_m_tag 5
+#define protobuf_sensor_fusion_result_t_tril_y_m_tag 6
+#define protobuf_sensor_fusion_result_t_yaw_deg_tag 7
+#define protobuf_sensor_fusion_result_t_anchor_mask_tag 8
+#define protobuf_sensor_fusion_result_t_ranging_error_count_tag 9
+#define protobuf_sensor_fusion_result_t_timestamp_ms_tag 10
+#define protobuf_sensor_fusion_result_t_zone_id_tag 11
+#define protobuf_sensor_fusion_result_t_anchors_tag 12
 #define protobuf_log_data_t_type_tag             1
 #define protobuf_log_data_t_data_tag             2
 #define protobuf_log_clear_t_type_tag            1
@@ -1657,6 +1681,18 @@ extern "C" {
 #define protobuf_calib_start_t_reference_position_valid_tag 5
 #define protobuf_calib_stop_t_dummy_tag          1
 #define protobuf_calib_candidate_apply_t_anchor_mask_tag 1
+#define protobuf_calib_data_t_anchor_mask_tag    1
+#define protobuf_calib_data_t_tx_frame_cnt_tag   2
+#define protobuf_calib_data_t_ax_tag             3
+#define protobuf_calib_data_t_ay_tag             4
+#define protobuf_calib_data_t_gz_tag             5
+#define protobuf_calib_data_t_px_tag             6
+#define protobuf_calib_data_t_py_tag             7
+#define protobuf_calib_data_t_distance_tag       8
+#define protobuf_calib_data_t_fp_amp_norm_tag    9
+#define protobuf_calib_data_t_fp_snr_tag         10
+#define protobuf_calib_data_t_error_frame_cnt_tag 11
+#define protobuf_calib_data_t_dt_tag             12
 #define protobuf_packet_t_hdr_tag                1
 #define protobuf_packet_t_none_tag               2
 #define protobuf_packet_t_ack_tag                3
@@ -1739,6 +1775,7 @@ extern "C" {
 #define protobuf_packet_t_calib_start_tag        84
 #define protobuf_packet_t_calib_stop_tag         85
 #define protobuf_packet_t_calib_candidate_apply_tag 86
+#define protobuf_packet_t_calib_data_tag         87
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1944,17 +1981,18 @@ X(a, STATIC,   OPTIONAL, MESSAGE,  config,            1)
 #define protobuf_sensor_fusion_cfg_resp_t_config_MSGTYPE protobuf_sensor_fusion_cfg_t
 
 #define protobuf_sensor_fusion_result_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, SINT32,   ukf_x_m,           1) \
-X(a, STATIC,   SINGULAR, SINT32,   ukf_y_m,           2) \
-X(a, STATIC,   SINGULAR, SINT32,   ukf_yaw_deg,       3) \
-X(a, STATIC,   SINGULAR, SINT32,   tril_x_m,          4) \
-X(a, STATIC,   SINGULAR, SINT32,   tril_y_m,          5) \
-X(a, STATIC,   SINGULAR, SINT32,   yaw_deg,           6) \
-X(a, STATIC,   SINGULAR, UINT32,   anchor_mask,       7) \
-X(a, STATIC,   SINGULAR, UINT32,   ranging_error_count,   8) \
-X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,      9) \
-X(a, STATIC,   SINGULAR, UINT32,   zone_id,          10) \
-X(a, STATIC,   REPEATED, MESSAGE,  anchors,          11)
+X(a, STATIC,   SINGULAR, UINT32,   ukf_step,          1) \
+X(a, STATIC,   SINGULAR, SINT32,   ukf_x_m,           2) \
+X(a, STATIC,   SINGULAR, SINT32,   ukf_y_m,           3) \
+X(a, STATIC,   SINGULAR, SINT32,   ukf_yaw_deg,       4) \
+X(a, STATIC,   SINGULAR, SINT32,   tril_x_m,          5) \
+X(a, STATIC,   SINGULAR, SINT32,   tril_y_m,          6) \
+X(a, STATIC,   SINGULAR, SINT32,   yaw_deg,           7) \
+X(a, STATIC,   SINGULAR, UINT32,   anchor_mask,       8) \
+X(a, STATIC,   SINGULAR, UINT32,   ranging_error_count,   9) \
+X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,     10) \
+X(a, STATIC,   SINGULAR, UINT32,   zone_id,          11) \
+X(a, STATIC,   REPEATED, MESSAGE,  anchors,          12)
 #define protobuf_sensor_fusion_result_t_CALLBACK NULL
 #define protobuf_sensor_fusion_result_t_DEFAULT NULL
 #define protobuf_sensor_fusion_result_t_anchors_MSGTYPE protobuf_anchor_data_t
@@ -2457,6 +2495,22 @@ X(a, STATIC,   SINGULAR, UINT32,   anchor_mask,       1)
 #define protobuf_calib_candidate_apply_t_CALLBACK NULL
 #define protobuf_calib_candidate_apply_t_DEFAULT NULL
 
+#define protobuf_calib_data_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   anchor_mask,       1) \
+X(a, STATIC,   SINGULAR, UINT32,   tx_frame_cnt,      2) \
+X(a, STATIC,   SINGULAR, FLOAT,    ax,                3) \
+X(a, STATIC,   SINGULAR, FLOAT,    ay,                4) \
+X(a, STATIC,   SINGULAR, FLOAT,    gz,                5) \
+X(a, STATIC,   SINGULAR, FLOAT,    px,                6) \
+X(a, STATIC,   SINGULAR, FLOAT,    py,                7) \
+X(a, STATIC,   REPEATED, FLOAT,    distance,          8) \
+X(a, STATIC,   REPEATED, DOUBLE,   fp_amp_norm,       9) \
+X(a, STATIC,   REPEATED, DOUBLE,   fp_snr,           10) \
+X(a, STATIC,   SINGULAR, UINT32,   error_frame_cnt,  11) \
+X(a, STATIC,   SINGULAR, FLOAT,    dt,               12)
+#define protobuf_calib_data_t_CALLBACK NULL
+#define protobuf_calib_data_t_DEFAULT NULL
+
 #define protobuf_packet_t_FIELDLIST(X, a) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  hdr,               1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,none,params.none),   2) \
@@ -2539,7 +2593,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,zone_profile_get,params.zone_profile_
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,zone_profile_resp,params.zone_profile_resp),  83) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_start,params.calib_start),  84) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_stop,params.calib_stop),  85) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_candidate_apply,params.calib_candidate_apply),  86)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_candidate_apply,params.calib_candidate_apply),  86) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_data,params.calib_data),  87)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -2624,6 +2679,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_candidate_apply,params.calib_ca
 #define protobuf_packet_t_params_calib_start_MSGTYPE protobuf_calib_start_t
 #define protobuf_packet_t_params_calib_stop_MSGTYPE protobuf_calib_stop_t
 #define protobuf_packet_t_params_calib_candidate_apply_MSGTYPE protobuf_calib_candidate_apply_t
+#define protobuf_packet_t_params_calib_data_MSGTYPE protobuf_calib_data_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -2723,6 +2779,7 @@ extern const pb_msgdesc_t protobuf_zone_profile_resp_t_msg;
 extern const pb_msgdesc_t protobuf_calib_start_t_msg;
 extern const pb_msgdesc_t protobuf_calib_stop_t_msg;
 extern const pb_msgdesc_t protobuf_calib_candidate_apply_t_msg;
+extern const pb_msgdesc_t protobuf_calib_data_t_msg;
 extern const pb_msgdesc_t protobuf_packet_t_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -2824,6 +2881,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_calib_start_t_fields &protobuf_calib_start_t_msg
 #define protobuf_calib_stop_t_fields &protobuf_calib_stop_t_msg
 #define protobuf_calib_candidate_apply_t_fields &protobuf_calib_candidate_apply_t_msg
+#define protobuf_calib_data_t_fields &protobuf_calib_data_t_msg
 #define protobuf_packet_t_fields &protobuf_packet_t_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -2854,6 +2912,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_ble_status_resp_t_size          19
 #define protobuf_calib_anchor_candidate_t_size   66
 #define protobuf_calib_candidate_apply_t_size    6
+#define protobuf_calib_data_t_size               232
 #define protobuf_calib_start_t_size              23
 #define protobuf_calib_status_get_t_size         6
 #define protobuf_calib_status_resp_t_size        357
@@ -2903,7 +2962,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_sensor_fusion_cfg_resp_t_size   72
 #define protobuf_sensor_fusion_cfg_set_t_size    72
 #define protobuf_sensor_fusion_cfg_t_size        70
-#define protobuf_sensor_fusion_result_t_size     260
+#define protobuf_sensor_fusion_result_t_size     266
 #define protobuf_sys_config_get_t_size           6
 #define protobuf_sys_config_resp_t_size          112
 #define protobuf_sys_config_set_t_size           112

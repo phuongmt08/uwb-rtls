@@ -36,7 +36,7 @@ extern osMutexId_t g_logger_mutexHandle;
 /**
  * @brief Payload sent from UwbRanging → SensorFusion after each ranging cycle.
  */
-typedef struct {
+typedef struct uwb_distance_msg {
     float   distances[8];     /**< Raw 3D distances [m] to anchors */
     uint8_t anchor_ids[8];    /**< Anchor IDs corresponding to each distance */
     float   fp_amp_norm[8];   /**< First path amplitude normalized */

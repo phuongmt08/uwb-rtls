@@ -30,6 +30,7 @@ _build/
 # Data and Logs
 *.csv
 logs_data/
+software/data/
 # UWB RTLS Studio runtime data
 software/uwb_rtls_studio/data/sessions/
 !software/uwb_rtls_studio/data/sessions/.gitkeep
