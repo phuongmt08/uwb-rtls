@@ -1114,6 +1114,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.set_geofences(self._vm.get_geofence_zones())
         self._map_3d.set_geofences(self._vm.get_geofence_zones())
         self._sync_room_origins(self._vm.get_geofence_zones())
+        self._sync_loaded_map_anchors(update_canvas=True)
         
         current_layout = getattr(self._vm, "current_anchor_layout", [])
         if current_layout:
@@ -1601,6 +1602,28 @@ class LiveTrackingTab(QWidget):
             )
         return formatted
 
+    def _sync_loaded_map_anchors(self, *, update_canvas: bool = True) -> list[dict]:
+        if not self._vm:
+            return []
+        map_anchors = self._annotate_anchor_membership(self._vm.get_map_anchors())
+        if not map_anchors:
+            return []
+        self._vm.update_anchor_layout_from_map(map_anchors)
+        if update_canvas:
+            formatted = self._format_anchors_for_canvas(map_anchors)
+            self._canvas.set_anchors(formatted)
+            if hasattr(self, "_map_3d"):
+                self._map_3d.set_anchors(formatted)
+        return map_anchors
+
+    def _set_current_layout_on_canvas(self):
+        if not self._vm:
+            return
+        formatted = self._format_anchors_for_canvas(self._vm.current_anchor_layout)
+        self._canvas.set_anchors(formatted)
+        if hasattr(self, "_map_3d"):
+            self._map_3d.set_anchors(formatted)
+
     def _same_anchor_layout(self, left, right) -> bool:
         def key(items):
             normalized = [self._normalize_anchor_record(anchor, idx) for idx, anchor in enumerate(items or [])]
@@ -1810,6 +1833,7 @@ class LiveTrackingTab(QWidget):
             if self._vm and file_path and os.path.exists(file_path):
                 self._vm.load_geofences(file_path)
                 self._canvas.set_geofences(self._vm.get_geofence_zones())
+                self._sync_loaded_map_anchors(update_canvas=True)
 
     def _setup_geofencing_ui(self):
         self._setup_user_map_ui()
@@ -2825,7 +2849,7 @@ class LiveTrackingTab(QWidget):
             )
             if should_commit:
                 self._vm.update_anchor_layout_from_map(draft_layout)
-            self._canvas.set_anchors(self._vm.current_anchor_layout)
+            self._set_current_layout_on_canvas()
             self._anchor_layout_commit_pending = False
             self._pending_layout_read_for_editor = False
 
@@ -2835,7 +2859,7 @@ class LiveTrackingTab(QWidget):
         self.canvas_header.setText("Real-time Position Tracking")
         self.user_map_groupbox.setVisible(False)
         if self._vm:
-            self._canvas.set_anchors(self._vm.current_anchor_layout)
+            self._set_current_layout_on_canvas()
 
     def _update_grid_settings(self, *_args):
         major_m = self.geofence_editor_widget.sb_grid_spacing.value()
@@ -3581,12 +3605,9 @@ class LiveTrackingTab(QWidget):
         if not self._vm.load_geofences(file_path):
             QMessageBox.warning(self, "Load Failed", "Could not load the selected geofencing map.")
             return
-
         zones = self._vm.get_geofence_zones()
-        map_anchors = self._annotate_anchor_membership(self._vm.get_map_anchors())
-        self._vm.geofence_repo.set_anchors(map_anchors)
         self._canvas.set_geofences(zones)
-        self._canvas.set_anchors(self._format_anchors_for_canvas(map_anchors))
+        map_anchors = self._sync_loaded_map_anchors(update_canvas=True)
         self._canvas.clear_undo_history()
         self._geofence_anchor_baseline = [dict(anchor) for anchor in map_anchors]
         self._draft_anchor_layout = [dict(anchor) for anchor in map_anchors]
@@ -3670,7 +3691,7 @@ class LiveTrackingTab(QWidget):
             if self.sidebar_stack.currentIndex() == 1:
                 self._exit_geofence_editor()
             elif self._vm:
-                self._canvas.set_anchors(self._vm.current_anchor_layout)
+                self._set_current_layout_on_canvas()
 
     def _on_enable_geofence_toggled(self, checked):
         self._canvas.set_25d_preview(False)
@@ -3683,6 +3704,7 @@ class LiveTrackingTab(QWidget):
                 else:
                     self._vm.load_geofences()
                 self._canvas.set_geofences(self._vm.get_geofence_zones())
+                self._sync_loaded_map_anchors(update_canvas=True)
         else:
             self.chk_enable_geofence.setText("Geofence map disabled")
             self._canvas.set_geofences([])

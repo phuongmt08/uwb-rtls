@@ -836,7 +836,7 @@ class DeviceModel(QObject):
     @property
     def _is_anchor(self) -> bool:
         """True if the currently connected device has role ANCHOR."""
-        return shared_app_state.connected_device.get("Role", "") == "ANCHOR"
+        return self._connected_role == "ANCHOR"
 
     @property
     def connected_role(self) -> str:
@@ -844,7 +844,9 @@ class DeviceModel(QObject):
 
     @property
     def _connected_role(self) -> str:
-        return str(shared_app_state.connected_device.get("Role", "") or "").strip().upper()
+        device = shared_app_state.connected_device
+        role = device.get("Role") or device.get("device_role") or device.get("role")
+        return str(role or "").strip().upper()
 
     @property
     def _role_known(self) -> bool:
@@ -945,6 +947,11 @@ class DeviceModel(QObject):
         self._connect_retry_count = 0
         self._connect_timeout_timer.stop()
         self._reset_time_sync_flow()
+        dev_info = dict(shared_app_state.connected_device or {})
+        dev_info.update({"name": name, "mac": mac})
+        if not str(dev_info.get("Role") or "").strip() and str(dev_info.get("device_role") or "").strip():
+            dev_info["Role"] = str(dev_info.get("device_role")).strip().upper()
+        shared_app_state.connected_device = dev_info
         self.connection_state_changed.emit({
             "name": name, "mac": mac, "status": "Connected", "SwitchToLogTab": True
         })

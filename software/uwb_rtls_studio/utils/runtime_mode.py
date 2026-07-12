@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-UWB_RTLS_TEST_MODE = 0
+UWB_RTLS_TEST_MODE = 1
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "test", "mock"}
 _FALSE_VALUES = {"0", "false", "no", "off", "real", "hardware"}
@@ -53,6 +53,8 @@ def seed_mock_app_state(shared_app_state, device_name: str | None = None, mac_ad
     shared_app_state.connected_device = {
         "mac_address": mac_address,
         "device_name": device_name,
+        "Role": "TAG",
+        "Type": "Tag",
         "device_role": "TAG",
         "fw_version": "offline-mock",
         "hw_version": "offline-mock",

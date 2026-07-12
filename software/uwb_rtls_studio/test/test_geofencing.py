@@ -190,6 +190,115 @@ def test_geofence_repository_position_checks():
             pass
 
 
+
+
+def test_live_tracking_syncs_loaded_map_anchors_to_canvas_and_layout():
+    _ensure_qt_app()
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    room = GeofenceZone(
+        id="room_1",
+        name="Room 1",
+        zone_type="room",
+        points=[(10.0, 10.0), (14.0, 10.0), (14.0, 14.0), (10.0, 14.0)],
+        object_type="room",
+    )
+
+    class FakeViewModel:
+        def __init__(self):
+            self.committed = None
+
+        def get_map_anchors(self):
+            return [
+                {
+                    "anchor_id": 1,
+                    "room_id": "room_1",
+                    "local_x_m": 1.0,
+                    "local_y_m": 2.0,
+                    "x_m": 1.0,
+                    "y_m": 2.0,
+                    "z_m": 2.5,
+                    "label": "A1",
+                }
+            ]
+
+        def get_geofence_zones(self):
+            return [room]
+
+        def update_anchor_layout_from_map(self, anchors):
+            self.committed = [dict(anchor) for anchor in anchors]
+
+    class FakeCanvas:
+        def __init__(self):
+            self.anchors = None
+
+        def set_anchors(self, anchors):
+            self.anchors = [dict(anchor) for anchor in anchors]
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab._vm = FakeViewModel()
+    tab._canvas = FakeCanvas()
+    tab._map_3d = FakeCanvas()
+
+    synced = LiveTrackingTab._sync_loaded_map_anchors(tab, update_canvas=True)
+
+    assert len(synced) == 1
+    assert tab._vm.committed[0]["room_id"] == "room_1"
+    assert math.isclose(tab._vm.committed[0]["x_m"], 1.0)
+    assert math.isclose(tab._vm.committed[0]["y_m"], 2.0)
+    assert math.isclose(tab._canvas.anchors[0]["x"], 11.0)
+    assert math.isclose(tab._canvas.anchors[0]["y"], 12.0)
+    assert math.isclose(tab._map_3d.anchors[0]["x"], 11.0)
+
+def test_live_tracking_current_layout_uses_room_scene_coordinates():
+    _ensure_qt_app()
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    room = GeofenceZone(
+        id="room_e1_303",
+        name="E1-303",
+        zone_type="room",
+        points=[(-2.3, -6.0), (6.0, -6.0), (6.0, 2.4), (-2.3, 2.4)],
+        object_type="room",
+        origin_vertex_idx=0,
+    )
+
+    class FakeViewModel:
+        def __init__(self):
+            self.current_anchor_layout = [
+                {
+                    "anchor_id": 0,
+                    "room_id": "room_e1_303",
+                    "local_x_m": 0.7,
+                    "local_y_m": 0.0,
+                    "x_m": 0.7,
+                    "y_m": 0.0,
+                    "z_m": 2.5,
+                    "label": "A0",
+                }
+            ]
+
+        def get_geofence_zones(self):
+            return [room]
+
+    class FakeCanvas:
+        def __init__(self):
+            self.anchors = []
+
+        def set_anchors(self, anchors):
+            self.anchors = [dict(anchor) for anchor in anchors]
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab._vm = FakeViewModel()
+    tab._canvas = FakeCanvas()
+
+    LiveTrackingTab._set_current_layout_on_canvas(tab)
+
+    assert math.isclose(tab._canvas.anchors[0]["x"], -1.6)
+    assert math.isclose(tab._canvas.anchors[0]["y"], -6.0)
+    assert math.isclose(tab._canvas.anchors[0]["local_x_m"], 0.7)
+    assert math.isclose(tab._canvas.anchors[0]["local_y_m"], 0.0)
+
 if __name__ == "__main__":
     print("Running Geofencing tests...")
     try:
@@ -199,6 +308,10 @@ if __name__ == "__main__":
         print("[OK] test_geofence_zone_contains_math passed!")
         test_geofence_repository_position_checks()
         print("[OK] test_geofence_repository_position_checks passed!")
+        test_live_tracking_syncs_loaded_map_anchors_to_canvas_and_layout()
+        print("[OK] test_live_tracking_syncs_loaded_map_anchors_to_canvas_and_layout passed!")
+        test_live_tracking_current_layout_uses_room_scene_coordinates()
+        print("[OK] test_live_tracking_current_layout_uses_room_scene_coordinates passed!")
         print("All tests passed successfully!")
     except Exception as e:
         import traceback
