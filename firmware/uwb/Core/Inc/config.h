@@ -27,7 +27,7 @@
  * 1: allow DW1000 low-power sleep and wake sequencing.
  */
 #ifndef UWB_SLEEP_ENABLE
-#define UWB_SLEEP_ENABLE 0
+#define UWB_SLEEP_ENABLE 1
 #endif
 
 /*

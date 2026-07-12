@@ -157,8 +157,13 @@ static float calc_dt(void);
 static void reset_runtime_state(void);
 static bool active_anchor_index_for_id(uint8_t anchor_id, uint8_t *index_out);
 static void clear_latest_anchor_metrics(void);
-static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id);
-static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging_msg);
+static const mw_tril_anchor_t *find_anchor_by_id(const mw_tril_anchor_t *anchors,
+                                                uint8_t anchor_count,
+                                                uint8_t anchor_id);
+static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *candidate_anchors,
+                                           uint8_t candidate_count);
+static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging_msg,
+                                               const mw_tril_anchor_t selected_anchors[3]);
 static int16_t to_uart_fixed2(float value);
 static int32_t to_proto_fixed2(float value);
 #if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
@@ -473,6 +478,27 @@ bool sys_sensor_fusion_is_initialized(void)
     return ukf.initialized;
 }
 
+bool sys_sensor_fusion_get_position_covariance(float *pxx, float *pxy, float *pyy)
+{
+    if (!ukf.initialized || !pxx || !pxy || !pyy) {
+        return false;
+    }
+
+    const float p00 = ukf.P_data[0U * NUM_STATE + 0U];
+    const float p01 = 0.5f * (ukf.P_data[0U * NUM_STATE + 1U]
+                            + ukf.P_data[1U * NUM_STATE + 0U]);
+    const float p11 = ukf.P_data[1U * NUM_STATE + 1U];
+    if (!isfinite(p00) || !isfinite(p01) || !isfinite(p11)
+        || p00 < 0.0f || p11 < 0.0f) {
+        return false;
+    }
+
+    *pxx = p00;
+    *pxy = p01;
+    *pyy = p11;
+    return true;
+}
+
 static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out)
 {
     if (!slot_out) {
@@ -492,14 +518,13 @@ static bool get_anchor_slot(uint8_t aid, uint8_t *slot_out)
 
 bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
 							  const vec2d_t *tril_position,
-							  const mw_tril_anchor_t best_3_anchors[3],
-							  const mw_tril_anchor_t *anchors_by_id,
-							  const mw_tril_anchor_t *anchors_compact,
-							  uint8_t compact_count,
+							  const mw_tril_anchor_t selected_anchors[3],
+							  const mw_tril_anchor_t *candidate_anchors,
+							  uint8_t candidate_count,
 							  uint8_t selected_anchor_mask,
 							  const uwb_distance_msg_t *ranging_msg)
 {
-    CHECK_ERR(p_ukf && tril_position && best_3_anchors && anchors_by_id, false);
+    CHECK_ERR(p_ukf && tril_position && selected_anchors && candidate_anchors, false);
 
     s_last_selected_anchors_mask = selected_anchor_mask;
     s_latest_tril_x = (float)tril_position->x;
@@ -515,9 +540,9 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                &init_x,
                                                &init_y);
         bool dist_done = mw_filter_ukf_init_distance_add(&s_ukf_init_dist_filter,
-                                                         (float)best_3_anchors[0].distance,
-                                                         (float)best_3_anchors[1].distance,
-                                                         (float)best_3_anchors[2].distance,
+                                                         (float)selected_anchors[0].distance,
+                                                         (float)selected_anchors[1].distance,
+                                                         (float)selected_anchors[2].distance,
                                                          &init_d0,
                                                          &init_d1,
                                                          &init_d2);
@@ -534,13 +559,13 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         const float init_distances[3] = {init_d0, init_d1, init_d2};
         for (uint8_t k = 0U; k < 3U; k++) {
             uint8_t layout_idx = 0U;
-            if (active_anchor_index_for_id(best_3_anchors[k].id, &layout_idx)) {
+            if (active_anchor_index_for_id(selected_anchors[k].id, &layout_idx)) {
                 s_latest_distances[layout_idx] = init_distances[k];
             }
         }
 
-        snapshot_latest_anchor_metrics(anchors_by_id);
-        update_latest_anchor_data_snapshot(ranging_msg);
+        snapshot_latest_anchor_metrics(candidate_anchors, candidate_count);
+        update_latest_anchor_data_snapshot(ranging_msg, selected_anchors);
 
         sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
         sys_sensor_fusion_set_predict_flag();
@@ -549,29 +574,28 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         return true;
     }
 
-    CHECK_ERR(anchors_compact != NULL, false);
     clear_latest_anchor_metrics();
-    for (uint8_t k = 0; k < compact_count; k++) {
-        uint8_t aid = anchors_compact[k].id;
+    for (uint8_t k = 0; k < candidate_count; k++) {
+        uint8_t aid = candidate_anchors[k].id;
         uint8_t layout_idx = 0U;
         if (active_anchor_index_for_id(aid, &layout_idx)) {
-            s_latest_distances[layout_idx] = (float)anchors_compact[k].distance;
+            s_latest_distances[layout_idx] = (float)candidate_anchors[k].distance;
         }
     }
 
-    snapshot_latest_anchor_metrics(anchors_by_id);
-    update_latest_anchor_data_snapshot(ranging_msg);
+    snapshot_latest_anchor_metrics(candidate_anchors, candidate_count);
+    update_latest_anchor_data_snapshot(ranging_msg, selected_anchors);
 
     const uint8_t selected_anchor_ids[3] = {
-        best_3_anchors[0].id,
-        best_3_anchors[1].id,
-        best_3_anchors[2].id
+        selected_anchors[0].id,
+        selected_anchors[1].id,
+        selected_anchors[2].id
     };
 
     if (fusion_update( p_ukf,
-                        (float)best_3_anchors[0].distance,
-                        (float)best_3_anchors[1].distance,
-                        (float)best_3_anchors[2].distance,
+                        (float)selected_anchors[0].distance,
+                        (float)selected_anchors[1].distance,
+                        (float)selected_anchors[2].distance,
                         selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
         return false;
     }
@@ -1365,10 +1389,27 @@ static void clear_latest_anchor_metrics(void)
     s_latest_anchor_data_count = 0U;
 }
 
-static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id)
+static const mw_tril_anchor_t *find_anchor_by_id(const mw_tril_anchor_t *anchors,
+                                                uint8_t anchor_count,
+                                                uint8_t anchor_id)
+{
+    if (!anchors || anchor_id == 0U) {
+        return NULL;
+    }
+
+    for (uint8_t i = 0U; i < anchor_count; i++) {
+        if (anchors[i].valid && anchors[i].id == anchor_id) {
+            return &anchors[i];
+        }
+    }
+    return NULL;
+}
+
+static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *candidate_anchors,
+                                           uint8_t candidate_count)
 {
     const sys_config_t *cfg = sys_config_get();
-    if (!cfg || !anchors_by_id) {
+    if (!cfg || !candidate_anchors) {
         return;
     }
 
@@ -1378,15 +1419,18 @@ static void snapshot_latest_anchor_metrics(const mw_tril_anchor_t *anchors_by_id
     }
 
     for (uint32_t i = 0U; i < count; i++) {
-        uint32_t aid = cfg->anchor_layout[i].anchor_id;
-        if (aid >= 1U && aid <= MAX_ANCHORS_SUPPORTED) {
-            s_latest_fp_amp_norm[i] = anchors_by_id[aid].fp_amp_norm;
-            s_latest_fp_snr[i] = anchors_by_id[aid].fp_snr;
+        uint8_t aid = (uint8_t)cfg->anchor_layout[i].anchor_id;
+        const mw_tril_anchor_t *candidate =
+            find_anchor_by_id(candidate_anchors, candidate_count, aid);
+        if (candidate) {
+            s_latest_fp_amp_norm[i] = candidate->fp_amp_norm;
+            s_latest_fp_snr[i] = candidate->fp_snr;
         }
     }
 }
 
-static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging_msg)
+static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging_msg,
+                                               const mw_tril_anchor_t selected_anchors[3])
 {
     memset(s_latest_anchor_data, 0, sizeof(s_latest_anchor_data));
     s_latest_anchor_data_count = 0U;
@@ -1415,7 +1459,21 @@ static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging
         anchor->distance_mm = (ranging_msg->distances[i] > 0.0f)
                             ? (uint32_t)(ranging_msg->distances[i] * 1000.0f)
                             : 0U;
-        anchor->weight      = ((aid <= 8U) && ((s_last_selected_anchors_mask & (1U << (aid - 1U))) != 0U)) ? 100 : 0;
+        const mw_tril_anchor_t *selected =
+            find_anchor_by_id(selected_anchors, 3U, (uint8_t)aid);
+        if (selected != NULL &&
+            (s_last_selected_anchors_mask & (1U << (aid - 1U))) != 0U) {
+            double fixed2_weight = selected->measurement_weight * 100.0;
+            if (!isfinite(fixed2_weight) || fixed2_weight <= 0.0) {
+                anchor->weight = 0;
+            } else if (fixed2_weight >= (double)INT32_MAX) {
+                anchor->weight = INT32_MAX;
+            } else {
+                anchor->weight = (int32_t)(fixed2_weight + 0.5);
+            }
+        } else {
+            anchor->weight = 0;
+        }
     }
 }
 

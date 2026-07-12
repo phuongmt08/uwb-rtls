@@ -124,7 +124,7 @@
 
 #define MAX_ANCHORS_SUPPORTED  8
 /* Maximum number of anchors participating in one zone/ranging cycle. */
-#define NUM_ANCHORS            6
+#define NUM_ANCHORS            4
 /* The anchor-to-anchor survey solver is geometrically fixed to four anchors. */
 #define SURVEY_NUM_ANCHORS     4
 
@@ -212,7 +212,7 @@
  *        1 = apply Mahalanobis gate before anchor selection
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
-#define ENABLE_MAHALANOBIS_PREFILTER  0
+#define ENABLE_MAHALANOBIS_PREFILTER  1
 #endif
 
 /**
@@ -269,36 +269,40 @@
 #define MW_TRIL_D2_REJECT                          MAHALANOBIS_PREFILTER_D2_REJECT
 #endif
 
-#ifndef MW_TRIL_RESIDUAL_SCALE_M
-#define MW_TRIL_RESIDUAL_SCALE_M                   0.30
+#ifndef MW_TRIL_RANGE_SIGMA_BASE_M
+/* LOS range standard-deviation model: sigma(d)^2 = base^2 + (slope*d)^2. */
+#define MW_TRIL_RANGE_SIGMA_BASE_M                 0.10
 #endif
 
-#ifndef MW_TRIL_FP_AMP_GOOD
-#define MW_TRIL_FP_AMP_GOOD                        40.0
+#ifndef MW_TRIL_RANGE_SIGMA_SLOPE
+#define MW_TRIL_RANGE_SIGMA_SLOPE                  0.015
 #endif
 
-#ifndef MW_TRIL_WEIGHT_D2
-#define MW_TRIL_WEIGHT_D2                          0.35
+#ifndef MW_TRIL_RANGE_SIGMA_MAX_M
+#define MW_TRIL_RANGE_SIGMA_MAX_M                  0.35
 #endif
 
-#ifndef MW_TRIL_WEIGHT_FP_AMP
-#define MW_TRIL_WEIGHT_FP_AMP                      0.15
+#ifndef MW_TRIL_HUBER_FP_DEFICIT_DELTA
+/* Huber transition for (1 - DW1000 register-based FP confidence). */
+#define MW_TRIL_HUBER_FP_DEFICIT_DELTA             0.35
 #endif
 
-#ifndef MW_TRIL_WEIGHT_GDOP
-#define MW_TRIL_WEIGHT_GDOP                        0.20
+#ifndef MW_TRIL_HUBER_RESIDUAL_DELTA
+/* Huber transition in normalized residual standard deviations. */
+#define MW_TRIL_HUBER_RESIDUAL_DELTA               1.50
 #endif
 
-#ifndef MW_TRIL_WEIGHT_RESIDUAL
-#define MW_TRIL_WEIGHT_RESIDUAL                    0.30
+#ifndef MW_TRIL_HUBER_WEIGHT_FLOOR
+#define MW_TRIL_HUBER_WEIGHT_FLOOR                 0.10
 #endif
 
-#ifndef MW_TRIL_WEIGHT_DIST
-#define MW_TRIL_WEIGHT_DIST                        0.25
+#ifndef MW_TRIL_WGDOP_DET_MIN
+#define MW_TRIL_WGDOP_DET_MIN                      1.0e-8
 #endif
 
 #ifndef MW_TRIL_SWITCH_MARGIN
-#define MW_TRIL_SWITCH_MARGIN                      0.12
+/* New triplet must improve WGDOP by 10 percent before switching. */
+#define MW_TRIL_SWITCH_MARGIN                      0.10
 #endif
 
 #ifndef MW_TRIL_SWITCH_SCORE_EPS

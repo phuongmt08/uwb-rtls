@@ -55,6 +55,7 @@ typedef struct
   uint8_t  anchor_id;
   uint16_t fp_amp_norm_q8;
   uint16_t fp_snr_q8;
+  uint8_t  fp_confidence_q8;
   uint8_t  quality;
   uint8_t  calib_status;
   bool     valid;

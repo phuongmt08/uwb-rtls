@@ -59,6 +59,15 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
+typedef struct
+{
+  mw_tril_anchor_t candidate_anchors[MAX_ANCHORS_SUPPORTED];
+  mw_tril_anchor_t selected_anchors[3U];
+#if ENABLE_MAHALANOBIS_PREFILTER
+  mw_tril_anchor_t rejected_anchors[MAX_ANCHORS_SUPPORTED];
+#endif
+} sensor_fusion_workspace_t;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -178,6 +187,9 @@ const osSemaphoreAttr_t g_io_btn_sem_attributes = {
 
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out);
 static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out);
+static bool sensor_fusion_has_candidate(const mw_tril_anchor_t *candidates,
+                                        uint8_t candidate_count,
+                                        uint8_t anchor_id);
 static void sensor_fusion_reset_state(void);
 
 static void drain_signal_semaphore(osSemaphoreId_t sem);
@@ -404,6 +416,8 @@ void sensor_fusion_entry(void *argument)
   }
   /* Init prefilter */
   sensor_fusion_reset_state();
+  sensor_fusion_workspace_t workspace_storage = {0};
+  sensor_fusion_workspace_t *const workspace = &workspace_storage;
 
   /* TEST */
 #if TEST_UKF_STREAM_UART
@@ -482,13 +496,19 @@ void sensor_fusion_entry(void *argument)
         /* 1. Calculate dynamic dt for ranging if needed, and update logs */
 
         /* 2. Process, project to 2D, and Mahalanobis filter the ranges */
-        mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
-        uint8_t valid_count = 0;
+        memset(workspace, 0, sizeof(*workspace));
+        uint8_t candidate_count = 0U;
 
 			#if ENABLE_MAHALANOBIS_PREFILTER
-        mw_tril_anchor_t prefilter_rejects[NUM_ANCHORS];
         uint8_t prefilter_reject_count = 0U;
 			#endif
+
+        float ukf_pxx = 0.0f;
+        float ukf_pxy = 0.0f;
+        float ukf_pyy = 0.0f;
+        bool ukf_cov_valid = sys_sensor_fusion_get_position_covariance(&ukf_pxx,
+                                                                       &ukf_pxy,
+                                                                       &ukf_pyy);
 
         for (uint8_t i = 0; i < msg.count && i < MAX_ANCHORS_SUPPORTED; i++) {
             uint8_t aid = msg.anchor_ids[i];
@@ -525,16 +545,17 @@ void sensor_fusion_entry(void *argument)
             anchor_entry.r_adaptive = (double)r_adapt;
             anchor_entry.fp_amp_norm = (double)msg.fp_amp_norm[i];
             anchor_entry.fp_snr = (double)msg.fp_snr[i];
+            anchor_entry.fp_confidence = (double)msg.fp_confidence[i];
             anchor_entry.quality_valid = (msg.quality_valid[i] != 0U);
-            anchor_entry.selection_score = 0.0;
+            anchor_entry.wgdop = 0.0;
             anchor_entry.residual_rms = 0.0;
-            anchor_entry.gdop_penalty = 0.0;
-            anchor_entry.fp_penalty = 0.0;
+            anchor_entry.triplet_fp_weight = 0.0;
+            anchor_entry.measurement_weight = 0.0;
 
 #if ENABLE_MAHALANOBIS_PREFILTER
             bool pass = true;
             const sys_prefilter_cfg_t *active_prefilter_cfg = sys_config_get_prefilter();
-            if (sys_sensor_fusion_is_initialized() && active_prefilter_cfg->enable)
+            if (sys_sensor_fusion_is_initialized() && ukf_cov_valid && active_prefilter_cfg->enable)
             {
                 s_prefilter.T1 = active_prefilter_cfg->recover_d2;
                 s_prefilter.T2 = active_prefilter_cfg->reject_d2;
@@ -548,9 +569,9 @@ void sensor_fusion_entry(void *argument)
                                                     ukf_data.px,
                                                     ukf_data.py,
                                                     TAG_HEIGHT_M,
-                                                    ukf_data.vx,
-                                                    ukf_data.vy,
-                                                    0.0f,
+                                                    ukf_pxx,
+                                                    ukf_pxy,
+                                                    ukf_pyy,
                                                     (float)anchor_pos.x,
                                                     (float)anchor_pos.y,
                                                     (float)anchor_pos.z,
@@ -564,9 +585,9 @@ void sensor_fusion_entry(void *argument)
             if (!pass)
             {
 #if (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U)
-                if (prefilter_reject_count < NUM_ANCHORS)
+                if (prefilter_reject_count < MAX_ANCHORS_SUPPORTED)
                 {
-                    prefilter_rejects[prefilter_reject_count++] = anchor_entry;
+                    workspace->rejected_anchors[prefilter_reject_count++] = anchor_entry;
                 }
 #endif
                 RLOG_W(LOG_OBJECT_CODE_TAG,
@@ -578,34 +599,40 @@ void sensor_fusion_entry(void *argument)
             anchor_entry.d2_score = (double)d2_score;
 #endif
 
-            anchors_by_id[aid] = anchor_entry;
-            valid_count++;
+            if (candidate_count < MAX_ANCHORS_SUPPORTED &&
+                !sensor_fusion_has_candidate(workspace->candidate_anchors,
+                                             candidate_count,
+                                             aid)) {
+                workspace->candidate_anchors[candidate_count++] = anchor_entry;
+            }
         }
 
 #if (ENABLE_MAHALANOBIS_PREFILTER && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
-        if (valid_count < MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS && prefilter_reject_count > 0U) {
+        if (candidate_count < MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS && prefilter_reject_count > 0U) {
             for (uint8_t i = 1U; i < prefilter_reject_count; i++) {
-                mw_tril_anchor_t key = prefilter_rejects[i];
+                mw_tril_anchor_t key = workspace->rejected_anchors[i];
                 int j = (int)i - 1;
-                while (j >= 0 && prefilter_rejects[j].d2_score > key.d2_score) {
-                    prefilter_rejects[j + 1] = prefilter_rejects[j];
+                while (j >= 0 && workspace->rejected_anchors[j].d2_score > key.d2_score) {
+                    workspace->rejected_anchors[j + 1] = workspace->rejected_anchors[j];
                     j--;
                 }
-                prefilter_rejects[j + 1] = key;
+                workspace->rejected_anchors[j + 1] = key;
             }
 
             uint8_t rescue_target = MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS;
             if (rescue_target > NUM_ANCHORS) rescue_target = NUM_ANCHORS;
-            for (uint8_t i = 0U; i < prefilter_reject_count && valid_count < rescue_target; i++) {
-                uint8_t aid = prefilter_rejects[i].id;
-                if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED || anchors_by_id[aid].valid) {
+            for (uint8_t i = 0U; i < prefilter_reject_count && candidate_count < rescue_target; i++) {
+                uint8_t aid = workspace->rejected_anchors[i].id;
+                if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED ||
+                    sensor_fusion_has_candidate(workspace->candidate_anchors,
+                                                candidate_count,
+                                                aid)) {
                     continue;
                 }
-                anchors_by_id[aid] = prefilter_rejects[i];
-                valid_count++;
+                workspace->candidate_anchors[candidate_count++] = workspace->rejected_anchors[i];
                 RLOG_W(LOG_OBJECT_CODE_TAG,
                        "[FUSION RESCUE] Anchor #%u rescued (d2=%.2f, valid=%u/%u)",
-                       aid, prefilter_rejects[i].d2_score, valid_count, rescue_target);
+                       aid, workspace->rejected_anchors[i].d2_score, candidate_count, rescue_target);
             }
         }
 #endif
@@ -613,50 +640,42 @@ void sensor_fusion_entry(void *argument)
         /* anchor_distances is unused in decoupled Sensor Fusion thread */
 
         /* 3. Sort and Select the Best 3 anchors for UKF Update */
-        if (valid_count >= 3) {
-            mw_tril_anchor_t anchors_compact[NUM_ANCHORS];
-            uint8_t compact_idx = 0;
-            for (uint8_t id = 1; id <= MAX_ANCHORS_SUPPORTED && compact_idx < NUM_ANCHORS; id++) {
-                if (anchors_by_id[id].valid) {
-                    anchors_compact[compact_idx++] = anchors_by_id[id];
-                }
-            }
+        if (candidate_count >= 3U) {
+            uint8_t selected_count = mw_trilateration_select_best_3(
+                                                                  workspace->candidate_anchors,
+                                                                  candidate_count,
+                                                                  workspace->selected_anchors,
+                                                                  s_last_selected_anchors_mask);
 
-            mw_tril_anchor_t best_3_anchors[3];
-            uint8_t best_count = mw_trilateration_select_best(anchors_compact, compact_idx, best_3_anchors, 3, s_last_selected_anchors_mask);
-
-            if (best_count >= 3) {
+            if (selected_count >= 3U) {
                 s_last_selected_anchors_mask = 0;
                 for (uint8_t i = 0; i < 3; i++)
                 {
-                    s_last_selected_anchors_mask |= (1 << (best_3_anchors[i].id - 1));
+                    s_last_selected_anchors_mask |= (1 << (workspace->selected_anchors[i].id - 1));
                 }
 
                 vec2d_t tril_position = {0.0f, 0.0f};
                 SYSVIEW_START(SYSVIEW_MARK_FUSION_TRILATERATION);
                 mw_tril_result_t tril_result = {0};
-                mw_tril_err_t err = mw_trilateration_2d(best_3_anchors, &tril_position, &tril_result);
+                mw_tril_err_t err = mw_trilateration_2d(workspace->selected_anchors,
+                                                        &tril_position,
+                                                        &tril_result);
                 SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
                 if (err == MW_TRIL_OK)
                 {
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
                     for (uint8_t i = 0U; i < 3U; i++)
                     {
-                        best_3_anchors[i].distance = 0.0;
+                        workspace->selected_anchors[i].distance = 0.0;
                     }
 #endif
-                    uint32_t current_time = HAL_GetTick();
-                    uint32_t latency_ms = current_time - msg.timestamp_ms;
-                    // RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION LATENCY] UWB Queue Latency: %u ms", latency_ms);
-
                     SYSVIEW_START(SYSVIEW_MARK_FUSION_UKF_UPDATE);
                     fusion_update_performed = sys_sensor_fusion_update(
                                                       &ukf_data,
                                                       &tril_position,
-                                                      best_3_anchors,
-                                                      anchors_by_id,
-                                                      anchors_compact,
-                                                      compact_idx,
+                                                      workspace->selected_anchors,
+                                                      workspace->candidate_anchors,
+                                                      candidate_count,
                                                       s_last_selected_anchors_mask,
                                                       &msg);
                     SYSVIEW_STOP(SYSVIEW_MARK_FUSION_UKF_UPDATE);
@@ -689,12 +708,12 @@ void sensor_fusion_entry(void *argument)
 
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
         const sys_config_t *fusion_cfg = sys_config_get();
-        mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};
-        mw_tril_anchor_t anchors_compact[NUM_ANCHORS] = {0};
-        mw_tril_anchor_t best_3_anchors[3] = {0};
-        uint8_t compact_idx = 0U;
+        memset(workspace, 0, sizeof(*workspace));
+        uint8_t simulation_candidate_count = 0U;
 
-        for (uint32_t i = 0U; i < fusion_cfg->anchor_count && compact_idx < 3U; i++)
+        for (uint32_t i = 0U;
+             i < fusion_cfg->anchor_count && simulation_candidate_count < 3U;
+             i++)
         {
           uint8_t aid = (uint8_t)fusion_cfg->anchor_layout[i].anchor_id;
           if (aid < 1U || aid > MAX_ANCHORS_SUPPORTED) {
@@ -709,28 +728,26 @@ void sensor_fusion_entry(void *argument)
           anchor_entry.id = aid;
           anchor_entry.valid = true;
 
-          anchors_by_id[aid] = anchor_entry;
-          anchors_compact[compact_idx] = anchor_entry;
-          best_3_anchors[compact_idx] = anchor_entry;
-          compact_idx++;
+          workspace->candidate_anchors[simulation_candidate_count] = anchor_entry;
+          workspace->selected_anchors[simulation_candidate_count] = anchor_entry;
+          simulation_candidate_count++;
         }
 
-        if (compact_idx >= 3U)
+        if (simulation_candidate_count >= 3U)
         {
           uint8_t selected_mask = 0U;
           for (uint8_t i = 0U; i < 3U; i++)
           {
-            selected_mask |= (uint8_t)(1U << (best_3_anchors[i].id - 1U));
+            selected_mask |= (uint8_t)(1U << (workspace->selected_anchors[i].id - 1U));
           }
           s_last_selected_anchors_mask = selected_mask;
 
           vec2d_t tril_position = {0.0, 0.0};
           fusion_update_performed = sys_sensor_fusion_update(&ukf_data,
                                                              &tril_position,
-                                                             best_3_anchors,
-                                                             anchors_by_id,
-                                                             anchors_compact,
-                                                             compact_idx,
+                                                             workspace->selected_anchors,
+                                                             workspace->candidate_anchors,
+                                                             simulation_candidate_count,
                                                              selected_mask,
                                                              NULL);
         }
@@ -1130,6 +1147,22 @@ static bool get_anchor_position(uint8_t aid, vec3d_t *pos_out)
             pos_out->x = (double)cfg->anchor_layout[i].x_m;
             pos_out->y = (double)cfg->anchor_layout[i].y_m;
             pos_out->z = (double)cfg->anchor_layout[i].z_m;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool sensor_fusion_has_candidate(const mw_tril_anchor_t *candidates,
+                                        uint8_t candidate_count,
+                                        uint8_t anchor_id)
+{
+    if (!candidates || anchor_id == 0U) {
+        return false;
+    }
+
+    for (uint8_t i = 0U; i < candidate_count; i++) {
+        if (candidates[i].valid && candidates[i].id == anchor_id) {
             return true;
         }
     }

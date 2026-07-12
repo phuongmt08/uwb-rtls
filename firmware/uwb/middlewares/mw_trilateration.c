@@ -69,30 +69,73 @@ static inline double vec_dot(vec3d_t v1, vec3d_t v2)
     return (v1.x * v2.x) + (v1.y * v2.y) + (v1.z * v2.z);
 }
 
-static double clamp01(double value)
+static double huber_weight(double value, double delta)
 {
-    if (value < 0.0) return 0.0;
-    if (value > 1.0) return 1.0;
-    return value;
+    double magnitude = fabs(value);
+    if (!isfinite(magnitude)) return MW_TRIL_HUBER_WEIGHT_FLOOR;
+    if (delta <= MAXZERO || magnitude <= delta) return 1.0;
+
+    double weight = delta / magnitude;
+    return (weight < MW_TRIL_HUBER_WEIGHT_FLOOR) ? MW_TRIL_HUBER_WEIGHT_FLOOR : weight;
 }
 
-static double anchor_d2_penalty(double d2_score)
+static double range_variance(const mw_tril_anchor_t *anchor)
 {
-    double reject = MW_TRIL_D2_REJECT;
-    if (reject <= 0.001) reject = 1.0;
-    return clamp01(d2_score / reject);
+    double distance = fabs(anchor->distance);
+    double sigma_base = MW_TRIL_RANGE_SIGMA_BASE_M;
+    double sigma_dist = MW_TRIL_RANGE_SIGMA_SLOPE * distance;
+    double sigma = sqrt((sigma_base * sigma_base) + (sigma_dist * sigma_dist));
+
+    if (sigma > MW_TRIL_RANGE_SIGMA_MAX_M) sigma = MW_TRIL_RANGE_SIGMA_MAX_M;
+    /* sigma >= sigma_base by construction (sqrt of sum-of-squares), so
+     * no lower-bound guard is needed here. */
+    return sigma * sigma;
 }
 
-static double fp_quality_penalty(double value, double good_value)
+static double d2_huber_weight(const mw_tril_anchor_t *anchor)
 {
-    if (value <= 0.0) return 1.0;
-    return clamp01(1.0 - (value / good_value));
+    if (anchor->d2_score <= 0.0) return 1.0;
+    /* Apply Huber on sqrt(d2) = Mahalanobis L2 distance, not on d2 directly.
+     * This keeps the downweighting in a more linear domain and avoids
+     * over-penalising moderately elevated d2 scores. */
+    return huber_weight(sqrt(anchor->d2_score), sqrt(MW_TRIL_D2_RECOVER));
 }
 
-static double triplet_gdop(const mw_tril_anchor_t *a,
-                           const mw_tril_anchor_t *b,
-                           const mw_tril_anchor_t *c,
-                           const vec2d_t *position)
+static double fp_huber_weight(const mw_tril_anchor_t *anchor)
+{
+    if (!anchor->quality_valid) {
+        /* FP confidence is unknown: confidence_valid was absent on at least
+         * one ranging leg. Apply a conservative downweight (deficit = 0.5
+         * exceeds the Huber delta = 0.35) rather than returning 1.0 (full
+         * trust). This prevents NLOS anchors whose DW1000 could not compute
+         * first-path index from contaminating the WGDOP score. */
+        return huber_weight(0.5, MW_TRIL_HUBER_FP_DEFICIT_DELTA);
+    }
+    if (!isfinite(anchor->fp_confidence) || anchor->fp_confidence < 0.0) {
+        return MW_TRIL_HUBER_WEIGHT_FLOOR;
+    }
+
+    double confidence = anchor->fp_confidence;
+    if (confidence > 1.0) confidence = 1.0;
+    double deficit = 1.0 - confidence;
+    if (deficit <= 0.0) return 1.0;
+    return huber_weight(deficit, MW_TRIL_HUBER_FP_DEFICIT_DELTA);
+}
+
+static double measurement_weight(const mw_tril_anchor_t *anchor, double residual)
+{
+    double variance = range_variance(anchor);
+    double normalized_residual = fabs(residual) / sqrt(variance);
+    double weight = d2_huber_weight(anchor)
+                  * fp_huber_weight(anchor)
+                  * huber_weight(normalized_residual, MW_TRIL_HUBER_RESIDUAL_DELTA);
+    return weight / variance;
+}
+
+static double triplet_wgdop(const mw_tril_anchor_t *a,
+                            const mw_tril_anchor_t *b,
+                            const mw_tril_anchor_t *c,
+                            const vec2d_t *position)
 {
     const mw_tril_anchor_t *triplet[3] = {a, b, c};
     double hxx = 0.0;
@@ -109,13 +152,15 @@ static double triplet_gdop(const mw_tril_anchor_t *a,
 
         double hx = dx / range;
         double hy = dy / range;
-        hxx += hx * hx;
-        hxy += hx * hy;
-        hyy += hy * hy;
+        double residual = range - triplet[i]->distance;
+        double weight = measurement_weight(triplet[i], residual);
+        hxx += weight * hx * hx;
+        hxy += weight * hx * hy;
+        hyy += weight * hy * hy;
     }
 
     double det = (hxx * hyy) - (hxy * hxy);
-    if (det <= 1.0e-6) {
+    if (!isfinite(det) || det <= MW_TRIL_WGDOP_DET_MIN) {
         return 1.0e9;
     }
 
@@ -150,157 +195,124 @@ static bool trilaterate_2d_probe(const mw_tril_anchor_t *a,
     double e2 = d2 - r2;
     double e3 = d3 - r3;
 
-    *residual_rms = sqrt((e1 * e1 + e2 * e2 + e3 * e3) / 3.0);
+    if (residual_rms != NULL) {
+        *residual_rms = sqrt((e1 * e1 + e2 * e2 + e3 * e3) / 3.0);
+    }
+    return true;
+}
+
+static double frame_residual_rms(const mw_tril_anchor_t *anchors,
+                                 uint8_t count,
+                                 const vec2d_t *position)
+{
+    /* Computed over ALL valid anchors using this triplet's probe position.
+     * This intentionally penalises layouts whose solved position is
+     * inconsistent with non-selected anchors, acting as a global coherence
+     * term in the Huber measurement weight. */
+    double sum_sq = 0.0;
+    for (uint8_t i = 0U; i < count; i++) {
+        double dx = position->x - anchors[i].position.x;
+        double dy = position->y - anchors[i].position.y;
+        double predicted = sqrt((dx * dx) + (dy * dy));
+        double residual = predicted - anchors[i].distance;
+        sum_sq += residual * residual;
+    }
+    return (count > 0U) ? sqrt(sum_sq / (double)count) : 0.0;
+}
+
+static bool snapshot_selected_triplet(mw_tril_anchor_t selected[3], bool update_diagnostics)
+{
+    vec2d_t probe;
+    if (!trilaterate_2d_probe(&selected[0], &selected[1], &selected[2], &probe, NULL)) {
+        return false;
+    }
+
+    if (update_diagnostics) {
+        double score = triplet_wgdop(&selected[0], &selected[1], &selected[2], &probe);
+        double residual = frame_residual_rms(selected, 3U, &probe);
+        double fp_weight = (fp_huber_weight(&selected[0])
+                          + fp_huber_weight(&selected[1])
+                          + fp_huber_weight(&selected[2])) / 3.0;
+        for (uint8_t i = 0U; i < 3U; i++) {
+            selected[i].wgdop = score;
+            selected[i].residual_rms = residual;
+            selected[i].triplet_fp_weight = fp_weight;
+        }
+    }
+
+    for (uint8_t i = 0U; i < 3U; i++) {
+        double dx = probe.x - selected[i].position.x;
+        double dy = probe.y - selected[i].position.y;
+        double predicted_range = sqrt((dx * dx) + (dy * dy));
+        double anchor_residual = predicted_range - selected[i].distance;
+        selected[i].measurement_weight = measurement_weight(&selected[i], anchor_residual);
+    }
+
     return true;
 }
 
 /* Anchor selection --------------------------------------------------- */
 
-uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
-                                     uint8_t total_anchors,
-                                     mw_tril_anchor_t *best_out,
-                                     uint8_t max_out,
-                                     uint8_t prev_mask)
+uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
+                                       uint8_t candidate_count,
+                                       mw_tril_anchor_t selected_out[3],
+                                       uint8_t prev_mask)
 {
-    if (!anchors || !best_out || max_out == 0) return 0;
+    if (!candidates || !selected_out ||
+        candidate_count < 3U || candidate_count > MAX_ANCHORS_SUPPORTED) {
+        return 0U;
+    }
 
-    /* Collect valid anchors */
-    mw_tril_anchor_t valid_anchors[8];
-    uint8_t valid_count = 0;
-
-    for (uint8_t i = 0; i < total_anchors; i++) {
-        if (anchors[i].valid) {
-            if (valid_count < 8) {
-                valid_anchors[valid_count++] = anchors[i];
-            }
+    /* sensor_fusion_entry has already filtered and compacted this array. */
+    for (uint8_t i = 0U; i < candidate_count; i++) {
+        if (!candidates[i].valid) {
+            return 0U;
         }
     }
 
-    if (valid_count == 0) return 0;
-
-    /* If we have exactly max_out or fewer, return all of them directly */
-    if (valid_count <= max_out) {
-        for (uint8_t i = 0; i < valid_count; i++) {
-            best_out[i] = valid_anchors[i];
-        }
-        return valid_count;
+    if (candidate_count == 3U) {
+        memcpy(selected_out, candidates, 3U * sizeof(selected_out[0]));
+        return snapshot_selected_triplet(selected_out, true) ? 3U : 0U;
     }
 
-    if (max_out != 3U) {
-        for (uint8_t i = 0; i < valid_count - 1; i++) {
-            for (uint8_t j = i + 1; j < valid_count; j++) {
-                if (valid_anchors[i].d2_score > valid_anchors[j].d2_score) {
-                    mw_tril_anchor_t temp = valid_anchors[i];
-                    valid_anchors[i] = valid_anchors[j];
-                    valid_anchors[j] = temp;
-                }
-            }
-        }
-
-        uint8_t out_count = (valid_count < max_out) ? valid_count : max_out;
-        for (uint8_t i = 0; i < out_count; i++) {
-            best_out[i] = valid_anchors[i];
-        }
-        return out_count;
-    }
-
-    double min_gdop = 1.0e9;
-    double max_gdop = 0.0;
-    for (uint8_t i = 0; i < valid_count - 2; i++) {
-        for (uint8_t j = i + 1; j < valid_count - 1; j++) {
-            for (uint8_t k = j + 1; k < valid_count; k++) {
-                vec2d_t probe_pos;
-                double residual = 0.0;
-                if (!trilaterate_2d_probe(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
-                                          &probe_pos, &residual)) {
-                    continue;
-                }
-
-                double gdop = triplet_gdop(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
-                                           &probe_pos);
-                if (gdop < 1.0e8) {
-                    if (gdop < min_gdop) min_gdop = gdop;
-                    if (gdop > max_gdop) max_gdop = gdop;
-                }
-            }
-        }
-    }
-    if (min_gdop >= 1.0e8) {
-        return 0;
-    }
-
-    /* Dynamically calculate and normalize weights (excluding health) */
-    double w_d2 = MW_TRIL_WEIGHT_D2;
-    double w_fp = MW_TRIL_WEIGHT_FP_AMP;
-    double w_residual = MW_TRIL_WEIGHT_RESIDUAL;
-    double w_dist = MW_TRIL_WEIGHT_DIST;
-    double weight_sum = w_d2 + w_fp + w_residual + w_dist;
-    if (weight_sum > 0.0) {
-        w_d2 /= weight_sum;
-        w_fp /= weight_sum;
-        w_residual /= weight_sum;
-        w_dist /= weight_sum;
-    } else {
-        w_d2 = 0.35 / 1.05;
-        w_fp = 0.15 / 1.05;
-        w_residual = 0.30 / 1.05;
-        w_dist = 0.25 / 1.05;
-    }
-
-    uint8_t best_i = 0, best_j = 1, best_k = 2;
+    uint8_t best_i = 0U, best_j = 1U, best_k = 2U;
     double  best_score = 1.0e9;
     double  best_residual = 0.0;
-    double  best_gdop_penalty = 0.0;
-    double  best_fp_penalty = 0.0;
-    uint8_t best_mask = 0;
+    double  best_fp_weight = 0.0;
+    uint8_t best_mask = 0U;
 
     bool    prev_found = false;
-    uint8_t prev_i = 0, prev_j = 1, prev_k = 2;
+    uint8_t prev_i = 0U, prev_j = 1U, prev_k = 2U;
     double  prev_score = 1.0e9;
     double  prev_residual = 0.0;
-    double  prev_gdop_penalty = 0.0;
-    double  prev_fp_penalty = 0.0;
+    double  prev_fp_weight = 0.0;
 
-    for (uint8_t i = 0; i < valid_count - 2; i++) {
-        for (uint8_t j = i + 1; j < valid_count - 1; j++) {
-            for (uint8_t k = j + 1; k < valid_count; k++) {
+    for (uint8_t i = 0U; i < candidate_count - 2U; i++) {
+        for (uint8_t j = i + 1U; j < candidate_count - 1U; j++) {
+            for (uint8_t k = j + 1U; k < candidate_count; k++) {
                 vec2d_t probe_pos;
-                double residual = 0.0;
-                if (!trilaterate_2d_probe(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
-                                          &probe_pos, &residual)) {
+                /* Per-anchor residuals are evaluated inside triplet_wgdop.
+                 * The all-anchor RMS below is retained only as a diagnostic. */
+                if (!trilaterate_2d_probe(&candidates[i], &candidates[j], &candidates[k],
+                                          &probe_pos, NULL)) {
                     continue;
                 }
 
-                double gdop = triplet_gdop(&valid_anchors[i], &valid_anchors[j], &valid_anchors[k],
-                                           &probe_pos);
-                if (gdop >= 1.0e8) {
+                double residual = frame_residual_rms(candidates, candidate_count, &probe_pos);
+
+                double wgdop = triplet_wgdop(&candidates[i], &candidates[j], &candidates[k],
+                                             &probe_pos);
+                if (wgdop >= 1.0e8) {
                     continue;
                 }
-                double gdop_span = max_gdop - min_gdop;
-                if (gdop_span <= 0.001) {
-                    gdop_span = 1.0;
-                }
-                double gdop_penalty = clamp01((gdop - min_gdop) / gdop_span);
-                double residual_penalty = clamp01(residual / MW_TRIL_RESIDUAL_SCALE_M);
-                double avg_d2_penalty = (anchor_d2_penalty(valid_anchors[i].d2_score)
-                                       + anchor_d2_penalty(valid_anchors[j].d2_score)
-                                       + anchor_d2_penalty(valid_anchors[k].d2_score)) / 3.0;
-                double avg_fp_penalty =
-                    ((valid_anchors[i].quality_valid ? fp_quality_penalty(valid_anchors[i].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)
-                   + (valid_anchors[j].quality_valid ? fp_quality_penalty(valid_anchors[j].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)
-                   + (valid_anchors[k].quality_valid ? fp_quality_penalty(valid_anchors[k].fp_amp_norm, MW_TRIL_FP_AMP_GOOD) : 1.0)) / 3.0;
+                double avg_fp_weight = (fp_huber_weight(&candidates[i])
+                                      + fp_huber_weight(&candidates[j])
+                                      + fp_huber_weight(&candidates[k])) / 3.0;
+                double score = wgdop;
 
-                double avg_range = (valid_anchors[i].distance + valid_anchors[j].distance + valid_anchors[k].distance) / 3.0;
-                double range_penalty = clamp01(avg_range / 15.0);
-
-                double score = (w_d2 * avg_d2_penalty)
-                             + (w_fp * avg_fp_penalty)
-                             + (w_residual * residual_penalty)
-                             + (w_dist * range_penalty);
-
-                uint8_t mask = (1 << (valid_anchors[i].id - 1))
-                             | (1 << (valid_anchors[j].id - 1))
-                             | (1 << (valid_anchors[k].id - 1));
+                uint8_t mask = (1U << (candidates[i].id - 1U))
+                             | (1U << (candidates[j].id - 1U))
+                             | (1U << (candidates[k].id - 1U));
 
                 if (score < best_score) {
                     best_score = score;
@@ -308,27 +320,25 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
                     best_j = j;
                     best_k = k;
                     best_residual = residual;
-                    best_gdop_penalty = gdop_penalty;
-                    best_fp_penalty = avg_fp_penalty;
+                    best_fp_weight = avg_fp_weight;
                     best_mask = mask;
                 }
 
-                if (prev_mask != 0 && mask == prev_mask) {
+                if (prev_mask != 0U && mask == prev_mask) {
                     prev_found = true;
                     prev_i = i;
                     prev_j = j;
                     prev_k = k;
                     prev_score = score;
                     prev_residual = residual;
-                    prev_gdop_penalty = gdop_penalty;
-                    prev_fp_penalty = avg_fp_penalty;
+                    prev_fp_weight = avg_fp_weight;
                 }
             }
         }
     }
 
     if (best_score >= 1.0e9) {
-        return 0;
+        return 0U;
     }
 
     uint8_t selected_i = best_i;
@@ -336,8 +346,7 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
     uint8_t selected_k = best_k;
     double  selected_score = best_score;
     double  selected_residual = best_residual;
-    double  selected_gdop_penalty = best_gdop_penalty;
-    double  selected_fp_penalty = best_fp_penalty;
+    double  selected_fp_weight = best_fp_weight;
 
     if (prev_found && best_mask != prev_mask) {
         double switch_margin = MW_TRIL_SWITCH_MARGIN;
@@ -349,30 +358,28 @@ uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors,
             selected_k = prev_k;
             selected_score = prev_score;
             selected_residual = prev_residual;
-            selected_gdop_penalty = prev_gdop_penalty;
-            selected_fp_penalty = prev_fp_penalty;
+            selected_fp_weight = prev_fp_weight;
         }
     }
 
-    best_out[0] = valid_anchors[selected_i];
-    best_out[1] = valid_anchors[selected_j];
-    best_out[2] = valid_anchors[selected_k];
+    selected_out[0] = candidates[selected_i];
+    selected_out[1] = candidates[selected_j];
+    selected_out[2] = candidates[selected_k];
 
     for (uint8_t i = 0; i < 3U; i++) {
-        best_out[i].selection_score = selected_score;
-        best_out[i].residual_rms = selected_residual;
-        best_out[i].gdop_penalty = selected_gdop_penalty;
-        best_out[i].fp_penalty = selected_fp_penalty;
+        selected_out[i].wgdop = selected_score;
+        selected_out[i].residual_rms = selected_residual;
+        selected_out[i].triplet_fp_weight = selected_fp_weight;
     }
-
+    (void)snapshot_selected_triplet(selected_out, false);
 #ifdef ENABLE_DEBUG_LOGGING
     RLOG_D(LOG_OBJECT_CODE_TAG,
-            "Best composite anchors: #%u #%u #%u (score=%.3f residual=%.3f gdop=%.3f)",
-            best_out[0].id, best_out[1].id, best_out[2].id,
-            selected_score, selected_residual, selected_gdop_penalty);
+            "Best WGDOP anchors: #%u #%u #%u (wgdop=%.3fm residual=%.3fm fp_weight=%.3f)",
+            selected_out[0].id, selected_out[1].id, selected_out[2].id,
+            selected_score, selected_residual, selected_fp_weight);
 #endif
 
-    return 3;
+    return 3U;
 }
 
 /* Core 3-sphere trilateration ---------------------------------------- */

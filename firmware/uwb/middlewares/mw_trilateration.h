@@ -44,11 +44,12 @@ typedef struct {
     double r_adaptive; /* Adaptive covariance */
     double fp_amp_norm;
     double fp_snr;
+    double fp_confidence;
     bool quality_valid;
-    double selection_score;
+    double wgdop;
     double residual_rms;
-    double gdop_penalty;
-    double fp_penalty;
+    double triplet_fp_weight; /* Mean FP-only confidence of the selected triplet */
+    double measurement_weight; /* Final per-anchor precision used by WGDOP */
 } mw_tril_anchor_t;
 
 /**
@@ -74,21 +75,21 @@ typedef enum {
 /* Public function prototypes ----------------------------------------- */
 
 /**
- * @brief Select the best anchors based on Mahalanobis distance (d2_score)
+ * @brief Select the best three-anchor layout using Huber-weighted WGDOP.
  * 
- * Sorts valid anchors by d2_score ascending and returns the top M anchors.
+ * For the production 2D path, combines temporal consistency, DW1000 first-path
+ * confidence, frame residual, and distance-dependent variance as measurement
+ * precision before evaluating each candidate layout.
  * 
- * @param[in]  anchors        Input array of anchors
- * @param[in]  total_anchors  Number of anchors in input array
- * @param[out] best_out       Output array to store selected anchors
- * @param[in]  max_out        Maximum number of anchors to select (usually 3 or 4)
- * @return Number of anchors successfully selected and copied to best_out
+ * @param[in]  candidates       Dense array of valid candidate anchors
+ * @param[in]  candidate_count  Number of entries in candidates
+ * @param[out] selected_out     Exact three-anchor selection
+ * @return 3 on success, otherwise 0
  */
-uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors, 
-                                     uint8_t total_anchors, 
-                                     mw_tril_anchor_t *best_out, 
-                                     uint8_t max_out,
-                                     uint8_t prev_mask);
+uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
+                                       uint8_t candidate_count,
+                                       mw_tril_anchor_t selected_out[3],
+                                       uint8_t prev_mask);
 
 /**
  * @brief Calculate 3D position (Mathematical core)
