@@ -211,14 +211,23 @@ class QueryQueueManager(QObject):
             if not self.is_running:
                 return False
 
+            src_addr = self._packet_src_addr(pkt)
+
             tx = self.current_transaction
             if tx and tx.expected_response == param_name:
-                self._mark_response_success(tx, param_name, pkt)
-                self.timer.stop()
-                self._request_send_next()
-                return True
+                if src_addr is None or int(src_addr) == int(tx.dst_addr):
+                    self._mark_response_success(tx, param_name, pkt)
+                    self.timer.stop()
+                    self._request_send_next()
+                    return True
+                log.debug(
+                    "Query RX ignored, wrong source: active=%s got_param=%s got_src=%s",
+                    self._tx_label(tx),
+                    param_name,
+                    src_addr,
+                )
 
-            rescued_tx = self._find_rescuable_transaction(param_name, exclude=tx)
+            rescued_tx = self._find_rescuable_transaction(param_name, src_addr, exclude=tx)
             if rescued_tx is not None:
                 self._mark_response_success(rescued_tx, param_name, pkt, late=True)
                 return True
@@ -226,15 +235,25 @@ class QueryQueueManager(QObject):
             if self._looks_like_response_name(param_name):
                 seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
                 log.debug(
-                    "Query RX did not resolve active query: active=%s got_param=%s got_seq=%s",
+                    "Query RX did not resolve active query: active=%s got_param=%s got_seq=%s got_src=%s",
                     self._tx_label(tx),
                     param_name,
                     seq_val,
+                    src_addr,
                 )
 
         return False
 
-    def _find_rescuable_transaction(self, param_name: str, exclude: QueryTransaction | None = None) -> QueryTransaction | None:
+    @staticmethod
+    def _packet_src_addr(pkt: Any) -> int | None:
+        hdr = getattr(pkt, "hdr", None)
+        addr = getattr(hdr, "addr", None)
+        src = getattr(addr, "src", None)
+        return int(src) if src is not None else None
+
+    def _find_rescuable_transaction(
+        self, param_name: str, src_addr: int | None = None, exclude: QueryTransaction | None = None
+    ) -> QueryTransaction | None:
         """Find an older in-flight query that this late payload can still satisfy."""
         for item in self.queue:
             if item is exclude:
@@ -242,6 +261,8 @@ class QueryQueueManager(QObject):
             if item.expected_response != param_name:
                 continue
             if item.status not in self.RESPONSE_RESCUE_STATES:
+                continue
+            if src_addr is not None and int(item.dst_addr) != int(src_addr):
                 continue
             return item
         return None
@@ -275,7 +296,7 @@ class QueryQueueManager(QObject):
             f"(success for '{tx.command_name}', attempt {tx.retries + 1})"
         )
 
-    def handle_ack(self, ack_seq: int, response: int) -> bool:
+    def handle_ack(self, ack_seq: int, response: int, src_addr: int | None = None) -> bool:
         """
         Processes incoming ACK packets. For non-GET commands, a matching ACK can
         resolve the current transaction even when the firmware does not send the
@@ -292,6 +313,15 @@ class QueryQueueManager(QObject):
                     self._tx_label(tx),
                     ack_seq,
                     response,
+                )
+                return False
+
+            if src_addr is not None and int(src_addr) != int(tx.dst_addr):
+                log.debug(
+                    "Ignoring ACK from unexpected device: active=%s ack_seq=%s got_src=%s",
+                    self._tx_label(tx),
+                    ack_seq,
+                    src_addr,
                 )
                 return False
 

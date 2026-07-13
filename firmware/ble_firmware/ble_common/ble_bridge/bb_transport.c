@@ -66,7 +66,7 @@ static bool rx_ring_pop(uint8_t *p_byte)
 }
 
 /* ---- BLE Packet Queue (for raw protobuf packets received via BLE) ---- */
-#define BLE_PKT_QUEUE_SIZE  4
+#define BLE_PKT_QUEUE_SIZE  16
 #define BLE_PKT_MAX_LEN     256
 
 typedef struct {

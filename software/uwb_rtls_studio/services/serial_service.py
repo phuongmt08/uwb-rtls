@@ -88,6 +88,14 @@ class SerialService(QObject):
             timeout=SERIAL_READ_TIMEOUT_S,
             write_timeout=SERIAL_WRITE_TIMEOUT_S,
         )
+        # Grow the OS-level RX/TX ring buffers (Windows only). The default driver
+        # buffer is small enough that a burst from multiple streaming devices can
+        # overflow and silently drop bytes before Python ever reads them.
+        if hasattr(self._serial, "set_buffer_size"):
+            try:
+                self._serial.set_buffer_size(rx_size=65536, tx_size=65536)
+            except Exception as exc:
+                log.debug("Could not resize serial buffers: %s", exc)
         log.info("Opened serial port %s @ %d baud", port, SERIAL_BAUD_RATE)
 
         # Start reader thread
@@ -146,14 +154,24 @@ class SerialService(QObject):
     # ── Private ──────────────────────────────────────────────────────
 
     def _read_loop(self) -> None:
-        """Background thread: đọc serial liên tục, emit signal."""
+        """Background thread: đọc serial liên tục, emit signal.
+
+        Reads 1 byte (blocking up to the read timeout) then drains whatever else
+        is already sitting in the OS buffer. A fixed-size read(256) would keep
+        waiting up to the full timeout trying to fill the chunk, leaving bursts
+        sitting in the driver buffer longer than necessary.
+        """
         while self._running:
             try:
                 if not self._serial or not self._serial.is_open:
                     break
-                data = self._serial.read(256)
-                if data:
-                    self.data_received.emit(data)
+                data = self._serial.read(1)
+                if not data:
+                    continue
+                waiting = self._serial.in_waiting
+                if waiting:
+                    data += self._serial.read(waiting)
+                self.data_received.emit(data)
             except (serial.SerialException, OSError) as e:
                 if self._running:
                     log.error("Serial read error: %s", e)

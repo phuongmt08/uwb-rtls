@@ -159,16 +159,25 @@ class CommandBus(QObject):
         response_name = self.INVALIDATE_ON_SEND.get(param_name)
         if not response_name:
             return
-        seq = getattr(getattr(pkt, "hdr", None), "seq", None)
+        hdr = getattr(pkt, "hdr", None)
+        seq = getattr(hdr, "seq", None)
         if seq is None:
             return
-        self._pending_ack_by_seq[int(seq)] = (param_name, response_name)
+        dst = getattr(getattr(hdr, "addr", None), "dst", None)
+        self._pending_ack_by_seq[int(seq)] = (param_name, response_name, dst)
 
-    def _on_ack_received(self, ack_seq: int, response: int) -> None:
-        entry = self._pending_ack_by_seq.pop(int(ack_seq), None)
+    def _on_ack_received(self, ack_seq: int, response: int, src_addr: int | None = None) -> None:
+        entry = self._pending_ack_by_seq.get(int(ack_seq))
         if not entry:
             return
-        command_name, response_name = entry
+        command_name, response_name, expected_src = entry
+        if src_addr is not None and expected_src is not None and int(src_addr) != int(expected_src):
+            log.debug(
+                "CommandBus ignoring ACK seq=%s from unexpected src=%s (expected %s) for %s",
+                ack_seq, src_addr, expected_src, command_name,
+            )
+            return
+        self._pending_ack_by_seq.pop(int(ack_seq), None)
         self._pending.pop(response_name, None)
         if int(response) == self.ACK_RESPONSE_OK:
             log.debug("CommandBus ACK resolved pending: %s -> %s seq=%s", command_name, response_name, ack_seq)
