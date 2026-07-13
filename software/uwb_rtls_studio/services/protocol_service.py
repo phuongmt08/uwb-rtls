@@ -26,7 +26,7 @@
 
   Signals:
     - packet_received(str, object)  : (param_name, packet_t) dispatched to Models.
-    - ack_received(int, int)        : (ack_seq, response_code) for transactions.
+    - ack_received(int, int, int)   : (ack_seq, response_code, src_addr) for transactions.
     - decode_error(str)             : Decapsulation or parsing failure alert.
 ===============================================================================
 """
@@ -65,7 +65,7 @@ class ProtocolService(QObject):
     # ── Signals ──────────────────────────────────────────────────────
     packet_received = pyqtSignal(str, object)   # (param_name, packet_t)
     packet_sent = pyqtSignal(str, object)       # (param_name, packet_t)
-    ack_received = pyqtSignal(int, int)         # (ack_seq, response_code)
+    ack_received = pyqtSignal(int, int, int)    # (ack_seq, response_code, src_addr)
     decode_error = pyqtSignal(str)              # error message
     _decoded_packets_ready = pyqtSignal(list)
     _decode_error_ready = pyqtSignal(str)
@@ -218,12 +218,13 @@ class ProtocolService(QObject):
                 self._warn_on_log_seq_gap(int(pkt.hdr.seq))
 
             if param == "ack":
+                ack_src = int(pkt.hdr.addr.src)
                 try:
                     from utils.app_state import shared_app_state
-                    shared_app_state.handle_incoming_ack(pkt.ack.ack_seq, pkt.ack.response)
+                    shared_app_state.handle_incoming_ack(pkt.ack.ack_seq, pkt.ack.response, ack_src)
                 except Exception as exc:
                     log.error("Failed to forward ACK to shared_app_state: %s", exc)
-                self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response)
+                self.ack_received.emit(pkt.ack.ack_seq, pkt.ack.response, ack_src)
                 self.packet_received.emit(param, pkt)
                 log.debug("RX: %s seq=%d ack_seq=%d", param, pkt.hdr.seq, pkt.ack.ack_seq)
                 continue

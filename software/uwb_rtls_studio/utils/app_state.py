@@ -744,10 +744,10 @@ class SharedAppState(QObject):
         if hasattr(self, '_query_manager') and self._query_manager:
             self._query_manager.handle_response(param_name, pkt)
 
-    def handle_incoming_ack(self, ack_seq: int, response: int) -> None:
+    def handle_incoming_ack(self, ack_seq: int, response: int, src_addr: int | None = None) -> None:
         """Route incoming ACK packets to the query queue manager."""
         if hasattr(self, '_query_manager') and self._query_manager:
-            self._query_manager.handle_ack(ack_seq, response)
+            self._query_manager.handle_ack(ack_seq, response, src_addr)
 
     def _query_result_key(self, item: Dict[str, Any]) -> str:
         command = str(item.get("command_name") or "")
