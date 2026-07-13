@@ -339,6 +339,8 @@ def parse_log(filepath):
                             'ukf_yaw': safe_float(fields.get('ukf_yaw')),
                             'fp_amp_norm': [safe_float(fields.get(f'amp{i}')) for i in range(1, 5)],
                             'fp_snr': [safe_float(fields.get(f'snr{i}')) for i in range(1, 5)],
+                            'fp_confidence': [safe_float(fields.get(f'fp_confidence{i}', fields.get(f'conf{i}'))) for i in range(1, 5)],
+                            'quality_valid': [safe_int(fields.get(f'quality_valid{i}', fields.get(f'qvalid{i}'))) for i in range(1, 5)],
                             'mask': safe_int(fields.get('mask'), 15),
                             'distances': [safe_float(fields.get(f'd{i}')) for i in range(1, 5)],
                             'weights': [safe_int(fields.get(f'w{i}')) for i in range(1, 5)],
@@ -369,6 +371,8 @@ def parse_log(filepath):
 
                     amp_vals = parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0]
                     snr_vals = parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0]
+                    confidence_vals = parse_quality('conf') if 'conf' in raw_line else [0,0,0,0]
+                    quality_valid_vals = parse_quality('qvalid') if 'qvalid' in raw_line else [0,0,0,0]
 
                     # Sanitize extreme outliers (values > 5000 or non-finite)
                     amp_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in amp_vals]
@@ -384,6 +388,8 @@ def parse_log(filepath):
                         'px_fw': float(d['px']), 'py_fw': float(d['py']), 'dt': float(d['dt']),
                         'fp_amp_norm': amp_vals,
                         'fp_snr': snr_vals,
+                        'fp_confidence': confidence_vals,
+                        'quality_valid': quality_valid_vals,
                         'mask': int(d['mask']) if d.get('mask') else 15,
                         'distances': [float(d['d1']), float(d['d2']), float(d['d3']), float(d['d4'])],
                         'err': int(d['err'])
@@ -441,6 +447,8 @@ def parse_path_csv_log(filepath):
                     'ukf_yaw': safe_float(row.get('ukf_yaw'), yaw),
                     'fp_amp_norm': [0, 0, 0, 0],
                     'fp_snr': [0, 0, 0, 0],
+                    'fp_confidence': [0, 0, 0, 0],
+                    'quality_valid': [0, 0, 0, 0],
                     'mask': safe_int(row.get('anchor_mask'), 15),
                     'distances': [0.0, 0.0, 0.0, 0.0],
                     'err': safe_int(row.get('error_frame_cnt'), 0)

@@ -160,6 +160,7 @@ self.onmessage = function(e) {
             ? params.yaw_map_offset_deg
             : SIM_CONFIG.FILTER.DEFAULT_YAW_MAP_OFFSET_DEG) * Math.PI / 180.0),
         min_frame_measurements: params.rescue_min_anchors || 3,
+        rescue_min_reject_streak: SIM_CONFIG.FILTER.DEFAULT_RESCUE_MIN_REJECT_STREAK,
         tagHeight: tagHeight,
         max_update_position_step: SIM_CONFIG.FILTER.MAX_UWB_POS_CORRECTION,
         max_update_velocity_step: SIM_CONFIG.FILTER.MAX_UWB_VEL_CORRECTION,
@@ -234,8 +235,17 @@ self.onmessage = function(e) {
         challengerKey: [],
         challengerScore: [],
         candidateCount: [],
+        tripletCombinationCount: [],
         ukfUsed: [],
         ukfKey: [],
+        referenceStd: [],
+        referenceTrusted: [],
+        weightByAnchor: anchors.map(() => []),
+        adaptiveRByAnchor: anchors.map(() => []),
+        qD2ByAnchor: anchors.map(() => []),
+        qFpByAnchor: anchors.map(() => []),
+        qResidualByAnchor: anchors.map(() => []),
+        rescuedByAnchor: anchors.map(() => []),
         healthByAnchor: anchors.map(() => []),
         rejectStreakByAnchor: anchors.map(() => []),
         rescueStreakByAnchor: anchors.map(() => []),
@@ -243,7 +253,8 @@ self.onmessage = function(e) {
         rescueRateByAnchor: anchors.map(() => [])
     };
 
-    const pushTripletDebug = (bestTriplet, healthSnapshot, didUwbUpdate) => {
+    const pushTripletDebug = (bestTriplet, healthSnapshot, didUwbUpdate,
+        referenceStd, referenceValid, frameAnchors, frameResults) => {
         tripletDebug.gdop.push(bestTriplet ? bestTriplet.gdopRaw : null);
         tripletDebug.gdopPenalty.push(bestTriplet ? bestTriplet.gdopPenalty : null);
         tripletDebug.score.push(bestTriplet ? bestTriplet.score : null);
@@ -260,15 +271,28 @@ self.onmessage = function(e) {
         tripletDebug.challengerKey.push(bestTriplet && bestTriplet.challengerKey ? bestTriplet.challengerKey : '');
         tripletDebug.challengerScore.push(bestTriplet && Number.isFinite(bestTriplet.challengerScore) ? bestTriplet.challengerScore : null);
         tripletDebug.candidateCount.push(bestTriplet ? bestTriplet.candidateCount : 0);
+        tripletDebug.tripletCombinationCount.push(bestTriplet ? bestTriplet.tripletCombinationCount : 0);
         tripletDebug.ukfUsed.push(didUwbUpdate ? 1 : 0);
         tripletDebug.ukfKey.push(didUwbUpdate && bestTriplet ? bestTriplet.key : '');
+        tripletDebug.referenceStd.push(Number.isFinite(referenceStd) ? referenceStd : null);
+        tripletDebug.referenceTrusted.push(referenceValid ? 1 : 0);
+
+        const anchorsById = new Map((frameAnchors || []).map(a => [a.id, a]));
 
         healthSnapshot.forEach((st, i) => {
+            const anchor = anchorsById.get(i + 1);
+            const gateResult = frameResults && frameResults[i];
             tripletDebug.healthByAnchor[i].push(st.score || 0);
-            tripletDebug.rejectStreakByAnchor[i].push(st.rejectStreak || 0);
+            tripletDebug.rejectStreakByAnchor[i].push(filter.reject_counts[i] || 0);
             tripletDebug.rescueStreakByAnchor[i].push(st.rescueStreak || 0);
             tripletDebug.rejectRateByAnchor[i].push(st.rejectRate || 0);
             tripletDebug.rescueRateByAnchor[i].push(st.rescueRate || 0);
+            tripletDebug.weightByAnchor[i].push(anchor ? anchor.measurement_weight : null);
+            tripletDebug.adaptiveRByAnchor[i].push(anchor ? filter.measurementNoiseFor(anchor) : null);
+            tripletDebug.qD2ByAnchor[i].push(anchor ? anchor.q_d2 : null);
+            tripletDebug.qFpByAnchor[i].push(anchor ? anchor.q_fp : null);
+            tripletDebug.qResidualByAnchor[i].push(anchor ? anchor.q_residual : null);
+            tripletDebug.rescuedByAnchor[i].push(gateResult && gateResult.rescue ? 1 : 0);
         });
     };
 
@@ -590,26 +614,47 @@ self.onmessage = function(e) {
             entry.distances.forEach((d, i) => {
                 const anc = anchors[i];
                 const fpAmp = Array.isArray(entry.fp_amp_norm) ? entry.fp_amp_norm[i] : 0;
+                let fpConfidence = Array.isArray(entry.fp_confidence) ? entry.fp_confidence[i] : null;
+                let qualityValid = Array.isArray(entry.quality_valid)
+                    ? !!entry.quality_valid[i]
+                    : false;
+                let fpConfidenceIsProxy = false;
+                // Old logs lack fp_confidence/quality_valid entirely. Derive a
+                // proxy from fp_amp so the FP branch still runs on replay
+                // (accepted bias vs live: firmware uses FP-index confidence).
+                if (!Number.isFinite(fpConfidence) &&
+                    SIM_CONFIG.FILTER.FP_CONFIDENCE_PROXY_FROM_AMP &&
+                    Number.isFinite(fpAmp) && fpAmp > 0) {
+                    fpConfidence = Math.min(1.0, fpAmp / SIM_CONFIG.FILTER.FP_AMP_GOOD);
+                    qualityValid = true;
+                    fpConfidenceIsProxy = true;
+                }
+                const planarD = d > 0.1 ? toPlanarRange(d, anc) : d;
                 if (d > 0.1) {
                     rawRangeAnchors.push({
                         x: anc.x,
                         y: anc.y,
-                        r: toPlanarRange(d, anc),
+                        r: planarD,
                         id: i + 1,
-                        fp_amp: fpAmp
+                        fp_amp: fpAmp,
+                        fp_confidence: fpConfidence,
+                        quality_valid: qualityValid
                     });
                 }
 
                 // Process range measurements through our UKF-based Mahalanobis Prefilter
-                const res = filter.process(i, d, anc);
+                const res = filter.process(i, planarD, anc);
                 res.fp_amp = fpAmp;
+                res.fp_confidence = fpConfidence;
+                res.quality_valid = qualityValid;
+                res.fp_confidence_is_proxy = fpConfidenceIsProxy;
                 d2Scores[i].push(res.d2);
 
                 res.pass = params.enable_mahalanobis ? res.pass : true;
                 if (d <= 0.1) res.pass = false; // Always reject near-zero distance
                 frameResults.push(res);
 
-                const resLpf = filterLpf.process(i, d, anc);
+                const resLpf = filterLpf.process(i, planarD, anc);
                 resLpf.pass = params.enable_mahalanobis ? resLpf.pass : true;
                 if (d <= 0.1) resLpf.pass = false;
                 frameResultsLpf.push(resLpf);
@@ -653,15 +698,18 @@ self.onmessage = function(e) {
                     } else {
                         gatedDist[i].push(smoothed_d);
                     }
-                    const r2d = toPlanarRange(smoothed_d, anc);
+                    const r2d = smoothed_d;
                     const anchorMeasurement = {
                         x: anc.x,
                         y: anc.y,
                         r: r2d,
                         d2: res.d2,
                         id: i + 1,
-                        fp_amp: Array.isArray(entry.fp_amp_norm) ? entry.fp_amp_norm[i] : 0,
-                        rescue: res.rescue
+                        fp_amp: res.fp_amp,
+                        fp_confidence: res.fp_confidence,
+                        quality_valid: res.quality_valid,
+                        rescue: res.rescue,
+                        prefilter_result: res
                     };
                     v_anchors.push(anchorMeasurement);
                     v_anchors_best.push(anchorMeasurement);
@@ -671,7 +719,7 @@ self.onmessage = function(e) {
                         index: i,
                         d: smoothed_d,
                         anchor: anc,
-                        r_uwb: filter.measurementNoiseFor(res)
+                        r_uwb: filter.ukf.r_uwb
                     };
                     acceptedMeasurements.push(acceptedMeasurement);
                     acceptedMeasurementsById.set(i + 1, acceptedMeasurement);
@@ -687,7 +735,7 @@ self.onmessage = function(e) {
                         index: res.index,
                         d: res.d,
                         anchor: res.anchor,
-                        r_uwb: filterLpf.measurementNoiseFor(res)
+                        r_uwb: filterLpf.ukf.r_uwb
                     });
                 }
             });
@@ -707,15 +755,34 @@ self.onmessage = function(e) {
             simPathWLS.y.push(pos_wls ? pos_wls.y : null);
             wlsInfo.push(pos_wls ? `N=${v_anchors_best.length}<br>${v_anchors_best.map(a => `A${a.id}(w=${anchorWeight(a).toFixed(2)},amp=${(a.fp_amp || 0).toFixed(1)})`).join(', ')}` : 'None');
 
+            const referenceStd = filter.ukf.is_initialized
+                && Number.isFinite(filter.ukf.P[0][0])
+                && Number.isFinite(filter.ukf.P[1][1])
+                ? Math.sqrt(Math.max(0.0, filter.ukf.P[0][0] + filter.ukf.P[1][1]))
+                : Infinity;
+            const referenceValid = filter.ukf.is_initialized
+                && Number.isFinite(filter.ukf.x[0])
+                && Number.isFinite(filter.ukf.x[1])
+                && referenceStd <= SIM_CONFIG.FILTER.REFERENCE_MAX_STD_M;
+            const referencePosition = { x: filter.ukf.x[0], y: filter.ukf.x[1] };
             const bestTriplet = selectBestTriplet(v_anchors_best, params.T2_high, params.triplet_weights, {
                 previousKey: previousTripletKey,
                 switchMargin: params.triplet_switch_margin,
                 switchScoreEps: params.triplet_switch_score_eps,
-                healthById: anchorHealth.scoresById()
+                referenceValid,
+                referencePosition
             });
             const tripletMeasurements = bestTriplet
                 ? bestTriplet.triplet.map(a => acceptedMeasurementsById.get(a.id)).filter(Boolean)
                 : [];
+            if (bestTriplet) {
+                bestTriplet.triplet.forEach(anchor => {
+                    const measurement = acceptedMeasurementsById.get(anchor.id);
+                    if (measurement) {
+                        measurement.r_uwb = filter.measurementNoiseFor(anchor);
+                    }
+                });
+            }
             const didUwbUpdate = tripletMeasurements.length >= 3;
             if (didUwbUpdate) {
                 filter.update(tripletMeasurements);
@@ -728,10 +795,22 @@ self.onmessage = function(e) {
 
             simPathTriplet.x.push(bestTriplet ? bestTriplet.pos.x : null);
             simPathTriplet.y.push(bestTriplet ? bestTriplet.pos.y : null);
+            const gateSummary = frameResults.map(r => {
+                const d2Text = Number.isFinite(r.d2) ? r.d2.toFixed(2) : 'inf';
+                const state = r.rescue ? 'RESCUE' : (r.pass ? 'PASS' : 'REJECT');
+                const anchor = v_anchors_best.find(a => a.id === r.index + 1);
+                const proxyMark = (r.fp_confidence_is_proxy) ? '~' : '';
+                const weightText = anchor
+                    ? ` q=(${anchor.q_d2.toFixed(2)},${proxyMark}${anchor.q_fp.toFixed(2)},${anchor.q_residual.toFixed(2)}) w=${anchor.measurement_weight.toFixed(2)}`
+                    : '';
+                const rText = anchor ? ` R=${filter.measurementNoiseFor(anchor).toFixed(4)}` : '';
+                return `A${r.index + 1}:${state} d2=${d2Text} streak=${filter.reject_counts[r.index]}${weightText}${rText}`;
+            }).join('<br>');
             bestTripletInfo.push(bestTriplet
-                ? `${bestTriplet.triplet.map(a => 'A'+a.id).join(',')}<br>score=${bestTriplet.score.toFixed(3)} fp=${bestTriplet.fpAmpPenalty.toFixed(2)} residual=${bestTriplet.residualPenalty.toFixed(2)} health=${bestTriplet.healthPenalty.toFixed(2)}`
-                : 'None');
-            pushTripletDebug(bestTriplet, healthSnapshot, didUwbUpdate);
+                ? `${bestTriplet.triplet.map(a => 'A'+a.id).join(',')}<br>WGDOP=${bestTriplet.score.toFixed(3)}m ref=${referenceValid ? `UKF (${referenceStd.toFixed(3)}m)` : 'triplet probe'}<br>${gateSummary}`
+                : `No UKF update<br>ref=${referenceValid ? `UKF (${referenceStd.toFixed(3)}m)` : 'triplet probe'}<br>${gateSummary}`);
+            pushTripletDebug(bestTriplet, healthSnapshot, didUwbUpdate,
+                referenceStd, referenceValid, v_anchors_best, frameResults);
 
             // Record UKF Fusion trajectory for plotting (Update rate = 6Hz)
             simPathUKF_plot.x.push(filter.ukf.is_initialized ? filter.ukf.x[0] : null);
