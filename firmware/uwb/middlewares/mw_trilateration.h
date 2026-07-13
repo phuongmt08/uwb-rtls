@@ -110,24 +110,12 @@ void mw_trilateration_compute_weights(mw_tril_anchor_t *candidates,
                                       vec2d_t reference_position);
 
 /**
- * @brief Calculate 3D position (Mathematical core)
- * 
- * Requires EXACTLY 3 pre-selected valid anchors.
- * 
- * @param[in]  anchors_exact_3 Array of exactly 3 previously selected anchors
- * @param[out] position        Calculated 3D position
- * @param[out] result          Optional quality info (can be NULL)
- * @return MW_TRIL_OK on success
- */
-mw_tril_err_t mw_trilateration_3d(const mw_tril_anchor_t *anchors_exact_3,
-                                  vec3d_t *position,
-                                  mw_tril_result_t *result);
-
-/**
- * @brief Calculate 2D position (Mathematical core)
- * 
- * Requires EXACTLY 3 pre-selected valid anchors. Ignored Z coordinate.
- * 
+ * @brief Calculate 2D position (debug/init fix, not the production estimator)
+ *
+ * Requires EXACTLY 3 pre-selected valid anchors. Ignores Z coordinate.
+ * error_estimate in result is the range residual RMS; geometry quality is
+ * published by mw_trilateration_select_best_3 (wgdop) instead.
+ *
  * @param[in]  anchors_exact_3 Array of exactly 3 previously selected anchors
  * @param[out] position        Calculated 2D position
  * @param[out] result          Optional quality info (can be NULL)

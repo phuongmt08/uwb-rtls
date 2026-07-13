@@ -685,10 +685,10 @@ void sensor_fusion_entry(void *argument)
 
                 vec2d_t tril_position = {0.0f, 0.0f};
                 SYSVIEW_START(SYSVIEW_MARK_FUSION_TRILATERATION);
-                mw_tril_result_t tril_result = {0};
+                /* Debug/init fix only; quality figures come from selection. */
                 mw_tril_err_t err = mw_trilateration_2d(workspace->selected_anchors,
                                                         &tril_position,
-                                                        &tril_result);
+                                                        NULL);
                 SYSVIEW_STOP(SYSVIEW_MARK_FUSION_TRILATERATION);
                 if (err == MW_TRIL_OK)
                 {
