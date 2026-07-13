@@ -2907,9 +2907,9 @@ class PositionCanvas(QWidget):
             if callable(scheduler):
                 scheduler()
 
-    def update(self, *args, **kwargs):
+    def update(self, *args):
         if not hasattr(self, "_render_timer"):
-            super().update(*args, **kwargs)
+            super().update(*args)
             return
         self._render_dirty = True
         if not self._render_timer.isActive():

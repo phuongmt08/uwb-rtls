@@ -4,14 +4,14 @@ Change UWB_RTLS_TEST_MODE to choose how the desktop app boots:
   1 = offline/mock test mode: skip dongle+scan popups and use fake data.
   0 = real hardware mode: require dongle, scan device, protobuf commands, realtime data.
 
-The UWB_RTLS_TEST_MODE environment variable can override this file when needed.
+The UWB_RTLS_TEST_MODE environment variable can override this file only when UWB_RTLS_ALLOW_MOCK_MODE=1.
 """
 from __future__ import annotations
 
 import os
 from typing import Any
 
-UWB_RTLS_TEST_MODE = 1
+UWB_RTLS_TEST_MODE = 0
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "test", "mock"}
 _FALSE_VALUES = {"0", "false", "no", "off", "real", "hardware"}
@@ -29,11 +29,23 @@ def _parse_bool(value: Any, default: bool) -> bool:
 
 
 def is_test_mode() -> bool:
-    """Return True for offline/mock mode, False for real hardware mode."""
+    """Return True for offline/mock mode, False for real hardware mode.
+
+    Safety guard: real hardware must not accidentally receive seeded mock TAG
+    data just because UWB_RTLS_TEST_MODE was left in the environment. To run
+    mock mode from env, set both UWB_RTLS_TEST_MODE=1 and
+    UWB_RTLS_ALLOW_MOCK_MODE=1.
+    """
     import sys
     if getattr(sys, 'frozen', False):
         return False
-    return _parse_bool(os.getenv("UWB_RTLS_TEST_MODE"), bool(UWB_RTLS_TEST_MODE))
+    env_mode = os.getenv("UWB_RTLS_TEST_MODE")
+    if env_mode is not None:
+        allow_mock = _parse_bool(os.getenv("UWB_RTLS_ALLOW_MOCK_MODE"), False)
+        if not allow_mock:
+            return False
+        return _parse_bool(env_mode, False)
+    return bool(UWB_RTLS_TEST_MODE)
 
 
 def mode_label() -> str:
@@ -45,7 +57,10 @@ def mock_device_identity() -> tuple[str, str]:
 
 
 def seed_mock_app_state(shared_app_state, device_name: str | None = None, mac_address: str | None = None) -> None:
-    """Seed UI-facing state for offline testing without touching serial/protobuf IO."""
+    """Seed UI-facing state only when the application is explicitly in mock mode."""
+    if not is_test_mode():
+        # Hard barrier: never inject mock telemetry into real hardware sessions.
+        return
     name, mac = mock_device_identity()
     device_name = device_name or name
     mac_address = mac_address or mac

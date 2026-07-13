@@ -17,7 +17,7 @@
 
 #define HDLC_SOF              (0x55U)
 #define HDLC_HEADER_LEN       (4U)
-#define HDLC_MAX_DATA_LEN     (256U)
+#define HDLC_MAX_DATA_LEN     (512U)
 #define HDLC_FRAME_MAX_LEN    (HDLC_HEADER_LEN + HDLC_MAX_DATA_LEN + 1U)
 
 typedef enum {

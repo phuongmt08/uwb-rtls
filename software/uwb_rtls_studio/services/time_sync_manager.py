@@ -36,6 +36,7 @@ class TimeSyncManager(QObject):
         self._cooldown_until = 0.0
         self._last_result = None
         self._pending_set_seq = None
+        self._waiting_for_queued_set = False
         self._waiting_for_post_set_resp = False
         self._ack_timeout_timer = QTimer(self)
         self._ack_timeout_timer.setSingleShot(True)
@@ -51,6 +52,7 @@ class TimeSyncManager(QObject):
         self._retry_count = 0
         self._last_result = None
         self._pending_set_seq = None
+        self._waiting_for_queued_set = False
         self._waiting_for_post_set_resp = False
         self._ack_timeout_timer.stop()
 
@@ -103,12 +105,26 @@ class TimeSyncManager(QObject):
         result["was_corrected"] = self._active or self._waiting_for_post_set_resp
         return result
 
+    def handle_packet_sent(self, param_name: str, pkt) -> None:
+        """Capture seq when a queued time_sync_set actually leaves the host."""
+        if not self._waiting_for_queued_set:
+            return
+        if str(param_name or "") != "time_sync_set":
+            return
+        seq = getattr(getattr(pkt, "hdr", None), "seq", None)
+        if seq is None:
+            return
+        self._waiting_for_queued_set = False
+        self._pending_set_seq = int(seq)
+        log.info("Queued time_sync_set transmitted seq=%s; waiting for ACK.", self._pending_set_seq)
+
     def handle_ack(self, ack_seq: int, response: int) -> None:
         if self._pending_set_seq is None or int(ack_seq) != int(self._pending_set_seq):
             return
 
         self._ack_timeout_timer.stop()
         self._pending_set_seq = None
+        self._waiting_for_queued_set = False
         if int(response) != 1:
             log.warning("time_sync_set NACK response=%s; waiting for future time event.", response)
             self._cooldown_until = time.monotonic() + self._cooldown_s
@@ -132,7 +148,12 @@ class TimeSyncManager(QObject):
         return int(TIME_SYNC_THRESHOLD_MS)
 
     def _queue_set(self) -> bool:
-        if not self._active or self._pending_set_seq is not None or self._waiting_for_post_set_resp:
+        if (
+            not self._active
+            or self._pending_set_seq is not None
+            or self._waiting_for_queued_set
+            or self._waiting_for_post_set_resp
+        ):
             return False
         if not self._send_command:
             log.warning("time_sync_set skipped: send command path is unavailable.")
@@ -143,6 +164,9 @@ class TimeSyncManager(QObject):
         host_time_ms = int(self._host_time_fn() * 1000)
         tz_offset_min = int(self._timezone_offset_fn())
         self.set_requested.emit(host_time_ms, tz_offset_min)
+        # Route through the shared sequential queue whenever possible. Immediate
+        # TX of time_sync_set while another GET is waiting is a common cause of
+        # "dongle has response, app times out" during bootstrap.
         pkt = self._send_command(
             "time_sync_set",
             dst_addr=VvAddress.MCU,
@@ -151,11 +175,15 @@ class TimeSyncManager(QObject):
             traffic_class="bootstrap",
         )
         if pkt is None:
-            log.warning("time_sync_set was not sent; waiting for future time event.")
-            self._cooldown_until = time.monotonic() + self._cooldown_s
-            self.finish(False, self._last_result.get("time_diff_ms", 0) if self._last_result else 0)
-            return False
+            # CommandBus serialized the SET into the query queue. Seq is unknown
+            # until the queue actually transmits — capture it via packet_sent.
+            log.info("time_sync_set queued through shared pipeline; waiting for TX seq + ACK.")
+            self._waiting_for_queued_set = True
+            self._pending_set_seq = None
+            self._ack_timeout_timer.start(max(self._ack_timeout_ms, 5000))
+            return True
 
+        self._waiting_for_queued_set = False
         self._pending_set_seq = int(pkt.hdr.seq)
         self._ack_timeout_timer.start(self._ack_timeout_ms)
         log.info("time_sync_set sent seq=%s; waiting for ACK before post-set check.", self._pending_set_seq)
@@ -178,7 +206,7 @@ class TimeSyncManager(QObject):
         return True
 
     def _handle_drift(self, time_diff_ms: int) -> None:
-        if self._pending_set_seq is not None:
+        if self._pending_set_seq is not None or self._waiting_for_queued_set:
             return
         now = time.monotonic()
         if now < self._cooldown_until:
@@ -196,10 +224,15 @@ class TimeSyncManager(QObject):
         self._queue_set()
 
     def _on_set_ack_timeout(self) -> None:
-        if self._pending_set_seq is None:
+        if self._pending_set_seq is None and not self._waiting_for_queued_set:
             return
-        log.warning("time_sync_set ACK timeout for seq=%s; no retry, waiting for future time event.", self._pending_set_seq)
+        log.warning(
+            "time_sync_set ACK timeout for seq=%s queued_wait=%s; no retry, waiting for future time event.",
+            self._pending_set_seq,
+            self._waiting_for_queued_set,
+        )
         self._pending_set_seq = None
+        self._waiting_for_queued_set = False
         self._cooldown_until = time.monotonic() + self._cooldown_s
         self.finish(False, self._last_result.get("time_diff_ms", 0) if self._last_result else 0)
 

@@ -29,17 +29,20 @@ class QueryState:
     SUCCESS = "SUCCESS"
     TIMEOUT = "TIMEOUT"
     FAILED = "FAILED"
+    UNSUPPORTED = "UNSUPPORTED"
 
 
 class QueryTransaction:
     """Represents a single query transaction in the state machine."""
 
-    def __init__(self, command_name: str, dst_addr: int, expected_response: str, kwargs: dict, priority: int = 0):
+    def __init__(self, command_name: str, dst_addr: int, expected_response: str, command_params: dict, traffic_class: str = "", priority: int = 0, flow_name: str = ""):
         self.command_name = command_name
         self.dst_addr = dst_addr
         self.expected_response = expected_response
-        self.kwargs = kwargs
+        self.command_params = command_params
+        self.traffic_class = str(traffic_class or "").strip().lower()
         self.priority = int(priority)
+        self.flow_name = str(flow_name or "").strip().lower()
 
         self.status = QueryState.PENDING
         self.retries = 0
@@ -49,6 +52,7 @@ class QueryTransaction:
         self.seq = None
         self.ack_received = False
         self.ack_response = None
+        self.failure_reason = ""
         self.pending_response_name = ""
         self.pending_response_packet = None
         self.pending_response_seq = None
@@ -103,24 +107,28 @@ class QueryQueueManager(QObject):
         "rtos_task_stats_get": "rtos_task_stats_resp",
         "device_type_get": "device_type_set",
         "prefilter_cfg_get": "prefilter_cfg_resp",
-        "prefilter_cfg_set": "prefilter_cfg_resp",
         "zone_profile_get": "zone_profile_resp",
     }
     ACK_RESPONSE_OK = 1
-    ACKED_GET_WAIT_S = 3.0
-    INTER_COMMAND_GAP_S = 0.05
+    ACKED_GET_WAIT_S = 5.0
+    # Host→dongle→BLE peripheral RTT needs a small settle gap between sequential
+    # commands. 50ms was too tight when ACK+payload still in flight on USB CDC.
+    # Remote MCU commands traverse USB/UART -> dongle -> BLE. A gap shorter
+    # than one connection event can leave the dongle/peripheral TX queues full.
+    INTER_COMMAND_GAP_S = 0.45
     def __init__(
         self,
         send_packet_fn: Callable[[str, int, Dict[str, Any]], Any],
         timeout_s: float = 0.2,
         max_retries: int = 3,
         on_complete_fn: Callable[[List[Dict[str, Any]]], None] | None = None,
+        on_nack_fn: Callable[[Dict[str, Any]], None] | None = None,
         response_map: Dict[str, str] | None = None,
         parent=None,
     ):
         """
         Args:
-            send_packet_fn: Callback function to execute sending: fn(command_name, dst_addr, **kwargs)
+            send_packet_fn: Callback function to execute sending: fn(command_name, dst_addr, command_params)
             timeout_s: Time to wait for expected response (in seconds)
             max_retries: Maximum retries per command on timeout
             on_complete_fn: Callback function called when all queries finish
@@ -130,6 +138,7 @@ class QueryQueueManager(QObject):
         self.timeout_s = timeout_s
         self.max_retries = max_retries
         self.on_complete_fn = on_complete_fn
+        self.on_nack_fn = on_nack_fn
         self.response_map = dict(response_map or self._load_response_map())
 
         self.queue: List[QueryTransaction] = []
@@ -142,6 +151,27 @@ class QueryQueueManager(QObject):
         self.is_running = False
 
         self._last_send_time = 0.0
+
+    def has_active_work(self) -> bool:
+        """Return True while a transaction is active or queued."""
+        with self.lock:
+            if self.is_running or self.current_transaction is not None:
+                return True
+            return any(tx.status in (QueryState.PENDING, QueryState.RETRY_PENDING, QueryState.SENT, QueryState.WAITING) for tx in self.queue)
+
+    def is_active_expected_response(self, param_name: str) -> bool:
+        """Return True when param_name is the payload currently awaited by the queue."""
+        name = str(param_name or "")
+        if not name:
+            return False
+        with self.lock:
+            if not self.is_running or self.current_transaction is None:
+                return False
+            tx = self.current_transaction
+            if tx.expected_response != name:
+                return False
+            return tx.status in (QueryState.SENT, QueryState.WAITING, QueryState.RETRY_PENDING)
+
     @classmethod
     def _load_response_map(cls) -> Dict[str, str]:
         try:
@@ -156,14 +186,32 @@ class QueryQueueManager(QObject):
             log.debug("Falling back to QueryQueueManager.RESPONSE_MAP: %s", exc)
         return dict(cls.RESPONSE_MAP)
 
-    def add_query(self, command_name: str, dst_addr: int, **kwargs) -> None:
-        """Add a query to the queue."""
+    def add_query(self, command_name: str, dst_addr: int, command_params: dict | None = None, traffic_class: str = "", flow_name: str = "", timeout_s: float | None = None, max_retries: int | None = None, recovery_wave: int = 0) -> bool:
+        """Add a query to the queue.
+
+        Returns True when the query was inserted, False when it was skipped as a
+        duplicate in-flight GET waiting for the same payload.
+        """
         expected_response = self.response_map.get(command_name, "")
         if not expected_response:
             log.warning(f"No expected response mapped for command '{command_name}'. Defaulting to None.")
 
-        tx = QueryTransaction(command_name, dst_addr, expected_response, kwargs, self._priority_for(kwargs))
+        params = dict(command_params or {})
+        traffic = str(traffic_class or "").strip().lower()
+        flow = str(flow_name or "").strip().lower()
+        tx = QueryTransaction(command_name, dst_addr, expected_response, params, traffic, self._priority_for(traffic), flow)
+        tx.timeout_s = max(0.05, float(self.timeout_s if timeout_s is None else timeout_s))
+        tx.max_retries = max(0, int(self.max_retries if max_retries is None else max_retries))
+        tx.recovery_wave = max(0, int(recovery_wave or 0))
         with self.lock:
+            if self._has_equivalent_inflight_query(tx):
+                log.info(
+                    "Skipping duplicate in-flight GET query: command=%s expected=%s dst=%s",
+                    tx.command_name,
+                    tx.expected_response or "-",
+                    tx.dst_addr,
+                )
+                return False
             if not self.is_running:
                 self.queue = [item for item in self.queue if item.status not in self.TERMINAL_STATES]
             log.debug("Query queued: %s", self._tx_label(tx))
@@ -176,10 +224,29 @@ class QueryQueueManager(QObject):
                         insert_at = index
                         break
             self.queue.insert(insert_at, tx)
+            return True
+
+    def _has_equivalent_inflight_query(self, candidate: QueryTransaction) -> bool:
+        """Return True when a same-payload GET is already queued or running."""
+        if not str(candidate.command_name or "").endswith("_get"):
+            return False
+        if not candidate.expected_response:
+            return False
+        for item in self.queue:
+            if item.status in self.TERMINAL_STATES:
+                continue
+            if not str(item.command_name or "").endswith("_get"):
+                continue
+            if item.dst_addr != candidate.dst_addr:
+                continue
+            if item.expected_response != candidate.expected_response:
+                continue
+            return True
+        return False
 
     @staticmethod
-    def _priority_for(kwargs: dict) -> int:
-        traffic_class = str((kwargs or {}).get("traffic_class", "") or "").strip().lower()
+    def _priority_for(traffic_class: str) -> int:
+        traffic_class = str(traffic_class or "").strip().lower()
         if traffic_class in {"connection", "critical"}:
             return 100
         if traffic_class in {"manual", "user"}:
@@ -208,11 +275,14 @@ class QueryQueueManager(QObject):
         the current query or rescued another in-batch query that timed out early.
         """
         with self.lock:
-            if not self.is_running:
-                return False
-
-            tx = self.current_transaction
-            if tx and tx.expected_response == param_name:
+            # Keep accepting late payloads even after the batch ends — they can
+            # still satisfy TIMEOUT/FAILED items that have not been cleared yet,
+            # and recovery uses those SUCCESS markers to avoid useless re-GET.
+            tx = self.current_transaction if self.is_running else None
+            if self.is_running and tx and tx.expected_response == param_name:
+                # Prefer the active query, but only when the payload is not an
+                # obvious stale duplicate for a still-open older transaction of
+                # the same response name that has not been marked SUCCESS yet.
                 self._mark_response_success(tx, param_name, pkt)
                 self.timer.stop()
                 self._request_send_next()
@@ -221,21 +291,29 @@ class QueryQueueManager(QObject):
             rescued_tx = self._find_rescuable_transaction(param_name, exclude=tx)
             if rescued_tx is not None:
                 self._mark_response_success(rescued_tx, param_name, pkt, late=True)
+                # If the active query was already waiting on this same payload
+                # type (duplicate enqueues), advance only when it is the active one.
+                if self.is_running and tx is rescued_tx:
+                    self.timer.stop()
+                    self._request_send_next()
                 return True
 
             if self._looks_like_response_name(param_name):
                 seq_val = pkt.hdr.seq if hasattr(pkt, "hdr") and hasattr(pkt.hdr, "seq") else None
                 log.debug(
-                    "Query RX did not resolve active query: active=%s got_param=%s got_seq=%s",
+                    "Query RX did not resolve active query: active=%s got_param=%s got_seq=%s is_running=%s",
                     self._tx_label(tx),
                     param_name,
                     seq_val,
+                    self.is_running,
                 )
 
         return False
 
     def _find_rescuable_transaction(self, param_name: str, exclude: QueryTransaction | None = None) -> QueryTransaction | None:
         """Find an older in-flight query that this late payload can still satisfy."""
+        # Prefer the oldest non-success transaction still waiting on this payload.
+        # Duplicate GETs of the same response type are common after recovery waves.
         for item in self.queue:
             if item is exclude:
                 continue
@@ -286,6 +364,14 @@ class QueryQueueManager(QObject):
                 return False
 
             tx = self.current_transaction
+            if tx.status == QueryState.SUCCESS:
+                log.debug(
+                    "Ignoring late ACK for already completed query: %s ack_seq=%s response=%s",
+                    self._tx_label(tx),
+                    ack_seq,
+                    response,
+                )
+                return True
             if tx.seq is None or int(ack_seq) != int(tx.seq):
                 log.debug(
                     "Ignoring ACK for non-active query: active=%s ack_seq=%s response=%s",
@@ -300,7 +386,8 @@ class QueryQueueManager(QObject):
                 tx.ack_response = int(response)
                 if int(response) != self.ACK_RESPONSE_OK:
                     self.timer.stop()
-                    tx.status = QueryState.FAILED
+                    tx.failure_reason = self._ack_response_name(response)
+                    tx.status = QueryState.UNSUPPORTED if int(response) == self.ACK_RESPONSE_NACK_UNIMPLEMENTED else QueryState.FAILED
                     tx.received_time = time.monotonic()
                     log.warning(
                         "Query ACK: '%s' seq=%s returned NACK response=%s while waiting for payload '%s'.",
@@ -309,6 +396,7 @@ class QueryQueueManager(QObject):
                         response,
                         tx.expected_response,
                     )
+                    self._notify_nack(tx, ack_seq, response)
                     self._request_send_next()
                     return True
 
@@ -330,7 +418,8 @@ class QueryQueueManager(QObject):
                     return True
 
                 tx.status = QueryState.WAITING
-                self.timer.start(max(1, int(self.ACKED_GET_WAIT_S * 1000)))
+                payload_wait_s = max(float(getattr(tx, "timeout_s", self.timeout_s) or 0.0), self.ACKED_GET_WAIT_S)
+                self.timer.start(max(1, int(payload_wait_s * 1000)))
                 log.debug(
                     "ACK received for GET query '%s' seq=%s; extending wait for payload '%s'.",
                     tx.command_name,
@@ -351,16 +440,44 @@ class QueryQueueManager(QObject):
                 )
             else:
                 tx.status = QueryState.FAILED
+                tx.failure_reason = self._ack_response_name(response)
                 log.warning(
                     "Query ACK: '%s' seq=%s returned NACK response=%s.",
                     tx.command_name,
                     ack_seq,
                     response,
                 )
+                self._notify_nack(tx, ack_seq, response)
 
             self._request_send_next()
             return True
 
+    ACK_RESPONSE_NACK_UNIMPLEMENTED = 3
+
+    @classmethod
+    def _ack_response_name(cls, response: int) -> str:
+        code = int(response)
+        if code == cls.ACK_RESPONSE_OK:
+            return "ACK"
+        if code == cls.ACK_RESPONSE_NACK_UNIMPLEMENTED:
+            return "UNIMPLEMENTED"
+        return f"NACK_{code}"
+
+    def _notify_nack(self, tx: QueryTransaction, ack_seq: int, response: int) -> None:
+        if self.on_nack_fn is None:
+            return
+        try:
+            self.on_nack_fn({
+                "command_name": tx.command_name,
+                "expected_response": tx.expected_response,
+                "dst_addr": tx.dst_addr,
+                "seq": tx.seq,
+                "ack_seq": int(ack_seq),
+                "ack_response": int(response),
+                "failure_reason": self._ack_response_name(response),
+            })
+        except Exception as exc:
+            log.debug("Query NACK notification failed: %s", exc)
     @staticmethod
     def _command_accepts_ack_success(command_name: str) -> bool:
         """
@@ -398,10 +515,16 @@ class QueryQueueManager(QObject):
                             "sent_time": tx.sent_time,
                             "received_time": tx.received_time,
                             "seq": tx.seq,
-                            "kwargs": dict(tx.kwargs),
+                            "command_params": dict(tx.command_params),
                             "priority": tx.priority,
+                            "traffic_class": tx.traffic_class,
+                            "flow_name": tx.flow_name,
                             "ack_received": tx.ack_received,
                             "ack_response": tx.ack_response,
+                            "timeout_s": getattr(tx, "timeout_s", self.timeout_s),
+                            "max_retries": getattr(tx, "max_retries", self.max_retries),
+                            "recovery_wave": getattr(tx, "recovery_wave", 0),
+                            "failure_reason": getattr(tx, "failure_reason", ""),
                             "response_seq": (tx.response_packet.hdr.seq if tx.response_packet is not None and hasattr(tx.response_packet, "hdr") and hasattr(tx.response_packet.hdr, "seq") else None),
                             "response_packet": tx.response_packet,
                         }
@@ -428,7 +551,7 @@ class QueryQueueManager(QObject):
             tx.pending_response_packet = None
             tx.pending_response_seq = None
             try:
-                sent_pkt = self.send_packet_fn(tx.command_name, tx.dst_addr, **tx.kwargs)
+                sent_pkt = self.send_packet_fn(tx.command_name, tx.dst_addr, dict(tx.command_params))
                 if sent_pkt is not None:
                     if hasattr(sent_pkt, "hdr") and hasattr(sent_pkt.hdr, "seq"):
                         tx.seq = sent_pkt.hdr.seq
@@ -448,7 +571,7 @@ class QueryQueueManager(QObject):
 
             seq_str = f" seq={tx.seq}" if tx.seq is not None else ""
             log.info(f"Query TX: '{tx.command_name}' -> dst={tx.dst_addr}{seq_str} (attempt {tx.retries + 1})")
-            log.debug("Query armed: %s timeout_s=%.3f", self._tx_label(tx), self.timeout_s)
+            log.debug("Query armed: %s timeout_s=%.3f max_retries=%d", self._tx_label(tx), tx.timeout_s, tx.max_retries)
 
             if not tx.expected_response:
                 tx.status = QueryState.SUCCESS
@@ -456,7 +579,7 @@ class QueryQueueManager(QObject):
                 self._request_send_next()
                 return
 
-            self.timer.start(max(1, int(self.timeout_s * 1000)))
+            self.timer.start(max(1, int(tx.timeout_s * 1000)))
 
     def _on_timeout(self) -> None:
         """Handles timeout event for current query."""
@@ -465,33 +588,55 @@ class QueryQueueManager(QObject):
                 return
 
             tx = self.current_transaction
+            # A payload that arrived slightly before this timer callback (or was
+            # redispatched from cache) must win over the timeout path.
+            if tx.status == QueryState.SUCCESS:
+                self._request_send_next()
+                return
+
             if tx.ack_received and not self._command_accepts_ack_success(tx.command_name):
-                if tx.retries < self.max_retries:
-                    tx.retries += 1
-                    tx.status = QueryState.RETRY_PENDING
-                    log.warning(
-                        f"Query TIMEOUT waiting for payload '{tx.expected_response}' after ACK to '{tx.command_name}'. "
-                        f"Retrying GET request ({tx.retries}/{self.max_retries}) because payload was not observed."
-                    )
-                else:
-                    tx.status = QueryState.TIMEOUT
-                    log.error(
-                        f"Query TIMEOUT waiting for payload '{tx.expected_response}' after ACK to '{tx.command_name}'. "
-                        f"Failed after {self.max_retries} retries."
-                    )
-            elif tx.retries < self.max_retries:
+                log.warning(
+                    "Query TIMEOUT waiting for payload '%s' after ACK to '%s'; "
+                    "marking failed for end-of-wave recovery.",
+                    tx.expected_response,
+                    tx.command_name,
+                )
+            else:
+                log.warning(
+                    "Query TIMEOUT waiting for '%s' to '%s'; marking failed for end-of-wave recovery.",
+                    tx.expected_response,
+                    tx.command_name,
+                )
+            max_retries = int(getattr(tx, "max_retries", self.max_retries) or 0)
+            if tx.retries < max_retries:
                 tx.retries += 1
                 tx.status = QueryState.RETRY_PENDING
+                # Retry goes to the end of this wave so one bad packet cannot
+                # block later slots in the same flow.
+                try:
+                    if tx in self.queue:
+                        self.queue.remove(tx)
+                        self.queue.append(tx)
+                except ValueError:
+                    pass
                 log.warning(
-                    f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. "
-                    f"Retrying ({tx.retries}/{self.max_retries})..."
+                    "Query RETRY queued at end of wave: '%s' retry=%d/%d.",
+                    tx.command_name,
+                    tx.retries,
+                    max_retries,
                 )
             else:
                 tx.status = QueryState.TIMEOUT
-                log.error(
-                    f"Query TIMEOUT waiting for '{tx.expected_response}' to '{tx.command_name}'. "
-                    f"Failed after {self.max_retries} retries."
-                )
+
+            # Free CommandBus pending so a later retry/recovery re-request is
+            # not silently dropped for PENDING_TTL after this query failed.
+            if tx.status in (QueryState.RETRY_PENDING, QueryState.TIMEOUT, QueryState.FAILED) and tx.expected_response:
+                try:
+                    from services.command_bus import shared_command_bus
+                    if shared_command_bus is not None:
+                        shared_command_bus.clear_pending(tx.expected_response)
+                except Exception:
+                    pass
 
         self._request_send_next()
 

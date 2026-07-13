@@ -2767,7 +2767,7 @@ class LiveTrackingTab(QWidget):
         self._vm._send_command(
             "anchor_layout_set",
             dst_addr=self._coerce_int_id(target.get("proto_dst_addr"), int(VvAddress.MCU)),
-            anchors=anchors_payload,
+            command_params={"anchors": anchors_payload},
         )
         warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
         QMessageBox.information(

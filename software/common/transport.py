@@ -26,7 +26,7 @@ class HostTransport(IntEnum):
 
 
 HDLC_SOF = 0x55
-HDLC_MAX_DATA_LEN = 256
+HDLC_MAX_DATA_LEN = 512
 FRAME_TYPE_PROTOBUF = 0
 
 
@@ -107,9 +107,20 @@ class HdlcCodec:
                 calc = self.checksum(header + bytes(self._payload))
                 if calc == byte:
                     chunks.append(HdlcChunk(self._frame_type, bytes(self._payload)))
+                else:
+                    if byte == HDLC_SOF:
+                        self._state = 1
+                        self._frame_type = 0
+                        self._length = 0
+                        self._payload.clear()
+                        continue
                 self._reset()
 
         return chunks
+
+    def reset(self) -> None:
+        """Discard an incomplete frame and return to the SOF search state."""
+        self._reset()
 
     def _reset(self) -> None:
         self._state = 0

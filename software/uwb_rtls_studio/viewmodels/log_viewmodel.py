@@ -180,10 +180,10 @@ class LogViewModel(QObject):
             self._log_model.stop_log_stream()
         return True
 
-    def send_host_log_packet(self, packet_name: str, **params) -> dict:
+    def send_host_log_packet(self, packet_name: str, command_params: dict | None = None) -> dict:
         if not self._log_model:
             return {"ok": False, "error": "Log model is not available"}
-        return self._log_model.send_host_log_packet(packet_name, **params)
+        return self._log_model.send_host_log_packet(packet_name, command_params=command_params)
 
     def _poll_log_timeout(self):
         if self._log_model and self._log_model.poll_log_timeout():

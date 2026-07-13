@@ -40,6 +40,8 @@ COMMAND_ENABLE = {
     "host_transport_set": 1,
     "pos_calib_cfg_get": 1,
     "pos_calib_cfg_set": 1,
+    "prefilter_cfg_get": 1,
+    "prefilter_cfg_set": 1,
     "anchor_layout_get": 1,
     "anchor_layout_set": 1,
     "battery_info_get": 1,

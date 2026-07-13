@@ -80,8 +80,8 @@ def test_ranging_model_start_ranging_sends_init_yaw_and_ukf_reinit():
         def __init__(self):
             self.sent = []
 
-        def send(self, command_name, dst_addr=None, **kwargs):
-            self.sent.append((command_name, dst_addr, kwargs))
+        def send(self, command_name, dst_addr=None, command_params: dict | None = None, traffic_class: str = ""):
+            self.sent.append((command_name, dst_addr, dict(command_params or {})))
             return object()
 
     command_bus = RecordingCommandBus()
@@ -94,10 +94,10 @@ def test_ranging_model_start_ranging_sends_init_yaw_and_ukf_reinit():
     model.start_ranging(yaw_deg=123, is_ukf_reinit=True)
 
     assert len(command_bus.sent) == 1
-    command_name, dst_addr, kwargs = command_bus.sent[0]
+    command_name, dst_addr, command_params = command_bus.sent[0]
     assert command_name == "ranging_start"
     assert dst_addr == VvAddress.MCU
-    assert kwargs == {"yaw_deg": 123, "is_ukf_reinit": True}
+    assert command_params == {"yaw_deg": 123, "is_ukf_reinit": True}
     assert model.is_ranging is True
     assert app is not None
 
@@ -761,3 +761,36 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_anchor_layout_response_publishes_to_shared_state_for_live_tracking():
+    _ensure_qt_app()
+    from repository.ranging_repository import RangingRepository
+    from utils.app_state import shared_app_state
+
+    shared_app_state.anchor_layout = []
+    received = []
+    shared_app_state.anchor_layout_changed.connect(received.append)
+
+    repo = RangingRepository()
+    factory = CommandFactory()
+    pkt = factory.anchor_layout_resp(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, 77)
+    del pkt.anchor_layout_resp.anchors[:]
+    item = pkt.anchor_layout_resp.anchors.add()
+    item.anchor_id = 3
+    item.x_m = 1.25
+    item.y_m = 2.5
+    item.z_m = 1.7
+
+    anchors = repo.parse_anchor_layout(pkt.anchor_layout_resp)
+
+    assert len(anchors) == 1
+    assert shared_app_state.anchor_layout
+    assert received
+    anchor = shared_app_state.anchor_layout[0]
+    assert anchor["anchor_id"] == 3
+    assert anchor["x"] == 1.25
+    assert anchor["y"] == 2.5
+    assert math.isclose(anchor["z"], 1.7, abs_tol=1e-6)
+    assert anchor["label"] == "A3"
+    assert anchor["placed"] is True

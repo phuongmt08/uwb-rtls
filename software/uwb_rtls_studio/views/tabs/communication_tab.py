@@ -1,4 +1,4 @@
-﻿"""
+"""
 ==============================================================================
   UWB RTLS Studio — Communication Tab
 ==============================================================================
@@ -39,6 +39,7 @@ import logging
 from common.commands import CommandCatalog, mapped_destination_for
 from common.transport import VvAddress
 from common import protocol_pb2 as pb
+from utils.runtime_mode import is_test_mode
 
 from PyQt6 import uic
 from PyQt6.QtWidgets import (
@@ -1184,6 +1185,13 @@ class CommunicationTab(QWidget):
             if not self._protocol_service:
                 self._last_manual_send_sig = send_signature
                 self._last_manual_send_at = now
+                if not is_test_mode():
+                    self.tester_status_label.setText("Warning: no hardware protocol service")
+                    self.tester_status_label.setStyleSheet("color: #EF4444;")
+                    self._manual_send_in_flight = False
+                    self.btn_send_packet.setEnabled(True)
+                    return
+
                 self.tester_status_label.setText("Warning: simulation mode (no dongle connected)")
                 self.tester_status_label.setStyleSheet("color: #F59E0B;")
                 self._simulate_exchange(packet_name, dst_addr, params)
@@ -1203,7 +1211,7 @@ class CommunicationTab(QWidget):
                     dst_addr=dst_addr,
                     src_addr=src_addr,
                     manual_bypass=True,
-                    **params,
+                    command_params=params,
                 )
             finally:
                 self._manual_send_active = False

@@ -635,11 +635,37 @@ class CommandFactory:
         cfg.velocity_weight = 0.5
         cfg.min_covariance = 1.0e-6
 
-    def prefilter_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def prefilter_cfg_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        enable: bool | None = None,
+        recover_d2: float | None = None,
+        reject_d2: float | None = None,
+        r_base: float | None = None,
+        r_gate: float | None = None,
+        velocity_weight: float | None = None,
+        min_covariance: float | None = None,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         self._fill_default_prefilter(pkt.prefilter_cfg_set.config)
+        cfg = pkt.prefilter_cfg_set.config
+        if enable is not None:
+            cfg.enable = bool(enable)
+        if recover_d2 is not None:
+            cfg.recover_d2 = float(recover_d2)
+        if reject_d2 is not None:
+            cfg.reject_d2 = float(reject_d2)
+        if r_base is not None:
+            cfg.r_base = float(r_base)
+        if r_gate is not None:
+            cfg.r_gate = float(r_gate)
+        if velocity_weight is not None:
+            cfg.velocity_weight = float(velocity_weight)
+        if min_covariance is not None:
+            cfg.min_covariance = float(min_covariance)
         return pkt
-
     def prefilter_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         self._fill_default_prefilter(pkt.prefilter_cfg_resp.config)
@@ -1046,7 +1072,7 @@ class CommandCatalog:
             CommandSpec(73, "rtos_task_stats_get", self.factory.rtos_task_stats_get, "rtos_task_stats_resp"),
             CommandSpec(74, "rtos_task_stats_resp", self.factory.rtos_task_stats_resp),
             CommandSpec(75, "prefilter_cfg_get", self.factory.prefilter_cfg_get, "prefilter_cfg_resp"),
-            CommandSpec(76, "prefilter_cfg_set", self.factory.prefilter_cfg_set, "prefilter_cfg_resp"),
+            CommandSpec(76, "prefilter_cfg_set", self.factory.prefilter_cfg_set),
             CommandSpec(77, "prefilter_cfg_resp", self.factory.prefilter_cfg_resp),
             CommandSpec(78, "vehicle_control", self.factory.vehicle_control_speed_steering),
             CommandSpec(79, "vehicle_status", self.factory.vehicle_status),

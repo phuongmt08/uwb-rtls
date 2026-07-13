@@ -21,6 +21,12 @@ class DiagnosticsRepository(QObject):
         self._calib_status: dict = {}
         self._rtos_resource: dict = {}
         self._rtos_task_stats: list[dict] = []
+        shared_app_state.device_session_reset.connect(self.reset_session)
+
+    def reset_session(self, _reason: str = "") -> None:
+        self._calib_status = {}
+        self._rtos_resource = {}
+        self._rtos_task_stats = []
 
     @property
     def calib_status(self) -> dict:

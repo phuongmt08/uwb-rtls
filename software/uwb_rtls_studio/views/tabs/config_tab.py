@@ -135,6 +135,7 @@ class ConfigTab(QWidget):
 
         # Post-load setup
         self._setup_dev_widgets()
+        self._setup_prefilter_group()
         if self._has_widget("tx_power_spin"):
             if hasattr(self.tx_power_spin, "setDecimals"):
                 self.tx_power_spin.setDecimals(0)
@@ -347,6 +348,43 @@ class ConfigTab(QWidget):
         self.uwb_config_form.insertRow(6, self.lbl_rx_timeout, self.rx_timeout_spin)
         self.ranging_group.setVisible(False)
 
+    def _setup_prefilter_group(self):
+        from PyQt6.QtWidgets import QFormLayout
+
+        self.prefilter_group = QGroupBox("Positioning Prefilter")
+        self.prefilter_form = QFormLayout(self.prefilter_group)
+        self.prefilter_form.setHorizontalSpacing(10)
+        self.prefilter_form.setVerticalSpacing(8)
+
+        self.chk_prefilter_enable = QCheckBox("Enable")
+        self.chk_prefilter_enable.setChecked(True)
+        self.prefilter_form.addRow("Prefilter:", self.chk_prefilter_enable)
+
+        def add_double(name, label, value, decimals=4, minimum=0.0, maximum=1000.0):
+            spin = QDoubleSpinBox()
+            spin.setDecimals(decimals)
+            spin.setRange(minimum, maximum)
+            spin.setSingleStep(10 ** (-min(decimals, 3)))
+            spin.setValue(value)
+            setattr(self, name, spin)
+            self.prefilter_form.addRow(label, spin)
+            return spin
+
+        add_double("prefilter_recover_d2_spin", "Recover d2:", 5.0, decimals=3)
+        add_double("prefilter_reject_d2_spin", "Reject d2:", 7.5, decimals=3)
+        add_double("prefilter_r_base_spin", "R base:", 0.05, decimals=5)
+        add_double("prefilter_r_gate_spin", "R gate:", 0.10, decimals=5)
+        add_double("prefilter_velocity_weight_spin", "Velocity weight:", 0.5, decimals=4)
+        add_double("prefilter_min_covariance_spin", "Min covariance:", 1.0e-6, decimals=8, maximum=1.0)
+
+        self.col3_container = QWidget()
+        self.col3_layout = QVBoxLayout(self.col3_container)
+        self.col3_layout.setContentsMargins(0, 0, 0, 0)
+        self.col3_layout.setSpacing(12)
+        self.col3_layout.addWidget(self.fusion_group)
+        self.col3_layout.addWidget(self.prefilter_group)
+        self.col3_layout.addStretch()
+        self._dev_widgets.append(self.prefilter_group)
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
         self._dev_widgets = [
@@ -374,6 +412,7 @@ class ConfigTab(QWidget):
                 getattr(self, "uwb_adv_separator", None),
                 getattr(self, "fusion_group", None),
                 getattr(self, "pos_calib_group", None),
+                getattr(self, "prefilter_group", None),
             )
             if widget is not None
         ]
@@ -510,7 +549,8 @@ class ConfigTab(QWidget):
             getattr(self, "ranging_group", None),
             getattr(self, "device_operations_group", None),
             getattr(self, "sys_group", None),
-            getattr(self, "col2_container", None)
+            getattr(self, "col2_container", None),
+            getattr(self, "col3_container", None)
         ]
         for w in widgets:
             if w is not None:
@@ -528,7 +568,7 @@ class ConfigTab(QWidget):
 
         # Update visibility of inner developer-only widgets in UWB Group
         for w in self._dev_widgets:
-            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None)):
+            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None), getattr(self, "prefilter_group", None)):
                 w.setVisible(enabled)
 
         # Show or hide connection parameters in BLE Group - always show in both modes
@@ -556,8 +596,8 @@ class ConfigTab(QWidget):
             self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
             # Column 2 Container (spanning row 0 and 1)
             self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
-            # Sensor Fusion (Col 3, spanning row 0 and 1)
-            self.main_layout.addWidget(self.fusion_group, 0, 3, 2, 1)
+            # Developer positioning controls (Col 3, spanning row 0 and 1)
+            self.main_layout.addWidget(self.col3_container, 0, 3, 2, 1)
 
             # Row 1: Host Transport (Col 0), BLE Config (Col 1)
             self.main_layout.addWidget(self.host_group, 1, 0, 1, 1)
@@ -575,6 +615,8 @@ class ConfigTab(QWidget):
 
             # Visibility
             self.fusion_group.setVisible(True)
+            self.prefilter_group.setVisible(True)
+            self.col3_container.setVisible(True)
             self.host_group.setVisible(True)
             if hasattr(self, "ranging_group") and self.ranging_group is not None:
                 self.ranging_group.setVisible(False)
@@ -606,6 +648,8 @@ class ConfigTab(QWidget):
 
             # Visibility
             self.fusion_group.setVisible(False)
+            self.prefilter_group.setVisible(False)
+            self.col3_container.setVisible(False)
             self.host_group.setVisible(True)
             if hasattr(self, "ranging_group") and self.ranging_group is not None:
                 self.ranging_group.setVisible(False)
@@ -628,11 +672,19 @@ class ConfigTab(QWidget):
         self._vm.sys_config_updated.connect(self._on_sys_config_loaded)
         self._vm.sys_ranging_cfg_updated.connect(self._on_sys_ranging_cfg_loaded)
         self._vm.sensor_fusion_cfg_updated.connect(self._on_sensor_fusion_cfg_loaded)
+        self._vm.prefilter_cfg_updated.connect(self._on_prefilter_cfg_loaded)
         self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
         if hasattr(self._vm, "ble_conn_params_updated"):
             self._vm.ble_conn_params_updated.connect(self._on_ble_conn_params_loaded)
         if hasattr(self._vm, "device_type_updated"):
             self._vm.device_type_updated.connect(self._on_device_type_loaded)
+        # Clear visible values immediately when the active device session is
+        # reset; do not let designer/.ui defaults look like hardware data.
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.device_session_reset.connect(lambda _reason="": self._reset_display_fields())
+        except Exception:
+            pass
 
         # Connect UI buttons to viewmodel actions
         self.btn_read_device.clicked.connect(self._read_device_config)
@@ -759,6 +811,15 @@ class ConfigTab(QWidget):
         if self._has_widget("init_p_bias_gz_spin"):
             set_widget_placeholder(self.init_p_bias_gz_spin)
             
+        # Reset Positioning Prefilter widgets
+        if self._has_widget("chk_prefilter_enable"):
+            set_widget_placeholder(self.chk_prefilter_enable)
+        for widget_name in (
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
+            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin"
+        ):
+            if self._has_widget(widget_name):
+                set_widget_placeholder(getattr(self, widget_name))
         # Reset Position Auto-Calibration widgets
         if self._has_widget("chk_enable_anchor_calib"):
             set_widget_placeholder(self.chk_enable_anchor_calib)
@@ -795,6 +856,22 @@ class ConfigTab(QWidget):
         set_widget_placeholder(self.spin_ble_latency)
         set_widget_placeholder(self.spin_ble_timeout)
         
+        # Factory OTP fields are write-only inputs, not device telemetry.
+        # Clear their designer defaults without disabling user write controls.
+        if hasattr(self, "otp_dev_type_combo"):
+            if self.otp_dev_type_combo.findText("-") < 0:
+                self.otp_dev_type_combo.insertItem(0, "-")
+            self.otp_dev_type_combo.setCurrentText("-")
+            self.otp_dev_type_combo.setEnabled(True)
+        if hasattr(self, "otp_mfg_date_input"):
+            self.otp_mfg_date_input.clear()
+            self.otp_mfg_date_input.setEnabled(True)
+        for widget_name in ("otp_hw_rev_spin", "otp_tx_delay_spin", "otp_rx_delay_spin"):
+            if hasattr(self, widget_name):
+                widget = getattr(self, widget_name)
+                widget.setEnabled(True)
+                widget.setValue(0)
+
         # Reset Anchor Layout table placeholders (deprecated)
         pass
 
@@ -889,11 +966,23 @@ class ConfigTab(QWidget):
                 pass
         return anchors
 
+    def _prefilter_config_from_ui(self) -> dict:
+        return {
+            "enable": self.chk_prefilter_enable.isChecked(),
+            "recover_d2": self._spin_value("prefilter_recover_d2_spin", 5.0),
+            "reject_d2": self._spin_value("prefilter_reject_d2_spin", 7.5),
+            "r_base": self._spin_value("prefilter_r_base_spin", 0.05),
+            "r_gate": self._spin_value("prefilter_r_gate_spin", 0.10),
+            "velocity_weight": self._spin_value("prefilter_velocity_weight_spin", 0.5),
+            "min_covariance": self._spin_value("prefilter_min_covariance_spin", 1.0e-6),
+        }
     def _read_device_config(self):
         if not self._vm or not self._require_connected_device("reading configuration"):
             return
         target = self._selected_target()
-        self._apply_target_to_ui(target)
+        # Read must never write role/device-id defaults into the UI before a
+        # real response arrives. The previous call injected Tag when the
+        # current device had not returned sys_config_resp yet.
         _flash_button(self.btn_read_device, "#22D3EE")   # Glow cyan khi bấm
         self._vm.read_device_config(target, force=True)   # force=True: bypass cache, gửi thật xuống phần cứng
 
@@ -989,6 +1078,10 @@ class ConfigTab(QWidget):
         chk_fusion = QCheckBox("Sensor Fusion (UKF) Configuration")
         chk_fusion.setChecked(True)
         dialog_layout.addWidget(chk_fusion)
+
+        chk_prefilter = QCheckBox("Positioning Prefilter Configuration")
+        chk_prefilter.setChecked(True)
+        dialog_layout.addWidget(chk_prefilter)
         
         chk_calib = QCheckBox("Position Calibration Configuration")
         chk_calib.setChecked(True)
@@ -1087,6 +1180,8 @@ class ConfigTab(QWidget):
                 init_p_bias_gz=self._spin_value("init_p_bias_gz_spin", 0.01)
             )
 
+        prefilter_config = self._prefilter_config_from_ui() if chk_prefilter.isChecked() else None
+
         pos_calib_config = None
         if chk_calib.isChecked() and self._has_widget("chk_enable_anchor_calib"):
             pos_calib_config = dict(
@@ -1181,6 +1276,7 @@ class ConfigTab(QWidget):
             ranging_config=ranging_config,
             sys_config=sys_config,
             sensor_fusion_config=sensor_fusion_config,
+            prefilter_config=prefilter_config,
             pos_calib_config=pos_calib_config,
             factory_otp_config=factory_otp_config,
         )
@@ -1234,6 +1330,8 @@ class ConfigTab(QWidget):
             "init_p_bias_ay": self._spin_value("init_p_bias_ay_spin", 0.01),
             "init_p_bias_gz": self._spin_value("init_p_bias_gz_spin", 0.01),
         }
+        prefilter_config = self._prefilter_config_from_ui()
+
         pos_calib_config = {}
         if self._has_widget("chk_enable_anchor_calib"):
             pos_calib_config = {
@@ -1257,6 +1355,7 @@ class ConfigTab(QWidget):
             "ranging_config": {"period_ms": self.rng_period_spin.value(), "timeout_ms": self.rx_timeout_spin.value()},
             "sys_config": sys_config,
             "sensor_fusion_config": sensor_fusion_config,
+            "prefilter_config": prefilter_config,
             "pos_calib_config": pos_calib_config,
         }
 
@@ -1403,6 +1502,25 @@ class ConfigTab(QWidget):
             if self._has_widget(widget_name):
                 set_widget_value(getattr(self, widget_name), cfg.get(key))
 
+    def _on_prefilter_cfg_loaded(self, cfg):
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        widgets = (
+            "chk_prefilter_enable",
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
+            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin",
+        )
+        if not cfg:
+            for widget_name in widgets:
+                if self._has_widget(widget_name):
+                    set_widget_placeholder(getattr(self, widget_name))
+            return
+        set_widget_value(self.chk_prefilter_enable, cfg.get("enable", True))
+        set_widget_value(self.prefilter_recover_d2_spin, cfg.get("recover_d2", 5.0))
+        set_widget_value(self.prefilter_reject_d2_spin, cfg.get("reject_d2", 7.5))
+        set_widget_value(self.prefilter_r_base_spin, cfg.get("r_base", 0.05))
+        set_widget_value(self.prefilter_r_gate_spin, cfg.get("r_gate", 0.10))
+        set_widget_value(self.prefilter_velocity_weight_spin, cfg.get("velocity_weight", 0.5))
+        set_widget_value(self.prefilter_min_covariance_spin, cfg.get("min_covariance", 1.0e-6))
     def _on_pos_calib_cfg_loaded(self, cfg):
         from utils.helpers import set_widget_placeholder, set_widget_value
         if not cfg:
@@ -1500,12 +1618,15 @@ class ConfigTab(QWidget):
             self._vm.write_device_type(dev_type)
 
     def _on_device_type_loaded(self, device_type: int):
-        from utils.helpers import set_widget_value
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not int(device_type or 0):
+            set_widget_placeholder(self.combo_device_type)
+            return
         type_map = {
             1: "Tag",
             2: "Anchor",
             3: "Gateway",
             4: "Debug Tool"
         }
-        text = type_map.get(device_type, "Tag")
+        text = type_map.get(int(device_type), "-")
         set_widget_value(self.combo_device_type, text)

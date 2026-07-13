@@ -110,7 +110,20 @@ class SerialService(QObject):
             if not self.is_open:
                 return
             try:
-                self._serial.write(data)
+                written = self._serial.write(data)
+                # USB-CDC bridges can buffer host TX; flush so the dongle sees
+                # the full HDLC frame before the next sequential GET is armed.
+                try:
+                    self._serial.flush()
+                except Exception:
+                    pass
+                if written is not None and int(written) < len(data):
+                    log.warning(
+                        "Serial short write: wrote %s/%s bytes on %s",
+                        written,
+                        len(data),
+                        self.port_name,
+                    )
             except (serial.SerialException, OSError) as e:
                 log.error("Serial write error: %s", e)
                 self.error_occurred.emit(str(e))
@@ -145,13 +158,32 @@ class SerialService(QObject):
 
     # ── Private ──────────────────────────────────────────────────────
 
+    def reset_input_buffer(self) -> None:
+        """Discard bytes already buffered by the serial adapter."""
+        with self._write_lock:
+            if not self.is_open:
+                return
+            try:
+                self._serial.reset_input_buffer()
+                log.debug("Serial RX input buffer reset")
+            except (serial.SerialException, OSError) as exc:
+                log.debug("Could not reset serial RX input buffer: %s", exc)
+
     def _read_loop(self) -> None:
         """Background thread: đọc serial liên tục, emit signal."""
         while self._running:
             try:
                 if not self._serial or not self._serial.is_open:
                     break
-                data = self._serial.read(256)
+                # Drain whatever is waiting; small fixed reads under USB CDC load
+                # increase the chance of host-side backlog when bootstrap bursts.
+                waiting = 0
+                try:
+                    waiting = int(getattr(self._serial, "in_waiting", 0) or 0)
+                except Exception:
+                    waiting = 0
+                read_size = max(512, min(waiting, 4096)) if waiting else 512
+                data = self._serial.read(read_size)
                 if data:
                     self.data_received.emit(data)
             except (serial.SerialException, OSError) as e:

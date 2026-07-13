@@ -23,6 +23,7 @@ from PyQt6.QtCore import QTimer, QSize, Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QAction
 from PyQt6 import uic
 from common import protocol_pb2 as pb
+from utils.app_state import shared_app_state
 
 # Tab imports are handled dynamically by uic.loadUi based on <customwidgets> in the .ui file
 
@@ -745,6 +746,8 @@ class MainWindow(QMainWindow):
             self._protocol_service.packet_sent.connect(self._on_protocol_packet_sent)
             self._protocol_service.ack_received.connect(self._on_protocol_ack_received)
 
+        shared_app_state.query_notification_requested.connect(self._show_ble_notification)
+
         # Connect serial connection lost signal
         if self._serial_service:
             self._serial_service.connection_lost.connect(self._on_dongle_disconnected)
@@ -921,6 +924,12 @@ class MainWindow(QMainWindow):
                 cleaned_text = text[i:]
                 break
         self.active_tab_title.setText(cleaned_text)
+        if self._device_info_vm:
+            diagnostics_visible = self.tabs.currentWidget() in (self._tab_device, self._tab_communication)
+            if diagnostics_visible and hasattr(self._device_info_vm, "start_rtos_polling"):
+                self._device_info_vm.start_rtos_polling()
+            elif hasattr(self._device_info_vm, "stop_rtos_polling"):
+                self._device_info_vm.stop_rtos_polling()
 
     def _on_end_session(self):
         if not self._session_active:

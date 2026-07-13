@@ -16,6 +16,7 @@ class ConfigRepository(QObject):
     sys_config_updated = pyqtSignal(dict)
     sys_ranging_cfg_updated = pyqtSignal(dict)
     sensor_fusion_cfg_updated = pyqtSignal(dict)
+    prefilter_cfg_updated = pyqtSignal(dict)
     pos_calib_cfg_updated = pyqtSignal(dict)
     device_type_updated = pyqtSignal(int)
 
@@ -25,7 +26,16 @@ class ConfigRepository(QObject):
         self._sys_config: dict = {}
         self._sys_ranging_cfg: dict = {}
         self._sensor_fusion_cfg: dict = {}
+        self._prefilter_cfg: dict = {}
         self._pos_calib_cfg: dict = {}
+        shared_app_state.device_session_reset.connect(self.reset_session)
+
+    def reset_session(self, _reason: str = "") -> None:
+        self._sys_config = {}
+        self._sys_ranging_cfg = {}
+        self._sensor_fusion_cfg = {}
+        self._prefilter_cfg = {}
+        self._pos_calib_cfg = {}
 
     @property
     def sys_config(self) -> dict:
@@ -38,6 +48,10 @@ class ConfigRepository(QObject):
     @property
     def sensor_fusion_cfg(self) -> dict:
         return self._sensor_fusion_cfg.copy()
+
+    @property
+    def prefilter_cfg(self) -> dict:
+        return self._prefilter_cfg.copy()
 
     @property
     def pos_calib_cfg(self) -> dict:
@@ -66,6 +80,13 @@ class ConfigRepository(QObject):
                 self.save_sensor_fusion_cfg({})
             else:
                 self.save_sensor_fusion_cfg(self.parse_sensor_fusion_cfg(cfg))
+            return True
+        if param_name == "prefilter_cfg_resp":
+            cfg = pkt.prefilter_cfg_resp.config
+            if cfg.ByteSize() == 0:
+                self.save_prefilter_cfg({})
+            else:
+                self.save_prefilter_cfg(self.parse_prefilter_cfg(cfg))
             return True
         if param_name == "pos_calib_cfg_resp":
             cfg = pkt.pos_calib_cfg_resp.config
@@ -127,6 +148,16 @@ class ConfigRepository(QObject):
             "init_p_bias_gz": float(getattr(cfg, "init_p_bias_gz", 0.0)),
         }
 
+    def parse_prefilter_cfg(self, cfg) -> dict:
+        return {
+            "enable": bool(getattr(cfg, "enable", False)),
+            "recover_d2": float(getattr(cfg, "recover_d2", 0.0)),
+            "reject_d2": float(getattr(cfg, "reject_d2", 0.0)),
+            "r_base": float(getattr(cfg, "r_base", 0.0)),
+            "r_gate": float(getattr(cfg, "r_gate", 0.0)),
+            "velocity_weight": float(getattr(cfg, "velocity_weight", 0.0)),
+            "min_covariance": float(getattr(cfg, "min_covariance", 0.0)),
+        }
     def parse_pos_calib_cfg(self, cfg) -> dict:
         return {
             "enable_anchor_auto_calib": bool(getattr(cfg, "enable_anchor_auto_calib", False)),
@@ -169,6 +200,10 @@ class ConfigRepository(QObject):
         shared_app_state.sensor_fusion_cfg = self._sensor_fusion_cfg
         self.sensor_fusion_cfg_updated.emit(self.sensor_fusion_cfg)
 
+    def save_prefilter_cfg(self, data: dict) -> None:
+        self._prefilter_cfg = data.copy()
+        shared_app_state.prefilter_cfg = self._prefilter_cfg
+        self.prefilter_cfg_updated.emit(self.prefilter_cfg)
     def save_pos_calib_cfg(self, data: dict) -> None:
         self._pos_calib_cfg = data.copy()
         shared_app_state.pos_calib_cfg = self._pos_calib_cfg

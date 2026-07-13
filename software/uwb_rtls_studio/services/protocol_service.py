@@ -80,6 +80,8 @@ class ProtocolService(QObject):
         self._last_log_data_seq: int | None = None
         self._packet_event_times: dict[tuple[str, int], float] = {}
         self._rx_queue: queue.Queue[bytes | None] = queue.Queue()
+        self._decoder_lock = threading.Lock()
+        self._rx_generation = 0
         self._rx_stop = threading.Event()
         self._rx_thread = threading.Thread(
             target=self._rx_worker_loop,
@@ -127,7 +129,28 @@ class ProtocolService(QObject):
         if not data:
             return
 
-        self._rx_queue.put(data)
+        with self._decoder_lock:
+            generation = self._rx_generation
+        self._rx_queue.put((generation, data))
+
+    def reset_decoder(self, reason: str = "") -> None:
+        """Reset HDLC state and discard bytes belonging to the old link."""
+        with self._decoder_lock:
+            self._rx_generation += 1
+            reset = getattr(self._protocol.hdlc, "reset", None)
+            if callable(reset):
+                reset()
+            else:
+                self._protocol.hdlc._reset()
+            while True:
+                try:
+                    self._rx_queue.get_nowait()
+                except queue.Empty:
+                    break
+        flush = getattr(self._serial, "reset_input_buffer", None)
+        if callable(flush):
+            flush()
+        log.info("[PROTOCOL] HDLC/RX reset%s", f" reason={reason}" if reason else "")
 
     def _rx_worker_loop(self) -> None:
         """Decode HDLC/protobuf frames away from the GUI thread."""
@@ -140,6 +163,13 @@ class ProtocolService(QObject):
             if data is None:
                 break
 
+            generation = None
+            if isinstance(data, tuple) and len(data) == 2:
+                generation, data = data
+            with self._decoder_lock:
+                if generation is not None and generation != self._rx_generation:
+                    log.debug("[PROTOCOL] discarded stale RX chunk generation=%s current=%s", generation, self._rx_generation)
+                    continue
             shared_raw_packet_store.append_serial_chunk(RawSerialChunk.from_bytes(data))
             packets = self._decode_packets(data)
             if packets:
@@ -148,14 +178,24 @@ class ProtocolService(QObject):
     def _decode_packets(self, data: bytes) -> list:
         packets = []
         try:
-            for chunk in self._protocol.hdlc.feed(data):
+            with self._decoder_lock:
+                chunks = self._protocol.hdlc.feed(data)
+            for chunk in chunks:
                 if chunk.frame_type != FRAME_TYPE_PROTOBUF:
+                    log.debug(
+                        "Ignoring non-protobuf HDLC frame: type=%s payload_len=%s",
+                        chunk.frame_type,
+                        len(chunk.payload),
+                    )
                     continue
 
                 try:
                     packets.append(self._protocol.decode_packet(chunk.payload))
                 except DecodeError as exc:
-                    msg = f"Protobuf decode error: payload_len={len(chunk.payload)} err={exc}"
+                    msg = (
+                        f"Protobuf decode error: payload_len={len(chunk.payload)} "
+                        f"err={exc} payload_hex={chunk.payload[:32].hex()}"
+                    )
                     log.warning(msg)
                     self._decode_error_ready.emit(msg)
         except Exception as exc:
@@ -247,22 +287,18 @@ class ProtocolService(QObject):
     def _remember_packet_event_time(self, direction: str, pkt, event_time: float) -> None:
         self._packet_event_times[(direction, id(pkt))] = float(event_time)
 
-    def send_command(self, builder_name: str, dst_addr: int | None = None, src_addr: int = VvAddress.HOST, **kwargs) -> pb.packet_t:
-        """Build + send command bằng tên.
-
-        Args:
-            builder_name: tên command (e.g. 'ble_scan_start') —
-                          method tương ứng là build_<name> trên VvProtocol (parser_protocol).
-            dst_addr: Địa chỉ đích. Nếu None, tự suy ra theo command catalog.
-            src_addr: Địa chỉ nguồn (mặc định ADDR_HOST)
-            **kwargs: extra args cho builder
-
-        Returns:
-            packet_t đã gửi (để caller track seq nếu cần).
-        """
+    def send_command(
+        self,
+        builder_name: str,
+        dst_addr: int | None = None,
+        src_addr: int = VvAddress.HOST,
+        command_params: dict | None = None,
+    ) -> pb.packet_t:
+        """Build and send a command by name."""
         seq = self.next_seq()
         target_addr = default_destination_for(builder_name) if dst_addr is None else dst_addr
         builder = getattr(self._protocol, f"build_{builder_name}")
-        pkt = builder(src_addr, target_addr, seq, **kwargs)
+        params = dict(command_params or {})
+        pkt = builder(src_addr, target_addr, seq, **params)
         self.send_packet(pkt)
         return pkt
