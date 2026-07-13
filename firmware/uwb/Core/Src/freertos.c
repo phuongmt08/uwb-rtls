@@ -509,6 +509,23 @@ void sensor_fusion_entry(void *argument)
         bool ukf_cov_valid = sys_sensor_fusion_get_position_covariance(&ukf_pxx,
                                                                        &ukf_pxy,
                                                                        &ukf_pyy);
+        float ukf_reference_std = 0.0f;
+        if (ukf_cov_valid) {
+            float position_variance = ukf_pxx + ukf_pyy;
+            if (isfinite(position_variance) && position_variance >= 0.0f) {
+                ukf_reference_std = sqrtf(position_variance);
+            } else {
+                ukf_cov_valid = false;
+            }
+        }
+        bool ukf_reference_valid = ukf_cov_valid
+                                && isfinite(ukf_data.px)
+                                && isfinite(ukf_data.py)
+                                && ukf_reference_std <= MW_TRIL_REFERENCE_MAX_STD_M;
+        vec2d_t ukf_reference = {
+            .x = (double)ukf_data.px,
+            .y = (double)ukf_data.py
+        };
 
         for (uint8_t i = 0; i < msg.count && i < MAX_ANCHORS_SUPPORTED; i++) {
             uint8_t aid = msg.anchor_ids[i];
@@ -624,15 +641,21 @@ void sensor_fusion_entry(void *argument)
             for (uint8_t i = 0U; i < prefilter_reject_count && candidate_count < rescue_target; i++) {
                 uint8_t aid = workspace->rejected_anchors[i].id;
                 if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED ||
+                    !isfinite(workspace->rejected_anchors[i].d2_score) ||
+                    s_prefilter.anchors[aid - 1U].reject_streak <
+                        MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK ||
                     sensor_fusion_has_candidate(workspace->candidate_anchors,
                                                 candidate_count,
                                                 aid)) {
                     continue;
                 }
+                workspace->rejected_anchors[i].rescued = true;
                 workspace->candidate_anchors[candidate_count++] = workspace->rejected_anchors[i];
                 RLOG_W(LOG_OBJECT_CODE_TAG,
-                       "[FUSION RESCUE] Anchor #%u rescued (d2=%.2f, valid=%u/%u)",
-                       aid, workspace->rejected_anchors[i].d2_score, candidate_count, rescue_target);
+                       "[FUSION RESCUE] Anchor #%u rescued (d2=%.2f streak=%u, valid=%u/%u)",
+                       aid, workspace->rejected_anchors[i].d2_score,
+                       s_prefilter.anchors[aid - 1U].reject_streak,
+                       candidate_count, rescue_target);
             }
         }
 #endif
@@ -641,11 +664,17 @@ void sensor_fusion_entry(void *argument)
 
         /* 3. Sort and Select the Best 3 anchors for UKF Update */
         if (candidate_count >= 3U) {
+            mw_trilateration_compute_weights(workspace->candidate_anchors,
+                                             candidate_count,
+                                             ukf_reference_valid,
+                                             ukf_reference);
             uint8_t selected_count = mw_trilateration_select_best_3(
                                                                   workspace->candidate_anchors,
                                                                   candidate_count,
                                                                   workspace->selected_anchors,
-                                                                  s_last_selected_anchors_mask);
+                                                                  s_last_selected_anchors_mask,
+                                                                  ukf_reference_valid,
+                                                                  ukf_reference);
 
             if (selected_count >= 3U) {
                 s_last_selected_anchors_mask = 0;

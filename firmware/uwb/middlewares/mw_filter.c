@@ -54,6 +54,7 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
     if (!ctx) return;
     for (uint8_t i = 0; i < 8; i++) {
         ctx->anchors[i].rejected = false;
+        ctx->anchors[i].reject_streak = 0U;
     }
     ctx->T1 = T1;
     ctx->T2 = T2;
@@ -83,6 +84,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
         if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
 
@@ -100,6 +102,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
         if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
     float hx = dx / dxy;
@@ -114,6 +117,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
         if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
     if (S < ctx->min_covariance) {
@@ -139,8 +143,11 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     }
 
     if (!accepted) {
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
+
+    state->reject_streak = 0U;
 
     if (R_adaptive) {
         float scale = 1.0f;

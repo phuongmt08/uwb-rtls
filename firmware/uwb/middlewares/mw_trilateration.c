@@ -89,7 +89,11 @@ static double range_variance(const mw_tril_anchor_t *anchor)
     if (sigma > MW_TRIL_RANGE_SIGMA_MAX_M) sigma = MW_TRIL_RANGE_SIGMA_MAX_M;
     /* sigma >= sigma_base by construction (sqrt of sum-of-squares), so
      * no lower-bound guard is needed here. */
-    return sigma * sigma;
+    double variance = sigma * sigma;
+    if (anchor->rescued) {
+        variance *= (double)MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN;
+    }
+    return variance;
 }
 
 static double d2_huber_weight(const mw_tril_anchor_t *anchor)
@@ -122,14 +126,76 @@ static double fp_huber_weight(const mw_tril_anchor_t *anchor)
     return huber_weight(deficit, MW_TRIL_HUBER_FP_DEFICIT_DELTA);
 }
 
-static double measurement_weight(const mw_tril_anchor_t *anchor, double residual)
+static double median_in_place(double *values, uint8_t count)
 {
-    double variance = range_variance(anchor);
-    double normalized_residual = fabs(residual) / sqrt(variance);
-    double weight = d2_huber_weight(anchor)
-                  * fp_huber_weight(anchor)
-                  * huber_weight(normalized_residual, MW_TRIL_HUBER_RESIDUAL_DELTA);
-    return weight / variance;
+    if (!values || count == 0U) return 0.0;
+
+    for (uint8_t i = 1U; i < count; i++) {
+        double key = values[i];
+        int j = (int)i - 1;
+        while (j >= 0 && values[j] > key) {
+            values[j + 1] = values[j];
+            j--;
+        }
+        values[j + 1] = key;
+    }
+
+    if ((count & 1U) != 0U) return values[count / 2U];
+    return 0.5 * (values[(count / 2U) - 1U] + values[count / 2U]);
+}
+
+void mw_trilateration_compute_weights(mw_tril_anchor_t *candidates,
+                                      uint8_t candidate_count,
+                                      bool reference_valid,
+                                      vec2d_t reference_position)
+{
+    if (!candidates || candidate_count == 0U ||
+        candidate_count > MAX_ANCHORS_SUPPORTED) {
+        return;
+    }
+
+    double residuals[MAX_ANCHORS_SUPPORTED] = {0.0};
+    double sorted[MAX_ANCHORS_SUPPORTED] = {0.0};
+    double deviations[MAX_ANCHORS_SUPPORTED] = {0.0};
+    bool use_residual = reference_valid && candidate_count >= 4U;
+    double residual_median = 0.0;
+    double residual_mad_scale = 0.0;
+
+    if (use_residual) {
+        for (uint8_t i = 0U; i < candidate_count; i++) {
+            double dx = reference_position.x - candidates[i].position.x;
+            double dy = reference_position.y - candidates[i].position.y;
+            double predicted = sqrt((dx * dx) + (dy * dy));
+            residuals[i] = candidates[i].distance - predicted;
+            sorted[i] = residuals[i];
+        }
+        residual_median = median_in_place(sorted, candidate_count);
+        for (uint8_t i = 0U; i < candidate_count; i++) {
+            deviations[i] = fabs(residuals[i] - residual_median);
+        }
+        residual_mad_scale = 1.4826 * median_in_place(deviations, candidate_count);
+    }
+
+    for (uint8_t i = 0U; i < candidate_count; i++) {
+        double variance = range_variance(&candidates[i]);
+        double residual_weight = 1.0;
+
+        if (use_residual) {
+            /* MAD can collapse on a very clean frame. The expected range
+             * sigma is the statistical floor for residual normalization. */
+            double scale = residual_mad_scale;
+            double sigma = sqrt(variance);
+            if (scale < sigma) scale = sigma;
+            double normalized = fabs(residuals[i] - residual_median) / scale;
+            residual_weight = huber_weight(normalized,
+                                           MW_TRIL_HUBER_RESIDUAL_DELTA);
+        }
+
+        candidates[i].measurement_weight =
+            (d2_huber_weight(&candidates[i])
+             * fp_huber_weight(&candidates[i])
+             * residual_weight) / variance;
+    }
 }
 
 static double triplet_wgdop(const mw_tril_anchor_t *a,
@@ -152,8 +218,10 @@ static double triplet_wgdop(const mw_tril_anchor_t *a,
 
         double hx = dx / range;
         double hy = dy / range;
-        double residual = range - triplet[i]->distance;
-        double weight = measurement_weight(triplet[i], residual);
+        double weight = triplet[i]->measurement_weight;
+        if (!(weight > 0.0) || !isfinite(weight)) {
+            weight = MW_TRIL_HUBER_WEIGHT_FLOOR / range_variance(triplet[i]);
+        }
         hxx += weight * hx * hx;
         hxy += weight * hx * hy;
         hyy += weight * hy * hy;
@@ -205,10 +273,8 @@ static double frame_residual_rms(const mw_tril_anchor_t *anchors,
                                  uint8_t count,
                                  const vec2d_t *position)
 {
-    /* Computed over ALL valid anchors using this triplet's probe position.
-     * This intentionally penalises layouts whose solved position is
-     * inconsistent with non-selected anchors, acting as a global coherence
-     * term in the Huber measurement weight. */
+    /* Diagnostic only: production residual weights are computed once for the
+     * whole frame at a trusted common reference. */
     double sum_sq = 0.0;
     for (uint8_t i = 0U; i < count; i++) {
         double dx = position->x - anchors[i].position.x;
@@ -220,32 +286,25 @@ static double frame_residual_rms(const mw_tril_anchor_t *anchors,
     return (count > 0U) ? sqrt(sum_sq / (double)count) : 0.0;
 }
 
-static bool snapshot_selected_triplet(mw_tril_anchor_t selected[3], bool update_diagnostics)
+static bool snapshot_selected_triplet(mw_tril_anchor_t selected[3],
+                                      bool reference_valid,
+                                      vec2d_t reference_position)
 {
     vec2d_t probe;
     if (!trilaterate_2d_probe(&selected[0], &selected[1], &selected[2], &probe, NULL)) {
         return false;
     }
 
-    if (update_diagnostics) {
-        double score = triplet_wgdop(&selected[0], &selected[1], &selected[2], &probe);
-        double residual = frame_residual_rms(selected, 3U, &probe);
-        double fp_weight = (fp_huber_weight(&selected[0])
-                          + fp_huber_weight(&selected[1])
-                          + fp_huber_weight(&selected[2])) / 3.0;
-        for (uint8_t i = 0U; i < 3U; i++) {
-            selected[i].wgdop = score;
-            selected[i].residual_rms = residual;
-            selected[i].triplet_fp_weight = fp_weight;
-        }
-    }
-
+    const vec2d_t *score_position = reference_valid ? &reference_position : &probe;
+    double score = triplet_wgdop(&selected[0], &selected[1], &selected[2], score_position);
+    double residual = frame_residual_rms(selected, 3U, &probe);
+    double fp_weight = (fp_huber_weight(&selected[0])
+                      + fp_huber_weight(&selected[1])
+                      + fp_huber_weight(&selected[2])) / 3.0;
     for (uint8_t i = 0U; i < 3U; i++) {
-        double dx = probe.x - selected[i].position.x;
-        double dy = probe.y - selected[i].position.y;
-        double predicted_range = sqrt((dx * dx) + (dy * dy));
-        double anchor_residual = predicted_range - selected[i].distance;
-        selected[i].measurement_weight = measurement_weight(&selected[i], anchor_residual);
+        selected[i].wgdop = score;
+        selected[i].residual_rms = residual;
+        selected[i].triplet_fp_weight = fp_weight;
     }
 
     return true;
@@ -256,7 +315,9 @@ static bool snapshot_selected_triplet(mw_tril_anchor_t selected[3], bool update_
 uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
                                        uint8_t candidate_count,
                                        mw_tril_anchor_t selected_out[3],
-                                       uint8_t prev_mask)
+                                       uint8_t prev_mask,
+                                       bool reference_valid,
+                                       vec2d_t reference_position)
 {
     if (!candidates || !selected_out ||
         candidate_count < 3U || candidate_count > MAX_ANCHORS_SUPPORTED) {
@@ -272,7 +333,9 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
 
     if (candidate_count == 3U) {
         memcpy(selected_out, candidates, 3U * sizeof(selected_out[0]));
-        return snapshot_selected_triplet(selected_out, true) ? 3U : 0U;
+        return snapshot_selected_triplet(selected_out,
+                                         reference_valid,
+                                         reference_position) ? 3U : 0U;
     }
 
     uint8_t best_i = 0U, best_j = 1U, best_k = 2U;
@@ -291,8 +354,8 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
         for (uint8_t j = i + 1U; j < candidate_count - 1U; j++) {
             for (uint8_t k = j + 1U; k < candidate_count; k++) {
                 vec2d_t probe_pos;
-                /* Per-anchor residuals are evaluated inside triplet_wgdop.
-                 * The all-anchor RMS below is retained only as a diagnostic. */
+                /* Candidate trilateration remains a fallback reference while
+                 * the UKF is uncertain, and a diagnostic otherwise. */
                 if (!trilaterate_2d_probe(&candidates[i], &candidates[j], &candidates[k],
                                           &probe_pos, NULL)) {
                     continue;
@@ -300,8 +363,13 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
 
                 double residual = frame_residual_rms(candidates, candidate_count, &probe_pos);
 
-                double wgdop = triplet_wgdop(&candidates[i], &candidates[j], &candidates[k],
-                                             &probe_pos);
+                const vec2d_t *score_position = reference_valid
+                                              ? &reference_position
+                                              : &probe_pos;
+                double wgdop = triplet_wgdop(&candidates[i],
+                                             &candidates[j],
+                                             &candidates[k],
+                                             score_position);
                 if (wgdop >= 1.0e8) {
                     continue;
                 }
@@ -371,7 +439,6 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
         selected_out[i].residual_rms = selected_residual;
         selected_out[i].triplet_fp_weight = selected_fp_weight;
     }
-    (void)snapshot_selected_triplet(selected_out, false);
 #ifdef ENABLE_DEBUG_LOGGING
     RLOG_D(LOG_OBJECT_CODE_TAG,
             "Best WGDOP anchors: #%u #%u #%u (wgdop=%.3fm residual=%.3fm fp_weight=%.3f)",

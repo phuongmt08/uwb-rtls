@@ -23,6 +23,7 @@ typedef struct {
 
 typedef struct {
     bool rejected;
+    uint16_t reject_streak;
 } mahalanobis_anchor_state_t;
 
 typedef struct {

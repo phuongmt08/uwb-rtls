@@ -592,6 +592,19 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
         selected_anchors[2].id
     };
 
+    /* measurement_weight is a precision (1 / variance). Keep the UKF update
+     * numerically bounded, and never give a rescued range normal confidence. */
+    for (uint8_t k = 0U; k < 3U; k++) {
+        float r_ii = MW_UKF_R_MAX;
+        double weight = selected_anchors[k].measurement_weight;
+        if (!selected_anchors[k].rescued && weight > 0.0 && isfinite(weight)) {
+            r_ii = (float)(1.0 / weight);
+            if (r_ii < MW_UKF_R_MIN) r_ii = MW_UKF_R_MIN;
+            if (r_ii > MW_UKF_R_MAX) r_ii = MW_UKF_R_MAX;
+        }
+        ukf.R_data[k * (NUM_UPDATE_NOISE + 1U)] = r_ii;
+    }
+
     if (fusion_update( p_ukf,
                         (float)selected_anchors[0].distance,
                         (float)selected_anchors[1].distance,

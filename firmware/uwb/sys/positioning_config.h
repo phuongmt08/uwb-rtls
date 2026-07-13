@@ -244,6 +244,12 @@
 #define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   3U
 #endif
 
+/* Transient rejects produce a predict-only frame. Rescue is allowed only
+ * after the same anchor has failed this many consecutive gate evaluations. */
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  5U
+#endif
+
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
 #define MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN 4.0f
 #endif
@@ -298,6 +304,12 @@
 
 #ifndef MW_TRIL_WGDOP_DET_MIN
 #define MW_TRIL_WGDOP_DET_MIN                      1.0e-8
+#endif
+
+/* Trust the common UKF reference only while its radial 1-sigma uncertainty,
+ * sqrt(Pxx + Pyy), stays below this limit. */
+#ifndef MW_TRIL_REFERENCE_MAX_STD_M
+#define MW_TRIL_REFERENCE_MAX_STD_M                0.50f
 #endif
 
 #ifndef MW_TRIL_SWITCH_MARGIN
@@ -365,6 +377,14 @@
 
 #ifndef SYS_FUSION_UKF_R_UWB
 #define SYS_FUSION_UKF_R_UWB   0.01f
+#endif
+
+#ifndef MW_UKF_R_MIN
+#define MW_UKF_R_MIN            0.0025f
+#endif
+
+#ifndef MW_UKF_R_MAX
+#define MW_UKF_R_MAX            0.25f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_PX

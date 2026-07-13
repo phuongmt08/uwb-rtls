@@ -46,6 +46,7 @@ typedef struct {
     double fp_snr;
     double fp_confidence;
     bool quality_valid;
+    bool rescued;       /* Reintroduced after persistent prefilter rejection */
     double wgdop;
     double residual_rms;
     double triplet_fp_weight; /* Mean FP-only confidence of the selected triplet */
@@ -84,12 +85,29 @@ typedef enum {
  * @param[in]  candidates       Dense array of valid candidate anchors
  * @param[in]  candidate_count  Number of entries in candidates
  * @param[out] selected_out     Exact three-anchor selection
+ * @param[in]  prev_mask        Previously selected triplet for hysteresis
+ * @param[in]  reference_valid  true when the UKF reference is trusted
+ * @param[in]  reference_position Common WGDOP evaluation position
  * @return 3 on success, otherwise 0
  */
 uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
                                        uint8_t candidate_count,
                                        mw_tril_anchor_t selected_out[3],
-                                       uint8_t prev_mask);
+                                       uint8_t prev_mask,
+                                       bool reference_valid,
+                                       vec2d_t reference_position);
+
+/**
+ * @brief Compute one precision weight per candidate at a common reference.
+ *
+ * Residual confidence is enabled only with at least four anchors and a trusted
+ * reference. With three anchors, or while the UKF reference is uncertain,
+ * residual confidence stays neutral to avoid self-fitting a triplet.
+ */
+void mw_trilateration_compute_weights(mw_tril_anchor_t *candidates,
+                                      uint8_t candidate_count,
+                                      bool reference_valid,
+                                      vec2d_t reference_position);
 
 /**
  * @brief Calculate 3D position (Mathematical core)
