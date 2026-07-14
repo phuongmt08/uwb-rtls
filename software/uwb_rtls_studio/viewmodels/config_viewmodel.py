@@ -222,43 +222,124 @@ class ConfigViewModel(QObject):
         sensor_fusion_config: dict | None = None,
         prefilter_config: dict | None = None,
         pos_calib_config: dict | None = None,
+        ble_conn_params_config: dict | None = None,
+        ble_adv_config: dict | None = None,
+        device_type: int | None = None,
+        host_transport: int | None = None,
         factory_otp_config: dict | None = None,
     ):
-        """Write one captured UI snapshot to the selected target."""
+        """Write one captured UI snapshot to the selected target with ACK-based sequencing."""
         target = dict(target or {})
+        log.info("Writing selected config for target: %s", target)
 
-        def operation():
-            log.info("Writing selected config for target: %s", target)
-            if anchors is not None:
-                anchors_copied = [dict(anchor) for anchor in anchors]
-                self.write_anchor_layout(anchors_copied)
-            if ranging_config is not None:
-                ranging_params = dict(ranging_config or {})
-                self.write_ranging_config(
-                    period_ms=ranging_params.get("period_ms", 0),
-                    timeout_ms=ranging_params.get("timeout_ms", 0),
-                )
-            if sys_config is not None:
-                self.write_sys_config(sys_config)
-            if sensor_fusion_config is not None:
-                self.write_sensor_fusion_config(sensor_fusion_config)
-            if prefilter_config is not None:
-                self.write_prefilter_config(prefilter_config)
-            if pos_calib_config:
-                self.write_pos_calib_config(pos_calib_config)
-            if factory_otp_config:
-                self.write_factory_otp(
-                    confirm_magic=factory_otp_config.get("confirm_magic", 0x4F545057),
-                    otp_type=factory_otp_config.get("otp_type", 0),
-                    device_type=factory_otp_config.get("device_type", 2),
-                    tx_antenna_delay=factory_otp_config.get("tx_antenna_delay", 0),
-                    rx_antenna_delay=factory_otp_config.get("rx_antenna_delay", 0),
-                    value_u32=factory_otp_config.get("value_u32", 0),
-                    value_u8=factory_otp_config.get("value_u8", 0),
-                )
+        steps: list[dict] = []
+        if anchors is not None:
+            anchors_copied = [dict(anchor) for anchor in anchors]
+            steps.append({
+                "label": "anchor_layout_set",
+                "command": "anchor_layout_set",
+                "method": "set_anchor_layout",
+                "args": [anchors_copied],
+            })
+        if ranging_config is not None:
+            ranging_params = dict(ranging_config or {})
+            steps.append({
+                "label": "sys_ranging_cfg_set",
+                "command": "sys_ranging_cfg_set",
+                "method": "set_ranging_config",
+                "kwargs": {
+                    "period_ms": ranging_params.get("period_ms", 0),
+                    "timeout_ms": ranging_params.get("timeout_ms", 0),
+                },
+            })
+        if sys_config is not None:
+            steps.append({
+                "label": "sys_config_set",
+                "command": "sys_config_set",
+                "method": "set_sys_config",
+                "args": [dict(sys_config or {})],
+            })
+        if sensor_fusion_config is not None:
+            steps.append({
+                "label": "sensor_fusion_cfg_set",
+                "command": "sensor_fusion_cfg_set",
+                "method": "set_sensor_fusion_config",
+                "args": [dict(sensor_fusion_config or {})],
+            })
+        if prefilter_config is not None:
+            steps.append({
+                "label": "prefilter_cfg_set",
+                "command": "prefilter_cfg_set",
+                "method": "set_prefilter_config",
+                "args": [dict(prefilter_config or {})],
+            })
+        if pos_calib_config:
+            steps.append({
+                "label": "pos_calib_cfg_set",
+                "command": "pos_calib_cfg_set",
+                "method": "set_pos_calib_config",
+                "args": [dict(pos_calib_config or {})],
+            })
+        if ble_adv_config is not None:
+            params = dict(ble_adv_config or {})
+            steps.append({
+                "label": "ble_adv_config_set",
+                "command": "ble_adv_config_set",
+                "method": "set_ble_adv_config",
+                "kwargs": {
+                    "enable": bool(params.get("enable", True)),
+                    "serial_number": int(params.get("serial_number", 0) or 0),
+                    "device_name": str(params.get("device_name", "")),
+                },
+            })
+        if ble_conn_params_config is not None:
+            params = dict(ble_conn_params_config or {})
+            steps.append({
+                "label": "ble_conn_params_set",
+                "command": "ble_conn_params_set",
+                "method": "set_ble_conn_params",
+                "kwargs": {
+                    "min_interval_ms": params.get("min_interval_ms", 20),
+                    "max_interval_ms": params.get("max_interval_ms", 40),
+                    "slave_latency": params.get("slave_latency", 0),
+                    "sup_timeout_ms": params.get("sup_timeout_ms", 3000),
+                },
+            })
+        if device_type is not None:
+            steps.append({
+                "label": "device_type_set",
+                "command": "device_type_set",
+                "method": "set_device_type",
+                "args": [int(device_type)],
+            })
+        if host_transport is not None:
+            steps.append({
+                "label": "host_transport_set",
+                "command": "host_transport_set",
+                "method": "set_host_transport",
+                "args": [int(host_transport)],
+            })
+        if factory_otp_config:
+            params = dict(factory_otp_config or {})
+            steps.append({
+                "label": "factory_otp_write",
+                "command": "factory_otp_write",
+                "method": "write_factory_otp",
+                "kwargs": {
+                    "confirm_magic": params.get("confirm_magic", 0x4F545057),
+                    "otp_type": params.get("otp_type", 0),
+                    "device_type": params.get("device_type", 2),
+                    "tx_antenna_delay": params.get("tx_antenna_delay", 0),
+                    "rx_antenna_delay": params.get("rx_antenna_delay", 0),
+                    "value_u32": params.get("value_u32", 0),
+                    "value_u8": params.get("value_u8", 0),
+                },
+            })
 
-        operation()
-        return True
+        if hasattr(self.model, "write_config_sequence"):
+            return bool(self.model.write_config_sequence(steps))
+        log.warning("DeviceModel does not support ACK-based config write sequence.")
+        return False
 
     def write_factory_otp(
         self,

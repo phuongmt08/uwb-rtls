@@ -10,6 +10,10 @@
     Warning/Amber: #F59E0B    Danger/Red:    #EF4444
 ===============================================================================
 """
+import os
+
+_DIR = os.path.dirname(os.path.abspath(__file__))
+CHECKMARK_PATH = os.path.abspath(os.path.join(_DIR, "..", "resources", "icons", "checkmark.svg")).replace("\\", "/")
 
 # ── Color Palette ─────────────────────────────────────────────────────
 COLOR_BG         = "#0F172A"
@@ -301,9 +305,13 @@ QCheckBox::indicator {{
     border-radius: 4px;
     background-color: {COLOR_BG_DARKER};
 }}
+QCheckBox::indicator:hover {{
+    border-color: {COLOR_ACCENT};
+}}
 QCheckBox::indicator:checked {{
     background-color: {COLOR_ACCENT};
     border-color: {COLOR_ACCENT};
+    image: url('{CHECKMARK_PATH}');
 }}
 
 /* ═══════════════════ SLIDER ═══════════════════ */

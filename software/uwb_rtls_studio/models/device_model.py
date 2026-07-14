@@ -40,6 +40,7 @@ CONNECT_TIMEOUT_MS = 10000
 MAX_CONNECT_RETRIES = 2
 CONNECT_TIME_SYNC_ACK_TIMEOUT_MS = 1500
 END_SESSION_ACK_TIMEOUT_MS = 1500
+CONFIG_WRITE_ACK_TIMEOUT_MS = 2500
 END_SESSION_STATUS_POLL_INTERVAL_MS = 400
 END_SESSION_STATUS_POLL_TIMEOUT_MS = 3000
 END_SESSION_VALID_STATES = {0, 1, 3}
@@ -123,6 +124,11 @@ class DeviceModel(QObject):
         self._pending_end_session_ack = False
         self._pending_end_session_state_seen = False
         self._suppress_next_disconnect_scan = False
+        self._config_write_steps: list[dict] = []
+        self._config_write_results: list[dict] = []
+        self._config_write_index = 0
+        self._config_write_active_seq: int | None = None
+        self._config_write_active_step: dict | None = None
         self._time_sync_manager = TimeSyncManager(
             request_query_fn=self._request_query,
             send_command_fn=self._send_command,
@@ -168,6 +174,12 @@ class DeviceModel(QObject):
         self._ble_status_timer.setInterval(10000)
         self._ble_status_timer.timeout.connect(self._poll_ble_status)
 
+        # RTOS task stats timer (30s interval). It uses the global query queue so
+        # same-tick BLE status polls are reported as one CONNECTED_DEVICE flow.
+        self._rtos_task_stats_timer = QTimer(self)
+        self._rtos_task_stats_timer.setInterval(30000)
+        self._rtos_task_stats_timer.timeout.connect(self._poll_rtos_task_stats)
+
         # battery_info is received via device telemetry stream (1s push); no host-side poll timer needed.
 
         self._ble_transition_timer = QTimer(self)
@@ -177,6 +189,10 @@ class DeviceModel(QObject):
         self._connect_timeout_timer = QTimer(self)
         self._connect_timeout_timer.setSingleShot(True)
         self._connect_timeout_timer.timeout.connect(self._on_connect_timeout)
+
+        self._config_write_ack_timer = QTimer(self)
+        self._config_write_ack_timer.setSingleShot(True)
+        self._config_write_ack_timer.timeout.connect(self._on_config_write_ack_timeout)
 
         self._background_scan_resume_timer = QTimer(self)
         self._background_scan_resume_timer.setSingleShot(True)
@@ -591,6 +607,186 @@ class DeviceModel(QObject):
         )
 
 
+    def write_config_sequence(self, steps: list[dict]) -> bool:
+        """Write selected config packets sequentially and report ACK-based progress."""
+        if self._config_write_active_seq is not None or self._config_write_steps:
+            self._emit_ble_notification(
+                kind="error",
+                title="Config write busy",
+                message="A configuration write is already running.",
+                auto_close_ms=3500,
+            )
+            return False
+
+        self._config_write_steps = [dict(step or {}) for step in (steps or [])]
+        self._config_write_results = []
+        self._config_write_index = 0
+        self._config_write_active_seq = None
+        self._config_write_active_step = None
+
+        total = len(self._config_write_steps)
+        if total <= 0:
+            self._emit_ble_notification(
+                kind="error",
+                title="No packet selected",
+                message="Select at least one configuration packet to write.",
+                auto_close_ms=3000,
+            )
+            return False
+
+        shared_app_state.begin_manual_flow("write_device")
+        self._emit_connection_progress(
+            0,
+            f"Config write: 0/{total} packets",
+            phase="config_write",
+            status=JobState.RUNNING,
+        )
+        QTimer.singleShot(0, self._send_next_config_write_step)
+        return True
+
+    def _send_next_config_write_step(self) -> None:
+        total = len(self._config_write_steps)
+        if self._config_write_index >= total:
+            self._finish_config_write_sequence()
+            return
+
+        step = self._config_write_steps[self._config_write_index]
+        label = str(step.get("label") or step.get("command") or "config packet")
+        command = str(step.get("command") or "")
+        progress = int((self._config_write_index / max(1, total)) * 100)
+        self._emit_connection_progress(
+            progress,
+            f"Writing {label}...",
+            phase="config_write",
+            status=JobState.RUNNING,
+        )
+
+        method_name = str(step.get("method") or "")
+        method = getattr(self, method_name, None)
+        if not callable(method):
+            self._complete_config_write_step(False, f"Missing writer for {command or label}.")
+            return
+
+        try:
+            pkt = method(*(step.get("args") or []), **(step.get("kwargs") or {}))
+        except Exception as exc:
+            log.exception("Config write step %s raised", label)
+            self._complete_config_write_step(False, f"{label} failed before send: {exc}")
+            return
+
+        seq = int(getattr(getattr(pkt, "hdr", None), "seq", 0) or 0) if pkt is not None else 0
+        if seq <= 0:
+            self._complete_config_write_step(False, f"{label} was not sent.")
+            return
+
+        step["seq"] = seq
+        self._config_write_active_seq = seq
+        self._config_write_active_step = step
+        self._config_write_ack_timer.start(CONFIG_WRITE_ACK_TIMEOUT_MS)
+
+    def _on_config_write_ack_timeout(self) -> None:
+        step = self._config_write_active_step or {}
+        label = str(step.get("label") or step.get("command") or "config packet")
+        self._complete_config_write_step(False, f"{label} timed out waiting for ACK.")
+
+    def _handle_config_write_ack(self, ack_seq: int, response: int) -> bool:
+        if self._config_write_active_seq is None or int(ack_seq) != int(self._config_write_active_seq):
+            return False
+
+        step = self._config_write_active_step or {}
+        label = str(step.get("label") or step.get("command") or "config packet")
+        self._config_write_ack_timer.stop()
+        step["ack_seq"] = int(ack_seq)
+        step["ack_response"] = int(response)
+        self._config_write_active_seq = None
+        self._config_write_active_step = None
+
+        ack_ok = int(response) == int(self._protocol.pb.PACKET_ACK_RESPONSE_ACK)
+        if ack_ok:
+            message = f"{label}: success - ACK received from firmware."
+        else:
+            try:
+                response_name = self._protocol.pb.packet_ack_response_t.Name(int(response))
+            except Exception:
+                response_name = f"ACK_RESPONSE_{int(response)}"
+            message = f"{label}: failed - {response_name}."
+        self._complete_config_write_step(ack_ok, message)
+        return True
+
+    def _complete_config_write_step(self, success: bool, message: str) -> None:
+        step = self._config_write_active_step or (
+            self._config_write_steps[self._config_write_index]
+            if self._config_write_index < len(self._config_write_steps)
+            else {}
+        )
+        label = str(step.get("label") or step.get("command") or "config packet")
+        self._config_write_ack_timer.stop()
+        self._config_write_active_seq = None
+        self._config_write_active_step = None
+        command = str(step.get("command") or label)
+        failure_reason = "" if success else str(message).split(" - ", 1)[-1].rstrip(".")
+        self._config_write_results.append({"label": label, "success": bool(success), "message": message})
+
+        shared_app_state.record_manual_flow_item(
+            "write_device",
+            command,
+            status="SUCCESS" if success else "FAILED",
+            seq=step.get("ack_seq") or step.get("seq"),
+            ack_response=step.get("ack_response"),
+            failure_reason=failure_reason,
+            traffic_class="manual",
+        )
+
+        total = len(self._config_write_steps)
+        completed = min(total, self._config_write_index + 1)
+        progress = int((completed / max(1, total)) * 100)
+        status_text = "success" if success else "failed"
+        self._emit_connection_progress(
+            progress,
+            f"{label}: {status_text} ({completed}/{total})",
+            phase="config_write",
+            status=JobState.RUNNING,
+        )
+        self._emit_ble_notification(
+            kind="success" if success else "error",
+            title="Write success" if success else "Write failed",
+            message=message,
+            auto_close_ms=3000 if success else 4500,
+        )
+
+        self._config_write_index += 1
+        QTimer.singleShot(180, self._send_next_config_write_step)
+
+    def _finish_config_write_sequence(self) -> None:
+        total = len(self._config_write_results)
+        failed = [item for item in self._config_write_results if not item.get("success")]
+        ok_count = total - len(failed)
+        if failed:
+            message = f"Config write finished: {ok_count}/{total} packets succeeded."
+            status = JobState.FAILED
+            kind = "error"
+            title = "Write finished with failures"
+        else:
+            message = f"Write success: {ok_count}/{total} packets acknowledged."
+            status = JobState.SUCCESS
+            kind = "success"
+            title = "Write success"
+
+        self._emit_connection_progress(100, message, phase="config_write", status=status)
+        self._emit_ble_notification(kind=kind, title=title, message=message, auto_close_ms=4500)
+        self._complete_write_device_flow_report_when_idle()
+        self._config_write_steps = []
+        self._config_write_results = []
+        self._config_write_index = 0
+        self._config_write_active_seq = None
+        self._config_write_active_step = None
+
+    def _complete_write_device_flow_report_when_idle(self) -> None:
+        if shared_app_state.query_queue_busy:
+            QTimer.singleShot(100, self._complete_write_device_flow_report_when_idle)
+            return
+        shared_app_state.complete_manual_flow("write_device")
+
     def request_device_reset(self):
         # BE/API: lifecycle action exposed to Config tab.
         return self._send_command("device_reset", dst_addr=VvAddress.MCU)
@@ -934,8 +1130,11 @@ class DeviceModel(QObject):
         if enabled:
             if not self._ble_status_timer.isActive():
                 self._ble_status_timer.start()
+            if not self._rtos_task_stats_timer.isActive():
+                self._rtos_task_stats_timer.start()
             return
         self._ble_status_timer.stop()
+        self._rtos_task_stats_timer.stop()
 
     def _schedule_background_scan_after_connect(self) -> None:
         # Disable automatic background scan after connect by user request
@@ -1504,6 +1703,7 @@ class DeviceModel(QObject):
         })
 
     def _on_ack_received(self, ack_seq: int, response: int) -> None:
+        config_ack_handled = self._handle_config_write_ack(ack_seq, response)
         if (
             hasattr(self, "_pending_device_type_set_seq")
             and self._pending_device_type_set_seq is not None
@@ -1528,6 +1728,9 @@ class DeviceModel(QObject):
             else:
                 log.warning("Connect time_sync_set NACK response=%s; continuing handshake.", response)
                 self._complete_connect_time_sync_step("Time sync skipped by device. Confirming final BLE state...")
+            return
+
+        if config_ack_handled:
             return
 
         pending_seq = self._pending_end_session_seq
@@ -1822,6 +2025,13 @@ class DeviceModel(QObject):
 
         self._background_scan_resume_timer.stop()
         self.stop_scan()
+        self._connection_status = "Connecting"
+        shared_app_state.connection_status = "Connecting"
+        self.connection_state_changed.emit({
+            "name": name,
+            "mac": mac_hex,
+            "status": "Connecting",
+        })
         self._emit_connection_progress(30, f"Connecting to {name or mac_hex}...", phase="connecting", status=JobState.RUNNING)
         QTimer.singleShot(STOP_TO_CONNECT_DELAY_MS, lambda: self._do_connect(mac_hex, name))
 
@@ -1946,6 +2156,7 @@ class DeviceModel(QObject):
         self._connect_generation += 1
         self._prune_timer.stop()
         self._ble_status_timer.stop()
+        self._rtos_task_stats_timer.stop()
         self._ble_transition_timer.stop()
         self._connect_timeout_timer.stop()
         self._background_scan_resume_timer.stop()
@@ -2304,6 +2515,7 @@ class DeviceModel(QObject):
                 self._handshake_time_sync_timer.stop()
                 self._pending_handshake_time_sync_seq = None
             self._ble_status_timer.stop()
+            self._rtos_task_stats_timer.stop()
             self._ble_transition_timer.stop()
             self._connect_timeout_timer.stop()
             self._background_scan_resume_timer.stop()
@@ -2351,8 +2563,25 @@ class DeviceModel(QObject):
                 else:
                     self.start_scan()
 
+    def _poll_rtos_task_stats(self):
+        """Poll RTOS task stats every 30s through the global query queue."""
+        if not self._connected_mac:
+            return
+        log.info("[RTOS POLL] rtos_task_stats_get tick (30s)")
+        try:
+            shared_app_state.enqueue_query(
+                "rtos_task_stats_get",
+                dst_addr=VvAddress.MCU,
+                command_params={},
+                traffic_class="background",
+                flow_name="connected_device",
+                defer_if_busy=False,
+            )
+        except Exception as e:
+            log.error("Failed to send rtos_task_stats_get: %s", e)
+
     def _poll_ble_status(self):
-        """Poll BLE status every 10s and enqueue it behind any active flow."""
+        """Poll BLE status every 10s through the global query queue."""
         if not self._connected_mac:
             return
         log.info("[BLE POLL] ble_status_get tick (10s)")
@@ -2369,12 +2598,12 @@ class DeviceModel(QObject):
             log.error("Failed to send ble_status_get: %s", e)
 
     def _on_query_flow_completed(self, flow_name: str) -> None:
-        """Resume the dedicated BLE status timer after the final flow report."""
+        """Resume the background polling timers after the final flow report."""
         if str(flow_name or "").strip().lower() != "connected_device":
             return
         if self._connection_status == "Connected" and self._connected_mac:
             self._set_background_polling_enabled(True)
-            log.info("[BLE POLL] enabled after final CONNECTED_DEVICE report; interval=10s")
+            log.info("[BACKGROUND POLL] enabled after final CONNECTED_DEVICE report; ble_status=10s rtos_task_stats=30s")
 
     def _poll_ble_transition_status(self):
         if self._connection_status not in ("Connecting", "Disconnecting"):

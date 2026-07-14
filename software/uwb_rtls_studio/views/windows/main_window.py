@@ -383,8 +383,11 @@ class MainWindow(QMainWindow):
     def _visualize_connection_progress(self, payload: dict) -> int:
         raw_progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         status = str(payload.get("status") or "RUNNING").upper()
+        phase = str(payload.get("phase") or "connection").strip().lower()
         message = str(payload.get("message") or "").strip().lower()
 
+        if phase == "config_write":
+            return raw_progress
         if raw_progress <= 0 or status in {"IDLE", "FAILED", "ERROR"}:
             return 0
         if status == "SUCCESS" or raw_progress >= 100:
@@ -418,6 +421,7 @@ class MainWindow(QMainWindow):
         raw_progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         message = str(payload.get("message") or "BLE process")
         status = str(payload.get("status") or "RUNNING")
+        status_upper = status.upper()
         mac = str(payload.get("mac") or "").strip().upper()
         name = str(payload.get("name") or "").strip()
         context = f"{mac}|{name}"
@@ -443,7 +447,7 @@ class MainWindow(QMainWindow):
             self._success_timer.stop()
             self._success_timer = None
 
-        if status == "SUCCESS" or progress >= 100:
+        if status_upper == "SUCCESS" or (progress >= 100 and status_upper not in {"FAILED", "ERROR"}):
             self._animate_success()
         else:
             self.update_progress_style(status)

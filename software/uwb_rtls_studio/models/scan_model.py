@@ -33,6 +33,8 @@ _CONNECT_TIMEOUT_MS = 15000
 _CONNECT_TIME_SYNC_TIMEOUT_MS = 1500
 _SCAN_RESTART_DELAY_MS = 250
 _STATUS_POLL_INTERVAL_MS = 500
+_CONNECT_RETRY_DELAY_MS = 700
+_MAX_CONNECT_RETRIES = 2
 
 
 class ScanModel(QObject):
@@ -61,6 +63,8 @@ class ScanModel(QObject):
         self._ble_connecting_seen = False
         self._pending_time_sync_seq: int | None = None
         self._connected_info: dict = {}
+        self._connect_retry_count = 0
+        self._connect_generation = 0
         
         self._protocol.packet_received.connect(self._on_packet)
         self._protocol.ack_received.connect(self._on_ack)
@@ -167,17 +171,28 @@ class ScanModel(QObject):
         self._ble_connecting_seen = False
         self._pending_time_sync_seq = None
         self._connected_info = {}
+        self._connect_retry_count = 0
+        self._connect_generation += 1
         self._emit_progress(10, f"Selected {mac_hex}. Preparing BLE connect...")
         
         # We MUST add a delay here! The dongle needs time to process ble_scan_stop 
         # before it can accept ble_connect. Without this delay, the first connect command 
         # is ignored by the firmware, requiring a second click.
-        QTimer.singleShot(STOP_TO_CONNECT_DELAY_MS, lambda: self._do_connect(mac_hex))
+        generation = self._connect_generation
+        QTimer.singleShot(STOP_TO_CONNECT_DELAY_MS, lambda: self._do_connect(mac_hex, generation))
         return True
 
-    def _do_connect(self, mac_hex: str) -> None:
+    def _do_connect(self, mac_hex: str, generation: int | None = None) -> None:
+        if generation is not None and generation != self._connect_generation:
+            return
+        if not self._is_connecting or self.connected_mac != mac_hex:
+            return
         mac_bytes = bytes.fromhex(mac_hex.replace(":", ""))
         self._connect_stage = "ble_connect"
+        self._ble_connected_seen = False
+        self._ble_connecting_seen = False
+        self._pending_time_sync_seq = None
+        self._emit_progress(30, f"Sending BLE connect to {mac_hex}...")
         pkt = self._send_command(
             "ble_connect",
             src_addr=self._protocol.pb.PACKET_ADDR_HOST,
@@ -185,9 +200,9 @@ class ScanModel(QObject):
             mac_address=mac_bytes
         )
         if pkt is None:
-            self._is_connecting = False
-            self._connect_stage = "idle"
-            self.connect_failed.emit("Failed to send ble_connect.")
+            if self._schedule_connect_retry("Failed to send ble_connect."):
+                return
+            self._fail_connect("Failed to send ble_connect.")
             return
         self._emit_progress(35, f"Connecting BLE MAC {mac_hex}...")
         self._connect_timer.start(_CONNECT_TIMEOUT_MS)
@@ -386,13 +401,9 @@ class ScanModel(QObject):
                 reason["code_hex"],
                 reason["name"],
             )
-            self._connect_timer.stop()
-            self._status_poll_timer.stop()
-            self._time_sync_ack_timer.stop()
-            self._pending_time_sync_seq = None
-            self._is_connecting = False
-            self._connect_stage = "idle"
-            self.connect_failed.emit(self._reason_text(reason))
+            if reason_code == 0x3E and self._schedule_connect_retry(self._reason_text(reason)):
+                return
+            self._fail_connect(self._reason_text(reason))
             return
 
     def _handle_device_info(self, resp) -> None:
@@ -525,13 +536,49 @@ class ScanModel(QObject):
         self.device_list_changed.emit([])
 
     def _on_connect_timeout(self) -> None:
+        if self._schedule_connect_retry("BLE connect flow timed out."):
+            return
+        self._fail_connect("BLE connect flow timed out.")
+
+    def _schedule_connect_retry(self, reason_text: str) -> bool:
+        if not self._is_connecting or not self.connected_mac:
+            return False
+        if self._connect_retry_count >= _MAX_CONNECT_RETRIES:
+            return False
+        self._connect_retry_count += 1
+        mac_hex = self.connected_mac
+        generation = self._connect_generation
+        log.warning(
+            "Popup BLE connect retry %d/%d for %s after: %s",
+            self._connect_retry_count,
+            _MAX_CONNECT_RETRIES,
+            mac_hex,
+            reason_text,
+        )
+        self._connect_timer.stop()
+        self._status_poll_timer.stop()
+        self._time_sync_ack_timer.stop()
+        self._connect_confirm_timer.stop()
+        self._pending_time_sync_seq = None
+        self._connect_stage = "selected"
+        self._ble_connected_seen = False
+        self._ble_connecting_seen = False
+        self.stop_scan()
+        self._emit_progress(
+            30,
+            f"Retry {self._connect_retry_count}/{_MAX_CONNECT_RETRIES}: {reason_text}",
+        )
+        QTimer.singleShot(_CONNECT_RETRY_DELAY_MS, lambda: self._do_connect(mac_hex, generation))
+        return True
+
+    def _fail_connect(self, message: str) -> None:
         self._is_connecting = False
         self._connect_stage = "idle"
         self._status_poll_timer.stop()
         self._time_sync_ack_timer.stop()
         self._connect_confirm_timer.stop()
         self._pending_time_sync_seq = None
-        self.connect_failed.emit("BLE connect flow timed out.")
+        self.connect_failed.emit(message)
 
     def _poll_connect_status(self) -> None:
         """Proactively send ble_status_get to confirm connection state from dongle."""

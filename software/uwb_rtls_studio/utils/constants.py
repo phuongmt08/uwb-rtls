@@ -59,7 +59,7 @@ MAX_SCAN_DEVICES = 10           # Max BLE devices in scan list
 
 # ── Device & Ranging Configs ──────────────────────────────────────
 DEVICE_TIMEOUT_S = 5.0              # Timeout for stale advertising devices (seconds)
-STOP_TO_CONNECT_DELAY_MS = 400      # Delay after ble_scan_stop before sending ble_connect (ms)
+STOP_TO_CONNECT_DELAY_MS = 1000     # Delay after ble_scan_stop before sending ble_connect (ms)
 TIME_SYNC_THRESHOLD_MS = 5000       # Time sync verification tolerance (ms)
 
 # Device Role/Type Labels
