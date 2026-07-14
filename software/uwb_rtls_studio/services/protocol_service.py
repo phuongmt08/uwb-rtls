@@ -52,6 +52,7 @@ if _common_dir not in sys.path:
 from common.parser_protocol import VvProtocol
 from common.transport import HdlcCodec, FRAME_TYPE_PROTOBUF, VvAddress
 from common.commands import CommandFactory, default_destination_for
+from common.lenient_decode import try_lenient_packet_decode
 from common import protocol_pb2 as pb
 from data.raw_packet import RawSerialChunk
 from data.raw_packet_store import shared_raw_packet_store
@@ -74,6 +75,7 @@ class ProtocolService(QObject):
         super().__init__(parent)
         self._serial = serial_service
         self._protocol = VvProtocol()   # parser_protocol.VvProtocol — encode/decode/HDLC + build_*() methods
+        self._protocol.hdlc.emit_bad_checksum_chunks = True
         self._seq = 0
         self._seq_lock = threading.Lock()
         self._packet_repository = None
@@ -178,8 +180,26 @@ class ProtocolService(QObject):
     def _decode_packets(self, data: bytes) -> list:
         packets = []
         try:
+            hdlc_error = None
             with self._decoder_lock:
-                chunks = self._protocol.hdlc.feed(data)
+                codec = self._protocol.hdlc
+                before_errors = int(getattr(codec, "error_count", 0) or 0)
+                chunks = codec.feed(data)
+                after_errors = int(getattr(codec, "error_count", 0) or 0)
+                if after_errors > before_errors:
+                    hdlc_error = dict(getattr(codec, "last_error", {}) or {})
+                    hdlc_error["count_delta"] = after_errors - before_errors
+                    hdlc_error["total_errors"] = after_errors
+
+            if hdlc_error is not None:
+                msg = f"HDLC decode error: {hdlc_error}"
+                log.warning(msg)
+                try:
+                    shared_raw_packet_store.append_decode_error("hdlc", msg, hdlc_error)
+                except Exception:
+                    pass
+                self._decode_error_ready.emit(msg)
+
             for chunk in chunks:
                 if chunk.frame_type != FRAME_TYPE_PROTOBUF:
                     log.debug(
@@ -190,16 +210,51 @@ class ProtocolService(QObject):
                     continue
 
                 try:
-                    packets.append(self._protocol.decode_packet(chunk.payload))
+                    pkt = self._protocol.decode_packet(chunk.payload)
+                    if not getattr(chunk, "checksum_ok", True):
+                        recovered = pkt.WhichOneof("params")
+                        log.warning(
+                            "Recovered protobuf packet despite HDLC checksum error: param=%s seq=%s error=%s",
+                            recovered,
+                            getattr(getattr(pkt, "hdr", None), "seq", "-"),
+                            getattr(chunk, "error", None),
+                        )
+                    packets.append(pkt)
                 except DecodeError as exc:
+                    recovered_pkt = try_lenient_packet_decode(chunk.payload)
+                    if recovered_pkt is not None:
+                        recovered_param = recovered_pkt.WhichOneof("params")
+                        log.warning(
+                            "Recovered %s using lenient protobuf decode after strict parse failed: "
+                            "seq=%s payload_len=%s hdlc_checksum_ok=%s err=%s",
+                            recovered_param,
+                            getattr(getattr(recovered_pkt, "hdr", None), "seq", "-"),
+                            len(chunk.payload),
+                            getattr(chunk, "checksum_ok", True),
+                            exc,
+                        )
+                        packets.append(recovered_pkt)
+                        continue
+
+                    details = {"payload_len": len(chunk.payload), "payload_hex": chunk.payload.hex()}
                     msg = (
                         f"Protobuf decode error: payload_len={len(chunk.payload)} "
                         f"err={exc} payload_hex={chunk.payload[:32].hex()}"
                     )
                     log.warning(msg)
+                    try:
+                        shared_raw_packet_store.append_decode_error("protobuf", msg, details)
+                    except Exception:
+                        pass
                     self._decode_error_ready.emit(msg)
         except Exception as exc:
-            self._decode_error_ready.emit(f"HDLC decode error: {exc}")
+            msg = f"HDLC decode error: {exc}"
+            log.warning(msg)
+            try:
+                shared_raw_packet_store.append_decode_error("hdlc_exception", msg, {})
+            except Exception:
+                pass
+            self._decode_error_ready.emit(msg)
         return packets
 
     def _emit_decode_error(self, message: str) -> None:

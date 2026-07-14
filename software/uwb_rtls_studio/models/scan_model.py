@@ -353,6 +353,9 @@ class ScanModel(QObject):
                 log.info("BLE link up; requesting device information before completing connect.")
                 self._connect_stage = "device_info"
                 self._emit_progress(55, "BLE link established. Reading device information...")
+                reset_decoder = getattr(self._protocol, "reset_decoder", None)
+                if callable(reset_decoder):
+                    reset_decoder("BLE link up")
                 self._send_command(
                     "device_information_get",
                     src_addr=self._protocol.pb.PACKET_ADDR_HOST,

@@ -38,7 +38,7 @@ static bb_transport_state_transition_cb_t m_rx_cb = NULL;
 
 static hdlc_parser_t m_hdlc_parser;
 
-#define RX_RING_BUFFER_SIZE 512
+#define RX_RING_BUFFER_SIZE 2048
 static volatile uint16_t m_rx_ring_head = 0;
 static volatile uint16_t m_rx_ring_tail = 0;
 static uint8_t m_rx_ring_buf[RX_RING_BUFFER_SIZE];
@@ -67,7 +67,7 @@ static bool rx_ring_pop(uint8_t *p_byte)
 
 /* ---- BLE Packet Queue (for raw protobuf packets received via BLE) ---- */
 #define BLE_PKT_QUEUE_SIZE  16
-#define BLE_PKT_MAX_LEN     256
+#define BLE_PKT_MAX_LEN     512
 
 typedef struct {
     uint8_t data[BLE_PKT_MAX_LEN];

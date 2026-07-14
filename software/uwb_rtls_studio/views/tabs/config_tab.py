@@ -608,10 +608,10 @@ class ConfigTab(QWidget):
             self.main_layout.addWidget(self.sys_group, 2, 3, 1, 1, Qt.AlignmentFlag.AlignBottom)
 
             # Column Stretch
-            self.main_layout.setColumnStretch(0, 1)
-            self.main_layout.setColumnStretch(1, 1)
-            self.main_layout.setColumnStretch(2, 1)
-            self.main_layout.setColumnStretch(3, 1)
+            self.main_layout.setColumnStretch(0, 10)
+            self.main_layout.setColumnStretch(1, 10)
+            self.main_layout.setColumnStretch(2, 10)
+            self.main_layout.setColumnStretch(3, 15)
 
             # Visibility
             self.fusion_group.setVisible(True)
@@ -894,12 +894,33 @@ class ConfigTab(QWidget):
         pass
 
     def _selected_target(self) -> dict:
+        role_map = {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3, "Tag": 1, "Anchor": 2, "Gateway": 3}
         if self._vm and self._vm.model.is_connected:
+            try:
+                from utils.app_state import shared_app_state
+                connected = dict(shared_app_state.connected_device or {})
+                sys_cfg = dict(shared_app_state.sys_config or {})
+            except Exception:
+                connected = {}
+                sys_cfg = {}
+            role_text = str(self._vm.model.connected_role or connected.get("Role") or connected.get("role") or "").strip()
+            role = role_map.get(role_text.upper(), role_map.get(role_text, self._role_from_ui()))
+            raw_device_id = (
+                sys_cfg.get("device_id")
+                or connected.get("device_id")
+                or connected.get("Device ID")
+                or self._parse_device_id_from_ui(default=0)
+                or 0
+            )
+            try:
+                device_id = int(str(raw_device_id), 0)
+            except (TypeError, ValueError):
+                device_id = 0
             return {
                 "mac": self._vm.model.connected_mac,
-                "role": self._role_from_ui(),
-                "device_type": self._role_from_ui(),
-                "device_id": self._parse_device_id_from_ui(default=1),
+                "role": role,
+                "device_type": role,
+                "device_id": device_id,
             }
         return {
             "mac": "",
@@ -907,7 +928,6 @@ class ConfigTab(QWidget):
             "device_type": self._role_from_ui(),
             "device_id": self._parse_device_id_from_ui(default=1),
         }
-
     def _apply_target_to_ui(self, target: dict):
         if not hasattr(self, "_last_anchor_layout"):
             self._last_anchor_layout = []

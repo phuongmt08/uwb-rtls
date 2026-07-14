@@ -292,7 +292,7 @@ class CommandBus(QObject):
         force=False previously hit cache and received nothing — UI stayed empty
         even though the packet had already arrived from the dongle.
         """
-        if not shared_app_state.should_accept_device_session_payload(response_name):
+        if not shared_app_state.should_accept_decoded_packet(response_name, pkt):
             log.debug("CommandBus cache-hit blocked by session gate: %s", response_name)
             self._cache.pop(response_name, None)
             self._pending.pop(response_name, None)
@@ -356,7 +356,7 @@ class CommandBus(QObject):
             )
 
     def _on_packet_received(self, param_name: str, pkt) -> None:
-        if not shared_app_state.should_accept_device_session_payload(param_name):
+        if not shared_app_state.should_accept_decoded_packet(param_name, pkt):
             log.debug("CommandBus RX cache blocked by session gate: %s", param_name)
             self._pending.pop(param_name, None)
             return

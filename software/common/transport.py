@@ -34,7 +34,8 @@ FRAME_TYPE_PROTOBUF = 0
 class HdlcChunk:
     frame_type: int
     payload: bytes
-
+    checksum_ok: bool = True
+    error: dict | None = None
 
 class HdlcCodec:
     def __init__(self) -> None:
@@ -42,6 +43,9 @@ class HdlcCodec:
         self._frame_type = 0
         self._length = 0
         self._payload = bytearray()
+        self.error_count = 0
+        self.last_error: dict | None = None
+        self.emit_bad_checksum_chunks = False
 
     @staticmethod
     def checksum(data: bytes) -> int:
@@ -84,6 +88,11 @@ class HdlcCodec:
             if self._state == 3:
                 self._length |= (byte << 8)
                 if self._length > HDLC_MAX_DATA_LEN:
+                    self._record_error(
+                        "length",
+                        frame_type=self._frame_type,
+                        length=self._length,
+                    )
                     self._reset()
                 elif self._length == 0:
                     self._state = 5
@@ -108,6 +117,16 @@ class HdlcCodec:
                 if calc == byte:
                     chunks.append(HdlcChunk(self._frame_type, bytes(self._payload)))
                 else:
+                    error = self._record_error(
+                        "checksum",
+                        frame_type=self._frame_type,
+                        length=self._length,
+                        expected_checksum=calc,
+                        got_checksum=byte,
+                        payload_prefix=bytes(self._payload[:32]).hex(),
+                    )
+                    if self.emit_bad_checksum_chunks:
+                        chunks.append(HdlcChunk(self._frame_type, bytes(self._payload), checksum_ok=False, error=error))
                     if byte == HDLC_SOF:
                         self._state = 1
                         self._frame_type = 0
@@ -121,6 +140,11 @@ class HdlcCodec:
     def reset(self) -> None:
         """Discard an incomplete frame and return to the SOF search state."""
         self._reset()
+
+    def _record_error(self, reason: str, **fields) -> dict:
+        self.error_count += 1
+        self.last_error = {"reason": reason, **fields}
+        return self.last_error
 
     def _reset(self) -> None:
         self._state = 0

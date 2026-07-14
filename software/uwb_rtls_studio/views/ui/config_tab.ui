@@ -63,7 +63,8 @@ QSpinBox, QDoubleSpinBox {
     color: #F8FAFC;
     border: 1px solid #334155;
     border-radius: 6px;
-    padding: 6px 26px 6px 10px;
+    padding: 6px 18px 6px 6px;
+    min-width: 90px;
 }
 QSpinBox:focus, QDoubleSpinBox:focus {
     border-color: #22D3EE;

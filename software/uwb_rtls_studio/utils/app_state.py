@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -354,7 +355,10 @@ class SharedAppState(QObject):
         self._rtos_task_stats = [item.copy() for item in val]
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
+    TAG_ONLY_QUERY_COMMANDS = {"anchor_layout_get", "sensor_fusion_cfg_get", "prefilter_cfg_get"}
+
     DEVICE_SESSION_PAYLOADS = {
+        "device_information_resp",
         "battery_info_resp",
         "time_sync_resp",
         "ble_conn_params_resp",
@@ -394,6 +398,127 @@ class SharedAppState(QObject):
         # Block only when the session gate is closed, not just because status has
         # not reached Connected yet.
         return self._connection_status in {"Connecting", "Connected"} or self._is_active_query_response(name)
+
+    def should_accept_decoded_packet(self, param_name: str, pkt: Any) -> bool:
+        """Return True when a decoded payload belongs to the active device session."""
+        name = str(param_name or "")
+        if not self.should_accept_device_session_payload(name):
+            return False
+        if not self._device_session_identity_matches(name, pkt):
+            log.debug("[SharedAppState] Ignoring stale/mismatched device payload: %s", name)
+            return False
+        return True
+
+    def _device_session_identity_matches(self, param_name: str, pkt: Any) -> bool:
+        name = str(param_name or "")
+        if name not in self.DEVICE_SESSION_PAYLOADS:
+            return True
+
+        expected_id = self._connected_device_id()
+        expected_serial = self._connected_device_serial()
+        expected_role = self._connected_device_role_value()
+        payload_id = self._packet_device_id(name, pkt)
+        payload_serial = self._packet_serial_number(name, pkt)
+        payload_role = self._packet_role_value(name, pkt)
+
+        if expected_id is not None and payload_id is not None and payload_id != expected_id:
+            log.info(
+                "[SharedAppState] Rejected %s for device_id=%s while connected target is device_id=%s",
+                name,
+                payload_id,
+                expected_id,
+            )
+            return False
+        if expected_serial is not None and payload_serial is not None and payload_serial != expected_serial:
+            log.info(
+                "[SharedAppState] Rejected %s for serial=%s while connected target is serial=%s",
+                name,
+                payload_serial,
+                expected_serial,
+            )
+            return False
+        if expected_role is not None and payload_role is not None and payload_role != expected_role:
+            log.info(
+                "[SharedAppState] Rejected %s for role=%s while connected target role=%s",
+                name,
+                payload_role,
+                expected_role,
+            )
+            return False
+        return True
+
+    def _connected_device_id(self) -> int | None:
+        device = dict(self._connected_device or {})
+        for key in ("device_id", "Device ID", "id"):
+            parsed = self._parse_optional_int(device.get(key))
+            if parsed is not None and parsed > 0:
+                return parsed
+        text = str(device.get("name") or device.get("Device Name") or "")
+        match = re.search(r"\b(?:anchor|tag)[-_ ]*(\d+)\b", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        return None
+
+    def _connected_device_serial(self) -> int | None:
+        device = dict(self._connected_device or {})
+        for key in ("serial_number", "serial", "Serial Number"):
+            parsed = self._parse_optional_int(device.get(key))
+            if parsed is not None and parsed > 0:
+                return parsed
+        return None
+
+    def _connected_device_role_value(self) -> int | None:
+        device = dict(self._connected_device or {})
+        role = str(device.get("Role") or device.get("device_role") or device.get("role") or "").strip().upper()
+        if role == "TAG":
+            return 1
+        if role == "ANCHOR":
+            return 2
+        return None
+
+    @staticmethod
+    def _parse_optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return int(value)
+        text = str(value).strip()
+        if not text or text == "-":
+            return None
+        try:
+            return int(text, 0)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _packet_payload(param_name: str, pkt: Any) -> Any:
+        return getattr(pkt, str(param_name or ""), None)
+
+    def _packet_device_id(self, param_name: str, pkt: Any) -> int | None:
+        payload = self._packet_payload(param_name, pkt)
+        if payload is None:
+            return None
+        if param_name == "sys_config_resp":
+            cfg = getattr(payload, "config", None)
+            return self._parse_optional_int(getattr(cfg, "device_id", None))
+        if param_name == "ble_adv_status":
+            return self._parse_optional_int(getattr(payload, "device_id", None))
+        return self._parse_optional_int(getattr(payload, "device_id", None))
+
+    def _packet_serial_number(self, param_name: str, pkt: Any) -> int | None:
+        payload = self._packet_payload(param_name, pkt)
+        if payload is None:
+            return None
+        return self._parse_optional_int(getattr(payload, "serial_number", None))
+
+    def _packet_role_value(self, param_name: str, pkt: Any) -> int | None:
+        payload = self._packet_payload(param_name, pkt)
+        if payload is None:
+            return None
+        if param_name == "sys_config_resp":
+            cfg = getattr(payload, "config", None)
+            return self._parse_optional_int(getattr(cfg, "role", None))
+        return self._parse_optional_int(getattr(payload, "role", None))
 
     def clear_query_payload_markers(self) -> None:
         """Forget decoded response markers without clearing UI state.
@@ -645,6 +770,17 @@ class SharedAppState(QObject):
         except Exception as exc:
             log.debug("Could not check active query response gate for %s: %s", param_name, exc)
             return False
+
+    def _query_allowed_for_connected_role(self, command_name: str) -> bool:
+        name = str(command_name or "").strip()
+        if name not in self.TAG_ONLY_QUERY_COMMANDS:
+            return True
+        device = dict(self._connected_device or {})
+        role = str(device.get("Role") or device.get("device_role") or device.get("role") or "").strip().upper()
+        allowed = role == "TAG"
+        if not allowed:
+            log.info("Skipping TAG-only recovery query for role=%s: %s", role or "UNKNOWN", name)
+        return allowed
     def enqueue_query(
         self,
         command_name: str,
@@ -665,6 +801,8 @@ class SharedAppState(QObject):
         traffic_class = str(traffic_class or "").strip().lower()
         raw_flow_name = str(flow_name or "").strip().lower()
         flow_name = self._normalise_query_flow(raw_flow_name, traffic_class)
+        if flow_name == "connected_device" and traffic_class == "bootstrap":
+            self.enable_device_session_payloads(f"query queued: {command_name}")
         if max_retries is None and flow_name == "connected_device" and traffic_class == "bootstrap":
             max_retries = 1
 
@@ -734,7 +872,7 @@ class SharedAppState(QObject):
     def handle_incoming_packet(self, param_name: str, pkt: Any) -> None:
         """Route incoming packets to the query queue manager to check for response matches."""
         name = str(param_name or "")
-        if not self.should_accept_device_session_payload(name):
+        if not self.should_accept_decoded_packet(name, pkt):
             log.debug("[SharedAppState] Ignoring stale payload marker/query response before active session: %s", name)
             return
         if name.endswith("_resp") or name == "device_type_set":
@@ -803,14 +941,13 @@ class SharedAppState(QObject):
             ]
         success_count = sum(1 for item in results if item.get("status") == "SUCCESS")
         total = len(results)
-        summary_status = "OK" if success_count == total else "FAIL"
         failed = [item for item in results if item.get("status") != "SUCCESS"]
         detail_rows = []
         for item in failed:
             command = str(item.get("command_name") or "-")
             reason = str(item.get("failure_reason") or "").upper()
             detail_rows.append(("FAILED", f"{command} {reason}".strip()))
-        self._print_query_report(results, flow_name=flow, summary=("SUMMARY", f"{summary_status} {success_count}/{total}"), detail_rows=detail_rows)
+        self._print_query_report(results, flow_name=flow, summary=("SUCCESSFUL", f"{success_count}/{total} packets"), detail_rows=detail_rows)
         self._query_flow_results.pop(flow, None)
 
     def _on_query_complete(self, results: List[Dict[str, Any]]) -> None:
@@ -858,6 +995,7 @@ class SharedAppState(QObject):
                 failed_gets = [
                     r for r in failed
                     if r.get("expected_response")
+                    and self._query_allowed_for_connected_role(str(r.get("command_name") or ""))
                     and str(r.get("command_name") or "").endswith("_get")
                     and str(r.get("traffic_class") or "").strip().lower() == "bootstrap"
                     and str(r.get("failure_reason") or "").upper() != "UNIMPLEMENTED"

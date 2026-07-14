@@ -115,6 +115,33 @@ class VvProtocol(_VvProtocol):
         )
     def build_sensor_fusion_cfg_resp(self, src: int, dst: int, seq: int):
         return self._commands.sensor_fusion_cfg_resp(src, dst, seq)
+    def build_prefilter_cfg_get(self, src: int, dst: int, seq: int):
+        return self._commands.prefilter_cfg_get(src, dst, seq)
+    def build_prefilter_cfg_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        enable: bool = True,
+        recover_d2: float = 0.25,
+        reject_d2: float = 4.0,
+        r_base: float = 0.1,
+        r_gate: float = 0.5,
+        velocity_weight: float = 0.2,
+        min_covariance: float = 0.01,
+    ):
+        return self._commands.prefilter_cfg_set(
+            src, dst, seq,
+            enable=enable,
+            recover_d2=recover_d2,
+            reject_d2=reject_d2,
+            r_base=r_base,
+            r_gate=r_gate,
+            velocity_weight=velocity_weight,
+            min_covariance=min_covariance,
+        )
+    def build_prefilter_cfg_resp(self, src: int, dst: int, seq: int):
+        return self._commands.prefilter_cfg_resp(src, dst, seq)
     def build_device_reset(self, src: int, dst: int, seq: int):
         return self._commands.device_reset(src, dst, seq)
     def build_uwb_reset(self, src: int, dst: int, seq: int):

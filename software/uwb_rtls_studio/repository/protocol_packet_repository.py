@@ -26,7 +26,7 @@ class ProtocolPacketRepository:
         shared_raw_packet_store.append_proto_async(param_name, pkt)
         if shared_app_state.manual_test_mode_enabled:
             return
-        if not shared_app_state.should_accept_device_session_payload(param_name):
+        if not shared_app_state.should_accept_decoded_packet(param_name, pkt):
             log.debug("Skipping stale device-session packet before active bootstrap: %s", param_name)
             return
         for repository in self._repositories:

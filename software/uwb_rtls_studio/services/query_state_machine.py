@@ -110,12 +110,12 @@ class QueryQueueManager(QObject):
         "zone_profile_get": "zone_profile_resp",
     }
     ACK_RESPONSE_OK = 1
-    ACKED_GET_WAIT_S = 5.0
+    ACKED_GET_WAIT_S = 3.5
     # Host→dongle→BLE peripheral RTT needs a small settle gap between sequential
     # commands. 50ms was too tight when ACK+payload still in flight on USB CDC.
     # Remote MCU commands traverse USB/UART -> dongle -> BLE. A gap shorter
     # than one connection event can leave the dongle/peripheral TX queues full.
-    INTER_COMMAND_GAP_S = 0.45
+    INTER_COMMAND_GAP_S = 0.15
     def __init__(
         self,
         send_packet_fn: Callable[[str, int, Dict[str, Any]], Any],
@@ -478,14 +478,23 @@ class QueryQueueManager(QObject):
             return True
 
     ACK_RESPONSE_NACK_UNIMPLEMENTED = 3
+    ACK_RESPONSE_NACK_BAD_CRC = 2
 
     @classmethod
     def _ack_response_name(cls, response: int) -> str:
         code = int(response)
         if code == cls.ACK_RESPONSE_OK:
             return "ACK"
-        if code == cls.ACK_RESPONSE_NACK_UNIMPLEMENTED:
-            return "UNIMPLEMENTED"
+        names = {
+            cls.ACK_RESPONSE_NACK_BAD_CRC: "BAD_CRC",
+            cls.ACK_RESPONSE_NACK_UNIMPLEMENTED: "UNIMPLEMENTED",
+            4: "TIMED_OUT",
+            5: "BUSY",
+            6: "CMD_FAILED",
+            7: "INVALID_TYPE",
+        }
+        if code in names:
+            return names[code]
         return f"NACK_{code}"
 
     def _notify_nack(self, tx: QueryTransaction, ack_seq: int, response: int) -> None:
@@ -620,8 +629,10 @@ class QueryQueueManager(QObject):
                 return
 
             if tx.ack_received and not self._command_accepts_ack_success(tx.command_name):
+
+                tx.failure_reason = "ACK_NO_DECODED_PAYLOAD"
                 log.warning(
-                    "Query TIMEOUT waiting for payload '%s' after ACK to '%s'; "
+                    "Query TIMEOUT waiting for decoded payload '%s' after ACK to '%s'; "
                     "marking failed for end-of-wave recovery.",
                     tx.expected_response,
                     tx.command_name,
