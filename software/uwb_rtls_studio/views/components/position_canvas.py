@@ -1981,7 +1981,7 @@ class PositionCanvas(QWidget):
                 weight = telemetry.get("weight")
                 live_text = f"{distance_m:.3f} m"
                 if weight is not None:
-                    live_text += f"  W:{weight}"
+                    live_text += f"  W:{float(weight) / 100.0:.2f}"
                 painter.setPen(QColor(103, 232, 249) if is_mask_selected else QColor(148, 163, 184))
                 painter.drawText(center_x + 16, center_y + 17, live_text)
     def _draw_tracking_grid(self, painter, to_screen, view_x1, view_y1, view_x2, view_y2, margin, width, height):

@@ -134,6 +134,7 @@ class ConfigViewModel(QObject):
     ble_conn_params_updated = pyqtSignal(dict)
     scan_devices_updated = pyqtSignal(list)
     device_type_updated = pyqtSignal(int)
+    zone_profile_updated = pyqtSignal(dict)
 
     def __init__(self, device_model, ranging_model, command_bus=None, ble_scan_repo=None, parent=None):
         super().__init__(parent)
@@ -156,6 +157,7 @@ class ConfigViewModel(QObject):
         shared_app_state.sensor_fusion_cfg_changed.connect(self.sensor_fusion_cfg_updated.emit)
         shared_app_state.prefilter_cfg_changed.connect(self.prefilter_cfg_updated.emit)
         shared_app_state.pos_calib_cfg_changed.connect(self.pos_calib_cfg_updated.emit)
+        shared_app_state.zone_profiles_changed.connect(lambda profiles: self.zone_profile_updated.emit(dict(profiles).get(1, {})))
         if hasattr(self.model, "ble_conn_params_parsed"):
             self.model.ble_conn_params_parsed.connect(self.ble_conn_params_updated.emit)
         shared_app_state.device_type_changed.connect(self.device_type_updated.emit)
@@ -201,6 +203,7 @@ class ConfigViewModel(QObject):
             if hasattr(self.model, "refresh_connected_device_from_hardware"):
                 return bool(self.model.refresh_connected_device_from_hardware("read from device button"))
             self.read_anchor_layout(force=force, traffic_class="bootstrap")
+            self.read_zone_profile(zone_id=1, force=force, traffic_class="bootstrap")
             self.read_ranging_config(force=force, traffic_class="bootstrap")
             self.read_sys_config(force=force, traffic_class="bootstrap")
             self.read_sensor_fusion_config(force=force, traffic_class="bootstrap")
@@ -217,6 +220,7 @@ class ConfigViewModel(QObject):
         self,
         target: dict | None,
         anchors: list | None = None,
+        zone_profile_config: dict | None = None,
         ranging_config: dict | None = None,
         sys_config: dict | None = None,
         sensor_fusion_config: dict | None = None,
@@ -241,6 +245,22 @@ class ConfigViewModel(QObject):
                 "method": "set_anchor_layout",
                 "args": [anchors_copied],
             })
+        if zone_profile_config is not None:
+            zone_profile = dict(zone_profile_config or {})
+            steps.append({
+                "label": "zone_profile_set",
+                "command": "zone_profile_set",
+                "method": "set_zone_profile",
+                "args": [zone_profile],
+            })
+            zone_id = int(zone_profile.get("zone_id", 0) or 0)
+            if zone_id > 0:
+                steps.append({
+                    "label": "zone_switch",
+                    "command": "zone_switch",
+                    "method": "switch_zone",
+                    "args": [zone_id],
+                })
         if ranging_config is not None:
             ranging_params = dict(ranging_config or {})
             steps.append({
@@ -373,6 +393,21 @@ class ConfigViewModel(QObject):
         log.info("Sending anchor layout set command to MCU: %s", anchors)
         self.ranging_model.set_anchor_layout(anchors)
         self.model.set_anchor_layout(anchors)
+
+    def read_zone_profile(self, zone_id: int = 1, force: bool = False, traffic_class: str = ""):
+        log.info("Requesting zone profile %s from MCU via global query queue... (force=%s)", zone_id, force)
+        if hasattr(self.model, "request_zone_profile"):
+            self.model.request_zone_profile(zone_id=zone_id, force=force, traffic_class=traffic_class)
+
+    def write_zone_profile(self, profile: dict):
+        log.info("Sending zone profile set command to MCU: %s", profile)
+        if hasattr(self.model, "set_zone_profile"):
+            self.model.set_zone_profile(profile)
+
+    def switch_zone(self, zone_id: int):
+        log.info("Sending zone switch command to MCU: zone_id=%s", zone_id)
+        if hasattr(self.model, "switch_zone"):
+            self.model.switch_zone(zone_id)
 
     def read_ranging_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch ranging config for the Config tab.

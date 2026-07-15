@@ -7,9 +7,13 @@ to SharedAppState so every tab can consume the same parsed state.
 """
 from __future__ import annotations
 
+import logging
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from utils.app_state import shared_app_state
+
+log = logging.getLogger(__name__)
 
 
 class ConfigRepository(QObject):
@@ -19,6 +23,7 @@ class ConfigRepository(QObject):
     prefilter_cfg_updated = pyqtSignal(dict)
     pos_calib_cfg_updated = pyqtSignal(dict)
     device_type_updated = pyqtSignal(int)
+    zone_profile_updated = pyqtSignal(dict)
 
 
     def __init__(self, parent=None):
@@ -28,6 +33,7 @@ class ConfigRepository(QObject):
         self._sensor_fusion_cfg: dict = {}
         self._prefilter_cfg: dict = {}
         self._pos_calib_cfg: dict = {}
+        self._zone_profiles: dict[int, dict] = {}
         shared_app_state.device_session_reset.connect(self.reset_session)
 
     def reset_session(self, _reason: str = "") -> None:
@@ -36,6 +42,7 @@ class ConfigRepository(QObject):
         self._sensor_fusion_cfg = {}
         self._prefilter_cfg = {}
         self._pos_calib_cfg = {}
+        self._zone_profiles = {}
 
     @property
     def sys_config(self) -> dict:
@@ -56,6 +63,10 @@ class ConfigRepository(QObject):
     @property
     def pos_calib_cfg(self) -> dict:
         return self._pos_calib_cfg.copy()
+
+    @property
+    def zone_profiles(self) -> dict[int, dict]:
+        return {int(zone_id): dict(profile) for zone_id, profile in self._zone_profiles.items()}
 
     def handle_packet(self, param_name: str, pkt) -> bool:
         if param_name == "sys_config_resp":
@@ -98,6 +109,12 @@ class ConfigRepository(QObject):
             return True
         if param_name == "device_type_set":
             self.save_device_type(int(getattr(pkt.device_type_set, "device_type", 0)))
+            return True
+        if param_name == "zone_profile_resp":
+            profile = pkt.zone_profile_resp.profile
+            if profile.ByteSize() == 0:
+                return True
+            self.save_zone_profile(self.parse_zone_profile(profile))
             return True
         return False
 
@@ -158,6 +175,46 @@ class ConfigRepository(QObject):
             "velocity_weight": float(getattr(cfg, "velocity_weight", 0.0)),
             "min_covariance": float(getattr(cfg, "min_covariance", 0.0)),
         }
+
+    def parse_zone_profile(self, profile) -> dict:
+        zone_id = int(getattr(profile, "zone_id", 0))
+        zone_key = str(zone_id) if zone_id else ""
+        anchors = []
+        for item in getattr(profile, "anchors", []):
+            anchor_id = int(getattr(item, "anchor_id", 0))
+            x_m = float(getattr(item, "x_m", 0.0))
+            y_m = float(getattr(item, "y_m", 0.0))
+            z_m = float(getattr(item, "z_m", 0.0))
+            anchors.append({
+                "anchor_id": anchor_id,
+                "x_m": x_m,
+                "y_m": y_m,
+                "z_m": z_m,
+                "x": x_m,
+                "y": y_m,
+                "z": z_m,
+                "label": f"A{anchor_id}",
+                "role": "anchor",
+                "device_type": "uwb_anchor",
+                "device_id": anchor_id,
+                "zone_id": zone_key,
+                "zone_name": f"Zone {zone_id}" if zone_id else "",
+                "zone_ids": [zone_key] if zone_key else [],
+                "zone_names": [f"Zone {zone_id}"] if zone_id else [],
+                "room_id": zone_key,
+                "local_x_m": x_m,
+                "local_y_m": y_m,
+                "placed": True,
+                "is_scanned": False,
+                "sync_state": "synced",
+            })
+        return {
+            "zone_id": zone_id,
+            "preamble_code": int(getattr(profile, "preamble_code", 0)),
+            "anchor_count": int(getattr(profile, "anchor_count", 0)),
+            "anchors": anchors,
+        }
+
     def parse_pos_calib_cfg(self, cfg) -> dict:
         return {
             "enable_anchor_auto_calib": bool(getattr(cfg, "enable_anchor_auto_calib", False)),
@@ -208,6 +265,47 @@ class ConfigRepository(QObject):
         self._pos_calib_cfg = data.copy()
         shared_app_state.pos_calib_cfg = self._pos_calib_cfg
         self.pos_calib_cfg_updated.emit(self.pos_calib_cfg)
+
+
+    @staticmethod
+    def _is_numeric_zone_id(value) -> bool:
+        text = str(value or "").strip().lower()
+        if not text:
+            return False
+        if text.isdigit():
+            return True
+        for prefix in ("zone_", "room_"):
+            if text.startswith(prefix) and text[len(prefix):].isdigit():
+                return True
+        return False
+
+    def _should_preserve_map_anchor_layout(self, profile: dict) -> bool:
+        current = shared_app_state.anchor_layout
+        if not current:
+            return False
+        profile_zone = str(profile.get("zone_id", "") or "")
+        for anchor in current:
+            room_id = anchor.get("room_id", anchor.get("zone_id", ""))
+            if room_id and not self._is_numeric_zone_id(room_id):
+                log.debug(
+                    "Preserving geofence map anchor layout while caching zone_profile_resp zone=%s; current room_id=%s",
+                    profile_zone or "-",
+                    room_id,
+                )
+                return True
+        return False
+
+    def save_zone_profile(self, data: dict) -> None:
+        profile = dict(data or {})
+        zone_id = int(profile.get("zone_id", 0) or 0)
+        if zone_id <= 0:
+            return
+        self._zone_profiles[zone_id] = profile
+        shared_app_state.update_zone_profile(profile)
+        anchors = [dict(anchor) for anchor in profile.get("anchors", [])]
+        if anchors and not self._should_preserve_map_anchor_layout(profile):
+            shared_app_state.anchor_layout = anchors
+        self.zone_profile_updated.emit(dict(profile))
 
     def save_device_type(self, device_type: int) -> None:
         shared_app_state.device_type = device_type

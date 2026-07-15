@@ -1152,6 +1152,61 @@ class ConfigTab(QWidget):
                 pass
         return anchors
 
+    @staticmethod
+    def _zone_id_from_value(value, default=1) -> int:
+        text = str(value or "").strip().lower()
+        if not text:
+            return int(default)
+        if text.isdigit():
+            return max(1, int(text))
+        for prefix in ("zone_", "room_", "zone ", "room "):
+            if text.startswith(prefix) and text[len(prefix):].isdigit():
+                return max(1, int(text[len(prefix):]))
+        return int(default)
+
+    def _anchors_for_zone_profile(self) -> list:
+        anchors = self._get_anchors_from_table()
+        if anchors:
+            return anchors
+        if getattr(self, "_last_anchor_layout", None):
+            return [dict(anchor) for anchor in self._last_anchor_layout]
+        try:
+            from utils.app_state import shared_app_state
+            return [dict(anchor) for anchor in (shared_app_state.anchor_layout or [])]
+        except Exception:
+            return []
+
+    def _zone_profile_from_ui(self) -> dict | None:
+        anchors = self._anchors_for_zone_profile()
+        if not anchors:
+            return None
+        first_anchor = anchors[0]
+        zone_id = self._zone_id_from_value(
+            first_anchor.get("zone_id", first_anchor.get("room_id", 1)),
+            default=1,
+        )
+        profile_anchors = []
+        for item in anchors:
+            anchor = dict(item or {})
+            anchor_id = int(anchor.get("anchor_id", anchor.get("id", 0)) or 0)
+            if anchor_id <= 0:
+                continue
+            profile_anchors.append({
+                "anchor_id": anchor_id,
+                "x_m": float(anchor.get("x_m", anchor.get("x", anchor.get("local_x_m", 0.0))) or 0.0),
+                "y_m": float(anchor.get("y_m", anchor.get("y", anchor.get("local_y_m", 0.0))) or 0.0),
+                "z_m": float(anchor.get("z_m", anchor.get("z", 0.0)) or 0.0),
+            })
+        anchor_ids = [item["anchor_id"] for item in profile_anchors]
+        if len(profile_anchors) != 4 or len(set(anchor_ids)) != 4:
+            return None
+        return {
+            "zone_id": zone_id,
+            "preamble_code": int(self.preamble_spin.value()),
+            "anchor_count": len(profile_anchors),
+            "anchors": profile_anchors,
+        }
+
     def _prefilter_config_from_ui(self) -> dict:
         return {
             "enable": self.chk_prefilter_enable.isChecked(),
@@ -1257,6 +1312,10 @@ class ConfigTab(QWidget):
         chk_sys.setChecked(True)
         dialog_layout.addWidget(chk_sys)
 
+        chk_zone_profile = QCheckBox("Zone Profile (Anchor Layout)")
+        chk_zone_profile.setChecked(True)
+        dialog_layout.addWidget(chk_zone_profile)
+
         chk_ranging = QCheckBox("Ranging Configuration")
         chk_ranging.setChecked(True)
         dialog_layout.addWidget(chk_ranging)
@@ -1303,6 +1362,14 @@ class ConfigTab(QWidget):
             return
 
         # Prepare configurations to send
+        zone_profile_config = None
+        if chk_zone_profile.isChecked():
+            zone_profile_config = self._zone_profile_from_ui()
+            if zone_profile_config is None:
+                QMessageBox.warning(self, "Zone Profile Warning",
+                    "Zone Profile requires a complete 4-anchor layout. Load or create the anchor layout before writing this packet.")
+                return
+
         sys_config = None
         if chk_sys.isChecked():
             role = self._role_from_ui()
@@ -1601,7 +1668,7 @@ class ConfigTab(QWidget):
         }
 
     def _on_anchor_layout_loaded(self, anchors):
-        pass
+        self._last_anchor_layout = [dict(anchor) for anchor in (anchors or [])]
 
     def _update_single_anchor_in_table(self, anchor_id, x_m, y_m, z_m):
         target_row = -1

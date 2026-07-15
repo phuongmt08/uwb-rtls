@@ -1120,6 +1120,15 @@ class LiveTrackingTab(QWidget):
         if current_layout:
             self._on_anchor_layout_updated(current_layout)
 
+
+    def _has_loaded_map_anchor_layout(self) -> bool:
+        if not self._vm:
+            return False
+        try:
+            return bool(self._vm.get_map_anchors())
+        except Exception:
+            return False
+
     def _on_anchor_layout_updated(self, anchors_list):
         if getattr(self._canvas, "dim_tracking_view", False):
             normalized = [self._normalize_anchor_record(anchor, idx) for idx, anchor in enumerate(anchors_list or [])]
@@ -1138,6 +1147,16 @@ class LiveTrackingTab(QWidget):
                 self._pending_layout_read_room_id = ""
                 return
             self._draft_anchor_layout = normalized
+            return
+        if self._has_loaded_map_anchor_layout():
+            # Keep the user-loaded map as the visual source of truth. A TAG
+            # anchor_layout_resp may be a different/local device layout and
+            # must not pull canvas anchors away from the loaded floor plan.
+            map_anchors = self._annotate_anchor_membership(self._vm.get_map_anchors())
+            formatted = self._format_anchors_for_canvas(map_anchors)
+            self._canvas.set_anchors(formatted)
+            if hasattr(self, "_map_3d"):
+                self._map_3d.set_anchors(formatted)
             return
         self.set_anchors(self._format_anchors_for_canvas(anchors_list or []))
 
@@ -1616,6 +1635,19 @@ class LiveTrackingTab(QWidget):
                 self._map_3d.set_anchors(formatted)
         return map_anchors
 
+
+    def _refresh_live_tracking_map_context(self, reason: str) -> None:
+        if not self._vm or not hasattr(self._vm, "request_live_tracking_map_context"):
+            return
+        try:
+            from utils.app_state import shared_app_state
+            if shared_app_state.connection_status != "Connected":
+                log.debug("Live tracking map context refresh skipped while disconnected: %s", reason)
+                return
+        except Exception:
+            pass
+        self._vm.request_live_tracking_map_context(reason=reason)
+
     def _set_current_layout_on_canvas(self):
         if not self._vm:
             return
@@ -1834,6 +1866,7 @@ class LiveTrackingTab(QWidget):
                 self._vm.load_geofences(file_path)
                 self._canvas.set_geofences(self._vm.get_geofence_zones())
                 self._sync_loaded_map_anchors(update_canvas=True)
+                self._refresh_live_tracking_map_context("user_map_changed")
 
     def _setup_geofencing_ui(self):
         self._setup_user_map_ui()
@@ -2601,6 +2634,7 @@ class LiveTrackingTab(QWidget):
         self._active_rooms_snapshot = None
         self._refresh_active_rooms()
         self._refresh_anchor_layout_table()
+        self._refresh_live_tracking_map_context("active_room_changed")
 
     def _on_set_local_origin_clicked(self):
         if self._canvas._origin_pick_room_id is not None:
@@ -2852,6 +2886,7 @@ class LiveTrackingTab(QWidget):
             self._set_current_layout_on_canvas()
             self._anchor_layout_commit_pending = False
             self._pending_layout_read_for_editor = False
+            self._refresh_live_tracking_map_context("exit_geofence_editor")
 
         self._canvas.dim_tracking_view = False
         self._canvas.set_edit_mode("navigate")
@@ -3608,6 +3643,7 @@ class LiveTrackingTab(QWidget):
         zones = self._vm.get_geofence_zones()
         self._canvas.set_geofences(zones)
         map_anchors = self._sync_loaded_map_anchors(update_canvas=True)
+        self._refresh_live_tracking_map_context("map_loaded")
         self._canvas.clear_undo_history()
         self._geofence_anchor_baseline = [dict(anchor) for anchor in map_anchors]
         self._draft_anchor_layout = [dict(anchor) for anchor in map_anchors]
@@ -3705,6 +3741,7 @@ class LiveTrackingTab(QWidget):
                     self._vm.load_geofences()
                 self._canvas.set_geofences(self._vm.get_geofence_zones())
                 self._sync_loaded_map_anchors(update_canvas=True)
+                self._refresh_live_tracking_map_context("geofence_enabled")
         else:
             self.chk_enable_geofence.setText("Geofence map disabled")
             self._canvas.set_geofences([])

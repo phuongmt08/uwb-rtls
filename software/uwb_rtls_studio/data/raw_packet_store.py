@@ -21,14 +21,18 @@ log = logging.getLogger(__name__)
 
 
 class RawPacketStore:
-    def __init__(self, max_packets: int = 1000):
+    def __init__(self, max_packets: int = 1000, runtime_dir: str | Path | None = None):
         self._packets = deque(maxlen=max_packets)
         self._serial_chunks = deque(maxlen=max_packets)
         self._lock = Lock()
         self._last_seq_by_route: dict[tuple[int, int], int] = {}
         self._packet_gap_count = 0
         self._last_packet_gap: dict | None = None
-        self._runtime_dir = Path(__file__).resolve().parent / "runtime"
+        self._runtime_dir = (
+            Path(runtime_dir)
+            if runtime_dir is not None
+            else Path(__file__).resolve().parent / "runtime"
+        )
         self._serial_file = self._runtime_dir / "raw_serial_chunks.jsonl"
         self._packet_file = self._runtime_dir / "raw_packets.jsonl"
         self._parsed_file = self._runtime_dir / "parsed_packets.jsonl"
@@ -76,15 +80,20 @@ class RawPacketStore:
         with self._lock:
             return list(self._serial_chunks)
 
-    def clear(self) -> None:
+    def clear(self, *, truncate_files: bool = False) -> None:
+        """Clear volatile diagnostics without deleting the current process capture."""
         with self._lock:
             self._packets.clear()
             self._serial_chunks.clear()
             self._last_seq_by_route.clear()
             self._packet_gap_count = 0
             self._last_packet_gap = None
-            self._capture_generation += 1
-            self._prepare_runtime_capture()
+            if truncate_files:
+                self._capture_generation += 1
+                generation = self._capture_generation
+        if truncate_files:
+            self._disk_queue.put((generation, "truncate"))
+            log.info("Raw packet runtime capture files were explicitly truncated.")
 
     def stats(self) -> dict:
         with self._lock:
@@ -142,6 +151,10 @@ class RawPacketStore:
             with self._lock:
                 if generation != self._capture_generation:
                     continue
+
+            if kind == "truncate":
+                self._prepare_runtime_capture()
+                continue
 
             if kind == "serial":
                 self._append_serial_chunk_to_disk(item[2])
@@ -231,10 +244,5 @@ class RawPacketStore:
                 handle.write("\n")
         except Exception as exc:
             log.error("Failed to append JSONL to %s: %s", path.name, exc)
-
-    def close(self) -> None:
-        """Graceful cleanup for raw packet store."""
-        pass
-
 
 shared_raw_packet_store = RawPacketStore()

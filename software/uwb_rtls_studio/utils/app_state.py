@@ -108,6 +108,7 @@ class SharedAppState(QObject):
     ranging_stats_changed = pyqtSignal(dict)       # total_count, success_count, rms_error_m...
     calib_status_changed = pyqtSignal(dict)         # state, progress, iteration, peer ready mask...
     anchor_layout_changed = pyqtSignal(list)       # List of fixed anchors positions
+    zone_profiles_changed = pyqtSignal(dict)       # zone_id -> zone profile/anchor layout from firmware
     sys_config_changed = pyqtSignal(dict)          # UWB role, channel, tx/rx antenna delays...
     sys_ranging_cfg_changed = pyqtSignal(dict)     # Rx timeout, ranging period
     sensor_fusion_cfg_changed = pyqtSignal(dict)   # alpha, kappa, noise covariances...
@@ -149,6 +150,7 @@ class SharedAppState(QObject):
         self._ranging_stats: Dict[str, Any] = {}
         self._calib_status: Dict[str, Any] = {}
         self._anchor_layout: List[Dict[str, Any]] = []
+        self._zone_profiles: Dict[int, Dict[str, Any]] = {}
         self._sys_config: Dict[str, Any] = {}
         self._sys_ranging_cfg: Dict[str, Any] = {}
         self._sensor_fusion_cfg: Dict[str, Any] = {}
@@ -272,6 +274,19 @@ class SharedAppState(QObject):
     def anchor_layout(self, val: List[Dict[str, Any]]) -> None:
         self._anchor_layout = list(val)
         self.anchor_layout_changed.emit(self._anchor_layout)
+        self.zone_profiles_changed.emit(self.zone_profiles)
+
+    @property
+    def zone_profiles(self) -> Dict[int, Dict[str, Any]]:
+        return {int(zone_id): dict(profile) for zone_id, profile in self._zone_profiles.items()}
+
+    def update_zone_profile(self, profile: Dict[str, Any]) -> None:
+        data = dict(profile or {})
+        zone_id = self._parse_optional_int(data.get("zone_id"))
+        if zone_id is None or zone_id <= 0:
+            return
+        self._zone_profiles[int(zone_id)] = data
+        self.zone_profiles_changed.emit(self.zone_profiles)
 
     @property
     def sys_config(self) -> Dict[str, Any]:
@@ -357,7 +372,7 @@ class SharedAppState(QObject):
         self._rtos_task_stats = [item.copy() for item in val]
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
-    TAG_ONLY_QUERY_COMMANDS = {"anchor_layout_get", "sensor_fusion_cfg_get", "prefilter_cfg_get"}
+    TAG_ONLY_QUERY_COMMANDS = {"anchor_layout_get", "sensor_fusion_cfg_get", "prefilter_cfg_get", "zone_profile_get"}
 
     DEVICE_SESSION_PAYLOADS = {
         "device_information_resp",
@@ -365,6 +380,7 @@ class SharedAppState(QObject):
         "time_sync_resp",
         "ble_conn_params_resp",
         "anchor_layout_resp",
+        "zone_profile_resp",
         "sys_config_resp",
         "sys_ranging_cfg_resp",
         "sensor_fusion_cfg_resp",
@@ -547,6 +563,7 @@ class SharedAppState(QObject):
         self._ranging_stats = {}
         self._calib_status = {}
         self._anchor_layout = []
+        self._zone_profiles = {}
         self._sys_config = {}
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
@@ -564,6 +581,7 @@ class SharedAppState(QObject):
         self.ranging_stats_changed.emit(self._ranging_stats)
         self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)
+        self.zone_profiles_changed.emit(self.zone_profiles)
         self.sys_config_changed.emit(self._sys_config)
         self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
@@ -586,6 +604,7 @@ class SharedAppState(QObject):
         self._ranging_stats = {}
         self._calib_status = {}
         self._anchor_layout = []
+        self._zone_profiles = {}
         self._sys_config = {}
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
@@ -607,6 +626,7 @@ class SharedAppState(QObject):
         self.ranging_stats_changed.emit(self._ranging_stats)
         self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)
+        self.zone_profiles_changed.emit(self.zone_profiles)
         self.sys_config_changed.emit(self._sys_config)
         self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
@@ -646,6 +666,7 @@ class SharedAppState(QObject):
             "connect": "CONNECT",
             "connected_device": "CONNECTED_DEVICE",
             "write_device": "WRITE_DEVICE",
+            "live_tracking_map": "LIVE_TRACKING_MAP",
             "user_action": "USER_ACTION",
             "background": "BACKGROUND",
             "default": "DEFAULT",
@@ -1099,6 +1120,15 @@ class SharedAppState(QObject):
                 footer_rows.append(("", entry))
         else:
             footer_rows.append(("WAVE", "-"))
+        if flow in {"connected_device", "write_device"}:
+            ble = self.ble_status
+            raw_state = str(ble.get("display_state") or ble.get("state_name") or "-")
+            footer_rows.extend([
+                ("DEVICE LINK", str(ble.get("connection_status") or self.connection_status or "-").upper()),
+                ("LINK HEALTH", str(ble.get("link_health") or "-").upper()),
+                ("DONGLE BLE", raw_state.replace("BLE_STATE_", "")),
+                ("SCAN", "ACTIVE" if ble.get("scan_active") else "INACTIVE"),
+            ])
         for item in failed:
             command = str(item.get("command_name") or "-")
             reason = str(item.get("failure_reason") or "").upper()

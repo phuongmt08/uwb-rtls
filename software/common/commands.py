@@ -919,38 +919,84 @@ class CommandFactory:
         pkt.battery_info_resp.error_mask = 0
         return pkt
 
-    def zone_switch(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def zone_switch(self, src: int, dst: int, seq: int, zone_id: int = 1) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
+        pkt.zone_switch.zone_id = max(0, int(zone_id))
         return pkt
 
-    def zone_profile_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    @staticmethod
+    def _fill_zone_profile(
+        profile_msg,
+        *,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ) -> None:
+        data = dict(profile or {})
+        profile_msg.zone_id = int(data.get("zone_id", zone_id) or 0)
+        profile_msg.preamble_code = int(data.get("preamble_code", preamble_code) or 0)
+        source_anchors = anchors if anchors is not None else data.get("anchors")
+        if source_anchors is None:
+            source_anchors = [
+                {"anchor_id": 1, "x_m": 0.0, "y_m": 0.0, "z_m": 2.0},
+                {"anchor_id": 2, "x_m": 4.0, "y_m": 0.0, "z_m": 2.0},
+                {"anchor_id": 3, "x_m": 0.0, "y_m": 4.0, "z_m": 2.0},
+                {"anchor_id": 4, "x_m": 4.0, "y_m": 4.0, "z_m": 2.0},
+            ]
+        profile_msg.anchor_count = int(data.get("anchor_count", len(source_anchors)) or 0)
+        del profile_msg.anchors[:]
+        for item in source_anchors:
+            anchor_data = dict(item or {})
+            anchor = profile_msg.anchors.add()
+            anchor.anchor_id = int(anchor_data.get("anchor_id", anchor_data.get("id", 0)) or 0)
+            anchor.x_m = float(anchor_data.get("x_m", anchor_data.get("x", anchor_data.get("local_x_m", 0.0))) or 0.0)
+            anchor.y_m = float(anchor_data.get("y_m", anchor_data.get("y", anchor_data.get("local_y_m", 0.0))) or 0.0)
+            anchor.z_m = float(anchor_data.get("z_m", anchor_data.get("z", 0.0)) or 0.0)
+
+    def zone_profile_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_profile_set.profile.zone_id = 1
-        pkt.zone_profile_set.profile.preamble_code = 17
-        pkt.zone_profile_set.profile.anchor_count = 4
-        for anchor_id, x_m, y_m in (
-            (1, 0.0, 0.0),
-            (2, 4.0, 0.0),
-            (3, 0.0, 4.0),
-            (4, 4.0, 4.0),
-        ):
-            anchor = pkt.zone_profile_set.profile.anchors.add()
-            anchor.anchor_id = anchor_id
-            anchor.x_m = x_m
-            anchor.y_m = y_m
-            anchor.z_m = 2.0
+        self._fill_zone_profile(
+            pkt.zone_profile_set.profile,
+            profile=profile,
+            zone_id=zone_id,
+            preamble_code=preamble_code,
+            anchors=anchors,
+        )
         return pkt
 
-    def zone_profile_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def zone_profile_get(self, src: int, dst: int, seq: int, zone_id: int = 1) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_profile_get.zone_id = 1
+        pkt.zone_profile_get.zone_id = max(0, int(zone_id))
         return pkt
 
-    def zone_profile_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def zone_profile_resp(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_profile_resp.profile.zone_id = 1
-        pkt.zone_profile_resp.profile.preamble_code = 17
-        pkt.zone_profile_resp.profile.anchor_count = 4
+        self._fill_zone_profile(
+            pkt.zone_profile_resp.profile,
+            profile=profile,
+            zone_id=zone_id,
+            preamble_code=preamble_code,
+            anchors=anchors,
+        )
         return pkt
 
     def calib_start(

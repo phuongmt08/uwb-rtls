@@ -177,6 +177,13 @@ class RangingRepository(QObject):
             "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": time.time(),
         }
+        if sample["zone_id"]:
+            sample["room_id"] = str(sample["zone_id"])
+            sample["local_x_m"] = sample["ukf_x_m"]
+            sample["local_y_m"] = sample["ukf_y_m"]
+            sample["local_z_m"] = 0.0
+            sample["tril_local_x_m"] = sample["tril_x_m"]
+            sample["tril_local_y_m"] = sample["tril_y_m"]
         self._fusion_samples.append(sample)
         self.sensor_fusion_parsed.emit(sample)
         return sample

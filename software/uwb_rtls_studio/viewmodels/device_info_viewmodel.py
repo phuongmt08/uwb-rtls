@@ -42,6 +42,7 @@ class DeviceInfoViewModel(QObject):
     # ── Signals cho View ─────────────────────────────────────────────
     device_info_updated = pyqtSignal(dict)
     ble_info_updated = pyqtSignal(dict)
+    link_health_updated = pyqtSignal(dict)
     telemetry_updated = pyqtSignal(dict)
     advertising_devices_updated = pyqtSignal(list, bool)   # list of dicts, is_scanning
     time_sync_updated = pyqtSignal(str, bool, bool)        # local_time_str, is_synced, is_syncing
@@ -78,6 +79,7 @@ class DeviceInfoViewModel(QObject):
             self.model.battery_info_parsed.connect(self._on_battery_info_parsed)
             
         self.model.ble_status_parsed.connect(self._on_ble_status_parsed)
+        self.model.link_health_changed.connect(self.link_health_updated.emit)
         self.model.ble_conn_params_parsed.connect(self._on_ble_conn_params_parsed)
         self.model.time_sync_result.connect(self._on_time_sync_result)
         
@@ -481,6 +483,9 @@ class DeviceInfoViewModel(QObject):
             "disconnect_reason": info.get("disconnect_reason"),
             "disconnect_reason_hex": info.get("disconnect_reason_hex"),
             "disconnect_reason_name": info.get("disconnect_reason_name"),
+            "connection_status": info.get("connection_status"),
+            "link_health": info.get("link_health"),
+            "scan_active": info.get("scan_active"),
         }
         if self._telemetry_model:
             self._telemetry_model.handle_ble_status(payload)
@@ -507,6 +512,8 @@ class DeviceInfoViewModel(QObject):
             "MAC Address": info.get("mac", self.model.connected_mac or "-"),
         }
         self.device_info_updated.emit(payload)
+        if hasattr(self.model, "link_health_snapshot"):
+            self.link_health_updated.emit(self.model.link_health_snapshot)
         self._emit_current_scan_devices()
         if info.get("status") == "Connected" and info.get("SwitchToLogTab"):
             self.model.schedule_session_start(delay_ms=1500, force=False)
