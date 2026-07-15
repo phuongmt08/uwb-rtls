@@ -7,15 +7,22 @@ debugging.
 """
 from __future__ import annotations
 
+import csv
 import time
 import logging
 from collections import deque
+from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from utils.app_state import shared_app_state
 
 log = logging.getLogger(__name__)
+
+_CALIB_EXPORT_PREFIX = "ukf_log_data"
+_CALIB_EXPORT_SUFFIX = ".csv"
+_CALIB_PREDICT_THRESHOLD_M = 0.001
 
 
 class RangingRepository(QObject):
@@ -27,13 +34,17 @@ class RangingRepository(QObject):
     anchor_layout_parsed = pyqtSignal(list)
     stats_parsed = pyqtSignal(dict)
 
-    def __init__(self, max_positions: int = 100000, parent=None):
+    def __init__(self, max_positions: int = 100000, parent=None, *, calib_export_root: str | Path | None = None):
         super().__init__(parent)
         self._positions = deque(maxlen=max_positions)
         self._fusion_samples = deque(maxlen=max_positions)
         self._calib_samples = deque(maxlen=max_positions)
         self._anchor_layout: list[dict] = []
         self._stats: dict = {}
+        self._calib_export_root = Path(calib_export_root) if calib_export_root is not None else self._default_calib_export_root()
+        self._calib_export_path: Path | None = None
+        self._calib_export_count = 0
+        self._calib_prev_distances: list[float] | None = None
         shared_app_state.device_session_reset.connect(self.reset_session)
 
     def reset_session(self, _reason: str = "") -> None:
@@ -42,6 +53,12 @@ class RangingRepository(QObject):
         self._calib_samples.clear()
         self._anchor_layout = []
         self._stats = {}
+        self.reset_calib_export()
+
+    def reset_calib_export(self) -> None:
+        self._calib_export_path = None
+        self._calib_export_count = 0
+        self._calib_prev_distances = None
 
     @staticmethod
     def _decode_fixed2(value) -> float:
@@ -69,6 +86,10 @@ class RangingRepository(QObject):
     @property
     def stats(self) -> dict:
         return self._stats.copy()
+
+    @property
+    def calib_export_path(self) -> str:
+        return str(self._calib_export_path or "")
 
     def handle_packet(self, param_name: str, pkt) -> bool:
         seq = int(getattr(getattr(pkt, "hdr", None), "seq", 0) or 0)
@@ -209,8 +230,103 @@ class RangingRepository(QObject):
             "dt": float(getattr(data, "dt", 0.0)),
         }
         self._calib_samples.append(sample)
+        self._append_calib_data_csv(sample)
         self.calib_data_parsed.emit(sample)
         return sample
+
+    @staticmethod
+    def _default_calib_export_root() -> Path:
+        software_dir = Path(__file__).resolve().parents[2]
+        return software_dir / "data" / "studio"
+
+    def _ensure_calib_export_path(self) -> Path:
+        if self._calib_export_path is not None:
+            return self._calib_export_path
+        now = datetime.now()
+        output_dir = self._calib_export_root / now.strftime("%d_%m_%y")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{_CALIB_EXPORT_PREFIX}{_CALIB_EXPORT_SUFFIX}"
+        self._calib_export_path = output_dir / filename
+        try:
+            rel_path = self._calib_export_path.relative_to(Path(__file__).resolve().parents[2])
+            log.info("Calib data CSV export started: %s", rel_path.as_posix())
+        except ValueError:
+            log.info("Calib data CSV export started: %s", self._calib_export_path)
+        return self._calib_export_path
+
+    def _append_calib_data_csv(self, sample: dict) -> None:
+        try:
+            path = self._ensure_calib_export_path()
+            self._calib_export_count += 1
+            status = self._classify_calib_status(sample)
+            with path.open("a", newline="", encoding="utf-8") as handle:
+                csv.writer(handle).writerow([
+                    self._build_calib_text_record(sample, self._calib_export_count, status)
+                ])
+        except Exception as exc:
+            log.warning("Failed to append calib_data CSV export: %s", exc)
+
+    def _classify_calib_status(self, sample: dict) -> str:
+        distances = [float(value) for value in sample.get("distance", [])]
+        if self._calib_prev_distances is None:
+            self._calib_prev_distances = distances.copy()
+            return "Init"
+
+        status = "Predict"
+        if distances and any(abs(value) >= 1e-6 for value in distances):
+            prev = self._calib_prev_distances or []
+            if len(prev) != len(distances):
+                status = "Update"
+            else:
+                for current, previous in zip(distances, prev):
+                    if abs(current - previous) > _CALIB_PREDICT_THRESHOLD_M:
+                        status = "Update"
+                        break
+        self._calib_prev_distances = distances.copy()
+        return status
+
+    @staticmethod
+    def _calib_list_value(sample: dict, key: str, index: int, default: float = 0.0) -> float:
+        values = sample.get(key, [])
+        try:
+            return float(values[index])
+        except (TypeError, ValueError, IndexError):
+            return default
+
+    def _build_calib_text_record(self, sample: dict, index: int, status: str) -> str:
+        dt = float(sample.get("dt", 0.0) or 0.0)
+        update_dt = dt if status in ("Init", "Update") else 0.0
+        predict_dt = dt if status == "Predict" else 0.0
+        distances = [self._calib_list_value(sample, "distance", i) for i in range(4)]
+        fp_amp = [self._calib_list_value(sample, "fp_amp_norm", i) for i in range(4)]
+        fp_snr = [self._calib_list_value(sample, "fp_snr", i) for i in range(4)]
+
+        return (
+            f"({int(index):4d}/{int(sample.get('tx_frame_cnt', 0) or 0):4d}) {status:<7s} "
+            f"| ts: {int(sample.get('packet_timestamp_ms', 0) or 0)} "
+            f"| zone: 0 "
+            f"| ukf_step: {1 if status in ('Init', 'Update') else 0} "
+            f"| ax: {float(sample.get('ax', 0.0) or 0.0):9.6f} "
+            f"| ay: {float(sample.get('ay', 0.0) or 0.0):9.6f} "
+            f"| gz: {float(sample.get('gz', 0.0) or 0.0):9.6f} "
+            f"| tril_x: {float(sample.get('px', 0.0) or 0.0):9.6f} "
+            f"| tril_y: {float(sample.get('py', 0.0) or 0.0):9.6f} "
+            f"| ukf_x: {float(sample.get('px', 0.0) or 0.0):9.6f} "
+            f"| ukf_y: {float(sample.get('py', 0.0) or 0.0):9.6f} "
+            f"| ukf_yaw: {0.0:9.6f} "
+            f"| yaw: {0.0:9.6f} "
+            f"| update_dt: {update_dt:9.6f} "
+            f"| predict_dt: {predict_dt:9.6f} "
+            f"| mask: {int(sample.get('anchor_mask', 0) or 0)} "
+            f"| d1: {distances[0]:9.6f} | d2: {distances[1]:9.6f} "
+            f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
+            f"| w1: 0 | w2: 0 | w3: 0 | w4: 0 "
+            f"| err: {int(sample.get('error_frame_cnt', 0) or 0)} "
+            f"| amp1: {fp_amp[0]:9.6f} | amp2: {fp_amp[1]:9.6f} "
+            f"| amp3: {fp_amp[2]:9.6f} | amp4: {fp_amp[3]:9.6f} "
+            f"| snr1: {fp_snr[0]:9.6f} | snr2: {fp_snr[1]:9.6f} "
+            f"| snr3: {fp_snr[2]:9.6f} | snr4: {fp_snr[3]:9.6f}"
+        )
 
     @staticmethod
     def _build_anchor_mask(anchors: list[dict]) -> int:

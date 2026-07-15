@@ -89,7 +89,13 @@
         <div class="anchor-editor" style="border-top:none; padding-top:0;">
             <div class="anchor-editor-header">
                 <label style="margin: 0;">Anchor Positions (meters):</label>
-                <button onclick="resetAnchorsToDefault()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #475569; color: white; border: none; border-radius: 6px; font-weight: bold;">Reset Anchors</button>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <select id="anchor_layout_select" onchange="onAnchorLayoutChanged()" style="padding: 5px 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.75rem; font-weight: 700; color: #475569;">
+                        <option value="layout_1">Anchor Layout 1</option>
+                        <option value="layout_2">Anchor Layout 2</option>
+                    </select>
+                    <button onclick="resetAnchorsToDefault()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #475569; color: white; border: none; border-radius: 6px; font-weight: bold;">Reset Anchors</button>
+                </div>
             </div>
             <div id="anchor_editor" class="anchor-grid"></div>
         </div>
@@ -101,6 +107,20 @@
                     <button onclick="addRule()" style="padding: 4px 12px; font-size: 0.75rem; cursor: pointer; background: #8b5cf6; color: white; border: none; border-radius: 6px; font-weight: bold;">+ Add Rule</button>
                 </div>
                 <div id="rules_container" style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; padding-right: 4px;"></div>
+                <div style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px;">
+                    <label style="display:block; margin-bottom:8px;">Ground Truth Offset (m):</label>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:8px; align-items:end;">
+                        <div>
+                            <label for="gt_offset_x_input" style="text-transform:none; font-size:0.7rem;">Offset X</label>
+                            <input id="gt_offset_x_input" type="number" step="0.001" value="0" oninput="onGroundTruthOffsetChanged()" style="width:100%; box-sizing:border-box; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+                        </div>
+                        <div>
+                            <label for="gt_offset_y_input" style="text-transform:none; font-size:0.7rem;">Offset Y</label>
+                            <input id="gt_offset_y_input" type="number" step="0.001" value="0" oninput="onGroundTruthOffsetChanged()" style="width:100%; box-sizing:border-box; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+                        </div>
+                        <button onclick="resetGroundTruthOffset()" style="padding:7px 10px; font-size:0.75rem; cursor:pointer; background:#64748b; color:white; border:none; border-radius:6px; font-weight:bold;">Reset</button>
+                    </div>
+                </div>
             </div>
             
             <div style="display: flex; flex-direction: column; gap: 15px;">
@@ -385,6 +405,10 @@
         <div class="card"><h3 class="plot-title">Trajectory Comparison</h3><div id="trajectory" class="plot-lg"></div></div>
         <div class="card"><h3 class="plot-title">Distance Tracking</h3><div id="distances" class="plot-lg"></div></div>
     </div>
+    <div class="grid-2">
+        <div class="card"><h3 class="plot-title">X Position</h3><div id="x_position" class="plot-md"></div></div>
+        <div class="card"><h3 class="plot-title">Y Position</h3><div id="y_position" class="plot-md"></div></div>
+    </div>
     <div class="card">
         <h3 class="plot-title">Mahalanobis D2 Scores (gated by UKF prediction & innovation covariance)</h3>
         <div id="scores" class="plot-md"></div>
@@ -442,6 +466,7 @@ __APP_JS_BUNDLE__
         // Initialize Anchor Editor
         initAnchorEditor(anchors);
         loadDefaults();
+        initAnchorLayoutSelector();
         initGroundTruthSelector();
 
         // Initialize Plots

@@ -114,7 +114,11 @@ class FusionFrameThread(QThread):
     def _open_new_csv(self):
         self._close_csv()
         self._last_step_timestamp.clear()
-        filename = generate_timestamp_filename(CSV_UKF_FUSION_FILENAME_PREFIX, CSV_UKF_FUSION_FILENAME_SUFFIX)
+        filename = generate_timestamp_filename(
+            CSV_UKF_FUSION_FILENAME_PREFIX,
+            CSV_UKF_FUSION_FILENAME_SUFFIX,
+            source_directory="scripts",
+        )
         self.csv_file, self.csv_writer = create_csv_file(filename)
         self.csv_created_signal.emit()
         print("[INFO] Started new fusion data csv...")

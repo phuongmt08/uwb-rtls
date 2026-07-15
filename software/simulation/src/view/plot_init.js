@@ -1,4 +1,4 @@
-const TIME_AXIS_PLOTS = ['distances', 'scores', 'triplet_selection', 'triplet_debug', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame', 'fp_amp', 'fp_snr'];
+const TIME_AXIS_PLOTS = ['distances', 'scores', 'triplet_selection', 'triplet_debug', 'x_position', 'y_position', 'accel', 'velocity', 'yaw_plot', 'pos_error', 'error_frame', 'fp_amp', 'fp_snr'];
 
 function sampleToTime(sampleIndex, times, totalTime) {
     if (!times || times.length === 0 || !Number.isFinite(sampleIndex)) return 0;
@@ -137,6 +137,30 @@ function initPlots(anchors, gt_square, rawData, samples) {
         responsive: true,
         scrollZoom: true
     });
+
+    const positionTraceNames = isPathCsv
+        ? ['Trilateration', 'Data UKF', '', '', '', '']
+        : ['Trilateration', 'Rules', 'Multilateration', 'Best Triplet', 'UKF Fusion', 'UKF Fusion + IMU Butterworth'];
+    const positionTraceColors = ['#64748b', '#ef4444', '#d97706', '#059669', '#8b5cf6', '#0ea5e9'];
+    const makePositionTraces = (axisLabel) => positionTraceNames.map((name, i) => ({
+        x: [],
+        y: [],
+        name,
+        mode: 'lines',
+        type: 'scattergl',
+        visible: name ? true : false,
+        line: { color: positionTraceColors[i], width: i === 0 ? 1.5 : 2 },
+        hovertemplate: `${axisLabel}: %{y:.4f} m<extra></extra>`
+    })).concat([{ x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }]);
+    const positionLayout = (axisLabel) => ({
+        margin: { t: 40, b: 40, l: 50, r: 50 },
+        xaxis: { title: 'Sample Index' },
+        xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
+        yaxis: { title: `${axisLabel} Position (m)` },
+        hovermode: 'x unified'
+    });
+    Plotly.newPlot('x_position', makePositionTraces('X'), positionLayout('X'));
+    Plotly.newPlot('y_position', makePositionTraces('Y'), positionLayout('Y'));
 
     // 2. Distances (4 traces per anchor: Raw, Gated, Rejected, Rescue)
     const distTraces = [];

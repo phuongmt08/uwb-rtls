@@ -1,5 +1,9 @@
 let ruleCounter = 0;
-const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 9;
+const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 10;
+const ANCHOR_LAYOUT_IDS = ['layout_1', 'layout_2'];
+let activeAnchorLayoutId = 'layout_1';
+let anchorLayouts = null;
+let groundTruthOffset = { x: 0, y: 0 };
 
 function cloneAnchors(source) {
     return source.map(a => ({
@@ -8,6 +12,49 @@ function cloneAnchors(source) {
         y: Number(a.y),
         z: Number(a.z)
     }));
+}
+
+function defaultAnchorLayouts() {
+    return {
+        layout_1: cloneAnchors(SIM_CONFIG.ENV.ANCHORS),
+        layout_2: cloneAnchors(SIM_CONFIG.ENV.ANCHORS)
+    };
+}
+
+function ensureAnchorLayouts() {
+    if (!anchorLayouts) anchorLayouts = defaultAnchorLayouts();
+    ANCHOR_LAYOUT_IDS.forEach(id => {
+        if (!Array.isArray(anchorLayouts[id]) || anchorLayouts[id].length !== anchors.length) {
+            anchorLayouts[id] = cloneAnchors(SIM_CONFIG.ENV.ANCHORS);
+        }
+    });
+}
+
+function saveActiveAnchorLayout() {
+    ensureAnchorLayouts();
+    anchorLayouts[activeAnchorLayoutId] = readAnchorsFromInputs();
+}
+
+function setAnchorLayoutSelectValue(layoutId) {
+    const select = document.getElementById('anchor_layout_select');
+    if (select) select.value = layoutId;
+}
+
+function initAnchorLayoutSelector() {
+    ensureAnchorLayouts();
+    setAnchorLayoutSelectValue(activeAnchorLayoutId);
+}
+
+function onAnchorLayoutChanged() {
+    const select = document.getElementById('anchor_layout_select');
+    const nextLayoutId = select && ANCHOR_LAYOUT_IDS.includes(select.value) ? select.value : 'layout_1';
+    saveActiveAnchorLayout();
+    activeAnchorLayoutId = nextLayoutId;
+    ensureAnchorLayouts();
+    anchors = cloneAnchors(anchorLayouts[activeAnchorLayoutId]);
+    setAnchorInputs(anchors);
+    updateAnchorPlot(anchors);
+    if (typeof update === 'function') update();
 }
 
 function initAnchorEditor(anchorList) {
@@ -61,12 +108,16 @@ function updateAnchorPlot(anchorList) {
 
 function updateAnchorsFromInputs() {
     anchors = readAnchorsFromInputs();
+    ensureAnchorLayouts();
+    anchorLayouts[activeAnchorLayoutId] = cloneAnchors(anchors);
     updateAnchorPlot(anchors);
     if (typeof update === 'function') update();
 }
 
 function resetAnchorsToDefault() {
     anchors = cloneAnchors(SIM_CONFIG.ENV.ANCHORS);
+    ensureAnchorLayouts();
+    anchorLayouts[activeAnchorLayoutId] = cloneAnchors(anchors);
     setAnchorInputs(anchors);
     updateAnchorPlot(anchors);
     if (typeof update === 'function') update();
@@ -87,6 +138,63 @@ function normalizeGroundTruth(track) {
     return Object.assign({}, track, { segments });
 }
 
+function readGroundTruthOffsetInputs() {
+    const offsetXInput = document.getElementById('gt_offset_x_input');
+    const offsetYInput = document.getElementById('gt_offset_y_input');
+    const x = offsetXInput ? parseFloat(offsetXInput.value) : 0;
+    const y = offsetYInput ? parseFloat(offsetYInput.value) : 0;
+    return {
+        x: Number.isFinite(x) ? x : 0,
+        y: Number.isFinite(y) ? y : 0
+    };
+}
+
+function setGroundTruthOffsetInputs(offset) {
+    const offsetX = parseFloat(offset && offset.x);
+    const offsetY = parseFloat(offset && offset.y);
+    const next = {
+        x: Number.isFinite(offsetX) ? offsetX : 0,
+        y: Number.isFinite(offsetY) ? offsetY : 0
+    };
+    groundTruthOffset = next;
+    const offsetXInput = document.getElementById('gt_offset_x_input');
+    const offsetYInput = document.getElementById('gt_offset_y_input');
+    if (offsetXInput) offsetXInput.value = next.x;
+    if (offsetYInput) offsetYInput.value = next.y;
+}
+
+function applyGroundTruthOffset(track) {
+    const normalized = normalizeGroundTruth(track);
+    const offset = groundTruthOffset || { x: 0, y: 0 };
+    if (!offset.x && !offset.y) return normalized;
+
+    const shiftX = (value) => Number.isFinite(value) ? value + offset.x : value;
+    const shiftY = (value) => Number.isFinite(value) ? value + offset.y : value;
+    return Object.assign({}, normalized, {
+        x: (normalized.x || []).map(shiftX),
+        y: (normalized.y || []).map(shiftY),
+        segments: (normalized.segments || []).map(seg => [
+            shiftX(seg[0]),
+            shiftY(seg[1]),
+            shiftX(seg[2]),
+            shiftY(seg[3]),
+            ...seg.slice(4)
+        ]),
+        ui_offset: { x: offset.x, y: offset.y }
+    });
+}
+
+function selectedGroundTruthBase() {
+    const select = document.getElementById('groundtruth_select');
+    const selected = select ? select.value : null;
+    return groundTruths.find((gt, idx) => (gt.id || `gt_${idx}`) === selected) || groundTruths[0];
+}
+
+function refreshActiveGroundTruth() {
+    groundTruthOffset = readGroundTruthOffsetInputs();
+    activeGroundTruth = applyGroundTruthOffset(selectedGroundTruthBase());
+}
+
 function initGroundTruthSelector() {
     const select = document.getElementById('groundtruth_select');
     if (!select) return;
@@ -97,10 +205,10 @@ function initGroundTruthSelector() {
     }).join('');
 
     const saved = localStorage.getItem('uwb_sim_groundtruth');
-    if (saved && groundTruths.some(gt => gt.id === saved)) {
+    if (saved && groundTruths.some((gt, idx) => (gt.id || `gt_${idx}`) === saved)) {
         select.value = saved;
     }
-    activeGroundTruth = normalizeGroundTruth(groundTruths.find(gt => gt.id === select.value) || groundTruths[0]);
+    refreshActiveGroundTruth();
 }
 
 function updateGroundTruthPlot(track) {
@@ -116,10 +224,21 @@ function updateGroundTruthPlot(track) {
 function onGroundTruthChanged() {
     const select = document.getElementById('groundtruth_select');
     const selected = select ? select.value : null;
-    activeGroundTruth = normalizeGroundTruth(groundTruths.find(gt => gt.id === selected) || groundTruths[0]);
+    refreshActiveGroundTruth();
     if (selected) localStorage.setItem('uwb_sim_groundtruth', selected);
     updateGroundTruthPlot(activeGroundTruth);
     if (typeof update === 'function') update();
+}
+
+function onGroundTruthOffsetChanged() {
+    refreshActiveGroundTruth();
+    updateGroundTruthPlot(activeGroundTruth);
+    if (typeof update === 'function') update();
+}
+
+function resetGroundTruthOffset() {
+    setGroundTruthOffsetInputs({ x: 0, y: 0 });
+    onGroundTruthOffsetChanged();
 }
 
 function decodeMask(mask) {
@@ -416,6 +535,15 @@ function saveDefaults() {
         imu_lpf_cutoff_hz: document.getElementById('imu_lpf_cutoff_input').value,
         imu_filter_order: document.getElementById('imu_filter_order_input').value,
         groundtruth: document.getElementById('groundtruth_select') ? document.getElementById('groundtruth_select').value : null,
+        groundtruth_offset: readGroundTruthOffsetInputs(),
+        active_anchor_layout: activeAnchorLayoutId,
+        anchor_layouts: (() => {
+            saveActiveAnchorLayout();
+            return {
+                layout_1: cloneAnchors(anchorLayouts.layout_1),
+                layout_2: cloneAnchors(anchorLayouts.layout_2)
+            };
+        })(),
         anchors: readAnchorsFromInputs(),
         rules: [],
         tag_height: document.getElementById('tag_height_input').value,
@@ -531,9 +659,29 @@ function loadDefaults() {
             if (config.groundtruth) {
                 localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
             }
+            if (loadTuning && config.groundtruth_offset) {
+                setGroundTruthOffsetInputs(config.groundtruth_offset);
+            }
             if (Array.isArray(config.anchors) && config.anchors.length === anchors.length) {
                 anchors = cloneAnchors(config.anchors);
                 setAnchorInputs(anchors);
+            }
+            if (config.anchor_layouts) {
+                ensureAnchorLayouts();
+                ANCHOR_LAYOUT_IDS.forEach(id => {
+                    if (Array.isArray(config.anchor_layouts[id]) && config.anchor_layouts[id].length === anchors.length) {
+                        anchorLayouts[id] = cloneAnchors(config.anchor_layouts[id]);
+                    }
+                });
+                activeAnchorLayoutId = ANCHOR_LAYOUT_IDS.includes(config.active_anchor_layout)
+                    ? config.active_anchor_layout
+                    : 'layout_1';
+                anchors = cloneAnchors(anchorLayouts[activeAnchorLayoutId]);
+                setAnchorInputs(anchors);
+                setAnchorLayoutSelectValue(activeAnchorLayoutId);
+            } else {
+                ensureAnchorLayouts();
+                anchorLayouts[activeAnchorLayoutId] = cloneAnchors(anchors);
             }
             
             // Load UKF parameters
