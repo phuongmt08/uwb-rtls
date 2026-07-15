@@ -952,7 +952,7 @@ class SessionRepository:
             return None
 
         now = datetime.now()
-        output_dir = os.path.join(SHARED_DATA_DIR, now.strftime("%d_%m_%y"))
+        output_dir = os.path.join(SHARED_DATA_DIR, "studio", now.strftime("%d_%m_%y"))
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(
             output_dir,

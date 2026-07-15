@@ -794,3 +794,53 @@ def test_anchor_layout_response_publishes_to_shared_state_for_live_tracking():
     assert math.isclose(anchor["z"], 1.7, abs_tol=1e-6)
     assert anchor["label"] == "A3"
     assert anchor["placed"] is True
+
+
+def test_calib_data_is_exported_immediately_to_studio_csv(tmp_path):
+    app = _ensure_qt_app()
+    from repository.ranging_repository import RangingRepository
+    from simulation.module.module_csv import parse_csv_data
+
+    export_root = tmp_path / "studio"
+    repo = RangingRepository(calib_export_root=export_root)
+
+    def make_packet(seq: int, frame: int, distances: list[float]):
+        pkt = pb.packet_t()
+        pkt.hdr.addr.src = pb.PACKET_ADDR_MCU
+        pkt.hdr.addr.dst = pb.PACKET_ADDR_HOST
+        pkt.hdr.seq = seq
+        pkt.hdr.timestamp = 1234 + seq
+        pkt.calib_data.anchor_mask = 0x0F
+        pkt.calib_data.tx_frame_cnt = frame
+        pkt.calib_data.ax = 0.1
+        pkt.calib_data.ay = 0.2
+        pkt.calib_data.gz = 0.3
+        pkt.calib_data.px = 1.5
+        pkt.calib_data.py = 2.5
+        pkt.calib_data.distance.extend(distances)
+        pkt.calib_data.fp_amp_norm.extend([1.0, 1.1, 1.2, 1.3])
+        pkt.calib_data.fp_snr.extend([10.0, 11.0, 12.0, 13.0])
+        pkt.calib_data.error_frame_cnt = 2
+        pkt.calib_data.dt = 0.02
+        return pkt
+
+    assert repo.handle_packet("calib_data", make_packet(1, 10, [1.0, 2.0, 3.0, 4.0])) is True
+    assert repo.handle_packet("calib_data", make_packet(2, 11, [1.2, 2.0, 3.0, 4.0])) is True
+
+    export_path = Path(repo.calib_export_path)
+    assert export_path.exists()
+    assert export_path.parent.parent == export_root
+    assert export_path.name.endswith("_ukf_log_data.csv")
+
+    rows = export_path.read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 2
+    assert "Init" in rows[0]
+    assert "Update" in rows[1]
+    assert "| mask: 15 " in rows[1]
+    assert "| d1:  1.200000" in rows[1]
+
+    events = parse_csv_data(str(export_path))
+    assert [event.type for event in events] == ["Init", "Update"]
+    assert events[1].mask == 0x0F
+    assert math.isclose(float(events[1].distances[0]), 1.2, rel_tol=1e-6)
+    assert app is not None

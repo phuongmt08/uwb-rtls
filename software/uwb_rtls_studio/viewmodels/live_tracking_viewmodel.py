@@ -266,6 +266,8 @@ class LiveTrackingViewModel(QObject):
         if self._session_run_manager:
             self._session_run_manager.open_ranging_run()
         self.model.clear_history()
+        if self._ranging_repo and hasattr(self._ranging_repo, "reset_calib_export"):
+            self._ranging_repo.reset_calib_export()
         self._pending_position = None
         self._pending_position_meta = None
         self._pending_sensor_fusion = None
