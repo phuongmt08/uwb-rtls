@@ -712,9 +712,13 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
 #if TEST_UKF_STREAM_FUSION_LOG
     protobuf_calib_data_t calib_data;
     memset(&calib_data, 0, sizeof(calib_data));
+    const float imu_phase = (float)s_stream_test_sample_idx * 0.05f;
 
     calib_data.anchor_mask = anchor_mask;
     calib_data.tx_frame_cnt = s_stream_test_tx_frame_cnt;
+    calib_data.ax = 0.25f * sinf(imu_phase);
+    calib_data.ay = 0.20f * cosf(imu_phase);
+    calib_data.gz = 0.10f * sinf(imu_phase * 0.5f);
     calib_data.px = x;
     calib_data.py = y;
     calib_data.distance_count = TEST_UKF_STREAM_ANCHOR_COUNT;
