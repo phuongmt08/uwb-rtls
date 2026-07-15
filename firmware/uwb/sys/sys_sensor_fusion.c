@@ -56,6 +56,9 @@
 #define RAD2DEG							180.0f / 3.14159265358979323846f
 #define DEG2RAD							3.14159265358979323846f / 180.0f
 
+#define TEST_UKF_STREAM_MASK_PACKET_COUNT  50U
+#define TEST_UKF_STREAM_ANCHOR_COUNT       4U
+
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
 {
@@ -675,13 +678,30 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     stream_data.tril_y_m = to_proto_fixed2(y - 0.05f);
     stream_data.yaw_deg  = stream_data.ukf_yaw_deg;
 
-    stream_data.anchor_mask = 0U;
+    const uint8_t anchor_mask =
+        (uint8_t)((s_stream_test_sample_idx / TEST_UKF_STREAM_MASK_PACKET_COUNT) & 0x0FU);
+    static const float anchor_positions[TEST_UKF_STREAM_ANCHOR_COUNT][2] = {
+        {0.0f, 0.0f},
+        {4.0f, 0.0f},
+        {0.0f, 4.0f},
+        {4.0f, 4.0f},
+    };
+
+    stream_data.anchor_mask = anchor_mask;
     stream_data.ranging_error_count = s_stream_test_sample_idx;
     stream_data.timestamp_ms = now_ms;
     stream_data.zone_id = 0U;
-    stream_data.anchors_count = s_latest_anchor_data_count;
-    memcpy(stream_data.anchors, s_latest_anchor_data,
-           (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));
+    stream_data.anchors_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    for (uint32_t i = 0U; i < TEST_UKF_STREAM_ANCHOR_COUNT; i++)
+    {
+        const float dx = x - anchor_positions[i][0];
+        const float dy = y - anchor_positions[i][1];
+        protobuf_anchor_data_t *anchor = &stream_data.anchors[i];
+
+        anchor->anchor_id = i + 1U;
+        anchor->distance_mm = (uint32_t)(sqrtf(dx * dx + dy * dy) * 1000.0f);
+        anchor->weight = ((anchor_mask & (1U << i)) != 0U) ? 100 : 0;
+    }
 
     if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data))
     {
