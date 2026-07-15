@@ -153,6 +153,9 @@ float yaw_rad_cached   	= 0.0f;
 #if TEST_UKF_STREAM_BLE || TEST_UKF_STREAM_UART
 static uint32_t s_stream_test_sample_idx = 0U;
 #endif
+#if TEST_UKF_STREAM_BLE && TEST_UKF_STREAM_FUSION_LOG && ENABLE_SYS_FUSION
+static uint32_t s_stream_test_tx_frame_cnt = 0U;
+#endif
 
 /* Private function prototypes ---------------------------------------- */
 static float normalize_angle(float angle);
@@ -626,6 +629,9 @@ void sys_sensor_fusion_stream_test_init(network_core_t *stream)
 #if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
     CHECK_VOID(stream);
     s_stream_test_sample_idx = 0U;
+#if TEST_UKF_STREAM_FUSION_LOG
+    s_stream_test_tx_frame_cnt = 0U;
+#endif
     configure_adv(stream);
 #else
     (void)stream;
@@ -703,11 +709,40 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
         anchor->weight = ((anchor_mask & (1U << i)) != 0U) ? 100 : 0;
     }
 
+#if TEST_UKF_STREAM_FUSION_LOG
+    protobuf_calib_data_t calib_data;
+    memset(&calib_data, 0, sizeof(calib_data));
+
+    calib_data.anchor_mask = anchor_mask;
+    calib_data.tx_frame_cnt = s_stream_test_tx_frame_cnt;
+    calib_data.px = x;
+    calib_data.py = y;
+    calib_data.distance_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    calib_data.fp_amp_norm_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    calib_data.fp_snr_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    calib_data.error_frame_cnt = 0U;
+    calib_data.dt = 0.02f;
+
+    for (uint32_t i = 0U; i < TEST_UKF_STREAM_ANCHOR_COUNT; i++)
+    {
+        calib_data.distance[i] = (float)stream_data.anchors[i].distance_mm / 1000.0f;
+        calib_data.fp_amp_norm[i] = 1.0;
+        calib_data.fp_snr[i] = 20.0;
+    }
+
+    if (network_send_calib_data(&g_network_core,
+                                protobuf_PACKET_ADDR_HOST,
+                                &calib_data))
+    {
+        s_stream_test_tx_frame_cnt++;
+        s_stream_test_sample_idx++;
+    }
+#else
     if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data))
     {
         s_stream_test_sample_idx++;
     }
-
+#endif
 #else
     if (!ukf.initialized)
     {

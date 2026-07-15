@@ -33,6 +33,10 @@ typedef struct uwb_distance_msg uwb_distance_msg_t;
 #define TEST_UKF_STREAM_UART false
 #endif
 
+#ifndef TEST_UKF_STREAM_FUSION_LOG
+#define TEST_UKF_STREAM_FUSION_LOG false
+#endif
+
 #ifndef TEST_UKF_DISTANCE_ZERO_SIMULATION
 #define TEST_UKF_DISTANCE_ZERO_SIMULATION 0
 #endif
