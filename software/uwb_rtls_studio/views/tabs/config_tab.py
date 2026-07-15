@@ -22,7 +22,9 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QFrame, QCheckBox,
     QStackedWidget, QTabWidget, QAbstractItemView
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+from PyQt6.QtGui import QColor
 from PyQt6 import uic
 
 # Path to .ui file
@@ -41,6 +43,80 @@ DEVICE_TYPE_ANCHOR     = 2
 DEVICE_TYPE_GATEWAY    = 3
 DEVICE_TYPE_DEBUG_TOOL = 4
 
+UWB_DATA_RATE_TO_FW = {
+    "110 kbps": 0,
+    "850 kbps": 1,
+    "6.8 Mbps": 2,
+}
+UWB_DATA_RATE_FROM_FW = {
+    0: "110 kbps",
+    1: "850 kbps",
+    2: "6.8 Mbps",
+    # Compatibility with older app/mock values.
+    110: "110 kbps",
+    850: "850 kbps",
+    6800: "6.8 Mbps",
+}
+DEFAULT_UWB_DATA_RATE = 2
+
+UWB_PREAMBLE_LEN_TO_FW = {
+    "64 symbols": 0x04,
+    "128 symbols": 0x14,
+    "256 symbols": 0x24,
+    "512 symbols": 0x34,
+    "1024 symbols": 0x08,
+    "1536 symbols": 0x18,
+    "2048 symbols": 0x28,
+    "4096 symbols": 0x0C,
+}
+UWB_PREAMBLE_LEN_FROM_FW = {value: label for label, value in UWB_PREAMBLE_LEN_TO_FW.items()}
+DEFAULT_UWB_PREAMBLE_LEN = 0x34
+DEFAULT_UWB_PREAMBLE_LEN_TEXT = "512 symbols"
+
+UWB_RX_PAC_TO_FW = {"8": 0, "16": 1, "32": 2, "64": 3}
+UWB_RX_PAC_FROM_FW = {value: label for label, value in UWB_RX_PAC_TO_FW.items()}
+DEFAULT_UWB_RX_PAC = 2
+DEFAULT_UWB_RX_PAC_TEXT = "32"
+
+UWB_NS_SFD_TO_FW = {"Standard": 0, "Non-standard": 1}
+UWB_NS_SFD_FROM_FW = {value: label for label, value in UWB_NS_SFD_TO_FW.items()}
+DEFAULT_UWB_NS_SFD = 1
+DEFAULT_UWB_NS_SFD_TEXT = "Non-standard"
+
+UWB_PHR_MODE_TO_FW = {"Standard": 0, "Extended": 1}
+UWB_PHR_MODE_FROM_FW = {value: label for label, value in UWB_PHR_MODE_TO_FW.items()}
+DEFAULT_UWB_PHR_MODE = 0
+DEFAULT_UWB_PHR_MODE_TEXT = "Standard"
+DEFAULT_UWB_PG_DELAY = 0xC2
+
+def _flash_button(btn, color_hex: str = "#22D3EE", duration_ms: int = 450):
+    """Hiệu ứng glow phát sáng tắt dần khi nhấn nút.
+
+    Sử dụng QGraphicsDropShadowEffect + QPropertyAnimation để tạo
+    hiệu ứng viền sáng lan rộng rồi mờ dần sau khi nhấn. Không
+    ảnh hưởng đến layout vì dùng shadow effect.
+    """
+    effect = QGraphicsDropShadowEffect(btn)
+    effect.setBlurRadius(32)
+    effect.setColor(QColor(color_hex))
+    effect.setOffset(0, 0)
+    btn.setGraphicsEffect(effect)
+
+    anim = QPropertyAnimation(effect, b"blurRadius", btn)
+    anim.setDuration(duration_ms)
+    anim.setStartValue(32)
+    anim.setEndValue(0)
+    anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+    # Giữ tham chiếu Python trên widget để tránh GC hủy animation sớm
+    btn._flash_anim = anim
+    anim.finished.connect(lambda: _cleanup_flash(btn))
+    anim.start()
+
+
+def _cleanup_flash(btn):
+    """Xóa graphics effect và tham chiếu animation sau khi glow kết thúc."""
+    btn.setGraphicsEffect(None)
+    btn._flash_anim = None
 
 
 
@@ -59,6 +135,7 @@ class ConfigTab(QWidget):
 
         # Post-load setup
         self._setup_dev_widgets()
+        self._setup_prefilter_group()
         if self._has_widget("tx_power_spin"):
             if hasattr(self.tx_power_spin, "setDecimals"):
                 self.tx_power_spin.setDecimals(0)
@@ -271,6 +348,43 @@ class ConfigTab(QWidget):
         self.uwb_config_form.insertRow(6, self.lbl_rx_timeout, self.rx_timeout_spin)
         self.ranging_group.setVisible(False)
 
+    def _setup_prefilter_group(self):
+        from PyQt6.QtWidgets import QFormLayout
+
+        self.prefilter_group = QGroupBox("Positioning Prefilter")
+        self.prefilter_form = QFormLayout(self.prefilter_group)
+        self.prefilter_form.setHorizontalSpacing(10)
+        self.prefilter_form.setVerticalSpacing(8)
+
+        self.chk_prefilter_enable = QCheckBox("Enable")
+        self.chk_prefilter_enable.setChecked(True)
+        self.prefilter_form.addRow("Prefilter:", self.chk_prefilter_enable)
+
+        def add_double(name, label, value, decimals=4, minimum=0.0, maximum=1000.0):
+            spin = QDoubleSpinBox()
+            spin.setDecimals(decimals)
+            spin.setRange(minimum, maximum)
+            spin.setSingleStep(10 ** (-min(decimals, 3)))
+            spin.setValue(value)
+            setattr(self, name, spin)
+            self.prefilter_form.addRow(label, spin)
+            return spin
+
+        add_double("prefilter_recover_d2_spin", "Recover d2:", 5.0, decimals=3)
+        add_double("prefilter_reject_d2_spin", "Reject d2:", 7.5, decimals=3)
+        add_double("prefilter_r_base_spin", "R base:", 0.05, decimals=5)
+        add_double("prefilter_r_gate_spin", "R gate:", 0.10, decimals=5)
+        add_double("prefilter_velocity_weight_spin", "Velocity weight:", 0.5, decimals=4)
+        add_double("prefilter_min_covariance_spin", "Min covariance:", 1.0e-6, decimals=8, maximum=1.0)
+
+        self.col3_container = QWidget()
+        self.col3_layout = QVBoxLayout(self.col3_container)
+        self.col3_layout.setContentsMargins(0, 0, 0, 0)
+        self.col3_layout.setSpacing(12)
+        self.col3_layout.addWidget(self.fusion_group)
+        self.col3_layout.addWidget(self.prefilter_group)
+        self.col3_layout.addStretch()
+        self._dev_widgets.append(self.prefilter_group)
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
         self._dev_widgets = [
@@ -298,6 +412,7 @@ class ConfigTab(QWidget):
                 getattr(self, "uwb_adv_separator", None),
                 getattr(self, "fusion_group", None),
                 getattr(self, "pos_calib_group", None),
+                getattr(self, "prefilter_group", None),
             )
             if widget is not None
         ]
@@ -434,7 +549,8 @@ class ConfigTab(QWidget):
             getattr(self, "ranging_group", None),
             getattr(self, "device_operations_group", None),
             getattr(self, "sys_group", None),
-            getattr(self, "col2_container", None)
+            getattr(self, "col2_container", None),
+            getattr(self, "col3_container", None)
         ]
         for w in widgets:
             if w is not None:
@@ -452,7 +568,7 @@ class ConfigTab(QWidget):
 
         # Update visibility of inner developer-only widgets in UWB Group
         for w in self._dev_widgets:
-            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None)):
+            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None), getattr(self, "prefilter_group", None)):
                 w.setVisible(enabled)
 
         # Show or hide connection parameters in BLE Group - always show in both modes
@@ -480,8 +596,8 @@ class ConfigTab(QWidget):
             self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
             # Column 2 Container (spanning row 0 and 1)
             self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
-            # Sensor Fusion (Col 3, spanning row 0 and 1)
-            self.main_layout.addWidget(self.fusion_group, 0, 3, 2, 1)
+            # Developer positioning controls (Col 3, spanning row 0 and 1)
+            self.main_layout.addWidget(self.col3_container, 0, 3, 2, 1)
 
             # Row 1: Host Transport (Col 0), BLE Config (Col 1)
             self.main_layout.addWidget(self.host_group, 1, 0, 1, 1)
@@ -492,13 +608,15 @@ class ConfigTab(QWidget):
             self.main_layout.addWidget(self.sys_group, 2, 3, 1, 1, Qt.AlignmentFlag.AlignBottom)
 
             # Column Stretch
-            self.main_layout.setColumnStretch(0, 1)
-            self.main_layout.setColumnStretch(1, 1)
-            self.main_layout.setColumnStretch(2, 1)
-            self.main_layout.setColumnStretch(3, 1)
+            self.main_layout.setColumnStretch(0, 10)
+            self.main_layout.setColumnStretch(1, 10)
+            self.main_layout.setColumnStretch(2, 10)
+            self.main_layout.setColumnStretch(3, 15)
 
             # Visibility
             self.fusion_group.setVisible(True)
+            self.prefilter_group.setVisible(True)
+            self.col3_container.setVisible(True)
             self.host_group.setVisible(True)
             if hasattr(self, "ranging_group") and self.ranging_group is not None:
                 self.ranging_group.setVisible(False)
@@ -530,6 +648,8 @@ class ConfigTab(QWidget):
 
             # Visibility
             self.fusion_group.setVisible(False)
+            self.prefilter_group.setVisible(False)
+            self.col3_container.setVisible(False)
             self.host_group.setVisible(True)
             if hasattr(self, "ranging_group") and self.ranging_group is not None:
                 self.ranging_group.setVisible(False)
@@ -552,19 +672,27 @@ class ConfigTab(QWidget):
         self._vm.sys_config_updated.connect(self._on_sys_config_loaded)
         self._vm.sys_ranging_cfg_updated.connect(self._on_sys_ranging_cfg_loaded)
         self._vm.sensor_fusion_cfg_updated.connect(self._on_sensor_fusion_cfg_loaded)
+        self._vm.prefilter_cfg_updated.connect(self._on_prefilter_cfg_loaded)
         self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
         if hasattr(self._vm, "ble_conn_params_updated"):
             self._vm.ble_conn_params_updated.connect(self._on_ble_conn_params_loaded)
         if hasattr(self._vm, "device_type_updated"):
             self._vm.device_type_updated.connect(self._on_device_type_loaded)
+        # Clear visible values immediately when the active device session is
+        # reset; do not let designer/.ui defaults look like hardware data.
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.device_session_reset.connect(lambda _reason="": self._reset_display_fields())
+        except Exception:
+            pass
 
         # Connect UI buttons to viewmodel actions
         self.btn_read_device.clicked.connect(self._read_device_config)
         self.btn_write_device.clicked.connect(self._write_device_config)
         self.btn_write_all.clicked.connect(self._write_all_devices)
         self.btn_write_all.setToolTip("Bulk target switching is disabled. This action applies to the connected device only.")
-        self.btn_device_reset.clicked.connect(self._vm.device_reset)
-        self.btn_bootloader.clicked.connect(self._vm.enter_bootloader)
+        self.btn_device_reset.clicked.connect(self._on_device_reset_clicked)
+        self.btn_bootloader.clicked.connect(self._on_bootloader_clicked)
         self.btn_set_ble.clicked.connect(self._on_set_ble_clicked)
         self.btn_apply_host_transport.clicked.connect(self._on_apply_host_transport_clicked)
         self.btn_get_device_type.clicked.connect(self._on_get_device_type)
@@ -683,6 +811,15 @@ class ConfigTab(QWidget):
         if self._has_widget("init_p_bias_gz_spin"):
             set_widget_placeholder(self.init_p_bias_gz_spin)
             
+        # Reset Positioning Prefilter widgets
+        if self._has_widget("chk_prefilter_enable"):
+            set_widget_placeholder(self.chk_prefilter_enable)
+        for widget_name in (
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
+            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin"
+        ):
+            if self._has_widget(widget_name):
+                set_widget_placeholder(getattr(self, widget_name))
         # Reset Position Auto-Calibration widgets
         if self._has_widget("chk_enable_anchor_calib"):
             set_widget_placeholder(self.chk_enable_anchor_calib)
@@ -719,6 +856,22 @@ class ConfigTab(QWidget):
         set_widget_placeholder(self.spin_ble_latency)
         set_widget_placeholder(self.spin_ble_timeout)
         
+        # Factory OTP fields are write-only inputs, not device telemetry.
+        # Clear their designer defaults without disabling user write controls.
+        if hasattr(self, "otp_dev_type_combo"):
+            if self.otp_dev_type_combo.findText("-") < 0:
+                self.otp_dev_type_combo.insertItem(0, "-")
+            self.otp_dev_type_combo.setCurrentText("-")
+            self.otp_dev_type_combo.setEnabled(True)
+        if hasattr(self, "otp_mfg_date_input"):
+            self.otp_mfg_date_input.clear()
+            self.otp_mfg_date_input.setEnabled(True)
+        for widget_name in ("otp_hw_rev_spin", "otp_tx_delay_spin", "otp_rx_delay_spin"):
+            if hasattr(self, widget_name):
+                widget = getattr(self, widget_name)
+                widget.setEnabled(True)
+                widget.setValue(0)
+
         # Reset Anchor Layout table placeholders (deprecated)
         pass
 
@@ -741,12 +894,33 @@ class ConfigTab(QWidget):
         pass
 
     def _selected_target(self) -> dict:
+        role_map = {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3, "Tag": 1, "Anchor": 2, "Gateway": 3}
         if self._vm and self._vm.model.is_connected:
+            try:
+                from utils.app_state import shared_app_state
+                connected = dict(shared_app_state.connected_device or {})
+                sys_cfg = dict(shared_app_state.sys_config or {})
+            except Exception:
+                connected = {}
+                sys_cfg = {}
+            role_text = str(self._vm.model.connected_role or connected.get("Role") or connected.get("role") or "").strip()
+            role = role_map.get(role_text.upper(), role_map.get(role_text, self._role_from_ui()))
+            raw_device_id = (
+                sys_cfg.get("device_id")
+                or connected.get("device_id")
+                or connected.get("Device ID")
+                or self._parse_device_id_from_ui(default=0)
+                or 0
+            )
+            try:
+                device_id = int(str(raw_device_id), 0)
+            except (TypeError, ValueError):
+                device_id = 0
             return {
                 "mac": self._vm.model.connected_mac,
-                "role": self._role_from_ui(),
-                "device_type": self._role_from_ui(),
-                "device_id": self._parse_device_id_from_ui(default=1),
+                "role": role,
+                "device_type": role,
+                "device_id": device_id,
             }
         return {
             "mac": "",
@@ -754,7 +928,6 @@ class ConfigTab(QWidget):
             "device_type": self._role_from_ui(),
             "device_id": self._parse_device_id_from_ui(default=1),
         }
-
     def _apply_target_to_ui(self, target: dict):
         if not hasattr(self, "_last_anchor_layout"):
             self._last_anchor_layout = []
@@ -813,12 +986,35 @@ class ConfigTab(QWidget):
                 pass
         return anchors
 
+    def _prefilter_config_from_ui(self) -> dict:
+        return {
+            "enable": self.chk_prefilter_enable.isChecked(),
+            "recover_d2": self._spin_value("prefilter_recover_d2_spin", 5.0),
+            "reject_d2": self._spin_value("prefilter_reject_d2_spin", 7.5),
+            "r_base": self._spin_value("prefilter_r_base_spin", 0.05),
+            "r_gate": self._spin_value("prefilter_r_gate_spin", 0.10),
+            "velocity_weight": self._spin_value("prefilter_velocity_weight_spin", 0.5),
+            "min_covariance": self._spin_value("prefilter_min_covariance_spin", 1.0e-6),
+        }
     def _read_device_config(self):
         if not self._vm or not self._require_connected_device("reading configuration"):
             return
         target = self._selected_target()
-        self._apply_target_to_ui(target)
-        self._vm.read_device_config(target)
+        # Read must never write role/device-id defaults into the UI before a
+        # real response arrives. The previous call injected Tag when the
+        # current device had not returned sys_config_resp yet.
+        _flash_button(self.btn_read_device, "#22D3EE")   # Glow cyan khi bấm
+        self._vm.read_device_config(target, force=True)   # force=True: bypass cache, gửi thật xuống phần cứng
+
+    def _on_device_reset_clicked(self):
+        if self._vm:
+            _flash_button(self.btn_device_reset, "#EF4444")
+            self._vm.device_reset()
+
+    def _on_bootloader_clicked(self):
+        if self._vm:
+            _flash_button(self.btn_bootloader, "#F59E0B")
+            self._vm.enter_bootloader()
 
     def _on_ble_min_interval_changed(self, value: int):
         if self.spin_ble_max_int.value() < value:
@@ -874,6 +1070,7 @@ class ConfigTab(QWidget):
             return
         target = self._selected_target()
         self._apply_target_to_ui(target)
+        _flash_button(self.btn_write_device, "#22D3EE")   # Glow cyan khi bấm
 
         from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QVBoxLayout
 
@@ -901,6 +1098,10 @@ class ConfigTab(QWidget):
         chk_fusion = QCheckBox("Sensor Fusion (UKF) Configuration")
         chk_fusion.setChecked(True)
         dialog_layout.addWidget(chk_fusion)
+
+        chk_prefilter = QCheckBox("Positioning Prefilter Configuration")
+        chk_prefilter.setChecked(True)
+        dialog_layout.addWidget(chk_prefilter)
         
         chk_calib = QCheckBox("Position Calibration Configuration")
         chk_calib.setChecked(True)
@@ -931,41 +1132,27 @@ class ConfigTab(QWidget):
                 uwb_channel = 5
 
             rate_str = self.val_datarate.currentText()
-            rate_map = {"110 kbps": 110, "850 kbps": 850, "6.8 Mbps": 6800}
-            uwb_data_rate = rate_map.get(rate_str, 6800)
+            uwb_data_rate = UWB_DATA_RATE_TO_FW.get(rate_str, DEFAULT_UWB_DATA_RATE)
 
             prf_str = self.val_prf.currentText()
             prf_map = {"16 MHz": 16, "64 MHz": 64}
             uwb_prf = prf_map.get(prf_str, 64)
 
             # 6 developer-mode UWB fields
-            preamble_len_map = {
-                "64 symbols": 0x04,
-                "128 symbols": 0x08,
-                "256 symbols": 0x18,
-                "512 symbols": 0x28,
-                "1024 symbols": 0x14,
-                "1536 symbols": 0x0C,
-                "2048 symbols": 0x24,
-                "4096 symbols": 0x34
-            }
-            preamble_len_text = self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else "4096 symbols"
-            uwb_preamble_len = preamble_len_map.get(preamble_len_text, 0x34)
+            preamble_len_text = self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else DEFAULT_UWB_PREAMBLE_LEN_TEXT
+            uwb_preamble_len = UWB_PREAMBLE_LEN_TO_FW.get(preamble_len_text, DEFAULT_UWB_PREAMBLE_LEN)
 
-            pac_map = {"8": 0, "16": 1, "32": 2, "64": 3}
-            rx_pac_text = self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else "8"
-            uwb_rx_pac = pac_map.get(rx_pac_text, 0)
+            rx_pac_text = self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else DEFAULT_UWB_RX_PAC_TEXT
+            uwb_rx_pac = UWB_RX_PAC_TO_FW.get(rx_pac_text, DEFAULT_UWB_RX_PAC)
 
-            sfd_map = {"Standard": 0, "Non-standard": 1}
-            ns_sfd_text = self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else "Standard"
-            uwb_ns_sfd = sfd_map.get(ns_sfd_text, 0)
+            ns_sfd_text = self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else DEFAULT_UWB_NS_SFD_TEXT
+            uwb_ns_sfd = UWB_NS_SFD_TO_FW.get(ns_sfd_text, DEFAULT_UWB_NS_SFD)
 
-            phr_map = {"Standard": 0, "Extended": 1}
-            phr_mode_text = self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else "Standard"
-            uwb_phr_mode = phr_map.get(phr_mode_text, 0)
+            phr_mode_text = self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else DEFAULT_UWB_PHR_MODE_TEXT
+            uwb_phr_mode = UWB_PHR_MODE_TO_FW.get(phr_mode_text, DEFAULT_UWB_PHR_MODE)
 
-            smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False
-            pg_delay = self._spin_value("val_pg_delay", 193)
+            smart_tx_power = self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else True
+            pg_delay = self._spin_value("val_pg_delay", DEFAULT_UWB_PG_DELAY)
 
             sys_config = dict(
                 role=role,
@@ -1012,6 +1199,8 @@ class ConfigTab(QWidget):
                 init_p_bias_ay=self._spin_value("init_p_bias_ay_spin", 0.01),
                 init_p_bias_gz=self._spin_value("init_p_bias_gz_spin", 0.01)
             )
+
+        prefilter_config = self._prefilter_config_from_ui() if chk_prefilter.isChecked() else None
 
         pos_calib_config = None
         if chk_calib.isChecked() and self._has_widget("chk_enable_anchor_calib"):
@@ -1107,11 +1296,13 @@ class ConfigTab(QWidget):
             ranging_config=ranging_config,
             sys_config=sys_config,
             sensor_fusion_config=sensor_fusion_config,
+            prefilter_config=prefilter_config,
             pos_calib_config=pos_calib_config,
             factory_otp_config=factory_otp_config,
         )
 
     def _write_all_devices(self):
+        _flash_button(self.btn_write_all, "#22D3EE")   # Glow cyan khi bấm
         QMessageBox.information(self, "Broadcast Write", "Write All Devices will be enabled after broadcast support is implemented.")
 
     def _collect_write_snapshot(self) -> dict:
@@ -1123,26 +1314,12 @@ class ConfigTab(QWidget):
             uwb_channel = int(self.val_channel.currentText())
         except ValueError:
             uwb_channel = 5
-        rate_map = {"110 kbps": 110, "850 kbps": 850, "6.8 Mbps": 6800}
         prf_map = {"16 MHz": 16, "64 MHz": 64}
-        preamble_len_map = {
-            "64 symbols": 0x04,
-            "128 symbols": 0x08,
-            "256 symbols": 0x18,
-            "512 symbols": 0x28,
-            "1024 symbols": 0x14,
-            "1536 symbols": 0x0C,
-            "2048 symbols": 0x24,
-            "4096 symbols": 0x34,
-        }
-        pac_map = {"8": 0, "16": 1, "32": 2, "64": 3}
-        sfd_map = {"Standard": 0, "Non-standard": 1}
-        phr_map = {"Standard": 0, "Extended": 1}
         sys_config = {
             "role": role,
             "device_id": device_id,
             "uwb_channel": uwb_channel,
-            "uwb_data_rate": rate_map.get(self.val_datarate.currentText(), 6800),
+            "uwb_data_rate": UWB_DATA_RATE_TO_FW.get(self.val_datarate.currentText(), DEFAULT_UWB_DATA_RATE),
             "uwb_prf": prf_map.get(self.val_prf.currentText(), 64),
             "tx_antenna_delay": self.tx_delay_spin.value(),
             "rx_antenna_delay": self.rx_delay_spin.value(),
@@ -1150,12 +1327,12 @@ class ConfigTab(QWidget):
             "uwb_preamble_code": self.preamble_spin.value(),
             "ranging_period_ms": self.rng_period_spin.value(),
             "rx_timeout_ms": self.rx_timeout_spin.value(),
-            "uwb_preamble_len": preamble_len_map.get(self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else "4096 symbols", 0x34),
-            "uwb_rx_pac": pac_map.get(self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else "8", 0),
-            "uwb_ns_sfd": sfd_map.get(self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else "Standard", 0),
-            "uwb_phr_mode": phr_map.get(self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else "Standard", 0),
-            "smart_tx_power": self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else False,
-            "pg_delay": self._spin_value("val_pg_delay", 193),
+            "uwb_preamble_len": UWB_PREAMBLE_LEN_TO_FW.get(self.val_preamble_len.currentText() if self._has_widget("val_preamble_len") else DEFAULT_UWB_PREAMBLE_LEN_TEXT, DEFAULT_UWB_PREAMBLE_LEN),
+            "uwb_rx_pac": UWB_RX_PAC_TO_FW.get(self.val_rx_pac.currentText() if self._has_widget("val_rx_pac") else DEFAULT_UWB_RX_PAC_TEXT, DEFAULT_UWB_RX_PAC),
+            "uwb_ns_sfd": UWB_NS_SFD_TO_FW.get(self.val_ns_sfd.currentText() if self._has_widget("val_ns_sfd") else DEFAULT_UWB_NS_SFD_TEXT, DEFAULT_UWB_NS_SFD),
+            "uwb_phr_mode": UWB_PHR_MODE_TO_FW.get(self.val_phr_mode.currentText() if self._has_widget("val_phr_mode") else DEFAULT_UWB_PHR_MODE_TEXT, DEFAULT_UWB_PHR_MODE),
+            "smart_tx_power": self.chk_smart_tx_power.isChecked() if self._has_widget("chk_smart_tx_power") else True,
+            "pg_delay": self._spin_value("val_pg_delay", DEFAULT_UWB_PG_DELAY),
         }
         sensor_fusion_config = {
             "alpha": self.alpha_spin.value(),
@@ -1173,6 +1350,8 @@ class ConfigTab(QWidget):
             "init_p_bias_ay": self._spin_value("init_p_bias_ay_spin", 0.01),
             "init_p_bias_gz": self._spin_value("init_p_bias_gz_spin", 0.01),
         }
+        prefilter_config = self._prefilter_config_from_ui()
+
         pos_calib_config = {}
         if self._has_widget("chk_enable_anchor_calib"):
             pos_calib_config = {
@@ -1196,6 +1375,7 @@ class ConfigTab(QWidget):
             "ranging_config": {"period_ms": self.rng_period_spin.value(), "timeout_ms": self.rx_timeout_spin.value()},
             "sys_config": sys_config,
             "sensor_fusion_config": sensor_fusion_config,
+            "prefilter_config": prefilter_config,
             "pos_calib_config": pos_calib_config,
         }
 
@@ -1262,10 +1442,9 @@ class ConfigTab(QWidget):
         role = role_map.get(self._current_role, "Tag")
         set_widget_value(self.val_role, role)
 
-        # Map data rate (1 = 110kbps, 2 = 850kbps, 3 = 6.8Mbps)
-        rate_val = cfg.get("uwb_data_rate", 3)
-        rate_map = {1: "110 kbps", 2: "850 kbps", 3: "6.8 Mbps", 110: "110 kbps", 850: "850 kbps", 6800: "6.8 Mbps"}
-        rate = rate_map.get(rate_val, "6.8 Mbps")
+        # Firmware sys_config.h: 0=110kbps, 1=850kbps, 2=6.8Mbps.
+        rate_val = cfg.get("uwb_data_rate", DEFAULT_UWB_DATA_RATE)
+        rate = UWB_DATA_RATE_FROM_FW.get(rate_val, "6.8 Mbps")
         set_widget_value(self.val_datarate, rate)
 
         # Map PRF (1 = 16MHz, 2 = 64MHz)
@@ -1285,39 +1464,26 @@ class ConfigTab(QWidget):
         set_widget_value(self.preamble_spin, cfg.get("uwb_preamble_code", 10))
 
         # Map the 6 developer-mode UWB fields
-        preamble_len_rev = {
-            0x04: "64 symbols",
-            0x08: "128 symbols",
-            0x18: "256 symbols",
-            0x28: "512 symbols",
-            0x14: "1024 symbols",
-            0x0C: "1536 symbols",
-            0x24: "2048 symbols",
-            0x34: "4096 symbols"
-        }
-        preamble_len_val = cfg.get("uwb_preamble_len", 0x34)
+        preamble_len_val = cfg.get("uwb_preamble_len", DEFAULT_UWB_PREAMBLE_LEN)
         if self._has_widget("val_preamble_len"):
-            set_widget_value(self.val_preamble_len, preamble_len_rev.get(preamble_len_val, "4096 symbols"))
+            set_widget_value(self.val_preamble_len, UWB_PREAMBLE_LEN_FROM_FW.get(preamble_len_val, DEFAULT_UWB_PREAMBLE_LEN_TEXT))
 
-        pac_rev = {0: "8", 1: "16", 2: "32", 3: "64"}
-        pac_val = cfg.get("uwb_rx_pac", 0)
+        pac_val = cfg.get("uwb_rx_pac", DEFAULT_UWB_RX_PAC)
         if self._has_widget("val_rx_pac"):
-            set_widget_value(self.val_rx_pac, pac_rev.get(pac_val, "8"))
+            set_widget_value(self.val_rx_pac, UWB_RX_PAC_FROM_FW.get(pac_val, DEFAULT_UWB_RX_PAC_TEXT))
 
-        sfd_rev = {0: "Standard", 1: "Non-standard"}
-        sfd_val = cfg.get("uwb_ns_sfd", 0)
+        sfd_val = cfg.get("uwb_ns_sfd", DEFAULT_UWB_NS_SFD)
         if self._has_widget("val_ns_sfd"):
-            set_widget_value(self.val_ns_sfd, sfd_rev.get(sfd_val, "Standard"))
+            set_widget_value(self.val_ns_sfd, UWB_NS_SFD_FROM_FW.get(sfd_val, DEFAULT_UWB_NS_SFD_TEXT))
 
-        phr_rev = {0: "Standard", 1: "Extended"}
-        phr_val = cfg.get("uwb_phr_mode", 0)
+        phr_val = cfg.get("uwb_phr_mode", DEFAULT_UWB_PHR_MODE)
         if self._has_widget("val_phr_mode"):
-            set_widget_value(self.val_phr_mode, phr_rev.get(phr_val, "Standard"))
+            set_widget_value(self.val_phr_mode, UWB_PHR_MODE_FROM_FW.get(phr_val, DEFAULT_UWB_PHR_MODE_TEXT))
         
         if self._has_widget("chk_smart_tx_power"):
-            set_widget_value(self.chk_smart_tx_power, cfg.get("smart_tx_power", False))
+            set_widget_value(self.chk_smart_tx_power, cfg.get("smart_tx_power", True))
         if self._has_widget("val_pg_delay"):
-            set_widget_value(self.val_pg_delay, cfg.get("pg_delay", 193))
+            set_widget_value(self.val_pg_delay, cfg.get("pg_delay", DEFAULT_UWB_PG_DELAY))
             
         # if self._last_anchor_layout:
         #     self._apply_anchor_layout_to_table()
@@ -1356,6 +1522,25 @@ class ConfigTab(QWidget):
             if self._has_widget(widget_name):
                 set_widget_value(getattr(self, widget_name), cfg.get(key))
 
+    def _on_prefilter_cfg_loaded(self, cfg):
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        widgets = (
+            "chk_prefilter_enable",
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
+            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin",
+        )
+        if not cfg:
+            for widget_name in widgets:
+                if self._has_widget(widget_name):
+                    set_widget_placeholder(getattr(self, widget_name))
+            return
+        set_widget_value(self.chk_prefilter_enable, cfg.get("enable", True))
+        set_widget_value(self.prefilter_recover_d2_spin, cfg.get("recover_d2", 5.0))
+        set_widget_value(self.prefilter_reject_d2_spin, cfg.get("reject_d2", 7.5))
+        set_widget_value(self.prefilter_r_base_spin, cfg.get("r_base", 0.05))
+        set_widget_value(self.prefilter_r_gate_spin, cfg.get("r_gate", 0.10))
+        set_widget_value(self.prefilter_velocity_weight_spin, cfg.get("velocity_weight", 0.5))
+        set_widget_value(self.prefilter_min_covariance_spin, cfg.get("min_covariance", 1.0e-6))
     def _on_pos_calib_cfg_loaded(self, cfg):
         from utils.helpers import set_widget_placeholder, set_widget_value
         if not cfg:
@@ -1437,7 +1622,8 @@ class ConfigTab(QWidget):
 
     def _on_get_device_type(self):
         if self._vm and self._require_connected_device("reading device type"):
-            self._vm.read_device_type()
+            _flash_button(self.btn_get_device_type, "#22D3EE")   # Glow cyan
+            self._vm.read_device_type(force=True)                 # force=True: gửi thật xuống phần cứng
 
     def _on_set_device_type(self):
         if self._vm and self._require_connected_device("writing device type"):
@@ -1448,15 +1634,19 @@ class ConfigTab(QWidget):
                 "Debug Tool": 4
             }
             dev_type = text_map.get(self.combo_device_type.currentText(), 1)
+            _flash_button(self.btn_set_device_type, "#22D3EE")   # Glow cyan
             self._vm.write_device_type(dev_type)
 
     def _on_device_type_loaded(self, device_type: int):
-        from utils.helpers import set_widget_value
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        if not int(device_type or 0):
+            set_widget_placeholder(self.combo_device_type)
+            return
         type_map = {
             1: "Tag",
             2: "Anchor",
             3: "Gateway",
             4: "Debug Tool"
         }
-        text = type_map.get(device_type, "Tag")
+        text = type_map.get(int(device_type), "-")
         set_widget_value(self.combo_device_type, text)

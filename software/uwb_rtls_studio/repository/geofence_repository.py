@@ -63,6 +63,13 @@ class GeofenceRepository:
         else:
             self._meta.pop("active_room_ids", None)
 
+    def get_active_room_id(self) -> str:
+        active_ids = self.get_active_room_ids()
+        return active_ids[0] if active_ids else ""
+
+    def set_active_room_id(self, room_id: str) -> None:
+        self.set_active_room_ids([room_id] if room_id else [])
+
     def _coerce_int_id(self, value, default: int = 0) -> int:
         if value is None or value == "":
             return default
@@ -171,10 +178,11 @@ class GeofenceRepository:
 
             self._load_zone_list(data.get("rule_zones", []))
 
+            has_structured_map = bool(map_objects) or bool(data.get("rule_zones"))
             legacy_objects = data.get("objects", [])
-            if legacy_objects:
+            if legacy_objects and not has_structured_map:
                 self._load_zone_list(legacy_objects)
-            elif data.get("geofences"):
+            elif data.get("geofences") and not has_structured_map:
                 self._load_zone_list(data.get("geofences", []))
 
             self._anchors = [
@@ -197,8 +205,9 @@ class GeofenceRepository:
             rooms, walls, objects, rule_zones = self._split_zones()
             anchors = [dict(anchor) for anchor in self._anchors]
             meta = dict(self._meta)
+            meta.pop("editor_settings", None)
             meta.update({
-                "name": self._meta.get("name", "Virtual_Map_Config"),
+                "name": meta.get("name", "Virtual_Map_Config"),
                 "version": 2,
                 "schema": "uwb_rtls_geofence_map",
             })

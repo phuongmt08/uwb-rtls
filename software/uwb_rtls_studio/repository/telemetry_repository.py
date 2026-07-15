@@ -15,6 +15,12 @@ class TelemetryRepository(QObject):
         super().__init__(parent)
         self._latest_by_device: dict[str, dict] = {}
         self._telemetry_model = telemetry_model
+        shared_app_state.device_session_reset.connect(self.reset_session)
+
+    def reset_session(self, _reason: str = "") -> None:
+        self._latest_by_device.clear()
+        if self._telemetry_model and hasattr(self._telemetry_model, "reset_session"):
+            self._telemetry_model.reset_session(_reason)
 
     def handle_packet(self, param_name: str, pkt, device_key: str = "") -> bool:
         if param_name == "battery_info_resp":

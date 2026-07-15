@@ -98,6 +98,7 @@ class DeviceInfoViewModel(QObject):
         shared_app_state.rtos_resource_changed.connect(self._on_rtos_resource_changed)
         shared_app_state.rtos_task_stats_changed.connect(self._on_rtos_task_stats_changed)
         shared_app_state.device_type_changed.connect(self._on_device_type_changed)
+        shared_app_state.device_session_reset.connect(self._on_device_session_reset)
 
         # ── Handle Dongle Connection Lifecycle ───────────────────────
         if self.dongle_model:
@@ -171,6 +172,12 @@ class DeviceInfoViewModel(QObject):
             return self.model.disconnect_device(reason=reason)
         return False
 
+    def start_rtos_polling(self):
+        return self.model.start_rtos_polling()
+
+    def stop_rtos_polling(self):
+        return self.model.stop_rtos_polling()
+
     def start_ble_scan(self, duration_ms: int = 5000):
         """Trigger a finite BLE scan manually without clearing the current advertising snapshot."""
         self.model.start_scan(clear_results=False, force=True, duration_ms=duration_ms)
@@ -200,6 +207,35 @@ class DeviceInfoViewModel(QObject):
     #  PRESENTATION LOGIC (Model signal → format → UI signal)
     # ═══════════════════════════════════════════════════════════════════
 
+    def _connected_role(self) -> str:
+        try:
+            from utils.app_state import shared_app_state
+            role = shared_app_state.connected_device.get("Role") or shared_app_state.connected_device.get("role")
+            return str(role or "").strip().upper().replace("DEVICE_ROLE_", "")
+        except Exception:
+            return ""
+
+    def _on_device_session_reset(self, _reason: str = "") -> None:
+        self._last_telemetry = {}
+        self._last_rtos_resource = {}
+        self._last_rtos_tasks = []
+        if self._telemetry_model and hasattr(self._telemetry_model, "reset_session"):
+            self._telemetry_model.reset_session(_reason)
+        self.telemetry_updated.emit({
+            "bat_soc_percent": None,
+            "bat_voltage_str": "-",
+            "remaining_str": "-",
+            "charging_str": "-",
+            "mcu_temp_str": "-",
+            "uwb_temp_str": "-",
+            "imu_temp_str": "-",
+            "vdda_str": "-",
+            "uwb_vbat_str": "-",
+            "heap_usage": "-",
+            "stack_usage": "-",
+            "cpu_usage": "-",
+        })
+
     def _on_device_info_parsed(self, data: dict):
         """Forward device info with connected device name/mac merged."""
         merged = {
@@ -211,9 +247,11 @@ class DeviceInfoViewModel(QObject):
 
     def _on_battery_info_parsed(self, data: dict):
         """Format telemetry data before sending to View."""
+        data = dict(data or {})
+        if self._connected_role() == "ANCHOR" and float(data.get("imu_temp_c") or 0.0) == 0.0:
+            data["imu_temp_c"] = None
         if self._telemetry_model:
-            if data.get("source") != "device_rx":
-                self._telemetry_model.handle_battery_info(data)
+            self._telemetry_model.handle_battery_info(data)
             formatted_data = self._telemetry_model.display_snapshot()
         else:
             formatted_data = {

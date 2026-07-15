@@ -8,9 +8,14 @@ debugging.
 from __future__ import annotations
 
 import time
+import logging
 from collections import deque
 
 from PyQt6.QtCore import QObject, pyqtSignal
+
+from utils.app_state import shared_app_state
+
+log = logging.getLogger(__name__)
 
 
 class RangingRepository(QObject):
@@ -29,6 +34,14 @@ class RangingRepository(QObject):
         self._calib_samples = deque(maxlen=max_positions)
         self._anchor_layout: list[dict] = []
         self._stats: dict = {}
+        shared_app_state.device_session_reset.connect(self.reset_session)
+
+    def reset_session(self, _reason: str = "") -> None:
+        self._positions.clear()
+        self._fusion_samples.clear()
+        self._calib_samples.clear()
+        self._anchor_layout = []
+        self._stats = {}
 
     @staticmethod
     def _decode_fixed2(value) -> float:
@@ -82,7 +95,9 @@ class RangingRepository(QObject):
             )
             return True
         if param_name == "anchor_layout_resp":
-            self.parse_anchor_layout(pkt.anchor_layout_resp)
+            seq = int(getattr(getattr(pkt, "hdr", None), "seq", 0) or 0)
+            anchors = self.parse_anchor_layout(pkt.anchor_layout_resp)
+            log.info("[ANCHOR_LAYOUT] received seq=%s anchors=%s; published to SharedAppState/LiveTracking", seq, len(anchors))
             return True
         if param_name == "ranging_status_resp":
             self.parse_ranging_status(pkt.ranging_status_resp)
@@ -212,17 +227,44 @@ class RangingRepository(QObject):
     def parse_anchor_layout(self, resp) -> list[dict]:
         anchors = []
         for a in getattr(resp, "anchors", []):
+            anchor_id = int(getattr(a, "anchor_id", 0))
+
             def coord_or_none(name: str):
                 return float(getattr(a, name))
 
+            x_m = coord_or_none("x_m")
+            y_m = coord_or_none("y_m")
+            z_m = coord_or_none("z_m")
             anchors.append({
-                "anchor_id": int(getattr(a, "anchor_id", 0)),
-                "x_m": coord_or_none("x_m"),
-                "y_m": coord_or_none("y_m"),
-                "z_m": coord_or_none("z_m"),
+                "anchor_id": anchor_id,
+                "x_m": x_m,
+                "y_m": y_m,
+                "z_m": z_m,
+                "x": x_m,
+                "y": y_m,
+                "z": z_m,
+                "label": f"A{anchor_id}",
+                "role": "anchor",
+                "device_type": "uwb_anchor",
+                "device_id": anchor_id,
+                "zone_id": "",
+                "zone_name": "",
+                "zone_ids": [],
+                "zone_names": [],
+                "room_id": "",
+                "local_x_m": x_m,
+                "local_y_m": y_m,
+                "placed": True,
+                "is_scanned": False,
+                "sync_state": "synced",
             })
-        self._anchor_layout = anchors
-        self.anchor_layout_parsed.emit(anchors)
+        self._anchor_layout = [anchor.copy() for anchor in anchors]
+        # Publish through shared state as well as the repository signal. Live
+        # Tracking listens to shared_app_state.anchor_layout_changed, so without
+        # this a parsed anchor_layout_resp can appear in debug but never reach
+        # the canvas/table.
+        shared_app_state.anchor_layout = [anchor.copy() for anchor in anchors]
+        self.anchor_layout_parsed.emit([anchor.copy() for anchor in anchors])
         return anchors
 
     def update_anchor_layout_cache(self, anchors: list[dict], emit: bool = False) -> None:
@@ -250,6 +292,7 @@ class RangingRepository(QObject):
         total = stats["total_count"]
         stats["success_rate_percent"] = (stats["success_count"] / total * 100.0) if total else 0.0
         self._stats = stats
+        shared_app_state.ranging_stats = stats
         self.stats_parsed.emit(stats)
         return stats
 

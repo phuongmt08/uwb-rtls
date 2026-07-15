@@ -23,6 +23,7 @@ from PyQt6.QtCore import QTimer, QSize, Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QAction
 from PyQt6 import uic
 from common import protocol_pb2 as pb
+from utils.app_state import shared_app_state
 
 # Tab imports are handled dynamically by uic.loadUi based on <customwidgets> in the .ui file
 
@@ -543,6 +544,9 @@ class MainWindow(QMainWindow):
             "sys_config_set",
             "sensor_fusion_cfg_set",
             "pos_calib_cfg_set",
+            "calib_start",
+            "calib_stop",
+            "calib_candidate_apply",
             "ble_conn_params_set",
             "ble_adv_config_set",
             "device_type_set",
@@ -566,6 +570,9 @@ class MainWindow(QMainWindow):
             "sys_config_set": "system config set",
             "sensor_fusion_cfg_set": "sensor fusion config set",
             "pos_calib_cfg_set": "position calibration config set",
+            "calib_start": "TAG antenna calibration start",
+            "calib_stop": "TAG antenna calibration stop",
+            "calib_candidate_apply": "TAG calibration candidate apply",
             "ble_conn_params_set": "BLE connection params set",
             "ble_adv_config_set": "BLE advertising config set",
             "device_type_set": "device type set",
@@ -738,6 +745,8 @@ class MainWindow(QMainWindow):
         if self._protocol_service:
             self._protocol_service.packet_sent.connect(self._on_protocol_packet_sent)
             self._protocol_service.ack_received.connect(self._on_protocol_ack_received)
+
+        shared_app_state.query_notification_requested.connect(self._show_ble_notification)
 
         # Connect serial connection lost signal
         if self._serial_service:
@@ -915,6 +924,12 @@ class MainWindow(QMainWindow):
                 cleaned_text = text[i:]
                 break
         self.active_tab_title.setText(cleaned_text)
+        if self._device_info_vm:
+            diagnostics_visible = self.tabs.currentWidget() in (self._tab_device, self._tab_communication)
+            if diagnostics_visible and hasattr(self._device_info_vm, "start_rtos_polling"):
+                self._device_info_vm.start_rtos_polling()
+            elif hasattr(self._device_info_vm, "stop_rtos_polling"):
+                self._device_info_vm.stop_rtos_polling()
 
     def _on_end_session(self):
         if not self._session_active:
@@ -939,7 +954,7 @@ class MainWindow(QMainWindow):
 
             if self._main_vm:
                 try:
-                    self._main_vm.end_session(duration_sec=self._session_seconds)
+                    self._main_vm.end_session(duration_sec=self._session_seconds, await_device_completion=False)
                 except Exception as exc:
                     self.btn_end_session.setEnabled(True)
                     QMessageBox.warning(self, "Session Save Failed", str(exc))
@@ -990,6 +1005,8 @@ class MainWindow(QMainWindow):
         self._status_session.setText("\u23F2 Session: End Failed")
         self._status_session.setStyleSheet("color: #EF4444;")
         self._set_session_button_active(True)
+        if self._shutdown_in_progress:
+            return
         QMessageBox.warning(self, "Session Save Failed", message)
 
     def request_interrupt_shutdown(self):
@@ -1002,21 +1019,11 @@ class MainWindow(QMainWindow):
 
         self._shutdown_in_progress = True
 
-        # Stop BLE work through the model state machine so timers stop before transport shutdown.
-        if self._device_info_vm:
-            try:
-                self._device_info_vm.shutdown_device_link()
-            except Exception:
-                try:
-                    self._device_info_vm.request_ble_disconnect()
-                except Exception:
-                    pass
-
-        # Stop all session work and persist current buffers.
+        # Stop all session work first so active streams send the correct end_session reasons.
         if self._session_active:
             if self._main_vm:
                 try:
-                    self._main_vm.end_session(duration_sec=self._session_seconds)
+                    self._main_vm.end_session(duration_sec=self._session_seconds, await_device_completion=False)
                 except Exception:
                     pass
             else:
@@ -1030,6 +1037,16 @@ class MainWindow(QMainWindow):
             if self._main_vm:
                 try:
                     self._main_vm._clear_live_session_buffers()
+                except Exception:
+                    pass
+
+        # After end_session packets are queued, disconnect BLE and continue shutdown.
+        if self._device_info_vm:
+            try:
+                self._device_info_vm.shutdown_device_link()
+            except Exception:
+                try:
+                    self._device_info_vm.request_ble_disconnect()
                 except Exception:
                     pass
 

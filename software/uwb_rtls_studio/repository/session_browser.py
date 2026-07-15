@@ -40,6 +40,9 @@ class SessionBrowser:
     def get_browser_root(self) -> str:
         return self._repo.get_browser_root()
 
+    def get_session_storage_folder(self, session_id: str) -> str:
+        return self._repo.get_session_storage_folder(session_id)
+
     def session_file_exists(self, session_id: str, filename: str) -> bool:
         return self._repo.session_file_exists(session_id, filename)
 
@@ -58,3 +61,6 @@ class SessionBrowser:
     def delete_session(self, session_id: str) -> bool:
         """Xóa session khỏi hệ thống."""
         return self._repo.delete_session(session_id)
+
+    def get_session_record_files(self, session_id: str, detail_type: str) -> list:
+        return self._repo.get_session_record_files(session_id, detail_type)

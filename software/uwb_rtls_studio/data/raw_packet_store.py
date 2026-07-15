@@ -14,7 +14,7 @@ import queue
 from collections import deque
 from pathlib import Path
 from threading import Lock, Thread
-
+from time import time
 from data.raw_packet import RawPacket, RawSerialChunk
 
 log = logging.getLogger(__name__)
@@ -59,6 +59,11 @@ class RawPacketStore:
             self._serial_chunks.append(chunk)
             generation = self._capture_generation
         self._disk_queue.put((generation, "serial", chunk))
+
+    def append_decode_error(self, stage: str, message: str, details: dict | None = None) -> None:
+        with self._lock:
+            generation = self._capture_generation
+        self._disk_queue.put((generation, "decode_error", str(stage or "decode"), str(message or ""), dict(details or {}), time()))
 
     def recent(self) -> list[RawPacket]:
         with self._lock:
@@ -142,6 +147,10 @@ class RawPacketStore:
                 self._append_serial_chunk_to_disk(item[2])
                 continue
 
+            if kind == "decode_error":
+                self._append_decode_error_to_disk(item[2], item[3], item[4], item[5])
+                continue
+
             if kind == "packet":
                 self._append_packet_to_disk(item[2], gap=item[3])
                 continue
@@ -168,6 +177,22 @@ class RawPacketStore:
             "payload_base64": base64.b64encode(chunk.payload).decode("ascii"),
         }
         self._append_jsonl(self._serial_file, record)
+
+    def _append_decode_error_to_disk(self, stage: str, message: str, details: dict, received_at: float) -> None:
+        record = {
+            "received_time": datetime.fromtimestamp(received_at).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "param_name": "__decode_error__",
+            "src_addr": 0,
+            "dst_addr": 0,
+            "seq": 0,
+            "parsed_data": {
+                "stage": stage,
+                "message": message,
+                "details": details,
+                "__decode_failed__": True,
+            },
+        }
+        self._append_jsonl(self._parsed_file, record)
 
     def _append_packet_to_disk(self, packet: RawPacket, gap: dict | None = None) -> None:
         record = {

@@ -24,8 +24,8 @@ MAX_PROBE_RETRIES = 3           # Số lần retry probe mỗi port
 
 # ── Serial Communication ──────────────────────────────────────────
 SERIAL_BAUD_RATE = 115200
-SERIAL_READ_TIMEOUT_S = 0.1     # Non-blocking read timeout
-SERIAL_WRITE_TIMEOUT_S = 0.1
+SERIAL_READ_TIMEOUT_S = 0.05    # Short poll; reader thread drains in_waiting aggressively
+SERIAL_WRITE_TIMEOUT_S = 1.0    # Allow USB-CDC bridges time to accept full HDLC frames
 
 # ── Protocol Addresses ────────────────────────────────────────────
 # Sync voi protocol.proto device_addr_t

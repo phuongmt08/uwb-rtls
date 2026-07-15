@@ -28,11 +28,11 @@ class _FakeProtocol(QObject):
         super().__init__()
         self.factory = CommandFactory()
 
-    def send_command(self, command_name: str, dst_addr: int | None = None, **kwargs):
+    def send_command(self, command_name: str, dst_addr: int | None = None, command_params: dict | None = None, seq: int = 1):
         dst = int(VvAddress.MCU) if dst_addr is None else int(dst_addr)
         src = int(VvAddress.HOST)
-        seq = int(kwargs.pop('seq', 1))
-        pkt = getattr(self.factory, command_name)(src, dst, seq, **kwargs)
+        params = dict(command_params or {})
+        pkt = getattr(self.factory, command_name)(src, dst, int(seq), **params)
         self.packet_sent.emit(command_name, pkt)
         return pkt
 
@@ -41,7 +41,7 @@ def test_command_bus_clears_pending_on_ack_for_set_command():
     protocol = _FakeProtocol()
     bus = CommandBus(protocol)
 
-    pkt = protocol.send_command('time_sync_set', dst_addr=int(VvAddress.MCU), seq=39, unix_time_ms=1, timezone_offset=420)
+    pkt = protocol.send_command('time_sync_set', dst_addr=int(VvAddress.MCU), seq=39, command_params={'unix_time_ms': 1, 'timezone_offset': 420})
     bus._pending['time_sync_resp'] = 123.0
     bus._on_packet_sent('time_sync_set', pkt)
 

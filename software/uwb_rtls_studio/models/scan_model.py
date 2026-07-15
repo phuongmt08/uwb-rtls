@@ -58,6 +58,7 @@ class ScanModel(QObject):
         self._is_connecting = False
         self._connect_stage = "idle"
         self._ble_connected_seen = False
+        self._ble_connecting_seen = False
         self._pending_time_sync_seq: int | None = None
         self._connected_info: dict = {}
         
@@ -84,11 +85,38 @@ class ScanModel(QObject):
         self._time_sync_ack_timer.setSingleShot(True)
         self._time_sync_ack_timer.timeout.connect(self._on_time_sync_timeout)
 
-    def _send_command(self, command_name: str, **kwargs):
+        self._connect_confirm_timer = QTimer(self)
+        self._connect_confirm_timer.setSingleShot(True)
+        self._connect_confirm_timer.timeout.connect(self._finish_if_ble_connected)
+
+    def _send_command(
+        self,
+        command_name: str,
+        dst_addr: int | None = None,
+        src_addr: int | None = None,
+        command_params: dict | None = None,
+        duration_ms: int | None = None,
+        mac_address: bytes | None = None,
+    ):
+        params = dict(command_params or {})
+        if duration_ms is not None:
+            params["duration_ms"] = duration_ms
+        if mac_address is not None:
+            params["mac_address"] = mac_address
+        target_addr = dst_addr if dst_addr is not None else self._protocol.pb.PACKET_ADDR_CENTRAL
         if self._command_bus:
-            dst_addr = kwargs.pop("dst_addr", self._protocol.pb.PACKET_ADDR_CENTRAL)
-            return self._command_bus.send(command_name, dst_addr=dst_addr, **kwargs)
-        return self._protocol.send_command(command_name, **kwargs)
+            return self._command_bus.send(
+                command_name,
+                dst_addr=target_addr,
+                src_addr=src_addr,
+                command_params=params,
+            )
+        return self._protocol.send_command(
+            command_name,
+            dst_addr=target_addr,
+            src_addr=src_addr if src_addr is not None else self._protocol.pb.PACKET_ADDR_HOST,
+            command_params=params,
+        )
 
     def start_scan(self, clear_results: bool = True) -> None:
         if clear_results:
@@ -129,10 +157,14 @@ class ScanModel(QObject):
             return False
             
         self.stop_scan()
+        reset_decoder = getattr(self._protocol, "reset_decoder", None)
+        if callable(reset_decoder):
+            reset_decoder("before BLE connect")
         self.connected_mac = mac_hex
         self._is_connecting = True
         self._connect_stage = "selected"
         self._ble_connected_seen = False
+        self._ble_connecting_seen = False
         self._pending_time_sync_seq = None
         self._connected_info = {}
         self._emit_progress(10, f"Selected {mac_hex}. Preparing BLE connect...")
@@ -166,6 +198,7 @@ class ScanModel(QObject):
         self._connect_timer.stop()
         self._status_poll_timer.stop()
         self._time_sync_ack_timer.stop()
+        self._connect_confirm_timer.stop()
         self._is_connecting = False
         self._connect_stage = "idle"
         self._pending_time_sync_seq = None
@@ -320,14 +353,21 @@ class ScanModel(QObject):
                 log.info("BLE link up; requesting device information before completing connect.")
                 self._connect_stage = "device_info"
                 self._emit_progress(55, "BLE link established. Reading device information...")
+                reset_decoder = getattr(self._protocol, "reset_decoder", None)
+                if callable(reset_decoder):
+                    reset_decoder("BLE link up")
                 self._send_command(
                     "device_information_get",
                     src_addr=self._protocol.pb.PACKET_ADDR_HOST,
                     dst_addr=VvAddress.MCU,
                 )
+                # Hardware BLE is already connected at this point. Device info/time sync are best-effort
+                # startup reads; do not force the user to click Connect again if one of them is late.
+                self._connect_confirm_timer.start(1800)
             elif self._connect_stage == "final_status":
                 self._finish_connect_success()
         elif status.state == pb.BLE_STATE_CONNECTING:
+            self._ble_connecting_seen = True
             if self._connect_stage in ("selected", "ble_connect"):
                 self._connect_stage = "ble_connect"
                 self._emit_progress(45, "Dongle is establishing BLE link...")
@@ -335,6 +375,9 @@ class ScanModel(QObject):
         elif has_reason and reason_code:
             if self._connect_stage == "selected":
                 log.debug("Ignoring disconnect reason during selected/scan-stop stage.")
+                return
+            if self._connect_stage == "ble_connect" and not getattr(self, "_ble_connecting_seen", False):
+                log.debug("Ignoring cached disconnect reason before connecting state is seen.")
                 return
             reason = normalize_hci_reason(reason_code)
             log.warning(
@@ -373,8 +416,10 @@ class ScanModel(QObject):
                 "time_sync_set",
                 src_addr=self._protocol.pb.PACKET_ADDR_HOST,
                 dst_addr=VvAddress.MCU,
-                unix_time_ms=int(time.time() * 1000),
-                timezone_offset=self._host_timezone_offset_min(),
+                command_params={
+                    "unix_time_ms": int(time.time() * 1000),
+                    "timezone_offset": self._host_timezone_offset_min(),
+                },
             )
         except Exception as exc:
             log.warning("Popup time_sync_set failed to send; continuing connect flow: %s", exc)
@@ -397,6 +442,7 @@ class ScanModel(QObject):
             return
 
         self._time_sync_ack_timer.stop()
+        self._connect_confirm_timer.stop()
         self._pending_time_sync_seq = None
         if int(response) == int(pb.PACKET_ACK_RESPONSE_ACK):
             self._begin_final_status_check("Time synchronized. Confirming final BLE state...")
@@ -418,12 +464,21 @@ class ScanModel(QObject):
         self._emit_progress(90, message)
         self._poll_connect_status()
 
+    def _finish_if_ble_connected(self) -> None:
+        """Complete popup connect once BLE is confirmed, even if optional startup reads are late."""
+        if not self._is_connecting or not self._ble_connected_seen:
+            return
+        if self._connect_stage in {"device_info", "time_sync", "final_status", "ble_connect"}:
+            log.info("Completing popup connect from confirmed BLE_STATE_CONNECTED; optional startup read is late.")
+            self._finish_connect_success()
+
     def _finish_connect_success(self) -> None:
         if not self._is_connecting:
             return
         self._connect_timer.stop()
         self._status_poll_timer.stop()
         self._time_sync_ack_timer.stop()
+        self._connect_confirm_timer.stop()
         self._is_connecting = False
         self._connect_stage = "connected"
         self._pending_time_sync_seq = None
@@ -474,6 +529,7 @@ class ScanModel(QObject):
         self._connect_stage = "idle"
         self._status_poll_timer.stop()
         self._time_sync_ack_timer.stop()
+        self._connect_confirm_timer.stop()
         self._pending_time_sync_seq = None
         self.connect_failed.emit("BLE connect flow timed out.")
 
@@ -488,6 +544,22 @@ class ScanModel(QObject):
             src_addr=self._protocol.pb.PACKET_ADDR_HOST,
             dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
         )
+
+    def request_interrupt_disconnect(self, reason: int = 0) -> None:
+        """Best-effort BLE disconnect used when Ctrl+C happens before MainWindow exists."""
+        if not self.connected_mac and not self._ble_connected_seen:
+            return
+        try:
+            self.stop_scan()
+            self._send_command(
+                "ble_disconnect",
+                src_addr=self._protocol.pb.PACKET_ADDR_HOST,
+                dst_addr=self._protocol.pb.PACKET_ADDR_CENTRAL,
+                command_params={"reason": int(reason)},
+            )
+            log.info("Ctrl+C cleanup sent ble_disconnect for %s", self.connected_mac or "active BLE link")
+        except Exception as exc:
+            log.warning("Ctrl+C cleanup failed to send ble_disconnect: %s", exc)
 
     def _on_connection_lost(self) -> None:
         self.dongle_disconnected.emit("Dongle was disconnected!")

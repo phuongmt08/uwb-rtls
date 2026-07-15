@@ -63,6 +63,7 @@ from data.raw_packet_store import shared_raw_packet_store
 from utils.app_state import shared_app_state
 from models.geofence_model import GeofenceZone
 from repository.geofence_repository import GeofenceRepository
+from common.transport import VvAddress
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class LiveTrackingViewModel(QObject):
         self.model.anchor_distances_updated.connect(self.anchor_distances_updated.emit)
         self.model.stats_updated.connect(self.stats_updated.emit)
         shared_app_state.anchor_layout_changed.connect(self.anchor_layout_updated.emit)
+        shared_app_state.device_session_reset.connect(self._reset_device_session_view)
 
         if self._ble_scan_repo:
             self._ble_scan_repo.scan_results_updated.connect(self.scan_devices_updated.emit)
@@ -125,6 +127,13 @@ class LiveTrackingViewModel(QObject):
         self._render_timer.setInterval(LIVE_RENDER_INTERVAL_MS)
         self._render_timer.timeout.connect(self._flush_pending_live_updates)
         self._render_timer.start()
+
+    def _reset_device_session_view(self, _reason: str = "") -> None:
+        self._pending_position = None
+        self._pending_position_meta = None
+        self._pending_sensor_fusion = None
+        self.model.clear_history()
+        self.anchor_layout_updated.emit([])
 
     def _find_room(self, room_id: str):
         if not room_id:
@@ -246,10 +255,11 @@ class LiveTrackingViewModel(QObject):
     def current_anchor_layout(self) -> list:
         return shared_app_state.anchor_layout
 
-    def _send_command(self, command_name: str, **kwargs):
+    def _send_command(self, command_name: str, command_params: dict | None = None, dst_addr: int | None = None):
+        params = dict(command_params or {})
         if self._command_bus:
-            return self._command_bus.send(command_name, **kwargs)
-        return self.model.send_command(command_name, **kwargs)
+            return self._command_bus.send(command_name, dst_addr=dst_addr, command_params=params)
+        return self.model.send_command(command_name, dst_addr=dst_addr or VvAddress.MCU, command_params=params)
 
     def start_ranging(self, yaw_deg: int | float = 0, is_ukf_reinit: bool = False) -> None:
         # Gọi command tới BE từ ViewModel
@@ -287,6 +297,13 @@ class LiveTrackingViewModel(QObject):
 
     def get_map_anchors(self) -> list:
         return self.geofence_repo.get_anchors()
+
+    def get_active_room_id(self) -> str:
+        active_ids = self.get_active_room_ids()
+        return active_ids[0] if active_ids else ""
+
+    def set_active_room_id(self, room_id: str) -> None:
+        self.set_active_room_ids([room_id] if room_id else [])
 
     def get_active_room_ids(self) -> list[str]:
         return self.geofence_repo.get_active_room_ids()

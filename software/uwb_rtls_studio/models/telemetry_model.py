@@ -93,6 +93,10 @@ class TelemetryModel(QObject):
         self._freshness_timer.timeout.connect(self.refresh_freshness)
         self._freshness_timer.start()
 
+    def reset_session(self, _reason: str = "") -> None:
+        self._snapshot = TelemetrySnapshot()
+        self._emit_snapshot()
+
     def handle_battery_info(self, data: dict, received_at: float | None = None) -> dict:
         now = time.time() if received_at is None else float(received_at)
         self._update_group(self._snapshot.battery, self.BATTERY_KEYS, data, now)

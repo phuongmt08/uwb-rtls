@@ -22,8 +22,8 @@
 #include "../ble_common/ble_bridge/bb_debug.h"
 
 /* Private defines ---------------------------------------------------- */
-#define UART_TX_BUF_SIZE 1024
-#define UART_RX_BUF_SIZE 1024
+#define UART_TX_BUF_SIZE 4096
+#define UART_RX_BUF_SIZE 2048
 #define BLE_NUS_MAX_DATA_LEN 244
 
 /* Private enumerate/structure ---------------------------------------- */

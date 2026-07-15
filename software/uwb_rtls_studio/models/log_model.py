@@ -125,7 +125,7 @@ class LogModel(QObject):
         self._append_entry(entry)
         return entry
 
-    def send_host_log_packet(self, packet_name: str, **params) -> dict:
+    def send_host_log_packet(self, packet_name: str, command_params: dict | None = None) -> dict:
         """Send a developer-selected host packet to the MCU from the Log tab."""
         if not self._command_bus:
             return {"ok": False, "error": "Command bus is not available"}
@@ -136,6 +136,7 @@ class LogModel(QObject):
             return {"ok": False, "error": "Protocol service is not available"}
 
         try:
+            params = dict(command_params or {})
             dst_addr = int(params.get("dst_addr", VvAddress.MCU))
             seq = protocol.next_seq()
 
@@ -301,10 +302,12 @@ class LogModel(QObject):
         """Request firmware to stop/clear the current device log upload."""
         result = self.send_host_log_packet(
             "log_clear",
-            dst_addr=VvAddress.MCU,
-            log_type=log_type,
-            offset=offset,
-            length=length,
+            command_params={
+                "dst_addr": VvAddress.MCU,
+                "log_type": log_type,
+                "offset": offset,
+                "length": length,
+            },
         )
         if not result.get("ok"):
             log.warning("LogModel: Failed to send log_clear stop request: %s", result.get("error"))

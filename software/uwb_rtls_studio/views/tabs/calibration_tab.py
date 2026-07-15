@@ -5,18 +5,50 @@ Tab 4: Antenna delay tuning + Calibration status (Developer only).
 FE: Loaded from views/ui/calibration_tab.ui (editable in Qt Designer)
 BE: Calibration logic + ViewModel bindings (this file)
 """
+
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QGridLayout, QPushButton, QSpinBox, QDoubleSpinBox,
-    QProgressBar, QFrame, QCheckBox, QScrollArea
+    QProgressBar, QFrame, QCheckBox, QScrollArea, QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+from PyQt6.QtGui import QFont, QColor
 from PyQt6 import uic
 
 # Path to .ui file
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'calibration_tab.ui')
+
+
+def _flash_button(btn, color_hex: str = "#22D3EE", duration_ms: int = 450):
+    """Hiệu ứng glow phát sáng tắt dần khi nhấn nút.
+
+    Sử dụng QGraphicsDropShadowEffect + QPropertyAnimation để tạo
+    hiệu ứng viền sáng lan rộng rồi mờ dần sau khi nhấn. Không
+    ảnh hưởng đến layout vì dùng shadow effect.
+    """
+    effect = QGraphicsDropShadowEffect(btn)
+    effect.setBlurRadius(32)
+    effect.setColor(QColor(color_hex))
+    effect.setOffset(0, 0)
+    btn.setGraphicsEffect(effect)
+
+    anim = QPropertyAnimation(effect, b"blurRadius", btn)
+    anim.setDuration(duration_ms)
+    anim.setStartValue(32)
+    anim.setEndValue(0)
+    anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+    # Giữ tham chiếu Python trên widget để tránh GC hủy animation sớm
+    btn._flash_anim = anim
+    anim.finished.connect(lambda: _cleanup_flash(btn))
+    anim.start()
+
+
+def _cleanup_flash(btn):
+    """Xóa graphics effect và tham chiếu animation sau khi glow kết thúc."""
+    btn.setGraphicsEffect(None)
+    btn._flash_anim = None
 
 
 class CalibrationTab(QWidget):
@@ -44,8 +76,11 @@ class CalibrationTab(QWidget):
         self.btn_apply_calib.clicked.connect(self._apply_calibration)
         if hasattr(self, "chk_save_flash"):
             self.chk_save_flash.setVisible(False)
+        self.btn_start_pos_calib.setText("Save Position Config")
+        self.btn_stop_pos_calib.setVisible(False)
         self.btn_stop_calib.setEnabled(False)
         self.btn_stop_pos_calib.setEnabled(False)
+        self.samples_spin.setMaximum(64)
         self._reset_display_fields()
 
     def _reset_display_fields(self):
@@ -89,6 +124,28 @@ class CalibrationTab(QWidget):
         except (TypeError, ValueError):
             return "-"
 
+    @staticmethod
+    def _candidate_delay_average(status: dict) -> tuple[int, int] | None:
+        mask = int(status.get("candidate_mask", 0) or 0)
+        candidates = status.get("candidates") or []
+        tx_total = 0
+        rx_total = 0
+        count = 0
+        for candidate in candidates:
+            anchor_id = int(candidate.get("anchor_id", 0) or 0)
+            if anchor_id <= 0 or (mask & (1 << (anchor_id - 1))) == 0:
+                continue
+            tx = int(candidate.get("suggested_tx_delay", 0) or 0)
+            rx = int(candidate.get("suggested_rx_delay", 0) or 0)
+            if tx <= 0 and rx <= 0:
+                continue
+            tx_total += tx
+            rx_total += rx
+            count += 1
+        if count <= 0:
+            return None
+        return tx_total // count, rx_total // count
+
     def _setup_imu_controls(self):
         row = QHBoxLayout()
         self.btn_imu_reset = QPushButton("Reset IMU")
@@ -127,21 +184,33 @@ class CalibrationTab(QWidget):
         QMessageBox.information(self, "No Connected Device", f"Connect a device before {action_name}.")
         return False
 
+    def _connected_role(self) -> str:
+        if not self._vm:
+            return ""
+        return str(getattr(self._vm.model, "connected_role", "") or "").upper()
+
     def _update_action_state(self):
         connected = self._has_connected_device()
         running = bool(self._vm and getattr(self._vm, "_running", False))
-        # self.btn_start_calib -> QPushButton
-        self.btn_start_pos_calib.setEnabled(connected and not running)
-        # self.btn_stop_calib  -> QPushButton
-        self.btn_stop_pos_calib.setEnabled(connected and running)
-        # self.btn_apply_calib -> QPushButton
-        self.btn_imu_reset.setEnabled(connected)
-        self.btn_imu_calibrate.setEnabled(connected)
+        role = self._connected_role()
+        status = self._vm.latest_status if self._vm else {}
+        candidate_mask = int(status.get("candidate_mask", 0) or 0)
+        done = int(status.get("state", 0) or 0) == 4
+        applying = bool(self._vm and self._vm.is_applying)
+
+        self.btn_start_calib.setEnabled(connected and role == "TAG" and not running and not applying)
+        self.btn_stop_calib.setEnabled(connected and role == "TAG" and running)
+        self.btn_apply_calib.setEnabled(connected and role == "TAG" and done and candidate_mask > 0 and not applying)
+        self.btn_start_pos_calib.setEnabled(connected and not running and not applying)
+        self.btn_stop_pos_calib.setEnabled(False)
+        self.btn_imu_reset.setEnabled(False)
+        self.btn_imu_calibrate.setEnabled(False)
 
     def _start_calibration(self):
         if not self._vm or not self._require_connected_device("starting calibration"):
             return
 
+        _flash_button(self.btn_start_calib, "#22D3EE")
         # Collect values only from delay_group (Antenna Delay Calibration)
         config = {
             "enable_anchor_auto_calib": False,
@@ -161,10 +230,10 @@ class CalibrationTab(QWidget):
         self._vm.start_calibration(config)
 
     def _start_position_calibration(self):
-        if not self._vm or not self._require_connected_device("starting position calibration"):
+        if not self._vm or not self._require_connected_device("saving position calibration config"):
             return
 
-        # Collect values from pos_calib_group (Position Calibration Options)
+        _flash_button(self.btn_start_pos_calib, "#22D3EE")
         config = {
             "enable_anchor_auto_calib": self.chk_enable_anchor_calib.isChecked(),
             "enable_tag_auto_calib": self.chk_enable_tag_calib.isChecked(),
@@ -180,62 +249,46 @@ class CalibrationTab(QWidget):
             "damping": self.pos_damping_spin.value(),
             "iterations": self.pos_iterations_spin.value(),
         }
-        self._vm.start_calibration(config)
+        self._vm.save_position_calibration_config(config)
 
     def _stop_calibration(self):
         if self._vm:
+            _flash_button(self.btn_stop_calib, "#EF4444")
             self._vm.stop_calibration()
 
     def _apply_calibration(self):
         if not self._vm or not self._require_connected_device("applying calibration"):
             return
 
+        _flash_button(self.btn_apply_calib, "#22D3EE")
         if self._vm.is_applying:
             self.calib_status.setText("Status: Error - Apply already in progress")
             return
 
         latest_status = self._vm.latest_status
-        delay = int(latest_status.get("current_antenna_delay", 0))
-
-        # Fallback to current inputs if 0
-        tx_delay = delay if delay > 0 else self.tx_delay_spin.value()
-        rx_delay = delay if delay > 0 else self.rx_delay_spin.value()
-
-        if tx_delay <= 0 or rx_delay <= 0:
-            self.calib_status.setText("Status: Error - No valid antenna delay to apply")
+        if int(latest_status.get("state", 0) or 0) != 4:
+            self.calib_status.setText("Status: Error - Calibration is not done yet")
+            return
+        candidate_mask = int(latest_status.get("candidate_mask", 0) or 0)
+        if candidate_mask <= 0:
+            self.calib_status.setText("Status: Error - No valid candidate mask")
             return
 
-        # Collect Position Calibration Option inputs
-        pos_config = {
-            "enable_anchor_auto_calib": self.chk_enable_anchor_calib.isChecked(),
-            "enable_tag_auto_calib": self.chk_enable_tag_calib.isChecked(),
-            "ref_distance_xy_m": self.pos_ref_dist_spin.value(),
-            "tag_height_m": self.pos_tag_height_spin.value(),
-            "anchor_height_m": self.pos_anchor_height_spin.value(),
-            "calib_anchor_id": self.pos_calib_anchor_spin.value(),
-            "samples": self.pos_samples_spin.value(),
-            "error_threshold_m": self.pos_err_thresh_spin.value(),
-            "min_delta_step": self.pos_min_delta_spin.value(),
-            "max_rounds": self.pos_max_rounds_spin.value(),
-            "max_std_m": self.pos_max_std_spin.value(),
-            "damping": self.pos_damping_spin.value(),
-            "iterations": self.pos_iterations_spin.value(),
-        }
-
-        self._vm.apply_results_sequence(tx_delay, rx_delay, pos_config)
+        self._vm.apply_candidate_results(candidate_mask)
 
     def _reset_imu(self):
         if self._vm and self._require_connected_device("resetting IMU"):
+            _flash_button(self.btn_imu_reset, "#EF4444")
             self._vm.reset_imu()
 
     def _calibrate_imu(self):
         if self._vm and self._require_connected_device("calibrating IMU"):
+            _flash_button(self.btn_imu_calibrate, "#22D3EE")
             self._vm.calibrate_imu()
 
     def _on_connection_state_changed(self, info: dict):
         if info.get("status") in ("Disconnected", "Connecting", "Connected"):
             self._reset_display_fields()
-            self._update_action_state()
 
     def _on_running_changed(self, running: bool):
         _ = running
@@ -334,9 +387,10 @@ class CalibrationTab(QWidget):
             set_widget_value(self.pos_iterations_spin, cfg.get("iterations", 100))
 
     def _on_status_updated(self, status: dict):
-        # status = {} khi firmware gửi gói rỗng → reset về "-"
+        # status = {} khi firmware gửi gói rỗng -> reset về "-"
         if not status:
             self._reset_display_fields()
+            self._update_action_state()
             return
 
         state = int(status.get("state", 0))
@@ -395,21 +449,28 @@ class CalibrationTab(QWidget):
                 if label is not None:
                     label.setText("-")
 
-        # calib_status_resp_t.current_antenna_delay → Optimized TX / RX Delay
-        self.val_opt_tx.setText(str(delay) if delay > 0 else "-")
-        self.val_opt_rx.setText(str(delay) if delay > 0 else "-")
+        candidate_delay = self._candidate_delay_average(status)
+        if candidate_delay is not None:
+            tx_delay, rx_delay = candidate_delay
+            self.val_opt_tx.setText(str(tx_delay))
+            self.val_opt_rx.setText(str(rx_delay))
+        else:
+            self.val_opt_tx.setText("-")
+            self.val_opt_rx.setText("-")
 
+        candidate_mask = int(status.get("candidate_mask", 0) or 0)
         if state != 4:
             self._auto_applied_delay = 0
         elif (
-            delay > 0
+            candidate_mask > 0
             and self.chk_auto_apply.isChecked()
             and custom_text is None
-            and delay != self._auto_applied_delay
+            and candidate_mask != self._auto_applied_delay
             and not self._vm.is_applying
         ):
-            self._auto_applied_delay = delay
+            self._auto_applied_delay = candidate_mask
             self._apply_calibration()
+        self._update_action_state()
 
     def _on_operation_failed(self, message: str):
         self.calib_status.setText(f"Status: Error - {message}")
