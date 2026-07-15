@@ -130,7 +130,11 @@ class DataThread(QThread):
         if self.csv_file:
             self.csv_file.flush()
             self.csv_file.close()
-        filename = generate_timestamp_filename(CSV_UKF_FILENAME_PREFIX, CSV_UKF_FILENAME_SUFFIX)
+        filename = generate_timestamp_filename(
+            CSV_UKF_FILENAME_PREFIX,
+            CSV_UKF_FILENAME_SUFFIX,
+            source_directory="scripts",
+        )
         self.csv_file, self.csv_writer = create_csv_file(filename)
         self.prev_distances = None
         self.csv_created_signal.emit()
