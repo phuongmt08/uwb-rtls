@@ -732,13 +732,15 @@ def main():
             category_body = "\n".join(date_sections)
 
         section = f"""
-        <section class="category-group category-{category['key']}">
-            <div class="category-header">
-                <h2>{category['title']}</h2>
-                <span>_{category['suffix']}.csv</span>
+        <details class="category-group category-{category['key']}">
+            <summary class="category-header">
+                <span class="category-title">{category['title']}</span>
+                <span class="category-suffix">_{category['suffix']}.csv</span>
+            </summary>
+            <div class="category-body">
+                {category_body}
             </div>
-            {category_body}
-        </section>
+        </details>
         """
         html_sections.append(section)
 
@@ -769,18 +771,47 @@ def main():
         }}
         h1 {{ margin-top: 0; color: #1e293b; font-size: 2.25rem; }}
         p {{ color: #64748b; margin-bottom: 30px; }}
-        .category-group {{ margin-top: 34px; }}
+        .category-group {{
+            margin-top: 18px;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+            background: white;
+        }}
         .category-header {{
             display: flex;
-            align-items: baseline;
-            justify-content: space-between;
+            align-items: center;
             gap: 16px;
-            margin-bottom: 14px;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 8px;
+            padding: 16px 20px;
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            transition: background 0.2s;
         }}
-        .category-header h2 {{ margin: 0; font-size: 1.45rem; color: #0f172a; }}
-        .category-header span {{ color: #64748b; font-family: monospace; font-size: 0.9rem; }}
+        .category-header:hover {{ background: #f8fafc; }}
+        .category-header::-webkit-details-marker {{ display: none; }}
+        .category-header::before {{
+            content: '›';
+            color: #7c3aed;
+            font-size: 1.5rem;
+            font-weight: 700;
+            line-height: 1;
+            transform: rotate(0deg);
+            transition: transform 0.2s;
+        }}
+        .category-group[open] > .category-header {{
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }}
+        .category-group[open] > .category-header::before {{ transform: rotate(90deg); }}
+        .category-title {{ font-size: 1.25rem; font-weight: 700; color: #0f172a; }}
+        .category-suffix {{
+            margin-left: auto;
+            color: #64748b;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }}
+        .category-body {{ padding: 18px 20px 1px; }}
         .date-group {{ margin-bottom: 22px; }}
         .date-header {{ 
             background: #f1f5f9; 

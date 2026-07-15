@@ -517,6 +517,8 @@ self.onmessage = function(e) {
     };
 
     const entriesToProcess = rawData.all_entries.slice(0, max_samples);
+    const hasPredictEntries = entriesToProcess.some(entry => entry.type === 'Predict');
+    const useUpdateFrameImu = !hasPredictEntries;
     const wallClock = buildFusionWallClockTimes(entriesToProcess);
     entriesToProcess.forEach((entry, entryIndex) => {
         let didEntryUwbUpdate = false;
@@ -527,6 +529,24 @@ self.onmessage = function(e) {
             applyImuLpf(entry);
             filter.init(entry.px_fw, entry.py_fw, bias.ax, bias.ay, bias.gz);
             filterLpf.init(entry.px_fw, entry.py_fw, bias.ax, bias.ay, bias.gz);
+        }
+
+        // Studio fusion logs may carry IMU samples on Update frames only. The
+        // legacy Scripts logs have dedicated Predict frames, so keep their
+        // existing behavior and use Update IMU data only when Predict is absent.
+        if (useUpdateFrameImu && entry.type === 'Update') {
+            last_ax = entry.ax; last_ay = entry.ay; last_gz = entry.gz;
+            const imuLpf = applyImuLpf(entry);
+            const accMag = Math.sqrt((entry.ax - bias.ax) ** 2 + (entry.ay - bias.ay) ** 2);
+            const gyrMag = Math.abs(entry.gz - bias.gz);
+            if (accMag < params.zupt_acc && gyrMag < params.zupt_gyr) zupt_cnt++; else zupt_cnt = 0;
+            zuptActive = zupt_cnt > SIM_CONFIG.IMU.ZUPT_COUNT_THRESHOLD;
+
+            imuSpectrumSeries.times.push(total_time);
+            imuSpectrumSeries.ax.push(entry.ax - bias.ax);
+            imuSpectrumSeries.ay.push(entry.ay - bias.ay);
+            imuSpectrumSeries.ax_lpf.push(imuLpf.ax - bias.ax);
+            imuSpectrumSeries.ay_lpf.push(imuLpf.ay - bias.ay);
         }
 
         if (entry.type === 'Predict' && entry.dt > 0) {
