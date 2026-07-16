@@ -1,7 +1,7 @@
 {
   "meta": {
     "name": "Virtual_Map_Config",
-    "version": 2,
+    "version": 3,
     "schema": "uwb_rtls_geofence_map",
     "active_room_ids": [
       "18cc1278",
@@ -15,9 +15,6 @@
         "name": "E1-303",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": -2.3,
@@ -39,23 +36,26 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": 1,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "cbc39752",
         "name": "Hallway",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.6,
@@ -201,23 +201,26 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "c9ec312b",
         "name": "Room 4",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.4,
@@ -239,23 +242,26 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "102f67d3",
         "name": "E1-30x",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.4,
@@ -277,23 +283,26 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "58d6743a-7e34-4b1c-864c-6a276a0e1040",
         "name": "E1-30x",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 8.9,
@@ -315,23 +324,26 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": 1,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "f754d6bd",
         "name": "E1-30x",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 8.9,
@@ -353,23 +365,26 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "5f92184c",
         "name": "Room 8",
         "type": "room",
         "object_type": "room",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 3.5,
@@ -391,14 +406,20 @@
         "min_z": 0.0,
         "max_z": 0.0,
         "height_m": 0.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#F8FAFC",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#F8FAFC"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       }
     ],
     "walls": [
@@ -407,9 +428,6 @@
         "name": "Wall Segment 1",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.4,
@@ -439,23 +457,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "18cc1278",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "01f95852",
         "name": "Wall Segment 12",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.4,
@@ -477,23 +498,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "f754d6bd",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "2a760727",
         "name": "Wall Segment 12",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.6,
@@ -507,23 +531,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "f754d6bd",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "7bdde903",
         "name": "Wall Segment 11",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 8.9,
@@ -553,23 +580,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "58d6743a-7e34-4b1c-864c-6a276a0e1040",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "ede80a63",
         "name": "Wall Segment 12",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 8.9,
@@ -591,23 +621,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "f754d6bd",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "d8af8b2b",
         "name": "Wall Segment 12",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 8.9,
@@ -621,23 +654,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "f754d6bd",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "5a5d9fdd",
         "name": "Wall Segment 10",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 5.5,
@@ -667,23 +703,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "5f92184c",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "2ed6be4d",
         "name": "Wall Segment 10",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": -0.1,
@@ -701,23 +740,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "5f92184c",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "00a402a8",
         "name": "Wall Segment 10",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 3.5,
@@ -731,23 +773,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "5f92184c",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "bec3652f",
         "name": "Wall Segment 10",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 3.5,
@@ -761,23 +806,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "5f92184c",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "73ae4a64",
         "name": "Wall Segment 10",
         "type": "wall",
         "object_type": "wall",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 15.4,
@@ -795,14 +843,20 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.2,
         "thickness_m": 0.2,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "boundary_outside",
         "host_room_id": "5f92184c",
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       }
     ],
     "objects": [
@@ -811,9 +865,6 @@
         "name": "Object 1",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.1,
@@ -835,23 +886,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "7fc8182b-abf8-4be4-8c49-222264d07103",
         "name": "Object 1",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": -2.3,
@@ -873,23 +927,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "b5754101-9f5b-42b1-830c-40418e3c5985",
         "name": "Object 1",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": -2.3,
@@ -911,23 +968,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "5203ba76-f82c-4007-babc-9f395eb047a7",
         "name": "Object 1",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.1,
@@ -949,23 +1009,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "204d5278",
         "name": "Object 1",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 6.4,
@@ -987,23 +1050,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "f0384fd8-0904-440e-9732-64966585003c",
         "name": "Object 1",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "generic",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": -1.9,
@@ -1025,23 +1091,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "generic",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "cb92addc",
         "name": "Stairs 8",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "stairs",
-        "object_direction": "down",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 10.0,
@@ -1063,23 +1132,26 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "stairs",
+        "object_direction": "down",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       },
       {
         "id": "dddc75bd-2669-463f-a5c7-f2896c4a58a5",
         "name": "Stairs 8",
         "type": "object",
         "object_type": "object",
-        "object_subtype": "stairs",
-        "object_direction": "up",
-        "shape_kind": "polygon",
         "points": [
           {
             "x": 10.0,
@@ -1101,14 +1173,20 @@
         "min_z": 0.0,
         "max_z": 4.0,
         "height_m": 4.0,
-        "radius_m": 0.0,
+        "speed_limit": 0.0,
+        "color": "#787878",
+        "thickness": 0.0,
         "thickness_m": 0.0,
+        "shape_kind": "polygon",
+        "object_subtype": "stairs",
+        "object_direction": "up",
+        "radius_m": 0.0,
         "origin_vertex_idx": null,
         "local_frame_yaw_deg": 0.0,
         "wall_mode": "free_standing",
         "host_room_id": null,
-        "speed_limit": 0.0,
-        "color": "#787878"
+        "label_offset_x": 0.0,
+        "label_offset_y": 0.0
       }
     ],
     "anchors": [
@@ -1119,7 +1197,6 @@
         "device_type": "uwb_anchor",
         "device_id": 0,
         "mac": "",
-        "room_id": "18cc1278",
         "zone_id": "18cc1278",
         "zone_name": "E1-303",
         "zone_ids": [
@@ -1128,6 +1205,7 @@
         "zone_names": [
           "E1-303"
         ],
+        "room_id": "18cc1278",
         "local_x_m": 0.6999999999999997,
         "local_y_m": 0.0,
         "x_m": 0.6999999999999997,
@@ -1144,7 +1222,6 @@
         "device_type": "uwb_anchor",
         "device_id": 1,
         "mac": "",
-        "room_id": "18cc1278",
         "zone_id": "18cc1278",
         "zone_name": "E1-303",
         "zone_ids": [
@@ -1153,6 +1230,7 @@
         "zone_names": [
           "E1-303"
         ],
+        "room_id": "18cc1278",
         "local_x_m": 0.6999999999999997,
         "local_y_m": 8.4,
         "x_m": 0.6999999999999997,
@@ -1169,7 +1247,6 @@
         "device_type": "uwb_anchor",
         "device_id": 2,
         "mac": "",
-        "room_id": "18cc1278",
         "zone_id": "18cc1278",
         "zone_name": "E1-303",
         "zone_ids": [
@@ -1178,6 +1255,7 @@
         "zone_names": [
           "E1-303"
         ],
+        "room_id": "18cc1278",
         "local_x_m": 8.3,
         "local_y_m": 8.4,
         "x_m": 8.3,
@@ -1194,7 +1272,6 @@
         "device_type": "uwb_anchor",
         "device_id": 3,
         "mac": "",
-        "room_id": "18cc1278",
         "zone_id": "18cc1278",
         "zone_name": "E1-303",
         "zone_ids": [
@@ -1203,6 +1280,7 @@
         "zone_names": [
           "E1-303"
         ],
+        "room_id": "18cc1278",
         "local_x_m": 8.3,
         "local_y_m": 0.0,
         "x_m": 8.3,
@@ -1219,7 +1297,6 @@
         "device_type": "uwb_anchor",
         "device_id": 4,
         "mac": "",
-        "room_id": "cbc39752",
         "zone_id": "cbc39752",
         "zone_name": "Hallway",
         "zone_ids": [
@@ -1228,6 +1305,7 @@
         "zone_names": [
           "Hallway"
         ],
+        "room_id": "cbc39752",
         "local_x_m": 0.3000000000000007,
         "local_y_m": -2.2,
         "x_m": 0.3000000000000007,
@@ -1244,7 +1322,6 @@
         "device_type": "uwb_anchor",
         "device_id": 5,
         "mac": "",
-        "room_id": "cbc39752",
         "zone_id": "cbc39752",
         "zone_name": "Hallway",
         "zone_ids": [
@@ -1253,6 +1330,7 @@
         "zone_names": [
           "Hallway"
         ],
+        "room_id": "cbc39752",
         "local_x_m": 2.0,
         "local_y_m": -8.6,
         "x_m": 2.0,
@@ -1269,7 +1347,6 @@
         "device_type": "uwb_anchor",
         "device_id": 6,
         "mac": "",
-        "room_id": "cbc39752",
         "zone_id": "cbc39752",
         "zone_name": "Hallway",
         "zone_ids": [
@@ -1278,6 +1355,7 @@
         "zone_names": [
           "Hallway"
         ],
+        "room_id": "cbc39752",
         "local_x_m": 0.10000000000000053,
         "local_y_m": -12.100000000000001,
         "x_m": 0.10000000000000053,
@@ -1288,7 +1366,83 @@
         "sync_state": "draft"
       }
     ],
-    "gateways": []
+    "gateways": [],
+    "ground_truths": [
+      {
+        "id": "gt_aa12b108",
+        "name": "Ground Truth 1",
+        "points": [
+          {
+            "x": 2.0,
+            "y": 0.4
+          },
+          {
+            "x": 4.4,
+            "y": 0.4
+          },
+          {
+            "x": 3.6,
+            "y": -2.2
+          },
+          {
+            "x": 2.8,
+            "y": -2.4
+          },
+          {
+            "x": 1.6,
+            "y": -0.6
+          }
+        ],
+        "x": [
+          2.0,
+          4.4,
+          3.6,
+          2.8,
+          1.6
+        ],
+        "y": [
+          0.4,
+          0.4,
+          -2.2,
+          -2.4,
+          -0.6
+        ],
+        "segments": [
+          [
+            2.0,
+            0.4,
+            4.4,
+            0.4,
+            false
+          ],
+          [
+            4.4,
+            0.4,
+            3.6,
+            -2.2,
+            false
+          ],
+          [
+            3.6,
+            -2.2,
+            2.8,
+            -2.4,
+            false
+          ],
+          [
+            2.8,
+            -2.4,
+            1.6,
+            -0.6,
+            false
+          ]
+        ],
+        "color": "#FB7185",
+        "line_width": 2.0,
+        "coordinate_frame": "world",
+        "metadata": {}
+      }
+    ]
   },
   "rule_zones": [
     {
@@ -1296,9 +1450,6 @@
       "name": "Rule Zone 1",
       "type": "forbidden",
       "object_type": "zone",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.6,
@@ -1320,14 +1471,96 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 1.0,
+      "color": "#AA0000",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 1.0,
-      "color": "#AA0000"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
+    }
+  ],
+  "ground_truths": [
+    {
+      "id": "gt_aa12b108",
+      "name": "Ground Truth 1",
+      "points": [
+        {
+          "x": 2.0,
+          "y": 0.4
+        },
+        {
+          "x": 4.4,
+          "y": 0.4
+        },
+        {
+          "x": 3.6,
+          "y": -2.2
+        },
+        {
+          "x": 2.8,
+          "y": -2.4
+        },
+        {
+          "x": 1.6,
+          "y": -0.6
+        }
+      ],
+      "x": [
+        2.0,
+        4.4,
+        3.6,
+        2.8,
+        1.6
+      ],
+      "y": [
+        0.4,
+        0.4,
+        -2.2,
+        -2.4,
+        -0.6
+      ],
+      "segments": [
+        [
+          2.0,
+          0.4,
+          4.4,
+          0.4,
+          false
+        ],
+        [
+          4.4,
+          0.4,
+          3.6,
+          -2.2,
+          false
+        ],
+        [
+          3.6,
+          -2.2,
+          2.8,
+          -2.4,
+          false
+        ],
+        [
+          2.8,
+          -2.4,
+          1.6,
+          -0.6,
+          false
+        ]
+      ],
+      "color": "#FB7185",
+      "line_width": 2.0,
+      "coordinate_frame": "world",
+      "metadata": {}
     }
   ],
   "map_name": "Virtual_Map_Config",
@@ -1339,7 +1572,6 @@
       "device_type": "uwb_anchor",
       "device_id": 0,
       "mac": "",
-      "room_id": "18cc1278",
       "zone_id": "18cc1278",
       "zone_name": "E1-303",
       "zone_ids": [
@@ -1348,6 +1580,7 @@
       "zone_names": [
         "E1-303"
       ],
+      "room_id": "18cc1278",
       "local_x_m": 0.6999999999999997,
       "local_y_m": 0.0,
       "x_m": 0.6999999999999997,
@@ -1364,7 +1597,6 @@
       "device_type": "uwb_anchor",
       "device_id": 1,
       "mac": "",
-      "room_id": "18cc1278",
       "zone_id": "18cc1278",
       "zone_name": "E1-303",
       "zone_ids": [
@@ -1373,6 +1605,7 @@
       "zone_names": [
         "E1-303"
       ],
+      "room_id": "18cc1278",
       "local_x_m": 0.6999999999999997,
       "local_y_m": 8.4,
       "x_m": 0.6999999999999997,
@@ -1389,7 +1622,6 @@
       "device_type": "uwb_anchor",
       "device_id": 2,
       "mac": "",
-      "room_id": "18cc1278",
       "zone_id": "18cc1278",
       "zone_name": "E1-303",
       "zone_ids": [
@@ -1398,6 +1630,7 @@
       "zone_names": [
         "E1-303"
       ],
+      "room_id": "18cc1278",
       "local_x_m": 8.3,
       "local_y_m": 8.4,
       "x_m": 8.3,
@@ -1414,7 +1647,6 @@
       "device_type": "uwb_anchor",
       "device_id": 3,
       "mac": "",
-      "room_id": "18cc1278",
       "zone_id": "18cc1278",
       "zone_name": "E1-303",
       "zone_ids": [
@@ -1423,6 +1655,7 @@
       "zone_names": [
         "E1-303"
       ],
+      "room_id": "18cc1278",
       "local_x_m": 8.3,
       "local_y_m": 0.0,
       "x_m": 8.3,
@@ -1439,7 +1672,6 @@
       "device_type": "uwb_anchor",
       "device_id": 4,
       "mac": "",
-      "room_id": "cbc39752",
       "zone_id": "cbc39752",
       "zone_name": "Hallway",
       "zone_ids": [
@@ -1448,6 +1680,7 @@
       "zone_names": [
         "Hallway"
       ],
+      "room_id": "cbc39752",
       "local_x_m": 0.3000000000000007,
       "local_y_m": -2.2,
       "x_m": 0.3000000000000007,
@@ -1464,7 +1697,6 @@
       "device_type": "uwb_anchor",
       "device_id": 5,
       "mac": "",
-      "room_id": "cbc39752",
       "zone_id": "cbc39752",
       "zone_name": "Hallway",
       "zone_ids": [
@@ -1473,6 +1705,7 @@
       "zone_names": [
         "Hallway"
       ],
+      "room_id": "cbc39752",
       "local_x_m": 2.0,
       "local_y_m": -8.6,
       "x_m": 2.0,
@@ -1489,7 +1722,6 @@
       "device_type": "uwb_anchor",
       "device_id": 6,
       "mac": "",
-      "room_id": "cbc39752",
       "zone_id": "cbc39752",
       "zone_name": "Hallway",
       "zone_ids": [
@@ -1498,6 +1730,7 @@
       "zone_names": [
         "Hallway"
       ],
+      "room_id": "cbc39752",
       "local_x_m": 0.10000000000000053,
       "local_y_m": -12.100000000000001,
       "x_m": 0.10000000000000053,
@@ -1514,9 +1747,6 @@
       "name": "E1-303",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": -2.3,
@@ -1538,23 +1768,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": 1,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "cbc39752",
       "name": "Hallway",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.6,
@@ -1700,23 +1933,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "c9ec312b",
       "name": "Room 4",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.4,
@@ -1738,23 +1974,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "102f67d3",
       "name": "E1-30x",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.4,
@@ -1776,23 +2015,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "58d6743a-7e34-4b1c-864c-6a276a0e1040",
       "name": "E1-30x",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 8.9,
@@ -1814,23 +2056,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": 1,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "f754d6bd",
       "name": "E1-30x",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 8.9,
@@ -1852,23 +2097,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "5f92184c",
       "name": "Room 8",
       "type": "room",
       "object_type": "room",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 3.5,
@@ -1890,23 +2138,26 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#F8FAFC",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#F8FAFC"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "96ba3d18",
       "name": "Wall Segment 1",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.4,
@@ -1936,23 +2187,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "18cc1278",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "01f95852",
       "name": "Wall Segment 12",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.4,
@@ -1974,23 +2228,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "f754d6bd",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "2a760727",
       "name": "Wall Segment 12",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.6,
@@ -2004,23 +2261,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "f754d6bd",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "7bdde903",
       "name": "Wall Segment 11",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 8.9,
@@ -2050,23 +2310,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "58d6743a-7e34-4b1c-864c-6a276a0e1040",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "ede80a63",
       "name": "Wall Segment 12",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 8.9,
@@ -2088,23 +2351,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "f754d6bd",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "d8af8b2b",
       "name": "Wall Segment 12",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 8.9,
@@ -2118,23 +2384,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "f754d6bd",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "5a5d9fdd",
       "name": "Wall Segment 10",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 5.5,
@@ -2164,23 +2433,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "5f92184c",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "2ed6be4d",
       "name": "Wall Segment 10",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": -0.1,
@@ -2198,23 +2470,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "5f92184c",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "00a402a8",
       "name": "Wall Segment 10",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 3.5,
@@ -2228,23 +2503,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "5f92184c",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "bec3652f",
       "name": "Wall Segment 10",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 3.5,
@@ -2258,23 +2536,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "5f92184c",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "73ae4a64",
       "name": "Wall Segment 10",
       "type": "wall",
       "object_type": "wall",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 15.4,
@@ -2292,23 +2573,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.2,
       "thickness_m": 0.2,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "boundary_outside",
       "host_room_id": "5f92184c",
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "3525de44",
       "name": "Object 1",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.1,
@@ -2330,23 +2614,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "7fc8182b-abf8-4be4-8c49-222264d07103",
       "name": "Object 1",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": -2.3,
@@ -2368,23 +2655,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "b5754101-9f5b-42b1-830c-40418e3c5985",
       "name": "Object 1",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": -2.3,
@@ -2406,23 +2696,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "5203ba76-f82c-4007-babc-9f395eb047a7",
       "name": "Object 1",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.1,
@@ -2444,23 +2737,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "204d5278",
       "name": "Object 1",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.4,
@@ -2482,23 +2778,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "f0384fd8-0904-440e-9732-64966585003c",
       "name": "Object 1",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": -1.9,
@@ -2520,23 +2819,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "cb92addc",
       "name": "Stairs 8",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "stairs",
-      "object_direction": "down",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 10.0,
@@ -2558,23 +2860,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "stairs",
+      "object_direction": "down",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "dddc75bd-2669-463f-a5c7-f2896c4a58a5",
       "name": "Stairs 8",
       "type": "object",
       "object_type": "object",
-      "object_subtype": "stairs",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 10.0,
@@ -2596,23 +2901,26 @@
       "min_z": 0.0,
       "max_z": 4.0,
       "height_m": 4.0,
-      "radius_m": 0.0,
+      "speed_limit": 0.0,
+      "color": "#787878",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "stairs",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 0.0,
-      "color": "#787878"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     },
     {
       "id": "0b8f5372",
       "name": "Rule Zone 1",
       "type": "forbidden",
       "object_type": "zone",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.6,
@@ -2634,14 +2942,20 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 1.0,
+      "color": "#AA0000",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 1.0,
-      "color": "#AA0000"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     }
   ],
   "geofences": [
@@ -2650,9 +2964,6 @@
       "name": "Rule Zone 1",
       "type": "forbidden",
       "object_type": "zone",
-      "object_subtype": "generic",
-      "object_direction": "up",
-      "shape_kind": "polygon",
       "points": [
         {
           "x": 6.6,
@@ -2674,14 +2985,20 @@
       "min_z": 0.0,
       "max_z": 0.0,
       "height_m": 0.0,
-      "radius_m": 0.0,
+      "speed_limit": 1.0,
+      "color": "#AA0000",
+      "thickness": 0.0,
       "thickness_m": 0.0,
+      "shape_kind": "polygon",
+      "object_subtype": "generic",
+      "object_direction": "up",
+      "radius_m": 0.0,
       "origin_vertex_idx": null,
       "local_frame_yaw_deg": 0.0,
       "wall_mode": "free_standing",
       "host_room_id": null,
-      "speed_limit": 1.0,
-      "color": "#AA0000"
+      "label_offset_x": 0.0,
+      "label_offset_y": 0.0
     }
   ]
 }

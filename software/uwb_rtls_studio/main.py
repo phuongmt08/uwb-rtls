@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 
 # Logging setup
 from utils.logging_config import setup_logging
@@ -421,6 +421,18 @@ def main():
     QSurfaceFormat.setDefaultFormat(fmt)
 
     app = QApplication(sys.argv)
+
+    # Set taskbar icon correctly on Windows
+    import ctypes
+    try:
+        # Set explicit AppUserModelID so Windows treats it as a distinct app on the taskbar
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("uwb_rtls.studio.1.0.0")
+    except Exception:
+        pass
+
+    # Set global application icon
+    from resources import get_icon_path
+    app.setWindowIcon(QIcon(get_icon_path("app_icon.png")))
 
     interrupt_state = {"handled": False, "callback": lambda: app.quit()}
     interrupt_timer = QTimer()

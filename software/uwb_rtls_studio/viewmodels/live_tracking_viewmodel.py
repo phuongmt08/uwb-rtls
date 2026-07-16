@@ -112,7 +112,7 @@ class LiveTrackingViewModel(QObject):
         self._last_map_context_request_at = 0.0
         
         # Instantiate geofence repository
-        self.geofence_repo = GeofenceRepository()
+        self.geofence_repo = GeofenceRepository(autoload=False)
         
         # Connect position updates to custom handler to run geofencing checks
         self.model.position_updated.connect(self._on_model_position_updated)
@@ -408,6 +408,11 @@ class LiveTrackingViewModel(QObject):
 
     def add_ground_truth(self, track: GroundTruthTrack, *, persist: bool = True) -> bool:
         self.geofence_repo.add_ground_truth(track)
+        self.ground_truths_updated.emit(self.get_ground_truths())
+        return self.geofence_repo.save() if persist else True
+
+    def set_ground_truths(self, tracks: list[GroundTruthTrack], *, persist: bool = True) -> bool:
+        self.geofence_repo.set_ground_truths(tracks)
         self.ground_truths_updated.emit(self.get_ground_truths())
         return self.geofence_repo.save() if persist else True
 

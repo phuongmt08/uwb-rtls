@@ -38,7 +38,9 @@ class PositionCanvas(QWidget):
     anchor_layout_edited = pyqtSignal(list)
     zones_undo_remove_requested = pyqtSignal(list)
     zones_undo_restore_requested = pyqtSignal(list)
+    ground_truths_undo_restore_requested = pyqtSignal(list)
     room_origin_vertex_picked = pyqtSignal(str, int)
+    ground_truth_edge_selection_changed = pyqtSignal(str, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -126,6 +128,10 @@ class PositionCanvas(QWidget):
         self.preview_25d = False
         self.draw_object_shape = "polygon"
         self._object_draw_center = None
+        self._ground_truth_freehand_active = False
+        self._ground_truth_sample_min_px = 4.0
+        self._ground_truth_edit_track_id = ""
+        self._ground_truth_selected_edges = []
         self.active_room_ids = set()
         self._undo_stack = []
         self._target_render_fps = 60
@@ -170,6 +176,66 @@ class PositionCanvas(QWidget):
     def set_ground_truths(self, tracks, visible_ids=None):
         self.ground_truths = list(tracks or [])
         self.visible_ground_truth_ids = None if visible_ids is None else set(visible_ids)
+        valid_ids = {str(getattr(track, "id", "")) for track in self.ground_truths}
+        if self._ground_truth_edit_track_id not in valid_ids:
+            self._ground_truth_edit_track_id = ""
+            self._ground_truth_selected_edges.clear()
+        self.update()
+
+    def begin_ground_truth_edit(self, track_id: str) -> bool:
+        track_id = str(track_id or "")
+        track = next(
+            (item for item in self.ground_truths if str(getattr(item, "id", "")) == track_id),
+            None,
+        )
+        if track is None or len(getattr(track, "points", []) or []) < 3:
+            self._ground_truth_edit_track_id = ""
+            self._ground_truth_selected_edges.clear()
+            self.update()
+            return False
+        self.set_draw_object_type("ground_truth")
+        self.set_edit_mode("edit_ground_truth")
+        self._ground_truth_edit_track_id = track_id
+        self._ground_truth_selected_edges.clear()
+        self.ground_truth_edge_selection_changed.emit(track_id, 0)
+        self.update()
+        return True
+
+    def _ground_truth_edit_track(self):
+        return next(
+            (
+                item for item in self.ground_truths
+                if str(getattr(item, "id", "")) == self._ground_truth_edit_track_id
+            ),
+            None,
+        )
+
+    def _ground_truth_edge_at_screen_pos(self, screen_x, screen_y, max_distance_px=12):
+        track = self._ground_truth_edit_track()
+        points = list(getattr(track, "points", []) or []) if track is not None else []
+        best = None
+        for edge_idx, (start, end) in enumerate(zip(points, points[1:])):
+            screen_start = self._world_to_screen(start[0], start[1])
+            screen_end = self._world_to_screen(end[0], end[1])
+            distance_px, _ = self._distance_to_segment_px(
+                (screen_x, screen_y), screen_start, screen_end
+            )
+            if distance_px <= max_distance_px and (best is None or distance_px < best[0]):
+                best = (distance_px, edge_idx)
+        return None if best is None else best[1]
+
+    def _toggle_ground_truth_edge(self, edge_idx: int):
+        if edge_idx in self._ground_truth_selected_edges:
+            self._ground_truth_selected_edges.remove(edge_idx)
+        else:
+            if len(self._ground_truth_selected_edges) >= 2:
+                self._ground_truth_selected_edges.clear()
+            self._ground_truth_selected_edges.append(edge_idx)
+        self._ground_truth_selected_edges.sort()
+        self.ground_truth_edge_selection_changed.emit(
+            self._ground_truth_edit_track_id,
+            len(self._ground_truth_selected_edges),
+        )
         self.update()
 
     def set_visible_ground_truth_ids(self, track_ids):
@@ -268,6 +334,7 @@ class PositionCanvas(QWidget):
             {
                 "anchors": deepcopy(self.anchors),
                 "zones": [deepcopy(zone.to_dict()) for zone in self.geofence_zones],
+                "ground_truths": [deepcopy(track.to_dict()) for track in self.ground_truths],
             }
         )
         if len(self._undo_stack) > 50:
@@ -298,17 +365,19 @@ class PositionCanvas(QWidget):
                 if zone.id in zone_points:
                     zone.points = list(zone_points[zone.id])
                     self.zone_modified.emit(zone.id, zone.points)
+        ground_truth_snapshots = deepcopy(state.get("ground_truths", []))
+        self.ground_truths_undo_restore_requested.emit(ground_truth_snapshots)
         self.selected_vertex_idx = None
         self.selected_edge_idx = None
         self.dragging_anchor_idx = None
         self._emit_anchor_layout_edited()
         self.update()
         return True
-
     def set_edit_mode(self, mode):
         self.edit_mode = mode
         self.current_draw_points.clear()
         self._object_draw_center = None
+        self._ground_truth_freehand_active = False
         self.selected_vertex_idx = None
         self.selected_edge_idx = None
         self.dragging_anchor_idx = None
@@ -473,6 +542,7 @@ class PositionCanvas(QWidget):
         if self.draw_object_type != object_type:
             self.current_draw_points.clear()
             self._object_draw_center = None
+            self._ground_truth_freehand_active = False
         self.draw_object_type = object_type
         self.update()
 
@@ -511,6 +581,7 @@ class PositionCanvas(QWidget):
     def clear_active_drawing(self):
         self.current_draw_points.clear()
         self._object_draw_center = None
+        self._ground_truth_freehand_active = False
         self.update()
 
     def finish_active_polyline(self) -> bool:
@@ -522,6 +593,7 @@ class PositionCanvas(QWidget):
         points = list(self.current_draw_points)
         self.current_draw_points.clear()
         self._object_draw_center = None
+        self._ground_truth_freehand_active = False
         self.polygon_completed.emit(points)
         self.update()
         return True
@@ -536,6 +608,380 @@ class PositionCanvas(QWidget):
         snapped_x = round(world_x / step) * step
         snapped_y = round(world_y / step) * step
         return round(snapped_x, 6), round(snapped_y, 6)
+
+    def _ground_truth_point(self, world_x: float, world_y: float):
+        return round(float(world_x), 6), round(float(world_y), 6)
+
+    def _ground_truth_snap_point(self, world_x: float, world_y: float):
+        return self._snap_world_point(world_x, world_y)
+
+    def _append_ground_truth_point(self, world_x: float, world_y: float, *, force: bool = False) -> bool:
+        point = self._ground_truth_point(world_x, world_y)
+        if self.current_draw_points:
+            last = self.current_draw_points[-1]
+            if point == last:
+                return False
+            last_screen = self._world_to_screen(last[0], last[1])
+            point_screen = self._world_to_screen(point[0], point[1])
+            distance_px = math.hypot(point_screen[0] - last_screen[0], point_screen[1] - last_screen[1])
+            if not force and distance_px < self._ground_truth_sample_min_px:
+                return False
+        self.current_draw_points.append(point)
+        return True
+
+    def _unit_vector(self, start, end):
+        dx = float(end[0]) - float(start[0])
+        dy = float(end[1]) - float(start[1])
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            return None, 0.0
+        return (dx / length, dy / length), length
+
+    def _ground_truth_corner_ops(self, track):
+        metadata = getattr(track, "metadata", None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+            track.metadata = metadata
+        ops = metadata.get("corner_ops")
+        if not isinstance(ops, list):
+            ops = []
+            metadata["corner_ops"] = ops
+        return ops
+
+    @staticmethod
+    def _ground_truth_meta_point(point):
+        return [round(float(point[0]), 6), round(float(point[1]), 6)]
+
+    def _ground_truth_point_from_meta(self, point):
+        return self._ground_truth_point(float(point[0]), float(point[1]))
+
+    def _ground_truth_edge_matches_source_leg(self, points, edge_idx: int, leg_start, leg_end) -> bool:
+        if edge_idx < 0 or edge_idx >= len(points) - 1:
+            return False
+        edge_start = points[edge_idx]
+        edge_end = points[edge_idx + 1]
+        leg_dx = float(leg_end[0]) - float(leg_start[0])
+        leg_dy = float(leg_end[1]) - float(leg_start[1])
+        edge_dx = float(edge_end[0]) - float(edge_start[0])
+        edge_dy = float(edge_end[1]) - float(edge_start[1])
+        leg_len = math.hypot(leg_dx, leg_dy)
+        edge_len = math.hypot(edge_dx, edge_dy)
+        if leg_len <= 1e-9 or edge_len <= 1e-9:
+            return False
+        cross_norm = abs(edge_dx * leg_dy - edge_dy * leg_dx) / (edge_len * leg_len)
+        if cross_norm > 1e-4:
+            return False
+
+        def distance_to_leg_line(point):
+            px = float(point[0]) - float(leg_start[0])
+            py = float(point[1]) - float(leg_start[1])
+            return abs(px * leg_dy - py * leg_dx) / leg_len
+
+        if distance_to_leg_line(edge_start) > 1e-4 or distance_to_leg_line(edge_end) > 1e-4:
+            return False
+        projections = []
+        for point in (edge_start, edge_end):
+            px = float(point[0]) - float(leg_start[0])
+            py = float(point[1]) - float(leg_start[1])
+            projections.append((px * leg_dx + py * leg_dy) / (leg_len * leg_len))
+        return max(projections) >= -1e-4 and min(projections) <= 1.0 + 1e-4
+
+    def _selected_ground_truth_corner_op(self, track, selected_edges=None):
+        selected = sorted(int(edge) for edge in (selected_edges or self._ground_truth_selected_edges))
+        if len(selected) != 2:
+            return None
+        points = list(getattr(track, "points", []) or []) if track is not None else []
+        for op in self._ground_truth_corner_ops(track):
+            try:
+                start_edge = int(op.get("start_edge"))
+                end_edge = int(op.get("end_edge"))
+                op_edges = sorted([start_edge, end_edge])
+            except (TypeError, ValueError):
+                continue
+            if op_edges == selected:
+                return op
+            if all(start_edge <= edge <= end_edge for edge in selected):
+                return op
+            try:
+                source = op.get("source_points", [])
+                p0, p1, p2 = [self._ground_truth_point_from_meta(point) for point in source[:3]]
+            except (TypeError, ValueError, IndexError):
+                continue
+            matched_legs = set()
+            for edge in selected:
+                if self._ground_truth_edge_matches_source_leg(points, edge, p0, p1):
+                    matched_legs.add(0)
+                elif self._ground_truth_edge_matches_source_leg(points, edge, p1, p2):
+                    matched_legs.add(1)
+            if matched_legs == {0, 1}:
+                return op
+        return None
+
+    def ground_truth_selected_edges_can_corner(self) -> bool:
+        track = self._ground_truth_edit_track()
+        points = list(getattr(track, "points", []) or []) if track is not None else []
+        if len(self._ground_truth_selected_edges) != 2:
+            return False
+        edge_a, edge_b = sorted(self._ground_truth_selected_edges)
+        connected = edge_b == edge_a + 1 or (
+            len(points) >= 4
+            and points[0] == points[-1]
+            and edge_a == 0
+            and edge_b == len(points) - 2
+        )
+        return connected or self._selected_ground_truth_corner_op(track) is not None
+
+    def _build_ground_truth_corner_replacement(self, mode: str, amount_m: float, p0, p1, p2):
+        incoming, len_in = self._unit_vector(p1, p0)
+        outgoing, len_out = self._unit_vector(p1, p2)
+        if incoming is None or outgoing is None:
+            return False, "Corner has a zero-length segment", []
+
+        amount = float(amount_m)
+        if amount <= 0.0:
+            return False, "Corner amount must be greater than 0", []
+
+        dot = max(-1.0, min(1.0, incoming[0] * outgoing[0] + incoming[1] * outgoing[1]))
+        theta = math.acos(dot)
+        if theta <= math.radians(2.0) or abs(math.pi - theta) <= math.radians(2.0):
+            return False, "Corner angle is too straight to modify", []
+
+        mode = str(mode or "").lower()
+        if mode == "chamfer":
+            distance = amount
+            if distance >= min(len_in, len_out):
+                return False, "Chamfer distance is longer than one selected segment", []
+            q1 = (p1[0] + incoming[0] * distance, p1[1] + incoming[1] * distance)
+            q2 = (p1[0] + outgoing[0] * distance, p1[1] + outgoing[1] * distance)
+            return True, "", [self._ground_truth_point(*q1), self._ground_truth_point(*q2)]
+
+        if mode == "fillet":
+            radius = amount
+            tan_dist = radius / max(math.tan(theta / 2.0), 1e-9)
+            if tan_dist >= min(len_in, len_out):
+                return False, "Fillet radius is too large for the selected corner", []
+            q1 = (p1[0] + incoming[0] * tan_dist, p1[1] + incoming[1] * tan_dist)
+            q2 = (p1[0] + outgoing[0] * tan_dist, p1[1] + outgoing[1] * tan_dist)
+            bisector = (incoming[0] + outgoing[0], incoming[1] + outgoing[1])
+            bisector_len = math.hypot(bisector[0], bisector[1])
+            if bisector_len <= 1e-9:
+                return False, "Corner angle cannot produce a fillet", []
+            bisector = (bisector[0] / bisector_len, bisector[1] / bisector_len)
+            center_dist = radius / max(math.sin(theta / 2.0), 1e-9)
+            center = (p1[0] + bisector[0] * center_dist, p1[1] + bisector[1] * center_dist)
+            a1 = math.atan2(q1[1] - center[1], q1[0] - center[0])
+            a2 = math.atan2(q2[1] - center[1], q2[0] - center[0])
+            delta = (a2 - a1 + math.pi) % (2.0 * math.pi) - math.pi
+            arc_segments = max(4, min(48, int(math.ceil(abs(delta) * radius / 0.05))))
+            replacement = []
+            for idx in range(arc_segments + 1):
+                angle = a1 + delta * (idx / arc_segments)
+                replacement.append(
+                    self._ground_truth_point(
+                        center[0] + math.cos(angle) * radius,
+                        center[1] + math.sin(angle) * radius,
+                    )
+                )
+            return True, "", replacement
+
+        return False, "Unknown corner operation", []
+
+    def _remember_ground_truth_corner_op(self, track, *, p0, p1, p2, mode, amount, start_idx, replacement_len):
+        ops = self._ground_truth_corner_ops(track)
+        op = {
+            "source_points": [
+                self._ground_truth_meta_point(p0),
+                self._ground_truth_meta_point(p1),
+                self._ground_truth_meta_point(p2),
+            ],
+            "mode": str(mode),
+            "amount_m": float(amount),
+            "replace_start_idx": int(start_idx),
+            "replace_end_idx": int(start_idx + replacement_len - 1),
+            "start_edge": int(start_idx - 1),
+            "end_edge": int(start_idx + replacement_len - 1),
+        }
+        ops.append(op)
+        self._ground_truth_selected_edges = sorted([op["start_edge"], op["end_edge"]])
+        return op
+
+    def _update_ground_truth_corner_op(self, track, op, mode: str, amount_m: float):
+        points = list(getattr(track, "points", []) or [])
+        try:
+            source = op.get("source_points", [])
+            p0, p1, p2 = [self._ground_truth_point_from_meta(point) for point in source[:3]]
+            start_idx = int(op.get("replace_start_idx"))
+            end_idx = int(op.get("replace_end_idx"))
+        except (TypeError, ValueError, IndexError):
+            return False, "Stored corner metadata is invalid", None
+        if not (0 <= start_idx <= end_idx < len(points)):
+            return False, "Stored corner range is no longer valid", None
+
+        ok, message, replacement = self._build_ground_truth_corner_replacement(mode, amount_m, p0, p1, p2)
+        if not ok:
+            return False, message, None
+
+        track.points = points[:start_idx] + replacement + points[end_idx + 1:]
+        op.update({
+            "mode": str(mode),
+            "amount_m": float(amount_m),
+            "replace_start_idx": start_idx,
+            "replace_end_idx": start_idx + len(replacement) - 1,
+            "start_edge": start_idx - 1,
+            "end_edge": start_idx + len(replacement) - 1,
+        })
+        self._ground_truth_selected_edges = sorted([op["start_edge"], op["end_edge"]])
+        self._ground_truth_freehand_active = False
+        self.ground_truth_edge_selection_changed.emit(self._ground_truth_edit_track_id, 2)
+        self.update()
+        return True, f"Updated {mode} on the selected corner", track
+
+    def apply_ground_truth_corner(self, mode: str, amount_m: float):
+        if self.edit_mode != "edit_ground_truth":
+            return False, "Click Edit, then select two connected edges", None
+        track = self._ground_truth_edit_track()
+        if track is None:
+            return False, "Select a saved Ground Truth path", None
+        if len(self._ground_truth_selected_edges) != 2:
+            return False, "Select exactly two edges", None
+
+        existing_op = self._selected_ground_truth_corner_op(track)
+        if existing_op is not None:
+            return self._update_ground_truth_corner_op(track, existing_op, mode, amount_m)
+
+        edge_a, edge_b = sorted(self._ground_truth_selected_edges)
+        points = list(getattr(track, "points", []) or [])
+        is_closed_corner = (
+            len(points) >= 4
+            and points[0] == points[-1]
+            and edge_a == 0
+            and edge_b == len(points) - 2
+        )
+        if edge_b != edge_a + 1 and not is_closed_corner:
+            return False, "The selected edges must share one corner, or be a previously applied corner", None
+        if is_closed_corner:
+            corner_idx = 0
+            p0, p1, p2 = points[-2], points[0], points[1]
+        else:
+            corner_idx = edge_b
+            p0, p1, p2 = points[corner_idx - 1:corner_idx + 2]
+
+        ok, message, replacement = self._build_ground_truth_corner_replacement(mode, amount_m, p0, p1, p2)
+        if not ok:
+            return False, message, None
+
+        if is_closed_corner:
+            track.points = [replacement[-1]] + points[1:-1] + replacement
+            self._ground_truth_selected_edges.clear()
+            self.ground_truth_edge_selection_changed.emit(self._ground_truth_edit_track_id, 0)
+        else:
+            track.points = (
+                points[:corner_idx - 1]
+                + [p0]
+                + replacement
+                + [p2]
+                + points[corner_idx + 2:]
+            )
+            self._remember_ground_truth_corner_op(
+                track,
+                p0=p0,
+                p1=p1,
+                p2=p2,
+                mode=mode,
+                amount=amount_m,
+                start_idx=corner_idx,
+                replacement_len=len(replacement),
+            )
+            self.ground_truth_edge_selection_changed.emit(self._ground_truth_edit_track_id, 2)
+        self._ground_truth_freehand_active = False
+        self.update()
+        return True, f"Applied {mode} to the selected corner", track
+
+    def _extend_existing_ground_truth_corner_op(self, track, op):
+        points = list(getattr(track, "points", []) or [])
+        try:
+            source = op.get("source_points", [])
+            _p0, p1, _p2 = [self._ground_truth_point_from_meta(point) for point in source[:3]]
+            start_idx = int(op.get("replace_start_idx"))
+            end_idx = int(op.get("replace_end_idx"))
+        except (TypeError, ValueError, IndexError):
+            return False, "Stored corner metadata is invalid", None
+        if not (0 <= start_idx <= end_idx < len(points)):
+            return False, "Stored corner range is no longer valid", None
+
+        old_len = end_idx - start_idx + 1
+        track.points = points[:start_idx] + [p1] + points[end_idx + 1:]
+        ops = self._ground_truth_corner_ops(track)
+        if op in ops:
+            ops.remove(op)
+        shift = 1 - old_len
+        for other in ops:
+            try:
+                other_start = int(other.get("replace_start_idx"))
+                other_end = int(other.get("replace_end_idx"))
+            except (TypeError, ValueError):
+                continue
+            if other_start > end_idx:
+                other["replace_start_idx"] = other_start + shift
+                other["replace_end_idx"] = other_end + shift
+                other["start_edge"] = int(other.get("start_edge", other_start - 1)) + shift
+                other["end_edge"] = int(other.get("end_edge", other_end)) + shift
+        self._ground_truth_selected_edges = sorted([max(0, start_idx - 1), start_idx])
+        self._ground_truth_freehand_active = False
+        self.ground_truth_edge_selection_changed.emit(self._ground_truth_edit_track_id, 2)
+        self.update()
+        return True, "Extended selected corner to its original intersection", track
+
+    def apply_ground_truth_extend(self):
+        if self.edit_mode != "edit_ground_truth":
+            return False, "Click Edit, then select two edges", None
+        track = self._ground_truth_edit_track()
+        if track is None:
+            return False, "Select a saved Ground Truth path", None
+        if len(self._ground_truth_selected_edges) != 2:
+            return False, "Select exactly two edges", None
+        existing_op = self._selected_ground_truth_corner_op(track)
+        if existing_op is not None:
+            return self._extend_existing_ground_truth_corner_op(track, existing_op)
+        points = list(getattr(track, "points", []) or [])
+        edge_a, edge_b = sorted(self._ground_truth_selected_edges)
+        if edge_a == edge_b or edge_b >= len(points) - 1:
+            return False, "Selected edge index is invalid", None
+
+        p1, p2 = points[edge_a], points[edge_a + 1]
+        p3, p4 = points[edge_b], points[edge_b + 1]
+        x1, y1 = p1
+        x2, y2 = p2
+        x3, y3 = p3
+        x4, y4 = p4
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(denom) <= 1e-9:
+            return False, "Selected edges are parallel and cannot extend to one point", None
+        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom
+        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom
+        intersection = self._ground_truth_point(px, py)
+
+        def nearest_endpoint_index(edge_idx):
+            candidates = [edge_idx, edge_idx + 1]
+            return min(
+                candidates,
+                key=lambda idx: math.hypot(points[idx][0] - intersection[0], points[idx][1] - intersection[1]),
+            )
+
+        idx_a = nearest_endpoint_index(edge_a)
+        idx_b = nearest_endpoint_index(edge_b)
+        if idx_a == idx_b:
+            return False, "Selected edges already share the same endpoint", None
+        points[idx_a] = intersection
+        points[idx_b] = intersection
+        track.points = points
+        if isinstance(getattr(track, "metadata", None), dict):
+            track.metadata["corner_ops"] = []
+        self._ground_truth_selected_edges = [edge_a, edge_b]
+        self._ground_truth_freehand_active = False
+        self.ground_truth_edge_selection_changed.emit(self._ground_truth_edit_track_id, 2)
+        self.update()
+        return True, "Extended selected edges to one intersection", track
 
     def _is_close(self, world_pt, screen_x, screen_y, threshold_px=8):
         sx, sy = self._world_to_screen(world_pt[0], world_pt[1])
@@ -1059,14 +1505,22 @@ class PositionCanvas(QWidget):
         """Update live anchor selection and per-anchor distance/weight data."""
         self.anchor_mask_valid = bool(valid and mask is not None and mask != "")
         self.anchor_mask = int(mask or 0) if self.anchor_mask_valid else 0
-        self.anchor_telemetry = {
-            int(item.get("anchor_id", 0)): {
-                "distance_mm": int(item.get("distance_mm", 0) or 0),
+        telemetry = {}
+        for item in anchors or []:
+            try:
+                anchor_id = int(item.get("anchor_id", item.get("id", -1)) or 0)
+            except (TypeError, ValueError):
+                continue
+            if anchor_id < 0:
+                continue
+            distance_mm = item.get("distance_mm")
+            if distance_mm is None and item.get("distance_cm") is not None:
+                distance_mm = float(item.get("distance_cm") or 0.0) * 10.0
+            telemetry[anchor_id] = {
+                "distance_mm": int(distance_mm or 0),
                 "weight": item.get("weight"),
             }
-            for item in (anchors or [])
-            if int(item.get("anchor_id", 0) or 0) > 0
-        }
+        self.anchor_telemetry = telemetry
         self.update()
 
     def clear_anchor_telemetry(self):
@@ -1075,13 +1529,25 @@ class PositionCanvas(QWidget):
         self.anchor_telemetry = {}
         self.update()
 
+    def _anchor_mask_bit_for_id(self, anchor_id):
+        if not self.anchor_mask_valid:
+            return None
+        map_ids = [self._coerce_int_id(anchor.get("anchor_id"), -1) for anchor in self.anchors]
+        has_zero_based_layout = any(anchor_id == 0 for anchor_id in map_ids)
+        if has_zero_based_layout:
+            if 0 <= anchor_id < 32:
+                return 1 << anchor_id
+            return None
+        if 1 <= anchor_id <= 32:
+            return 1 << (anchor_id - 1)
+        return None
+
     def _anchor_is_mask_selected(self, anchor):
-        anchor_id = self._coerce_int_id(anchor.get("anchor_id"), 0)
-        return bool(
-            self.anchor_mask_valid
-            and 1 <= anchor_id <= 32
-            and self.anchor_mask & (1 << (anchor_id - 1))
-        )
+        anchor_id = self._coerce_int_id(anchor.get("anchor_id"), -1)
+        if anchor_id in self.anchor_telemetry:
+            return True
+        bit = self._anchor_mask_bit_for_id(anchor_id)
+        return bool(bit is not None and (self.anchor_mask & bit))
     def set_anchor_template(self, anchor_info):
         self._anchor_template = dict(anchor_info) if anchor_info else None
 
@@ -1315,7 +1781,17 @@ class PositionCanvas(QWidget):
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
-        if self.edit_mode == "draw" and self.draw_object_type in {"wall", "ground_truth"}:
+        if self.edit_mode == "draw" and self.draw_object_type == "ground_truth":
+            self._append_ground_truth_point(snapped_x, snapped_y, force=True)
+            if len(self.current_draw_points) >= 2:
+                self._push_undo_state()
+                pts = list(self.current_draw_points)
+                self.current_draw_points.clear()
+                self._ground_truth_freehand_active = False
+                self.polygon_completed.emit(pts)
+            self.update()
+            return
+        if self.edit_mode == "draw" and self.draw_object_type == "wall":
             if not self.current_draw_points or self.current_draw_points[-1] != (snapped_x, snapped_y):
                 self.current_draw_points.append((snapped_x, snapped_y))
             if len(self.current_draw_points) >= 2:
@@ -1411,6 +1887,28 @@ class PositionCanvas(QWidget):
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
 
+        if self.edit_mode == "edit_ground_truth":
+            if event.button() == Qt.MouseButton.LeftButton:
+                edge_idx = self._ground_truth_edge_at_screen_pos(pos.x(), pos.y())
+                if edge_idx is None:
+                    self._ground_truth_selected_edges.clear()
+                    self.ground_truth_edge_selection_changed.emit(
+                        self._ground_truth_edit_track_id, 0
+                    )
+                    self.update()
+                else:
+                    self._toggle_ground_truth_edge(edge_idx)
+                event.accept()
+                return
+            if event.button() == Qt.MouseButton.RightButton:
+                self._ground_truth_selected_edges.clear()
+                self.ground_truth_edge_selection_changed.emit(
+                    self._ground_truth_edit_track_id, 0
+                )
+                self.update()
+                event.accept()
+                return
+
         if self.edit_mode == "pick_zone" and event.button() == Qt.MouseButton.LeftButton:
             hit_anchor_idx = self._anchor_at_screen_pos(pos.x(), pos.y())
             if hit_anchor_idx is not None:
@@ -1499,6 +1997,16 @@ class PositionCanvas(QWidget):
             self.set_edit_mode("edit_vertices")
             return
 
+        if self.edit_mode == "draw" and self.draw_object_type == "ground_truth" and event.button() == Qt.MouseButton.LeftButton:
+            point = self._ground_truth_snap_point(world_x, world_y)
+            self._ground_truth_freehand_active = False
+            self._append_ground_truth_point(point[0], point[1], force=True)
+            self.mouse_world_pos = point
+            self.snapped_grid_pt = point
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.update()
+            return
+
         if self.edit_mode == "draw" and event.button() == Qt.MouseButton.LeftButton:
             if self.draw_object_type == "object" and self.draw_object_shape == "circle":
                 if self._object_draw_center is None:
@@ -1544,12 +2052,14 @@ class PositionCanvas(QWidget):
                 pts = list(self.current_draw_points)
                 self.current_draw_points.clear()
                 self._object_draw_center = None
+                self._ground_truth_freehand_active = False
                 self.polygon_completed.emit(pts)
                 self.update()
                 return
             # Cancel drawing
             self.current_draw_points.clear()
             self._object_draw_center = None
+            self._ground_truth_freehand_active = False
             self.update()
             return
 
@@ -1713,7 +2223,12 @@ class PositionCanvas(QWidget):
             )
             self.update()
             return
-        if self.edit_mode in {"draw", "edit_vertices"}:
+        if self.edit_mode == "draw" and self.draw_object_type == "ground_truth":
+            point = self._ground_truth_snap_point(world_x, world_y)
+            self.mouse_world_pos = point
+            self.snapped_grid_pt = point
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif self.edit_mode in {"draw", "edit_vertices"}:
             self.mouse_world_pos = (snapped_x, snapped_y)
             self.snapped_grid_pt = (snapped_x, snapped_y)
         else:
@@ -1860,6 +2375,12 @@ class PositionCanvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._ground_truth_freehand_active:
+            self._ground_truth_freehand_active = False
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.update()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton and self._selection_box_active:
             handled = self._finish_selection_box()
             if not handled:
@@ -2518,13 +3039,36 @@ class PositionCanvas(QWidget):
                 continue
             color = QColor(getattr(track, "color", "#FB7185"))
             width = max(1.0, float(getattr(track, "line_width", 2.0)))
-            painter.setPen(QPen(color, width, Qt.PenStyle.DashLine, Qt.PenCapStyle.RoundCap))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            for start, end in zip(points, points[1:]):
+            is_edit_track = (
+                self.edit_mode == "edit_ground_truth"
+                and str(getattr(track, "id", "")) == self._ground_truth_edit_track_id
+            )
+            for edge_idx, (start, end) in enumerate(zip(points, points[1:])):
                 sx1, sy1 = to_screen(start[0], start[1])
                 sx2, sy2 = to_screen(end[0], end[1])
+                if is_edit_track and edge_idx in self._ground_truth_selected_edges:
+                    painter.setPen(QPen(
+                        QColor(34, 211, 238),
+                        max(4.0, width + 2.0),
+                        Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap,
+                    ))
+                else:
+                    painter.setPen(QPen(
+                        color,
+                        width,
+                        Qt.PenStyle.DashLine,
+                        Qt.PenCapStyle.RoundCap,
+                    ))
                 painter.drawLine(sx1, sy1, sx2, sy2)
 
+            if is_edit_track:
+                for point in points:
+                    px, py = to_screen(point[0], point[1])
+                    painter.setPen(QPen(QColor(226, 232, 240), 1.0))
+                    painter.setBrush(QColor(15, 23, 42))
+                    painter.drawEllipse(int(px - 3), int(py - 3), 6, 6)
             label = str(getattr(track, "name", "Ground Truth"))
             lx, ly = to_screen(points[0][0], points[0][1])
             painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))

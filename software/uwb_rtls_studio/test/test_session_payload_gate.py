@@ -141,3 +141,69 @@ def test_late_payload_after_final_fail_updates_report_and_stops_retry(capsys):
     failed = shared_app_state.failed_queries_from_last_report("connected_device")
     assert [item["command_name"] for item in failed] == ["sys_config_get"]
     shared_app_state.cancel_query_pipeline("unit test cleanup")
+
+class _ReadButtonFakeDevice:
+    def __init__(self):
+        self._connection_status = "Connected"
+        self._connected_mac = "AA:BB:CC:DD:EE:FF"
+        self.retry_calls = 0
+        self.refresh_calls = []
+
+    def _query_allowed_for_current_role(self, command_name: str) -> bool:
+        return True
+
+    def retry_failed_connected_device_queries(self, reason: str = "") -> bool:
+        self.retry_calls += 1
+        return True
+
+    def refresh_connected_device_from_hardware(self, reason: str = "", preserve_ui: bool = False) -> bool:
+        self.refresh_calls.append((reason, preserve_ui))
+        return True
+
+
+def test_read_button_retries_failed_packets_before_full_refresh():
+    _ensure_qt_app()
+    from models.device_model import DeviceModel
+
+    shared_app_state.cancel_query_pipeline("unit test read button failed")
+    shared_app_state.clear_query_payload_markers()
+    shared_app_state.enable_device_session_payloads("unit test read button failed")
+    shared_app_state._last_query_flow_reports["connected_device"] = [
+        {
+            "command_name": "sys_config_get",
+            "dst_addr": 1,
+            "expected_response": "sys_config_resp",
+            "status": "TIMEOUT",
+            "traffic_class": "bootstrap",
+        }
+    ]
+
+    fake = _ReadButtonFakeDevice()
+    assert DeviceModel.read_connected_device_from_button(fake, "manual read") is True
+    assert fake.retry_calls == 1
+    assert fake.refresh_calls == []
+    shared_app_state.cancel_query_pipeline("unit test cleanup")
+
+
+def test_read_button_full_refresh_preserves_ui_after_complete_report():
+    _ensure_qt_app()
+    from models.device_model import DeviceModel
+
+    shared_app_state.cancel_query_pipeline("unit test read button full")
+    shared_app_state.clear_query_payload_markers()
+    shared_app_state.enable_device_session_payloads("unit test read button full")
+    shared_app_state._last_query_flow_reports["connected_device"] = [
+        {
+            "command_name": "sys_config_get",
+            "dst_addr": 1,
+            "expected_response": "sys_config_resp",
+            "status": "SUCCESS",
+            "traffic_class": "bootstrap",
+        }
+    ]
+
+    fake = _ReadButtonFakeDevice()
+    assert DeviceModel.read_connected_device_from_button(fake, "manual read") is True
+    assert fake.retry_calls == 0
+    assert fake.refresh_calls == [("manual read", True)]
+    shared_app_state.cancel_query_pipeline("unit test cleanup")

@@ -564,6 +564,7 @@ class LiveTrackingTab(QWidget):
         self._frame_count = 0
         self._start_time = time.time()
         self._is_ranging = False
+        self._ranging_stop_requested = False
         self._last_z = 0.0
         self._last_rms = 0.0
         self._last_stats = {}
@@ -580,6 +581,7 @@ class LiveTrackingTab(QWidget):
         self._clipboard = None
         self._anchor_telemetry_cache = {}
         self._selected_ground_truth_id = ""
+        self._ground_truth_color = "#FB7185"
 
         uic.loadUi(UI_FILE, self)
         self._setup_dynamic_metrics()
@@ -659,6 +661,7 @@ class LiveTrackingTab(QWidget):
         )
         self.header_widget.setGeometry(10, 10, header_width, 40)
         self._position_canvas_preview_button()
+        self._position_ground_truth_selector()
 
     def _setup_yaw_offset_control(self):
         self.yaw_offset_group = QGroupBox("Yaw Offset", self.scroll_content)
@@ -728,7 +731,7 @@ class LiveTrackingTab(QWidget):
         return value
 
     def _ensure_stream_active(self):
-        if self._is_ranging:
+        if self._is_ranging or self._ranging_stop_requested:
             return
         self._is_ranging = True
         self._start_time = time.time()
@@ -804,6 +807,14 @@ class LiveTrackingTab(QWidget):
                 return True
         return super().eventFilter(watched, event)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(50, self._position_canvas_preview_button)
+        if hasattr(self, "_position_ground_truth_selector"):
+            QTimer.singleShot(50, self._position_ground_truth_selector)
+        if self._vm and not self._is_developer_mode:
+            QTimer.singleShot(0, self._sync_tracking_canvas_from_map)
+
     def _toggle_probe_dimension_mode(self):
         enabled = self._canvas.toggle_probe_dimension_mode()
         if enabled:
@@ -860,36 +871,100 @@ class LiveTrackingTab(QWidget):
         self._live_sub_tabs.addTab(self._distance_graph, "Distance Log")
         self._live_sub_tabs.currentChanged.connect(self._on_live_subtab_changed)
         self.main_layout.addWidget(self._live_sub_tabs, 0, 0, 2, 2)
+        
+        # Create editor overlay buttons
+        from PyQt6.QtWidgets import QButtonGroup
+        self._map_layout_overlay_btn = QPushButton("Map Layout", self)
+        self._map_layout_overlay_btn.setCheckable(True)
+        self._map_layout_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._map_layout_overlay_btn.setMinimumWidth(98)
+        self._map_layout_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+        
+        self._rule_zones_overlay_btn = QPushButton("Rule Zones", self)
+        self._rule_zones_overlay_btn.setCheckable(True)
+        self._rule_zones_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._rule_zones_overlay_btn.setMinimumWidth(98)
+        self._rule_zones_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+        
+        self._ground_truth_overlay_btn = QPushButton("Ground Truth", self)
+        self._ground_truth_overlay_btn.setCheckable(True)
+        self._ground_truth_overlay_btn.setFixedHeight(self._preview_overlay_btn.height())
+        self._ground_truth_overlay_btn.setMinimumWidth(98)
+        self._ground_truth_overlay_btn.setStyleSheet(self._preview_overlay_btn.styleSheet())
+
+        self._editor_overlay_group = QButtonGroup(self)
+        self._editor_overlay_group.addButton(self._map_layout_overlay_btn, 0)
+        self._editor_overlay_group.addButton(self._rule_zones_overlay_btn, 1)
+        self._editor_overlay_group.addButton(self._ground_truth_overlay_btn, 2)
+        self._editor_overlay_group.setExclusive(True)
+
+        self._map_layout_overlay_btn.clicked.connect(lambda: self._set_editor_tab_from_overlay(0))
+        self._rule_zones_overlay_btn.clicked.connect(lambda: self._set_editor_tab_from_overlay(1))
+        self._ground_truth_overlay_btn.clicked.connect(lambda: self._set_editor_tab_from_overlay(2))
+        
+        # Hide them initially
+        self._map_layout_overlay_btn.hide()
+        self._rule_zones_overlay_btn.hide()
+        self._ground_truth_overlay_btn.hide()
+        
         self._setup_ground_truth_selector()
         self._on_live_subtab_changed(0)
 
     def _setup_ground_truth_selector(self):
         self._ground_truth_corner = QWidget(self._live_sub_tabs)
+        self._ground_truth_corner.setObjectName("groundTruthTabControl")
+        self._ground_truth_corner.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._ground_truth_corner.setFixedHeight(34)
         layout = QHBoxLayout(self._ground_truth_corner)
-        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         label = QLabel("Ground truth:", self._ground_truth_corner)
-        label.setStyleSheet("color: #CBD5E1; font-weight: bold;")
-        self.chk_show_ground_truth = QCheckBox(self._ground_truth_corner)
-        self.chk_show_ground_truth.setToolTip("Show the selected ground-truth path.")
+        label.setStyleSheet("color: #CBD5E1; font-weight: bold; background: transparent;")
+        self.chk_show_ground_truth = QCheckBox("Show", self._ground_truth_corner)
+        self.chk_show_ground_truth.setToolTip("Show the selected ground-truth path on the 2D map.")
         self.chk_show_ground_truth.setChecked(False)
         self.cmb_live_ground_truth = QComboBox(self._ground_truth_corner)
-        self.cmb_live_ground_truth.setMinimumWidth(180)
-        self.cmb_live_ground_truth.setMaximumWidth(280)
+        self.cmb_live_ground_truth.setMinimumWidth(150)
+        self.cmb_live_ground_truth.setMaximumWidth(220)
         self.cmb_live_ground_truth.setEnabled(False)
-        self.cmb_live_ground_truth.setStyleSheet(
-            "QComboBox { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; "
-            "border-radius: 4px; padding: 4px 8px; }"
-            "QComboBox:disabled { color: #64748B; }"
+        self._ground_truth_corner.setStyleSheet(
+            "QWidget#groundTruthTabControl { background: transparent; }"
+            "QLabel, QCheckBox { color: #CBD5E1; background: transparent; }"
+            "QCheckBox { spacing: 4px; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; }"
+            "QComboBox { background: #1E293B; color: #F8FAFC; border: 1px solid #334155; "
+            "border-radius: 4px; padding: 3px 8px; }"
+            "QComboBox:disabled { color: #64748B; border-color: #334155; }"
         )
         layout.addWidget(label)
         layout.addWidget(self.chk_show_ground_truth)
         layout.addWidget(self.cmb_live_ground_truth)
-        self._live_sub_tabs.setCornerWidget(self._ground_truth_corner, Qt.Corner.TopRightCorner)
+        self._ground_truth_corner.adjustSize()
+        self._ground_truth_corner.raise_()
+        self._position_ground_truth_selector()
 
         self.chk_show_ground_truth.toggled.connect(self._on_live_ground_truth_toggled)
         self.cmb_live_ground_truth.currentIndexChanged.connect(self._on_live_ground_truth_changed)
+
+    def _position_ground_truth_selector(self):
+        if not hasattr(self, "_ground_truth_corner") or not hasattr(self, "_live_sub_tabs"):
+            return
+        tab_bar = self._live_sub_tabs.tabBar()
+        if self._live_sub_tabs.count() < 2:
+            return
+        tab_rect = tab_bar.tabRect(1)
+        bar_geom = tab_bar.geometry()
+        tab_height = max(30, tab_rect.height())
+        x = bar_geom.x() + tab_rect.right() + 18
+        y = bar_geom.y() + tab_rect.top()
+        max_width = max(180, self._live_sub_tabs.width() - x - 380)
+        self._ground_truth_corner.setFixedHeight(tab_height)
+        self._ground_truth_corner.setMaximumWidth(max_width)
+        self._ground_truth_corner.adjustSize()
+        self._ground_truth_corner.move(x, y)
+        self._ground_truth_corner.raise_()
 
     def _on_live_subtab_changed(self, index):
         map_visible = index == 0
@@ -898,6 +973,17 @@ class LiveTrackingTab(QWidget):
         self._helpers_overlay_btn.setVisible(map_visible)
         if hasattr(self, "_ground_truth_corner"):
             self._ground_truth_corner.setVisible(map_visible)
+            if map_visible:
+                self._position_ground_truth_selector()
+
+        # Update overlay buttons visibility
+        editor_visible = map_visible and (self.sidebar_stack.currentIndex() == 1)
+        if hasattr(self, "_map_layout_overlay_btn"):
+            self._map_layout_overlay_btn.setVisible(editor_visible)
+            self._rule_zones_overlay_btn.setVisible(editor_visible)
+            self._ground_truth_overlay_btn.setVisible(editor_visible)
+            if editor_visible:
+                self._position_canvas_preview_button()
 
     def _toggle_map_view(self, show_3d):
         if show_3d and not OPENGL_AVAILABLE:
@@ -947,7 +1033,11 @@ class LiveTrackingTab(QWidget):
         canvas = self._map_view_stack
         canvas_origin = canvas.mapTo(self, QPointF(0, 0).toPoint())
         preview_x = max(self.right_widget.x() - self._preview_overlay_btn.width() - 12, canvas_origin.x() + 12)
-        y = canvas_origin.y() + 10
+        
+        # Ensure we don't overlap the tab bar if layout isn't settled
+        tab_bar_height = self._live_sub_tabs.tabBar().height() if hasattr(self, "_live_sub_tabs") else 35
+        y = max(canvas_origin.y(), tab_bar_height) + 10
+        
         self._preview_overlay_btn.move(preview_x, y)
         self._preview_overlay_btn.raise_()
         detail_x = preview_x
@@ -959,6 +1049,17 @@ class LiveTrackingTab(QWidget):
             helper_x = max(detail_x - self._helpers_overlay_btn.width() - 8, canvas_origin.x() + 12)
             self._helpers_overlay_btn.move(helper_x, y)
             self._helpers_overlay_btn.raise_()
+
+        # Position editor overlay buttons at the top-left of the canvas
+        if hasattr(self, "_map_layout_overlay_btn"):
+            self._map_layout_overlay_btn.move(canvas_origin.x() + 12, y)
+            self._map_layout_overlay_btn.raise_()
+        if hasattr(self, "_rule_zones_overlay_btn"):
+            self._rule_zones_overlay_btn.move(canvas_origin.x() + 12 + self._map_layout_overlay_btn.width() + 8, y)
+            self._rule_zones_overlay_btn.raise_()
+        if hasattr(self, "_ground_truth_overlay_btn"):
+            self._ground_truth_overlay_btn.move(canvas_origin.x() + 12 + self._map_layout_overlay_btn.width() + 8 + self._rule_zones_overlay_btn.width() + 8, y)
+            self._ground_truth_overlay_btn.raise_()
 
     def _make_metric_label(self, text: str, color: str = "#94A3B8", bold: bool = False) -> QLabel:
         label = QLabel(text, self)
@@ -1023,25 +1124,60 @@ class LiveTrackingTab(QWidget):
             text += f"  |  W: {float(anchor['weight']) / 100.0:.2f}"
         return text
 
+    def _telemetry_display_anchor_ids(self, packet_anchor_ids=None):
+        ordered = []
+        try:
+            canvas = getattr(self, "_canvas")
+        except (AttributeError, RuntimeError):
+            canvas = None
+        if canvas is not None:
+            for idx, anchor in enumerate(getattr(canvas, "anchors", []) or []):
+                anchor_id = self._coerce_int_id(anchor.get("anchor_id"), idx)
+                if anchor_id >= 0 and anchor_id not in ordered:
+                    ordered.append(anchor_id)
+        for anchor_id in sorted(self._anchor_telemetry_cache):
+            if anchor_id not in ordered:
+                ordered.append(anchor_id)
+        for anchor_id in packet_anchor_ids or []:
+            if anchor_id not in ordered:
+                ordered.append(anchor_id)
+        return ordered[:4]
+
     def _show_anchor_telemetry(self, anchors):
-        """Render cached distance and weight values in the four live rows."""
+        """Render cached distance and weight values using real anchor_id values."""
+        packet_anchor_ids = []
         for anchor in anchors or []:
-            anchor_id = int(anchor.get("anchor_id", 0) or 0)
-            if anchor_id <= 0:
+            try:
+                anchor_id = int(anchor.get("anchor_id", anchor.get("id", 0)) or 0)
+            except (TypeError, ValueError):
                 text_id = str(anchor.get("id", "")).replace("A", "")
-                anchor_id = int(text_id) if text_id.isdigit() else 0
-            if anchor_id <= 0:
+                anchor_id = int(text_id) if text_id.isdigit() else -1
+            if anchor_id < 0:
                 continue
+            packet_anchor_ids.append(anchor_id)
             cached = self._anchor_telemetry_cache.get(anchor_id, {}).copy()
             cached.update(anchor)
             cached["anchor_id"] = anchor_id
             self._anchor_telemetry_cache[anchor_id] = cached
 
-        for anchor_idx in range(1, 5):
-            label_widget = getattr(self, f"d{anchor_idx}_label", None)
-            if label_widget is not None:
-                label_widget.setText(self._anchor_telemetry_text(self._anchor_telemetry_cache[anchor_idx])
-                                     if anchor_idx in self._anchor_telemetry_cache else "-")
+        display_ids = self._telemetry_display_anchor_ids(packet_anchor_ids)
+        for row in range(1, 5):
+            anchor_id = display_ids[row - 1] if row - 1 < len(display_ids) else None
+            try:
+                name_widget = getattr(self, f"lbl_d{row}", None)
+            except (AttributeError, RuntimeError):
+                name_widget = None
+            try:
+                value_widget = getattr(self, f"d{row}_label", None)
+            except (AttributeError, RuntimeError):
+                value_widget = None
+            if name_widget is not None:
+                name_widget.setText(f"A{anchor_id}:" if anchor_id is not None else f"D{row}:")
+            if value_widget is not None:
+                value_widget.setText(
+                    self._anchor_telemetry_text(self._anchor_telemetry_cache[anchor_id])
+                    if anchor_id is not None and anchor_id in self._anchor_telemetry_cache else "-"
+                )
 
     def _setup_dynamic_metrics(self):
         if hasattr(self, "lbl_fps"):
@@ -1142,22 +1278,20 @@ class LiveTrackingTab(QWidget):
         self._vm.geofence_layout_updated.connect(self._map_3d.set_geofences)
         self._vm.geofence_layout_updated.connect(self._sync_room_origins)
         self._vm.ground_truths_updated.connect(self._refresh_ground_truth_controls)
+        shared_app_state.device_session_reset.connect(self._on_device_session_reset)
         
         if hasattr(self._vm, "scan_devices_updated"):
             self._vm.scan_devices_updated.connect(self._update_device_targets)
             self._update_device_targets(self._vm.get_scan_devices())
         
-        # Load any existing geofence maps on startup
-        self._vm.load_geofences()
-        self._canvas.set_geofences(self._vm.get_geofence_zones())
-        self._map_3d.set_geofences(self._vm.get_geofence_zones())
-        self._sync_room_origins(self._vm.get_geofence_zones())
-        self._refresh_ground_truth_controls(self._vm.get_ground_truths())
-        self._sync_loaded_map_anchors(update_canvas=True)
-        
-        current_layout = getattr(self._vm, "current_anchor_layout", [])
-        if current_layout:
-            self._on_anchor_layout_updated(current_layout)
+        # A new process starts with an empty visual workspace. Saved maps and
+        # ground truths remain on disk, but are loaded only by an explicit UI action.
+        self._canvas.set_geofences([])
+        self._map_3d.set_geofences([])
+        self._canvas.set_anchors([])
+        self._map_3d.set_anchors([])
+        self._sync_room_origins([])
+        self._refresh_ground_truth_controls([])
 
 
     def _has_loaded_map_anchor_layout(self) -> bool:
@@ -1201,6 +1335,7 @@ class LiveTrackingTab(QWidget):
 
     def _start_ranging(self):
         if self._vm:
+            self._ranging_stop_requested = False
             self._distance_graph.start_session()
             yaw_deg = int(round(float(self.yaw_offset_spin.value()))) % 360
             is_ukf_reinit = bool(self.reinit_ukf_check.isChecked())
@@ -1208,8 +1343,11 @@ class LiveTrackingTab(QWidget):
 
     def _stop_ranging(self):
         if self._vm:
-            self._vm.stop_ranging()
+            self._ranging_stop_requested = True
+            self._is_ranging = False
             self._distance_graph.stop_session()
+            self._sync_ranging_button()
+            self._vm.stop_ranging()
 
     def _toggle_ranging(self):
         if self._is_ranging:
@@ -1235,6 +1373,7 @@ class LiveTrackingTab(QWidget):
         self.btn_start.setEnabled(True)
 
     def _on_ranging_started(self):
+        self._ranging_stop_requested = False
         self._is_ranging = True
         self._sync_ranging_button()
         self._frame_count = 0
@@ -1245,10 +1384,19 @@ class LiveTrackingTab(QWidget):
         self._render_stats()
 
     def _on_ranging_stopped(self):
+        self._ranging_stop_requested = True
         self._is_ranging = False
         self._distance_graph.stop_session()
         self._sync_ranging_button()
         self._clear_live_metrics()
+
+    def _on_device_session_reset(self, _reason: str = ""):
+        if str(_reason or "").strip().lower() == "read from device refresh":
+            return
+        self._ranging_stop_requested = False
+        self._is_ranging = False
+        self._distance_graph.stop_session()
+        self._sync_ranging_button()
 
     def _on_position_updated(self, x, y, z, rms):
         self._ensure_stream_active()
@@ -1692,8 +1840,38 @@ class LiveTrackingTab(QWidget):
             return
         formatted = self._format_anchors_for_canvas(self._vm.current_anchor_layout)
         self._canvas.set_anchors(formatted)
-        if hasattr(self, "_map_3d"):
-            self._map_3d.set_anchors(formatted)
+        try:
+            map_3d = getattr(self, "_map_3d")
+        except (AttributeError, RuntimeError):
+            map_3d = None
+        if map_3d is not None:
+            map_3d.set_anchors(formatted)
+
+    def _sync_tracking_canvas_from_map(self):
+        """Keep User and Geofencing canvases on the same loaded map source."""
+        if not self._vm:
+            return
+        zones = self._vm.get_geofence_zones()
+        self._canvas.set_geofences(zones)
+        try:
+            map_3d = getattr(self, "_map_3d")
+        except (AttributeError, RuntimeError):
+            map_3d = None
+        if map_3d is not None:
+            map_3d.set_geofences(zones)
+
+        map_anchors = self._vm.get_map_anchors()
+        if map_anchors:
+            formatted = self._format_anchors_for_canvas(
+                self._annotate_anchor_membership(map_anchors)
+            )
+            self._canvas.set_anchors(formatted)
+            if map_3d is not None:
+                map_3d.set_anchors(formatted)
+        else:
+            self._set_current_layout_on_canvas()
+
+        QTimer.singleShot(0, self._canvas.auto_fit)
 
     def _same_anchor_layout(self, left, right) -> bool:
         def key(items):
@@ -1877,26 +2055,44 @@ class LiveTrackingTab(QWidget):
         self.cmb_user_map.currentIndexChanged.connect(self._on_user_map_changed)
         self._refresh_map_list()
 
-    def _refresh_map_list(self):
-        self.cmb_user_map.clear()
+    def _refresh_map_list(self, selected_path: str | None = None):
+        combo = self.cmb_user_map
+        previous_path = selected_path or combo.currentData()
+        previous_path = os.path.abspath(previous_path) if previous_path else ""
+        combo.blockSignals(True)
+        try:
+            combo.clear()
 
-        maps_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
-
-        if not os.path.exists(maps_dir):
+            maps_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime")
+            )
             os.makedirs(maps_dir, exist_ok=True)
 
-        default_file = "geofence_map.json"
-        files = sorted(
-            (f for f in os.listdir(maps_dir) if f.endswith(".json")),
-            key=lambda name: (name != default_file, name.lower()),
-        )
-        if default_file not in files:
-            files.insert(0, default_file)
+            default_file = "geofence_map.json"
+            files = sorted(
+                (name for name in os.listdir(maps_dir) if name.endswith(".json")),
+                key=lambda name: (name != default_file, name.lower()),
+            )
+            if default_file not in files:
+                files.insert(0, default_file)
 
-        for f in files:
-            full_path = os.path.join(maps_dir, f)
-            label = f[:-5] if f.endswith(".json") else f
-            self.cmb_user_map.addItem(label, full_path)
+            known_paths = set()
+            for name in files:
+                full_path = os.path.abspath(os.path.join(maps_dir, name))
+                known_paths.add(os.path.normcase(full_path))
+                label = name[:-5] if name.endswith(".json") else name
+                combo.addItem(label, full_path)
+
+            if previous_path and os.path.normcase(previous_path) not in known_paths:
+                label = os.path.splitext(os.path.basename(previous_path))[0]
+                combo.addItem(label, previous_path)
+
+            if previous_path:
+                index = combo.findData(previous_path)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        finally:
+            combo.blockSignals(False)
 
     def _on_user_map_changed(self, index):
         if index < 0:
@@ -1914,6 +2110,20 @@ class LiveTrackingTab(QWidget):
             return False
         editor = self.geofence_editor_widget
         return self.sidebar_stack.currentIndex() == 1
+
+    def _is_ground_truth_tool_active(self) -> bool:
+        if not hasattr(self, "geofence_editor_widget") or not hasattr(self, "sidebar_stack"):
+            return False
+        if self.sidebar_stack.currentIndex() != 1:
+            return False
+        editor = self.geofence_editor_widget
+        editor_tabs = getattr(editor, "editor_tabs", None)
+        current_widget = editor_tabs.currentWidget() if editor_tabs is not None else None
+        return (
+            getattr(self._canvas, "draw_object_type", "") == "ground_truth"
+            or getattr(self._canvas, "edit_mode", "") == "edit_ground_truth"
+            or current_widget is getattr(editor, "tab_ground_truth", None)
+        )
 
     def _refresh_ground_truth_controls(self, tracks):
         tracks = list(tracks or [])
@@ -1960,14 +2170,21 @@ class LiveTrackingTab(QWidget):
         selected_id = self._selected_track_id(self.cmb_live_ground_truth)
         if selected_id:
             self._selected_ground_truth_id = selected_id
+        self._sync_ground_truth_color_button()
         self._apply_ground_truth_visibility()
 
     def _on_editor_ground_truth_changed(self, _index):
         selected_id = self._selected_track_id(self.geofence_editor_widget.cmb_ground_truth)
         if selected_id:
             self._selected_ground_truth_id = selected_id
+        self._sync_ground_truth_color_button()
         if not self.geofence_editor_widget.chk_show_all_ground_truths.isChecked():
             self._apply_ground_truth_visibility()
+        if self._canvas.edit_mode == "edit_ground_truth" and selected_id:
+            if self._canvas.begin_ground_truth_edit(selected_id):
+                self.geofence_editor_widget.lbl_ground_truth_status.setText(
+                    "Edit mode: select two connected edges"
+                )
 
     def _apply_ground_truth_visibility(self):
         if not self._vm:
@@ -1988,11 +2205,118 @@ class LiveTrackingTab(QWidget):
         self._canvas.set_ground_truths(tracks, visible_ids)
         self._map_3d.set_ground_truths(self._canvas.visible_ground_truths())
 
-    def _finish_ground_truth_drawing(self):
-        if not self._canvas.finish_active_polyline():
+    def _enter_ground_truth_edit(self):
+        if self._canvas.current_draw_points:
+            if not self._canvas.finish_active_polyline():
+                self.geofence_editor_widget.lbl_ground_truth_status.setText(
+                    "Draw at least 2 points before editing"
+                )
+                self.geofence_editor_widget.btn_edit_ground_truth.setChecked(False)
+                return
+
+        track_id = self._selected_track_id(self.geofence_editor_widget.cmb_ground_truth)
+        if not track_id or not self._canvas.begin_ground_truth_edit(track_id):
             self.geofence_editor_widget.lbl_ground_truth_status.setText(
-                "Add at least 2 points before finishing"
+                "Select a saved path with at least 3 points"
             )
+            self.geofence_editor_widget.btn_edit_ground_truth.setChecked(False)
+            return
+        self._set_editor_mode("edit_ground_truth")
+        self.geofence_editor_widget.lbl_ground_truth_status.setText(
+            "Edit mode: select two connected edges"
+        )
+
+    def _on_ground_truth_edge_selection_changed(self, _track_id: str, count: int):
+        if self._canvas.edit_mode != "edit_ground_truth":
+            return
+        selected_edges = list(self._canvas._ground_truth_selected_edges)
+        track = self._canvas._ground_truth_edit_track()
+        points = list(getattr(track, "points", []) or []) if track is not None else []
+        connected = False
+        if len(selected_edges) == 2:
+            edge_a, edge_b = sorted(selected_edges)
+            connected = edge_b == edge_a + 1 or (
+                len(points) >= 4
+                and points[0] == points[-1]
+                and edge_a == 0
+                and edge_b == len(points) - 2
+            )
+        ready = count == 2 and self._canvas.ground_truth_selected_edges_can_corner()
+        can_extend = count == 2
+        self.geofence_editor_widget.btn_fillet_ground_truth.setEnabled(ready)
+        self.geofence_editor_widget.btn_chamfer_ground_truth.setEnabled(ready)
+        self.geofence_editor_widget.btn_extend_ground_truth.setEnabled(can_extend)
+        if count == 0:
+            message = "Edit mode: select two connected edges"
+        elif count == 1:
+            message = "1 edge selected; select the connected edge"
+        elif ready and not connected:
+            message = "Corner selected; choose Fillet/Chamfer again to update it"
+        elif connected:
+            message = "2 edges selected; choose Fillet, Chamfer, or Extend"
+        else:
+            message = "2 edges selected; use Extend or select a shared corner"
+        self.geofence_editor_widget.lbl_ground_truth_status.setText(message)
+
+    def _apply_ground_truth_corner(self, mode: str):
+        amount = float(self.geofence_editor_widget.gt_corner_amount.value())
+        ok, message, track = self._canvas.apply_ground_truth_corner(mode, amount)
+        self.geofence_editor_widget.lbl_ground_truth_status.setText(message)
+        if not ok or track is None:
+            return
+        if self._vm:
+            self._vm.add_ground_truth(track, persist=False)
+        self._selected_ground_truth_id = str(track.id)
+        self._apply_ground_truth_visibility()
+        self._set_editor_mode("edit_ground_truth")
+
+    def _apply_ground_truth_extend(self):
+        ok, message, track = self._canvas.apply_ground_truth_extend()
+        self.geofence_editor_widget.lbl_ground_truth_status.setText(message)
+        if not ok or track is None:
+            return
+        if self._vm:
+            self._vm.add_ground_truth(track, persist=False)
+        self._selected_ground_truth_id = str(track.id)
+        self._apply_ground_truth_visibility()
+        self._set_editor_mode("edit_ground_truth")
+
+    def _sync_ground_truth_color_button(self):
+        button = getattr(self.geofence_editor_widget, "btn_ground_truth_color", None)
+        if button is None:
+            return
+        color = self._ground_truth_color
+        track_id = self._selected_track_id(self.geofence_editor_widget.cmb_ground_truth)
+        if self._vm and track_id:
+            track = next((item for item in self._vm.get_ground_truths() if str(item.id) == track_id), None)
+            if track is not None:
+                color = str(getattr(track, "color", color) or color)
+                self._ground_truth_color = color
+        qcolor = QColor(color)
+        if not qcolor.isValid():
+            color = "#FB7185"
+            qcolor = QColor(color)
+            self._ground_truth_color = color
+        text_color = "#0F172A" if qcolor.lightness() > 150 else "#F8FAFC"
+        button.setStyleSheet(
+            f"QPushButton {{ background: {color}; color: {text_color}; font-weight: bold; }}"
+        )
+
+    def _choose_ground_truth_color(self):
+        current = QColor(self._ground_truth_color)
+        chosen = QColorDialog.getColor(current, self, "Choose Ground Truth Color")
+        if not chosen.isValid():
+            return
+        color = chosen.name().upper()
+        self._ground_truth_color = color
+        track_id = self._selected_track_id(self.geofence_editor_widget.cmb_ground_truth)
+        if self._vm and track_id:
+            track = next((item for item in self._vm.get_ground_truths() if str(item.id) == track_id), None)
+            if track is not None:
+                track.color = color
+                self._vm.add_ground_truth(track, persist=False)
+                self._apply_ground_truth_visibility()
+        self._sync_ground_truth_color_button()
 
     def _delete_selected_ground_truth(self):
         if not self._vm:
@@ -2011,8 +2335,9 @@ class LiveTrackingTab(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        if not self._vm.remove_ground_truth(track_id, persist=True):
-            QMessageBox.warning(self, "Save Failed", "Could not update the active map JSON.")
+        self._canvas._push_undo_state()
+        if not self._vm.remove_ground_truth(track_id, persist=False):
+            QMessageBox.warning(self, "Delete Failed", "Could not delete the selected ground-truth path.")
 
     def _unique_ground_truth_id(self, base_id: str, used_ids: set[str]) -> str:
         clean = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in str(base_id or "gt"))
@@ -2135,6 +2460,11 @@ class LiveTrackingTab(QWidget):
         }
         return self._ground_truth_tracks_from_payload(payload, file_path)
 
+    def _ground_truth_storage_dir(self) -> str:
+        app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        storage_dir = os.path.join(app_dir, "data", "ground_truth")
+        os.makedirs(storage_dir, exist_ok=True)
+        return storage_dir
     def _load_ground_truth_file(self, file_path: str) -> list[GroundTruthTrack]:
         ext = os.path.splitext(file_path)[1].lower()
         if ext == ".xml":
@@ -2149,7 +2479,7 @@ class LiveTrackingTab(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import Ground Truth",
-            "",
+            self._ground_truth_storage_dir(),
             "Ground Truth Files (*.json *.xml);;JSON Files (*.json);;GraphML XML (*.xml);;All Files (*)",
         )
         if not file_path:
@@ -2162,11 +2492,9 @@ class LiveTrackingTab(QWidget):
         if not tracks:
             QMessageBox.warning(self, "Import Failed", "No valid ground-truth path was found in this file.")
             return
+        self._canvas._push_undo_state()
         for track in tracks:
             self._vm.add_ground_truth(track, persist=False)
-        if not self._vm.save_geofences():
-            QMessageBox.warning(self, "Save Failed", "Imported paths were added, but the active map JSON could not be saved.")
-            return
         self._selected_ground_truth_id = str(tracks[0].id)
         self._refresh_ground_truth_controls(self._vm.get_ground_truths())
         self.geofence_editor_widget.lbl_ground_truth_status.setText(
@@ -2180,10 +2508,11 @@ class LiveTrackingTab(QWidget):
         if not tracks:
             QMessageBox.information(self, "Export Ground Truth", "There are no ground-truth paths to export.")
             return
+        default_path = os.path.join(self._ground_truth_storage_dir(), "ground_truths.json")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Ground Truth",
-            "ground_truths.json",
+            default_path,
             "Ground Truth JSON (*.json);;All Files (*)",
         )
         if not file_path:
@@ -2218,10 +2547,14 @@ class LiveTrackingTab(QWidget):
         self._canvas.is_developer_mode = False
 
         editor = self.geofence_editor_widget
+        editor.editor_tabs.tabBar().hide()
         if not hasattr(editor, "btn_mode_object"):
             editor.btn_mode_object = QPushButton("Object", editor)
             editor.btn_mode_object.setCheckable(True)
-            editor.btn_mode_object.setStyleSheet("QPushButton:checked { background-color: #F59E0B; color: #111827; border-color: #FCD34D; }")
+            editor.btn_mode_object.setStyleSheet(
+                "QPushButton { padding: 4px 4px; font-size: 11px; font-weight: normal; }"
+                "QPushButton:checked { font-weight: bold; background-color: #F59E0B; color: #111827; border-color: #FCD34D; }"
+            )
             editor.map_modes_layout.insertWidget(2, editor.btn_mode_object)
         if editor.cmb_map_type.findText("Object") < 0:
             editor.cmb_map_type.insertItem(2, "Object")
@@ -2229,7 +2562,14 @@ class LiveTrackingTab(QWidget):
         self._setup_properties_tab(editor)
         editor.editor_tabs.currentChanged.connect(self._on_editor_tab_changed)
         editor.btn_mode_ground_truth.clicked.connect(lambda: self._set_editor_tool("ground_truth", "draw"))
-        editor.btn_finish_ground_truth.clicked.connect(self._finish_ground_truth_drawing)
+        editor.btn_edit_ground_truth.clicked.connect(self._enter_ground_truth_edit)
+        self._canvas.ground_truth_edge_selection_changed.connect(
+            self._on_ground_truth_edge_selection_changed
+        )
+        editor.btn_fillet_ground_truth.clicked.connect(lambda: self._apply_ground_truth_corner("fillet"))
+        editor.btn_chamfer_ground_truth.clicked.connect(lambda: self._apply_ground_truth_corner("chamfer"))
+        editor.btn_extend_ground_truth.clicked.connect(self._apply_ground_truth_extend)
+        editor.btn_ground_truth_color.clicked.connect(self._choose_ground_truth_color)
         editor.cmb_ground_truth.currentIndexChanged.connect(self._on_editor_ground_truth_changed)
         editor.chk_show_all_ground_truths.toggled.connect(self._apply_ground_truth_visibility)
         editor.btn_import_ground_truth.clicked.connect(self._import_ground_truth_file)
@@ -2264,6 +2604,7 @@ class LiveTrackingTab(QWidget):
         self._canvas.room_origin_vertex_picked.connect(self._on_canvas_room_origin_vertex_picked)
         self._canvas.zones_undo_remove_requested.connect(self._undo_remove_zones)
         self._canvas.zones_undo_restore_requested.connect(self._undo_restore_zones)
+        self._canvas.ground_truths_undo_restore_requested.connect(self._undo_restore_ground_truths)
         self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self._undo_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._undo_shortcut.activated.connect(self._canvas.undo_last_action)
@@ -2271,7 +2612,7 @@ class LiveTrackingTab(QWidget):
         # Delete shortcut (Del)
         self._delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self)
         self._delete_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self._delete_shortcut.activated.connect(self._delete_selected_zone)
+        self._delete_shortcut.activated.connect(self._delete_current_selection)
 
         # Cut shortcut (Ctrl+X)
         self._cut_shortcut = QShortcut(QKeySequence("Ctrl+X"), self)
@@ -2537,6 +2878,28 @@ class LiveTrackingTab(QWidget):
         self._active_rooms_snapshot = None
         self._refresh_active_rooms()
 
+    def _undo_restore_ground_truths(self, track_snapshots):
+        if not self._vm:
+            return
+        tracks = []
+        for snapshot in track_snapshots or []:
+            try:
+                track = GroundTruthTrack.from_dict(snapshot)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if len(track.points) >= 2:
+                tracks.append(track)
+        current_id = self._selected_track_id(self.geofence_editor_widget.cmb_ground_truth)
+        valid_ids = {str(track.id) for track in tracks}
+        self._selected_ground_truth_id = current_id if current_id in valid_ids else (str(tracks[0].id) if tracks else "")
+        if hasattr(self._vm, "set_ground_truths"):
+            self._vm.set_ground_truths(tracks, persist=False)
+        else:
+            self._vm.geofence_repo.set_ground_truths(tracks)
+            self._vm.ground_truths_updated.emit(self._vm.get_ground_truths())
+        self._refresh_ground_truth_controls(self._vm.get_ground_truths())
+        self._apply_ground_truth_visibility()
+        self.geofence_editor_widget.lbl_ground_truth_status.setText("Undo restored Ground Truth paths")
     def _reload_selected_zone_properties(self, zone_id):
         if not self._vm:
             return
@@ -3217,6 +3580,19 @@ class LiveTrackingTab(QWidget):
             self._refresh_anchor_status_label()
             self._apply_ground_truth_visibility()
 
+        if hasattr(self, "_map_layout_overlay_btn"):
+            map_visible = self._live_sub_tabs.currentIndex() == 0
+            self._map_layout_overlay_btn.setVisible(map_visible)
+            self._rule_zones_overlay_btn.setVisible(map_visible)
+            self._ground_truth_overlay_btn.setVisible(map_visible)
+            if map_visible:
+                # Sync check state to match current editor tab
+                current_tab = self.geofence_editor_widget.editor_tabs.currentIndex()
+                btn = self._editor_overlay_group.button(current_tab)
+                if btn:
+                    btn.setChecked(True)
+                self._position_canvas_preview_button()
+
     def _exit_geofence_editor(self):
         if self._is_developer_mode:
             self._enter_geofence_editor()
@@ -3230,7 +3606,6 @@ class LiveTrackingTab(QWidget):
             )
             if should_commit:
                 self._vm.update_anchor_layout_from_map(draft_layout)
-            self._set_current_layout_on_canvas()
             self._anchor_layout_commit_pending = False
             self._pending_layout_read_for_editor = False
             self._refresh_live_tracking_map_context("exit_geofence_editor")
@@ -3240,8 +3615,12 @@ class LiveTrackingTab(QWidget):
         self.sidebar_stack.setCurrentIndex(0)
         self.canvas_header.setText("Real-time Position Tracking")
         self.user_map_groupbox.setVisible(False)
+        if hasattr(self, "_map_layout_overlay_btn"):
+            self._map_layout_overlay_btn.setVisible(False)
+            self._rule_zones_overlay_btn.setVisible(False)
+            self._ground_truth_overlay_btn.setVisible(False)
         if self._vm:
-            self._set_current_layout_on_canvas()
+            self._sync_tracking_canvas_from_map()
             self._apply_ground_truth_visibility()
 
     def _update_grid_settings(self, *_args):
@@ -3266,6 +3645,19 @@ class LiveTrackingTab(QWidget):
             self._set_editor_tool("ground_truth", "draw")
             self._apply_ground_truth_visibility()
         editor.editor_tabs.updateGeometry()
+
+        # Sync right editor tab selection to overlay buttons
+        if hasattr(self, "_editor_overlay_group"):
+            btn = self._editor_overlay_group.button(index)
+            if btn and not btn.isChecked():
+                btn.blockSignals(True)
+                btn.setChecked(True)
+                btn.blockSignals(False)
+
+    def _set_editor_tab_from_overlay(self, index):
+        editor = self.geofence_editor_widget
+        if editor.editor_tabs.currentIndex() != index:
+            editor.editor_tabs.setCurrentIndex(index)
 
     def _set_anchor_authoring_visible(self, visible: bool):
         for name in (
@@ -3294,6 +3686,10 @@ class LiveTrackingTab(QWidget):
             else:
                 self._properties_scroll.hide()
         self._canvas.set_draw_object_type(object_type)
+        if object_type == "ground_truth":
+            self._canvas.set_selected_zone(None)
+            if self._canvas.selected_anchor_idx is not None:
+                self._canvas.set_selected_anchor(None)
         if object_type == "zone":
             target_tab = self.geofence_editor_widget.editor_tabs.indexOf(
                 self.geofence_editor_widget.tab_rule_zones
@@ -3349,6 +3745,13 @@ class LiveTrackingTab(QWidget):
         self.geofence_editor_widget.btn_mode_ground_truth.setChecked(
             is_draw and draw_type == "ground_truth"
         )
+        self.geofence_editor_widget.btn_edit_ground_truth.setChecked(
+            mode == "edit_ground_truth" and draw_type == "ground_truth"
+        )
+        if mode != "edit_ground_truth":
+            self.geofence_editor_widget.btn_fillet_ground_truth.setEnabled(False)
+            self.geofence_editor_widget.btn_chamfer_ground_truth.setEnabled(False)
+            self.geofence_editor_widget.btn_extend_ground_truth.setEnabled(False)
         if is_edit and draw_type == "anchor":
             self.geofence_editor_widget.gb_map_properties.hide()
             self._set_anchor_authoring_visible(False)
@@ -3403,18 +3806,14 @@ class LiveTrackingTab(QWidget):
                 id=track_id,
                 name=name or f"Ground Truth {number}",
                 points=[(float(x), float(y)) for x, y in points],
-                color="#FB7185",
+                color=self._ground_truth_color,
                 line_width=2.0,
                 coordinate_frame="world",
             )
             self._selected_ground_truth_id = track_id
             self.geofence_editor_widget.txt_ground_truth_name.clear()
-            if not self._vm.add_ground_truth(track, persist=True):
-                QMessageBox.warning(
-                    self,
-                    "Save Failed",
-                    "The path is visible in this session but could not be written to the active map JSON.",
-                )
+            self._canvas._push_undo_state()
+            self._vm.add_ground_truth(track, persist=False)
             return
 
         objects = self._vm.get_geofence_zones()
@@ -3532,6 +3931,7 @@ class LiveTrackingTab(QWidget):
                 self._refresh_active_rooms()
                 self._refresh_anchor_layout_table()
         self._set_editor_mode("edit_vertices")
+
     def _apply_map_properties_from_enter(self):
         """Apply the visible map-object/anchor editor exactly like the Update button."""
         if not self.geofence_editor_widget.gb_map_properties.isVisible():
@@ -3705,6 +4105,16 @@ class LiveTrackingTab(QWidget):
         zone.object_type = "zone"
         self._vm.geofence_layout_updated.emit(self._vm.get_geofence_zones())
         self._canvas.update()
+
+    def _delete_current_selection(self):
+        if self._is_ground_truth_tool_active():
+            if getattr(self._canvas, "draw_object_type", "") == "ground_truth" and self._canvas.current_draw_points:
+                self._canvas.clear_active_drawing()
+                self.geofence_editor_widget.lbl_ground_truth_status.setText("Ground Truth draft cleared")
+                return
+            self._delete_selected_ground_truth()
+            return
+        self._delete_selected_zone()
 
     def _delete_selected_zone(self):
         if self._canvas.selected_anchor_idx is not None:
@@ -4015,7 +4425,7 @@ class LiveTrackingTab(QWidget):
         if not self._vm:
             return
 
-        default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime"))
+        default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "maps"))
         os.makedirs(default_dir, exist_ok=True)
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -4038,7 +4448,7 @@ class LiveTrackingTab(QWidget):
         self._geofence_anchor_baseline = [dict(anchor) for anchor in map_anchors]
         self._draft_anchor_layout = [dict(anchor) for anchor in map_anchors]
         self._anchor_layout_commit_pending = False
-        self._refresh_map_list()
+        self._refresh_map_list(selected_path=file_path)
         self._refresh_anchor_status_label()
         self._refresh_active_rooms()
         QMessageBox.information(self, "Map Loaded", f"Loaded geofencing map:\n{os.path.basename(file_path)}")
@@ -4117,7 +4527,7 @@ class LiveTrackingTab(QWidget):
             if self.sidebar_stack.currentIndex() == 1:
                 self._exit_geofence_editor()
             elif self._vm:
-                self._set_current_layout_on_canvas()
+                self._sync_tracking_canvas_from_map()
 
     def _on_enable_geofence_toggled(self, checked):
         self._canvas.set_25d_preview(False)

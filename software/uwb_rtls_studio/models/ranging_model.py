@@ -100,7 +100,7 @@ class RangingModel(QObject):
         super().__init__(parent)
         self._protocol = protocol_service
         self._ranging_repo = ranging_repo
-        shared_app_state.device_session_reset.connect(self.clear_history)
+        shared_app_state.device_session_reset.connect(self._on_device_session_reset)
         self._command_bus = command_bus
         if self._ranging_repo:
             self._ranging_repo.position_parsed.connect(self._handle_position_sample)
@@ -298,6 +298,13 @@ class RangingModel(QObject):
             self._ranging_repo.update_anchor_layout_cache(anchors)
         shared_app_state.anchor_layout = anchors
 
+    def _on_device_session_reset(self, reason: str = ""):
+        self.clear_history()
+        if str(reason or "").strip().lower() == "read from device refresh":
+            return
+        self.is_ranging = False
+        self._status_timer.stop()
+
     def clear_history(self):
         """Clear position history buffer."""
         self._position_history.clear()
@@ -386,11 +393,12 @@ class RangingModel(QObject):
     @staticmethod
     def _parse_anchor_distances(res) -> tuple[list[dict], int, dict[int, int]]:
         anchors = []
-        anchor_mask = 0
         distances_by_anchor: dict[int, int] = {}
+        anchor_ids = []
         for anchor in getattr(res, "anchors", []):
             anchor_id = int(getattr(anchor, "anchor_id", 0) or 0)
             distance_mm = int(getattr(anchor, "distance_mm", 0) or 0)
+            anchor_ids.append(anchor_id)
             anchors.append({
                 "id": f"A{anchor_id}",
                 "anchor_id": anchor_id,
@@ -398,13 +406,17 @@ class RangingModel(QObject):
                 "distance_cm": distance_mm / 10.0,
                 "fp_amp": int(getattr(anchor, "fp_amp", 0) or 0),
             })
-            # Protocol convention: bit 0 selects Anchor 1, bit 1 Anchor 2, ...
-            if 1 <= anchor_id <= 32:
-                anchor_mask |= 1 << (anchor_id - 1)
-            if anchor_id:
-                distances_by_anchor[anchor_id] = distance_mm
-        return anchors, anchor_mask, distances_by_anchor
+            distances_by_anchor[anchor_id] = distance_mm
 
+        zero_based = any(anchor_id == 0 for anchor_id in anchor_ids)
+        anchor_mask = 0
+        for anchor_id in anchor_ids:
+            if zero_based:
+                if 0 <= anchor_id < 32:
+                    anchor_mask |= 1 << anchor_id
+            elif 1 <= anchor_id <= 32:
+                anchor_mask |= 1 << (anchor_id - 1)
+        return anchors, anchor_mask, distances_by_anchor
     def _handle_ranging_result(self, res, seq: int = 0, packet_timestamp_ms: int = 0):
         now = time.time()
         anchors, anchor_mask, distances_by_anchor = self._parse_anchor_distances(res)
