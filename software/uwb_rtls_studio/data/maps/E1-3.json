@@ -3,6 +3,8 @@
     "name": "Virtual_Map_Config",
     "version": 3,
     "schema": "uwb_rtls_geofence_map",
+    "global_frame_room_id": "18cc1278",
+    "global_frame_note": "For debugging: global frame matches E1-303 local frame",
     "active_room_ids": [
       "18cc1278",
       "cbc39752"

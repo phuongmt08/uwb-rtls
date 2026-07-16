@@ -23,6 +23,7 @@ typedef struct {
 
 typedef struct {
     bool rejected;
+    uint16_t reject_streak;
 } mahalanobis_anchor_state_t;
 
 typedef struct {
@@ -46,7 +47,7 @@ float mw_filter_median_update(median_filter_1d_t *med, float new_val);
 bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   uint8_t anchor_id, float d_raw,
                                   float px, float py, float pz,
-                                  float vx, float vy, float vz,
+                                  float pxx, float pxy, float pyy,
                                   float ax, float ay, float az,
                                   float *d_out, float *d2_score, float *R_adaptive);
 

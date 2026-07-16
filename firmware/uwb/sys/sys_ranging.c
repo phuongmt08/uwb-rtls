@@ -164,7 +164,14 @@ typedef struct __attribute__((packed))
   float   distance_m; /* Calculated distance */
   uint16_t fp_amp_norm_q8;
   uint16_t fp_snr_q8;
+  uint8_t  fp_confidence_q8;
+  uint8_t  quality_flags;
 } result_msg_t;
+/* Packet format version guard: anchor and tag must agree on wire layout.
+ * If this fires, update the assert value AND bump the protocol version. */
+typedef char result_msg_size_check_t[
+  (sizeof(result_msg_t) == 15U) ? 1 : -1
+];
 
 typedef struct
 {
@@ -529,7 +536,14 @@ static float calculate_distance(const dstwr_timestamps_t *ts)
     RLOG_W(LOG_OBJECT_CODE_RANGING, "[ANCHOR] Negative tof_dw");
     return -1.0f;
   }
-  return tof_dw * (float) DWT_TIME_UNITS * (float) SPEED_OF_LIGHT;
+  float raw_dist = tof_dw * (float) DWT_TIME_UNITS * (float) SPEED_OF_LIGHT;
+  float bias = bsp_uwb_get_range_bias(raw_dist);
+  float corrected_dist = raw_dist - bias;
+  if (corrected_dist < 0.0f)
+  {
+    corrected_dist = 0.0f;
+  }
+  return corrected_dist;
 }
 
 static uint16_t control_msg_size(uint8_t type)
@@ -1011,7 +1025,8 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
   tr->distance_m       = res->distance_m;
   tr->fp_amp_norm_q8   = res->fp_amp_norm_q8;
   tr->fp_snr_q8        = res->fp_snr_q8;
-  tr->quality          = (res->fp_amp_norm_q8 > 0U && res->fp_snr_q8 > 0U) ? 1U : 0U;
+  tr->fp_confidence_q8 = res->fp_confidence_q8;
+  tr->quality          = ((res->quality_flags & 0x01U) != 0U) ? 1U : 0U;
   tr->calib_status     = calib_status;
   tr->valid            = (res->valid == 1);
   s_ctx.result_multi.count++;
@@ -1671,6 +1686,23 @@ sys_ranging_err_t sys_ranging_tag_start_tdma(uint8_t        num_anchors,
 
 static uint32_t anchor_smart_discovery_interval_ms(uint32_t power_mode);
 
+static uint32_t tdma_cycle_watchdog_ms(uint8_t num_anchors, uint32_t configured_timeout_ms)
+{
+  uint32_t n = (num_anchors == 0U) ? 1U : (uint32_t)num_anchors;
+  uint32_t effective_slot_us = TDMA_DEFAULT_SLOT_DURATION_US + TDMA_DEFAULT_GUARD_TIME_US;
+  uint32_t active_us = TDMA_DEFAULT_POLL_TO_RESP_DELAY_US +
+                       (n * effective_slot_us) +
+                       TDMA_DEFAULT_RESP_TO_FINAL_DELAY_US +
+                       TDMA_DEFAULT_SLOT_DURATION_US +
+                       TDMA_DEFAULT_FINAL_TO_RESULT_DELAY_US +
+                       (n * effective_slot_us) +
+                       TDMA_DEFAULT_SLOT_DURATION_US;
+  /* Preserve 10 ms for foreground/ISR scheduling jitter. Six anchors need
+   * about 53.5 ms on air, so the minimum whole-cycle watchdog becomes 64 ms. */
+  uint32_t required_ms = (active_us + 10000U + 999U) / 1000U;
+  return (configured_timeout_ms < required_ms) ? required_ms : configured_timeout_ms;
+}
+
 sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_t *anchor_ids, uint32_t rx_timeout_ms)
 {
   event_tag_diag_maybe_log();
@@ -1679,6 +1711,7 @@ sys_ranging_err_t sys_ranging_tag_process_tdma(uint8_t num_anchors, const uint8_
   if (s_ctx.state != STATE_TAG_RANGING_TDMA) return SYS_RANGING_ERR;
   
   uint32_t timeout_ms = (rx_timeout_ms == 0) ? DEFAULT_RX_TIMEOUT_MS : rx_timeout_ms;
+  timeout_ms = tdma_cycle_watchdog_ms(num_anchors, timeout_ms);
   /* Use the configured timeout as the whole-cycle watchdog. */
   if (HAL_GetTick() - s_ctx.state_entry_tick > timeout_ms) {
     state_machine_reset();
@@ -1981,7 +2014,7 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
   if (s_ctx.state != STATE_ANCHOR_RANGING_TDMA) return SYS_RANGING_ERR;
   
   uint32_t timeout_ms = (rx_timeout_ms == 0) ? DEFAULT_RX_TIMEOUT_MS : rx_timeout_ms;
-  uint32_t sm_watchdog_ms = timeout_ms;
+  uint32_t sm_watchdog_ms = tdma_cycle_watchdog_ms(num_anchors, timeout_ms);
   
   if (s_sys_ranging_ev.step == SYS_RANGING_EV_SYS_IDLE) {
       s_ctx.state_entry_tick = HAL_GetTick();
@@ -2250,8 +2283,25 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                       s_ctx.result_single.fp_snr_q8 =
                           min_nonzero_u16(s_sys_ranging_ev.poll_quality.fp_snr_q8,
                                           final_evt.rx_quality.fp_snr_q8);
+                      if (s_sys_ranging_ev.poll_quality.confidence_valid &&
+                          final_evt.rx_quality.confidence_valid)
+                      {
+                          s_ctx.result_single.fp_confidence_q8 =
+                              (s_sys_ranging_ev.poll_quality.fp_confidence_q8 < final_evt.rx_quality.fp_confidence_q8)
+                              ? s_sys_ranging_ev.poll_quality.fp_confidence_q8
+                              : final_evt.rx_quality.fp_confidence_q8;
+                      }
+                      else
+                      {
+                          /* confidence_valid absent on at least one leg: treat as
+                           * worst-case (0 = fully NLOS / unknown) so the Huber
+                           * weight in mw_trilateration will downweight this anchor.
+                           * Do NOT use 255 here — that would silently grant full trust. */
+                          s_ctx.result_single.fp_confidence_q8 = 0U;
+                      }
                       s_ctx.result_single.quality =
-                          (s_sys_ranging_ev.poll_quality.valid && final_evt.rx_quality.valid) ? 1U : 0U;
+                          (s_sys_ranging_ev.poll_quality.valid && final_evt.rx_quality.valid &&
+                           s_sys_ranging_ev.poll_quality.confidence_valid && final_evt.rx_quality.confidence_valid) ? 1U : 0U;
                       s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
                       s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
                       
@@ -2278,6 +2328,8 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                       res.distance_m = s_ctx.result_single.distance_m;
                       res.fp_amp_norm_q8 = s_ctx.result_single.fp_amp_norm_q8;
                       res.fp_snr_q8      = s_ctx.result_single.fp_snr_q8;
+                      res.fp_confidence_q8 = s_ctx.result_single.fp_confidence_q8;
+                      res.quality_flags = s_ctx.result_single.quality ? 0x01U : 0U;
                       
                       s_sys_ranging_ev.planned_tx_dw = res_tx_dw;
 #if SYS_RANGING_VERIFY_TX_TIMING

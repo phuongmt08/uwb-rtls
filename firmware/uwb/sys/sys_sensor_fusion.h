@@ -74,12 +74,13 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 
 bool sys_sensor_fusion_is_initialized(void);
 
+bool sys_sensor_fusion_get_position_covariance(float *pxx, float *pxy, float *pyy);
+
 bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                   const vec2d_t *tril_position,
-                                                  const mw_tril_anchor_t best_3_anchors[3],
-                                                  const mw_tril_anchor_t *anchors_by_id,
-                                                  const mw_tril_anchor_t *anchors_compact,
-                                                  uint8_t compact_count,
+                                                  const mw_tril_anchor_t selected_anchors[3],
+                                                  const mw_tril_anchor_t *candidate_anchors,
+                                                  uint8_t candidate_count,
                                                   uint8_t selected_anchor_mask,
                                                   const uwb_distance_msg_t *ranging_msg);
 

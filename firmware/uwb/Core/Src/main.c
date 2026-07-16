@@ -85,7 +85,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 extern network_core_t g_network_core;
-extern uint8_t g_network_rx_buf[512];
+extern uint8_t g_network_rx_buf[NETWORK_CORE_PACKET_BUFFER_SIZE];
 
 /* USER CODE BEGIN PV */
 #if TEST_SEND_POS

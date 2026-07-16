@@ -7,7 +7,7 @@
 
 #define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
 
-#define BLE_RX_BUF_SIZE  512u
+#define BLE_RX_BUF_SIZE  2048u
 #define BLE_RX_BUF_MASK  (BLE_RX_BUF_SIZE - 1u)
 #define BLE_DMA_BUF_SIZE 256u
 

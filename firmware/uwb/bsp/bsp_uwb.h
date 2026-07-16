@@ -25,10 +25,15 @@ typedef struct {
     uint16_t fp_amp2;
     uint16_t fp_amp3;
     uint16_t std_noise;
-    uint16_t max_noise;
+    uint16_t lde_threshold;
     uint16_t rx_pream_count;
     uint16_t fp_amp_norm_q8;
     uint16_t fp_snr_q8;
+    uint16_t first_path_index_q6;
+    uint16_t peak_path_index;
+    uint16_t peak_path_amp;
+    uint8_t  fp_confidence_q8;
+    bool     confidence_valid;
     bool     valid;
 } bsp_uwb_rx_quality_t;
 
@@ -210,6 +215,8 @@ bool bsp_uwb_is_rx_ready(void);
 uint64_t bsp_uwb_get_current_time_dw(void);
 bsp_err_t bsp_uwb_validate_delayed_tx(uint64_t tx_timestamp_dw, uint64_t min_guard_dw);
 uint16_t bsp_uwb_get_rx_antenna_delay(void);
+float bsp_uwb_get_range_bias(float range_raw_m);
+
 
 void bsp_uwb_get_rx_error_counts(uint32_t *timeout,
                                  uint32_t *crc_err,

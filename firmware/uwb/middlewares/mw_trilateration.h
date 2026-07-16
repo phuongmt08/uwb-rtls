@@ -44,11 +44,13 @@ typedef struct {
     double r_adaptive; /* Adaptive covariance */
     double fp_amp_norm;
     double fp_snr;
+    double fp_confidence;
     bool quality_valid;
-    double selection_score;
+    bool rescued;       /* Reintroduced after persistent prefilter rejection */
+    double wgdop;
     double residual_rms;
-    double gdop_penalty;
-    double fp_penalty;
+    double triplet_fp_weight; /* Mean FP-only confidence of the selected triplet */
+    double measurement_weight; /* Final per-anchor precision used by WGDOP */
 } mw_tril_anchor_t;
 
 /**
@@ -74,41 +76,46 @@ typedef enum {
 /* Public function prototypes ----------------------------------------- */
 
 /**
- * @brief Select the best anchors based on Mahalanobis distance (d2_score)
+ * @brief Select the best three-anchor layout using Huber-weighted WGDOP.
  * 
- * Sorts valid anchors by d2_score ascending and returns the top M anchors.
+ * For the production 2D path, combines temporal consistency, DW1000 first-path
+ * confidence, frame residual, and distance-dependent variance as measurement
+ * precision before evaluating each candidate layout.
  * 
- * @param[in]  anchors        Input array of anchors
- * @param[in]  total_anchors  Number of anchors in input array
- * @param[out] best_out       Output array to store selected anchors
- * @param[in]  max_out        Maximum number of anchors to select (usually 3 or 4)
- * @return Number of anchors successfully selected and copied to best_out
+ * @param[in]  candidates       Dense array of valid candidate anchors
+ * @param[in]  candidate_count  Number of entries in candidates
+ * @param[out] selected_out     Exact three-anchor selection
+ * @param[in]  prev_mask        Previously selected triplet for hysteresis
+ * @param[in]  reference_valid  true when the UKF reference is trusted
+ * @param[in]  reference_position Common WGDOP evaluation position
+ * @return 3 on success, otherwise 0
  */
-uint8_t mw_trilateration_select_best(const mw_tril_anchor_t *anchors, 
-                                     uint8_t total_anchors, 
-                                     mw_tril_anchor_t *best_out, 
-                                     uint8_t max_out,
-                                     uint8_t prev_mask);
+uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
+                                       uint8_t candidate_count,
+                                       mw_tril_anchor_t selected_out[3],
+                                       uint8_t prev_mask,
+                                       bool reference_valid,
+                                       vec2d_t reference_position);
 
 /**
- * @brief Calculate 3D position (Mathematical core)
- * 
- * Requires EXACTLY 3 pre-selected valid anchors.
- * 
- * @param[in]  anchors_exact_3 Array of exactly 3 previously selected anchors
- * @param[out] position        Calculated 3D position
- * @param[out] result          Optional quality info (can be NULL)
- * @return MW_TRIL_OK on success
+ * @brief Compute one precision weight per candidate at a common reference.
+ *
+ * Residual confidence is enabled only with at least four anchors and a trusted
+ * reference. With three anchors, or while the UKF reference is uncertain,
+ * residual confidence stays neutral to avoid self-fitting a triplet.
  */
-mw_tril_err_t mw_trilateration_3d(const mw_tril_anchor_t *anchors_exact_3,
-                                  vec3d_t *position,
-                                  mw_tril_result_t *result);
+void mw_trilateration_compute_weights(mw_tril_anchor_t *candidates,
+                                      uint8_t candidate_count,
+                                      bool reference_valid,
+                                      vec2d_t reference_position);
 
 /**
- * @brief Calculate 2D position (Mathematical core)
- * 
- * Requires EXACTLY 3 pre-selected valid anchors. Ignored Z coordinate.
- * 
+ * @brief Calculate 2D position (debug/init fix, not the production estimator)
+ *
+ * Requires EXACTLY 3 pre-selected valid anchors. Ignores Z coordinate.
+ * error_estimate in result is the range residual RMS; geometry quality is
+ * published by mw_trilateration_select_best_3 (wgdop) instead.
+ *
  * @param[in]  anchors_exact_3 Array of exactly 3 previously selected anchors
  * @param[out] position        Calculated 2D position
  * @param[out] result          Optional quality info (can be NULL)

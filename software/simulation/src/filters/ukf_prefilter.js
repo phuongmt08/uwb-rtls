@@ -394,35 +394,36 @@ class UnscentedKalmanFilter {
         if (!this.is_initialized) return { d_pred: d, d2: 0 };
         if (!Number.isFinite(d)) return { d_pred: null, d2: Infinity };
 
-        // Fusion logs normally carry planar ranges; app_tag projects raw UWB 3D
-        // distance to 2D before logging d1..d4.
-        const z_sigma = new Float64Array(this.num_sigmas);
-        for (let m = 0; m < this.num_sigmas; m++) {
-            const px = this.X_sigma_pred[m][0];
-            const py = this.X_sigma_pred[m][1];
-            z_sigma[m] = this.predictedRange(px, py, anchor, tagHeight);
+        // Mirror mw_filter_mahalanobis_update(): planar range Jacobian and
+        // scalar innovation covariance S = H P H' + R_gate.
+        const dx = this.x[0] - anchor.x;
+        const dy = this.x[1] - anchor.y;
+        const dxy = Math.sqrt(dx * dx + dy * dy);
+        if (!Number.isFinite(dxy) || dxy < 1.0e-6) {
+            return { d_pred: null, d2: Infinity, innovation_covariance: null };
         }
 
-        // 2. Mean predicted measurement
-        let z_mean = 0.0;
-        for (let m = 0; m < this.num_sigmas; m++) {
-            z_mean += this.Wm[m] * z_sigma[m];
+        const dPred = this.predictedRange(this.x[0], this.x[1], anchor, tagHeight);
+        const hx = dx / dxy;
+        const hy = dy / dxy;
+        const pxy = 0.5 * (this.P[0][1] + this.P[1][0]);
+        const projectedCov = hx * hx * this.P[0][0]
+            + 2.0 * hx * hy * pxy
+            + hy * hy * this.P[1][1];
+        const S = Math.max(
+            SIM_CONFIG.FILTER.MIN_GATE_COVARIANCE,
+            projectedCov + this.r_gate
+        );
+        if (!Number.isFinite(dPred) || !Number.isFinite(S)) {
+            return { d_pred: dPred, d2: Infinity, innovation_covariance: S };
         }
 
-        // 3. Innovation covariance S
-        let S = 0.0;
-        for (let m = 0; m < this.num_sigmas; m++) {
-            S += this.Wc[m] * (z_sigma[m] - z_mean) * (z_sigma[m] - z_mean);
-        }
-        S += this.r_gate; // Gate noise can be looser than update noise.
-        if (!Number.isFinite(z_mean) || !Number.isFinite(S) || S <= 0) {
-            return { d_pred: z_mean, d2: Infinity };
-        }
-
-        // 4. Mahalanobis distance squared
-        const d2 = ((d - z_mean) ** 2) / Math.max(1e-6, S);
-
-        return { d_pred: z_mean, d2: d2 };
+        const innovation = d - dPred;
+        return {
+            d_pred: dPred,
+            d2: (innovation * innovation) / S,
+            innovation_covariance: S
+        };
     }
 
     update(acceptedMeasurements, tagHeight) {
@@ -686,6 +687,9 @@ class MahalanobisPrefilter {
         this.is_rejected = [false, false, false, false];
         this.reject_counts = [0, 0, 0, 0];
         this.min_frame_measurements = config.min_frame_measurements !== undefined ? config.min_frame_measurements : 3;
+        this.rescue_min_reject_streak = config.rescue_min_reject_streak !== undefined
+            ? config.rescue_min_reject_streak
+            : SIM_CONFIG.FILTER.DEFAULT_RESCUE_MIN_REJECT_STREAK;
         this.rescue_noise_scale_min = config.rescue_noise_scale_min !== undefined ? config.rescue_noise_scale_min : 4.0;
         this.rescue_noise_max = config.rescue_noise_max !== undefined ? config.rescue_noise_max : 0.25;
         
@@ -718,10 +722,18 @@ class MahalanobisPrefilter {
         const res = this.ukf.computeMahalanobis(d, anchor, this.tagHeight);
         const d2 = Number.isFinite(res.d2) ? res.d2 : Infinity;
 
-        // Stateless gating: if d2 <= T2_high, we accept it immediately.
-        // This completely prevents Hysteresis Lock (khóa trễ) where clean data remains rejected.
-        const pass = (d2 <= this.T2_high);
-        this.is_rejected[i] = !pass;
+        // Firmware hysteresis: enter rejected above T2, leave it only below T1.
+        let pass = false;
+        if (this.is_rejected[i]) {
+            if (d2 < this.T2_low) {
+                this.is_rejected[i] = false;
+                pass = true;
+            }
+        } else if (d2 > this.T2_high) {
+            this.is_rejected[i] = true;
+        } else {
+            pass = true;
+        }
 
         if (pass) {
             this.reject_counts[i] = 0;
@@ -738,10 +750,11 @@ class MahalanobisPrefilter {
         if (acceptedCount >= targetCount) return [];
 
         const needed = targetCount - acceptedCount;
-        // Smart Rescue: Only rescue an anchor if it has been rejected consecutively for at least 5 frames
-        // This ensures we never rescue transient noise spikes, only correct data during filter lag
+        // Same frame-level smart rescue as firmware: finite lowest d2 first,
+        // only after a persistent per-anchor rejection streak.
         const rescue = results
-            .filter(r => !r.pass && r.d2 !== null && Number.isFinite(r.d2) && r.d > 0.1 && this.reject_counts[r.index] >= 5)
+            .filter(r => !r.pass && r.d2 !== null && Number.isFinite(r.d2) && r.d > 0.1
+                && this.reject_counts[r.index] >= this.rescue_min_reject_streak)
             .sort((a, b) => a.d2 - b.d2)
             .slice(0, needed);
 
@@ -754,16 +767,15 @@ class MahalanobisPrefilter {
     }
 
     measurementNoiseFor(result) {
-        if (!result || !result.rescue || !Number.isFinite(result.d2)) {
-            return this.ukf.r_uwb;
-        }
-        const gate = Math.max(0.001, this.T2_high);
-        const residual = Number.isFinite(result.d_pred) ? result.d - result.d_pred : 0.0;
-        const residualNoise = Number.isFinite(residual) ? (residual * residual) / gate : 0.0;
-        const scaledNoise = this.ukf.r_uwb * Math.max(this.rescue_noise_scale_min, result.d2 / gate);
-        const noise = Math.max(this.ukf.r_uwb * this.rescue_noise_scale_min, residualNoise, scaledNoise);
-        // Corrected: ensure uncertainty is AT LEAST rescue_noise_max, allowed to go higher
-        return Math.max(this.rescue_noise_max, noise);
+        if (result && result.rescue) return SIM_CONFIG.FILTER.ADAPTIVE_R_MAX;
+        const weight = result && Number.isFinite(result.measurement_weight)
+            ? result.measurement_weight
+            : null;
+        if (!(weight > 0.0)) return SIM_CONFIG.FILTER.ADAPTIVE_R_MAX;
+        return Math.max(
+            SIM_CONFIG.FILTER.ADAPTIVE_R_MIN,
+            Math.min(SIM_CONFIG.FILTER.ADAPTIVE_R_MAX, 1.0 / weight)
+        );
     }
 
     update(acceptedMeasurements) {

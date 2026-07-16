@@ -178,101 +178,168 @@ function scoreTripletCandidate(c, d2Reject, weights, minGdop, maxGdop) {
     };
 }
 
+function firmwareHuberWeight(value, delta) {
+    const magnitude = Math.abs(value);
+    if (!Number.isFinite(magnitude)) return SIM_CONFIG.FILTER.HUBER_WEIGHT_FLOOR;
+    if (delta <= 1.0e-9 || magnitude <= delta) return 1.0;
+    return Math.max(SIM_CONFIG.FILTER.HUBER_WEIGHT_FLOOR, delta / magnitude);
+}
+
+function firmwareRangeVariance(anchor) {
+    const distance = Math.abs(anchor.r);
+    const sigma = Math.min(
+        SIM_CONFIG.FILTER.RANGE_SIGMA_MAX_M,
+        Math.sqrt(
+            SIM_CONFIG.FILTER.RANGE_SIGMA_BASE_M ** 2
+            + (SIM_CONFIG.FILTER.RANGE_SIGMA_SLOPE * distance) ** 2
+        )
+    );
+    return sigma * sigma * (anchor.rescue ? SIM_CONFIG.FILTER.DEFAULT_RESCUE_NOISE_SCALE_MIN : 1.0);
+}
+
+function firmwareFpWeight(anchor) {
+    if (!anchor.quality_valid) {
+        return firmwareHuberWeight(0.5, SIM_CONFIG.FILTER.HUBER_FP_DEFICIT_DELTA);
+    }
+    if (!Number.isFinite(anchor.fp_confidence) || anchor.fp_confidence < 0.0) {
+        return SIM_CONFIG.FILTER.HUBER_WEIGHT_FLOOR;
+    }
+    const deficit = 1.0 - Math.min(1.0, anchor.fp_confidence);
+    return deficit <= 0.0
+        ? 1.0
+        : firmwareHuberWeight(deficit, SIM_CONFIG.FILTER.HUBER_FP_DEFICIT_DELTA);
+}
+
+function median(values) {
+    if (!values.length) return 0.0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return (sorted.length % 2) ? sorted[mid] : 0.5 * (sorted[mid - 1] + sorted[mid]);
+}
+
+function computeFirmwareMeasurementWeights(anchors, referenceValid, referencePosition) {
+    const useResidual = !!referenceValid && anchors.length >= 4;
+    const residuals = useResidual
+        ? anchors.map(a => a.r - Math.hypot(referencePosition.x - a.x, referencePosition.y - a.y))
+        : anchors.map(() => 0.0);
+    const residualMedian = useResidual ? median(residuals) : 0.0;
+    const madScale = useResidual
+        ? 1.4826 * median(residuals.map(r => Math.abs(r - residualMedian)))
+        : 0.0;
+
+    anchors.forEach((anchor, i) => {
+        const variance = firmwareRangeVariance(anchor);
+        const qD2 = (!(anchor.d2 > 0.0))
+            ? 1.0
+            : firmwareHuberWeight(
+                Math.sqrt(anchor.d2),
+                Math.sqrt(SIM_CONFIG.FILTER.DEFAULT_T2_LOW)
+            );
+        const qFp = firmwareFpWeight(anchor);
+        let qResidual = 1.0;
+        if (useResidual) {
+            const scale = Math.max(madScale, Math.sqrt(variance));
+            const normalized = Math.abs(residuals[i] - residualMedian) / scale;
+            qResidual = firmwareHuberWeight(normalized, SIM_CONFIG.FILTER.HUBER_RESIDUAL_DELTA);
+        }
+        anchor.range_variance = variance;
+        anchor.q_d2 = qD2;
+        anchor.q_fp = qFp;
+        anchor.q_residual = qResidual;
+        anchor.frame_residual = useResidual ? residuals[i] : null;
+        anchor.measurement_weight = (qD2 * qFp * qResidual) / variance;
+    });
+}
+
+function firmwareTripletWgdop(pos, triplet) {
+    let hxx = 0.0, hxy = 0.0, hyy = 0.0;
+    for (const anchor of triplet) {
+        const dx = pos.x - anchor.x;
+        const dy = pos.y - anchor.y;
+        const range = Math.hypot(dx, dy);
+        if (range < 1.0e-9) return 1.0e9;
+        const hx = dx / range;
+        const hy = dy / range;
+        const fallbackWeight = SIM_CONFIG.FILTER.HUBER_WEIGHT_FLOOR / firmwareRangeVariance(anchor);
+        const weight = anchor.measurement_weight > 0.0 && Number.isFinite(anchor.measurement_weight)
+            ? anchor.measurement_weight
+            : fallbackWeight;
+        hxx += weight * hx * hx;
+        hxy += weight * hx * hy;
+        hyy += weight * hy * hy;
+    }
+    const det = hxx * hyy - hxy * hxy;
+    if (!Number.isFinite(det) || det <= SIM_CONFIG.FILTER.WGDOP_DET_MIN) return 1.0e9;
+    return Math.sqrt((hxx + hyy) / det);
+}
+
 function selectBestTriplet(vAnchors, d2Reject, weights, options) {
     if (vAnchors.length < 3) return null;
-    const candidates = [];
-    let minGdop = Infinity;
-    let maxGdop = 0;
-    const healthById = options && options.healthById;
+    const referenceValid = !!(options && options.referenceValid);
+    const referencePosition = options && options.referencePosition;
+    computeFirmwareMeasurementWeights(vAnchors, referenceValid, referencePosition);
 
+    const candidates = [];
     for (let i = 0; i < vAnchors.length - 2; i++) {
         for (let j = i + 1; j < vAnchors.length - 1; j++) {
             for (let k = j + 1; k < vAnchors.length; k++) {
                 const triplet = [vAnchors[i], vAnchors[j], vAnchors[k]];
                 const pos = trilaterate(triplet);
                 if (!pos) continue;
-                const gdop = tripletGdop(pos, triplet);
-                if (!Number.isFinite(gdop)) continue;
-                const residual = residualRms(pos, triplet);
-                const avgD2Raw = triplet.reduce((s, a) => s + (a.d2 || 0), 0) / 3;
-                const avgFpAmpPenalty = triplet.reduce((s, a) => s + fpAmpPenalty(a.fp_amp), 0) / 3;
-                const avgHealthPenalty = averageTripletHealthPenalty(triplet, healthById);
-                const avgRange = triplet.reduce((s, a) => s + (a.r || 0), 0) / 3;
-                const rangePenalty = clamp01(avgRange / 15.0);
+                const scorePosition = referenceValid ? referencePosition : pos;
+                const wgdop = firmwareTripletWgdop(scorePosition, triplet);
+                if (wgdop >= 1.0e8) continue;
                 candidates.push({
                     triplet,
                     key: tripletKey(triplet),
                     pos,
-                    gdop,
-                    residual,
-                    avgD2Raw,
-                    avgFpAmpPenalty,
-                    avgHealthPenalty,
-                    rangePenalty
+                    score: wgdop,
+                    gdopRaw: wgdop,
+                    gdopPenalty: wgdop,
+                    residual: residualRms(pos, vAnchors),
+                    residualPenalty: 0.0,
+                    avgD2Raw: triplet.reduce((s, a) => s + (a.d2 || 0.0), 0.0) / 3.0,
+                    avgD2Penalty: 0.0,
+                    fpAmpPenalty: 1.0 - triplet.reduce((s, a) => s + a.q_fp, 0.0) / 3.0,
+                    distPenalty: 0.0,
+                    healthPenalty: 0.0
                 });
-                minGdop = Math.min(minGdop, gdop);
-                maxGdop = Math.max(maxGdop, gdop);
             }
         }
     }
     if (!candidates.length) return null;
-
-    let best = null;
-    const w = normalizeTripletWeights(weights);
-    const residualSumsById = {};
-    const residualCountsById = {};
     candidates.forEach(c => {
-        c.candidateCount = candidates.length;
+        c.candidateCount = vAnchors.length;
+        c.tripletCombinationCount = candidates.length;
     });
 
-    for (const c of candidates) {
-        const scored = scoreTripletCandidate(c, d2Reject, w, minGdop, maxGdop);
-        c.triplet.forEach(a => {
-            const id = String(a.id);
-            residualSumsById[id] = (residualSumsById[id] || 0.0) + scored.residualPenalty;
-            residualCountsById[id] = (residualCountsById[id] || 0) + 1;
-        });
-
-        if (!best || scored.score < best.score) {
-            best = scored;
-        }
-    }
-
-    const residualContributionById = {};
-    Object.keys(residualSumsById).forEach(id => {
-        residualContributionById[id] = residualSumsById[id] / Math.max(1, residualCountsById[id]);
-    });
-    if (best) {
-        best.residualContributionById = residualContributionById;
-    }
-
+    let best = candidates.reduce((a, b) => b.score < a.score ? b : a);
     const previousKey = options && options.previousKey;
-    if (best && previousKey && best.key !== previousKey) {
-        const challengerKey = best.key;
-        const challengerScore = best.score;
-        const challengerHealthPenalty = best.healthPenalty;
+    if (previousKey && best.key !== previousKey) {
         const previous = candidates.find(c => c.key === previousKey);
         if (previous) {
-            const scoredPrevious = scoreTripletCandidate(previous, d2Reject, w, minGdop, maxGdop);
             const switchMargin = options && Number.isFinite(options.switchMargin)
-                ? Math.max(0, options.switchMargin)
-                : (SIM_CONFIG.FILTER.TRIPLET_SWITCH_MARGIN || 0);
+                ? Math.max(0.0, options.switchMargin)
+                : SIM_CONFIG.FILTER.TRIPLET_SWITCH_MARGIN;
             const switchScoreEps = options && Number.isFinite(options.switchScoreEps)
-                ? Math.max(0, options.switchScoreEps)
-                : (SIM_CONFIG.FILTER.TRIPLET_SWITCH_SCORE_EPS || 0);
-            const keepPrevious = scoredPrevious.score <= (best.score * (1.0 + switchMargin)) + switchScoreEps;
-
-            if (keepPrevious) {
-                best = Object.assign(scoredPrevious, {
-                    residualContributionById,
+                ? Math.max(0.0, options.switchScoreEps)
+                : SIM_CONFIG.FILTER.TRIPLET_SWITCH_SCORE_EPS;
+            if (previous.score <= best.score * (1.0 + switchMargin) + switchScoreEps) {
+                const challenger = best;
+                best = Object.assign(previous, {
                     keptPrevious: true,
-                    challengerKey,
-                    challengerScore,
-                    challengerHealthPenalty
+                    challengerKey: challenger.key,
+                    challengerScore: challenger.score,
+                    challengerHealthPenalty: 0.0
                 });
             }
         }
     }
+
+    const residualContributionById = {};
+    vAnchors.forEach(a => { residualContributionById[String(a.id)] = 1.0 - a.q_residual; });
+    best.residualContributionById = residualContributionById;
+    best.referenceValid = referenceValid;
     return best;
 }
 

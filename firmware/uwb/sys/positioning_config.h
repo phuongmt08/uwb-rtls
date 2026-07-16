@@ -9,6 +9,8 @@
 #ifndef __POSITIONING_CONFIG_H
 #define __POSITIONING_CONFIG_H
 
+#include "config.h"
+
 /* ===================================================================
  * ANTENNA DELAY CONFIGURATION
  * =================================================================== */
@@ -121,7 +123,18 @@
  * =================================================================== */
 
 #define MAX_ANCHORS_SUPPORTED  8
+/* Maximum number of anchors participating in one zone/ranging cycle. */
 #define NUM_ANCHORS            4
+/* The anchor-to-anchor survey solver is geometrically fixed to four anchors. */
+#define SURVEY_NUM_ANCHORS     4
+
+#if NUM_ANCHORS > MAX_ZONE_ANCHORS
+#error "NUM_ANCHORS exceeds protobuf zone-profile capacity"
+#endif
+
+#if NUM_ANCHORS > MAX_ANCHORS_SUPPORTED
+#error "NUM_ANCHORS exceeds ranging anchor-ID capacity"
+#endif
 
 /* Default active zone ID (1 or 2) */
 #ifndef DEFAULT_ZONE_ID
@@ -170,26 +183,17 @@
 #define ZONE_1_ANCHOR_4_Y    0.03f
 #define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
-/* Zone 2 Defaults */
-#define ZONE_2_ANCHOR_1_ID   5
-#define ZONE_2_ANCHOR_1_X    0.0f
-#define ZONE_2_ANCHOR_1_Y    0.0f
-#define ZONE_2_ANCHOR_1_Z    ANCHOR_HEIGHT_M
+#define ZONE_1_ANCHOR_5_ID   5
+#define ZONE_1_ANCHOR_5_X    0.0f
+#define ZONE_1_ANCHOR_5_Y    0.0f
+#define ZONE_1_ANCHOR_5_Z    ANCHOR_HEIGHT_M
 
-#define ZONE_2_ANCHOR_2_ID   6
-#define ZONE_2_ANCHOR_2_X    10.0f
-#define ZONE_2_ANCHOR_2_Y    0.0f
-#define ZONE_2_ANCHOR_2_Z    ANCHOR_HEIGHT_M
+#define ZONE_1_ANCHOR_6_ID   6
+#define ZONE_1_ANCHOR_6_X    10.0f
+#define ZONE_1_ANCHOR_6_Y    0.0f
+#define ZONE_1_ANCHOR_6_Z    ANCHOR_HEIGHT_M
 
-#define ZONE_2_ANCHOR_3_ID   7
-#define ZONE_2_ANCHOR_3_X    0.0f
-#define ZONE_2_ANCHOR_3_Y    10.0f
-#define ZONE_2_ANCHOR_3_Z    ANCHOR_HEIGHT_M
-
-#define ZONE_2_ANCHOR_4_ID   8
-#define ZONE_2_ANCHOR_4_X    10.0f
-#define ZONE_2_ANCHOR_4_Y    10.0f
-#define ZONE_2_ANCHOR_4_Z    ANCHOR_HEIGHT_M
+/* Zone 2 is intentionally left unconfigured for now. */
 
 /* ===================================================================
  * DISTANCE VALIDATION
@@ -208,7 +212,7 @@
  *        1 = apply Mahalanobis gate before anchor selection
  */
 #ifndef ENABLE_MAHALANOBIS_PREFILTER
-#define ENABLE_MAHALANOBIS_PREFILTER  0
+#define ENABLE_MAHALANOBIS_PREFILTER  1
 #endif
 
 /**
@@ -240,6 +244,12 @@
 #define MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS   3U
 #endif
 
+/* Transient rejects produce a predict-only frame. Rescue is allowed only
+ * after the same anchor has failed this many consecutive gate evaluations. */
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  5U
+#endif
+
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
 #define MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN 4.0f
 #endif
@@ -265,36 +275,46 @@
 #define MW_TRIL_D2_REJECT                          MAHALANOBIS_PREFILTER_D2_REJECT
 #endif
 
-#ifndef MW_TRIL_RESIDUAL_SCALE_M
-#define MW_TRIL_RESIDUAL_SCALE_M                   0.30
+#ifndef MW_TRIL_RANGE_SIGMA_BASE_M
+/* LOS range standard-deviation model: sigma(d)^2 = base^2 + (slope*d)^2. */
+#define MW_TRIL_RANGE_SIGMA_BASE_M                 0.10
 #endif
 
-#ifndef MW_TRIL_FP_AMP_GOOD
-#define MW_TRIL_FP_AMP_GOOD                        40.0
+#ifndef MW_TRIL_RANGE_SIGMA_SLOPE
+#define MW_TRIL_RANGE_SIGMA_SLOPE                  0.015
 #endif
 
-#ifndef MW_TRIL_WEIGHT_D2
-#define MW_TRIL_WEIGHT_D2                          0.35
+#ifndef MW_TRIL_RANGE_SIGMA_MAX_M
+#define MW_TRIL_RANGE_SIGMA_MAX_M                  0.35
 #endif
 
-#ifndef MW_TRIL_WEIGHT_FP_AMP
-#define MW_TRIL_WEIGHT_FP_AMP                      0.15
+#ifndef MW_TRIL_HUBER_FP_DEFICIT_DELTA
+/* Huber transition for (1 - DW1000 register-based FP confidence). */
+#define MW_TRIL_HUBER_FP_DEFICIT_DELTA             0.35
 #endif
 
-#ifndef MW_TRIL_WEIGHT_GDOP
-#define MW_TRIL_WEIGHT_GDOP                        0.20
+#ifndef MW_TRIL_HUBER_RESIDUAL_DELTA
+/* Huber transition in normalized residual standard deviations. */
+#define MW_TRIL_HUBER_RESIDUAL_DELTA               1.50
 #endif
 
-#ifndef MW_TRIL_WEIGHT_RESIDUAL
-#define MW_TRIL_WEIGHT_RESIDUAL                    0.30
+#ifndef MW_TRIL_HUBER_WEIGHT_FLOOR
+#define MW_TRIL_HUBER_WEIGHT_FLOOR                 0.10
 #endif
 
-#ifndef MW_TRIL_WEIGHT_DIST
-#define MW_TRIL_WEIGHT_DIST                        0.25
+#ifndef MW_TRIL_WGDOP_DET_MIN
+#define MW_TRIL_WGDOP_DET_MIN                      1.0e-8
+#endif
+
+/* Trust the common UKF reference only while its radial 1-sigma uncertainty,
+ * sqrt(Pxx + Pyy), stays below this limit. */
+#ifndef MW_TRIL_REFERENCE_MAX_STD_M
+#define MW_TRIL_REFERENCE_MAX_STD_M                0.50f
 #endif
 
 #ifndef MW_TRIL_SWITCH_MARGIN
-#define MW_TRIL_SWITCH_MARGIN                      0.12
+/* New triplet must improve WGDOP by 10 percent before switching. */
+#define MW_TRIL_SWITCH_MARGIN                      0.10
 #endif
 
 #ifndef MW_TRIL_SWITCH_SCORE_EPS
@@ -357,6 +377,14 @@
 
 #ifndef SYS_FUSION_UKF_R_UWB
 #define SYS_FUSION_UKF_R_UWB   0.01f
+#endif
+
+#ifndef MW_UKF_R_MIN
+#define MW_UKF_R_MIN            0.0025f
+#endif
+
+#ifndef MW_UKF_R_MAX
+#define MW_UKF_R_MAX            0.25f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_PX

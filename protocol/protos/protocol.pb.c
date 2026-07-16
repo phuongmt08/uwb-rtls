@@ -237,7 +237,7 @@ PB_BIND(protobuf_calib_status_get_t, protobuf_calib_status_get_t, AUTO)
 PB_BIND(protobuf_calib_anchor_candidate_t, protobuf_calib_anchor_candidate_t, AUTO)
 
 
-PB_BIND(protobuf_calib_status_resp_t, protobuf_calib_status_resp_t, AUTO)
+PB_BIND(protobuf_calib_status_resp_t, protobuf_calib_status_resp_t, 2)
 
 
 PB_BIND(protobuf_rtos_resource_get_t, protobuf_rtos_resource_get_t, AUTO)

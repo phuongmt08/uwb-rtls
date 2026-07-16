@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* Private defines ---------------------------------------------------- */
 #define DW1000_DEVICE_ID       0xDECA0130UL
@@ -282,19 +283,25 @@ static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
   memset(out_quality, 0, sizeof(*out_quality));
 
   /* Directly query DW1000 registers to bypass compiler strict-aliasing optimization bugs on block-reads */
-  uint16_t max_noise      = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_THRESH_OFFSET);
+  uint16_t lde_threshold  = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_THRESH_OFFSET);
   uint16_t fp_amp1        = dwt_read16bitoffsetreg(RX_TIME_ID, 0x7);
   uint16_t std_noise      = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x0);
   uint16_t fp_amp2        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x2);
   uint16_t fp_amp3        = dwt_read16bitoffsetreg(RX_FQUAL_ID, 0x4);
   uint16_t rx_pream_count = (uint16_t)((dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXPACC_MASK) >> RX_FINFO_RXPACC_SHIFT);
+  uint16_t first_path_q6  = dwt_read16bitoffsetreg(RX_TIME_ID, RX_TIME_FP_INDEX_OFFSET);
+  uint16_t peak_path_idx  = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_PPINDX_OFFSET);
+  uint16_t peak_path_amp  = dwt_read16bitoffsetreg(LDE_IF_ID, LDE_PPAMPL_OFFSET);
 
   out_quality->fp_amp1        = fp_amp1;
   out_quality->fp_amp2        = fp_amp2;
   out_quality->fp_amp3        = fp_amp3;
   out_quality->std_noise      = std_noise;
-  out_quality->max_noise      = max_noise;
+  out_quality->lde_threshold  = lde_threshold;
   out_quality->rx_pream_count = rx_pream_count;
+  out_quality->first_path_index_q6 = first_path_q6;
+  out_quality->peak_path_index = peak_path_idx;
+  out_quality->peak_path_amp = peak_path_amp;
 
   if (rx_pream_count > 0U && (fp_amp1 != 0U || fp_amp2 != 0U || fp_amp3 != 0U))
   {
@@ -305,6 +312,27 @@ static void capture_rx_quality(bsp_uwb_rx_quality_t *out_quality)
     out_quality->fp_amp_norm_q8 = (fp_norm_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_norm_q8;
     out_quality->fp_snr_q8      = (fp_snr_q8 > 0xFFFFU) ? 0xFFFFU : (uint16_t)fp_snr_q8;
     out_quality->valid          = true;
+
+    if (first_path_q6 > 0U && peak_path_amp > 0U)
+    {
+      float first_path = (float)first_path_q6 / 64.0f;
+      float idiff = fabsf(first_path - (float)peak_path_idx);
+      float pr_nlos;
+      if (idiff <= 3.3f) pr_nlos = 0.0f;
+      else if (idiff < 6.0f) pr_nlos = (0.39178f * idiff) - 1.31719f;
+      else pr_nlos = 1.0f;
+
+      uint16_t fp_peak = fp_amp1;
+      if (fp_amp2 > fp_peak) fp_peak = fp_amp2;
+      if (fp_amp3 > fp_peak) fp_peak = fp_amp3;
+      float mc = (float)fp_peak / (float)peak_path_amp;
+      if (mc > 1.0f) mc = 1.0f;
+      float confidence = (mc >= 0.9f) ? 1.0f : (1.0f - pr_nlos);
+      if (confidence < 0.0f) confidence = 0.0f;
+      if (confidence > 1.0f) confidence = 1.0f;
+      out_quality->fp_confidence_q8 = (uint8_t)((confidence * 255.0f) + 0.5f);
+      out_quality->confidence_valid = true;
+    }
   }
 }
 
@@ -1162,6 +1190,16 @@ uint16_t bsp_uwb_get_rx_antenna_delay(void)
 uint16_t bsp_uwb_get_tx_antenna_delay(void)
 {
   return s_tx_antenna_delay;
+}
+float bsp_uwb_get_range_bias(float range_raw_m)
+{
+  if (!s_initialized || !s_runtime_cfg_valid)
+  {
+    return 0.0f;
+  }
+  uint8_t chan = s_runtime_cfg.uwb_channel;
+  uint8_t prf = (s_runtime_cfg.uwb_prf == 64) ? DWT_PRF_64M : DWT_PRF_16M;
+  return (float)dwt_getrangebias(chan, range_raw_m, prf);
 }
 void bsp_uwb_on_irq(void)
 {

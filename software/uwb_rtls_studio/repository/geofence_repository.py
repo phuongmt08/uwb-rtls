@@ -10,6 +10,7 @@
 import os
 import json
 import logging
+import math
 from typing import List, Tuple, Optional, Dict
 from models.geofence_model import GeofenceZone
 from models.ground_truth_model import GroundTruthTrack
@@ -92,6 +93,60 @@ class GeofenceRepository:
 
     def set_active_room_id(self, room_id: str) -> None:
         self.set_active_room_ids([room_id] if room_id else [])
+
+    def _apply_configured_global_frame(self) -> None:
+        """Make the configured room's local axes the in-memory global map axes."""
+        room_id = str(self._meta.get("global_frame_room_id") or "")
+        if not room_id:
+            return
+
+        reference_room = self._zones.get(room_id)
+        if (
+            reference_room is None
+            or getattr(reference_room, "object_type", "zone") != "room"
+            or not reference_room.points
+        ):
+            log.warning("Ignoring invalid meta.global_frame_room_id: %s", room_id)
+            return
+
+        origin_idx = getattr(reference_room, "origin_vertex_idx", None)
+        if origin_idx is None or not 0 <= int(origin_idx) < len(reference_room.points):
+            origin_idx = 0
+        origin_x, origin_y = reference_room.points[int(origin_idx)]
+        yaw_deg = float(getattr(reference_room, "local_frame_yaw_deg", 0.0))
+        cos_theta = math.cos(math.radians(yaw_deg))
+        sin_theta = math.sin(math.radians(yaw_deg))
+
+        def transform_point(x, y):
+            dx, dy = float(x) - origin_x, float(y) - origin_y
+            return (
+                cos_theta * dx + sin_theta * dy,
+                -sin_theta * dx + cos_theta * dy,
+            )
+
+        def transform_vector(x, y):
+            return (
+                cos_theta * float(x) + sin_theta * float(y),
+                -sin_theta * float(x) + cos_theta * float(y),
+            )
+
+        for zone in self._zones.values():
+            zone.points = [transform_point(x, y) for x, y in zone.points]
+            zone.label_offset_x, zone.label_offset_y = transform_vector(
+                zone.label_offset_x, zone.label_offset_y
+            )
+            if getattr(zone, "object_type", "zone") == "room":
+                zone.local_frame_yaw_deg = float(zone.local_frame_yaw_deg) - yaw_deg
+
+        # Anchors owned by a room are stored in that room's local frame, so they
+        # must stay unchanged. Free anchors use map-global coordinates.
+        for anchor in self._anchors:
+            if anchor.get("room_id") or anchor.get("zone_id"):
+                continue
+            anchor["x_m"], anchor["y_m"] = transform_point(anchor["x_m"], anchor["y_m"])
+            anchor["local_x_m"], anchor["local_y_m"] = transform_point(
+                anchor["local_x_m"], anchor["local_y_m"]
+            )
 
     def _coerce_int_id(self, value, default: int = 0) -> int:
         if value is None or value == "":
@@ -214,6 +269,7 @@ class GeofenceRepository:
                 self._normalize_anchor(anchor, idx)
                 for idx, anchor in enumerate(anchor_items or [])
             ]
+            self._apply_configured_global_frame()
             ground_truth_items = data.get("ground_truths", [])
             if isinstance(map_objects, dict) and not ground_truth_items:
                 ground_truth_items = map_objects.get("ground_truths", [])

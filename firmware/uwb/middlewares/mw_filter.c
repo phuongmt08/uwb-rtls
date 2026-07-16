@@ -54,6 +54,7 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
     if (!ctx) return;
     for (uint8_t i = 0; i < 8; i++) {
         ctx->anchors[i].rejected = false;
+        ctx->anchors[i].reject_streak = 0U;
     }
     ctx->T1 = T1;
     ctx->T2 = T2;
@@ -67,7 +68,7 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
 bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   uint8_t anchor_id, float d_raw,
                                   float px, float py, float pz,
-                                  float vx, float vy, float vz,
+                                  float pxx, float pxy, float pyy,
                                   float ax, float ay, float az,
                                   float *d_out, float *d2_score, float *R_adaptive)
 {
@@ -77,11 +78,13 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
 
     if (!isfinite(d_raw) ||
         !isfinite(px) || !isfinite(py) || !isfinite(pz) ||
+        !isfinite(pxx) || !isfinite(pxy) || !isfinite(pyy) ||
         !isfinite(ax) || !isfinite(ay) || !isfinite(az)) {
         if (d_out) *d_out = d_raw;
         if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
 
@@ -93,14 +96,28 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     float dz = pz - az;
     float d_pred = sqrtf((dx * dx) + (dy * dy) + (dz * dz));
 #endif
-    float vel_mag = sqrtf(vx * vx + vy * vy + vz * vz);
-    const float k_vel = ctx->velocity_weight;
-    float S = ctx->R_gate + (k_vel * vel_mag);
+    float dxy = sqrtf((dx * dx) + (dy * dy));
+    if (!isfinite(dxy) || dxy < 1.0e-6f) {
+        if (d_out) *d_out = d_raw;
+        if (d2_score) *d2_score = INFINITY;
+        if (R_adaptive) *R_adaptive = ctx->R_base;
+        state->rejected = true;
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
+        return false;
+    }
+    float hx = dx / dxy;
+    float hy = dy / dxy;
+    /* Scalar range innovation covariance: S = H P H' + R. Position is
+     * planar here, matching the distance passed by the fusion task. */
+    float projected_cov = (hx * hx * pxx) + (2.0f * hx * hy * pxy)
+                        + (hy * hy * pyy);
+    float S = projected_cov + ctx->R_gate;
     if (!isfinite(d_pred) || !isfinite(S)) {
         if (d_out) *d_out = d_raw;
         if (d2_score) *d2_score = INFINITY;
         if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
     if (S < ctx->min_covariance) {
@@ -126,8 +143,11 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     }
 
     if (!accepted) {
+        if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
     }
+
+    state->reject_streak = 0U;
 
     if (R_adaptive) {
         float scale = 1.0f;

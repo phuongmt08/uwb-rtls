@@ -44,9 +44,9 @@ MAX_ANCHORS_SUPPORTED = _read_define("MAX_ANCHORS_SUPPORTED", NUM_ANCHORS)
 
 
 def _validate_anchor_list(anchors: list[tuple[int, float, float, float]]) -> list[tuple[int, float, float, float]]:
-    if len(anchors) != NUM_ANCHORS:
+    if len(anchors) < 3 or len(anchors) > NUM_ANCHORS:
         raise argparse.ArgumentTypeError(
-            f"zone profile currently requires exactly {NUM_ANCHORS} anchors"
+            f"zone profile requires 3..{NUM_ANCHORS} anchors"
         )
 
     ids = [anchor_id for anchor_id, _, _, _ in anchors]

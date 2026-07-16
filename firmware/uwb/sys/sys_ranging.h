@@ -55,6 +55,7 @@ typedef struct
   uint8_t  anchor_id;
   uint16_t fp_amp_norm_q8;
   uint16_t fp_snr_q8;
+  uint8_t  fp_confidence_q8;
   uint8_t  quality;
   uint8_t  calib_status;
   bool     valid;
@@ -107,7 +108,7 @@ typedef struct __attribute__((packed))
   uint16_t current_tx_delay;
   uint16_t current_rx_delay;
   uint16_t current_combined_delay;
-  sys_calib_pair_summary_item_t pair[NUM_ANCHORS - 1U];
+  sys_calib_pair_summary_item_t pair[SURVEY_NUM_ANCHORS - 1U];
 } sys_calib_pair_summary_msg_t;
 
 typedef struct __attribute__((packed))

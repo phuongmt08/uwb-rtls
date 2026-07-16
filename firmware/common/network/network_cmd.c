@@ -907,7 +907,7 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
     CHECK_VOID(pkt);
 
     uint32_t count = pkt->params.anchor_layout_set.anchors_count;
-    if (count != NUM_ANCHORS) {
+    if (count < 3U || count > NUM_ANCHORS) {
         RLOG_W(OBJECT_CODE, "Invalid anchor layout count: %lu", count);
         network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
         return;
