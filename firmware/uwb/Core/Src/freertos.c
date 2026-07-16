@@ -685,8 +685,6 @@ void sensor_fusion_entry(void *argument)
 
     if (!has_uwb_msg)
     {
-        sys_sensor_fusion_clear_latest_anchor_metrics();
-
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
         const sys_config_t *fusion_cfg = sys_config_get();
         mw_tril_anchor_t anchors_by_id[MAX_ANCHORS_SUPPORTED + 1] = {0};

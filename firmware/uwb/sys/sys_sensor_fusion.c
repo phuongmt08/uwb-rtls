@@ -260,6 +260,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
     ukf.initialized = true;
+    sys_sensor_fusion_set_predict_flag();
 #endif
 
     return SYS_SENSOR_FUSION_OK;
@@ -568,6 +569,7 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
     snapshot_latest_anchor_metrics(anchors_by_id);
     update_latest_anchor_data_snapshot(ranging_msg);
 
+#if ENABLE_SYS_FUSION
     const uint8_t selected_anchor_ids[3] = {
         best_3_anchors[0].id,
         best_3_anchors[1].id,
@@ -581,7 +583,7 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                         selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
         return false;
     }
-
+#endif
     sys_sensor_fusion_stream_uart(UKF_STEP_UPDATE);
 
     return true;
@@ -748,10 +750,12 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     }
 #endif
 #else
+#if ENABLE_SYS_FUSION
     if (!ukf.initialized)
     {
         return;
     }
+#endif
 
 #if ENABLE_SYS_FUSION
     const sys_config_t *cfg = sys_config_get();
@@ -781,27 +785,41 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     protobuf_calib_data_t stream_data;
     memset(&stream_data, 0, sizeof(stream_data));
 
-    stream_data.anchor_mask = s_last_selected_anchors_mask;
     stream_data.tx_frame_cnt = tx_frame_cnt;
-    stream_data.ax = ukf.imu_current.ax;
-    stream_data.ay = ukf.imu_current.ay;
-    stream_data.gz = ukf.imu_current.gz;
-    stream_data.px = s_latest_tril_x;
-    stream_data.py = s_latest_tril_y;
-    stream_data.distance_count = NUM_ANCHORS;
-    stream_data.fp_amp_norm_count = NUM_ANCHORS;
-    stream_data.fp_snr_count = NUM_ANCHORS;
-    memcpy(stream_data.distance, s_latest_distances, sizeof(s_latest_distances));
-    memcpy(stream_data.fp_amp_norm, s_latest_fp_amp_norm, sizeof(s_latest_fp_amp_norm));
-    memcpy(stream_data.fp_snr, s_latest_fp_snr, sizeof(s_latest_fp_snr));
-    stream_data.error_frame_cnt = s_error_count;
-    stream_data.dt = s_fusion_dt;
 
-    if (network_send_calib_data(&g_network_core,
-                                protobuf_PACKET_ADDR_HOST,
-                                &stream_data)) {
-        tx_frame_cnt++;
+    if (ukf_step == UKF_STEP_PREDICT)
+    {
+        /* Predict packet carries only the latest IMU sample. Keep all UWB
+         * fields present but zero so the host receives a stable array shape. */
+        stream_data.ax = ukf.imu_current.ax;
+        stream_data.ay = ukf.imu_current.ay;
+        stream_data.gz = ukf.imu_current.gz;
+        stream_data.distance_count = NUM_ANCHORS;
+        stream_data.fp_amp_norm_count = NUM_ANCHORS;
+        stream_data.fp_snr_count = NUM_ANCHORS;
+        stream_data.dt = s_fusion_dt;
     }
+    else
+    {
+        /* Update packet carries only UWB/trilateration data. IMU fields stay
+         * zero from memset above. */
+        stream_data.anchor_mask = s_last_selected_anchors_mask;
+        stream_data.px = s_latest_tril_x;
+        stream_data.py = s_latest_tril_y;
+        stream_data.distance_count = NUM_ANCHORS;
+        stream_data.fp_amp_norm_count = NUM_ANCHORS;
+        stream_data.fp_snr_count = NUM_ANCHORS;
+        memcpy(stream_data.distance, s_latest_distances, sizeof(s_latest_distances));
+        memcpy(stream_data.fp_amp_norm, s_latest_fp_amp_norm, sizeof(s_latest_fp_amp_norm));
+        memcpy(stream_data.fp_snr, s_latest_fp_snr, sizeof(s_latest_fp_snr));
+        stream_data.error_frame_cnt = s_error_count;
+    }
+
+//    if (network_send_calib_data(&g_network_core,
+//                                protobuf_PACKET_ADDR_HOST,
+//                                &stream_data)) {
+//        tx_frame_cnt++;
+//    }
 #endif
 #endif
 }
@@ -948,10 +966,12 @@ float sys_sensor_fusion_get_yaw_deg()
 
 void sys_sensor_fusion_task()
 {
+
     if (g_imu_data_queue == NULL) 
     {
         return;
     }
+
 
     bsp_imu_data_t imu_data = {0};
     if (bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK) 
@@ -960,6 +980,7 @@ void sys_sensor_fusion_task()
         {
             (void)osMessageQueuePut(g_imu_data_queue, &imu_data, 0U, 0U);
         }
+
     }
 }
 
