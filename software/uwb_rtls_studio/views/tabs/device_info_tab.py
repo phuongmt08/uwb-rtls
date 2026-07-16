@@ -16,7 +16,7 @@ import time
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QGridLayout, QProgressBar, QFrame, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QSizePolicy
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -24,6 +24,7 @@ from PyQt6 import uic
 
 # Path to .ui file
 UI_FILE = os.path.join(os.path.dirname(__file__), '..', 'ui', 'device_info_tab.ui')
+MAX_ADV_VISIBLE_ROWS = 6
 
 
 class DeviceInfoTab(QWidget):
@@ -33,10 +34,25 @@ class DeviceInfoTab(QWidget):
         self._is_developer_mode = False
         # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
+        # The page itself must stay fixed; only the advertising table may scroll.
+        self._remove_page_scroll_area()
         # Post-load setup
         self._setup_mappings()
         self._setup_table()
         self._reset_display_fields()
+
+    def _remove_page_scroll_area(self):
+        content = self.scroll_area.takeWidget()
+        if content is None:
+            return
+        self.base_layout.removeWidget(self.scroll_area)
+        content.setParent(self)
+        content.setMinimumSize(0, 0)
+        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.left_primary.setContentsMargins(0, 0, 0, 0)
+        self.base_layout.addWidget(content)
+        self.scroll_area.hide()
+        self.scroll_area.deleteLater()
 
     def _setup_mappings(self):
         """Map label keys to widget references for data updates."""
@@ -53,15 +69,31 @@ class DeviceInfoTab(QWidget):
         }
 
         # BLE info value labels
-        self.lbl_ble_state = QLabel("State:")
+        self.lbl_ble_state = QLabel("Dongle BLE:")
         self.lbl_ble_state.setStyleSheet("color: #94A3B8; font-weight: bold;")
         self.val_ble_state = QLabel("-")
         self.val_ble_state.setStyleSheet("color: #F8FAFC;")
         self.ble_grid.addWidget(self.lbl_ble_state, 5, 0)
         self.ble_grid.addWidget(self.val_ble_state, 5, 1)
 
+        self.lbl_device_link = QLabel("Device Link:")
+        self.lbl_device_link.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        self.val_device_link = QLabel("-")
+        self.val_device_link.setStyleSheet("color: #F8FAFC;")
+        self.ble_grid.addWidget(self.lbl_device_link, 6, 0)
+        self.ble_grid.addWidget(self.val_device_link, 6, 1)
+
+        self.lbl_link_health = QLabel("Link Health:")
+        self.lbl_link_health.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        self.val_link_health = QLabel("-")
+        self.val_link_health.setStyleSheet("color: #F8FAFC;")
+        self.ble_grid.addWidget(self.lbl_link_health, 7, 0)
+        self.ble_grid.addWidget(self.val_link_health, 7, 1)
+
         self._ble_values = {
-            "State:": self.val_ble_state,
+            "Dongle BLE:": self.val_ble_state,
+            "Device Link:": self.val_device_link,
+            "Link Health:": self.val_link_health,
             "RSSI:": self.val_ble_rssi,
             "Conn Interval:": self.val_ble_interval,
             "Slave Latency:": self.val_ble_latency,
@@ -162,11 +194,30 @@ class DeviceInfoTab(QWidget):
         self._adv_table.setColumnWidth(6, 90)   # Warn
         self._adv_table.setColumnWidth(7, 90)   # Error
         self._adv_table.setColumnWidth(8, 145)   # Action (Connect + Set Time buttons)
+        self._adv_table.verticalHeader().setDefaultSectionSize(36)
+        self._adv_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._adv_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._update_adv_table_height(0)
+
+    def _update_adv_table_height(self, row_count: int):
+        header_height = max(
+            self._adv_table.horizontalHeader().height(),
+            self._adv_table.horizontalHeader().sizeHint().height(),
+            36,
+        )
+        if row_count <= 0:
+            total_height = 60
+        else:
+            visible_rows = min(int(row_count), MAX_ADV_VISIBLE_ROWS)
+            row_height = max(self._adv_table.verticalHeader().defaultSectionSize(), 36)
+            total_height = header_height + (visible_rows * row_height) + (self._adv_table.frameWidth() * 2)
+        self._adv_table.setFixedHeight(total_height)
 
     def set_viewmodel(self, vm):
         self._vm = vm
         self._vm.device_info_updated.connect(self._on_device_info)
         self._vm.ble_info_updated.connect(self._on_ble_info)
+        self._vm.link_health_updated.connect(self._on_link_health)
         self._vm.telemetry_updated.connect(self._on_telemetry_updated)
         self._vm.advertising_devices_updated.connect(self._on_advertising_devices)
         if hasattr(self._vm, 'time_sync_updated'):
@@ -204,7 +255,7 @@ class DeviceInfoTab(QWidget):
     def _on_ble_info(self, info: dict):
         display_state = info.get("display_state")
         if display_state is not None:
-            self._ble_values["State:"].setText(str(display_state))
+            self._ble_values["Dongle BLE:"].setText(str(display_state).replace("BLE_STATE_", ""))
             try:
                 state_value = int(info.get("state", -1) if info.get("state") is not None else -1)
             except (TypeError, ValueError):
@@ -218,14 +269,14 @@ class DeviceInfoTab(QWidget):
                 color = "#94A3B8"
             else:
                 color = "#EF4444"
-            self._ble_values["State:"].setStyleSheet(f"color: {color}; font-weight: bold;")
+            self._ble_values["Dongle BLE:"].setStyleSheet(f"color: {color}; font-weight: bold;")
             reason_hex = info.get("disconnect_reason_hex")
             reason_name = info.get("disconnect_reason_name")
             raw_state = info.get("state_name")
             tooltip = f"Raw BLE state: {raw_state or display_state}"
             if reason_hex and reason_name:
                 tooltip += f" | Reason: {reason_hex} - {reason_name}"
-            self._ble_values["State:"].setToolTip(tooltip)
+            self._ble_values["Dongle BLE:"].setToolTip(tooltip)
 
         rssi = info.get("rssi_dbm")
         if rssi is not None:
@@ -246,6 +297,35 @@ class DeviceInfoTab(QWidget):
         phy = info.get("phy")
         if phy is not None:
             self._ble_values["PHY:"].setText(str(phy))
+
+    def _on_link_health(self, info: dict):
+        connection_status = str(info.get("connection_status") or "-")
+        health = str(info.get("health") or "-").upper()
+        self._ble_values["Device Link:"].setText(connection_status)
+        status_key = connection_status.strip().upper()
+        if status_key == "CONNECTED":
+            link_color = "#10B981"
+        elif status_key in {"CONNECTING", "DISCONNECTING"}:
+            link_color = "#F59E0B"
+        elif status_key in {"DISCONNECTED", "LOST", "FAILED", "ERROR"}:
+            link_color = "#EF4444"
+        else:
+            link_color = "#94A3B8"
+        self._ble_values["Device Link:"].setStyleSheet(f"color: {link_color}; font-weight: bold;")
+        self._ble_values["Link Health:"].setText(health)
+        if health == "OK":
+            color = "#10B981"
+        elif health in {"WARNING", "CONNECTING"}:
+            color = "#F59E0B"
+        elif health == "LOST":
+            color = "#EF4444"
+        else:
+            color = "#94A3B8"
+        self._ble_values["Link Health:"].setStyleSheet(f"color: {color}; font-weight: bold;")
+        age_s = info.get("last_device_rx_age_s")
+        age_text = "No device RX yet" if age_s is None else f"Last device RX: {float(age_s):.1f}s ago"
+        scan_text = "active" if info.get("scan_active") else "inactive"
+        self._ble_values["Link Health:"].setToolTip(f"{age_text} | Dongle scan: {scan_text}")
 
     def _on_telemetry_updated(self, data: dict):
         pct = data.get("bat_soc_percent")
@@ -470,14 +550,7 @@ class DeviceInfoTab(QWidget):
                     
                     btn_set_time.setEnabled(d_id is not None and state_str not in ("connecting", "disconnecting"))
 
-        # Dynamic height adjustment so the groupbox scales with the content
-        header_height = self._adv_table.horizontalHeader().height()
-        if header_height == 0:
-            header_height = 60  # fallback
-        row_height = 36
-        visible_rows = min(len(devices), 10)  # maximum devices show at 10 rows for height
-        total_height = header_height + (visible_rows * row_height) + 2  # +2 for borders
-        self._adv_table.setFixedHeight(max(total_height, 60))
+        self._update_adv_table_height(len(devices))
 
     def _set_table_item_text(self, row: int, col: int, text: str):
         item = self._adv_table.item(row, col)

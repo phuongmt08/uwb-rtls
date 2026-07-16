@@ -134,6 +134,7 @@ class ConfigViewModel(QObject):
     ble_conn_params_updated = pyqtSignal(dict)
     scan_devices_updated = pyqtSignal(list)
     device_type_updated = pyqtSignal(int)
+    zone_profile_updated = pyqtSignal(dict)
 
     def __init__(self, device_model, ranging_model, command_bus=None, ble_scan_repo=None, parent=None):
         super().__init__(parent)
@@ -156,6 +157,7 @@ class ConfigViewModel(QObject):
         shared_app_state.sensor_fusion_cfg_changed.connect(self.sensor_fusion_cfg_updated.emit)
         shared_app_state.prefilter_cfg_changed.connect(self.prefilter_cfg_updated.emit)
         shared_app_state.pos_calib_cfg_changed.connect(self.pos_calib_cfg_updated.emit)
+        shared_app_state.zone_profiles_changed.connect(lambda profiles: self.zone_profile_updated.emit(dict(profiles).get(1, {})))
         if hasattr(self.model, "ble_conn_params_parsed"):
             self.model.ble_conn_params_parsed.connect(self.ble_conn_params_updated.emit)
         shared_app_state.device_type_changed.connect(self.device_type_updated.emit)
@@ -201,6 +203,7 @@ class ConfigViewModel(QObject):
             if hasattr(self.model, "refresh_connected_device_from_hardware"):
                 return bool(self.model.refresh_connected_device_from_hardware("read from device button"))
             self.read_anchor_layout(force=force, traffic_class="bootstrap")
+            self.read_zone_profile(zone_id=1, force=force, traffic_class="bootstrap")
             self.read_ranging_config(force=force, traffic_class="bootstrap")
             self.read_sys_config(force=force, traffic_class="bootstrap")
             self.read_sensor_fusion_config(force=force, traffic_class="bootstrap")
@@ -217,48 +220,146 @@ class ConfigViewModel(QObject):
         self,
         target: dict | None,
         anchors: list | None = None,
+        zone_profile_config: dict | None = None,
         ranging_config: dict | None = None,
         sys_config: dict | None = None,
         sensor_fusion_config: dict | None = None,
         prefilter_config: dict | None = None,
         pos_calib_config: dict | None = None,
+        ble_conn_params_config: dict | None = None,
+        ble_adv_config: dict | None = None,
+        device_type: int | None = None,
+        host_transport: int | None = None,
         factory_otp_config: dict | None = None,
     ):
-        """Write one captured UI snapshot to the selected target."""
+        """Write one captured UI snapshot to the selected target with ACK-based sequencing."""
         target = dict(target or {})
+        log.info("Writing selected config for target: %s", target)
 
-        def operation():
-            log.info("Writing selected config for target: %s", target)
-            if anchors is not None:
-                anchors_copied = [dict(anchor) for anchor in anchors]
-                self.write_anchor_layout(anchors_copied)
-            if ranging_config is not None:
-                ranging_params = dict(ranging_config or {})
-                self.write_ranging_config(
-                    period_ms=ranging_params.get("period_ms", 0),
-                    timeout_ms=ranging_params.get("timeout_ms", 0),
-                )
-            if sys_config is not None:
-                self.write_sys_config(sys_config)
-            if sensor_fusion_config is not None:
-                self.write_sensor_fusion_config(sensor_fusion_config)
-            if prefilter_config is not None:
-                self.write_prefilter_config(prefilter_config)
-            if pos_calib_config:
-                self.write_pos_calib_config(pos_calib_config)
-            if factory_otp_config:
-                self.write_factory_otp(
-                    confirm_magic=factory_otp_config.get("confirm_magic", 0x4F545057),
-                    otp_type=factory_otp_config.get("otp_type", 0),
-                    device_type=factory_otp_config.get("device_type", 2),
-                    tx_antenna_delay=factory_otp_config.get("tx_antenna_delay", 0),
-                    rx_antenna_delay=factory_otp_config.get("rx_antenna_delay", 0),
-                    value_u32=factory_otp_config.get("value_u32", 0),
-                    value_u8=factory_otp_config.get("value_u8", 0),
-                )
+        steps: list[dict] = []
+        if anchors is not None:
+            anchors_copied = [dict(anchor) for anchor in anchors]
+            steps.append({
+                "label": "anchor_layout_set",
+                "command": "anchor_layout_set",
+                "method": "set_anchor_layout",
+                "args": [anchors_copied],
+            })
+        if zone_profile_config is not None:
+            zone_profile = dict(zone_profile_config or {})
+            steps.append({
+                "label": "zone_profile_set",
+                "command": "zone_profile_set",
+                "method": "set_zone_profile",
+                "args": [zone_profile],
+            })
+            zone_id = int(zone_profile.get("zone_id", 0) or 0)
+            if zone_id > 0:
+                steps.append({
+                    "label": "zone_switch",
+                    "command": "zone_switch",
+                    "method": "switch_zone",
+                    "args": [zone_id],
+                })
+        if ranging_config is not None:
+            ranging_params = dict(ranging_config or {})
+            steps.append({
+                "label": "sys_ranging_cfg_set",
+                "command": "sys_ranging_cfg_set",
+                "method": "set_ranging_config",
+                "kwargs": {
+                    "period_ms": ranging_params.get("period_ms", 0),
+                    "timeout_ms": ranging_params.get("timeout_ms", 0),
+                },
+            })
+        if sys_config is not None:
+            steps.append({
+                "label": "sys_config_set",
+                "command": "sys_config_set",
+                "method": "set_sys_config",
+                "args": [dict(sys_config or {})],
+            })
+        if sensor_fusion_config is not None:
+            steps.append({
+                "label": "sensor_fusion_cfg_set",
+                "command": "sensor_fusion_cfg_set",
+                "method": "set_sensor_fusion_config",
+                "args": [dict(sensor_fusion_config or {})],
+            })
+        if prefilter_config is not None:
+            steps.append({
+                "label": "prefilter_cfg_set",
+                "command": "prefilter_cfg_set",
+                "method": "set_prefilter_config",
+                "args": [dict(prefilter_config or {})],
+            })
+        if pos_calib_config:
+            steps.append({
+                "label": "pos_calib_cfg_set",
+                "command": "pos_calib_cfg_set",
+                "method": "set_pos_calib_config",
+                "args": [dict(pos_calib_config or {})],
+            })
+        if ble_adv_config is not None:
+            params = dict(ble_adv_config or {})
+            steps.append({
+                "label": "ble_adv_config_set",
+                "command": "ble_adv_config_set",
+                "method": "set_ble_adv_config",
+                "kwargs": {
+                    "enable": bool(params.get("enable", True)),
+                    "serial_number": int(params.get("serial_number", 0) or 0),
+                    "device_name": str(params.get("device_name", "")),
+                },
+            })
+        if ble_conn_params_config is not None:
+            params = dict(ble_conn_params_config or {})
+            steps.append({
+                "label": "ble_conn_params_set",
+                "command": "ble_conn_params_set",
+                "method": "set_ble_conn_params",
+                "kwargs": {
+                    "min_interval_ms": params.get("min_interval_ms", 20),
+                    "max_interval_ms": params.get("max_interval_ms", 40),
+                    "slave_latency": params.get("slave_latency", 0),
+                    "sup_timeout_ms": params.get("sup_timeout_ms", 3000),
+                },
+            })
+        if device_type is not None:
+            steps.append({
+                "label": "device_type_set",
+                "command": "device_type_set",
+                "method": "set_device_type",
+                "args": [int(device_type)],
+            })
+        if host_transport is not None:
+            steps.append({
+                "label": "host_transport_set",
+                "command": "host_transport_set",
+                "method": "set_host_transport",
+                "args": [int(host_transport)],
+            })
+        if factory_otp_config:
+            params = dict(factory_otp_config or {})
+            steps.append({
+                "label": "factory_otp_write",
+                "command": "factory_otp_write",
+                "method": "write_factory_otp",
+                "kwargs": {
+                    "confirm_magic": params.get("confirm_magic", 0x4F545057),
+                    "otp_type": params.get("otp_type", 0),
+                    "device_type": params.get("device_type", 2),
+                    "tx_antenna_delay": params.get("tx_antenna_delay", 0),
+                    "rx_antenna_delay": params.get("rx_antenna_delay", 0),
+                    "value_u32": params.get("value_u32", 0),
+                    "value_u8": params.get("value_u8", 0),
+                },
+            })
 
-        operation()
-        return True
+        if hasattr(self.model, "write_config_sequence"):
+            return bool(self.model.write_config_sequence(steps))
+        log.warning("DeviceModel does not support ACK-based config write sequence.")
+        return False
 
     def write_factory_otp(
         self,
@@ -292,6 +393,21 @@ class ConfigViewModel(QObject):
         log.info("Sending anchor layout set command to MCU: %s", anchors)
         self.ranging_model.set_anchor_layout(anchors)
         self.model.set_anchor_layout(anchors)
+
+    def read_zone_profile(self, zone_id: int = 1, force: bool = False, traffic_class: str = ""):
+        log.info("Requesting zone profile %s from MCU via global query queue... (force=%s)", zone_id, force)
+        if hasattr(self.model, "request_zone_profile"):
+            self.model.request_zone_profile(zone_id=zone_id, force=force, traffic_class=traffic_class)
+
+    def write_zone_profile(self, profile: dict):
+        log.info("Sending zone profile set command to MCU: %s", profile)
+        if hasattr(self.model, "set_zone_profile"):
+            self.model.set_zone_profile(profile)
+
+    def switch_zone(self, zone_id: int):
+        log.info("Sending zone switch command to MCU: zone_id=%s", zone_id)
+        if hasattr(self.model, "switch_zone"):
+            self.model.switch_zone(zone_id)
 
     def read_ranging_config(self, force: bool = False, traffic_class: str = ""):
         # BE/API: fetch ranging config for the Config tab.

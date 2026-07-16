@@ -108,6 +108,7 @@ class SharedAppState(QObject):
     ranging_stats_changed = pyqtSignal(dict)       # total_count, success_count, rms_error_m...
     calib_status_changed = pyqtSignal(dict)         # state, progress, iteration, peer ready mask...
     anchor_layout_changed = pyqtSignal(list)       # List of fixed anchors positions
+    zone_profiles_changed = pyqtSignal(dict)       # zone_id -> zone profile/anchor layout from firmware
     sys_config_changed = pyqtSignal(dict)          # UWB role, channel, tx/rx antenna delays...
     sys_ranging_cfg_changed = pyqtSignal(dict)     # Rx timeout, ranging period
     sensor_fusion_cfg_changed = pyqtSignal(dict)   # alpha, kappa, noise covariances...
@@ -149,6 +150,7 @@ class SharedAppState(QObject):
         self._ranging_stats: Dict[str, Any] = {}
         self._calib_status: Dict[str, Any] = {}
         self._anchor_layout: List[Dict[str, Any]] = []
+        self._zone_profiles: Dict[int, Dict[str, Any]] = {}
         self._sys_config: Dict[str, Any] = {}
         self._sys_ranging_cfg: Dict[str, Any] = {}
         self._sensor_fusion_cfg: Dict[str, Any] = {}
@@ -168,6 +170,8 @@ class SharedAppState(QObject):
         self._last_query_flow_reports: Dict[str, List[Dict[str, Any]]] = {}
         self._query_recovery_pending = False
         self._deferred_background_queries: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+        self._deferred_manual_flow_queries: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+        self._manual_flow_active = ""
         self._received_payload_names: set[str] = set()
         self._active_query_flow = ""
         self._query_start_scheduled = False
@@ -270,6 +274,19 @@ class SharedAppState(QObject):
     def anchor_layout(self, val: List[Dict[str, Any]]) -> None:
         self._anchor_layout = list(val)
         self.anchor_layout_changed.emit(self._anchor_layout)
+        self.zone_profiles_changed.emit(self.zone_profiles)
+
+    @property
+    def zone_profiles(self) -> Dict[int, Dict[str, Any]]:
+        return {int(zone_id): dict(profile) for zone_id, profile in self._zone_profiles.items()}
+
+    def update_zone_profile(self, profile: Dict[str, Any]) -> None:
+        data = dict(profile or {})
+        zone_id = self._parse_optional_int(data.get("zone_id"))
+        if zone_id is None or zone_id <= 0:
+            return
+        self._zone_profiles[int(zone_id)] = data
+        self.zone_profiles_changed.emit(self.zone_profiles)
 
     @property
     def sys_config(self) -> Dict[str, Any]:
@@ -355,7 +372,7 @@ class SharedAppState(QObject):
         self._rtos_task_stats = [item.copy() for item in val]
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
 
-    TAG_ONLY_QUERY_COMMANDS = {"anchor_layout_get", "sensor_fusion_cfg_get", "prefilter_cfg_get"}
+    TAG_ONLY_QUERY_COMMANDS = {"anchor_layout_get", "sensor_fusion_cfg_get", "prefilter_cfg_get", "zone_profile_get"}
 
     DEVICE_SESSION_PAYLOADS = {
         "device_information_resp",
@@ -363,6 +380,7 @@ class SharedAppState(QObject):
         "time_sync_resp",
         "ble_conn_params_resp",
         "anchor_layout_resp",
+        "zone_profile_resp",
         "sys_config_resp",
         "sys_ranging_cfg_resp",
         "sensor_fusion_cfg_resp",
@@ -545,6 +563,7 @@ class SharedAppState(QObject):
         self._ranging_stats = {}
         self._calib_status = {}
         self._anchor_layout = []
+        self._zone_profiles = {}
         self._sys_config = {}
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
@@ -562,6 +581,7 @@ class SharedAppState(QObject):
         self.ranging_stats_changed.emit(self._ranging_stats)
         self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)
+        self.zone_profiles_changed.emit(self.zone_profiles)
         self.sys_config_changed.emit(self._sys_config)
         self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
@@ -584,6 +604,7 @@ class SharedAppState(QObject):
         self._ranging_stats = {}
         self._calib_status = {}
         self._anchor_layout = []
+        self._zone_profiles = {}
         self._sys_config = {}
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
@@ -605,6 +626,7 @@ class SharedAppState(QObject):
         self.ranging_stats_changed.emit(self._ranging_stats)
         self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)
+        self.zone_profiles_changed.emit(self.zone_profiles)
         self.sys_config_changed.emit(self._sys_config)
         self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
@@ -643,6 +665,8 @@ class SharedAppState(QObject):
         labels = {
             "connect": "CONNECT",
             "connected_device": "CONNECTED_DEVICE",
+            "write_device": "WRITE_DEVICE",
+            "live_tracking_map": "LIVE_TRACKING_MAP",
             "user_action": "USER_ACTION",
             "background": "BACKGROUND",
             "default": "DEFAULT",
@@ -705,6 +729,115 @@ class SharedAppState(QObject):
                 defer_if_busy=False,
             )
         return bool(pending)
+
+    def _defer_manual_flow_query(
+        self,
+        command_name: str,
+        dst_addr: int,
+        params: Dict[str, Any],
+        traffic_class: str,
+        timeout_s: float | None,
+        max_retries: int | None,
+        recovery_wave: int,
+        flow_name: str,
+        defer_if_busy: bool,
+    ) -> None:
+        key = self._background_query_key(command_name, dst_addr, params)
+        key = (key[0], key[1], f"{key[2]}|{traffic_class}|{flow_name}|{recovery_wave}")
+        self._deferred_manual_flow_queries[key] = {
+            "command_name": str(command_name or ""),
+            "dst_addr": int(dst_addr or 0),
+            "command_params": dict(params or {}),
+            "traffic_class": str(traffic_class or ""),
+            "timeout_s": timeout_s,
+            "max_retries": max_retries,
+            "recovery_wave": int(recovery_wave or 0),
+            "flow_name": str(flow_name or ""),
+            "defer_if_busy": bool(defer_if_busy),
+        }
+        log.debug("[SharedAppState] Query deferred while %s flow is active: %s", self._manual_flow_active, command_name)
+
+    def _flush_deferred_manual_flow_queries(self) -> bool:
+        if not self._deferred_manual_flow_queries:
+            return False
+        pending = list(self._deferred_manual_flow_queries.values())
+        self._deferred_manual_flow_queries.clear()
+        for item in pending:
+            self.enqueue_query(
+                str(item.get("command_name") or ""),
+                int(item.get("dst_addr") or 0),
+                command_params=dict(item.get("command_params") or {}),
+                traffic_class=str(item.get("traffic_class") or ""),
+                timeout_s=item.get("timeout_s"),
+                max_retries=item.get("max_retries"),
+                recovery_wave=int(item.get("recovery_wave") or 0),
+                flow_name=str(item.get("flow_name") or ""),
+                defer_if_busy=bool(item.get("defer_if_busy", True)),
+            )
+        return bool(pending)
+
+    def begin_manual_flow(self, flow_name: str) -> str:
+        flow = self._normalise_query_flow(flow_name)
+        self._manual_flow_active = flow
+        self._active_query_flow = flow
+        self._print_flow_debug(flow)
+        self.update_job("query_queue", JobState.RUNNING)
+        return flow
+
+    def record_manual_flow_item(
+        self,
+        flow_name: str,
+        command_name: str,
+        *,
+        status: str,
+        dst_addr: int = 0,
+        expected_response: str = "",
+        retries: int = 0,
+        seq: int | None = None,
+        ack_response: int | None = None,
+        failure_reason: str = "",
+        traffic_class: str = "manual",
+    ) -> None:
+        flow = self._normalise_query_flow(flow_name)
+        item = {
+            "command_name": str(command_name or "-"),
+            "dst_addr": int(dst_addr or 0),
+            "expected_response": str(expected_response or ""),
+            "status": str(status or QueryState.FAILED).upper(),
+            "retries": int(retries or 0),
+            "sent_time": 0.0,
+            "received_time": 0.0,
+            "seq": seq,
+            "command_params": {},
+            "priority": 100,
+            "traffic_class": str(traffic_class or "manual"),
+            "flow_name": flow,
+            "ack_received": ack_response is not None,
+            "ack_response": ack_response,
+            "timeout_s": 0.0,
+            "max_retries": 0,
+            "recovery_wave": 0,
+            "failure_reason": str(failure_reason or ""),
+            "response_seq": None,
+            "response_packet": None,
+        }
+        self._remember_query_results(flow, [item])
+
+    def complete_manual_flow(self, flow_name: str) -> None:
+        flow = self._normalise_query_flow(flow_name)
+        self._print_final_flow_report(flow)
+        results = list(self._last_query_flow_reports.get(flow, []))
+        success = sum(1 for item in results if item.get("status") == "SUCCESS")
+        total = len(results)
+        status = JobState.SUCCESS if total and success == total else JobState.FAILED
+        self.update_job("query_queue", status, progress=100)
+        if self._manual_flow_active == flow:
+            self._manual_flow_active = ""
+        if self._active_query_flow == flow:
+            self._active_query_flow = ""
+        self._flush_deferred_manual_flow_queries()
+        self._flush_deferred_background_queries()
+        self.query_flow_completed.emit(flow)
     # Global Query Queue Management (Retry/Timeout logic)
 
     def cancel_query_pipeline(self, reason: str = "") -> None:
@@ -801,6 +934,25 @@ class SharedAppState(QObject):
         traffic_class = str(traffic_class or "").strip().lower()
         raw_flow_name = str(flow_name or "").strip().lower()
         flow_name = self._normalise_query_flow(raw_flow_name, traffic_class)
+        manual_flow = str(self._manual_flow_active or "").strip().lower()
+        if manual_flow:
+            if str(command_name or "") == "ble_status_get":
+                flow_name = manual_flow
+                raw_flow_name = manual_flow
+                defer_if_busy = False
+            else:
+                self._defer_manual_flow_query(
+                    command_name,
+                    dst_addr,
+                    params,
+                    traffic_class,
+                    timeout_s,
+                    max_retries,
+                    recovery_wave,
+                    flow_name,
+                    defer_if_busy,
+                )
+                return True
         if flow_name == "connected_device" and traffic_class == "bootstrap":
             self.enable_device_session_payloads(f"query queued: {command_name}")
         if max_retries is None and flow_name == "connected_device" and traffic_class == "bootstrap":
@@ -904,17 +1056,24 @@ class SharedAppState(QObject):
             if expected and self._response_payload_available(expected):
                 copy_item["status"] = "SUCCESS"
                 copy_item["received_time"] = copy_item.get("received_time") or 0.0
+            if previous:
+                copy_item["recovery_wave"] = max(
+                    int(previous.get("recovery_wave") or 0),
+                    int(copy_item.get("recovery_wave") or 0),
+                )
             if previous and previous.get("status") == "SUCCESS" and copy_item.get("status") != "SUCCESS":
                 continue
             bucket[key] = copy_item
 
-    def _mark_aggregate_payload_success(self, flow_name: str, expected_response: str) -> None:
+    def _mark_aggregate_payload_success(self, flow_name: str, expected_response: str, recovery_wave: int | None = None) -> None:
         flow = self._normalise_query_flow(flow_name)
         expected = str(expected_response or "")
         for item in self._query_flow_results.get(flow, {}).values():
             if str(item.get("expected_response") or "") == expected:
                 item["status"] = "SUCCESS"
                 item["received_time"] = item.get("received_time") or 0.0
+                if recovery_wave is not None:
+                    item["recovery_wave"] = max(int(item.get("recovery_wave") or 0), int(recovery_wave or 0))
 
     def _mark_payload_success_in_reports(self, expected_response: str) -> None:
         """Mark any queued/reported command satisfied by an event/polling payload."""
@@ -942,12 +1101,39 @@ class SharedAppState(QObject):
         success_count = sum(1 for item in results if item.get("status") == "SUCCESS")
         total = len(results)
         failed = [item for item in results if item.get("status") != "SUCCESS"]
-        detail_rows = []
+        retry_total = 0
+        wave_entries: List[str] = []
+        for item in results:
+            retries = int(item.get("retries") or 0)
+            wave = int(item.get("recovery_wave") or 0)
+            retry_total += retries + wave
+            if item.get("status") == "SUCCESS" and wave > 0:
+                command = str(item.get("command_name") or "-")
+                wave_entries.append(f"{command} - WAVE {wave}")
+        footer_rows: List[Tuple[str, str]] = [
+            ("SUCCESSFUL", f"{success_count}/{total} packets"),
+            ("RETRY", str(retry_total)),
+        ]
+        if wave_entries:
+            footer_rows.append(("WAVE", wave_entries[0]))
+            for entry in wave_entries[1:]:
+                footer_rows.append(("", entry))
+        else:
+            footer_rows.append(("WAVE", "-"))
+        if flow in {"connected_device", "write_device"}:
+            ble = self.ble_status
+            raw_state = str(ble.get("display_state") or ble.get("state_name") or "-")
+            footer_rows.extend([
+                ("DEVICE LINK", str(ble.get("connection_status") or self.connection_status or "-").upper()),
+                ("LINK HEALTH", str(ble.get("link_health") or "-").upper()),
+                ("DONGLE BLE", raw_state.replace("BLE_STATE_", "")),
+                ("SCAN", "ACTIVE" if ble.get("scan_active") else "INACTIVE"),
+            ])
         for item in failed:
             command = str(item.get("command_name") or "-")
             reason = str(item.get("failure_reason") or "").upper()
-            detail_rows.append(("FAILED", f"{command} {reason}".strip()))
-        self._print_query_report(results, flow_name=flow, summary=("SUCCESSFUL", f"{success_count}/{total} packets"), detail_rows=detail_rows)
+            footer_rows.append(("FAILED", f"{command} {reason}".strip()))
+        self._print_query_report(results, flow_name=flow, detail_rows=footer_rows)
         self._query_flow_results.pop(flow, None)
 
     def _on_query_complete(self, results: List[Dict[str, Any]]) -> None:
@@ -1042,17 +1228,29 @@ class SharedAppState(QObject):
             self._schedule_query_recovery(all_retryable, self._query_generation)
             return
 
+        manual_flow = str(self._manual_flow_active or "").strip().lower()
+        completed_flows: List[str] = []
         for flow in flow_order:
+            if manual_flow and flow == manual_flow:
+                continue
             self._print_final_flow_report(flow)
+            completed_flows.append(flow)
 
-        status = JobState.SUCCESS if total_success == total_count else JobState.FAILED
-        self.update_job("query_queue", status, progress=100)
         self._query_recovery_pending = False
-        self._active_query_flow = ""
         self._query_start_scheduled = False
-        self._flush_deferred_background_queries()
-        for completed_flow in flow_order:
-            self.query_flow_completed.emit(str(completed_flow))
+        if completed_flows:
+            status = JobState.SUCCESS if total_success == total_count else JobState.FAILED
+            self.update_job("query_queue", status, progress=100)
+            if not manual_flow:
+                self._active_query_flow = ""
+            self._flush_deferred_background_queries()
+            for completed_flow in completed_flows:
+                self.query_flow_completed.emit(str(completed_flow))
+        elif not manual_flow:
+            status = JobState.SUCCESS if total_success == total_count else JobState.FAILED
+            self.update_job("query_queue", status, progress=100)
+            self._active_query_flow = ""
+            self._flush_deferred_background_queries()
 
     def _mark_late_payload_success_after_final_report(self, expected_response: str, pkt: Any) -> None:
         """Upgrade a previously failed final report row when its payload arrives late."""
@@ -1147,7 +1345,8 @@ class SharedAppState(QObject):
 
         label_width = max([len(title)] + [len(label) for label, _ in all_rows]) if all_rows else len(title)
         value_width = max([len("OK")] + [len(value) for _, value in all_rows]) if all_rows else len("OK")
-        inner_width = max(label_width + value_width + 5, len(title) + 4)
+        summary_title = "SUMMARY"
+        inner_width = max(label_width + value_width + 5, len(title) + 4, len(summary_title) + 4)
         border = "|" + "=" * inner_width + "|"
         print(f"|{title:=^{inner_width}}|", flush=True)
         print(border, flush=True)
@@ -1158,6 +1357,8 @@ class SharedAppState(QObject):
             for label, value in command_rows:
                 print(f"| {label:<{label_width}} : {value:<{value_width}} |", flush=True)
         if footer_rows:
+            print(border, flush=True)
+            print(f"|{summary_title:=^{inner_width}}|", flush=True)
             print(border, flush=True)
             for label, value in footer_rows:
                 print(f"| {label:<{label_width}} : {value:<{value_width}} |", flush=True)
@@ -1229,7 +1430,11 @@ class SharedAppState(QObject):
             for item in retryable:
                 expected = str(item.get("expected_response") or "")
                 if self._response_payload_available(expected):
-                    self._mark_aggregate_payload_success("connected_device", expected)
+                    self._mark_aggregate_payload_success(
+                        "connected_device",
+                        expected,
+                        recovery_wave=int(item.get("recovery_wave") or 0),
+                    )
                     log.debug(
                         "[GlobalQueue] Recovery skipped for %s because payload %s is already in app state.",
                         item.get("command_name"),

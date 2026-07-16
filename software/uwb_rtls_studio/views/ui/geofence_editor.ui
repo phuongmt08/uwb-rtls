@@ -25,6 +25,7 @@ QLabel { background: transparent; }
 QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background-color: #111827; border: 1px solid #475569; border-radius: 5px; color: #F8FAFC; padding: 4px 22px 4px 8px; }
 QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus { border-color: #22D3EE; }
 QTabWidget::pane { border: 1px solid #334155; border-radius: 8px; background: rgba(15, 23, 42, 0.35); margin-top: -1px; }
+QTabBar { background: transparent; background-color: transparent; border: none; padding: 0px; }
 QTabBar::tab { background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 7px 12px; font-weight: bold; min-width: 110px; }
 QTabBar::tab:selected { background: #0F172A; color: #22D3EE; border-color: #22D3EE; }
 QGroupBox { color: #CBD5E1; font-weight: bold; border: 1px solid #334155; border-radius: 8px; margin-top: 12px; padding-top: 16px; }

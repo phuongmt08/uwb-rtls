@@ -39,14 +39,28 @@ except ModuleNotFoundError as exc:
 DEFAULT_TCP_HOST = "127.0.0.1"
 DEFAULT_TCP_PORT = 9999
 DEFAULT_SERIAL_BAUD = 115200
-DEFAULT_MAP_PATH = Path(STUDIO_DIR) / "data" / "runtime" / "live_tracking_demo_map.json"
+DEFAULT_MAP_PATH = Path(STUDIO_DIR) / "data" / "maps" / "geofence_mapv1.json"
 DEFAULT_ANCHORS = [
     {"anchor_id": 0, "x_m": 0.7, "y_m": 0.0, "z_m": 2.5},
     {"anchor_id": 1, "x_m": 0.7, "y_m": 8.4, "z_m": 2.5},
     {"anchor_id": 2, "x_m": 8.3, "y_m": 8.4, "z_m": 2.5},
     {"anchor_id": 3, "x_m": 8.3, "y_m": 0.0, "z_m": 2.5},
 ]
+SCENARIOS = ("ellipse", "e1-303-zones")
 
+# E1-303 map has Room 1 origin at global (-2.4, -6.0), yaw 0.
+# These local-frame points become global positions crossing:
+# outside allowed boundary -> Rule Zone 1 (allowed) -> Rule Zone 2 (forbidden).
+E1_303_ZONE_ROUTE = [
+    {"label": "outside_allowed", "local": (4.40, 6.00), "global": (2.00, 0.00)},
+    {"label": "approach_allowed", "local": (8.80, 5.30), "global": (6.40, -0.70)},
+    {"label": "allowed_rule_zone_1", "local": (10.05, 4.35), "global": (7.65, -1.65)},
+    {"label": "allowed_rule_zone_1", "local": (10.05, 3.65), "global": (7.65, -2.35)},
+    {"label": "forbidden_rule_zone_2", "local": (10.05, 2.55), "global": (7.65, -3.45)},
+    {"label": "forbidden_rule_zone_2", "local": (10.05, 1.25), "global": (7.65, -4.75)},
+    {"label": "allowed_rule_zone_1", "local": (10.05, 4.35), "global": (7.65, -1.65)},
+    {"label": "outside_allowed", "local": (4.40, 6.00), "global": (2.00, 0.00)},
+]
 GENERIC_RESPONSES = {
     "time_sync_get": "time_sync_resp",
     "time_sync_set": "time_sync_resp",
@@ -207,11 +221,12 @@ class SerialTransport:
 
 
 class AnchorLayoutResponder:
-    def __init__(self, transport, anchors: list[dict], hz: float, stream_on_boot: bool):
+    def __init__(self, transport, anchors: list[dict], hz: float, stream_on_boot: bool, scenario: str):
         self.transport = transport
         self.anchors = anchors
         self.period_s = 1.0 / max(float(hz), 1.0)
         self.stream_on_boot = stream_on_boot
+        self.scenario = scenario
         self.proto = VvProtocol()
         self.factory = CommandFactory()
         self.factory.set_device_identity(pb.DEVICE_TYPE_TAG, pb.DEVICE_ROLE_TAG)
@@ -226,6 +241,8 @@ class AnchorLayoutResponder:
         self.last_ranging_time_ms = 0
         self.last_rms_error_m = 0.0
         self.avg_rssi_dbm = -62
+        self._route_pos = 0.0
+        self._last_route_label = ""
         self._lock = threading.Lock()
 
     def _send_packet(self, pkt) -> None:
@@ -316,6 +333,9 @@ class AnchorLayoutResponder:
         return True
 
     def _pose(self) -> tuple[float, float, float, float]:
+        if self.scenario == "e1-303-zones":
+            return self._pose_e1_303_zones()
+
         xs = [a["x_m"] for a in self.anchors]
         ys = [a["y_m"] for a in self.anchors]
         min_x, max_x = min(xs), max(xs)
@@ -328,6 +348,30 @@ class AnchorLayoutResponder:
         x = cx + ax * math.sin(self.angle * 1.7)
         y = cy + ay * math.sin(self.angle)
         yaw = math.degrees(math.atan2(ay * math.cos(self.angle), ax * 1.7 * math.cos(self.angle * 1.7))) % 360.0
+        return x, y, 1.2, yaw
+
+    def _pose_e1_303_zones(self) -> tuple[float, float, float, float]:
+        route = E1_303_ZONE_ROUTE
+        if len(route) < 2:
+            return 0.0, 0.0, 1.2, 0.0
+
+        # About 30 seconds for one full loop at 5 Hz, slow enough to keep
+        # the allowed-zone segment visible before any speed-limit transition.
+        self._route_pos = (self._route_pos + 1.0 / 150.0) % len(route)
+        idx = int(self._route_pos)
+        nxt = (idx + 1) % len(route)
+        frac = self._route_pos - idx
+        x0, y0 = route[idx]["local"]
+        x1, y1 = route[nxt]["local"]
+        x = x0 + (x1 - x0) * frac
+        y = y0 + (y1 - y0) * frac
+        yaw = math.degrees(math.atan2(y1 - y0, x1 - x0)) % 360.0
+
+        label = str(route[idx]["label"])
+        if label != self._last_route_label:
+            gx, gy = route[idx]["global"]
+            print(f"[SIM] E1-303 scenario: {label} global=({gx:.2f},{gy:.2f}) local=({x0:.2f},{y0:.2f})")
+            self._last_route_label = label
         return x, y, 1.2, yaw
 
     def _stream_once(self) -> None:
@@ -479,6 +523,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--hz", type=float, default=5.0, help="sensor_fusion_result streaming rate")
     parser.add_argument(
+        "--scenario",
+        choices=SCENARIOS,
+        default="ellipse",
+        help="Motion profile: ellipse keeps the old path; e1-303-zones crosses Rule Zone 1/2 in geofence_mapv1.",
+    )
+    parser.add_argument(
         "--stream-on-boot",
         action="store_true",
         help="Start streaming sensor_fusion_result immediately instead of waiting for ranging_start",
@@ -500,6 +550,7 @@ def main() -> int:
         anchors=anchors,
         hz=args.hz,
         stream_on_boot=args.stream_on_boot,
+        scenario=args.scenario,
     )
     responder.run()
     return 0

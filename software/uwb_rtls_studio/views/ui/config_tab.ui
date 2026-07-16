@@ -111,25 +111,7 @@ QComboBox QAbstractItemView {
     selection-background-color: #0E7490;
     selection-color: #F8FAFC;
 }
-QCheckBox {
-    color: #94A3B8;
-    font-weight: bold;
-}
-QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border: 1px solid #334155;
-    border-radius: 4px;
-    background-color: #0A0F1E;
-}
-QCheckBox::indicator:hover {
-    border-color: #22D3EE;
-}
-QCheckBox::indicator:checked {
-    background-color: #0E7490;
-    border-color: #22D3EE;
-    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMCcgaGVpZ2h0PScxMCcgdmlld0JveD0nMCAwIDEwIDEwJz48cGF0aCBkPSdNMiA1IEw0IDcgTDggMycgc3Ryb2tlPScjMjJEM0VFJyBzdHJva2Utd2lkdGg9JzInIGZpbGw9J25vbmUnIHN0cm9rZS1saW5lY2FwPSdyb3VuZCcgc3Ryb2tlLWxpbmVqb2luPSdyb3VuZCcvPjwvc3ZnPg==");
-}
+
 </string>
   </property>
   <layout class="QVBoxLayout" name="outer_layout">

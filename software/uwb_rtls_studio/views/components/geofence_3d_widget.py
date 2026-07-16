@@ -125,11 +125,13 @@ class Geofence3DWidget(QWidget):
         super().__init__(parent)
         self._zones = []
         self._anchors = []
+        self._ground_truths = []
         self._tag_position = [0.0, 0.0, 0.0]
         self._tag_yaw = 0.0
         self._trail_points = []
         self._zone_items = []
         self._anchor_items = []
+        self._ground_truth_items = []
         self._last_gizmo_camera = None
         self._active_room_ids: set = set()
         self._camera_reset_timer = QTimer(self)
@@ -634,6 +636,48 @@ class Geofence3DWidget(QWidget):
                 if len(points) >= 3:
                     self._add_prism(points, bottom, top, fill, edge, gl_options="opaque")
 
+    def set_ground_truths(self, tracks):
+        self._ground_truths = list(tracks or [])
+        if not self.gl_widget:
+            return
+        for item in self._ground_truth_items:
+            self.gl_widget.removeItem(item)
+        self._ground_truth_items.clear()
+
+        dash_length = 0.18
+        gap_length = 0.10
+        for track in self._ground_truths:
+            points = list(getattr(track, "points", []) or [])
+            color = QColor(getattr(track, "color", "#FB7185"))
+            width = max(1.0, float(getattr(track, "line_width", 2.0)))
+            for start, end in zip(points, points[1:]):
+                dx = end[0] - start[0]
+                dy = end[1] - start[1]
+                length = math.hypot(dx, dy)
+                if length <= 1e-9:
+                    continue
+                cursor = 0.0
+                while cursor < length:
+                    dash_end = min(cursor + dash_length, length)
+                    p1 = (
+                        start[0] + dx * cursor / length,
+                        start[1] + dy * cursor / length,
+                        0.08,
+                    )
+                    p2 = (
+                        start[0] + dx * dash_end / length,
+                        start[1] + dy * dash_end / length,
+                        0.08,
+                    )
+                    item = gl.GLLinePlotItem(
+                        pos=np.array([p1, p2], dtype=float),
+                        color=color,
+                        width=width,
+                        antialias=True,
+                    )
+                    self.gl_widget.addItem(item)
+                    self._ground_truth_items.append(item)
+                    cursor += dash_length + gap_length
     def _is_inside_polygon(self, poly_points, wx, wy):
         poly = QPolygonF()
         for pt in poly_points:

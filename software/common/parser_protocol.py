@@ -332,3 +332,45 @@ class VvProtocol(_VvProtocol):
         return self._commands.rtos_task_stats_get(src, dst, seq)
     def build_rtos_task_stats_resp(self, src: int, dst: int, seq: int):
         return self._commands.rtos_task_stats_resp(src, dst, seq)
+    def build_zone_switch(self, src: int, dst: int, seq: int, zone_id: int = 1):
+        return self._commands.zone_switch(src, dst, seq, zone_id=zone_id)
+    def build_zone_profile_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ):
+        return self._commands.zone_profile_set(
+            src,
+            dst,
+            seq,
+            profile=profile,
+            zone_id=zone_id,
+            preamble_code=preamble_code,
+            anchors=anchors,
+        )
+    def build_zone_profile_get(self, src: int, dst: int, seq: int, zone_id: int = 1):
+        return self._commands.zone_profile_get(src, dst, seq, zone_id=zone_id)
+    def build_zone_profile_resp(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ):
+        return self._commands.zone_profile_resp(
+            src,
+            dst,
+            seq,
+            profile=profile,
+            zone_id=zone_id,
+            preamble_code=preamble_code,
+            anchors=anchors,
+        )

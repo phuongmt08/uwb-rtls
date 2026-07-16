@@ -53,6 +53,9 @@ COMMAND_ENABLE = {
     "rtos_resource_get": 1,
     "rtos_task_stats_get": 1,
     "end_session": 1,
+    "zone_switch": 1,
+    "zone_profile_set": 1,
+    "zone_profile_get": 1,
 }
 
 

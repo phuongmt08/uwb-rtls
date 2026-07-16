@@ -383,8 +383,11 @@ class MainWindow(QMainWindow):
     def _visualize_connection_progress(self, payload: dict) -> int:
         raw_progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         status = str(payload.get("status") or "RUNNING").upper()
+        phase = str(payload.get("phase") or "connection").strip().lower()
         message = str(payload.get("message") or "").strip().lower()
 
+        if phase == "config_write":
+            return raw_progress
         if raw_progress <= 0 or status in {"IDLE", "FAILED", "ERROR"}:
             return 0
         if status == "SUCCESS" or raw_progress >= 100:
@@ -418,6 +421,7 @@ class MainWindow(QMainWindow):
         raw_progress = max(0, min(100, int(payload.get("progress", 0) or 0)))
         message = str(payload.get("message") or "BLE process")
         status = str(payload.get("status") or "RUNNING")
+        status_upper = status.upper()
         mac = str(payload.get("mac") or "").strip().upper()
         name = str(payload.get("name") or "").strip()
         context = f"{mac}|{name}"
@@ -443,7 +447,7 @@ class MainWindow(QMainWindow):
             self._success_timer.stop()
             self._success_timer = None
 
-        if status == "SUCCESS" or progress >= 100:
+        if status_upper == "SUCCESS" or (progress >= 100 and status_upper not in {"FAILED", "ERROR"}):
             self._animate_success()
         else:
             self.update_progress_style(status)
@@ -540,6 +544,8 @@ class MainWindow(QMainWindow):
     def _should_notify_command(command_name: str) -> bool:
         notify_commands = {
             "anchor_layout_set",
+            "zone_profile_set",
+            "zone_switch",
             "sys_ranging_cfg_set",
             "sys_config_set",
             "sensor_fusion_cfg_set",
@@ -566,6 +572,8 @@ class MainWindow(QMainWindow):
     def _command_display_name(command_name: str) -> str:
         labels = {
             "anchor_layout_set": "anchor layout set",
+            "zone_profile_set": "zone profile set",
+            "zone_switch": "zone switch",
             "sys_ranging_cfg_set": "ranging config set",
             "sys_config_set": "system config set",
             "sensor_fusion_cfg_set": "sensor fusion config set",
@@ -703,8 +711,14 @@ class MainWindow(QMainWindow):
 
         status.addWidget(self._make_separator())
 
-        # BLE telemetry state from dongle
-        self._status_ble = QLabel("BLE: ---")
+        # Logical device-link health and raw BLE activity are separate signals.
+        self._status_link_health = QLabel("Link: ---")
+        self._status_link_health.setStyleSheet("color: #94A3B8;")
+        status.addWidget(self._status_link_health)
+
+        status.addWidget(self._make_separator())
+
+        self._status_ble = QLabel("Dongle: ---")
         self._status_ble.setStyleSheet("color: #94A3B8;")
         status.addWidget(self._status_ble)
 
@@ -729,8 +743,12 @@ class MainWindow(QMainWindow):
         if self._device_info_vm:
             self._device_info_vm.telemetry_updated.connect(self._on_telemetry_status)
             self._device_info_vm.ble_info_updated.connect(self._on_ble_info_status)
+            self._device_info_vm.link_health_updated.connect(self._on_link_health_status)
         if self._live_tracking_vm:
             self._live_tracking_vm.position_updated.connect(self._on_position_status)
+            self._live_tracking_vm.stats_updated.connect(self._on_ranging_stats_status)
+            self._live_tracking_vm.ranging_started.connect(self._reset_ranging_rate_status)
+            self._live_tracking_vm.ranging_stopped.connect(self._reset_ranging_rate_status)
 
     def _connect_signals(self):
         """Connect UI signals from .ui widgets to backend logic."""
@@ -779,7 +797,8 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             state_value = -1
         if state_label is not None:
-            self._status_ble.setText(f"BLE: {state_label}")
+            short_state = str(state_label).replace("BLE_STATE_", "")
+            self._status_ble.setText(f"Dongle: {short_state}")
             raw_state_label = str(data.get("state_name") or state_label or "").upper()
             if state_value == 5 or raw_state_label in ("BLE_STATE_CONNECTED", "CONNECTED"):
                 self._status_ble.setStyleSheet("color: #10B981; font-weight: bold;")
@@ -790,8 +809,39 @@ class MainWindow(QMainWindow):
             else:
                 self._status_ble.setStyleSheet("color: #EF4444; font-weight: bold;")
 
+    def _on_link_health_status(self, data: dict):
+        health = str(data.get("health") or "---").upper()
+        self._status_link_health.setText(f"Link: {health}")
+        if health == "OK":
+            color = "#10B981"
+        elif health in {"WARNING", "CONNECTING"}:
+            color = "#F59E0B"
+        elif health == "LOST":
+            color = "#EF4444"
+        else:
+            color = "#94A3B8"
+        age_s = data.get("last_device_rx_age_s")
+        age_text = "no device RX yet" if age_s is None else f"last device RX {float(age_s):.1f}s ago"
+        scan_text = "scan active" if data.get("scan_active") else "scan inactive"
+        self._status_link_health.setToolTip(
+            f"{data.get('connection_status', '-')}; {age_text}; {scan_text}"
+        )
+        self._status_link_health.setStyleSheet(f"color: {color}; font-weight: bold;")
+
     def _on_position_status(self, x, y, z, rms):
         self._status_rms.setText(f"\U0001F4CA RMS: {rms:.3f} m")
+
+    def _on_ranging_stats_status(self, stats: dict):
+        try:
+            rate_hz = float(stats.get("update_rate_hz", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            rate_hz = 0.0
+        self._status_rate.setText(
+            f"\U0001F504 Rate: {rate_hz:.1f} Hz" if rate_hz > 0.0 else "\U0001F504 Rate: --"
+        )
+
+    def _reset_ranging_rate_status(self):
+        self._status_rate.setText("\U0001F504 Rate: --")
 
     def _on_device_changed(self, info: dict):
         status_text = info.get("Status")
@@ -818,6 +868,7 @@ class MainWindow(QMainWindow):
 
         if status_text == "Disconnected":
             self.btn_scan_device.setEnabled(True)
+            self.device_badge.setText("● -")
             label_name = name if name and name != "-" else "-"
             self._status_conn.setText(f"\U0001F534 Disconnected: {label_name}")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -832,7 +883,7 @@ class MainWindow(QMainWindow):
             self.btn_scan_device.setEnabled(True)
             self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
             self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
-            self._status_rate.setText("\U0001F504 30 FPS")
+            self._reset_ranging_rate_status()
             return
 
         if not info:

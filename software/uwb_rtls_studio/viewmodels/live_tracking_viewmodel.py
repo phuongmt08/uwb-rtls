@@ -55,6 +55,7 @@
 """
 import logging
 import math
+import time
 from typing import Optional
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from models.ranging_model import RangingModel
@@ -62,6 +63,7 @@ from services.protocol_service import ProtocolService
 from data.raw_packet_store import shared_raw_packet_store
 from utils.app_state import shared_app_state
 from models.geofence_model import GeofenceZone
+from models.ground_truth_model import GroundTruthTrack
 from repository.geofence_repository import GeofenceRepository
 from common.transport import VvAddress
 
@@ -84,6 +86,7 @@ class LiveTrackingViewModel(QObject):
     # Geofence signals
     geofence_status_updated = pyqtSignal(str, str, float)  # status, zone_name, speed_limit
     geofence_layout_updated = pyqtSignal(list)  # list of GeofenceZones
+    ground_truths_updated = pyqtSignal(list)  # list of GroundTruthTrack
 
     def __init__(
         self,
@@ -105,6 +108,8 @@ class LiveTrackingViewModel(QObject):
         self._pending_position: tuple[float, float, float, float] | None = None
         self._pending_position_meta: dict | None = None
         self._pending_sensor_fusion: dict | None = None
+        self._last_mapping_debug_signature: tuple | None = None
+        self._last_map_context_request_at = 0.0
         
         # Instantiate geofence repository
         self.geofence_repo = GeofenceRepository()
@@ -135,16 +140,51 @@ class LiveTrackingViewModel(QObject):
         self.model.clear_history()
         self.anchor_layout_updated.emit([])
 
-    def _find_room(self, room_id: str):
-        if not room_id:
+    @staticmethod
+    def _room_id_candidates(room_id: str) -> list[str]:
+        raw = str(room_id or "").strip()
+        if not raw:
+            return []
+        candidates = [raw]
+        if raw.isdigit():
+            candidates.extend([f"zone_{raw}", f"room_{raw}"])
+        for prefix in ("zone_", "room_"):
+            if raw.lower().startswith(prefix) and raw[len(prefix):].isdigit():
+                candidates.append(raw[len(prefix):])
+        unique = []
+        for item in candidates:
+            if item and item not in unique:
+                unique.append(item)
+        return unique
+
+    def _find_room_direct(self, room_id: str):
+        candidates = set(self._room_id_candidates(room_id))
+        if not candidates:
             return None
         return next(
             (
                 zone for zone in self.geofence_repo.get_zones()
-                if zone.id == room_id and getattr(zone, "object_type", "zone") == "room"
+                if zone.id in candidates and getattr(zone, "object_type", "zone") == "room"
             ),
             None,
         )
+
+    def _active_room_for_zone_id(self, room_id: str):
+        raw = str(room_id or "").strip()
+        if not raw.isdigit():
+            return None
+        active_ids = self.geofence_repo.get_active_room_ids()
+        if not active_ids:
+            return None
+        zone_index = int(raw) - 1
+        if 0 <= zone_index < len(active_ids):
+            return self._find_room_direct(active_ids[zone_index])
+        if len(active_ids) == 1:
+            return self._find_room_direct(active_ids[0])
+        return None
+
+    def _find_room(self, room_id: str):
+        return self._find_room_direct(room_id) or self._active_room_for_zone_id(room_id)
 
     @staticmethod
     def _room_origin(room):
@@ -171,27 +211,69 @@ class LiveTrackingViewModel(QObject):
         local_x = payload.get("local_x_m")
         local_y = payload.get("local_y_m")
         if room_id and local_x is not None and local_y is not None:
-            room = self._find_room(room_id)
+            direct_room = self._find_room_direct(room_id)
+            room = direct_room or self._active_room_for_zone_id(room_id)
             if room is not None:
                 global_x, global_y = self._room_local_to_scene(local_x, local_y, room)
-                return {
-                    "room_id": room_id,
+                resolved = {
+                    "room_id": str(getattr(room, "id", room_id) or room_id),
+                    "firmware_zone_id": room_id,
                     "local_x_m": float(local_x),
                     "local_y_m": float(local_y),
                     "x_m": float(global_x),
                     "y_m": float(global_y),
                     "z_m": float(payload.get("local_z_m", z_value) if payload.get("local_z_m") is not None else z_value),
                     "is_local_frame": True,
+                    "mapping_mode": "direct" if direct_room is not None else "active_room_fallback",
                 }
-        return {
+                self._log_coordinate_mapping(payload, resolved, x_key, y_key)
+                return resolved
+        resolved = {
             "room_id": room_id,
+            "firmware_zone_id": room_id,
             "local_x_m": None,
             "local_y_m": None,
             "x_m": float(payload.get(x_key, 0.0)),
             "y_m": float(payload.get(y_key, 0.0)),
             "z_m": float(z_value),
             "is_local_frame": False,
+            "mapping_mode": "raw_global_or_unmapped",
         }
+        self._log_coordinate_mapping(payload, resolved, x_key, y_key)
+        return resolved
+
+    def _log_coordinate_mapping(self, payload: dict, resolved: dict, x_key: str, y_key: str) -> None:
+        signature = (
+            x_key,
+            resolved.get("firmware_zone_id"),
+            resolved.get("room_id"),
+            resolved.get("is_local_frame"),
+            resolved.get("mapping_mode"),
+        )
+        if signature != self._last_mapping_debug_signature:
+            log.info(
+                "Live tracking coordinate mapping: source=%s firmware_zone=%s room=%s mode=%s local=(%s,%s) global=(%.3f,%.3f)",
+                x_key,
+                resolved.get("firmware_zone_id") or "-",
+                resolved.get("room_id") or "-",
+                resolved.get("mapping_mode"),
+                "-" if resolved.get("local_x_m") is None else f"{resolved.get('local_x_m'):.3f}",
+                "-" if resolved.get("local_y_m") is None else f"{resolved.get('local_y_m'):.3f}",
+                float(resolved.get("x_m", 0.0)),
+                float(resolved.get("y_m", 0.0)),
+            )
+            self._last_mapping_debug_signature = signature
+        log.debug(
+            "Live tracking coordinate sample: source=%s firmware_zone=%s room=%s mode=%s local=(%s,%s) global=(%.3f,%.3f)",
+            x_key,
+            resolved.get("firmware_zone_id") or "-",
+            resolved.get("room_id") or "-",
+            resolved.get("mapping_mode"),
+            "-" if resolved.get("local_x_m") is None else f"{resolved.get('local_x_m'):.3f}",
+            "-" if resolved.get("local_y_m") is None else f"{resolved.get('local_y_m'):.3f}",
+            float(resolved.get("x_m", 0.0)),
+            float(resolved.get("y_m", 0.0)),
+        )
 
     def _on_model_position_updated(self, x: float, y: float, z: float, rms: float):
         sample = self.model._position_history[-1].copy() if self.model._position_history else {}
@@ -225,9 +307,13 @@ class LiveTrackingViewModel(QObject):
         if emitted.get("local_y_m") is None:
             emitted["local_y_m"] = resolved["local_y_m"]
         if emitted.get("tril_x_m") is not None and emitted.get("tril_y_m") is not None and resolved["is_local_frame"]:
-            emitted["tril_x_m"] = resolved["x_m"]
-            emitted["tril_y_m"] = resolved["y_m"]
-
+            tril_local_x = emitted.get("tril_local_x_m", emitted.get("tril_x_m"))
+            tril_local_y = emitted.get("tril_local_y_m", emitted.get("tril_y_m"))
+            room = self._find_room(resolved["room_id"])
+            if room is not None:
+                tril_x, tril_y = self._room_local_to_scene(tril_local_x, tril_local_y, room)
+                emitted["tril_x_m"] = float(tril_x)
+                emitted["tril_y_m"] = float(tril_y)
         self.sensor_fusion_updated.emit(emitted)
         x = emitted.get("ukf_x_m", 0.0)
         y = emitted.get("ukf_y_m", 0.0)
@@ -254,6 +340,26 @@ class LiveTrackingViewModel(QObject):
     @property
     def current_anchor_layout(self) -> list:
         return shared_app_state.anchor_layout
+
+
+    def request_live_tracking_map_context(self, reason: str = "map_loaded") -> bool:
+        active_room_ids = self.geofence_repo.get_active_room_ids()
+        anchors = self.geofence_repo.get_anchors()
+        log.info(
+            "Live tracking map context refresh requested: reason=%s active_rooms=%s anchors=%d",
+            reason,
+            active_room_ids or [],
+            len(anchors),
+        )
+        if not hasattr(self.model, "request_zone_profile"):
+            log.debug("Live tracking map context refresh skipped: model has no zone_profile_get path.")
+            return False
+        now = time.monotonic()
+        if now - self._last_map_context_request_at < 0.75:
+            log.debug("Live tracking map context refresh coalesced: reason=%s", reason)
+            return False
+        self._last_map_context_request_at = now
+        return bool(self.model.request_zone_profile(zone_id=1, force=True, traffic_class="manual", flow_name="live_tracking_map"))
 
     def _send_command(self, command_name: str, command_params: dict | None = None, dst_addr: int | None = None):
         params = dict(command_params or {})
@@ -297,6 +403,19 @@ class LiveTrackingViewModel(QObject):
         self.geofence_repo.set_zones(zones)
         self.geofence_layout_updated.emit(self.get_geofence_zones())
 
+    def get_ground_truths(self) -> list:
+        return self.geofence_repo.get_ground_truths()
+
+    def add_ground_truth(self, track: GroundTruthTrack, *, persist: bool = True) -> bool:
+        self.geofence_repo.add_ground_truth(track)
+        self.ground_truths_updated.emit(self.get_ground_truths())
+        return self.geofence_repo.save() if persist else True
+
+    def remove_ground_truth(self, track_id: str, *, persist: bool = True) -> bool:
+        if not self.geofence_repo.remove_ground_truth(track_id):
+            return False
+        self.ground_truths_updated.emit(self.get_ground_truths())
+        return self.geofence_repo.save() if persist else True
     def get_map_anchors(self) -> list:
         return self.geofence_repo.get_anchors()
 
@@ -385,4 +504,5 @@ class LiveTrackingViewModel(QObject):
         res = self.geofence_repo.load(file_path)
         if res:
             self.geofence_layout_updated.emit(self.get_geofence_zones())
+            self.ground_truths_updated.emit(self.get_ground_truths())
         return res
