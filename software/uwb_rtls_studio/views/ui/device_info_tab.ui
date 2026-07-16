@@ -474,7 +474,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
                 <item row="0" column="0">
                  <widget class="QLabel" name="lbl_bat_voltage">
                   <property name="styleSheet">
-                   <string notr="true">color: #94A3B8; background: transparent;</string>
+                   <string notr="true">color: #94A3B8; font-weight: bold; background: transparent;</string>
                   </property>
                   <property name="text">
                    <string>Voltage:</string>
@@ -494,7 +494,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
                 <item row="1" column="0">
                  <widget class="QLabel" name="lbl_bat_remaining">
                   <property name="styleSheet">
-                   <string notr="true">color: #94A3B8; background: transparent;</string>
+                   <string notr="true">color: #94A3B8; font-weight: bold; background: transparent;</string>
                   </property>
                   <property name="text">
                    <string>Remaining:</string>
@@ -514,7 +514,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
                 <item row="2" column="0">
                  <widget class="QLabel" name="lbl_bat_charging">
                   <property name="styleSheet">
-                   <string notr="true">color: #94A3B8; background: transparent;</string>
+                   <string notr="true">color: #94A3B8; font-weight: bold; background: transparent;</string>
                   </property>
                   <property name="text">
                    <string>Charging:</string>
@@ -627,7 +627,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
               <item row="0" column="1">
                <widget class="QLabel" name="val_temp_mcu">
                 <property name="styleSheet">
-                 <string notr="true">color: #94A3B8; font-weight: bold; font-size: 15px;</string>
+                 <string notr="true">color: #F8FAFC;</string>
                 </property>
                 <property name="text">
                  <string>-</string>
@@ -647,7 +647,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
               <item row="1" column="1">
                <widget class="QLabel" name="val_temp_uwb">
                 <property name="styleSheet">
-                 <string notr="true">color: #94A3B8; font-weight: bold; font-size: 15px;</string>
+                 <string notr="true">color: #F8FAFC;</string>
                 </property>
                 <property name="text">
                  <string>-</string>
@@ -667,7 +667,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
               <item row="2" column="1">
                <widget class="QLabel" name="val_temp_imu">
                 <property name="styleSheet">
-                 <string notr="true">color: #94A3B8; font-weight: bold; font-size: 15px;</string>
+                 <string notr="true">color: #F8FAFC;</string>
                 </property>
                 <property name="text">
                  <string>-</string>

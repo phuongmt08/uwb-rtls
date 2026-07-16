@@ -32,7 +32,7 @@
 #define PACKET_ADDR protobuf_PACKET_ADDR_UNSPECIFIED
 #endif
 
-#define MAX_PROTOBUF_PAYLOAD_SIZE 256
+#define MAX_PROTOBUF_PAYLOAD_SIZE 512
 #define BB_ROUTER_APP_TIMER_TICKS_TO_MS(ticks) \
     ((uint32_t)(((uint64_t)(ticks) * (APP_TIMER_CONFIG_RTC_FREQUENCY + 1u) * 1000u) / 32768u))
 
@@ -225,7 +225,9 @@ static void bb_router_state_forward_handle(void)
 {
     bb_router_log_packet("TX", m_target_source, protobuf_buffer, protobuf_buffer_len);
     ret_code_t err_code = bb_transport_send_data(protobuf_buffer, protobuf_buffer_len, m_target_source);
-    if (err_code == NRF_ERROR_RESOURCES || err_code == NRF_ERROR_BUSY)
+    if (err_code == NRF_ERROR_RESOURCES ||
+        err_code == NRF_ERROR_BUSY ||
+        err_code == NRF_ERROR_IO_PENDING)
     {
         NRF_LOG_DEBUG("forward packet: transport busy target=%u len=%u",
                       (unsigned)m_target_source,

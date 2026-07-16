@@ -487,7 +487,14 @@ def main():
     # Initialize global query manager in shared app state
     from utils.app_state import shared_app_state
     shared_app_state.init_query_manager(
-        send_packet_fn=lambda cmd, dst, **kwargs: command_bus.send(cmd, dst_addr=dst, **kwargs)
+        # Query queue is the TX backend owner: mark so CommandBus never
+        # re-enqueues the same packet into itself mid-wait.
+        send_packet_fn=lambda cmd, dst, command_params: command_bus.send(
+            cmd,
+            dst_addr=dst,
+            command_params=command_params,
+            from_query_queue=True,
+        )
     )
 
     # STEP 2 & 3: Connection Flow
@@ -522,7 +529,16 @@ def main():
             scan_vm = ScanViewModel(scan_model)
             scan_popup = ScanPopup(scan_vm)
 
+            def _scan_interrupt_shutdown(model=scan_model):
+                try:
+                    model.request_interrupt_disconnect()
+                    model.cleanup()
+                finally:
+                    app.quit()
+
+            interrupt_state["callback"] = _scan_interrupt_shutdown
             res = scan_popup.exec()
+            interrupt_state["callback"] = lambda: app.quit()
             if res == 1:
                 # Extract connected device info from scan_model before cleanup
                 connected_mac = scan_model.connected_mac

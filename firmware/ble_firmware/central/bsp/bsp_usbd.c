@@ -12,6 +12,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "app_usbd.h"
 #include "app_usbd_cdc_acm.h"
@@ -50,6 +51,16 @@
 static bool m_usb_connected = false;   /**< USBD is enumerated on the bus.  */
 static bool m_port_open     = false;   /**< Host has opened the COM port.   */
 static bool m_stub_pending  = false;   /**< Timer fired; TX not yet ACK-ed. */
+
+
+/*
+ * app_usbd_cdc_acm_write() owns the TX pointer until TX_DONE. Keep a module
+ * buffer here so callers can safely pass stack-backed HDLC frames.
+ */
+#define BSP_USBD_TX_BUFFER_SIZE 517u
+static uint8_t m_tx_buffer[BSP_USBD_TX_BUFFER_SIZE];
+static volatile bool m_tx_busy = false;
+static size_t m_tx_len = 0;
 
 /** Single-byte RX scratch buffer used for the continuous OUT transfer. */
 static char m_rx_buffer[BSP_USBD_READ_SIZE];
@@ -164,7 +175,8 @@ static void cdc_acm_user_event_handler(app_usbd_class_inst_t const *p_inst,
             m_port_open     = true;
             m_usb_connected = true;
             m_stub_pending  = false;
-
+            m_tx_busy       = false;
+            m_tx_len        = 0;
             /* Start the periodic stub timer. */
             ret_code_t timer_ret = app_timer_start(m_stub_timer,
                                                     BSP_USBD_STUB_TIMER_TICKS,
@@ -204,6 +216,8 @@ static void cdc_acm_user_event_handler(app_usbd_class_inst_t const *p_inst,
             NRF_LOG_INFO("USB CDC ACM port closed");
             m_port_open    = false;
             m_stub_pending = false;
+            m_tx_busy      = false;
+            m_tx_len       = 0;
 
             /* Stop stub timer — ignore error; it may already be stopped. */
             (void)app_timer_stop(m_stub_timer);
@@ -213,7 +227,9 @@ static void cdc_acm_user_event_handler(app_usbd_class_inst_t const *p_inst,
         /* ---- TX DONE ---------------------------------------------- */
         case APP_USBD_CDC_ACM_USER_EVT_TX_DONE:
         {
-            NRF_LOG_DEBUG("USB CDC ACM TX done");
+            NRF_LOG_DEBUG("USB CDC ACM TX done len=%u", (unsigned int)m_tx_len);
+            m_tx_busy = false;
+            m_tx_len = 0;
             /* Retry any pending stub that failed while the endpoint was busy. */
             usb_try_send_stub();
             break;
@@ -373,11 +389,37 @@ bool bsp_usbd_is_connected(void)
 
 ret_code_t bsp_usbd_write(const uint8_t *p_data, size_t length)
 {
-    if (!m_port_open || p_data == NULL || length == 0)
+    if (!m_port_open)
     {
         return NRF_ERROR_INVALID_STATE;
     }
-    ret_code_t ret = app_usbd_cdc_acm_write(&m_usb_cdc_acm, p_data, length);
+
+    if (p_data == NULL || length == 0)
+    {
+        return NRF_ERROR_INVALID_PARAM;
+    }
+
+    if (length > sizeof(m_tx_buffer))
+    {
+        return NRF_ERROR_DATA_SIZE;
+    }
+
+    if (m_tx_busy)
+    {
+        return NRF_ERROR_BUSY;
+    }
+
+    memcpy(m_tx_buffer, p_data, length);
+    m_tx_busy = true;
+    m_tx_len = length;
+
+    ret_code_t ret = app_usbd_cdc_acm_write(&m_usb_cdc_acm, m_tx_buffer, length);
+    if (ret != NRF_SUCCESS)
+    {
+        m_tx_busy = false;
+        m_tx_len = 0;
+    }
+
     if (ret != NRF_SUCCESS && ret != NRF_ERROR_BUSY && ret != NRF_ERROR_IO_PENDING)
     {
         NRF_LOG_WARNING("USB TX: write(%u bytes) failed: 0x%08x", (unsigned)length, ret);

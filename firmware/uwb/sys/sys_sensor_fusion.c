@@ -56,6 +56,9 @@
 #define RAD2DEG							180.0f / 3.14159265358979323846f
 #define DEG2RAD							3.14159265358979323846f / 180.0f
 
+#define TEST_UKF_STREAM_MASK_PACKET_COUNT  50U
+#define TEST_UKF_STREAM_ANCHOR_COUNT       4U
+
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
 {
@@ -149,6 +152,9 @@ float yaw_rad_cached   	= 0.0f;
 
 #if TEST_UKF_STREAM_BLE || TEST_UKF_STREAM_UART
 static uint32_t s_stream_test_sample_idx = 0U;
+#endif
+#if TEST_UKF_STREAM_BLE && TEST_UKF_STREAM_FUSION_LOG && ENABLE_SYS_FUSION
+static uint32_t s_stream_test_tx_frame_cnt = 0U;
 #endif
 
 /* Private function prototypes ---------------------------------------- */
@@ -660,6 +666,9 @@ void sys_sensor_fusion_stream_test_init(network_core_t *stream)
 #if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
     CHECK_VOID(stream);
     s_stream_test_sample_idx = 0U;
+#if TEST_UKF_STREAM_FUSION_LOG
+    s_stream_test_tx_frame_cnt = 0U;
+#endif
     configure_adv(stream);
 #else
     (void)stream;
@@ -712,19 +721,69 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     stream_data.tril_y_m = to_proto_fixed2(y - 0.05f);
     stream_data.yaw_deg  = stream_data.ukf_yaw_deg;
 
-    stream_data.anchor_mask = 0U;
+    const uint8_t anchor_mask =
+        (uint8_t)((s_stream_test_sample_idx / TEST_UKF_STREAM_MASK_PACKET_COUNT) & 0x0FU);
+    static const float anchor_positions[TEST_UKF_STREAM_ANCHOR_COUNT][2] = {
+        {0.0f, 0.0f},
+        {4.0f, 0.0f},
+        {0.0f, 4.0f},
+        {4.0f, 4.0f},
+    };
+
+    stream_data.anchor_mask = anchor_mask;
     stream_data.ranging_error_count = s_stream_test_sample_idx;
     stream_data.timestamp_ms = now_ms;
     stream_data.zone_id = 0U;
-    stream_data.anchors_count = s_latest_anchor_data_count;
-    memcpy(stream_data.anchors, s_latest_anchor_data,
-           (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));
+    stream_data.anchors_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    for (uint32_t i = 0U; i < TEST_UKF_STREAM_ANCHOR_COUNT; i++)
+    {
+        const float dx = x - anchor_positions[i][0];
+        const float dy = y - anchor_positions[i][1];
+        protobuf_anchor_data_t *anchor = &stream_data.anchors[i];
 
+        anchor->anchor_id = i + 1U;
+        anchor->distance_mm = (uint32_t)(sqrtf(dx * dx + dy * dy) * 1000.0f);
+        anchor->weight = ((anchor_mask & (1U << i)) != 0U) ? 100 : 0;
+    }
+
+#if TEST_UKF_STREAM_FUSION_LOG
+    protobuf_calib_data_t calib_data;
+    memset(&calib_data, 0, sizeof(calib_data));
+    const float imu_phase = (float)s_stream_test_sample_idx * 0.05f;
+
+    calib_data.anchor_mask = anchor_mask;
+    calib_data.tx_frame_cnt = s_stream_test_tx_frame_cnt;
+    calib_data.ax = 0.25f * sinf(imu_phase);
+    calib_data.ay = 0.20f * cosf(imu_phase);
+    calib_data.gz = 0.10f * sinf(imu_phase * 0.5f);
+    calib_data.px = x;
+    calib_data.py = y;
+    calib_data.distance_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    calib_data.fp_amp_norm_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    calib_data.fp_snr_count = TEST_UKF_STREAM_ANCHOR_COUNT;
+    calib_data.error_frame_cnt = 0U;
+    calib_data.dt = 0.02f;
+
+    for (uint32_t i = 0U; i < TEST_UKF_STREAM_ANCHOR_COUNT; i++)
+    {
+        calib_data.distance[i] = (float)stream_data.anchors[i].distance_mm / 1000.0f;
+        calib_data.fp_amp_norm[i] = 1.0;
+        calib_data.fp_snr[i] = 20.0;
+    }
+
+    if (network_send_calib_data(&g_network_core,
+                                protobuf_PACKET_ADDR_HOST,
+                                &calib_data))
+    {
+        s_stream_test_tx_frame_cnt++;
+        s_stream_test_sample_idx++;
+    }
+#else
     if (network_send_sensor_fusion_result(&g_network_core, protobuf_PACKET_ADDR_HOST, &stream_data))
     {
         s_stream_test_sample_idx++;
     }
-
+#endif
 #else
     if (!ukf.initialized)
     {

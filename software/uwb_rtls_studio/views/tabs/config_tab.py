@@ -128,6 +128,7 @@ class ConfigTab(QWidget):
         self._vm = None
         # Initialize state before UI wiring can trigger callbacks.
         self._current_role = 1  # Default: Tag
+        self._current_device_type = 0
         self._current_device_id = 0
         self._last_anchor_layout = []
         # Load UI from .ui file
@@ -135,6 +136,7 @@ class ConfigTab(QWidget):
 
         # Post-load setup
         self._setup_dev_widgets()
+        self._setup_prefilter_group()
         if self._has_widget("tx_power_spin"):
             if hasattr(self.tx_power_spin, "setDecimals"):
                 self.tx_power_spin.setDecimals(0)
@@ -144,6 +146,7 @@ class ConfigTab(QWidget):
         self._setup_view_toggle()
         self._setup_target_selector()
         self._merge_ranging_into_uwb_config()
+        self._setup_role_tab_bar()
 
         # Build container for Col 2 if not loaded from UI
         if not hasattr(self, "col2_container") or self.col2_container is None:
@@ -347,6 +350,250 @@ class ConfigTab(QWidget):
         self.uwb_config_form.insertRow(6, self.lbl_rx_timeout, self.rx_timeout_spin)
         self.ranging_group.setVisible(False)
 
+    def _setup_role_tab_bar(self):
+        from PyQt6.QtWidgets import QTabBar, QHBoxLayout
+
+        # 1. Create the Tab Bar
+        self.role_tab_bar = QTabBar()
+        self.role_tab_bar.setObjectName("role_tab_bar")
+        self.role_tab_bar.addTab("Tag")
+        self.role_tab_bar.addTab("Anchor")
+        self.role_tab_bar.setStyleSheet("""
+            QTabBar#role_tab_bar {
+                background-color: transparent;
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }
+            QTabBar#role_tab_bar::tab {
+                background: #0F172A;
+                color: #94A3B8;
+                border: 1px solid #334155;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
+                padding: 8px 24px;
+                font-weight: bold;
+                font-size: 13px;
+                margin-right: 8px;
+            }
+            QTabBar#role_tab_bar::tab:selected {
+                background: #1E293B;
+                color: #22D3EE;
+                border-color: #334155;
+            }
+            QTabBar#role_tab_bar::tab:hover:!selected {
+                background: #253346;
+                color: #22D3EE;
+            }
+        """)
+
+        # 2. Wrap it in a QHBoxLayout to align left
+        self.tab_container_layout = QHBoxLayout()
+        self.tab_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.tab_container_layout.addWidget(self.role_tab_bar)
+        self.tab_container_layout.addStretch()
+
+        # 3. Insert it at the top of outer_layout (before main_layout)
+        self.outer_layout.insertLayout(0, self.tab_container_layout)
+
+        # 4. Connect signals
+        self.role_tab_bar.currentChanged.connect(self._on_role_tab_changed)
+        self.val_role.currentTextChanged.connect(self._on_role_combo_changed)
+
+        # 5. Default state
+        self._sync_role_tab_to_data()
+
+    def _on_role_tab_changed(self, index):
+        self._update_fields_for_role(index)
+
+    def _on_role_combo_changed(self, text):
+        self._current_role = self._role_value_from_any(text, self._current_role or DEVICE_TYPE_TAG)
+        self._sync_role_tab_to_data()
+
+    @staticmethod
+    def _role_value_from_any(value, default=DEVICE_TYPE_TAG) -> int:
+        if isinstance(value, str):
+            key = value.strip().upper().replace("DEVICE_ROLE_", "").replace("DEVICE_TYPE_", "")
+            return {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3}.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _device_type_value_from_any(value, default=0) -> int:
+        if isinstance(value, str):
+            key = value.strip().upper().replace("DEVICE_TYPE_", "").replace("DEVICE_ROLE_", "")
+            return {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3, "DEBUG_TOOL": 4, "DEBUG TOOL": 4}.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _sync_role_tab_to_data(self):
+        if not hasattr(self, "role_tab_bar") or self.role_tab_bar is None:
+            return
+        index = 1 if self._current_role == 2 else 0
+        self.role_tab_bar.blockSignals(True)
+        self.role_tab_bar.setCurrentIndex(index)
+        self.role_tab_bar.blockSignals(False)
+        self._update_fields_for_role(index)
+
+    def _update_fields_for_role(self, index):
+        is_tag = (index == 0)
+        is_anchor = (index == 1)
+
+        # Tag-specific UWB fields
+        tag_fields = [
+            getattr(self, "lbl_rng_period", None),
+            getattr(self, "rng_period_spin", None),
+            getattr(self, "lbl_rx_timeout", None),
+            getattr(self, "rx_timeout_spin", None),
+        ]
+
+        # Anchor-specific UWB fields
+        anchor_fields = [
+            getattr(self, "lbl_tx_delay", None),
+            getattr(self, "tx_delay_spin", None),
+            getattr(self, "lbl_rx_delay", None),
+            getattr(self, "rx_delay_spin", None),
+            getattr(self, "lbl_preamble", None),
+            getattr(self, "preamble_spin", None),
+            getattr(self, "lbl_preamble_len", None),
+            getattr(self, "val_preamble_len", None),
+            getattr(self, "lbl_rx_pac", None),
+            getattr(self, "val_rx_pac", None),
+            getattr(self, "lbl_ns_sfd", None),
+            getattr(self, "val_ns_sfd", None),
+            getattr(self, "lbl_phr_mode", None),
+            getattr(self, "val_phr_mode", None),
+            getattr(self, "lbl_smart_tx_power", None),
+            getattr(self, "chk_smart_tx_power", None),
+            getattr(self, "lbl_pg_delay", None),
+            getattr(self, "val_pg_delay", None),
+        ]
+
+        # Apply visibility (show all fields regardless of Tag/Anchor tab, respecting only Developer Mode for Anchor fields)
+        for w in tag_fields:
+            if w is not None:
+                w.setVisible(True)
+
+        for w in anchor_fields:
+            if w is not None:
+                # Anchor fields are visible if developer mode is enabled
+                w.setVisible(self._is_developer)
+
+        # Right column container (col3_container) contains Sensor Fusion and Prefilter
+        if hasattr(self, "col3_container") and self.col3_container is not None:
+            # Right column is shown in Tag mode (in both User and Developer modes)
+            self.col3_container.setVisible(is_tag)
+
+    def _setup_prefilter_group(self):
+        from PyQt6.QtWidgets import QFormLayout, QLabel
+
+        self.prefilter_group = QGroupBox("Positioning Prefilter")
+        self.prefilter_form = QFormLayout(self.prefilter_group)
+        self.prefilter_form.setHorizontalSpacing(10)
+        self.prefilter_form.setVerticalSpacing(8)
+
+        self.lbl_prefilter = QLabel("🔍 Prefilter:")
+        self.lbl_prefilter.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        self.chk_prefilter_enable = QCheckBox("Enable")
+        self.chk_prefilter_enable.setChecked(True)
+        self.prefilter_form.addRow(self.lbl_prefilter, self.chk_prefilter_enable)
+
+        def add_double(name, label_text, emoji, value, decimals=4, minimum=0.0, maximum=1000.0):
+            lbl = QLabel(f"{emoji} {label_text}")
+            lbl.setStyleSheet("color: #94A3B8; font-weight: bold;")
+            setattr(self, f"lbl_{name}", lbl)
+
+            spin = QDoubleSpinBox()
+            spin.setDecimals(decimals)
+            spin.setRange(minimum, maximum)
+            spin.setSingleStep(10 ** (-min(decimals, 3)))
+            spin.setValue(value)
+            setattr(self, name, spin)
+            self.prefilter_form.addRow(lbl, spin)
+            return spin
+
+        add_double("prefilter_recover_d2_spin", "Recover d2:", "📈", 5.0, decimals=3)
+        add_double("prefilter_reject_d2_spin", "Reject d2:", "📉", 7.5, decimals=3)
+        add_double("prefilter_r_base_spin", "R base:", "📐", 0.05, decimals=5)
+        add_double("prefilter_r_gate_spin", "R gate:", "📐", 0.10, decimals=5)
+        add_double("prefilter_velocity_weight_spin", "Velocity weight:", "⚖️", 0.5, decimals=4)
+        add_double("prefilter_min_covariance_spin", "Min covariance:", "📊", 1.0e-6, decimals=8, maximum=1.0)
+
+        self.col3_container = QWidget()
+        self.col3_layout = QVBoxLayout(self.col3_container)
+        self.col3_layout.setContentsMargins(0, 0, 0, 0)
+        self.col3_layout.setSpacing(12)
+
+        from PyQt6.QtWidgets import QTabWidget
+        from PyQt6.QtCore import QSize
+
+        class DynamicTabWidget(QTabWidget):
+            def sizeHint(self):
+                current_widget = self.currentWidget()
+                if current_widget:
+                    hint = current_widget.sizeHint()
+                    tb_height = self.tabBar().sizeHint().height()
+                    return QSize(super().sizeHint().width(), hint.height() + tb_height + 16)
+                return super().sizeHint()
+
+        self.right_tab_widget = DynamicTabWidget()
+        self.right_tab_widget.setObjectName("right_tab_widget")
+        self.right_tab_widget.tabBar().setObjectName("right_tab_bar")
+        self.right_tab_widget.currentChanged.connect(self.right_tab_widget.updateGeometry)
+        self.right_tab_widget.setStyleSheet("""
+            QTabWidget#right_tab_widget::pane {
+                border: 1px solid #334155;
+                background: #1E293B;
+                border-radius: 8px;
+            }
+            QTabBar#right_tab_bar {
+                background-color: transparent;
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }
+            QTabBar#right_tab_bar::tab {
+                background: #0F172A;
+                color: #94A3B8;
+                border: 1px solid #334155;
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QTabBar#right_tab_bar::tab:selected {
+                background: #1E293B;
+                color: #22D3EE;
+                border-color: #334155;
+            }
+            QTabBar#right_tab_bar::tab:hover:!selected {
+                background: #253346;
+                color: #22D3EE;
+            }
+        """)
+
+        # Clean borders, margins and titles since they are inside tabs
+        self.fusion_group.setTitle("")
+        self.fusion_group.setStyleSheet("QGroupBox { border: none; background: transparent; margin: 0px; padding: 0px; }")
+        self.fusion_form.setContentsMargins(12, 14, 12, 12)
+
+        self.prefilter_group.setTitle("")
+        self.prefilter_group.setStyleSheet("QGroupBox { border: none; background: transparent; margin: 0px; padding: 0px; }")
+        self.prefilter_form.setContentsMargins(12, 14, 12, 12)
+
+        self.right_tab_widget.addTab(self.fusion_group, "Sensor Fusion (UKF)")
+        self.right_tab_widget.addTab(self.prefilter_group, "Positioning Prefilter")
+
+        self.col3_layout.addWidget(self.right_tab_widget)
+        self.col3_layout.addStretch()
+        self._dev_widgets.append(self.prefilter_group)
     def _setup_dev_widgets(self):
         """Collect developer-only widgets for visibility toggling."""
         self._dev_widgets = [
@@ -374,6 +621,7 @@ class ConfigTab(QWidget):
                 getattr(self, "uwb_adv_separator", None),
                 getattr(self, "fusion_group", None),
                 getattr(self, "pos_calib_group", None),
+                getattr(self, "prefilter_group", None),
             )
             if widget is not None
         ]
@@ -424,67 +672,67 @@ class ConfigTab(QWidget):
 
         # Setup Form Layout for OTP fields
         from PyQt6.QtWidgets import QFormLayout, QStackedWidget, QComboBox, QLineEdit, QSpinBox, QCheckBox
-        
+
         otp_form = QFormLayout()
         otp_form.setContentsMargins(12, 12, 12, 12)
         otp_form.setSpacing(12)
-        
+
         self.otp_type_combo = QComboBox()
         self.otp_type_combo.addItems(["Device Info (0x01)", "Antenna Delay (0x02)"])
         otp_form.addRow("OTP Field Type:", self.otp_type_combo)
-        
+
         self.otp_stacked_widget = QStackedWidget()
-        
+
         # Page 0: Device Info
         page_device_info = QWidget()
         layout_device_info = QFormLayout(page_device_info)
         layout_device_info.setContentsMargins(0, 0, 0, 0)
         layout_device_info.setSpacing(10)
-        
+
         self.otp_dev_type_combo = QComboBox()
         self.otp_dev_type_combo.addItems(["Tag", "Anchor", "Gateway", "Debug Tool"])
         self.otp_dev_type_combo.setCurrentText("Anchor")
-        
+
         self.otp_mfg_date_input = QLineEdit()
         self.otp_mfg_date_input.setPlaceholderText("DDMMYYYY (e.g. 03072026)")
         self.otp_mfg_date_input.setInputMask("99999999")
-        
+
         self.otp_hw_rev_spin = QSpinBox()
         self.otp_hw_rev_spin.setRange(0, 255)
         self.otp_hw_rev_spin.setValue(1)
-        
+
         layout_device_info.addRow("Device Type:", self.otp_dev_type_combo)
         layout_device_info.addRow("Mfg Date:", self.otp_mfg_date_input)
         layout_device_info.addRow("HW Revision:", self.otp_hw_rev_spin)
-        
+
         # Page 1: Antenna Delay
         page_antenna_delay = QWidget()
         layout_antenna_delay = QFormLayout(page_antenna_delay)
         layout_antenna_delay.setContentsMargins(0, 0, 0, 0)
         layout_antenna_delay.setSpacing(10)
-        
+
         self.otp_tx_delay_spin = QSpinBox()
         self.otp_tx_delay_spin.setRange(0, 65535)
         self.otp_tx_delay_spin.setValue(16436)
-        
+
         self.otp_rx_delay_spin = QSpinBox()
         self.otp_rx_delay_spin.setRange(0, 65535)
         self.otp_rx_delay_spin.setValue(16436)
-        
+
         layout_antenna_delay.addRow("TX Antenna Delay:", self.otp_tx_delay_spin)
         layout_antenna_delay.addRow("RX Antenna Delay:", self.otp_rx_delay_spin)
-        
+
         self.otp_stacked_widget.addWidget(page_device_info)
         self.otp_stacked_widget.addWidget(page_antenna_delay)
-        
+
         otp_form.addRow(self.otp_stacked_widget)
-        
+
         self.otp_confirm_checkbox = QCheckBox("Confirm irreversible OTP write")
         self.otp_confirm_checkbox.setStyleSheet("QCheckBox { color: #F87171; font-weight: bold; }")
         otp_form.addRow(self.otp_confirm_checkbox)
-        
+
         self.anchor_layout.addLayout(otp_form)
-        
+
         # Connect currentIndex changes
         self.otp_type_combo.currentIndexChanged.connect(self.otp_stacked_widget.setCurrentIndex)
 
@@ -510,7 +758,8 @@ class ConfigTab(QWidget):
             getattr(self, "ranging_group", None),
             getattr(self, "device_operations_group", None),
             getattr(self, "sys_group", None),
-            getattr(self, "col2_container", None)
+            getattr(self, "col2_container", None),
+            getattr(self, "col3_container", None)
         ]
         for w in widgets:
             if w is not None:
@@ -528,7 +777,7 @@ class ConfigTab(QWidget):
 
         # Update visibility of inner developer-only widgets in UWB Group
         for w in self._dev_widgets:
-            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None)):
+            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None), getattr(self, "prefilter_group", None)):
                 w.setVisible(enabled)
 
         # Show or hide connection parameters in BLE Group - always show in both modes
@@ -550,70 +799,42 @@ class ConfigTab(QWidget):
         # Always keep ranging config merged into UWB configuration
         self._merge_ranging_into_uwb_config()
 
-        if enabled:
-            # 1. Developer Mode Layout (Grid 4-columns)
-            # Row 0: Anchor Layout (Col 0-1)
-            self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
-            # Column 2 Container (spanning row 0 and 1)
-            self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
-            # Sensor Fusion (Col 3, spanning row 0 and 1)
-            self.main_layout.addWidget(self.fusion_group, 0, 3, 2, 1)
+        # 4-Column Grid Layout (shared between User and Developer modes)
+        # Row 0: Anchor Layout (Col 0-1)
+        self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
+        # Column 2 Container (spanning row 0 and 1)
+        self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
+        # Column 3 (spanning row 0 and 1)
+        self.main_layout.addWidget(self.col3_container, 0, 3, 2, 1, Qt.AlignmentFlag.AlignTop)
 
-            # Row 1: Host Transport (Col 0), BLE Config (Col 1)
-            self.main_layout.addWidget(self.host_group, 1, 0, 1, 1)
-            self.main_layout.addWidget(self.ble_group, 1, 1, 1, 1)
+        # Row 1: Host Transport (Col 0), BLE Config (Col 1)
+        self.main_layout.addWidget(self.host_group, 1, 0, 1, 1)
+        self.main_layout.addWidget(self.ble_group, 1, 1, 1, 1)
 
-            # Row 2 (Footer): Bottom Control buttons
-            self.main_layout.addWidget(self.device_operations_group, 2, 0, 1, 3, Qt.AlignmentFlag.AlignBottom)
-            self.main_layout.addWidget(self.sys_group, 2, 3, 1, 1, Qt.AlignmentFlag.AlignBottom)
+        # Row 2 (Footer): Bottom Control buttons
+        self.main_layout.addWidget(self.device_operations_group, 2, 0, 1, 3, Qt.AlignmentFlag.AlignBottom)
+        self.main_layout.addWidget(self.sys_group, 2, 3, 1, 1, Qt.AlignmentFlag.AlignBottom)
 
-            # Column Stretch
-            self.main_layout.setColumnStretch(0, 1)
-            self.main_layout.setColumnStretch(1, 1)
-            self.main_layout.setColumnStretch(2, 1)
-            self.main_layout.setColumnStretch(3, 1)
+        # Column Stretch
+        self.main_layout.setColumnStretch(0, 10)
+        self.main_layout.setColumnStretch(1, 10)
+        self.main_layout.setColumnStretch(2, 10)
+        self.main_layout.setColumnStretch(3, 15)
 
-            # Visibility
-            self.fusion_group.setVisible(True)
-            self.host_group.setVisible(True)
-            if hasattr(self, "ranging_group") and self.ranging_group is not None:
-                self.ranging_group.setVisible(False)
-            self.ble_group.setVisible(True)
+        # Visibility defaults
+        self.host_group.setVisible(True)
+        if hasattr(self, "ranging_group") and self.ranging_group is not None:
+            self.ranging_group.setVisible(False)
+        self.ble_group.setVisible(True)
+        self.dev_type_group.setVisible(True)
 
-            # Table Edit Triggers (deprecated)
-            pass
+        # Table Edit Triggers (deprecated)
+        pass
 
-        else:
-            # 2. User Mode: 3 Column Layout (Anchor Layout, Host, BLE on left/middle, UWB on right)
-            # Row 0: Anchor Layout (Col 0-1)
-            self.main_layout.addWidget(self.anchor_group, 0, 0, 1, 2)
-            # Column 2 Container (spanning row 0 and 1)
-            self.main_layout.addWidget(self.col2_container, 0, 2, 2, 1, Qt.AlignmentFlag.AlignTop)
-
-            # Row 1: Host Transport (Col 0), BLE Config (Col 1)
-            self.main_layout.addWidget(self.host_group, 1, 0, 1, 1)
-            self.main_layout.addWidget(self.ble_group, 1, 1, 1, 1)
-
-            # Row 2 (Footer): Bottom Control buttons
-            self.main_layout.addWidget(self.device_operations_group, 2, 0, 1, 2, Qt.AlignmentFlag.AlignBottom)
-            self.main_layout.addWidget(self.sys_group, 2, 2, 1, 1, Qt.AlignmentFlag.AlignBottom)
-
-            # Column Stretch (Column 3 stretch to 0)
-            self.main_layout.setColumnStretch(0, 1)
-            self.main_layout.setColumnStretch(1, 1)
-            self.main_layout.setColumnStretch(2, 1)
-            self.main_layout.setColumnStretch(3, 0)
-
-            # Visibility
-            self.fusion_group.setVisible(False)
-            self.host_group.setVisible(True)
-            if hasattr(self, "ranging_group") and self.ranging_group is not None:
-                self.ranging_group.setVisible(False)
-            self.ble_group.setVisible(True)
-            self.dev_type_group.setVisible(True)
-
-            # Table Edit Triggers (deprecated)
-            pass
+        # Sync main tab bar visibility and active state
+        if hasattr(self, "role_tab_bar") and self.role_tab_bar is not None:
+            self.role_tab_bar.setVisible(True)  # Always visible in both User Mode and Developer Mode
+            self._sync_role_tab_to_data()
 
         # Row Stretch - give Row 0 (Anchor Layout) more height than Row 1 to prevent table clipping
         self.main_layout.setRowStretch(0, 3)
@@ -628,11 +849,19 @@ class ConfigTab(QWidget):
         self._vm.sys_config_updated.connect(self._on_sys_config_loaded)
         self._vm.sys_ranging_cfg_updated.connect(self._on_sys_ranging_cfg_loaded)
         self._vm.sensor_fusion_cfg_updated.connect(self._on_sensor_fusion_cfg_loaded)
+        self._vm.prefilter_cfg_updated.connect(self._on_prefilter_cfg_loaded)
         self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
         if hasattr(self._vm, "ble_conn_params_updated"):
             self._vm.ble_conn_params_updated.connect(self._on_ble_conn_params_loaded)
         if hasattr(self._vm, "device_type_updated"):
             self._vm.device_type_updated.connect(self._on_device_type_loaded)
+        # Clear visible values immediately when the active device session is
+        # reset; do not let designer/.ui defaults look like hardware data.
+        try:
+            from utils.app_state import shared_app_state
+            shared_app_state.device_session_reset.connect(lambda _reason="": self._reset_display_fields())
+        except Exception:
+            pass
 
         # Connect UI buttons to viewmodel actions
         self.btn_read_device.clicked.connect(self._read_device_config)
@@ -705,7 +934,11 @@ class ConfigTab(QWidget):
     def _reset_display_fields(self):
         """Show placeholder '-' for all fields initially or when disconnected."""
         from utils.helpers import set_widget_placeholder
-        
+
+        self._current_role = 1
+        self._current_device_type = 0
+        self._current_device_id = 0
+
         # Reset UWB Configuration widgets
         set_widget_placeholder(self.val_channel)
         set_widget_placeholder(self.val_role)
@@ -716,7 +949,7 @@ class ConfigTab(QWidget):
         set_widget_placeholder(self.rx_delay_spin)
         set_widget_placeholder(self.tx_power_spin)
         set_widget_placeholder(self.preamble_spin)
-        
+
         if self._has_widget("val_preamble_len"):
             set_widget_placeholder(self.val_preamble_len)
         if self._has_widget("val_rx_pac"):
@@ -730,11 +963,11 @@ class ConfigTab(QWidget):
         if hasattr(self, "val_pg_delay") and self.val_pg_delay is not None:
             set_widget_placeholder(self.val_pg_delay)
         set_widget_placeholder(self.combo_device_type)
-            
+
         # Reset Ranging widgets
         set_widget_placeholder(self.rng_period_spin)
         set_widget_placeholder(self.rx_timeout_spin)
-        
+
         # Reset Sensor Fusion (UKF) Configuration widgets
         set_widget_placeholder(self.alpha_spin)
         set_widget_placeholder(self.beta_spin)
@@ -758,7 +991,16 @@ class ConfigTab(QWidget):
             set_widget_placeholder(self.init_p_bias_ay_spin)
         if self._has_widget("init_p_bias_gz_spin"):
             set_widget_placeholder(self.init_p_bias_gz_spin)
-            
+
+        # Reset Positioning Prefilter widgets
+        if self._has_widget("chk_prefilter_enable"):
+            set_widget_placeholder(self.chk_prefilter_enable)
+        for widget_name in (
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
+            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin"
+        ):
+            if self._has_widget(widget_name):
+                set_widget_placeholder(getattr(self, widget_name))
         # Reset Position Auto-Calibration widgets
         if self._has_widget("chk_enable_anchor_calib"):
             set_widget_placeholder(self.chk_enable_anchor_calib)
@@ -786,7 +1028,7 @@ class ConfigTab(QWidget):
             set_widget_placeholder(self.pos_damping_spin)
         if self._has_widget("pos_iterations_spin"):
             set_widget_placeholder(self.pos_iterations_spin)
-            
+
         # Reset BLE widgets
         set_widget_placeholder(self.chk_enable_ble)
         set_widget_placeholder(self.txt_ble_name)
@@ -794,7 +1036,25 @@ class ConfigTab(QWidget):
         set_widget_placeholder(self.spin_ble_max_int)
         set_widget_placeholder(self.spin_ble_latency)
         set_widget_placeholder(self.spin_ble_timeout)
-        
+
+        # Factory OTP fields are write-only inputs, not device telemetry.
+        # Clear their designer defaults without disabling user write controls.
+        if hasattr(self, "otp_dev_type_combo"):
+            if self.otp_dev_type_combo.findText("-") < 0:
+                self.otp_dev_type_combo.insertItem(0, "-")
+            self.otp_dev_type_combo.setCurrentText("-")
+            self.otp_dev_type_combo.setEnabled(True)
+        if hasattr(self, "otp_mfg_date_input"):
+            self.otp_mfg_date_input.clear()
+            self.otp_mfg_date_input.setEnabled(True)
+        for widget_name in ("otp_hw_rev_spin", "otp_tx_delay_spin", "otp_rx_delay_spin"):
+            if hasattr(self, widget_name):
+                widget = getattr(self, widget_name)
+                widget.setEnabled(True)
+                widget.setValue(0)
+
+        self._sync_role_tab_to_data()
+
         # Reset Anchor Layout table placeholders (deprecated)
         pass
 
@@ -818,35 +1078,72 @@ class ConfigTab(QWidget):
 
     def _selected_target(self) -> dict:
         if self._vm and self._vm.model.is_connected:
+            try:
+                from utils.app_state import shared_app_state
+                connected = dict(shared_app_state.connected_device or {})
+                sys_cfg = dict(shared_app_state.sys_config or {})
+                shared_device_type = getattr(shared_app_state, "device_type", 0)
+            except Exception:
+                connected = {}
+                sys_cfg = {}
+                shared_device_type = 0
+            role_text = str(self._vm.model.connected_role or connected.get("Role") or connected.get("role") or "").strip()
+            role = self._role_value_from_any(role_text, self._role_from_ui())
+            raw_device_type = (
+                sys_cfg.get("device_type")
+                or connected.get("device_type")
+                or connected.get("Device Type")
+                or shared_device_type
+                or self._device_type_from_ui(default=0)
+            )
+            device_type = self._device_type_value_from_any(raw_device_type, self._device_type_from_ui(default=0))
+            raw_device_id = (
+                sys_cfg.get("device_id")
+                or connected.get("device_id")
+                or connected.get("Device ID")
+                or self._parse_device_id_from_ui(default=0)
+                or 0
+            )
+            try:
+                device_id = int(str(raw_device_id), 0)
+            except (TypeError, ValueError):
+                device_id = 0
             return {
                 "mac": self._vm.model.connected_mac,
-                "role": self._role_from_ui(),
-                "device_type": self._role_from_ui(),
-                "device_id": self._parse_device_id_from_ui(default=1),
+                "role": role,
+                "device_type": device_type,
+                "device_id": device_id,
             }
         return {
             "mac": "",
             "role": self._role_from_ui(),
-            "device_type": self._role_from_ui(),
+            "device_type": self._device_type_from_ui(default=0),
             "device_id": self._parse_device_id_from_ui(default=1),
         }
-
     def _apply_target_to_ui(self, target: dict):
         if not hasattr(self, "_last_anchor_layout"):
             self._last_anchor_layout = []
-        role = int(target.get("role") or 1)
+        role = self._role_value_from_any(target.get("role"), 1)
+        device_type = self._device_type_value_from_any(target.get("device_type"), self._current_device_type or 0)
         device_id = int(target.get("device_id") or 1)
         role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}
         self._current_role = role
+        if device_type:
+            self._current_device_type = device_type
         self._current_device_id = device_id
         self.val_role.setCurrentText(role_map.get(role, "Tag"))
         self.val_deviceid.setCurrentText(f"0x{device_id:04X}")
+        self._sync_role_tab_to_data()
         # if self._last_anchor_layout:
         #     self._apply_anchor_layout_to_table()
 
     def _role_from_ui(self) -> int:
-        role_map = {"Tag": 1, "Anchor": 2, "Gateway": 3}
-        return role_map.get(self.val_role.currentText(), 1)
+        return self._role_value_from_any(self.val_role.currentText(), 1)
+
+    def _device_type_from_ui(self, default=0) -> int:
+        if hasattr(self, "combo_device_type") and self.combo_device_type is not None:
+            return self._device_type_value_from_any(self.combo_device_type.currentText(), default)
+        return default
 
     def _parse_device_id_from_ui(self, default=1) -> int:
         dev_id_str = self.val_deviceid.currentText().strip()
@@ -889,11 +1186,78 @@ class ConfigTab(QWidget):
                 pass
         return anchors
 
+    @staticmethod
+    def _zone_id_from_value(value, default=1) -> int:
+        text = str(value or "").strip().lower()
+        if not text:
+            return int(default)
+        if text.isdigit():
+            return max(1, int(text))
+        for prefix in ("zone_", "room_", "zone ", "room "):
+            if text.startswith(prefix) and text[len(prefix):].isdigit():
+                return max(1, int(text[len(prefix):]))
+        return int(default)
+
+    def _anchors_for_zone_profile(self) -> list:
+        anchors = self._get_anchors_from_table()
+        if anchors:
+            return anchors
+        if getattr(self, "_last_anchor_layout", None):
+            return [dict(anchor) for anchor in self._last_anchor_layout]
+        try:
+            from utils.app_state import shared_app_state
+            return [dict(anchor) for anchor in (shared_app_state.anchor_layout or [])]
+        except Exception:
+            return []
+
+    def _zone_profile_from_ui(self) -> dict | None:
+        anchors = self._anchors_for_zone_profile()
+        if not anchors:
+            return None
+        first_anchor = anchors[0]
+        zone_id = self._zone_id_from_value(
+            first_anchor.get("zone_id", first_anchor.get("room_id", 1)),
+            default=1,
+        )
+        profile_anchors = []
+        for item in anchors:
+            anchor = dict(item or {})
+            anchor_id = int(anchor.get("anchor_id", anchor.get("id", 0)) or 0)
+            if anchor_id <= 0:
+                continue
+            profile_anchors.append({
+                "anchor_id": anchor_id,
+                "x_m": float(anchor.get("x_m", anchor.get("x", anchor.get("local_x_m", 0.0))) or 0.0),
+                "y_m": float(anchor.get("y_m", anchor.get("y", anchor.get("local_y_m", 0.0))) or 0.0),
+                "z_m": float(anchor.get("z_m", anchor.get("z", 0.0)) or 0.0),
+            })
+        anchor_ids = [item["anchor_id"] for item in profile_anchors]
+        if len(profile_anchors) != 4 or len(set(anchor_ids)) != 4:
+            return None
+        return {
+            "zone_id": zone_id,
+            "preamble_code": int(self.preamble_spin.value()),
+            "anchor_count": len(profile_anchors),
+            "anchors": profile_anchors,
+        }
+
+    def _prefilter_config_from_ui(self) -> dict:
+        return {
+            "enable": self.chk_prefilter_enable.isChecked(),
+            "recover_d2": self._spin_value("prefilter_recover_d2_spin", 5.0),
+            "reject_d2": self._spin_value("prefilter_reject_d2_spin", 7.5),
+            "r_base": self._spin_value("prefilter_r_base_spin", 0.05),
+            "r_gate": self._spin_value("prefilter_r_gate_spin", 0.10),
+            "velocity_weight": self._spin_value("prefilter_velocity_weight_spin", 0.5),
+            "min_covariance": self._spin_value("prefilter_min_covariance_spin", 1.0e-6),
+        }
     def _read_device_config(self):
         if not self._vm or not self._require_connected_device("reading configuration"):
             return
         target = self._selected_target()
-        self._apply_target_to_ui(target)
+        # Read must never write role/device-id defaults into the UI before a
+        # real response arrives. The previous call injected Tag when the
+        # current device had not returned sys_config_resp yet.
         _flash_button(self.btn_read_device, "#22D3EE")   # Glow cyan khi bấm
         self._vm.read_device_config(target, force=True)   # force=True: bypass cache, gửi thật xuống phần cứng
 
@@ -968,46 +1332,78 @@ class ConfigTab(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("Select Configuration to Write")
         dialog.setMinimumWidth(320)
-        
+
         dialog_layout = QVBoxLayout(dialog)
         dialog_layout.setSpacing(12)
         dialog_layout.setContentsMargins(16, 16, 16, 16)
-        
+
         label = QLabel("Select which configuration groups to write to the connected device:")
         label.setStyleSheet("font-weight: bold;")
         dialog_layout.addWidget(label)
-        
+
         # Checkboxes
         chk_sys = QCheckBox("UWB Configuration (Sys Config)")
         chk_sys.setChecked(True)
         dialog_layout.addWidget(chk_sys)
-        
+
+        chk_zone_profile = QCheckBox("Zone Profile (Anchor Layout)")
+        chk_zone_profile.setChecked(True)
+        dialog_layout.addWidget(chk_zone_profile)
+
         chk_ranging = QCheckBox("Ranging Configuration")
         chk_ranging.setChecked(True)
         dialog_layout.addWidget(chk_ranging)
-        
+
         chk_fusion = QCheckBox("Sensor Fusion (UKF) Configuration")
         chk_fusion.setChecked(True)
         dialog_layout.addWidget(chk_fusion)
-        
+
+        chk_prefilter = QCheckBox("Positioning Prefilter Configuration")
+        chk_prefilter.setChecked(True)
+        dialog_layout.addWidget(chk_prefilter)
+
         chk_calib = QCheckBox("Position Calibration Configuration")
         chk_calib.setChecked(True)
         dialog_layout.addWidget(chk_calib)
-        
+
+        chk_ble_adv = QCheckBox("BLE Advertising Configuration")
+        chk_ble_adv.setChecked(True)
+        dialog_layout.addWidget(chk_ble_adv)
+
+        chk_ble_conn = QCheckBox("BLE Connection Parameters")
+        chk_ble_conn.setChecked(True)
+        dialog_layout.addWidget(chk_ble_conn)
+
+        chk_device_type = QCheckBox("Device Type Configuration")
+        chk_device_type.setChecked(True)
+        dialog_layout.addWidget(chk_device_type)
+
+        chk_host_transport = QCheckBox("Host Transport Interface")
+        chk_host_transport.setChecked(False)
+        dialog_layout.addWidget(chk_host_transport)
+
         chk_otp = QCheckBox("Factory OTP Configuration")
         chk_otp.setChecked(False) # Unchecked by default for safety
         dialog_layout.addWidget(chk_otp)
-        
+
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         dialog_layout.addWidget(button_box)
-        
+
         button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
-        
+
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
         # Prepare configurations to send
+        zone_profile_config = None
+        if chk_zone_profile.isChecked():
+            zone_profile_config = self._zone_profile_from_ui()
+            if zone_profile_config is None:
+                QMessageBox.warning(self, "Zone Profile Warning",
+                    "Zone Profile requires a complete 4-anchor layout. Load or create the anchor layout before writing this packet.")
+                return
+
         sys_config = None
         if chk_sys.isChecked():
             role = self._role_from_ui()
@@ -1087,6 +1483,43 @@ class ConfigTab(QWidget):
                 init_p_bias_gz=self._spin_value("init_p_bias_gz_spin", 0.01)
             )
 
+        prefilter_config = self._prefilter_config_from_ui() if chk_prefilter.isChecked() else None
+
+        ble_adv_config = None
+        if chk_ble_adv.isChecked():
+            ble_adv_config = {
+                "enable": self.chk_enable_ble.isChecked(),
+                "serial_number": self._parse_device_id_from_ui(default=0),
+                "device_name": self.txt_ble_name.text().strip(),
+            }
+
+        ble_conn_params_config = None
+        if chk_ble_conn.isChecked():
+            min_int = self.spin_ble_min_int.value()
+            max_int = max(self.spin_ble_max_int.value(), min_int)
+            if max_int != self.spin_ble_max_int.value():
+                self.spin_ble_max_int.setValue(max_int)
+            ble_conn_params_config = {
+                "min_interval_ms": min_int,
+                "max_interval_ms": max_int,
+                "slave_latency": self.spin_ble_latency.value(),
+                "sup_timeout_ms": self.spin_ble_timeout.value(),
+            }
+
+        selected_device_type = None
+        if chk_device_type.isChecked():
+            type_map = {
+                "Tag": DEVICE_TYPE_TAG,
+                "Anchor": DEVICE_TYPE_ANCHOR,
+                "Gateway": DEVICE_TYPE_GATEWAY,
+                "Debug Tool": DEVICE_TYPE_DEBUG_TOOL,
+            }
+            selected_device_type = type_map.get(self.combo_device_type.currentText(), DEVICE_TYPE_TAG)
+
+        host_transport = None
+        if chk_host_transport.isChecked():
+            transport_map = {"USB": 1, "UART": 2}
+            host_transport = transport_map.get(self.combo_host_transport.currentText(), 1)
         pos_calib_config = None
         if chk_calib.isChecked() and self._has_widget("chk_enable_anchor_calib"):
             pos_calib_config = dict(
@@ -1181,7 +1614,12 @@ class ConfigTab(QWidget):
             ranging_config=ranging_config,
             sys_config=sys_config,
             sensor_fusion_config=sensor_fusion_config,
+            prefilter_config=prefilter_config,
             pos_calib_config=pos_calib_config,
+            ble_conn_params_config=ble_conn_params_config,
+            ble_adv_config=ble_adv_config,
+            device_type=selected_device_type,
+            host_transport=host_transport,
             factory_otp_config=factory_otp_config,
         )
 
@@ -1234,6 +1672,8 @@ class ConfigTab(QWidget):
             "init_p_bias_ay": self._spin_value("init_p_bias_ay_spin", 0.01),
             "init_p_bias_gz": self._spin_value("init_p_bias_gz_spin", 0.01),
         }
+        prefilter_config = self._prefilter_config_from_ui()
+
         pos_calib_config = {}
         if self._has_widget("chk_enable_anchor_calib"):
             pos_calib_config = {
@@ -1257,11 +1697,12 @@ class ConfigTab(QWidget):
             "ranging_config": {"period_ms": self.rng_period_spin.value(), "timeout_ms": self.rx_timeout_spin.value()},
             "sys_config": sys_config,
             "sensor_fusion_config": sensor_fusion_config,
+            "prefilter_config": prefilter_config,
             "pos_calib_config": pos_calib_config,
         }
 
     def _on_anchor_layout_loaded(self, anchors):
-        pass
+        self._last_anchor_layout = [dict(anchor) for anchor in (anchors or [])]
 
     def _update_single_anchor_in_table(self, anchor_id, x_m, y_m, z_m):
         target_row = -1
@@ -1311,7 +1752,7 @@ class ConfigTab(QWidget):
             return
 
         # Save active device role and ID
-        self._current_role = cfg.get("role", 1)
+        self._current_role = self._role_value_from_any(cfg.get("role", 1), 1)
         self._current_device_id = cfg.get("device_id", 0)
 
         # Map channel
@@ -1360,12 +1801,13 @@ class ConfigTab(QWidget):
         phr_val = cfg.get("uwb_phr_mode", DEFAULT_UWB_PHR_MODE)
         if self._has_widget("val_phr_mode"):
             set_widget_value(self.val_phr_mode, UWB_PHR_MODE_FROM_FW.get(phr_val, DEFAULT_UWB_PHR_MODE_TEXT))
-        
+
         if self._has_widget("chk_smart_tx_power"):
             set_widget_value(self.chk_smart_tx_power, cfg.get("smart_tx_power", True))
         if self._has_widget("val_pg_delay"):
             set_widget_value(self.val_pg_delay, cfg.get("pg_delay", DEFAULT_UWB_PG_DELAY))
-            
+
+        self._sync_role_tab_to_data()
         # if self._last_anchor_layout:
         #     self._apply_anchor_layout_to_table()
 
@@ -1387,7 +1829,7 @@ class ConfigTab(QWidget):
             set_widget_placeholder(self.q_accel_spin)
             set_widget_placeholder(self.q_gyro_spin)
             set_widget_placeholder(self.r_uwb_spin)
-            for widget_name in ("init_p_px_spin", "init_p_py_spin", "init_p_vx_spin", "init_p_vy_spin", 
+            for widget_name in ("init_p_px_spin", "init_p_py_spin", "init_p_vx_spin", "init_p_vy_spin",
                                 "init_p_theta_spin", "init_p_bias_ax_spin", "init_p_bias_ay_spin", "init_p_bias_gz_spin"):
                 if self._has_widget(widget_name):
                     set_widget_placeholder(getattr(self, widget_name))
@@ -1403,6 +1845,25 @@ class ConfigTab(QWidget):
             if self._has_widget(widget_name):
                 set_widget_value(getattr(self, widget_name), cfg.get(key))
 
+    def _on_prefilter_cfg_loaded(self, cfg):
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        widgets = (
+            "chk_prefilter_enable",
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
+            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin",
+        )
+        if not cfg:
+            for widget_name in widgets:
+                if self._has_widget(widget_name):
+                    set_widget_placeholder(getattr(self, widget_name))
+            return
+        set_widget_value(self.chk_prefilter_enable, cfg.get("enable", True))
+        set_widget_value(self.prefilter_recover_d2_spin, cfg.get("recover_d2", 5.0))
+        set_widget_value(self.prefilter_reject_d2_spin, cfg.get("reject_d2", 7.5))
+        set_widget_value(self.prefilter_r_base_spin, cfg.get("r_base", 0.05))
+        set_widget_value(self.prefilter_r_gate_spin, cfg.get("r_gate", 0.10))
+        set_widget_value(self.prefilter_velocity_weight_spin, cfg.get("velocity_weight", 0.5))
+        set_widget_value(self.prefilter_min_covariance_spin, cfg.get("min_covariance", 1.0e-6))
     def _on_pos_calib_cfg_loaded(self, cfg):
         from utils.helpers import set_widget_placeholder, set_widget_value
         if not cfg:
@@ -1500,12 +1961,19 @@ class ConfigTab(QWidget):
             self._vm.write_device_type(dev_type)
 
     def _on_device_type_loaded(self, device_type: int):
-        from utils.helpers import set_widget_value
+        from utils.helpers import set_widget_placeholder, set_widget_value
+        device_type_value = self._device_type_value_from_any(device_type, 0)
+        self._current_device_type = device_type_value
+        if not device_type_value:
+            set_widget_placeholder(self.combo_device_type)
+            self._sync_role_tab_to_data()
+            return
         type_map = {
             1: "Tag",
             2: "Anchor",
             3: "Gateway",
             4: "Debug Tool"
         }
-        text = type_map.get(device_type, "Tag")
+        text = type_map.get(device_type_value, "-")
         set_widget_value(self.combo_device_type, text)
+        self._sync_role_tab_to_data()

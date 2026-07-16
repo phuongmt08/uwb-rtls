@@ -178,12 +178,12 @@ def parse_csv_data(filepath: str) -> list[SensorEvent]:
 from datetime import datetime
 from .config import PREDICT_THRESHOLD
 
-def generate_timestamp_filename(prefix, suffix):
+def generate_timestamp_filename(prefix, suffix, source_directory=None):
     """Generate filename with current timestamp in format: YYYYMMDD_HgMMp_ukf_log_data.csv"""
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%Hg%Mp")
     date_folder = now.strftime("%d_%m_%y")
-    directory = _software_data_path()
+    directory = _software_data_path(source_directory) if source_directory else _software_data_path()
     date_directory = os.path.join(directory, date_folder)
     if not os.path.exists(date_directory):
         os.makedirs(date_directory)

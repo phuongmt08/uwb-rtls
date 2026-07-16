@@ -46,8 +46,13 @@ class MockDeviceModel(QObject):
         self.status_requests = 0
         self.sys_config_requests = 0
 
-    def request_calibration_start(self, **kwargs):
-        self.started.append(kwargs)
+    def request_calibration_start(self, sample_target: int = 32, tag_x_m: float = 2.0, tag_y_m: float = 2.0, tag_z_m: float = 1.0):
+        self.started.append({
+            "sample_target": sample_target,
+            "tag_x_m": tag_x_m,
+            "tag_y_m": tag_y_m,
+            "tag_z_m": tag_z_m,
+        })
         return MockPacket()
 
     def request_calibration_stop(self):
@@ -58,8 +63,8 @@ class MockDeviceModel(QObject):
         self.applied_masks.append(anchor_mask)
         return MockPacket()
 
-    def set_pos_calib_config(self, **kwargs):
-        self.sent_pos_configs.append(kwargs)
+    def set_pos_calib_config(self, config_data: dict):
+        self.sent_pos_configs.append(dict(config_data or {}))
         return MockPacket()
 
     def request_pos_calib_config(self, force=False):

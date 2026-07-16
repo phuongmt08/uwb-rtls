@@ -27,7 +27,6 @@ HOT_STORE_DIR = os.path.join(SESSION_STORE_DIR, "hot")
 ARCHIVE_STORE_DIR = os.path.join(SESSION_STORE_DIR, "archive")
 HOT_STORAGE_DAYS = int(os.environ.get("UWB_RTLS_HOT_STORAGE_DAYS", "7"))
 HOT_RUNS_PER_DAY = int(os.environ.get("UWB_RTLS_HOT_RUNS_PER_DAY", "20"))
-APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SESSION_BROWSER_DIR = os.path.join(APP_DIR, "session_browser")
 BROWSER_RANGING_DIR = os.path.join(SESSION_BROWSER_DIR, "ranging")
 BROWSER_LOG_DIR = os.path.join(SESSION_BROWSER_DIR, "log")
@@ -953,7 +952,7 @@ class SessionRepository:
             return None
 
         now = datetime.now()
-        output_dir = os.path.join(SHARED_DATA_DIR, now.strftime("%d_%m_%y"))
+        output_dir = os.path.join(SHARED_DATA_DIR, "studio", now.strftime("%d_%m_%y"))
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(
             output_dir,

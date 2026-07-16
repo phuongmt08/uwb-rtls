@@ -98,6 +98,11 @@ class TrafficScheduler(QObject):
         if force:
             return TrafficDecision(True, "forced", self._state)
 
+        # BLE status is a required 10-second liveness poll. The single query
+        # queue still serializes the actual packet transmission.
+        if command_name == "ble_status_get" and self._state != TrafficState.BLE_SCANNING:
+            return TrafficDecision(True, "ble-status-periodic", self._state)
+
         if traffic_class in {"connection", "manual", "user", "bootstrap", "critical"}:
             return TrafficDecision(True, traffic_class, self._state)
 
@@ -105,6 +110,13 @@ class TrafficScheduler(QObject):
             traffic_class == "background"
             or command_name in self.BACKGROUND_POLL_COMMANDS
         )
+        if (
+            is_background
+            and self._state == TrafficState.BLE_SCANNING
+            and command_name == "ble_status_get"
+        ):
+            return TrafficDecision(True, "ble-status-during-scan", self._state)
+
         if is_background and self._state in {
             TrafficState.RANGING_ACTIVE,
             TrafficState.LOG_ACTIVE,

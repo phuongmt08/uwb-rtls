@@ -1,6 +1,7 @@
 function updatePlots(res, samples, rawData) {
     const { 
         simPathRuled, simPathWLS, simPathTriplet, simPathUKF, simPathUKF_lpf, simPathUKF_plot,
+        simPathUKF_lpf_plot,
         wlsInfo, bestTripletInfo,
         tripletDebug,
         plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist,
@@ -8,10 +9,11 @@ function updatePlots(res, samples, rawData) {
         x_axis, total_time 
     } = res;
     const isPathCsv = isRecordedPathLog(rawData);
+    const positionSamples = samples.slice(0, x_axis.length);
 
     // 1. Trajectory
     if (isPathCsv) {
-        const pathSamples = samples.slice(0, x_axis.length);
+        const pathSamples = positionSamples;
         Plotly.restyle('trajectory', {
             x: [
                 pathSamples.map(s => s.tril_x),
@@ -44,6 +46,60 @@ function updatePlots(res, samples, rawData) {
             simPathUKF_lpf.x.map((_, i) => 'Entry Idx: ' + i + '<br>UKF Fusion + IMU Butterworth')
             ]
         }, [2, 3, 4, 5, 6, 7]);
+    }
+
+    if (isPathCsv) {
+        Plotly.restyle('x_position', {
+            x: [x_axis, x_axis, [], [], [], []],
+            y: [
+                positionSamples.map(s => s.tril_x),
+                positionSamples.map(s => s.ukf_x),
+                [], [], [], []
+            ],
+            name: ['Trilateration X', 'Data UKF X', '', '', '', ''],
+            visible: [true, true, false, false, false, false],
+            customdata: [plotData.times, plotData.times, [], [], [], []]
+        }, [0, 1, 2, 3, 4, 5]);
+        Plotly.restyle('y_position', {
+            x: [x_axis, x_axis, [], [], [], []],
+            y: [
+                positionSamples.map(s => s.tril_y),
+                positionSamples.map(s => s.ukf_y),
+                [], [], [], []
+            ],
+            name: ['Trilateration Y', 'Data UKF Y', '', '', '', ''],
+            visible: [true, true, false, false, false, false],
+            customdata: [plotData.times, plotData.times, [], [], [], []]
+        }, [0, 1, 2, 3, 4, 5]);
+    } else {
+        Plotly.restyle('x_position', {
+            x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
+            y: [
+                rawData.fw_path.x.slice(0, x_axis.length),
+                simPathRuled.x,
+                simPathWLS.x,
+                simPathTriplet.x,
+                simPathUKF_plot.x,
+                simPathUKF_lpf_plot.x
+            ],
+            name: ['Trilateration X', 'Rules X', 'Multilateration X', 'Best Triplet X', 'UKF Fusion X', 'UKF Fusion + IMU Butterworth X'],
+            visible: [true, true, true, true, true, true],
+            customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
+        }, [0, 1, 2, 3, 4, 5]);
+        Plotly.restyle('y_position', {
+            x: [x_axis, x_axis, x_axis, x_axis, x_axis, x_axis],
+            y: [
+                rawData.fw_path.y.slice(0, x_axis.length),
+                simPathRuled.y,
+                simPathWLS.y,
+                simPathTriplet.y,
+                simPathUKF_plot.y,
+                simPathUKF_lpf_plot.y
+            ],
+            name: ['Trilateration Y', 'Rules Y', 'Multilateration Y', 'Best Triplet Y', 'UKF Fusion Y', 'UKF Fusion + IMU Butterworth Y'],
+            visible: [true, true, true, true, true, true],
+            customdata: [plotData.times, plotData.times, plotData.times, plotData.times, plotData.times, plotData.times]
+        }, [0, 1, 2, 3, 4, 5]);
     }
 
     // 2. Distances & Scores

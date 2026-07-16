@@ -100,6 +100,7 @@ class RangingModel(QObject):
         super().__init__(parent)
         self._protocol = protocol_service
         self._ranging_repo = ranging_repo
+        shared_app_state.device_session_reset.connect(self.clear_history)
         self._command_bus = command_bus
         if self._ranging_repo:
             self._ranging_repo.position_parsed.connect(self._handle_position_sample)
@@ -167,27 +168,89 @@ class RangingModel(QObject):
                 self._stats["update_rate_hz"] = round(new_rate, 1)
         self._last_result_time = now
 
-    def _send_command(self, command_name: str, dst_addr: int, **kwargs):
+    def _send_command(
+        self,
+        command_name: str,
+        dst_addr: int,
+        command_params: dict | None = None,
+        traffic_class: str = "",
+        yaw_deg: int | float | None = None,
+        is_ukf_reinit: bool | None = None,
+    ):
+        params = dict(command_params or {})
+        if yaw_deg is not None:
+            params["yaw_deg"] = yaw_deg
+        if is_ukf_reinit is not None:
+            params["is_ukf_reinit"] = is_ukf_reinit
         if self._command_bus:
-            return self._command_bus.send(command_name, dst_addr=dst_addr, **kwargs)
-        return self._protocol.send_command(command_name, dst_addr=dst_addr, **kwargs)
+            return self._command_bus.send(
+                command_name,
+                dst_addr=dst_addr,
+                command_params=params,
+                traffic_class=traffic_class,
+            )
+        return self._protocol.send_command(command_name, dst_addr=dst_addr, command_params=params)
 
-    def _request_query(self, command_name: str, dst_addr: int, **kwargs):
-        cache_ttl_s = kwargs.pop("cache_ttl_s", None)
-        force = kwargs.pop("force", False)
+    def _request_query(
+        self,
+        command_name: str,
+        dst_addr: int,
+        cache_ttl_s: float | None = None,
+        force: bool = False,
+        traffic_class: str = "",
+        command_params: dict | None = None,
+        flow_name: str = "",
+        timeout_s: float | None = None,
+    ):
+        params = dict(command_params or {})
         if self._command_bus:
             return self._command_bus.request(
                 command_name,
                 dst_addr=dst_addr,
                 cache_ttl_s=cache_ttl_s,
                 force=force,
-                **kwargs,
+                traffic_class=traffic_class,
+                flow_name=flow_name,
+                timeout_s=timeout_s,
+                command_params=params,
             )
-        return shared_app_state.enqueue_query(command_name, dst_addr=dst_addr, **kwargs)
+        return shared_app_state.enqueue_query(
+            command_name,
+            dst_addr=dst_addr,
+            command_params=params,
+            traffic_class=traffic_class,
+            flow_name=flow_name,
+            timeout_s=timeout_s,
+        )
 
-    def send_command(self, command_name: str, dst_addr: int = VvAddress.MCU, **kwargs):
+    def send_command(self, command_name: str, dst_addr: int = VvAddress.MCU, command_params: dict | None = None):
         """Public model command path used by ViewModels when no CommandBus is injected."""
-        return self._send_command(command_name, dst_addr=dst_addr, **kwargs)
+        return self._send_command(command_name, dst_addr=dst_addr, command_params=command_params)
+
+
+    def request_zone_profile(self, zone_id: int = 1, force: bool = True, traffic_class: str = "manual", flow_name: str = "live_tracking_map"):
+        zone = max(1, int(zone_id or 1))
+        device = shared_app_state.connected_device
+        role = str(device.get("Role") or device.get("device_role") or device.get("role") or "").strip().upper()
+        if role and role != "TAG":
+            log.debug("Live tracking map context query skipped for role=%s: zone_profile_get is TAG-only", role)
+            return False
+        log.debug(
+            "Live tracking map context query: zone_profile_get zone_id=%s flow=%s force=%s",
+            zone,
+            flow_name,
+            force,
+        )
+        return self._request_query(
+            "zone_profile_get",
+            dst_addr=VvAddress.MCU,
+            cache_ttl_s=0.0 if force else None,
+            force=force,
+            traffic_class=traffic_class,
+            flow_name=flow_name,
+            timeout_s=4.0,
+            command_params={"zone_id": zone},
+        )
 
     def start_ranging(self, yaw_deg: int | float = 0, is_ukf_reinit: bool = False):
         pkt = self._send_command(
@@ -418,6 +481,13 @@ class RangingModel(QObject):
             "local_y_m": room_frame["local_y_m"],
             "local_z_m": room_frame["local_z_m"],
         }
+        if sample["zone_id"] and sample.get("local_x_m") is None and sample.get("local_y_m") is None:
+            sample["room_id"] = str(sample["zone_id"])
+            sample["local_x_m"] = sample["ukf_x_m"]
+            sample["local_y_m"] = sample["ukf_y_m"]
+            sample["local_z_m"] = 0.0
+            sample["tril_local_x_m"] = sample["tril_x_m"]
+            sample["tril_local_y_m"] = sample["tril_y_m"]
         self._handle_sensor_fusion_sample(sample)
 
     def _handle_ranging_status(self, resp):

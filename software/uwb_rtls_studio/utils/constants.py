@@ -24,8 +24,8 @@ MAX_PROBE_RETRIES = 3           # Số lần retry probe mỗi port
 
 # ── Serial Communication ──────────────────────────────────────────
 SERIAL_BAUD_RATE = 115200
-SERIAL_READ_TIMEOUT_S = 0.1     # Non-blocking read timeout
-SERIAL_WRITE_TIMEOUT_S = 0.1
+SERIAL_READ_TIMEOUT_S = 0.05    # Short poll; reader thread drains in_waiting aggressively
+SERIAL_WRITE_TIMEOUT_S = 1.0    # Allow USB-CDC bridges time to accept full HDLC frames
 
 # ── Protocol Addresses ────────────────────────────────────────────
 # Sync voi protocol.proto device_addr_t
@@ -59,7 +59,7 @@ MAX_SCAN_DEVICES = 10           # Max BLE devices in scan list
 
 # ── Device & Ranging Configs ──────────────────────────────────────
 DEVICE_TIMEOUT_S = 5.0              # Timeout for stale advertising devices (seconds)
-STOP_TO_CONNECT_DELAY_MS = 400      # Delay after ble_scan_stop before sending ble_connect (ms)
+STOP_TO_CONNECT_DELAY_MS = 1000     # Delay after ble_scan_stop before sending ble_connect (ms)
 TIME_SYNC_THRESHOLD_MS = 5000       # Time sync verification tolerance (ms)
 
 # Device Role/Type Labels

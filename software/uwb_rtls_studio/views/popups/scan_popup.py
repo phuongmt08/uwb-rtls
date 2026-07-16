@@ -36,6 +36,8 @@ class ScanPopup(QDialog):
         self._progress_target = 0
         self._progress_display = 0
         self._progress_timer = QTimer(self)
+        self._pending_accept_after_progress = False
+        self._accept_scheduled = False
         self._progress_timer.setInterval(8)
         self._progress_timer.timeout.connect(self._tick_progress)
 
@@ -296,11 +298,18 @@ class ScanPopup(QDialog):
     def _on_connected(self, info: dict):
         self._progress.setRange(0, 100)
         self._progress_target = 100
+        self._pending_accept_after_progress = True
+        self._accept_scheduled = False
+        self._scan_badge.setText("Connected")
+        self._scan_badge.setStyleSheet("""
+            color: #22D3EE; background: rgba(34,211,238,0.12);
+            border-radius: 10px; padding: 4px 12px; font-weight: bold;
+        """)
         if not self._progress_timer.isActive():
             self._progress_timer.start()
         self._btn_connect.setText("Connected")
-        self._log.setText("Connected! Opening main window...")
-        QTimer.singleShot(1000, self.accept)
+        self._log.setText("Connect flow complete. Opening main window...")
+        self._accept_if_progress_complete()
 
     def _on_connect_failed(self, msg: str):
         self._progress_target = 0
@@ -308,6 +317,8 @@ class ScanPopup(QDialog):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress_timer.stop()
+        self._pending_accept_after_progress = False
+        self._accept_scheduled = False
         self._btn_connect.setEnabled(True)
         self._btn_connect.setText("Connect")
         self._btn_rescan.setEnabled(True)
@@ -322,6 +333,15 @@ class ScanPopup(QDialog):
             self._progress.setValue(self._progress_display)
         else:
             self._progress_timer.stop()
+            self._accept_if_progress_complete()
+
+    def _accept_if_progress_complete(self):
+        if not self._pending_accept_after_progress or self._accept_scheduled:
+            return
+        if self._progress_target < 100 or self._progress_display < 100:
+            return
+        self._accept_scheduled = True
+        QTimer.singleShot(180, self.accept)
 
     def _on_connection_progress(self, info: dict):
         self._progress.setRange(0, 100)

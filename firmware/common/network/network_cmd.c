@@ -56,7 +56,8 @@ typedef struct {
 
 static bool network_cmd_packet_handler(const protobuf_packet_t *pkt);
 static void network_cmd_retry_pending(void);
-static void network_cmd_send_packet(protobuf_packet_t *pkt);
+static bool network_cmd_send_packet(protobuf_packet_t *pkt);
+static bool network_cmd_send_packet_raw(protobuf_packet_t *pkt);
 static void network_cmd_send_handler_ack(const protobuf_packet_t *pkt,
                                          protobuf_packet_ack_response_t response);
 static void network_cmd_unimplemented(const protobuf_packet_t *pkt);
@@ -132,6 +133,8 @@ typedef struct {
 
 static network_cmd_t s_network_cmd;
 static bool s_handler_ack_sent = false;
+/* Set by a command handler when its response could not enter the TX path. */
+static bool s_handler_response_send_failed = false;
 
 
 typedef struct {
@@ -367,16 +370,49 @@ static void network_cmd_retry_pending(void)
     }
 
     protobuf_packet_t pkt = s_network_cmd.last_resp;
-    network_cmd_send_packet(&pkt);
+    if (network_cmd_send_packet_raw(&pkt)) {
+        s_network_cmd.resp_pending = false;
+        RLOG_I(OBJECT_CODE, "Deferred response sent successfully: tag=%lu",
+               (unsigned long)pkt.which_params);
+        return;
+    }
 
-    s_network_cmd.resp_retry_left--;
+    if (s_network_cmd.resp_retry_left > 0u) {
+        s_network_cmd.resp_retry_left--;
+    }
     s_network_cmd.resp_deadline_ms = now + RESP_RETRY_DELAY_MS;
+    RLOG_W(OBJECT_CODE, "Deferred response TX still busy: tag=%lu retries_left=%u",
+           (unsigned long)pkt.which_params,
+           (unsigned)s_network_cmd.resp_retry_left);
 }
 
-static void network_cmd_send_packet(protobuf_packet_t *pkt)
+static bool network_cmd_send_packet_raw(protobuf_packet_t *pkt)
 {
-    CHECK_VOID(s_network_cmd.stream && pkt);
-    network_core_send_packet(s_network_cmd.stream, pkt->hdr.addr.dst, pkt);
+    CHECK(s_network_cmd.stream && pkt, false);
+    return network_core_send_packet(s_network_cmd.stream, pkt->hdr.addr.dst, pkt);
+}
+
+static bool network_cmd_send_packet(protobuf_packet_t *pkt)
+{
+    CHECK(s_network_cmd.stream && pkt, false);
+
+    /* Keep a copy before network_core_send_packet assigns a new TX sequence. */
+    protobuf_packet_t retry_copy = *pkt;
+    if (network_cmd_send_packet_raw(pkt)) {
+        return true;
+    }
+
+    s_handler_response_send_failed = true;
+    s_network_cmd.last_resp = retry_copy;
+    s_network_cmd.resp_pending = true;
+    s_network_cmd.resp_retry_left = RESP_RETRY_MAX;
+    s_network_cmd.resp_deadline_ms = bsp_util_get_ticks() + RESP_RETRY_DELAY_MS;
+    RLOG_W(OBJECT_CODE,
+           "Response TX failed; queued for retry: tag=%lu dst=%u retries=%u",
+           (unsigned)retry_copy.which_params,
+           (unsigned)retry_copy.hdr.addr.dst,
+           (unsigned)RESP_RETRY_MAX);
+    return false;
 }
 
 static void network_cmd_unimplemented(const protobuf_packet_t *pkt)
@@ -1595,11 +1631,27 @@ void network_cmd_dispatch(const protobuf_packet_t *pkt)
         return;
     }
 
+    /* A failed response remains queued for a short, bounded retry window. */
+    if (s_network_cmd.resp_pending) {
+        network_cmd_retry_pending();
+        if (s_network_cmd.resp_pending) {
+            network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_BUSY);
+            RLOG_W(OBJECT_CODE, "Command deferred while response TX is pending: tag=%lu",
+                   (unsigned long)pkt->which_params);
+            return;
+        }
+    }
+
     s_handler_ack_sent = false;
+    s_handler_response_send_failed = false;
     entry->cmd_hdl(pkt);
 
     if (!s_handler_ack_sent) {
-        network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+        if (s_handler_response_send_failed) {
+            network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+        } else {
+            network_core_send_ack(s_network_cmd.stream, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+        }
     }
 }
 

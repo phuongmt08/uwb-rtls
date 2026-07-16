@@ -287,12 +287,12 @@ def main():
     commands = CommandFactory()
     
     # Hàm tiện ích để gửi gói tin đi (in ra raw TX và decode TX)
-    def send_packet(cmd_name: str, dst_addr: int, src_addr: int = pb.PACKET_ADDR_HOST, **kwargs):
+    def send_packet(cmd_name: str, dst_addr: int, src_addr: int = pb.PACKET_ADDR_HOST, command_params: dict | None = None):
         seq = get_next_seq()
         global expected_seq
         expected_seq = seq
         builder = getattr(commands, cmd_name)
-        pkt = builder(src_addr, dst_addr, seq, **kwargs)
+        pkt = builder(src_addr, dst_addr, seq, **dict(command_params or {}))
         frame = proto.wrap_packet(pkt)
         ser.write(frame)
         ser.flush()
@@ -309,7 +309,7 @@ def main():
 
     # 3. Luồng đọc và giải mã dữ liệu phản hồi
     def rx_thread_func():
-        global is_running, ble_state, scanned_devices, script_state, expected_resp, expected_seq
+        global is_running, ble_state, scanned_devices, script_state, expected_resp, expected_seq, last_disconnect_reason, received_packet
         
         while is_running:
             try:
@@ -331,7 +331,6 @@ def main():
                         if param_name == "ble_status_resp":
                             ble_state = pkt.ble_status_resp.state
                             if pkt.ble_status_resp.disconnect_reason:
-                                global last_disconnect_reason
                                 last_disconnect_reason = pkt.ble_status_resp.disconnect_reason
                             
                             # Chỉ in chi tiết trạng thái BLE khi đang trong quá trình CONNECTING
@@ -355,11 +354,9 @@ def main():
                         
                         # Đánh dấu nhận được gói tin mong chờ
                         if expected_resp == param_name:
-                            global received_packet
                             received_packet = pkt
                             resp_event.set()
                         elif param_name == "ack" and pkt.ack.ack_seq == expected_seq:
-                            global received_packet
                             received_packet = pkt
                             resp_event.set()
                         # Không in các gói tin realtime chạy nền khác để tránh trôi màn hình khi người khác đang test

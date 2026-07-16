@@ -16,16 +16,46 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOFTWARE_DIR = os.path.abspath(os.path.join(BASE_DIR, '..'))
 DATA_DIR = os.path.join(SOFTWARE_DIR, 'data')
 CSV_LOG_CATEGORIES = (
-    {'key': 'log', 'title': 'Log', 'suffix': 'ukf_log_data'},
-    {'key': 'fusion', 'title': 'Fusion', 'suffix': 'fusion_frame_log_data'},
-    {'key': 'studio', 'title': 'Studio', 'suffix': 'sensor_fusion_result'},
+    {
+        'key': 'scripts_fusion',
+        'title': 'Scripts (Fusion)',
+        'source': 'scripts',
+        'suffix': 'fusion_frame_log_data',
+    },
+    {
+        'key': 'scripts_fusion_log',
+        'title': 'Scripts (Fusion Log)',
+        'source': 'scripts',
+        'suffix': 'ukf_log_data',
+    },
+    {
+        'key': 'studio_fusion',
+        'title': 'Studio (Fusion)',
+        'source': 'studio',
+        'suffix': 'sensor_fusion_result',
+    },
+    {
+        'key': 'studio_fusion_log',
+        'title': 'Studio (Fusion Log)',
+        'source': 'studio',
+        'suffix': 'ukf_log_data',
+    },
 )
 
-def classify_csv_log(filename):
+def classify_csv_log(path):
+    filename = os.path.basename(path)
     if not filename.endswith('.csv'):
         return None
+
+    absolute_path = os.path.abspath(path)
+    relative_path = os.path.relpath(absolute_path, DATA_DIR)
+    path_parts = relative_path.replace('\\', '/').split('/')
+    if not path_parts or path_parts[0] in ('', '.', '..'):
+        return None
+
+    source = path_parts[0].lower()
     for category in CSV_LOG_CATEGORIES:
-        if filename.endswith(f"_{category['suffix']}.csv"):
+        if source == category['source'] and filename.endswith(f"_{category['suffix']}.csv"):
             return category
     return None
 
@@ -39,7 +69,10 @@ def date_folder_for_csv(path):
     rel_parent = os.path.relpath(os.path.dirname(path), DATA_DIR).replace('\\', '/')
     if not rel_parent or rel_parent == '.':
         return 'Root'
-    return rel_parent.split('/')[0]
+    path_parts = rel_parent.split('/')
+    if path_parts[0].lower() in ('scripts', 'studio'):
+        return path_parts[1] if len(path_parts) > 1 else 'Root'
+    return path_parts[0]
 
 # --- METADATA CACHE ---
 CACHE_FILE = os.path.join(BASE_DIR, '.simulation_metadata_cache.json')
@@ -309,8 +342,8 @@ def parse_log(filepath):
                         ukf_x = safe_float(fields.get('ukf_x'), tril_x)
                         ukf_y = safe_float(fields.get('ukf_y'), tril_y)
                         
-                        category = classify_csv_log(os.path.basename(filepath))
-                        is_log_cat = category and category['key'] == 'log'
+                        category = classify_csv_log(filepath)
+                        is_log_cat = category and category['suffix'] == 'ukf_log_data'
                         source_format = 'ukf_log' if is_log_cat else ('fusion_frame_csv' if has_fusion_path else 'ukf_log')
                         px_fw = tril_x if is_log_cat else (ukf_x if has_fusion_path else tril_x)
                         py_fw = tril_y if is_log_cat else (ukf_y if has_fusion_path else tril_y)
@@ -604,9 +637,10 @@ def main():
     if os.path.isdir(DATA_DIR):
         for root, _, files in os.walk(DATA_DIR):
             for filename in files:
-                category = classify_csv_log(filename)
+                log_path = os.path.join(root, filename)
+                category = classify_csv_log(log_path)
                 if category:
-                    logs.append((os.path.join(root, filename), category))
+                    logs.append((log_path, category))
     logs.sort(key=lambda item: (date_folder_for_csv(item[0]), os.path.basename(item[0])), reverse=True)
 
     template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_ukf_prefilter.html')
@@ -706,13 +740,15 @@ def main():
             category_body = "\n".join(date_sections)
 
         section = f"""
-        <section class="category-group category-{category['key']}">
-            <div class="category-header">
-                <h2>{category['title']}</h2>
-                <span>_{category['suffix']}.csv</span>
+        <details class="category-group category-{category['key']}">
+            <summary class="category-header">
+                <span class="category-title">{category['title']}</span>
+                <span class="category-suffix">_{category['suffix']}.csv</span>
+            </summary>
+            <div class="category-body">
+                {category_body}
             </div>
-            {category_body}
-        </section>
+        </details>
         """
         html_sections.append(section)
 
@@ -743,18 +779,47 @@ def main():
         }}
         h1 {{ margin-top: 0; color: #1e293b; font-size: 2.25rem; }}
         p {{ color: #64748b; margin-bottom: 30px; }}
-        .category-group {{ margin-top: 34px; }}
+        .category-group {{
+            margin-top: 18px;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+            background: white;
+        }}
         .category-header {{
             display: flex;
-            align-items: baseline;
-            justify-content: space-between;
+            align-items: center;
             gap: 16px;
-            margin-bottom: 14px;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 8px;
+            padding: 16px 20px;
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            transition: background 0.2s;
         }}
-        .category-header h2 {{ margin: 0; font-size: 1.45rem; color: #0f172a; }}
-        .category-header span {{ color: #64748b; font-family: monospace; font-size: 0.9rem; }}
+        .category-header:hover {{ background: #f8fafc; }}
+        .category-header::-webkit-details-marker {{ display: none; }}
+        .category-header::before {{
+            content: '›';
+            color: #7c3aed;
+            font-size: 1.5rem;
+            font-weight: 700;
+            line-height: 1;
+            transform: rotate(0deg);
+            transition: transform 0.2s;
+        }}
+        .category-group[open] > .category-header {{
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }}
+        .category-group[open] > .category-header::before {{ transform: rotate(90deg); }}
+        .category-title {{ font-size: 1.25rem; font-weight: 700; color: #0f172a; }}
+        .category-suffix {{
+            margin-left: auto;
+            color: #64748b;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }}
+        .category-body {{ padding: 18px 20px 1px; }}
         .date-group {{ margin-bottom: 22px; }}
         .date-header {{ 
             background: #f1f5f9; 
@@ -844,7 +909,7 @@ def main():
                 if (
                     os.path.exists(lp)
                     and os.path.abspath(lp).startswith(data_root + os.sep)
-                    and classify_csv_log(os.path.basename(lp))
+                    and classify_csv_log(lp)
                 ):
                     # Check if it needs regeneration
                     log_mtime = os.path.getmtime(lp)

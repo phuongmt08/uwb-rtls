@@ -71,8 +71,10 @@ class CalibrationViewModel(QObject):
         return self._apply_state != "idle"
 
     def initialize(self):
-        self._model.request_pos_calib_config()
-        self._model.request_calibration_status()
+        # Config/bootstrap flow fetches these packets after connect. Avoid
+        # eager duplicate GETs here because they create a separate DEFAULT
+        # query report before the connected-device flow starts.
+        return None
 
     def start_calibration(self, config: dict):
         """Start TAG antenna-delay calibration via firmware calib_start."""
@@ -116,7 +118,7 @@ class CalibrationViewModel(QObject):
     def save_position_calibration_config(self, config: dict):
         """Save pos_calib_cfg_t. Current firmware has no host start/stop for anchor survey."""
         try:
-            self._model.set_pos_calib_config(**dict(config or {}))
+            self._model.set_pos_calib_config(dict(config or {}))
             self._latest_status.update({
                 "state": 0,
                 "progress_percent": 0,
@@ -235,7 +237,7 @@ class CalibrationViewModel(QObject):
         # Send pos_calib_cfg_set command
         try:
             self._watchdog_timer.start(4000)
-            self._model.set_pos_calib_config(**self._pending_pos_config)
+            self._model.set_pos_calib_config(dict(self._pending_pos_config or {}))
             QTimer.singleShot(200, self._request_pos_config_verify)
         except Exception as exc:
             self._watchdog_timer.stop()

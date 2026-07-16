@@ -1,4 +1,4 @@
-﻿"""
+"""
 ==============================================================================
   UWB RTLS Studio — Communication Tab
 ==============================================================================
@@ -39,6 +39,7 @@ import logging
 from common.commands import CommandCatalog, mapped_destination_for
 from common.transport import VvAddress
 from common import protocol_pb2 as pb
+from utils.runtime_mode import is_test_mode
 
 from PyQt6 import uic
 from PyQt6.QtWidgets import (
@@ -841,7 +842,14 @@ class CommunicationTab(QWidget):
         details = self._format_pkt(param_name, pkt)
         packet_id = self._packet_id_text(param_name, pkt)
         match_seq = int(getattr(getattr(pkt, "ack", None), "ack_seq", seq) or seq) if param_name == "ack" else seq
-
+        tester_match_seq = match_seq
+        if param_name != "ack" and self._manual_send_expected_seq is not None and self._manual_send_expected_name:
+            try:
+                expected_manual_resp = CommandCatalog().expected_response_for(self._manual_send_expected_name)
+            except Exception:
+                expected_manual_resp = ""
+            if expected_manual_resp == param_name:
+                tester_match_seq = int(self._manual_send_expected_seq)
         response_detail = (
             f"\nDIRECTION : RECEIVED (RX)\n"
             f"Time      : {timestamp}\n"
@@ -865,24 +873,24 @@ class CommunicationTab(QWidget):
             match_seq, timestamp, packet_id, src_str, dst_str, param_name, details,
         )
 
-        if match_seq in self._tester_seqs:
+        if tester_match_seq in self._tester_seqs:
             self._fill_recv_row(
                 self.tester_sent_table,
                 self.tester_received_table,
                 self._tester_seq_to_row,
-                match_seq, timestamp, packet_id, src_str, dst_str, param_name, details,
+                tester_match_seq, timestamp, packet_id, src_str, dst_str, param_name, details,
             )
             if param_name == "ack":
-                self.tester_status_label.setText(f"ACK received - seq={match_seq}")
+                self.tester_status_label.setText(f"ACK received - seq={tester_match_seq}")
                 self.tester_status_label.setStyleSheet("color: #22D3EE;")
             else:
-                self._tester_seqs.discard(match_seq)
-                if seq != match_seq:
+                self._tester_seqs.discard(tester_match_seq)
+                if seq != tester_match_seq:
                     self._tester_seqs.discard(seq)
-                if self._manual_send_expected_seq == match_seq:
+                if self._manual_send_expected_seq == tester_match_seq:
                     self._manual_send_expected_seq = None
                     self._manual_send_expected_name = None
-                self.tester_status_label.setText(f"Response received - seq={match_seq}")
+                self.tester_status_label.setText(f"Response received - seq={tester_match_seq}")
                 self.tester_status_label.setStyleSheet("color: #10B981;")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1184,6 +1192,13 @@ class CommunicationTab(QWidget):
             if not self._protocol_service:
                 self._last_manual_send_sig = send_signature
                 self._last_manual_send_at = now
+                if not is_test_mode():
+                    self.tester_status_label.setText("Warning: no hardware protocol service")
+                    self.tester_status_label.setStyleSheet("color: #EF4444;")
+                    self._manual_send_in_flight = False
+                    self.btn_send_packet.setEnabled(True)
+                    return
+
                 self.tester_status_label.setText("Warning: simulation mode (no dongle connected)")
                 self.tester_status_label.setStyleSheet("color: #F59E0B;")
                 self._simulate_exchange(packet_name, dst_addr, params)
@@ -1203,7 +1218,7 @@ class CommunicationTab(QWidget):
                     dst_addr=dst_addr,
                     src_addr=src_addr,
                     manual_bypass=True,
-                    **params,
+                    command_params=params,
                 )
             finally:
                 self._manual_send_active = False

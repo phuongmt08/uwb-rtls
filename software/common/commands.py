@@ -635,11 +635,37 @@ class CommandFactory:
         cfg.velocity_weight = 0.5
         cfg.min_covariance = 1.0e-6
 
-    def prefilter_cfg_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def prefilter_cfg_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        enable: bool | None = None,
+        recover_d2: float | None = None,
+        reject_d2: float | None = None,
+        r_base: float | None = None,
+        r_gate: float | None = None,
+        velocity_weight: float | None = None,
+        min_covariance: float | None = None,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         self._fill_default_prefilter(pkt.prefilter_cfg_set.config)
+        cfg = pkt.prefilter_cfg_set.config
+        if enable is not None:
+            cfg.enable = bool(enable)
+        if recover_d2 is not None:
+            cfg.recover_d2 = float(recover_d2)
+        if reject_d2 is not None:
+            cfg.reject_d2 = float(reject_d2)
+        if r_base is not None:
+            cfg.r_base = float(r_base)
+        if r_gate is not None:
+            cfg.r_gate = float(r_gate)
+        if velocity_weight is not None:
+            cfg.velocity_weight = float(velocity_weight)
+        if min_covariance is not None:
+            cfg.min_covariance = float(min_covariance)
         return pkt
-
     def prefilter_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         self._fill_default_prefilter(pkt.prefilter_cfg_resp.config)
@@ -893,38 +919,84 @@ class CommandFactory:
         pkt.battery_info_resp.error_mask = 0
         return pkt
 
-    def zone_switch(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def zone_switch(self, src: int, dst: int, seq: int, zone_id: int = 1) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
+        pkt.zone_switch.zone_id = max(0, int(zone_id))
         return pkt
 
-    def zone_profile_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    @staticmethod
+    def _fill_zone_profile(
+        profile_msg,
+        *,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ) -> None:
+        data = dict(profile or {})
+        profile_msg.zone_id = int(data.get("zone_id", zone_id) or 0)
+        profile_msg.preamble_code = int(data.get("preamble_code", preamble_code) or 0)
+        source_anchors = anchors if anchors is not None else data.get("anchors")
+        if source_anchors is None:
+            source_anchors = [
+                {"anchor_id": 1, "x_m": 0.0, "y_m": 0.0, "z_m": 2.0},
+                {"anchor_id": 2, "x_m": 4.0, "y_m": 0.0, "z_m": 2.0},
+                {"anchor_id": 3, "x_m": 0.0, "y_m": 4.0, "z_m": 2.0},
+                {"anchor_id": 4, "x_m": 4.0, "y_m": 4.0, "z_m": 2.0},
+            ]
+        profile_msg.anchor_count = int(data.get("anchor_count", len(source_anchors)) or 0)
+        del profile_msg.anchors[:]
+        for item in source_anchors:
+            anchor_data = dict(item or {})
+            anchor = profile_msg.anchors.add()
+            anchor.anchor_id = int(anchor_data.get("anchor_id", anchor_data.get("id", 0)) or 0)
+            anchor.x_m = float(anchor_data.get("x_m", anchor_data.get("x", anchor_data.get("local_x_m", 0.0))) or 0.0)
+            anchor.y_m = float(anchor_data.get("y_m", anchor_data.get("y", anchor_data.get("local_y_m", 0.0))) or 0.0)
+            anchor.z_m = float(anchor_data.get("z_m", anchor_data.get("z", 0.0)) or 0.0)
+
+    def zone_profile_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_profile_set.profile.zone_id = 1
-        pkt.zone_profile_set.profile.preamble_code = 17
-        pkt.zone_profile_set.profile.anchor_count = 4
-        for anchor_id, x_m, y_m in (
-            (1, 0.0, 0.0),
-            (2, 4.0, 0.0),
-            (3, 0.0, 4.0),
-            (4, 4.0, 4.0),
-        ):
-            anchor = pkt.zone_profile_set.profile.anchors.add()
-            anchor.anchor_id = anchor_id
-            anchor.x_m = x_m
-            anchor.y_m = y_m
-            anchor.z_m = 2.0
+        self._fill_zone_profile(
+            pkt.zone_profile_set.profile,
+            profile=profile,
+            zone_id=zone_id,
+            preamble_code=preamble_code,
+            anchors=anchors,
+        )
         return pkt
 
-    def zone_profile_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def zone_profile_get(self, src: int, dst: int, seq: int, zone_id: int = 1) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_profile_get.zone_id = 1
+        pkt.zone_profile_get.zone_id = max(0, int(zone_id))
         return pkt
 
-    def zone_profile_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
+    def zone_profile_resp(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        profile: dict | None = None,
+        zone_id: int = 1,
+        preamble_code: int = 17,
+        anchors: list | None = None,
+    ) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
-        pkt.zone_profile_resp.profile.zone_id = 1
-        pkt.zone_profile_resp.profile.preamble_code = 17
-        pkt.zone_profile_resp.profile.anchor_count = 4
+        self._fill_zone_profile(
+            pkt.zone_profile_resp.profile,
+            profile=profile,
+            zone_id=zone_id,
+            preamble_code=preamble_code,
+            anchors=anchors,
+        )
         return pkt
 
     def calib_start(
@@ -1046,7 +1118,7 @@ class CommandCatalog:
             CommandSpec(73, "rtos_task_stats_get", self.factory.rtos_task_stats_get, "rtos_task_stats_resp"),
             CommandSpec(74, "rtos_task_stats_resp", self.factory.rtos_task_stats_resp),
             CommandSpec(75, "prefilter_cfg_get", self.factory.prefilter_cfg_get, "prefilter_cfg_resp"),
-            CommandSpec(76, "prefilter_cfg_set", self.factory.prefilter_cfg_set, "prefilter_cfg_resp"),
+            CommandSpec(76, "prefilter_cfg_set", self.factory.prefilter_cfg_set),
             CommandSpec(77, "prefilter_cfg_resp", self.factory.prefilter_cfg_resp),
             CommandSpec(78, "vehicle_control", self.factory.vehicle_control_speed_steering),
             CommandSpec(79, "vehicle_status", self.factory.vehicle_status),
