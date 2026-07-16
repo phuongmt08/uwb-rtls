@@ -16,6 +16,7 @@
 #include "sys_logger.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -167,10 +168,18 @@ typedef struct __attribute__((packed))
   uint8_t  fp_confidence_q8;
   uint8_t  quality_flags;
 } result_msg_t;
-/* Packet format version guard: anchor and tag must agree on wire layout.
- * If this fires, update the assert value AND bump the protocol version. */
+
+/* Legacy RESULT packets end immediately after fp_snr_q8. Keep this boundary
+ * explicit so a new tag can range with anchors that have not yet received the
+ * optional confidence extension. */
+#define RESULT_MSG_LEGACY_SIZE ((uint16_t)offsetof(result_msg_t, fp_confidence_q8))
+
+/* Compile-time wire-layout guards. */
 typedef char result_msg_size_check_t[
   (sizeof(result_msg_t) == 15U) ? 1 : -1
+];
+typedef char result_msg_legacy_size_check_t[
+  (RESULT_MSG_LEGACY_SIZE == 13U) ? 1 : -1
 ];
 
 typedef struct
@@ -579,7 +588,7 @@ static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t 
   case MW_DSTWR_MSG_TYPE_POLL:   min_len = sizeof(poll_msg_t);   break;
   case MW_DSTWR_MSG_TYPE_RESP:   min_len = sizeof(resp_msg_t);   break;
   case MW_DSTWR_MSG_TYPE_FINAL:  min_len = sizeof(final_msg_t);  break;
-  case MW_DSTWR_MSG_TYPE_RESULT: min_len = sizeof(result_msg_t); break;
+  case MW_DSTWR_MSG_TYPE_RESULT: min_len = RESULT_MSG_LEGACY_SIZE; break;
   default: return false;
   }
   return len >= min_len;
@@ -988,7 +997,8 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
     return false;
   }
 
-  result_msg_t *res = (result_msg_t *)data;
+  const result_msg_t *res = (const result_msg_t *)data;
+  const bool has_quality_extension = (len >= sizeof(result_msg_t));
   if (res->sequence_num != s_ctx.sequence_num)
   {
     s_tag_diag.result_rejects++;
@@ -1025,8 +1035,27 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
   tr->distance_m       = res->distance_m;
   tr->fp_amp_norm_q8   = res->fp_amp_norm_q8;
   tr->fp_snr_q8        = res->fp_snr_q8;
-  tr->fp_confidence_q8 = res->fp_confidence_q8;
-  tr->quality          = ((res->quality_flags & 0x01U) != 0U) ? 1U : 0U;
+  if (has_quality_extension)
+  {
+    tr->fp_confidence_q8 = res->fp_confidence_q8;
+    tr->quality = ((res->quality_flags & 0x01U) != 0U) ? 1U : 0U;
+  }
+  else
+  {
+    /* A legacy packet contains a valid range but no confidence contract.
+     * Preserve the range and mark quality unknown so downstream weighting is
+     * conservative instead of reading beyond the received payload. */
+    tr->fp_confidence_q8 = 0U;
+    tr->quality = 0U;
+
+    static bool legacy_result_reported = false;
+    if (!legacy_result_reported)
+    {
+      legacy_result_reported = true;
+      RLOG_W(LOG_OBJECT_CODE_RANGING,
+             "[TAG] Legacy 13-byte RESULT accepted; confidence unavailable");
+    }
+  }
   tr->calib_status     = calib_status;
   tr->valid            = (res->valid == 1);
   s_ctx.result_multi.count++;

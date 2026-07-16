@@ -11,7 +11,7 @@
 #define HAVE_RTC
 
 #define HAVE_TX_DELAY
-#define ENABLE_DEBUG_LOGGING
+// #define ENABLE_DEBUG_LOGGING
 #define HAVE_BLE_PERIPHERAL
 
 /* Developer diagnostics */

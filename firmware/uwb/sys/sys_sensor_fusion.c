@@ -186,18 +186,32 @@ static void reset_imu_conditioner(void);
 static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt);
 static void reset_biquad_filter(imu_biquad_filter_t *filter, float value);
 static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, float dt);
-static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned);
+static void update_zupt_state(const bsp_imu_data    _t *raw, const bsp_imu_data_t *conditioned);
 static void apply_zupt_velocity_constraint(void);
 
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
-	CHECK_ERR((bsp_imu_init() == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
+
+	/* IMU hardware initialization and calibration are owned by main().
+	 * Fusion reset may run repeatedly at runtime, so it must not soft-reset or
+	 * recalibrate the shared IMU device. */
+	if (!bsp_imu_is_initialized())
+	{
+		RLOG_W(LOG_OBJECT_CODE_TAG,
+		       "[FUSION] IMU is not initialized; UKF initialization skipped");
+		return SYS_SENSOR_FUSION_ERR;
+	}
 
 	bsp_imu_bias_t imu_bias;
 
-	CHECK_ERR((bsp_imu_get_bias_data(&imu_bias) == BSP_IMU_OK), SYS_SENSOR_FUSION_ERR);
+	if (bsp_imu_get_bias_data(&imu_bias) != BSP_IMU_OK)
+	{
+		RLOG_W(LOG_OBJECT_CODE_TAG,
+		       "[FUSION] Failed to read IMU bias; UKF initialization skipped");
+		return SYS_SENSOR_FUSION_ERR;
+	}
 
 	memset(&ukf, 0, sizeof(ukf));
 	yaw = 0.0f;
