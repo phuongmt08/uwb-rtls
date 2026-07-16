@@ -128,6 +128,7 @@ class ConfigTab(QWidget):
         self._vm = None
         # Initialize state before UI wiring can trigger callbacks.
         self._current_role = 1  # Default: Tag
+        self._current_device_type = 0
         self._current_device_id = 0
         self._last_anchor_layout = []
         # Load UI from .ui file
@@ -402,33 +403,43 @@ class ConfigTab(QWidget):
         self.val_role.currentTextChanged.connect(self._on_role_combo_changed)
 
         # 5. Default state
-        self._update_fields_for_role(0)
+        self._sync_role_tab_to_data()
 
     def _on_role_tab_changed(self, index):
-        if not hasattr(self, "val_role") or self.val_role is None:
-            return
-
-        self.val_role.blockSignals(True)
-        if index == 0:
-            self.val_role.setCurrentText("Tag")
-        elif index == 1:
-            self.val_role.setCurrentText("Anchor")
-        self.val_role.blockSignals(False)
-
         self._update_fields_for_role(index)
 
     def _on_role_combo_changed(self, text):
+        self._current_role = self._role_value_from_any(text, self._current_role or DEVICE_TYPE_TAG)
+        self._sync_role_tab_to_data()
+
+    @staticmethod
+    def _role_value_from_any(value, default=DEVICE_TYPE_TAG) -> int:
+        if isinstance(value, str):
+            key = value.strip().upper().replace("DEVICE_ROLE_", "").replace("DEVICE_TYPE_", "")
+            return {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3}.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _device_type_value_from_any(value, default=0) -> int:
+        if isinstance(value, str):
+            key = value.strip().upper().replace("DEVICE_TYPE_", "").replace("DEVICE_ROLE_", "")
+            return {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3, "DEBUG_TOOL": 4, "DEBUG TOOL": 4}.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _sync_role_tab_to_data(self):
         if not hasattr(self, "role_tab_bar") or self.role_tab_bar is None:
             return
-
+        index = 1 if self._current_role == 2 else 0
         self.role_tab_bar.blockSignals(True)
-        if text in ("Tag", "Gateway", "-", "", None):
-            self.role_tab_bar.setCurrentIndex(0)
-            self._update_fields_for_role(0)
-        elif text == "Anchor":
-            self.role_tab_bar.setCurrentIndex(1)
-            self._update_fields_for_role(1)
+        self.role_tab_bar.setCurrentIndex(index)
         self.role_tab_bar.blockSignals(False)
+        self._update_fields_for_role(index)
 
     def _update_fields_for_role(self, index):
         is_tag = (index == 0)
@@ -823,7 +834,7 @@ class ConfigTab(QWidget):
         # Sync main tab bar visibility and active state
         if hasattr(self, "role_tab_bar") and self.role_tab_bar is not None:
             self.role_tab_bar.setVisible(True)  # Always visible in both User Mode and Developer Mode
-            self._update_fields_for_role(self.role_tab_bar.currentIndex())
+            self._sync_role_tab_to_data()
 
         # Row Stretch - give Row 0 (Anchor Layout) more height than Row 1 to prevent table clipping
         self.main_layout.setRowStretch(0, 3)
@@ -923,6 +934,10 @@ class ConfigTab(QWidget):
     def _reset_display_fields(self):
         """Show placeholder '-' for all fields initially or when disconnected."""
         from utils.helpers import set_widget_placeholder
+
+        self._current_role = 1
+        self._current_device_type = 0
+        self._current_device_id = 0
 
         # Reset UWB Configuration widgets
         set_widget_placeholder(self.val_channel)
@@ -1038,6 +1053,8 @@ class ConfigTab(QWidget):
                 widget.setEnabled(True)
                 widget.setValue(0)
 
+        self._sync_role_tab_to_data()
+
         # Reset Anchor Layout table placeholders (deprecated)
         pass
 
@@ -1060,17 +1077,26 @@ class ConfigTab(QWidget):
         pass
 
     def _selected_target(self) -> dict:
-        role_map = {"TAG": 1, "ANCHOR": 2, "GATEWAY": 3, "Tag": 1, "Anchor": 2, "Gateway": 3}
         if self._vm and self._vm.model.is_connected:
             try:
                 from utils.app_state import shared_app_state
                 connected = dict(shared_app_state.connected_device or {})
                 sys_cfg = dict(shared_app_state.sys_config or {})
+                shared_device_type = getattr(shared_app_state, "device_type", 0)
             except Exception:
                 connected = {}
                 sys_cfg = {}
+                shared_device_type = 0
             role_text = str(self._vm.model.connected_role or connected.get("Role") or connected.get("role") or "").strip()
-            role = role_map.get(role_text.upper(), role_map.get(role_text, self._role_from_ui()))
+            role = self._role_value_from_any(role_text, self._role_from_ui())
+            raw_device_type = (
+                sys_cfg.get("device_type")
+                or connected.get("device_type")
+                or connected.get("Device Type")
+                or shared_device_type
+                or self._device_type_from_ui(default=0)
+            )
+            device_type = self._device_type_value_from_any(raw_device_type, self._device_type_from_ui(default=0))
             raw_device_id = (
                 sys_cfg.get("device_id")
                 or connected.get("device_id")
@@ -1085,31 +1111,39 @@ class ConfigTab(QWidget):
             return {
                 "mac": self._vm.model.connected_mac,
                 "role": role,
-                "device_type": role,
+                "device_type": device_type,
                 "device_id": device_id,
             }
         return {
             "mac": "",
             "role": self._role_from_ui(),
-            "device_type": self._role_from_ui(),
+            "device_type": self._device_type_from_ui(default=0),
             "device_id": self._parse_device_id_from_ui(default=1),
         }
     def _apply_target_to_ui(self, target: dict):
         if not hasattr(self, "_last_anchor_layout"):
             self._last_anchor_layout = []
-        role = int(target.get("role") or 1)
+        role = self._role_value_from_any(target.get("role"), 1)
+        device_type = self._device_type_value_from_any(target.get("device_type"), self._current_device_type or 0)
         device_id = int(target.get("device_id") or 1)
         role_map = {1: "Tag", 2: "Anchor", 3: "Gateway"}
         self._current_role = role
+        if device_type:
+            self._current_device_type = device_type
         self._current_device_id = device_id
         self.val_role.setCurrentText(role_map.get(role, "Tag"))
         self.val_deviceid.setCurrentText(f"0x{device_id:04X}")
+        self._sync_role_tab_to_data()
         # if self._last_anchor_layout:
         #     self._apply_anchor_layout_to_table()
 
     def _role_from_ui(self) -> int:
-        role_map = {"Tag": 1, "Anchor": 2, "Gateway": 3}
-        return role_map.get(self.val_role.currentText(), 1)
+        return self._role_value_from_any(self.val_role.currentText(), 1)
+
+    def _device_type_from_ui(self, default=0) -> int:
+        if hasattr(self, "combo_device_type") and self.combo_device_type is not None:
+            return self._device_type_value_from_any(self.combo_device_type.currentText(), default)
+        return default
 
     def _parse_device_id_from_ui(self, default=1) -> int:
         dev_id_str = self.val_deviceid.currentText().strip()
@@ -1718,7 +1752,7 @@ class ConfigTab(QWidget):
             return
 
         # Save active device role and ID
-        self._current_role = cfg.get("role", 1)
+        self._current_role = self._role_value_from_any(cfg.get("role", 1), 1)
         self._current_device_id = cfg.get("device_id", 0)
 
         # Map channel
@@ -1773,6 +1807,7 @@ class ConfigTab(QWidget):
         if self._has_widget("val_pg_delay"):
             set_widget_value(self.val_pg_delay, cfg.get("pg_delay", DEFAULT_UWB_PG_DELAY))
 
+        self._sync_role_tab_to_data()
         # if self._last_anchor_layout:
         #     self._apply_anchor_layout_to_table()
 
@@ -1927,8 +1962,11 @@ class ConfigTab(QWidget):
 
     def _on_device_type_loaded(self, device_type: int):
         from utils.helpers import set_widget_placeholder, set_widget_value
-        if not int(device_type or 0):
+        device_type_value = self._device_type_value_from_any(device_type, 0)
+        self._current_device_type = device_type_value
+        if not device_type_value:
             set_widget_placeholder(self.combo_device_type)
+            self._sync_role_tab_to_data()
             return
         type_map = {
             1: "Tag",
@@ -1936,5 +1974,6 @@ class ConfigTab(QWidget):
             3: "Gateway",
             4: "Debug Tool"
         }
-        text = type_map.get(int(device_type), "-")
+        text = type_map.get(device_type_value, "-")
         set_widget_value(self.combo_device_type, text)
+        self._sync_role_tab_to_data()

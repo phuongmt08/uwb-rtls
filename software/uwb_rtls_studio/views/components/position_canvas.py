@@ -80,8 +80,10 @@ class PositionCanvas(QWidget):
 
         # Geofencing properties
         self.geofence_zones = []
+        self.ground_truths = []
+        self.visible_ground_truth_ids = None
         self.edit_mode = "navigate"  # "navigate" | "draw" | "edit_vertices" | "pick_zone"
-        self.draw_object_type = "zone"  # "zone" | "room" | "wall" | "anchor"
+        self.draw_object_type = "zone"  # "zone" | "room" | "wall" | "anchor" | "ground_truth"
         self.current_draw_points = []
         self.selected_zone_id = None
         self.selected_zone_ids = set()
@@ -164,6 +166,23 @@ class PositionCanvas(QWidget):
     def set_geofences(self, zones):
         self.geofence_zones = zones
         self.update()
+
+    def set_ground_truths(self, tracks, visible_ids=None):
+        self.ground_truths = list(tracks or [])
+        self.visible_ground_truth_ids = None if visible_ids is None else set(visible_ids)
+        self.update()
+
+    def set_visible_ground_truth_ids(self, track_ids):
+        self.visible_ground_truth_ids = None if track_ids is None else set(track_ids)
+        self.update()
+
+    def visible_ground_truths(self):
+        if self.visible_ground_truth_ids is None:
+            return list(self.ground_truths)
+        return [
+            track for track in self.ground_truths
+            if str(getattr(track, "id", "")) in self.visible_ground_truth_ids
+        ]
 
     def eventFilter(self, watched, event):
         if watched is self._dimension_editor and event.type() == QEvent.Type.KeyPress:
@@ -449,7 +468,7 @@ class PositionCanvas(QWidget):
         self.update()
 
     def set_draw_object_type(self, object_type: str):
-        if object_type not in {"zone", "room", "wall", "object", "anchor"}:
+        if object_type not in {"zone", "room", "wall", "object", "anchor", "ground_truth"}:
             object_type = "zone"
         if self.draw_object_type != object_type:
             self.current_draw_points.clear()
@@ -491,7 +510,21 @@ class PositionCanvas(QWidget):
 
     def clear_active_drawing(self):
         self.current_draw_points.clear()
+        self._object_draw_center = None
         self.update()
+
+    def finish_active_polyline(self) -> bool:
+        if self.edit_mode != "draw" or self.draw_object_type not in {"wall", "ground_truth"}:
+            return False
+        if len(self.current_draw_points) < 2:
+            return False
+        self._push_undo_state()
+        points = list(self.current_draw_points)
+        self.current_draw_points.clear()
+        self._object_draw_center = None
+        self.polygon_completed.emit(points)
+        self.update()
+        return True
 
     def _snap_step(self) -> float:
         return self._grid_spacing / max(self._grid_subdivisions, 1)
@@ -1212,6 +1245,10 @@ class PositionCanvas(QWidget):
             for point in zone.points:
                 pts_x.append(point[0])
                 pts_y.append(point[1])
+        for track in self.visible_ground_truths():
+            for point in getattr(track, "points", []):
+                pts_x.append(point[0])
+                pts_y.append(point[1])
         if not pts_x:
             return
 
@@ -1278,7 +1315,7 @@ class PositionCanvas(QWidget):
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
         
         snapped_x, snapped_y = self._snap_world_point(world_x, world_y)
-        if self.edit_mode == "draw" and self.draw_object_type == "wall":
+        if self.edit_mode == "draw" and self.draw_object_type in {"wall", "ground_truth"}:
             if not self.current_draw_points or self.current_draw_points[-1] != (snapped_x, snapped_y):
                 self.current_draw_points.append((snapped_x, snapped_y))
             if len(self.current_draw_points) >= 2:
@@ -1480,11 +1517,11 @@ class PositionCanvas(QWidget):
                 return
             # Click back to the first point closes polygons, and closes wall loops by adding the last segment.
             if self.current_draw_points and self._is_close(self.current_draw_points[0], pos.x(), pos.y()):
-                if self.draw_object_type == "wall":
+                if self.draw_object_type in {"wall", "ground_truth"}:
                     if len(self.current_draw_points) >= 2:
                         self._push_undo_state()
                         pts = list(self.current_draw_points)
-                        if pts[-1] != pts[0]:
+                        if self.draw_object_type == "wall" and pts[-1] != pts[0]:
                             pts.append(pts[0])
                         self.current_draw_points.clear()
                         self.polygon_completed.emit(pts)
@@ -1502,7 +1539,7 @@ class PositionCanvas(QWidget):
             self.update()
             return
         elif self.edit_mode == "draw" and event.button() == Qt.MouseButton.RightButton:
-            if self.draw_object_type == "wall" and len(self.current_draw_points) >= 2:
+            if self.draw_object_type in {"wall", "ground_truth"} and len(self.current_draw_points) >= 2:
                 self._push_undo_state()
                 pts = list(self.current_draw_points)
                 self.current_draw_points.clear()
@@ -2474,16 +2511,43 @@ class PositionCanvas(QWidget):
                     painter.drawEllipse(int(sx - 5), int(sy - 5), 10, 10)
 
 
-        # 9. Draw active drawing path
+        # 9. Draw saved ground-truth paths above the map and below live telemetry.
+        for track in self.visible_ground_truths():
+            points = list(getattr(track, "points", []) or [])
+            if len(points) < 2:
+                continue
+            color = QColor(getattr(track, "color", "#FB7185"))
+            width = max(1.0, float(getattr(track, "line_width", 2.0)))
+            painter.setPen(QPen(color, width, Qt.PenStyle.DashLine, Qt.PenCapStyle.RoundCap))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for start, end in zip(points, points[1:]):
+                sx1, sy1 = to_screen(start[0], start[1])
+                sx2, sy2 = to_screen(end[0], end[1])
+                painter.drawLine(sx1, sy1, sx2, sy2)
+
+            label = str(getattr(track, "name", "Ground Truth"))
+            lx, ly = to_screen(points[0][0], points[0][1])
+            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            label_rect = painter.fontMetrics().boundingRect(label)
+            label_rect.translate(int(lx + 8), int(ly - label_rect.height() - 6))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(15, 23, 42, 210))
+            painter.drawRoundedRect(label_rect.adjusted(-4, -2, 4, 2), 3, 3)
+            painter.setPen(color)
+            painter.drawText(label_rect.x(), label_rect.y() + label_rect.height() - 2, label)
+
+        # 10. Draw active drawing path
         if self.edit_mode == "draw" and self.current_draw_points:
             draw_colors = {
                 "room": QColor(248, 250, 252, 210),
                 "wall": QColor(148, 163, 184, 220),
                 "object": QColor(245, 158, 11, 225),
                 "zone": QColor(234, 179, 8, 220),
+                "ground_truth": QColor(251, 113, 133, 235),
             }
             active_color = draw_colors.get(self.draw_object_type, QColor(234, 179, 8, 220))
-            painter.setPen(QPen(active_color, 2, Qt.PenStyle.SolidLine))
+            active_style = Qt.PenStyle.DashLine if self.draw_object_type == "ground_truth" else Qt.PenStyle.SolidLine
+            painter.setPen(QPen(active_color, 2, active_style))
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
             handled_circle_preview = False

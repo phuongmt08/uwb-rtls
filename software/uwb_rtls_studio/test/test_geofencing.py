@@ -11,6 +11,7 @@ if STUDIO_DIR not in sys.path:
     sys.path.insert(0, STUDIO_DIR)
 
 from models.geofence_model import GeofenceZone
+from models.ground_truth_model import GroundTruthTrack
 from repository.geofence_repository import GeofenceRepository
 
 
@@ -54,6 +55,90 @@ def test_geofence_zone_serialization():
     assert loaded_zone.color == zone.color
     assert len(loaded_zone.points) == 4
     assert loaded_zone.points[1] == (10.0, 0.0)
+
+
+def test_ground_truth_track_simulation_compatible_serialization():
+    track = GroundTruthTrack(
+        id="gt_square",
+        name="Square",
+        points=[(1.0, 1.0), (3.0, 1.0), (3.0, 4.0)],
+    )
+
+    data = track.to_dict()
+    assert data["x"] == [1.0, 3.0, 3.0]
+    assert data["y"] == [1.0, 1.0, 4.0]
+    assert data["segments"] == [
+        [1.0, 1.0, 3.0, 1.0, False],
+        [3.0, 1.0, 3.0, 4.0, False],
+    ]
+
+    restored = GroundTruthTrack.from_dict(data)
+    assert restored.id == track.id
+    assert restored.name == track.name
+    assert restored.points == track.points
+
+    simulation_style = {
+        "id": "sim_segments",
+        "name": "Simulation Segments",
+        "x": [0.0, 1.0, None, 9.0, 10.0],
+        "y": [0.0, 0.0, None, 9.0, 9.0],
+        "segments": [
+            [0.0, 0.0, 1.0, 0.0, False],
+            [1.0, 0.0, 1.0, 1.0, False],
+        ],
+    }
+    restored_sim = GroundTruthTrack.from_dict(simulation_style)
+    assert restored_sim.points == [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+
+
+def test_live_tracking_ground_truth_import_helpers_accept_json_and_graphml():
+    _ensure_qt_app()
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    class FakeViewModel:
+        def get_ground_truths(self):
+            return []
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab._vm = FakeViewModel()
+
+    tracks = LiveTrackingTab._ground_truth_tracks_from_payload(
+        tab,
+        {
+            "ground_truths": [
+                {
+                    "id": "route_a",
+                    "name": "Route A",
+                    "points": [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}],
+                }
+            ]
+        },
+        "friend_ground_truth.json",
+    )
+    assert len(tracks) == 1
+    assert tracks[0].name == "Route A"
+    assert tracks[0].points[-1] == (2.0, 0.0)
+
+    graphml_path = os.path.join(tempfile.gettempdir(), f"uwb_gt_{os.getpid()}.xml")
+    graphml = '''<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="d0" for="node" attr.name="x" attr.type="double"/>
+  <key id="d1" for="node" attr.name="y" attr.type="double"/>
+  <graph edgedefault="undirected">
+    <node id="n0"><data key="d0">1.0</data><data key="d1">1.5</data></node>
+    <node id="n1"><data key="d0">2.0</data><data key="d1">1.5</data></node>
+    <edge source="n0" target="n1"/>
+  </graph>
+</graphml>'''
+    with open(graphml_path, "w", encoding="utf-8") as f:
+        f.write(graphml)
+    try:
+        graph_tracks = LiveTrackingTab._parse_graphml_ground_truth(tab, graphml_path)
+    finally:
+        if os.path.exists(graphml_path):
+            os.remove(graphml_path)
+    assert len(graph_tracks) == 1
+    assert graph_tracks[0].points == [(1.0, 1.5), (2.0, 1.5)]
 
 
 def test_geofence_zone_contains_math():
@@ -153,6 +238,13 @@ def test_geofence_repository_position_checks():
         object_type="wall",
     )
     repo.add_zone(wall_zone)
+    repo.add_ground_truth(
+        GroundTruthTrack(
+            id="gt_test",
+            name="Test Route",
+            points=[(1.0, 1.0), (2.0, 1.0), (2.0, 3.0)],
+        )
+    )
 
     # Check safe position (inside allowed, outside forbidden)
     status, zone_name, limit = repo.check_position(2.0, 2.0, 1.0)
@@ -178,9 +270,13 @@ def test_geofence_repository_position_checks():
     # Reload repo from saved json
     new_repo = GeofenceRepository(default_file_path=test_json_path)
     assert len(new_repo.get_zones()) == 3
+    assert len(new_repo.get_ground_truths()) == 1
+    assert new_repo.get_ground_truths()[0].points[-1] == (2.0, 3.0)
     status, zone_name, limit = new_repo.check_position(5.0, 5.0, 1.0)
     assert status == "forbidden"
     assert zone_name == "Danger Zone"
+    new_repo.clear()
+    assert len(new_repo.get_ground_truths()) == 1
 
     # Cleanup temp file
     if os.path.exists(test_json_path):

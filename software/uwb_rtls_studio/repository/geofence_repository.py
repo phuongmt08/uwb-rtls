@@ -12,6 +12,7 @@ import json
 import logging
 from typing import List, Tuple, Optional, Dict
 from models.geofence_model import GeofenceZone
+from models.ground_truth_model import GroundTruthTrack
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +27,9 @@ class GeofenceRepository:
 
         self._zones: Dict[str, GeofenceZone] = {}
         self._anchors: List[dict] = []
+        self._ground_truths: Dict[str, GroundTruthTrack] = {}
         self._meta: Dict[str, object] = {}
+        self._active_file_path = self.default_file_path
         self.load()
 
     def get_zones(self) -> List[GeofenceZone]:
@@ -44,6 +47,20 @@ class GeofenceRepository:
             for idx, anchor in enumerate(anchors or [])
         ]
 
+    def get_ground_truths(self) -> List[GroundTruthTrack]:
+        return list(self._ground_truths.values())
+
+    def set_ground_truths(self, tracks: List[GroundTruthTrack]) -> None:
+        self._ground_truths = {track.id: track for track in tracks or []}
+
+    def add_ground_truth(self, track: GroundTruthTrack) -> None:
+        self._ground_truths[track.id] = track
+
+    def remove_ground_truth(self, track_id: str) -> bool:
+        return self._ground_truths.pop(str(track_id), None) is not None
+
+    def active_file_path(self) -> str:
+        return self._active_file_path
     def get_active_room_ids(self) -> List[str]:
         active_ids = self._meta.get("active_room_ids")
         if isinstance(active_ids, list):
@@ -153,10 +170,11 @@ class GeofenceRepository:
         self._meta.pop("active_room_ids", None)
 
     def load(self, file_path: Optional[str] = None) -> bool:
-        path = file_path or self.default_file_path
+        path = file_path or self._active_file_path or self.default_file_path
         if not os.path.exists(path):
             log.warning(f"Geofence map file not found: {path}")
             self._zones = {}
+            self._ground_truths = {}
             return False
 
         try:
@@ -165,6 +183,7 @@ class GeofenceRepository:
             
             self._zones = {}
             self._anchors = []
+            self._ground_truths = {}
             self._meta = dict(data.get("meta", {}))
             map_objects = data.get("map_objects", {})
 
@@ -189,6 +208,14 @@ class GeofenceRepository:
                 self._normalize_anchor(anchor, idx)
                 for idx, anchor in enumerate(anchor_items or [])
             ]
+            ground_truth_items = data.get("ground_truths", [])
+            if isinstance(map_objects, dict) and not ground_truth_items:
+                ground_truth_items = map_objects.get("ground_truths", [])
+            for item in ground_truth_items or []:
+                track = GroundTruthTrack.from_dict(item)
+                if len(track.points) >= 2:
+                    self._ground_truths[track.id] = track
+            self._active_file_path = path
             log.info(f"Successfully loaded {len(self._zones)} geofences from {path}")
             return True
         except Exception as e:
@@ -196,7 +223,7 @@ class GeofenceRepository:
             return False
 
     def save(self, file_path: Optional[str] = None) -> bool:
-        path = file_path or self.default_file_path
+        path = file_path or self._active_file_path or self.default_file_path
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -204,11 +231,12 @@ class GeofenceRepository:
         try:
             rooms, walls, objects, rule_zones = self._split_zones()
             anchors = [dict(anchor) for anchor in self._anchors]
+            ground_truths = [track.to_dict() for track in self._ground_truths.values()]
             meta = dict(self._meta)
             meta.pop("editor_settings", None)
             meta.update({
                 "name": meta.get("name", "Virtual_Map_Config"),
-                "version": 2,
+                "version": 3,
                 "schema": "uwb_rtls_geofence_map",
             })
             data = {
@@ -219,8 +247,10 @@ class GeofenceRepository:
                     "objects": objects,
                     "anchors": anchors,
                     "gateways": [],
+                    "ground_truths": ground_truths,
                 },
                 "rule_zones": rule_zones,
+                "ground_truths": ground_truths,
                 "map_name": self._meta.get("name", "Virtual_Map_Config"),
                 "anchors": anchors,
                 "objects": [zone.to_dict() for zone in self._zones.values()],
@@ -228,6 +258,7 @@ class GeofenceRepository:
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            self._active_file_path = path
             log.info(f"Successfully saved geofences to {path}")
             return True
         except Exception as e:

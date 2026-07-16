@@ -63,6 +63,7 @@ from services.protocol_service import ProtocolService
 from data.raw_packet_store import shared_raw_packet_store
 from utils.app_state import shared_app_state
 from models.geofence_model import GeofenceZone
+from models.ground_truth_model import GroundTruthTrack
 from repository.geofence_repository import GeofenceRepository
 from common.transport import VvAddress
 
@@ -85,6 +86,7 @@ class LiveTrackingViewModel(QObject):
     # Geofence signals
     geofence_status_updated = pyqtSignal(str, str, float)  # status, zone_name, speed_limit
     geofence_layout_updated = pyqtSignal(list)  # list of GeofenceZones
+    ground_truths_updated = pyqtSignal(list)  # list of GroundTruthTrack
 
     def __init__(
         self,
@@ -401,6 +403,19 @@ class LiveTrackingViewModel(QObject):
         self.geofence_repo.set_zones(zones)
         self.geofence_layout_updated.emit(self.get_geofence_zones())
 
+    def get_ground_truths(self) -> list:
+        return self.geofence_repo.get_ground_truths()
+
+    def add_ground_truth(self, track: GroundTruthTrack, *, persist: bool = True) -> bool:
+        self.geofence_repo.add_ground_truth(track)
+        self.ground_truths_updated.emit(self.get_ground_truths())
+        return self.geofence_repo.save() if persist else True
+
+    def remove_ground_truth(self, track_id: str, *, persist: bool = True) -> bool:
+        if not self.geofence_repo.remove_ground_truth(track_id):
+            return False
+        self.ground_truths_updated.emit(self.get_ground_truths())
+        return self.geofence_repo.save() if persist else True
     def get_map_anchors(self) -> list:
         return self.geofence_repo.get_anchors()
 
@@ -489,4 +504,5 @@ class LiveTrackingViewModel(QObject):
         res = self.geofence_repo.load(file_path)
         if res:
             self.geofence_layout_updated.emit(self.get_geofence_zones())
+            self.ground_truths_updated.emit(self.get_ground_truths())
         return res

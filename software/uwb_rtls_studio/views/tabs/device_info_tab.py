@@ -302,6 +302,16 @@ class DeviceInfoTab(QWidget):
         connection_status = str(info.get("connection_status") or "-")
         health = str(info.get("health") or "-").upper()
         self._ble_values["Device Link:"].setText(connection_status)
+        status_key = connection_status.strip().upper()
+        if status_key == "CONNECTED":
+            link_color = "#10B981"
+        elif status_key in {"CONNECTING", "DISCONNECTING"}:
+            link_color = "#F59E0B"
+        elif status_key in {"DISCONNECTED", "LOST", "FAILED", "ERROR"}:
+            link_color = "#EF4444"
+        else:
+            link_color = "#94A3B8"
+        self._ble_values["Device Link:"].setStyleSheet(f"color: {link_color}; font-weight: bold;")
         self._ble_values["Link Health:"].setText(health)
         if health == "OK":
             color = "#10B981"
