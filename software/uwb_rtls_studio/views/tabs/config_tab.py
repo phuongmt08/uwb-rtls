@@ -519,10 +519,8 @@ class ConfigTab(QWidget):
             return spin
 
         add_double("prefilter_recover_d2_spin", "Recover d2:", "📈", 5.0, decimals=3)
-        add_double("prefilter_reject_d2_spin", "Reject d2:", "📉", 7.5, decimals=3)
-        add_double("prefilter_r_base_spin", "R base:", "📐", 0.05, decimals=5)
+        add_double("prefilter_reject_d2_spin", "Reject d2:", "📉", 6.0, decimals=3)
         add_double("prefilter_r_gate_spin", "R gate:", "📐", 0.10, decimals=5)
-        add_double("prefilter_velocity_weight_spin", "Velocity weight:", "⚖️", 0.5, decimals=4)
         add_double("prefilter_min_covariance_spin", "Min covariance:", "📊", 1.0e-6, decimals=8, maximum=1.0)
 
         self.col3_container = QWidget()
@@ -996,8 +994,8 @@ class ConfigTab(QWidget):
         if self._has_widget("chk_prefilter_enable"):
             set_widget_placeholder(self.chk_prefilter_enable)
         for widget_name in (
-            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
-            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin"
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin",
+            "prefilter_r_gate_spin", "prefilter_min_covariance_spin"
         ):
             if self._has_widget(widget_name):
                 set_widget_placeholder(getattr(self, widget_name))
@@ -1245,10 +1243,8 @@ class ConfigTab(QWidget):
         return {
             "enable": self.chk_prefilter_enable.isChecked(),
             "recover_d2": self._spin_value("prefilter_recover_d2_spin", 5.0),
-            "reject_d2": self._spin_value("prefilter_reject_d2_spin", 7.5),
-            "r_base": self._spin_value("prefilter_r_base_spin", 0.05),
+            "reject_d2": self._spin_value("prefilter_reject_d2_spin", 6.0),
             "r_gate": self._spin_value("prefilter_r_gate_spin", 0.10),
-            "velocity_weight": self._spin_value("prefilter_velocity_weight_spin", 0.5),
             "min_covariance": self._spin_value("prefilter_min_covariance_spin", 1.0e-6),
         }
     def _read_device_config(self):
@@ -1849,8 +1845,8 @@ class ConfigTab(QWidget):
         from utils.helpers import set_widget_placeholder, set_widget_value
         widgets = (
             "chk_prefilter_enable",
-            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin", "prefilter_r_base_spin",
-            "prefilter_r_gate_spin", "prefilter_velocity_weight_spin", "prefilter_min_covariance_spin",
+            "prefilter_recover_d2_spin", "prefilter_reject_d2_spin",
+            "prefilter_r_gate_spin", "prefilter_min_covariance_spin",
         )
         if not cfg:
             for widget_name in widgets:
@@ -1859,10 +1855,8 @@ class ConfigTab(QWidget):
             return
         set_widget_value(self.chk_prefilter_enable, cfg.get("enable", True))
         set_widget_value(self.prefilter_recover_d2_spin, cfg.get("recover_d2", 5.0))
-        set_widget_value(self.prefilter_reject_d2_spin, cfg.get("reject_d2", 7.5))
-        set_widget_value(self.prefilter_r_base_spin, cfg.get("r_base", 0.05))
+        set_widget_value(self.prefilter_reject_d2_spin, cfg.get("reject_d2", 6.0))
         set_widget_value(self.prefilter_r_gate_spin, cfg.get("r_gate", 0.10))
-        set_widget_value(self.prefilter_velocity_weight_spin, cfg.get("velocity_weight", 0.5))
         set_widget_value(self.prefilter_min_covariance_spin, cfg.get("min_covariance", 1.0e-6))
     def _on_pos_calib_cfg_loaded(self, cfg):
         from utils.helpers import set_widget_placeholder, set_widget_value

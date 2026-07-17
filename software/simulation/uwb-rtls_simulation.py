@@ -330,6 +330,7 @@ def parse_log(filepath):
         \s+err:\s*(?P<err>\d+)                     # Error Code
     """, re.VERBOSE)
     try:
+        previous_timestamp_ms = None
         with open(filepath, 'r', encoding='utf-8') as f:
             for line_no, line in enumerate(f, 1):
                 raw_line = line.rstrip('\r\n')
@@ -355,6 +356,29 @@ def parse_log(filepath):
                         category = classify_csv_log(filepath)
                         is_log_cat = category and category['suffix'] == 'ukf_log_data'
                         source_format = 'ukf_log' if is_log_cat else ('fusion_frame_csv' if has_fusion_path else 'ukf_log')
+                        timestamp_ms = safe_int(fields.get('ts'), None)
+                        ukf_step = safe_int(
+                            fields.get('ukf_step'),
+                            1 if status_match.group('type') == 'Update' else 0
+                        )
+                        entry_type = status_match.group('type')
+                        if source_format == 'fusion_frame_csv':
+                            # Studio labels every sensor_fusion_result row as
+                            # "Update"; ukf_step is the actual firmware mode.
+                            entry_type = 'Update' if ukf_step == 1 else 'Predict'
+                            if (update_dt <= 0.0 and predict_dt <= 0.0 and
+                                    timestamp_ms is not None and
+                                    previous_timestamp_ms is not None):
+                                timestamp_delta = (
+                                    timestamp_ms - previous_timestamp_ms
+                                ) & 0xffffffff
+                                if timestamp_delta < 60000:
+                                    if entry_type == 'Update':
+                                        update_dt = timestamp_delta / 1000.0
+                                    else:
+                                        predict_dt = timestamp_delta / 1000.0
+                        if timestamp_ms is not None:
+                            previous_timestamp_ms = timestamp_ms
                         px_fw = tril_x if is_log_cat else (ukf_x if has_fusion_path else tril_x)
                         py_fw = tril_y if is_log_cat else (ukf_y if has_fusion_path else tril_y)
                         
@@ -365,9 +389,11 @@ def parse_log(filepath):
                             'raw_line': raw_line,
                             'frame_counter': frame_counter,
                             'tx_frame_cnt': tx_frame_cnt,
-                            'type': status_match.group('type'),
+                            'type': entry_type,
                             'source_format': source_format,
-                            'ukf_step': safe_int(fields.get('ukf_step'), 1 if status_match.group('type') == 'Update' else 0),
+                            'timestamp_ms': timestamp_ms,
+                            'zone': safe_int(fields.get('zone')),
+                            'ukf_step': ukf_step,
                             'ax': ax_conv,
                             'ay': ay_conv,
                             'gz': safe_float(fields.get('gz')),
@@ -384,12 +410,27 @@ def parse_log(filepath):
                             'ukf_yaw': safe_float(fields.get('ukf_yaw')),
                             'fp_amp_norm': [safe_float(fields.get(f'amp{i}')) for i in range(1, 5)],
                             'fp_snr': [safe_float(fields.get(f'snr{i}')) for i in range(1, 5)],
-                            'fp_confidence': [safe_float(fields.get(f'fp_confidence{i}', fields.get(f'conf{i}'))) for i in range(1, 5)],
-                            'quality_valid': [safe_int(fields.get(f'quality_valid{i}', fields.get(f'qvalid{i}'))) for i in range(1, 5)],
+                            # Preserve missing quality fields as null.  Older
+                            # firmware logs only contain amp/snr; the replay
+                            # worker must be able to distinguish "not logged"
+                            # from a real confidence value of zero.
+                            'fp_confidence': [
+                                safe_optional_float(fields.get(
+                                    f'fp_confidence{i}', fields.get(f'conf{i}')
+                                ))
+                                for i in range(1, 5)
+                            ],
+                            'quality_valid': [
+                                safe_optional_int(fields.get(
+                                    f'quality_valid{i}', fields.get(f'qvalid{i}')
+                                ))
+                                for i in range(1, 5)
+                            ],
                             'mask': safe_int(fields.get('mask'), 15),
                             'distances': [safe_float(fields.get(f'd{i}')) for i in range(1, 5)],
                             'weights': [safe_int(fields.get(f'w{i}')) for i in range(1, 5)],
                             'err': safe_int(fields.get('err')),
+                            'prefilter_reject_count': safe_int(fields.get('pf_reject_count')),
                         })
                         continue
 
@@ -416,8 +457,8 @@ def parse_log(filepath):
 
                     amp_vals = parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0]
                     snr_vals = parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0]
-                    confidence_vals = parse_quality('conf') if 'conf' in raw_line else [0,0,0,0]
-                    quality_valid_vals = parse_quality('qvalid') if 'qvalid' in raw_line else [0,0,0,0]
+                    confidence_vals = parse_quality('conf') if 'conf' in raw_line else [None, None, None, None]
+                    quality_valid_vals = parse_quality('qvalid') if 'qvalid' in raw_line else [None, None, None, None]
 
                     # Sanitize extreme outliers (values > 5000 or non-finite)
                     amp_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in amp_vals]
@@ -456,6 +497,16 @@ def safe_int(value, default=0):
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+def safe_optional_float(value):
+    if value is None or str(value).strip() == '':
+        return None
+    return safe_float(value, None)
+
+def safe_optional_int(value):
+    if value is None or str(value).strip() == '':
+        return None
+    return safe_int(value, None)
 
 def parse_path_csv_log(filepath):
     data = []

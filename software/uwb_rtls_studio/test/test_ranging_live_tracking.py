@@ -136,6 +136,7 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     pkt2.sensor_fusion_result.yaw_deg = _fixed2(11.0)
     pkt2.sensor_fusion_result.anchor_mask = 0x0A
     pkt2.sensor_fusion_result.ranging_error_count = 4
+    pkt2.sensor_fusion_result.prefilter_reject_count = 9
     pkt2.sensor_fusion_result.timestamp_ms = 2000
     anchor = pkt2.sensor_fusion_result.anchors.add()
     anchor.anchor_id = 2
@@ -155,11 +156,13 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert latest["anchor_mask_valid"] is True
     assert latest["payload_size"] == pkt2.sensor_fusion_result.ByteSize()
     assert latest["ranging_error_count"] == 4
+    assert latest["prefilter_reject_count"] == 9
     assert math.isclose(latest["vx_mps"], 1.5)
     assert math.isclose(latest["vy_mps"], 2.0)
     assert latest["seq"] == 2
-    assert latest["anchors"] == [{"anchor_id": 2, "distance_mm": 2345, "weight": 87}]
-    assert anchor_updates[-1] == [{"anchor_id": 2, "distance_mm": 2345, "weight": 87}]
+    expected_anchor = {"anchor_id": 2, "distance_mm": 2345, "weight": 87}
+    assert latest["anchors"] == [expected_anchor]
+    assert anchor_updates[-1] == [expected_anchor]
     assert len(model.fusion_history) == 2
     assert model.fusion_history[-1]["source"] == "sensor_fusion"
     assert app is not None
