@@ -125,6 +125,7 @@ def build():
         
         # Move output from dist to execution
         dist_file = os.path.join("dist", f"{app_name}.exe")
+        legacy_exe_path = None
         if os.path.exists(dist_file):
             if os.path.exists(output_exe):
                 # Try to read the old version from current_version.txt
@@ -181,7 +182,17 @@ def build():
             
             # Create Desktop Shortcut automatically (Clean name, no .exe extension)
             create_desktop_shortcut(output_exe, icon_ico, app_name.replace("_", " "))
-            print("[+] Build complete!")
+            
+            # Print a neat build summary
+            print("\n" + "="*50)
+            print("                 BUILD SUCCESSFUL")
+            print("="*50)
+            print(f"  App Name    : {app_name}")
+            print(f"  App Version : {__version__}")
+            print(f"  Output Path : {os.path.abspath(output_exe)}")
+            if legacy_exe_path and os.path.exists(legacy_exe_path):
+                print(f"  Legacy Copy : {os.path.abspath(legacy_exe_path)}")
+            print("="*50 + "\n")
     else:
         print("[-] PyInstaller failed.")
 

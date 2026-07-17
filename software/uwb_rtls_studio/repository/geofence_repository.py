@@ -19,7 +19,12 @@ log = logging.getLogger(__name__)
 
 
 class GeofenceRepository:
-    def __init__(self, default_file_path: Optional[str] = None):
+    def __init__(
+        self,
+        default_file_path: Optional[str] = None,
+        *,
+        autoload: bool = True,
+    ):
         if default_file_path is None:
             app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             self.default_file_path = os.path.join(app_dir, "data", "runtime", "geofence_map.json")
@@ -31,7 +36,8 @@ class GeofenceRepository:
         self._ground_truths: Dict[str, GroundTruthTrack] = {}
         self._meta: Dict[str, object] = {}
         self._active_file_path = self.default_file_path
-        self.load()
+        if autoload:
+            self.load()
 
     def get_zones(self) -> List[GeofenceZone]:
         return list(self._zones.values())

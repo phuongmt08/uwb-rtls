@@ -106,6 +106,58 @@ def test_manual_scan_status_does_not_clear_connected_device_with_stale_reason():
     shared_app_state.connected_device = {}
 
 
+def test_post_connect_background_scan_is_disabled():
+    _ensure_qt_app()
+    protocol = _FakeProtocol()
+    model = DeviceModel(protocol, command_bus=_FakeCommandBus())
+
+    calls = []
+    model.start_scan = lambda *args, **kwargs: calls.append((args, kwargs))
+    shared_app_state.connection_status = "Connected"
+    model._connected_mac = "92:62:DE:B4:AF:F8"
+    model._connection_status = "Connected"
+
+    model._schedule_background_scan_after_connect()
+    model._resume_background_scan_after_connect()
+
+    assert calls == []
+    assert not model._background_scan_resume_timer.isActive()
+
+    model.deleteLater()
+    shared_app_state.connection_status = "Disconnected"
+    shared_app_state.connected_device = {}
+
+
+def test_ble_disconnect_does_not_auto_restart_scan():
+    _ensure_qt_app()
+    protocol = _FakeProtocol()
+    model = DeviceModel(protocol, command_bus=_FakeCommandBus())
+
+    calls = []
+    model.start_scan = lambda *args, **kwargs: calls.append((args, kwargs))
+    shared_app_state.ble_scan_active = False
+    shared_app_state.connection_status = "Connected"
+    shared_app_state.connected_device = {"name": "Anchor-1", "mac": "92:62:DE:B4:AF:F8"}
+    model._connected_mac = "92:62:DE:B4:AF:F8"
+    model._connected_name = "Anchor-1"
+    model._connection_status = "Connected"
+
+    pkt = CommandFactory().ble_status_resp(int(VvAddress.CENTRAL), int(VvAddress.HOST), 21)
+    model._last_device_rx_monotonic = time.monotonic() - 31.0
+    pkt.ble_status_resp.state = pb.BLE_STATE_SCANNING
+    pkt.ble_status_resp.rssi_dbm = -70
+    pkt.ble_status_resp.disconnect_reason = 0x08
+
+    model._handle_ble_status(pkt.ble_status_resp)
+
+    assert calls == []
+    assert model.connection_status == "Disconnected"
+
+    model.deleteLater()
+    shared_app_state.ble_scan_active = False
+    shared_app_state.connection_status = "Disconnected"
+    shared_app_state.connected_device = {}
+
 def test_background_scan_connecting_state_keeps_logical_link_connected():
     _ensure_qt_app()
     protocol = _FakeProtocol()

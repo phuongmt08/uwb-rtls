@@ -198,10 +198,14 @@ class ConfigViewModel(QObject):
 
         def operation():
             log.info("Read from Device requested (force=%s) for target: %s", force, target)
+            if hasattr(self.model, "read_connected_device_from_button"):
+                return bool(self.model.read_connected_device_from_button("read from device button"))
             if hasattr(self.model, "retry_failed_connected_device_queries"):
-                return bool(self.model.retry_failed_connected_device_queries("read from device button"))
+                retried = bool(self.model.retry_failed_connected_device_queries("read from device button"))
+                if retried:
+                    return True
             if hasattr(self.model, "refresh_connected_device_from_hardware"):
-                return bool(self.model.refresh_connected_device_from_hardware("read from device button"))
+                return bool(self.model.refresh_connected_device_from_hardware("read from device button", preserve_ui=True))
             self.read_anchor_layout(force=force, traffic_class="bootstrap")
             self.read_zone_profile(zone_id=1, force=force, traffic_class="bootstrap")
             self.read_ranging_config(force=force, traffic_class="bootstrap")

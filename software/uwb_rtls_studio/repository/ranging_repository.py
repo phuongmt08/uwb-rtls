@@ -330,11 +330,15 @@ class RangingRepository(QObject):
 
     @staticmethod
     def _build_anchor_mask(anchors: list[dict]) -> int:
-        """Build the protocol mask (bit 0 = Anchor 1, bit 1 = Anchor 2)."""
+        """Build an anchor mask from real anchor_id values."""
+        anchor_ids = [int(anchor.get("anchor_id", 0) or 0) for anchor in anchors]
+        zero_based = any(anchor_id == 0 for anchor_id in anchor_ids)
         mask = 0
-        for anchor in anchors:
-            anchor_id = int(anchor.get("anchor_id", 0) or 0)
-            if 1 <= anchor_id <= 32:
+        for anchor_id in anchor_ids:
+            if zero_based:
+                if 0 <= anchor_id < 32:
+                    mask |= 1 << anchor_id
+            elif 1 <= anchor_id <= 32:
                 mask |= 1 << (anchor_id - 1)
         return mask
 
@@ -343,10 +347,9 @@ class RangingRepository(QObject):
         distances: dict[int, int] = {}
         for anchor in anchors:
             anchor_id = int(anchor.get("anchor_id", 0) or 0)
-            if anchor_id:
+            if anchor_id >= 0:
                 distances[anchor_id] = int(anchor.get("distance_mm", 0) or 0)
         return distances
-
     def parse_anchor_layout(self, resp) -> list[dict]:
         anchors = []
         for a in getattr(resp, "anchors", []):

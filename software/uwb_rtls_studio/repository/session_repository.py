@@ -428,8 +428,8 @@ class SessionRepository:
 
         for f in (fusion_positions or []):
             f_copy = f.copy()
-            dist_map = {a.get("anchor_id"): a.get("distance_mm", "") for a in f_copy.get("anchors", []) if a.get("anchor_id")}
-            weight_map = {a.get("anchor_id"): a.get("weight", "") for a in f_copy.get("anchors", []) if a.get("anchor_id")}
+            dist_map = {a.get("anchor_id"): a.get("distance_mm", "") for a in f_copy.get("anchors", []) if a.get("anchor_id") is not None}
+            weight_map = {a.get("anchor_id"): a.get("weight", "") for a in f_copy.get("anchors", []) if a.get("anchor_id") is not None}
             for k in ["d1_mm", "d2_mm", "d3_mm", "d4_mm"]:
                 if f_copy.get(k) is None or f_copy.get(k) == "":
                     try:
@@ -1007,7 +1007,7 @@ class SessionRepository:
             if not isinstance(anchor, dict):
                 continue
             anchor_id = self._value_int(anchor.get("anchor_id"))
-            if anchor_id:
+            if anchor_id >= 0:
                 distances[anchor_id] = self._value_int(anchor.get("distance_mm"))
                 weights[anchor_id] = self._value_int(anchor.get("weight"))
         return distances, weights

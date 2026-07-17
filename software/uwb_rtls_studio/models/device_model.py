@@ -1308,22 +1308,15 @@ class DeviceModel(QObject):
         self._rtos_task_stats_timer.stop()
 
     def _schedule_background_scan_after_connect(self) -> None:
+        """Keep post-connect discovery manual; Scan Device is the only BLE scan trigger."""
         self._background_scan_resume_timer.stop()
-        if not self._connected_mac or self._connection_status != "Connected":
-            return
-        log.info("Scheduling one-shot BLE scan start 1000 ms after connect for background discovery trial.")
-        self._background_scan_resume_timer.start(BACKGROUND_SCAN_RESUME_DELAY_MS)
+        log.debug("Post-connect BLE scan is disabled; use Scan Device for a 5s manual scan.")
 
 
     def _resume_background_scan_after_connect(self) -> None:
-        if not self._connected_mac or self._connection_status != "Connected":
-            log.debug("Skipping post-connect BLE scan trial because connection is no longer active.")
-            return
-        if self._is_scanning:
-            log.debug("Skipping post-connect BLE scan trial because BLE scan is already active.")
-            return
-        log.info("Starting one-shot post-connect BLE scan trial while connected: ble_scan_start duration_ms=0")
-        self.start_scan(clear_results=False, force=True, duration_ms=0)
+        """Compatibility no-op for older timer wiring."""
+        self._background_scan_resume_timer.stop()
+        log.debug("Ignoring post-connect BLE scan resume; manual Scan Device owns ble_scan_start.")
 
     def _on_manual_test_mode_changed(self, enabled: bool) -> None:
         self._set_background_polling_enabled(not enabled)
@@ -1634,10 +1627,20 @@ class DeviceModel(QObject):
             auto_close_ms=8000,
         )
 
-    def refresh_connected_device_from_hardware(self, reason: str = "read from device") -> bool:
-        """Clear current-device UI/cache and re-read the full connected-device API flow."""
+    def refresh_connected_device_from_hardware(self, reason: str = "read from device", preserve_ui: bool = False) -> bool:
+        """Re-read the full connected-device API flow.
+
+        preserve_ui=True is used by the manual Config tab Read button: it keeps
+        existing UI/shared-state values until fresh response packets arrive.
+        """
         if self._connection_status != "Connected" or not self._connected_mac:
             log.warning("Read from Device ignored: no connected BLE device.")
+            return False
+        if shared_app_state.query_queue_busy:
+            log.info("Read from Device full refresh ignored: query queue is still busy.")
+            print("|================Read From Device================|", flush=True)
+            print("| ACTION : WAIT CURRENT QUEUE REPORT FIRST       |", flush=True)
+            print("|================================================|", flush=True)
             return False
 
         previous_device = dict(shared_app_state.connected_device or {})
@@ -1647,13 +1650,24 @@ class DeviceModel(QObject):
         preserved_device.update({"name": name, "mac": mac})
 
         print("|================Read From Device================|", flush=True)
-        print("| ACTION : CLEARED OLD DEVICE UI/CACHE DATA      |", flush=True)
+        if preserve_ui:
+            print("| ACTION : KEEP UI DATA, START FULL READ         |", flush=True)
+        else:
+            print("| ACTION : CLEARED OLD DEVICE UI/CACHE DATA      |", flush=True)
         print(f"| DEVICE : {name} ({mac})"[:48].ljust(48) + "|", flush=True)
         print("| ACTION : START FULL CONNECTED_DEVICE READ      |", flush=True)
         print("|================================================|", flush=True)
-        log.info("Read from Device: cleared cached data and restarting full connected-device API flow for %s (%s).", name, mac)
+        log.info(
+            "Read from Device: restarting full connected-device API flow for %s (%s), preserve_ui=%s.",
+            name,
+            mac,
+            preserve_ui,
+        )
 
-        shared_app_state.clear_connected_device_cached_data("read from device refresh")
+        if preserve_ui:
+            shared_app_state.cancel_query_pipeline("read from device refresh")
+        else:
+            shared_app_state.clear_connected_device_cached_data("read from device refresh")
         shared_app_state.connected_device = preserved_device
         shared_app_state.connection_status = "Connected"
         shared_app_state.enable_device_session_payloads("read from device refresh")
@@ -1666,9 +1680,32 @@ class DeviceModel(QObject):
         self._session_start_scheduled = False
         self._set_background_polling_enabled(False)
 
-        self.request_initial_telemetry(force=True)
-        self.request_session_start_events(force=True)
-        return True
+        requested = bool(self.request_initial_telemetry(force=True))
+        requested = bool(self.request_session_start_events(force=True)) or requested
+        return requested
+
+    def read_connected_device_from_button(self, reason: str = "read from device button") -> bool:
+        """Manual Config-tab read behavior.
+
+        If the latest connected-device report still has retryable failed GETs,
+        retry only those packets. Once the latest report is complete, start a
+        full fresh read while preserving the current UI until changed packets
+        arrive.
+        """
+        if self._connection_status != "Connected" or not self._connected_mac:
+            log.warning("Read from Device ignored: no connected BLE device.")
+            return False
+        if shared_app_state.query_queue_busy:
+            log.info("Read from Device ignored: query queue is still busy.")
+            print("|================Read From Device================|", flush=True)
+            print("| ACTION : WAIT CURRENT QUEUE REPORT FIRST       |", flush=True)
+            print("|================================================|", flush=True)
+            return False
+        failed = shared_app_state.failed_queries_from_last_report("connected_device")
+        failed = [item for item in failed if self._query_allowed_for_current_role(str(item.get("command_name") or ""))]
+        if failed:
+            return bool(self.retry_failed_connected_device_queries(reason))
+        return bool(self.refresh_connected_device_from_hardware(reason, preserve_ui=True))
 
     def retry_failed_connected_device_queries(self, reason: str = "read from device retry failed") -> bool:
         """Retry only failed GET packets from the latest CONNECTED_DEVICE report."""
@@ -2200,6 +2237,20 @@ class DeviceModel(QObject):
             self._emit_connection_progress(100, f"Already connected to {name or mac_hex}.", status=JobState.SUCCESS)
             return
 
+        if self._connection_status == "Connecting":
+            active_mac = self._pending_connect_mac or self._connected_mac or "-"
+            log.info(
+                "Connect request ignored while BLE connect is in progress: active=%s requested=%s",
+                active_mac,
+                mac_hex,
+            )
+            self._emit_connection_progress(
+                35,
+                f"Connect in progress for {self._pending_connect_name or active_mac}; wait before switching to {name or mac_hex}.",
+                phase="connecting",
+                status=JobState.RUNNING,
+            )
+            return
 
         if self._pending_connect_mac != mac_hex:
             self._reset_connect_attempts()
@@ -2834,10 +2885,8 @@ class DeviceModel(QObject):
             else:
                 self._pending_connect_mac = ""
                 self._pending_connect_name = ""
-                if self._suppress_next_disconnect_scan:
-                    self._suppress_next_disconnect_scan = False
-                else:
-                    self.start_scan()
+                self._suppress_next_disconnect_scan = False
+                log.debug("BLE disconnected; automatic scan restart is disabled. Use Scan Device to scan manually.")
 
     def _poll_rtos_task_stats(self):
         """Poll RTOS task stats every 30s through the global query queue."""

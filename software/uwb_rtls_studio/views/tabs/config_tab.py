@@ -1343,39 +1343,39 @@ class ConfigTab(QWidget):
 
         # Checkboxes
         chk_sys = QCheckBox("UWB Configuration (Sys Config)")
-        chk_sys.setChecked(True)
+        chk_sys.setChecked(False)
         dialog_layout.addWidget(chk_sys)
 
         chk_zone_profile = QCheckBox("Zone Profile (Anchor Layout)")
-        chk_zone_profile.setChecked(True)
+        chk_zone_profile.setChecked(False)
         dialog_layout.addWidget(chk_zone_profile)
 
         chk_ranging = QCheckBox("Ranging Configuration")
-        chk_ranging.setChecked(True)
+        chk_ranging.setChecked(False)
         dialog_layout.addWidget(chk_ranging)
 
         chk_fusion = QCheckBox("Sensor Fusion (UKF) Configuration")
-        chk_fusion.setChecked(True)
+        chk_fusion.setChecked(False)
         dialog_layout.addWidget(chk_fusion)
 
         chk_prefilter = QCheckBox("Positioning Prefilter Configuration")
-        chk_prefilter.setChecked(True)
+        chk_prefilter.setChecked(False)
         dialog_layout.addWidget(chk_prefilter)
 
         chk_calib = QCheckBox("Position Calibration Configuration")
-        chk_calib.setChecked(True)
+        chk_calib.setChecked(False)
         dialog_layout.addWidget(chk_calib)
 
         chk_ble_adv = QCheckBox("BLE Advertising Configuration")
-        chk_ble_adv.setChecked(True)
+        chk_ble_adv.setChecked(False)
         dialog_layout.addWidget(chk_ble_adv)
 
         chk_ble_conn = QCheckBox("BLE Connection Parameters")
-        chk_ble_conn.setChecked(True)
+        chk_ble_conn.setChecked(False)
         dialog_layout.addWidget(chk_ble_conn)
 
         chk_device_type = QCheckBox("Device Type Configuration")
-        chk_device_type.setChecked(True)
+        chk_device_type.setChecked(False)
         dialog_layout.addWidget(chk_device_type)
 
         chk_host_transport = QCheckBox("Host Transport Interface")

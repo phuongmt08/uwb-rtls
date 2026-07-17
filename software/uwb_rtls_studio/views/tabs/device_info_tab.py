@@ -508,7 +508,6 @@ class DeviceInfoTab(QWidget):
 
                     if state_str == "connected":
                         btn_connect.setText("Disconnect")
-                        btn_connect.setEnabled(True)
                         btn_connect.setStyleSheet(
                             "QPushButton { background: #DC2626; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
                             "QPushButton:hover { background: #EF4444; } "
@@ -517,25 +516,31 @@ class DeviceInfoTab(QWidget):
                         btn_connect.clicked.connect(lambda checked=False: self._vm.disconnect_device())
                     elif state_str == "connecting":
                         btn_connect.setText("Connecting...")
-                        btn_connect.setEnabled(False)
                         btn_connect.setStyleSheet(
                             "QPushButton { background: #334155; color: #94A3B8; border-radius: 4px; font-weight: bold; font-size: 11px; }"
                         )
                     elif state_str == "disconnecting":
                         btn_connect.setText("Disconnecting...")
-                        btn_connect.setEnabled(False)
                         btn_connect.setStyleSheet(
                             "QPushButton { background: #334155; color: #94A3B8; border-radius: 4px; font-weight: bold; font-size: 11px; }"
                         )
                     else: # disconnected
                         btn_connect.setText("Connect")
-                        btn_connect.setEnabled(True)
                         btn_connect.setStyleSheet(
                             "QPushButton { background: #059669; color: white; border-radius: 4px; font-weight: bold; font-size: 11px; } "
                             "QPushButton:hover { background: #10B981; } "
                             "QPushButton:disabled { background: #334155; color: #94A3B8; }"
                         )
                         btn_connect.clicked.connect(lambda checked, m=row_mac: self._vm.connect_device(m))
+
+                # Update enablement dynamically on every refresh to prevent rapid overlapping connections
+                if state_str == "connected":
+                    btn_connect.setEnabled(True)
+                elif state_str in ("connecting", "disconnecting"):
+                    btn_connect.setEnabled(False)
+                else: # disconnected
+                    any_transition = model.connection_status in ("Connecting", "Disconnecting")
+                    btn_connect.setEnabled(not any_transition)
 
                 # Update Set Time button connections only on change or rebuild
                 if btn_set_time:

@@ -70,7 +70,7 @@ from common.transport import VvAddress
 log = logging.getLogger(__name__)
 
 LIVE_RENDER_INTERVAL_MS = 16  # ~60 Hz UI flush; model/session buffers keep every sample.
-STOP_RANGING_END_DELAY_MS = 3000
+STOP_RANGING_END_DELAY_MS = 0
 
 class LiveTrackingViewModel(QObject):
     ranging_started = pyqtSignal()
@@ -112,7 +112,7 @@ class LiveTrackingViewModel(QObject):
         self._last_map_context_request_at = 0.0
         
         # Instantiate geofence repository
-        self.geofence_repo = GeofenceRepository()
+        self.geofence_repo = GeofenceRepository(autoload=False)
         
         # Connect position updates to custom handler to run geofencing checks
         self.model.position_updated.connect(self._on_model_position_updated)
@@ -385,14 +385,21 @@ class LiveTrackingViewModel(QObject):
         self.model.stop_ranging()
         self._flush_pending_live_updates()
         if self._session_run_manager:
-            log.info(
-                "LiveTrackingViewModel: Waiting %d ms after ranging_stop before end_session.",
-                STOP_RANGING_END_DELAY_MS,
-            )
-            QTimer.singleShot(
-                STOP_RANGING_END_DELAY_MS,
-                lambda: self._session_run_manager.close_ranging_run(send_end=True),
-            )
+            if STOP_RANGING_END_DELAY_MS > 0:
+                log.info(
+                    "LiveTrackingViewModel: Waiting %d ms after ranging_stop before end_session.",
+                    STOP_RANGING_END_DELAY_MS,
+                )
+                QTimer.singleShot(
+                    STOP_RANGING_END_DELAY_MS,
+                    lambda: self._session_run_manager.close_ranging_run(send_end=True),
+                )
+            else:
+                log.info("LiveTrackingViewModel: Closing ranging session on the next event-loop tick after ranging_stop.")
+                QTimer.singleShot(
+                    0,
+                    lambda: self._session_run_manager.close_ranging_run(send_end=True),
+                )
         self.ranging_stopped.emit()
 
     # Geofence service methods
@@ -408,6 +415,11 @@ class LiveTrackingViewModel(QObject):
 
     def add_ground_truth(self, track: GroundTruthTrack, *, persist: bool = True) -> bool:
         self.geofence_repo.add_ground_truth(track)
+        self.ground_truths_updated.emit(self.get_ground_truths())
+        return self.geofence_repo.save() if persist else True
+
+    def set_ground_truths(self, tracks: list[GroundTruthTrack], *, persist: bool = True) -> bool:
+        self.geofence_repo.set_ground_truths(tracks)
         self.ground_truths_updated.emit(self.get_ground_truths())
         return self.geofence_repo.save() if persist else True
 

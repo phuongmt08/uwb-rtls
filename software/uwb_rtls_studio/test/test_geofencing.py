@@ -288,6 +288,89 @@ def test_geofence_repository_position_checks():
 
 
 
+
+def test_e1_3_map_json_loads_all_map_objects_and_zero_based_anchors():
+    _ensure_qt_app()
+    map_path = os.path.abspath(os.path.join(CURRENT_DIR, "..", "data", "maps", "E1-3.json"))
+    repo = GeofenceRepository(map_path)
+
+    zones = repo.get_zones()
+    anchors = repo.get_anchors()
+    object_types = {getattr(zone, "object_type", "zone") for zone in zones}
+    anchor_ids = {anchor["anchor_id"] for anchor in anchors}
+
+    assert len(zones) >= 20
+    assert {"room", "wall", "object"}.issubset(object_types)
+    assert 0 in anchor_ids
+    assert max(anchor_ids) >= 6
+
+
+def test_live_tracking_anchor_telemetry_rows_follow_real_anchor_ids():
+    _ensure_qt_app()
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    class FakeCanvas:
+        anchors = [
+            {"anchor_id": 0, "label": "A0"},
+            {"anchor_id": 1, "label": "A1"},
+            {"anchor_id": 2, "label": "A2"},
+            {"anchor_id": 3, "label": "A3"},
+        ]
+
+    class FakeLabel:
+        def __init__(self):
+            self.text = None
+
+        def setText(self, value):
+            self.text = value
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab._canvas = FakeCanvas()
+    tab._anchor_telemetry_cache = {}
+    for row in range(1, 5):
+        setattr(tab, f"lbl_d{row}", FakeLabel())
+        setattr(tab, f"d{row}_label", FakeLabel())
+
+    LiveTrackingTab._show_anchor_telemetry(
+        tab,
+        [
+            {"anchor_id": 0, "distance_mm": 1234, "weight": 75},
+            {"anchor_id": 2, "distance_mm": 3456, "weight": 50},
+        ],
+    )
+
+    assert tab.lbl_d1.text == "A0:"
+    assert tab.d1_label.text == "1.234 m  |  W: 0.75"
+    assert tab.lbl_d3.text == "A2:"
+    assert tab.d3_label.text == "3.456 m  |  W: 0.50"
+
+
+def test_ranging_anchor_parser_preserves_anchor_zero_without_breaking_legacy_mask():
+    from models.ranging_model import RangingModel
+
+    class Anchor:
+        def __init__(self, anchor_id, distance_mm):
+            self.anchor_id = anchor_id
+            self.distance_mm = distance_mm
+            self.fp_amp = 0
+
+    class Response:
+        def __init__(self, anchors):
+            self.anchors = anchors
+
+    zero_based = Response([Anchor(0, 1000), Anchor(1, 1100), Anchor(2, 1200), Anchor(3, 1300)])
+    anchors, mask, distances = RangingModel._parse_anchor_distances(zero_based)
+    assert [anchor["anchor_id"] for anchor in anchors] == [0, 1, 2, 3]
+    assert mask == 0b1111
+    assert distances[0] == 1000
+    assert distances[3] == 1300
+
+    one_based = Response([Anchor(1, 1000), Anchor(2, 1100), Anchor(3, 1200), Anchor(4, 1300)])
+    _, mask, distances = RangingModel._parse_anchor_distances(one_based)
+    assert mask == 0b1111
+    assert distances[1] == 1000
+    assert distances[4] == 1300
+
 def test_live_tracking_syncs_loaded_map_anchors_to_canvas_and_layout():
     _ensure_qt_app()
     from views.tabs.live_tracking_tab import LiveTrackingTab
@@ -395,6 +478,394 @@ def test_live_tracking_current_layout_uses_room_scene_coordinates():
     assert math.isclose(tab._canvas.anchors[0]["local_x_m"], 0.7)
     assert math.isclose(tab._canvas.anchors[0]["local_y_m"], 0.0)
 
+
+def test_live_tracking_mode_switch_keeps_loaded_map_as_visual_source():
+    _ensure_qt_app()
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    map_path = os.path.abspath(os.path.join(CURRENT_DIR, "..", "data", "maps", "E1-3.json"))
+    repo = GeofenceRepository(map_path)
+
+    class FakeViewModel:
+        current_anchor_layout = [
+            {"anchor_id": idx, "x_m": 100_000_000.0 + idx, "y_m": -100_000_000.0 - idx}
+            for idx in range(1000)
+        ]
+
+        def get_geofence_zones(self):
+            return repo.get_zones()
+
+        def get_map_anchors(self):
+            return repo.get_anchors()
+
+    class FakeCanvas:
+        def __init__(self):
+            self.zones = []
+            self.anchors = []
+            self.auto_fit_calls = 0
+
+        def set_geofences(self, zones):
+            self.zones = list(zones)
+
+        def set_anchors(self, anchors):
+            self.anchors = [dict(anchor) for anchor in anchors]
+
+        def auto_fit(self):
+            self.auto_fit_calls += 1
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab._vm = FakeViewModel()
+    tab._canvas = FakeCanvas()
+    tab._map_3d = FakeCanvas()
+
+    LiveTrackingTab._sync_tracking_canvas_from_map(tab)
+
+    assert len(tab._canvas.zones) == 27
+    assert len(tab._canvas.anchors) == 7
+    assert len(tab._map_3d.zones) == 27
+    assert len(tab._map_3d.anchors) == 7
+    assert max(abs(anchor["x"]) for anchor in tab._canvas.anchors) < 100.0
+    assert {getattr(zone, "object_type", "zone") for zone in tab._canvas.zones} == {
+        "room", "wall", "object", "zone"
+    }
+
+
+def test_geofence_repository_can_start_empty_until_explicit_load():
+    map_path = os.path.abspath(os.path.join(CURRENT_DIR, "..", "data", "maps", "E1-3.json"))
+    repo = GeofenceRepository(map_path, autoload=False)
+
+    assert repo.get_zones() == []
+    assert repo.get_anchors() == []
+    assert repo.get_ground_truths() == []
+
+    assert repo.load(map_path) is True
+    assert len(repo.get_zones()) == 27
+    assert len(repo.get_anchors()) == 7
+
+
+def test_live_tracking_viewmodel_does_not_autoload_runtime_map():
+    _ensure_qt_app()
+    from PyQt6.QtCore import QObject, pyqtSignal
+    import viewmodels.live_tracking_viewmodel as live_tracking_viewmodel
+
+    class FakeRangingModel(QObject):
+        position_updated = pyqtSignal(float, float, float, float)
+        sensor_fusion_updated = pyqtSignal(dict)
+        calib_data_updated = pyqtSignal(dict)
+        anchor_distances_updated = pyqtSignal(list)
+        stats_updated = pyqtSignal(dict)
+
+        def clear_history(self):
+            pass
+
+    class FakeSharedAppState(QObject):
+        anchor_layout_changed = pyqtSignal(list)
+        device_session_reset = pyqtSignal(str)
+
+    original_state = live_tracking_viewmodel.shared_app_state
+    live_tracking_viewmodel.shared_app_state = FakeSharedAppState()
+    try:
+        vm = live_tracking_viewmodel.LiveTrackingViewModel(
+            FakeRangingModel(), protocol_service=object()
+        )
+
+        assert vm.get_geofence_zones() == []
+        assert vm.get_map_anchors() == []
+        assert vm.get_ground_truths() == []
+    finally:
+        live_tracking_viewmodel.shared_app_state = original_state
+
+
+def test_refresh_map_list_does_not_emit_or_replace_explicit_selection():
+    _ensure_qt_app()
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    class FakeCombo:
+        def __init__(self):
+            self.items = []
+            self.index = -1
+            self.blocked = False
+            self.events = []
+
+        def blockSignals(self, blocked):
+            self.blocked = bool(blocked)
+
+        def clear(self):
+            self.items = []
+            self.index = -1
+            if not self.blocked:
+                self.events.append(-1)
+
+        def addItem(self, label, data):
+            self.items.append((label, data))
+            if self.index < 0:
+                self.index = 0
+                if not self.blocked:
+                    self.events.append(0)
+
+        def currentData(self):
+            if 0 <= self.index < len(self.items):
+                return self.items[self.index][1]
+            return None
+
+        def findData(self, value):
+            return next(
+                (idx for idx, (_label, data) in enumerate(self.items) if data == value),
+                -1,
+            )
+
+        def setCurrentIndex(self, index):
+            self.index = index
+            if not self.blocked:
+                self.events.append(index)
+
+    selected_path = os.path.abspath(
+        os.path.join(CURRENT_DIR, "..", "data", "maps", "E1-3.json")
+    )
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab.cmb_user_map = FakeCombo()
+
+    LiveTrackingTab._refresh_map_list(tab, selected_path=selected_path)
+
+    assert tab.cmb_user_map.events == []
+    assert tab.cmb_user_map.currentData() == selected_path
+
+def test_live_tracking_device_session_reset_returns_ranging_button_to_start():
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    class FakeButton:
+        def __init__(self):
+            self._text = ""
+            self.enabled = False
+            self.styles = []
+
+        def setText(self, text):
+            self._text = text
+
+        def text(self):
+            return self._text
+
+        def setStyleSheet(self, style):
+            self.styles.append(style)
+
+        def setEnabled(self, enabled):
+            self.enabled = bool(enabled)
+
+    class FakeDistanceGraph:
+        def __init__(self):
+            self.stop_calls = 0
+
+        def stop_session(self):
+            self.stop_calls += 1
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab.btn_start = FakeButton()
+    tab._distance_graph = FakeDistanceGraph()
+    tab._is_ranging = True
+    tab._ranging_stop_requested = True
+    LiveTrackingTab._sync_ranging_button(tab)
+
+    assert tab.btn_start.text() == "Stop Ranging"
+
+    LiveTrackingTab._on_device_session_reset(tab, "read from device refresh")
+    assert tab._is_ranging is True
+    assert tab._ranging_stop_requested is True
+    assert tab.btn_start.text() == "Stop Ranging"
+    assert tab._distance_graph.stop_calls == 0
+
+    LiveTrackingTab._on_device_session_reset(tab, "switch device")
+
+    assert tab._is_ranging is False
+    assert tab._ranging_stop_requested is False
+    assert tab.btn_start.text() == "Start Ranging"
+    assert tab.btn_start.enabled is True
+    assert tab._distance_graph.stop_calls == 1
+
+def test_live_tracking_delete_shortcut_dispatches_ground_truth_context():
+    from views.tabs.live_tracking_tab import LiveTrackingTab
+
+    class FakeStack:
+        def __init__(self, index):
+            self.index = index
+
+        def currentIndex(self):
+            return self.index
+
+    class FakeTabs:
+        def __init__(self, current):
+            self.current = current
+
+        def currentWidget(self):
+            return self.current
+
+    class FakeLabel:
+        def __init__(self):
+            self.text = ""
+
+        def setText(self, text):
+            self.text = text
+
+    class FakeEditor:
+        def __init__(self):
+            self.tab_ground_truth = object()
+            self.tab_map_layout = object()
+            self.editor_tabs = FakeTabs(self.tab_ground_truth)
+            self.lbl_ground_truth_status = FakeLabel()
+
+    class FakeCanvas:
+        def __init__(self):
+            self.draw_object_type = "ground_truth"
+            self.edit_mode = "draw"
+            self.current_draw_points = [(0.0, 0.0), (1.0, 0.0)]
+            self.clear_calls = 0
+
+        def clear_active_drawing(self):
+            self.current_draw_points.clear()
+            self.clear_calls += 1
+
+    tab = LiveTrackingTab.__new__(LiveTrackingTab)
+    tab.sidebar_stack = FakeStack(1)
+    tab.geofence_editor_widget = FakeEditor()
+    tab._canvas = FakeCanvas()
+    calls = {"gt": 0, "zone": 0}
+    tab._delete_selected_ground_truth = lambda: calls.__setitem__("gt", calls["gt"] + 1)
+    tab._delete_selected_zone = lambda: calls.__setitem__("zone", calls["zone"] + 1)
+
+    LiveTrackingTab._delete_current_selection(tab)
+    assert tab._canvas.clear_calls == 1
+    assert tab.geofence_editor_widget.lbl_ground_truth_status.text == "Ground Truth draft cleared"
+    assert calls == {"gt": 0, "zone": 0}
+
+    LiveTrackingTab._delete_current_selection(tab)
+    assert calls == {"gt": 1, "zone": 0}
+
+    tab.geofence_editor_widget.editor_tabs.current = tab.geofence_editor_widget.tab_map_layout
+    tab._canvas.draw_object_type = "room"
+    tab._canvas.edit_mode = "draw"
+    LiveTrackingTab._delete_current_selection(tab)
+    assert calls == {"gt": 1, "zone": 1}
+
+def _ground_truth_canvas_for_track(track):
+    from views.components.position_canvas import PositionCanvas
+
+    class FakeSignal:
+        def __init__(self):
+            self.calls = []
+
+        def emit(self, *args):
+            self.calls.append(args)
+
+    canvas = PositionCanvas.__new__(PositionCanvas)
+    canvas.edit_mode = "edit_ground_truth"
+    canvas.ground_truths = [track]
+    canvas._ground_truth_edit_track_id = str(track.id)
+    canvas._ground_truth_selected_edges = []
+    canvas._ground_truth_freehand_active = False
+    canvas.ground_truth_edge_selection_changed = FakeSignal()
+    canvas.update = lambda: None
+    return canvas
+
+
+def test_canvas_undo_restores_ground_truth_snapshot():
+    from views.components.position_canvas import PositionCanvas
+
+    class FakeSignal:
+        def __init__(self):
+            self.calls = []
+
+        def emit(self, *args):
+            self.calls.append(args)
+
+    track = GroundTruthTrack("gt_undo", "Undo Path", [(0.0, 0.0), (1.0, 0.0)])
+    canvas = PositionCanvas.__new__(PositionCanvas)
+    canvas.is_developer_mode = True
+    canvas.current_draw_points = []
+    canvas._undo_stack = []
+    canvas.anchors = []
+    canvas.geofence_zones = []
+    canvas.ground_truths = [track]
+    canvas.zones_undo_restore_requested = FakeSignal()
+    canvas.zones_undo_remove_requested = FakeSignal()
+    canvas.ground_truths_undo_restore_requested = FakeSignal()
+    canvas._emit_anchor_layout_edited = lambda: None
+    canvas.update = lambda: None
+    canvas.selected_vertex_idx = None
+    canvas.selected_edge_idx = None
+    canvas.dragging_anchor_idx = None
+
+    canvas._push_undo_state()
+    canvas.ground_truths = []
+
+    assert canvas.undo_last_action() is True
+    assert canvas.ground_truths_undo_restore_requested.calls
+    restored = canvas.ground_truths_undo_restore_requested.calls[-1][0]
+    assert restored[0]["id"] == "gt_undo"
+    assert restored[0]["points"][-1] == {"x": 1.0, "y": 0.0}
+
+def test_ground_truth_corner_update_reuses_original_corner_geometry():
+    track = GroundTruthTrack("gt_corner", "Corner", [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])
+    canvas = _ground_truth_canvas_for_track(track)
+    canvas._ground_truth_selected_edges = [0, 1]
+
+    ok, _message, updated = canvas.apply_ground_truth_corner("fillet", 0.2)
+    assert ok is True
+    assert updated.metadata["corner_ops"][0]["amount_m"] == 0.2
+    selected_after_first = list(canvas._ground_truth_selected_edges)
+    assert selected_after_first == [0, updated.metadata["corner_ops"][0]["end_edge"]]
+
+    ok, _message, updated = canvas.apply_ground_truth_corner("chamfer", 0.4)
+    assert ok is True
+    op = updated.metadata["corner_ops"][0]
+    assert op["mode"] == "chamfer"
+    assert op["amount_m"] == 0.4
+    assert updated.points == [(0.0, 0.0), (0.6, 0.0), (1.0, 0.4), (1.0, 1.0)]
+    assert canvas._ground_truth_selected_edges == [0, 2]
+
+
+def test_ground_truth_extend_replaces_existing_fillet_corner():
+    track = GroundTruthTrack("gt_extend_corner", "Corner", [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])
+    canvas = _ground_truth_canvas_for_track(track)
+    canvas._ground_truth_selected_edges = [0, 1]
+
+    ok, _message, updated = canvas.apply_ground_truth_corner("fillet", 0.2)
+    assert ok is True
+    op = dict(updated.metadata["corner_ops"][0])
+    canvas._ground_truth_selected_edges = [op["start_edge"], op["end_edge"]]
+    assert canvas.ground_truth_selected_edges_can_corner() is True
+
+    ok, _message, updated = canvas.apply_ground_truth_extend()
+    assert ok is True
+    assert updated.points == [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+    assert updated.metadata.get("corner_ops") == []
+    assert canvas._ground_truth_selected_edges == [0, 1]
+
+
+def test_ground_truth_corner_selection_accepts_generated_fillet_edges():
+    track = GroundTruthTrack("gt_generated_corner", "Corner", [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])
+    canvas = _ground_truth_canvas_for_track(track)
+    canvas._ground_truth_selected_edges = [0, 1]
+
+    ok, _message, updated = canvas.apply_ground_truth_corner("fillet", 0.2)
+    assert ok is True
+    op = updated.metadata["corner_ops"][0]
+    canvas._ground_truth_selected_edges = [op["start_edge"] + 1, op["end_edge"] - 1]
+
+    assert canvas.ground_truth_selected_edges_can_corner() is True
+
+def test_ground_truth_extend_moves_nearest_endpoints_to_line_intersection():
+    track = GroundTruthTrack(
+        "gt_extend",
+        "Extend",
+        [(0.0, 0.0), (1.0, 0.0), (2.0, 1.0), (2.0, 2.0)],
+    )
+    canvas = _ground_truth_canvas_for_track(track)
+    canvas._ground_truth_selected_edges = [0, 2]
+
+    ok, _message, updated = canvas.apply_ground_truth_extend()
+    assert ok is True
+    assert updated.points[1] == (2.0, 0.0)
+    assert updated.points[2] == (2.0, 0.0)
+    assert updated.metadata.get("corner_ops") == []
 if __name__ == "__main__":
     print("Running Geofencing tests...")
     try:
