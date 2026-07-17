@@ -122,6 +122,7 @@ class UnscentedKalmanFilter {
         this.P = Array.from({ length: this.L }, () => new Float64Array(this.L));
         
         this.is_initialized = false;
+        this.last_predict_debug = null;
         this.X_sigma_pred = Array.from({ length: this.num_sigmas }, () => new Float64Array(this.L));
 
         // Param config
@@ -381,7 +382,31 @@ class UnscentedKalmanFilter {
         this.stabilizeCovariance();
         if (!this.isSaneState()) {
             this.restoreState(prevX, prevP);
+            this.last_predict_debug = null;
+            return;
         }
+
+        // Diagnostics from the UKF prediction that actually ran above. World
+        // acceleration is derived from the predicted velocity delta, so Replay
+        // observes the sigma-point result instead of recomputing CSV rows.
+        this.last_predict_debug = {
+            dt,
+            ax_raw: imuAx,
+            ay_raw: imuAy,
+            gz_raw: imuGz,
+            bias_ax: x_aug[5],
+            bias_ay: x_aug[6],
+            bias_gz: x_aug[7],
+            ax_body: imuAx - x_aug[5],
+            ay_body: imuAy - x_aug[6],
+            gz_corrected: imuGz - x_aug[7],
+            ax_global: (this.x[2] - prevX[2]) / dt,
+            ay_global: (this.x[3] - prevX[3]) / dt,
+            yaw_before_rad: x_aug[4],
+            yaw_after_rad: this.x[4],
+            vx: this.x[2],
+            vy: this.x[3]
+        };
     }
 
     predictedRange(px, py, anchor, tagHeight) {

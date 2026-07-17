@@ -1,5 +1,6 @@
 let ruleCounter = 0;
 const UWB_SIM_DEFAULTS_SCHEMA_VERSION = 10;
+const UWB_SIM_GEOMETRY_STORAGE_KEY = 'uwb_sim_geometry';
 const ANCHOR_LAYOUT_IDS = ['layout_1', 'layout_2'];
 let activeAnchorLayoutId = 'layout_1';
 let anchorLayouts = null;
@@ -574,20 +575,33 @@ function saveDefaults() {
         });
     }
     localStorage.setItem('uwb_sim_defaults', JSON.stringify(config));
+    localStorage.setItem(UWB_SIM_GEOMETRY_STORAGE_KEY, JSON.stringify({
+        groundtruth_offset: config.groundtruth_offset,
+        active_anchor_layout: config.active_anchor_layout,
+        anchor_layouts: config.anchor_layouts
+    }));
     if (config.groundtruth) localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
     alert('Defaults saved!');
 }
 
 function clearDefaults() {
     localStorage.removeItem('uwb_sim_defaults');
+    localStorage.removeItem(UWB_SIM_GEOMETRY_STORAGE_KEY);
     alert('Defaults cleared! Reload the page to see original settings.');
 }
 
 function loadDefaults() {
     const saved = localStorage.getItem('uwb_sim_defaults');
-    if (saved) {
+    const savedGeometry = localStorage.getItem(UWB_SIM_GEOMETRY_STORAGE_KEY);
+    if (saved || savedGeometry) {
         try {
-            const config = JSON.parse(saved);
+            const config = saved ? JSON.parse(saved) : {};
+            if (savedGeometry) {
+                const geometry = JSON.parse(savedGeometry);
+                config.groundtruth_offset = geometry.groundtruth_offset;
+                config.active_anchor_layout = geometry.active_anchor_layout;
+                config.anchor_layouts = geometry.anchor_layouts;
+            }
             const loadTuning = config.schema_version === UWB_SIM_DEFAULTS_SCHEMA_VERSION;
             if (!loadTuning) {
                 console.warn('Ignoring stale simulation tuning defaults. Ground truth and anchors are still restored.');
@@ -659,7 +673,7 @@ function loadDefaults() {
             if (config.groundtruth) {
                 localStorage.setItem('uwb_sim_groundtruth', config.groundtruth);
             }
-            if (loadTuning && config.groundtruth_offset) {
+            if (config.groundtruth_offset) {
                 setGroundTruthOffsetInputs(config.groundtruth_offset);
             }
             if (Array.isArray(config.anchors) && config.anchors.length === anchors.length) {

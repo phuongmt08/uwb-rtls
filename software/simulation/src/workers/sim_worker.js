@@ -206,6 +206,7 @@ self.onmessage = function(e) {
     const simPathUKF_lpf = { x: [], y: [] };
     const simPathUKF_allModes = []; // 20Hz: 0=Predict (IMU only), 1=Update (with UWB)
     const simPathUKF_allTimes = []; // 20Hz timestamps
+    const imuDebug20Hz = [];
     // Low-frequency UKF trajectory (6Hz - aligned with Update events) for UI plotting
     const simPathUKF_plot = { x: [], y: [] };
     const simPathUKF_lpf_plot = { x: [], y: [] };
@@ -412,7 +413,7 @@ self.onmessage = function(e) {
         self.postMessage({
             simPath, simPathRuled, simPathWLS, simPathTriplet,
             simPathUKF, simPathUKF_plot, simPathUKF_lpf, simPathUKF_lpf_plot,
-            simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes,
+            simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes, imuDebug20Hz,
             wlsInfo, bestTripletInfo,
             plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist, ambiguityEvents,
             pos_errors_fw: blankErrors, pos_errors: blankErrors, pos_errors_wls: blankErrors,
@@ -546,6 +547,7 @@ self.onmessage = function(e) {
     const wallClock = buildFusionWallClockTimes(entriesToProcess);
     entriesToProcess.forEach((entry, entryIndex) => {
         let didEntryUwbUpdate = false;
+        let entryUkfPredictDebug = null;
         total_time = wallClock.times[entryIndex] !== undefined ? wallClock.times[entryIndex] : total_time;
 
         if (entry.type === 'Init') {
@@ -583,6 +585,7 @@ self.onmessage = function(e) {
             zuptActive = zupt_cnt > SIM_CONFIG.IMU.ZUPT_COUNT_THRESHOLD;
             // UKF Predict
             filter.predict({ ax: entry.ax, ay: entry.ay, gz: entry.gz }, entry.dt);
+            entryUkfPredictDebug = filter.ukf.last_predict_debug;
             filterLpf.predict(imuLpf, entry.dt);
 
             v_raw.x += (entry.ax - bias.ax) * entry.dt;
@@ -820,10 +823,10 @@ self.onmessage = function(e) {
                 const state = r.rescue ? 'RESCUE' : (r.pass ? 'PASS' : 'REJECT');
                 const anchor = v_anchors_best.find(a => a.id === r.index + 1);
                 const proxyMark = (r.fp_confidence_is_proxy) ? '~' : '';
-                const weightText = anchor
+                const weightText = anchor && Number.isFinite(anchor.q_d2) && Number.isFinite(anchor.q_fp) && Number.isFinite(anchor.q_residual) && Number.isFinite(anchor.measurement_weight)
                     ? ` q=(${anchor.q_d2.toFixed(2)},${proxyMark}${anchor.q_fp.toFixed(2)},${anchor.q_residual.toFixed(2)}) w=${anchor.measurement_weight.toFixed(2)}`
                     : '';
-                const rText = anchor ? ` R=${filter.measurementNoiseFor(anchor).toFixed(4)}` : '';
+                const rText = anchor && Number.isFinite(filter.measurementNoiseFor(anchor)) ? ` R=${filter.measurementNoiseFor(anchor).toFixed(4)}` : '';
                 return `A${r.index + 1}:${state} d2=${d2Text} streak=${filter.reject_counts[r.index]}${weightText}${rText}`;
             }).join('<br>');
             bestTripletInfo.push(bestTriplet
@@ -866,6 +869,37 @@ self.onmessage = function(e) {
         simPathUKF_lpf.y.push(filterLpf.ukf.is_initialized ? filterLpf.ukf.x[1] : null);
         simPathUKF_allModes.push(didEntryUwbUpdate ? 1 : 0);
         simPathUKF_allTimes.push(total_time);
+
+        if (entryUkfPredictDebug) {
+            const debug = entryUkfPredictDebug;
+            const accelMagnitude = Math.hypot(debug.ax_global, debug.ay_global);
+            const speed = Math.hypot(debug.vx, debug.vy);
+            imuDebug20Hz.push({
+                time: total_time,
+                frame_type: 'Predict',
+                mode: 0,
+                dt: debug.dt,
+                ax_raw: debug.ax_raw,
+                ay_raw: debug.ay_raw,
+                gz_raw: debug.gz_raw,
+                bias_ax: debug.bias_ax,
+                bias_ay: debug.bias_ay,
+                bias_gz: debug.bias_gz,
+                ax_body: debug.ax_body,
+                ay_body: debug.ay_body,
+                gz_corrected: debug.gz_corrected,
+                ax_global: debug.ax_global,
+                ay_global: debug.ay_global,
+                accel_magnitude: accelMagnitude,
+                accel_heading_deg: accelMagnitude > 1e-6 ? Math.atan2(debug.ay_global, debug.ax_global) * 180 / Math.PI : null,
+                yaw_deg: debug.yaw_before_rad * 180 / Math.PI,
+                ukf_yaw_deg: debug.yaw_after_rad * 180 / Math.PI,
+                vx: debug.vx,
+                vy: debug.vy,
+                speed,
+                velocity_heading_deg: speed > 1e-6 ? Math.atan2(debug.vy, debug.vx) * 180 / Math.PI : null
+            });
+        }
     });
 
     const x_axis = simPath.x.map((_, i) => i);
@@ -903,7 +937,7 @@ self.onmessage = function(e) {
     self.postMessage({
         simPath, simPathRuled, simPathWLS, simPathTriplet,
         simPathUKF, simPathUKF_plot, simPathUKF_lpf, simPathUKF_lpf_plot,
-        simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes,
+        simPathUKF_modes, simPathUKF_lpf_modes, simPathUKF_allModes, simPathUKF_allTimes, imuDebug20Hz,
         wlsInfo, bestTripletInfo, tripletDebug,
         plotData, gatedDist, d2Scores, rejectIdx, rescueIdx, rescueDist, ambiguityEvents,
         pos_errors_fw, pos_errors, pos_errors_wls, pos_errors_triplet, pos_errors_ukf, pos_errors_ukf_lpf,

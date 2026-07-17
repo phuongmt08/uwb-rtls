@@ -102,6 +102,7 @@
 
         .hud-panel .card {
             pointer-events: auto;
+            flex-shrink: 0;
             background: rgba(9, 13, 22, 0.85);
             border: 1px solid rgba(139, 92, 246, 0.25);
             backdrop-filter: blur(16px);
@@ -509,6 +510,52 @@
             line-height: 1.5;
             margin-top: 15px;
         }
+
+        .imu-debug-section {
+            margin-top: 10px;
+        }
+
+        .imu-debug-section-title {
+            color: var(--text-muted);
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .imu-debug-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 4px 0;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.82rem;
+        }
+
+        .imu-debug-key {
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .imu-debug-value {
+            color: #38bdf8;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .imu-debug-mode {
+            color: #fbbf24;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+        }
+
+        #imu_debug_card .panel-title {
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -523,7 +570,7 @@
     <canvas id="trackCanvas"></canvas>
 
     <!-- LEFT HUD Widget (Controls, File Info, Back Navigation) -->
-    <div class="hud-panel left-hud" style="position: absolute; top: 20px; left: 20px; width: 300px; display: flex; flex-direction: column; gap: 15px; z-index: 10; pointer-events: none;">
+    <div class="hud-panel left-hud" style="position: absolute; top: 20px; left: 20px; width: 300px; display: flex; flex-direction: column; gap: 15px; z-index: 10; pointer-events: none; max-height: calc(100vh - 40px); overflow-y: auto; padding-right: 4px;">
         <!-- Card 1: File Info & Back Link -->
         <div class="card" style="pointer-events: auto;">
             <div style="display:flex; flex-direction:column; gap:8px;">
@@ -563,6 +610,69 @@
                 <button class="speed-btn" id="speed_2" onclick="setSpeed(2)">2x</button>
                 <button class="speed-btn" id="speed_5" onclick="setSpeed(5)">5x</button>
                 <button class="speed-btn" id="speed_10" onclick="setSpeed(10)">10x</button>
+            </div>
+        </div>
+
+        <!-- Card 3: Path Selection -->
+        <div class="card" style="pointer-events: auto;">
+            <div class="panel-title">Path Selection</div>
+            <div class="path-selector-group" style="gap: 6px;">
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_gt" checked onchange="drawFrame()">
+                    <span class="dot-color" style="background:#f87171; box-shadow: 0 0 8px #f87171;"></span>
+                    <span style="font-weight: 500;">Ground Truth Path</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_ukf" checked onchange="drawFrame()">
+                    <span class="dot-color color-ukf"></span>
+                    <span style="font-weight: 500;">UKF Fusion Path</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_ukf_lpf" checked onchange="drawFrame()">
+                    <span class="dot-color color-ukf-lpf"></span>
+                    <span style="font-weight: 500;">UKF Fusion + IMU LPF</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_fw" checked onchange="drawFrame()">
+                    <span class="dot-color color-fw"></span>
+                    <span style="font-weight: 500;">Trilateration Path</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_triplet" checked onchange="drawFrame()">
+                    <span class="dot-color color-triplet"></span>
+                    <span style="font-weight: 500;">Best Triplet</span>
+                </label>
+                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
+                    <input type="checkbox" id="chk_wls" onchange="drawFrame()">
+                    <span class="dot-color color-wls"></span>
+                    <span style="font-weight: 500;">Multilateration</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Card 4: Telemetry Coordinates -->
+        <div class="card" style="pointer-events: auto;">
+            <div class="panel-title">Telemetry Coordinates</div>
+            <div class="digital-grid" style="grid-template-columns: 1fr; gap: 8px; margin-top: 5px;">
+                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
+                    <span class="dig-lbl">UKF Position</span>
+                    <span class="dig-val violet" id="telemetry_ukf" style="font-size: 0.9rem;">X: --, Y: --</span>
+                </div>
+                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
+                    <span class="dig-lbl">UKF LPF Position</span>
+                    <span class="dig-val" id="telemetry_ukf_lpf" style="color:#a78bfa; font-size: 0.9rem;">X: --, Y: --</span>
+                </div>
+                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
+                    <span class="dig-lbl">Trilateration Position</span>
+                    <span class="dig-val" style="color:var(--text-muted); font-size: 0.9rem;" id="telemetry_fw">X: --, Y: --</span>
+                </div>
+            </div>
+            <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px; margin-top: 8px;">
+                <span class="dig-lbl">IMU LPF Config</span>
+                <span class="dig-val" id="telemetry_lpf_cfg" style="color:#a78bfa; font-size: 0.85rem;">--</span>
+            </div>
+            <div class="info-card-text" style="font-size: 0.75rem; margin-top: 10px; line-height: 1.4;">
+                Track widths: <strong>22cm</strong> (1 lane, dotted) or <strong>44cm</strong> (2 lanes, dashed divider). <strong>◆ Cyan diamond</strong> = UKF Update, <strong>● Orange circle</strong> = UKF Predict.
             </div>
         </div>
     </div>
@@ -606,78 +716,111 @@
             </div>
         </div>
 
-        <!-- Card 2: Path Selection -->
-        <div class="card" style="pointer-events: auto;">
-            <div class="panel-title">Path Selection</div>
-            <div class="path-selector-group" style="gap: 6px;">
-                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
-                    <input type="checkbox" id="chk_gt" checked onchange="drawFrame()">
-                    <span class="dot-color" style="background:#f87171; box-shadow: 0 0 8px #f87171;"></span>
-                    <span style="font-weight: 500;">Ground Truth Path</span>
-                </label>
-                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
-                    <input type="checkbox" id="chk_ukf" checked onchange="drawFrame()">
-                    <span class="dot-color color-ukf"></span>
-                    <span style="font-weight: 500;">UKF Fusion Path</span>
-                </label>
-                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
-                    <input type="checkbox" id="chk_ukf_lpf" checked onchange="drawFrame()">
-                    <span class="dot-color color-ukf-lpf"></span>
-                    <span style="font-weight: 500;">UKF Fusion + IMU LPF</span>
-                </label>
-                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
-                    <input type="checkbox" id="chk_fw" checked onchange="drawFrame()">
-                    <span class="dot-color color-fw"></span>
-                    <span style="font-weight: 500;">Trilateration Path</span>
-                </label>
-                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
-                    <input type="checkbox" id="chk_triplet" checked onchange="drawFrame()">
-                    <span class="dot-color color-triplet"></span>
-                    <span style="font-weight: 500;">Best Triplet</span>
-                </label>
-                <label class="path-checkbox-lbl" style="padding: 8px 12px; font-size: 0.8rem;">
-                    <input type="checkbox" id="chk_wls" onchange="drawFrame()">
-                    <span class="dot-color color-wls"></span>
-                    <span style="font-weight: 500;">Multilateration</span>
-                </label>
+        <!-- Card 4: IMU frame diagnostics passed from the simulation worker -->
+        <div class="card" id="imu_debug_card" style="pointer-events: auto;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                <div class="panel-title" style="margin-bottom:0;">IMU Frame Debug</div>
+                <span class="imu-debug-mode" id="imu_debug_mode">NO DATA</span>
             </div>
-        </div>
 
-        <!-- Card 3: Telemetry Coordinates -->
-        <div class="card" style="pointer-events: auto;">
-            <div class="panel-title">Telemetry Coordinates</div>
-            <div class="digital-grid" style="grid-template-columns: 1fr; gap: 8px; margin-top: 5px;">
-                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
-                    <span class="dig-lbl">UKF Position</span>
-                    <span class="dig-val violet" id="telemetry_ukf" style="font-size: 0.9rem;">X: --, Y: --</span>
-                </div>
-                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
-                    <span class="dig-lbl">UKF LPF Position</span>
-                    <span class="dig-val" id="telemetry_ukf_lpf" style="color:#a78bfa; font-size: 0.9rem;">X: --, Y: --</span>
-                </div>
-                <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px;">
-                    <span class="dig-lbl">Trilateration Position</span>
-                    <span class="dig-val" style="color:var(--text-muted); font-size: 0.9rem;" id="telemetry_fw">X: --, Y: --</span>
+            <div class="imu-debug-section">
+                <div class="imu-debug-section-title">Timing</div>
+                <div class="imu-debug-row">
+                    <span class="imu-debug-key">Frame / dt</span>
+                    <span class="imu-debug-value" id="imu_debug_timing">-- / -- s</span>
                 </div>
             </div>
-            <div class="digital-item" style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding: 8px 12px; margin-top: 8px;">
-                <span class="dig-lbl">IMU LPF Config</span>
-                <span class="dig-val" id="telemetry_lpf_cfg" style="color:#a78bfa; font-size: 0.85rem;">--</span>
+
+            <div class="imu-debug-section">
+                <div class="imu-debug-section-title">Raw Body Frame</div>
+                <div class="imu-debug-row">
+                    <span class="imu-debug-key">ax / ay</span>
+                    <span class="imu-debug-value" id="imu_debug_body_accel">-- / -- m/s²</span>
+                </div>
+                <div class="imu-debug-row">
+                    <span class="imu-debug-key">UKF yaw before / after [deg]</span>
+                    <span class="imu-debug-value" id="imu_debug_yaw">-- / --°</span>
+                </div>
             </div>
-            <div class="info-card-text" style="font-size: 0.75rem; margin-top: 10px; line-height: 1.4;">
-                Track widths: <strong>22cm</strong> (1 lane, dotted) or <strong>44cm</strong> (2 lanes, dashed divider). <strong>◆ Cyan diamond</strong> = UKF Update, <strong>● Orange circle</strong> = UKF Predict.
+
+            <div class="imu-debug-section">
+                <div class="imu-debug-section-title">Global Frame</div>
+                <div class="imu-debug-row">
+                    <span class="imu-debug-key">ax / ay</span>
+                    <span class="imu-debug-value" id="imu_debug_global_accel">-- / -- m/s²</span>
+                </div>
+                <div class="imu-debug-row">
+                    <span class="imu-debug-key">vx / vy</span>
+                    <span class="imu-debug-value" id="imu_debug_velocity">-- / -- m/s</span>
+                </div>
+                <div class="imu-debug-row">
+                    <span class="imu-debug-key">Accel / velocity heading</span>
+                    <span class="imu-debug-value" id="imu_debug_headings">-- / --°</span>
+                </div>
             </div>
         </div>
     </div> </div>
 
     <script>
-        // Load data from localStorage
-        const replayDataRaw = localStorage.getItem('uwb_replay_data');
-        if (!replayDataRaw) {
+        // Prefer the same-origin opener handoff for long logs; localStorage is
+        // retained as the refresh/manual-open fallback.
+        let openerReplayData = null;
+        try {
+            openerReplayData = window.opener && window.opener.__uwbReplayData
+                ? window.opener.__uwbReplayData
+                : null;
+        } catch (error) {
+            console.warn('Replay opener data is unavailable.', error);
+        }
+        const replayDataRaw = sessionStorage.getItem('uwb_replay_data')
+            || localStorage.getItem('uwb_replay_data');
+        if (!openerReplayData && !replayDataRaw) {
             alert('Simulation data not found! Please open from the Dashboard and click "Replay Trajectory".');
             window.location.href = 'simulation_dashboard.html';
         }
-        const data = JSON.parse(replayDataRaw);
+        const data = openerReplayData || JSON.parse(replayDataRaw);
+
+        function decodeImuDebug(payload) {
+            if (Array.isArray(payload)) return payload;
+            if (!payload || payload.format !== 'compact-v1' || !Array.isArray(payload.rows)) return [];
+
+            const biases = Array.isArray(payload.biases) ? payload.biases : [0, 0, 0];
+            const biasAx = Number(biases[0]) || 0;
+            const biasAy = Number(biases[1]) || 0;
+            return payload.rows.map(row => {
+                const frameCode = Number(row[1]);
+                const axRaw = Number(row[4]) || 0;
+                const ayRaw = Number(row[5]) || 0;
+                const axGlobal = Number(row[7]) || 0;
+                const ayGlobal = Number(row[8]) || 0;
+                const vx = Number(row[11]) || 0;
+                const vy = Number(row[12]) || 0;
+                return {
+                    time: Number(row[0]) || 0,
+                    frame_type: frameCode === 0 ? 'Predict' : (frameCode === 1 ? 'Update' : 'Init'),
+                    mode: Number(row[2]) || 0,
+                    dt: Number(row[3]) || 0,
+                    ax_raw: axRaw,
+                    ay_raw: ayRaw,
+                    ax_body: axRaw - biasAx,
+                    ay_body: ayRaw - biasAy,
+                    ax_global: axGlobal,
+                    ay_global: ayGlobal,
+                    yaw_deg: Number(row[9]) || 0,
+                    ukf_yaw_deg: Number(row[10]) || 0,
+                    vx,
+                    vy,
+                    accel_heading_deg: Math.hypot(axGlobal, ayGlobal) > 1e-6
+                        ? Math.atan2(ayGlobal, axGlobal) * 180 / Math.PI
+                        : null,
+                    velocity_heading_deg: Math.hypot(vx, vy) > 1e-6
+                        ? Math.atan2(vy, vx) * 180 / Math.PI
+                        : null
+                };
+            });
+        }
+
+        let imuDebugSamples = decodeImuDebug(data.imuDebug20Hz);
 
         document.getElementById('log_filename').innerText = "Log: " + (data.filename || "ukf_log_data.csv") + " (" + data.x_axis.length + " samples)";
         const lpfCfg = data.imuLpfConfig || {};
@@ -871,6 +1014,7 @@
                 const newData = JSON.parse(e.newValue);
                 // Dynamically update the main data object
                 Object.assign(data, newData);
+                imuDebugSamples = decodeImuDebug(data.imuDebug20Hz);
                 
                 // Update log filename display
                 document.getElementById('log_filename').innerText = "Log: " + (data.filename || "ukf_log_data.csv") + " (" + data.x_axis.length + " samples)";
@@ -1287,6 +1431,62 @@
             animFrameId = requestAnimationFrame(animate);
         }
 
+        function debugNumber(value, digits = 4) {
+            return Number.isFinite(value) ? value.toFixed(digits) : '--';
+        }
+
+        function imuDebugAtTime(targetTime) {
+            if (!imuDebugSamples.length) return null;
+            let low = 0;
+            let high = imuDebugSamples.length - 1;
+            while (low < high) {
+                const mid = Math.ceil((low + high) / 2);
+                const midTime = Number(imuDebugSamples[mid].time) || 0;
+                if (midTime <= targetTime) low = mid;
+                else high = mid - 1;
+            }
+            return imuDebugSamples[low];
+        }
+
+        function updateImuDebugPanel(currentTime) {
+            const sample = imuDebugAtTime(currentTime);
+            const modeElem = document.getElementById('imu_debug_mode');
+            if (!sample) {
+                modeElem.innerText = 'NO DATA';
+                document.getElementById('imu_debug_timing').innerText = '-- / -- s';
+                document.getElementById('imu_debug_body_accel').innerText = '-- / -- m/s²';
+                document.getElementById('imu_debug_yaw').innerText = '-- / --°';
+                document.getElementById('imu_debug_global_accel').innerText = '-- / -- m/s²';
+                document.getElementById('imu_debug_velocity').innerText = '-- / -- m/s';
+                document.getElementById('imu_debug_headings').innerText = '-- / --°';
+                return;
+            }
+
+            const frameType = sample.frame_type || (sample.mode === 1 ? 'Update' : 'Predict');
+            const axRaw = Number.isFinite(sample.ax_raw) ? sample.ax_raw : sample.ax;
+            const ayRaw = Number.isFinite(sample.ay_raw) ? sample.ay_raw : sample.ay;
+            const axGlobal = Number.isFinite(sample.ax_global) ? sample.ax_global : null;
+            const ayGlobal = Number.isFinite(sample.ay_global) ? sample.ay_global : null;
+            const accelHeading = Number.isFinite(sample.accel_heading_deg)
+                ? sample.accel_heading_deg
+                : (Number.isFinite(axGlobal) && Number.isFinite(ayGlobal) && Math.hypot(axGlobal, ayGlobal) > 1e-6
+                    ? Math.atan2(ayGlobal, axGlobal) * 180 / Math.PI
+                    : null);
+            const velocityHeading = Number.isFinite(sample.velocity_heading_deg)
+                ? sample.velocity_heading_deg
+                : (Number.isFinite(sample.vx) && Number.isFinite(sample.vy) && Math.hypot(sample.vx, sample.vy) > 1e-6
+                    ? Math.atan2(sample.vy, sample.vx) * 180 / Math.PI
+                    : null);
+
+            modeElem.innerText = frameType.toUpperCase();
+            document.getElementById('imu_debug_timing').innerText = `${frameType} / ${debugNumber(sample.dt, 4)} s`;
+            document.getElementById('imu_debug_body_accel').innerText = `${debugNumber(axRaw)} / ${debugNumber(ayRaw)} m/s²`;
+            document.getElementById('imu_debug_yaw').innerText = `${debugNumber(sample.yaw_deg, 2)} / ${debugNumber(sample.ukf_yaw_deg, 2)}°`;
+            document.getElementById('imu_debug_global_accel').innerText = `${debugNumber(axGlobal)} / ${debugNumber(ayGlobal)} m/s²`;
+            document.getElementById('imu_debug_velocity').innerText = `${debugNumber(sample.vx)} / ${debugNumber(sample.vy)} m/s`;
+            document.getElementById('imu_debug_headings').innerText = `${debugNumber(accelHeading, 1)} / ${debugNumber(velocityHeading, 1)}°`;
+        }
+
         function updateUI(ratio = 0.0) {
             scrubSlider.value = currentIndex;
             
@@ -1295,6 +1495,7 @@
             const maxT = times[totalSamples - 1];
             document.getElementById('timeDisplay').innerText = currentT.toFixed(3) + " / " + maxT.toFixed(3) + " s";
             document.getElementById('sampleDisplay').innerText = "Sample " + (currentIndex + 1) + " / " + totalSamples;
+            updateImuDebugPanel(currentT);
 
             let ukfX = null, ukfY = null, isUpdate = false;
             let ukfLpfX = null, ukfLpfY = null, isLpfUpdate = false;
@@ -1889,6 +2090,39 @@
                 updateHoverFromMouse(lastMouseEvent);
             }
             drawHoverTooltip();
+        }
+
+        window.receiveReplayData = function(newData) {
+            if (!newData || !newData.x_axis) return;
+            Object.assign(data, newData);
+            imuDebugSamples = decodeImuDebug(data.imuDebug20Hz);
+            anchorsList = data.anchors;
+            gt = data.groundTruth;
+            totalSamples = data.x_axis.length;
+            times = data.times;
+            currentIndex = Math.max(0, Math.min(currentIndex, totalSamples - 1));
+            scrubSlider.max = Math.max(0, totalSamples - 1);
+            updateChains();
+
+            document.getElementById('log_filename').innerText =
+                "Log: " + (data.filename || "ukf_log_data.csv") + " (" + totalSamples + " samples)";
+            const receivedLpfCfg = data.imuLpfConfig || {};
+            document.getElementById('telemetry_lpf_cfg').innerText =
+                `${receivedLpfCfg.enabled === false ? 'OFF' : 'ON'} | fc=${Number.isFinite(receivedLpfCfg.cutoff_hz) ? receivedLpfCfg.cutoff_hz.toFixed(2) : '--'} Hz`;
+
+            updateUI(0.0);
+            drawFrame(0.0);
+        };
+
+        if (typeof BroadcastChannel !== 'undefined') {
+            const replayHandoffChannel = new BroadcastChannel('uwb_replay_handoff_v1');
+            replayHandoffChannel.onmessage = (event) => {
+                if (event.data && event.data.type === 'payload') {
+                    window.receiveReplayData(event.data.payload);
+                    replayHandoffChannel.close();
+                }
+            };
+            replayHandoffChannel.postMessage({ type: 'request' });
         }
 
         // Initialize display

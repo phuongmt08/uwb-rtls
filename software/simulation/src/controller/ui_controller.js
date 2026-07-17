@@ -166,6 +166,38 @@ function openReplayPage() {
     const imuFilterOrderInput = document.getElementById('imu_filter_order_range');
     const isPathCsv = isRecordedPathLog(rawData);
 
+    const compactNumber = (value) => Number.isFinite(value)
+        ? Math.round(value * 1e6) / 1e6
+        : null;
+    const imuDebugSamples = latestSimulationResult.imuDebug20Hz || [];
+    const compactImuDebug = {
+        format: 'compact-v1',
+        biases: imuDebugSamples.length > 0
+            ? [
+                compactNumber(imuDebugSamples[0].bias_ax),
+                compactNumber(imuDebugSamples[0].bias_ay),
+                compactNumber(imuDebugSamples[0].bias_gz)
+            ]
+            : [0, 0, 0],
+        // time, frame code, mode, dt, raw ax/ay/gz, global ax/ay,
+        // raw yaw, UKF yaw, vx, vy
+        rows: imuDebugSamples.map(sample => [
+            compactNumber(sample.time),
+            sample.frame_type === 'Predict' ? 0 : (sample.frame_type === 'Update' ? 1 : 2),
+            sample.mode === 1 ? 1 : 0,
+            compactNumber(sample.dt),
+            compactNumber(sample.ax_raw),
+            compactNumber(sample.ay_raw),
+            compactNumber(sample.gz_raw),
+            compactNumber(sample.ax_global),
+            compactNumber(sample.ay_global),
+            compactNumber(sample.yaw_deg),
+            compactNumber(sample.ukf_yaw_deg),
+            compactNumber(sample.vx),
+            compactNumber(sample.vy)
+        ])
+    };
+
     // Package data for replay
     const replayData = {
         anchors: anchors,
@@ -180,6 +212,7 @@ function openReplayPage() {
         ukfLpfPath20Hz: latestSimulationResult.simPathUKF_lpf,
         ukfModes20Hz: latestSimulationResult.simPathUKF_allModes, // 20Hz: 0=Predict, 1=Update
         ukfTimes20Hz: latestSimulationResult.simPathUKF_allTimes, // 20Hz timestamps
+        imuDebug20Hz: compactImuDebug,
         imuLpfConfig: {
             enabled: enableImuLpfInput ? enableImuLpfInput.checked : true,
             cutoff_hz: imuLpfCutoffInput ? parseFloat(imuLpfCutoffInput.value) : null,
@@ -194,8 +227,50 @@ function openReplayPage() {
         filename: sourceFilename,
         simPageUrl: window.location.pathname
     };
-    localStorage.setItem('uwb_replay_data', JSON.stringify(replayData));
-    window.open('/simulation/trajectory_replay.html', '_blank');
+    // Long logs can exceed localStorage quota. The same-origin opener handoff
+    // is the primary path; localStorage remains useful for refresh/manual open.
+    window.__uwbReplayData = replayData;
+    const serializedReplayData = JSON.stringify(replayData);
+    try {
+        sessionStorage.setItem('uwb_replay_data', serializedReplayData);
+    } catch (error) {
+        console.warn('Replay payload exceeds sessionStorage quota; using window handoff.', error);
+    }
+    try {
+        localStorage.setItem('uwb_replay_data', serializedReplayData);
+    } catch (error) {
+        console.warn('Replay payload exceeds localStorage quota; using opener handoff.', error);
+    }
+
+    if (typeof BroadcastChannel !== 'undefined') {
+        if (window.__uwbReplayChannel) window.__uwbReplayChannel.close();
+        window.__uwbReplayChannel = new BroadcastChannel('uwb_replay_handoff_v1');
+        window.__uwbReplayChannel.onmessage = (event) => {
+            if (event.data && event.data.type === 'request') {
+                window.__uwbReplayChannel.postMessage({ type: 'payload', payload: replayData });
+            }
+        };
+    }
+
+    const replayWindow = window.open('/simulation/trajectory_replay.html', '_blank');
+    if (replayWindow) {
+        let handoffAttempts = 0;
+        const handoffTimer = window.setInterval(() => {
+            handoffAttempts++;
+            try {
+                if (replayWindow.closed) {
+                    window.clearInterval(handoffTimer);
+                } else if (typeof replayWindow.receiveReplayData === 'function') {
+                    replayWindow.receiveReplayData(replayData);
+                    window.clearInterval(handoffTimer);
+                } else if (handoffAttempts >= 100) {
+                    window.clearInterval(handoffTimer);
+                }
+            } catch (error) {
+                if (handoffAttempts >= 100) window.clearInterval(handoffTimer);
+            }
+        }, 100);
+    }
 }
 
 let hasChanges = false;
