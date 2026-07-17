@@ -135,6 +135,8 @@ static double 	s_latest_fp_snr[NUM_ANCHORS] = {0.0};
 static protobuf_anchor_data_t s_latest_anchor_data[pb_arraysize(protobuf_sensor_fusion_result_t, anchors)] = {0};
 static pb_size_t s_latest_anchor_data_count = 0U;
 static uint32_t s_error_count = 0U;
+static uint32_t s_latest_ranging_error_count = 0U;
+static uint32_t s_prefilter_reject_count = 0U;
 static uint8_t 	s_last_selected_anchors_mask = 0U;
 static float 	s_latest_tril_x = 0.0f;
 static float 	s_latest_tril_y = 0.0f;
@@ -190,6 +192,9 @@ static void reset_biquad_filter(imu_biquad_filter_t *filter, float value);
 static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, float dt);
 static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned);
 static void apply_zupt_velocity_constraint(void);
+static bool invert_innovation_covariance(const float32_t covariance[9],
+                                         float32_t inverse[9]);
+static void stabilize_state_covariance(void);
 
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
@@ -671,7 +676,9 @@ void sys_sensor_fusion_clear_latest_anchor_metrics(void)
 
 void sys_sensor_fusion_reset_error(void)
 {
-    s_error_count = 0;
+    s_error_count = 0U;
+    s_latest_ranging_error_count = 0U;
+    s_prefilter_reject_count = 0U;
 }
 
 uint32_t sys_sensor_fusion_get_error_count(void)
@@ -838,9 +845,13 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     stream_data.tril_y_m 			= to_proto_fixed2(s_latest_tril_y);
     stream_data.yaw_deg 			= to_proto_fixed2(sys_sensor_fusion_get_yaw_deg());
     stream_data.anchor_mask 		= s_last_selected_anchors_mask;
-    stream_data.ranging_error_count = s_error_count;
+    stream_data.ranging_error_count =
+        (UINT32_MAX - s_latest_ranging_error_count < s_error_count)
+        ? UINT32_MAX
+        : (s_latest_ranging_error_count + s_error_count);
     stream_data.timestamp_ms 		= HAL_GetTick();
     stream_data.zone_id 			= cfg ? cfg->default_zone_id : 0U;
+    stream_data.prefilter_reject_count = s_prefilter_reject_count;
     stream_data.anchors_count 		= s_latest_anchor_data_count;
     memcpy(stream_data.anchors, s_latest_anchor_data,
     (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));
@@ -1182,15 +1193,14 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
     static float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
     static float32_t K_data[NUM_STATE * NUM_UPDATE_NOISE];
-    static arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
+    static arm_matrix_instance_f32 mat_Pdd_inv, mat_Pxd, mat_K;
     memset(P_dd_inv, 0, sizeof(P_dd_inv));
     memset(K_data, 0, sizeof(K_data));
-    arm_mat_init_f32(&mat_Pdd, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd);
     arm_mat_init_f32(&mat_Pdd_inv, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd_inv);
     arm_mat_init_f32(&mat_Pxd, NUM_STATE, NUM_UPDATE_NOISE, P_xd);
     arm_mat_init_f32(&mat_K, NUM_STATE, NUM_UPDATE_NOISE, K_data);
 
-    if (arm_mat_inverse_f32(&mat_Pdd, &mat_Pdd_inv) != ARM_MATH_SUCCESS) 
+    if (!invert_innovation_covariance(P_dd, P_dd_inv))
     {
         sys_update_err_count++;
         sys_update_inverse_err_count++;
@@ -1233,6 +1243,7 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
 	// 3. Cập nhật P: P = P - K * (P_xd)^T
 	arm_mat_sub_f32(&ukf.mat_P, &mat_K_Pxd_t, &ukf.mat_P);
+    stabilize_state_covariance();
 
     if (p_ukf != NULL) *p_ukf = ukf.state;
 
@@ -1242,6 +1253,78 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
 #endif
 
+}
+
+static bool invert_innovation_covariance(const float32_t covariance[9],
+                                         float32_t inverse[9])
+{
+    static const float32_t jitter_levels[] = {
+        0.0f, 1.0e-6f, 1.0e-5f, 1.0e-4f, MW_UKF_INNOVATION_JITTER_MAX
+    };
+    float32_t symmetric[9];
+    float32_t work[9];
+    arm_matrix_instance_f32 mat_work;
+    arm_matrix_instance_f32 mat_inverse;
+
+    if (covariance == NULL || inverse == NULL) {
+        return false;
+    }
+
+    for (uint8_t row = 0U; row < 3U; row++) {
+        for (uint8_t col = 0U; col < 3U; col++) {
+            float32_t value = 0.5f * (covariance[row * 3U + col]
+                                    + covariance[col * 3U + row]);
+            if (!isfinite(value)) {
+                return false;
+            }
+            symmetric[row * 3U + col] = value;
+        }
+    }
+
+    for (uint8_t attempt = 0U;
+         attempt < (uint8_t)(sizeof(jitter_levels) / sizeof(jitter_levels[0]));
+         attempt++) {
+        memcpy(work, symmetric, sizeof(work));
+        for (uint8_t diagonal = 0U; diagonal < 3U; diagonal++) {
+            work[diagonal * 3U + diagonal] += jitter_levels[attempt];
+        }
+        memset(inverse, 0, 9U * sizeof(inverse[0]));
+        arm_mat_init_f32(&mat_work, 3U, 3U, work);
+        arm_mat_init_f32(&mat_inverse, 3U, 3U, inverse);
+        if (arm_mat_inverse_f32(&mat_work, &mat_inverse) != ARM_MATH_SUCCESS) {
+            continue;
+        }
+
+        bool finite = true;
+        for (uint8_t index = 0U; index < 9U; index++) {
+            if (!isfinite(inverse[index])) {
+                finite = false;
+                break;
+            }
+        }
+        if (finite) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void stabilize_state_covariance(void)
+{
+    for (uint8_t row = 0U; row < NUM_STATE; row++) {
+        for (uint8_t col = (uint8_t)(row + 1U); col < NUM_STATE; col++) {
+            float32_t symmetric = 0.5f * (ukf.P_data[row * NUM_STATE + col]
+                                        + ukf.P_data[col * NUM_STATE + row]);
+            ukf.P_data[row * NUM_STATE + col] = symmetric;
+            ukf.P_data[col * NUM_STATE + row] = symmetric;
+        }
+
+        float32_t *diagonal = &ukf.P_data[row * NUM_STATE + row];
+        if (!isfinite(*diagonal) || *diagonal < MW_UKF_P_DIAGONAL_FLOOR) {
+            *diagonal = MW_UKF_P_DIAGONAL_FLOOR;
+        }
+    }
 }
 
 static float calc_dt(void)
@@ -1457,6 +1540,8 @@ static void reset_runtime_state(void)
     clear_latest_anchor_metrics();
 
     s_error_count = 0U;
+    s_latest_ranging_error_count = 0U;
+    s_prefilter_reject_count = 0U;
     s_last_selected_anchors_mask = 0U;
     s_latest_tril_x = 0.0f;
     s_latest_tril_y = 0.0f;
@@ -1494,6 +1579,23 @@ static void clear_latest_anchor_metrics(void)
 
     memset(s_latest_anchor_data, 0, sizeof(s_latest_anchor_data));
     s_latest_anchor_data_count = 0U;
+}
+
+void sys_sensor_fusion_prefilter_record_reject(void)
+{
+    if (s_prefilter_reject_count < UINT32_MAX) {
+        s_prefilter_reject_count++;
+    }
+}
+
+void sys_sensor_fusion_set_ranging_error_count(uint32_t error_count)
+{
+    s_latest_ranging_error_count = error_count;
+}
+
+void sys_sensor_fusion_capture_ranging_snapshot(const uwb_distance_msg_t *ranging_msg)
+{
+    update_latest_anchor_data_snapshot(ranging_msg, NULL);
 }
 
 static const mw_tril_anchor_t *find_anchor_by_id(const mw_tril_anchor_t *anchors,
@@ -1581,6 +1683,7 @@ static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging
         } else {
             anchor->weight = 0;
         }
+
     }
 }
 

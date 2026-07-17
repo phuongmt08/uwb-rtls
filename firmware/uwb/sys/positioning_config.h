@@ -247,7 +247,14 @@
 /* Transient rejects produce a predict-only frame. Rescue is allowed only
  * after the same anchor has failed this many consecutive gate evaluations. */
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK
-#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  5U
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  2U
+#endif
+
+/* Never rescue an anchor whose spatial innovation is catastrophically far
+ * from the UKF prior.  This keeps controlled rescue from becoming an
+ * unconditional "always force three anchors" policy. */
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_D2_MAX
+#define MAHALANOBIS_PREFILTER_RESCUE_D2_MAX        25.0f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
@@ -385,6 +392,15 @@
 
 #ifndef MW_UKF_R_MAX
 #define MW_UKF_R_MAX            0.25f
+#endif
+
+/* Numerical floors for the small single-precision UKF matrices. */
+#ifndef MW_UKF_INNOVATION_JITTER_MAX
+#define MW_UKF_INNOVATION_JITTER_MAX  1.0e-3f
+#endif
+
+#ifndef MW_UKF_P_DIAGONAL_FLOOR
+#define MW_UKF_P_DIAGONAL_FLOOR      1.0e-8f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_PX

@@ -41,7 +41,6 @@ typedef struct {
     uint8_t id;        /* Anchor ID */
     bool valid;        /* true if measurement is valid */
     double d2_score;   /* Mahalanobis distance squared */
-    double r_adaptive; /* Adaptive covariance */
     double fp_amp_norm;
     double fp_snr;
     double fp_confidence;
