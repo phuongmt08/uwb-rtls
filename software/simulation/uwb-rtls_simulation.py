@@ -296,6 +296,16 @@ def load_ground_truths(payload=None):
 
     return tracks
 
+def convert_imu_accel(ax, ay):
+    """
+    Chuyển đổi ax, ay của IMU sang hệ quy chiếu global dùng cho UKF & Đồ thị
+    Mặc định:
+        ax = -ay_imu
+        ay = -ax_imu
+    Bạn có thể chỉnh sửa hàm này để thay đổi logic đổi hệ trục tọa độ.
+    """
+    return ay, -ax
+
 def parse_log(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         first_line = f.readline().strip()
@@ -348,6 +358,8 @@ def parse_log(filepath):
                         px_fw = tril_x if is_log_cat else (ukf_x if has_fusion_path else tril_x)
                         py_fw = tril_y if is_log_cat else (ukf_y if has_fusion_path else tril_y)
                         
+                        ax_conv, ay_conv = convert_imu_accel(safe_float(fields.get('ax')), safe_float(fields.get('ay')))
+                        
                         data.append({
                             'line_no': line_no,
                             'raw_line': raw_line,
@@ -356,8 +368,8 @@ def parse_log(filepath):
                             'type': status_match.group('type'),
                             'source_format': source_format,
                             'ukf_step': safe_int(fields.get('ukf_step'), 1 if status_match.group('type') == 'Update' else 0),
-                            'ax': safe_float(fields.get('ax')),
-                            'ay': safe_float(fields.get('ay')),
+                            'ax': ax_conv,
+                            'ay': ay_conv,
                             'gz': safe_float(fields.get('gz')),
                             'px_fw': px_fw,
                             'py_fw': py_fw,
@@ -411,13 +423,15 @@ def parse_log(filepath):
                     amp_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in amp_vals]
                     snr_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in snr_vals]
 
+                    ax_conv, ay_conv = convert_imu_accel(float(d['ax']), float(d['ay']))
+
                     data.append({
                         'line_no': line_no,
                         'raw_line': raw_line,
                         'frame_counter': frame_counter,
                         'tx_frame_cnt': tx_frame_cnt,
                         'type': d['type'],
-                        'ax': float(d['ax']), 'ay': float(d['ay']), 'gz': float(d['gz']),
+                        'ax': ax_conv, 'ay': ay_conv, 'gz': float(d['gz']),
                         'px_fw': float(d['px']), 'py_fw': float(d['py']), 'dt': float(d['dt']),
                         'fp_amp_norm': amp_vals,
                         'fp_snr': snr_vals,
@@ -890,6 +904,7 @@ def main():
     # --- AUTO SERVER & BROWSER ---
     PORT = 8000
     MAX_TRIES = 10
+    report_generation_lock = threading.Lock()
 
     class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         def do_GET(self):
@@ -908,25 +923,37 @@ def main():
                 
                 if (
                     os.path.exists(lp)
-                    and os.path.abspath(lp).startswith(data_root + os.sep)
+                    and os.path.abspath(lp).lower().startswith((data_root + os.sep).lower())
                     and classify_csv_log(lp)
                 ):
-                    # Check if it needs regeneration
                     log_mtime = os.path.getmtime(lp)
                     rp = report_path
-                    html_exists = os.path.exists(rp)
-                    html_mtime = os.path.getmtime(rp) if html_exists else 0
-                    
-                    needs_gen = not html_exists or log_mtime > html_mtime or report_source_mtime > html_mtime
-                    
-                    if needs_gen:
+
+                    # Always rebuild only the requested generated report using
+                    # the current source bundles. CSV parsing and simulation
+                    # algorithms are unchanged.
+                    with report_generation_lock:
+                        if os.path.exists(rp):
+                            os.remove(rp)
+                            print(f"[SERVER] Removed stale report: {os.path.basename(rp)}")
+
                         print(f"[SERVER] Generating simulation report on-demand for: {os.path.basename(lp)}")
                         p = run_gen(lp)
                         if p:
+                            current_template = load_template()
+                            current_app_bundle = load_app_js_bundle()
+                            current_worker_bundle = load_worker_js_bundle()
                             os.makedirs(os.path.dirname(rp), exist_ok=True)
                             with open(rp, 'w', encoding='utf-8') as f:
                                 gts = load_ground_truths(p)
-                                f.write(render_template(template_content, os.path.basename(lp), p, gts, app_js_bundle, worker_js_bundle))
+                                f.write(render_template(
+                                    current_template,
+                                    os.path.basename(lp),
+                                    p,
+                                    gts,
+                                    current_app_bundle,
+                                    current_worker_bundle,
+                                ))
                             print(f"[SERVER] Successfully generated: {os.path.basename(rp)}")
                             
                             # Update the metadata cache
