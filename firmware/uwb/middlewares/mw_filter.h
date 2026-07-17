@@ -18,7 +18,7 @@ typedef struct {
     uint8_t index;
 } median_filter_1d_t;
 
-#define UKF_INIT_SAMPLES 50
+#define UKF_INIT_SAMPLES 20
 #define UKF_INIT_DISCARD_SAMPLES 10
 
 typedef struct {

@@ -58,6 +58,7 @@
 
 #define TEST_UKF_STREAM_MASK_PACKET_COUNT  50U
 #define TEST_UKF_STREAM_ANCHOR_COUNT       4U
+#define SYS_FUSION_PREDICT_TIMEOUT_MS      2000U
 
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
@@ -92,6 +93,7 @@ typedef struct
 	bool initialized;
 	bool has_predict_tick;
 	uint32_t last_predict_tick;
+	uint32_t last_update_tick;
 
 } ukf_core_t;
 
@@ -186,7 +188,7 @@ static void reset_imu_conditioner(void);
 static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt);
 static void reset_biquad_filter(imu_biquad_filter_t *filter, float value);
 static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, float dt);
-static void update_zupt_state(const bsp_imu_data    _t *raw, const bsp_imu_data_t *conditioned);
+static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned);
 static void apply_zupt_velocity_constraint(void);
 
 /* Function definitions ----------------------------------------------- */
@@ -215,8 +217,8 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 
 	memset(&ukf, 0, sizeof(ukf));
 	yaw = 0.0f;
-	ukf.state.b_ax = imu_bias.bias_ax;
-	ukf.state.b_ay = imu_bias.bias_ay;
+	ukf.state.b_ax = -imu_bias.bias_ay;
+	ukf.state.b_ay = imu_bias.bias_ax;
 	ukf.state.b_gz = imu_bias.bias_gz;
 	b_gz_t = imu_bias.bias_gz;
 
@@ -273,6 +275,7 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
     ukf.initialized = false;
     ukf.has_predict_tick = false;
     ukf.last_predict_tick = 0U;
+    ukf.last_update_tick = 0U;
     sys_sensor_fusion_clear_update_flag();
     sys_sensor_fusion_clear_predict_flag();
     reset_runtime_state();
@@ -288,6 +291,16 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
 {
 	CHECK_ERR(p_ukf != NULL, SYS_SENSOR_FUSION_ERR);
 
+    if (ukf.initialized && ukf.last_update_tick != 0U)
+    {
+        if (HAL_GetTick() - ukf.last_update_tick > SYS_FUSION_PREDICT_TIMEOUT_MS)
+        {
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Predict timeout (> %u ms) without update. Disabling predict.", SYS_FUSION_PREDICT_TIMEOUT_MS);
+            sys_sensor_fusion_clear_predict_flag();
+            return SYS_SENSOR_FUSION_OK;
+        }
+    }
+
     if (g_imu_data_queue == NULL) {
         return SYS_SENSOR_FUSION_OK;
     }
@@ -295,7 +308,11 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
     bsp_imu_data_t temp_imu;
     bool has_imu = false;
     while (osMessageQueueGet(g_imu_data_queue, &temp_imu, NULL, 0U) == osOK) {
-        ukf.imu_current = temp_imu;
+        // Chuyển đổi hệ tọa độ
+         ukf.imu_current.ax = -temp_imu.ay;
+         ukf.imu_current.ay = temp_imu.ax;
+         ukf.imu_current.gz = temp_imu.gz;
+//        ukf.imu_current = temp_imu;
         has_imu = true;
     }
 
@@ -589,6 +606,7 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
         sys_sensor_fusion_set_initial_position(p_ukf, init_x, init_y);
         sys_sensor_fusion_set_predict_flag();
+        ukf.last_update_tick = HAL_GetTick();
        ukf.state.theta = yaw_rad_cached;
        yaw             = yaw_rad_cached;
         return true;
@@ -632,6 +650,9 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                         selected_anchor_ids) != SYS_SENSOR_FUSION_OK) {
         return false;
     }
+
+    ukf.last_update_tick = HAL_GetTick();
+    sys_sensor_fusion_set_predict_flag();
 
     sys_sensor_fusion_stream_uart(UKF_STEP_UPDATE);
 

@@ -372,7 +372,7 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_QG
-#define SYS_FUSION_UKF_QG      (4.066e-5f)
+#define SYS_FUSION_UKF_QG      1.0e-10f
 #endif
 
 #ifndef SYS_FUSION_UKF_R_UWB
@@ -408,11 +408,11 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_BIAS_AX
-#define SYS_FUSION_UKF_INIT_P_BIAS_AX   1.0e-8f
+#define SYS_FUSION_UKF_INIT_P_BIAS_AX   0.001f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_BIAS_AY
-#define SYS_FUSION_UKF_INIT_P_BIAS_AY   1.0e-8f
+#define SYS_FUSION_UKF_INIT_P_BIAS_AY   0.001f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_BIAS_GZ
@@ -440,7 +440,7 @@
 #ifndef SYS_FUSION_IMU_ZUPT_ENABLE
 /* Diagnostic bypass: do not force velocity/acceleration to zero while
  * comparing the UKF prediction and UWB correction paths. */
-#define SYS_FUSION_IMU_ZUPT_ENABLE              0
+#define SYS_FUSION_IMU_ZUPT_ENABLE              1
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_ACC_THRESHOLD
@@ -456,7 +456,7 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE
-#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 0
+#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 25
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_VEL_VARIANCE
