@@ -44,7 +44,7 @@ MAIN_WINDOW_MIN_WIDTH = 1200
 MAIN_WINDOW_MIN_HEIGHT = 800
 POPUP_WIDTH = 600
 POPUP_HEIGHT = 500
-CANVAS_FPS = 30                 # Position canvas refresh rate
+CANVAS_FPS = 60                 # Position canvas refresh rate
 
 # ── Polling Intervals (ms) ────────────────────────────────────────
 POLL_BATTERY_MS = 30000         # 30s

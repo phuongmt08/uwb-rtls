@@ -1,5 +1,6 @@
 import logging
 import math
+from collections import deque
 
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer, QPointF, QEvent
@@ -128,7 +129,14 @@ class Geofence3DWidget(QWidget):
         self._ground_truths = []
         self._tag_position = [0.0, 0.0, 0.0]
         self._tag_yaw = 0.0
-        self._trail_points = []
+        self._trail_points = deque(maxlen=600)
+        self._render_dirty = False
+        self._trail_dirty = False
+        self._target_render_fps = 60
+        self._render_timer = QTimer(self)
+        self._render_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._render_timer.setInterval(max(1, int(1000 / self._target_render_fps)))
+        self._render_timer.timeout.connect(self._flush_render_update)
         self._zone_items = []
         self._anchor_items = []
         self._ground_truth_items = []
@@ -796,6 +804,11 @@ class Geofence3DWidget(QWidget):
         self.gl_widget.addItem(scatter)
         self._anchor_items.append(scatter)
 
+    def set_render_fps(self, fps: int):
+        self._target_render_fps = max(30, min(120, int(fps or 60)))
+        if hasattr(self, "_render_timer"):
+            self._render_timer.setInterval(max(1, int(1000 / self._target_render_fps)))
+
     def update_position(self, position):
         self._tag_position = [
             float(position.get("x", 0.0)),
@@ -803,17 +816,28 @@ class Geofence3DWidget(QWidget):
             float(position.get("z", 0.0)),
         ]
         self._tag_yaw = float(position.get("yaw", self._tag_yaw))
-        if not self.gl_widget:
+        self._trail_points.append(tuple(self._tag_position))
+        self._render_dirty = True
+        self._trail_dirty = True
+        if self.gl_widget and not self._render_timer.isActive():
+            self._render_timer.start()
+
+    def _flush_render_update(self):
+        if hasattr(self, "_render_timer"):
+            self._render_timer.stop()
+        if not self.gl_widget or not self._render_dirty:
             return
+        self._render_dirty = False
         self._update_tag_arrow()
-        self._trail_points.append(list(self._tag_position))
-        if len(self._trail_points) > 100:
-            self._trail_points.pop(0)
-        self.tag_trail.setData(pos=np.array(self._trail_points, dtype=float))
+        if self._trail_dirty:
+            self._trail_dirty = False
+            points = self._trail_points or [tuple(self._tag_position)]
+            self.tag_trail.setData(pos=np.array(points, dtype=float))
         self.gl_widget.update()
 
     def clear_trail(self):
         self._trail_points.clear()
+        self._trail_dirty = True
         if self.gl_widget:
             self.tag_trail.setData(pos=np.array([self._tag_position], dtype=float))
 

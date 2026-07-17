@@ -2237,6 +2237,20 @@ class DeviceModel(QObject):
             self._emit_connection_progress(100, f"Already connected to {name or mac_hex}.", status=JobState.SUCCESS)
             return
 
+        if self._connection_status == "Connecting":
+            active_mac = self._pending_connect_mac or self._connected_mac or "-"
+            log.info(
+                "Connect request ignored while BLE connect is in progress: active=%s requested=%s",
+                active_mac,
+                mac_hex,
+            )
+            self._emit_connection_progress(
+                35,
+                f"Connect in progress for {self._pending_connect_name or active_mac}; wait before switching to {name or mac_hex}.",
+                phase="connecting",
+                status=JobState.RUNNING,
+            )
+            return
 
         if self._pending_connect_mac != mac_hex:
             self._reset_connect_attempts()
