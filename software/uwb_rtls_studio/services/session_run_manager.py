@@ -38,6 +38,10 @@ class SessionRunManager(QObject):
         self.device_info_vm = device_info_vm
         self.ranging_model = ranging_model
         self.log_model = log_model
+        self._active_ranging_record: dict[str, Any] | None = None
+        self._recorded_sensor_fusion_seqs: set[int] = set()
+        if self.ranging_model and hasattr(self.ranging_model, "session_sample_recorded"):
+            self.ranging_model.session_sample_recorded.connect(self._on_ranging_sample_recorded)
 
     @property
     def session_id(self) -> str:
@@ -52,8 +56,19 @@ class SessionRunManager(QObject):
         return session_id
 
     def open_ranging_run(self) -> StreamRunState:
-        self.ensure_session()
+        session_id = self.ensure_session()
         run = self.session_model.open_ranging_run()
+        if not self._active_ranging_record or self._active_ranging_record.get("run_index") != run.index:
+            meta = self._run_open_meta(run)
+            record = self.session_repository.begin_ranging_run(session_id, run.index, meta=meta)
+            self._active_ranging_record = {
+                "session_id": session_id,
+                "run_index": run.index,
+                "path": record.get("path", ""),
+                "files": [record.get("filename", "")] if record.get("filename") else [],
+                "sample_count": 0,
+            }
+            self._recorded_sensor_fusion_seqs.clear()
         self._persist_session_meta()
         return run
 
@@ -64,18 +79,33 @@ class SessionRunManager(QObject):
         if not run:
             return session_id, []
 
-        positions = self._collect_positions()
-        fusion = self._collect_fusion_positions()
         meta = self._run_base_meta(run, "SESSION_END_REASON_RANGING_RESULTS")
-        files = self.session_repository.save_ranging_run(
-            session_id,
-            run.index,
-            positions=positions,
-            fusion_positions=fusion,
-            meta=meta,
-        )
+        record = self._active_ranging_record
+        if record and record.get("session_id") == session_id and int(record.get("run_index", 0) or 0) == run.index:
+            files = self.session_repository.finalize_ranging_run(
+                session_id,
+                run.index,
+                files=record.get("files", []),
+                meta=meta,
+                sample_count=int(record.get("sample_count", 0) or 0),
+            )
+            sample_count = int(record.get("sample_count", 0) or 0)
+            self._active_ranging_record = None
+            self._recorded_sensor_fusion_seqs.clear()
+        else:
+            positions = self._collect_positions()
+            fusion = self._collect_fusion_positions()
+            files = self.session_repository.save_ranging_run(
+                session_id,
+                run.index,
+                positions=positions,
+                fusion_positions=fusion,
+                meta=meta,
+            )
+            sample_count = max(len(positions or []), len(fusion or []))
+
         self.session_model.close_ranging_run(
-            sample_count=max(len(positions or []), len(fusion or [])),
+            sample_count=sample_count,
             files=files,
             end_reason="SESSION_END_REASON_RANGING_RESULTS",
         )
@@ -176,6 +206,47 @@ class SessionRunManager(QObject):
             return
         meta["statistics"] = self._collect_statistics()
         self.session_repository.ensure_session(meta)
+
+    def _run_open_meta(self, run: StreamRunState) -> dict:
+        return {
+            "run_id": run.run_id,
+            "stream_type": run.stream_type,
+            "index": run.index,
+            "start_time_iso": run.started_at.isoformat(),
+            "end_time_iso": "",
+            "duration_sec": 0.0,
+            "end_reason": "",
+            "device_key": run.device_key,
+        }
+
+    def _on_ranging_sample_recorded(self, sample: dict) -> None:
+        record = self._active_ranging_record
+        if not record or not self.session_model.active_run("ranging"):
+            return
+        if not isinstance(sample, dict):
+            return
+        if str(sample.get("source", "") or "") != "sensor_fusion":
+            return
+
+        seq = int(sample.get("seq", 0) or 0)
+        if seq > 0:
+            if seq in self._recorded_sensor_fusion_seqs:
+                return
+            self._recorded_sensor_fusion_seqs.add(seq)
+
+        self._append_ranging_record(sample.copy())
+
+    def _append_ranging_record(self, sample: dict) -> None:
+        record = self._active_ranging_record
+        if not record:
+            return
+        next_index = int(record.get("sample_count", 0) or 0) + 1
+        self.session_repository.append_ranging_run_sample(
+            str(record.get("path", "")),
+            sample,
+            next_index,
+        )
+        record["sample_count"] = next_index
 
     def _run_base_meta(self, run: StreamRunState, end_reason: str) -> dict:
         now = datetime.now()

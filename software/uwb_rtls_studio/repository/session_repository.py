@@ -541,6 +541,80 @@ class SessionRepository:
         self._upsert_index_entry(self._build_index_entry(normalized_meta, session_folder))
         return session_id
 
+    @staticmethod
+    def _run_start_datetime(meta: dict | None = None) -> datetime:
+        raw_value = str((meta or {}).get("start_time_iso", "") or "").strip()
+        if raw_value:
+            try:
+                return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        return datetime.now()
+
+    def _ranging_run_filename(self, run_index: int, meta: dict | None = None) -> str:
+        start_dt = self._run_start_datetime(meta)
+        return f"{start_dt.strftime('%H-%M-%S')}_ranging_{int(run_index):03d}.csv"
+
+    def begin_ranging_run(self, session_id: str, run_index: int, meta: dict | None = None) -> dict:
+        session_meta = self.get_session_meta(session_id)
+        storage = self._ensure_session_storage(session_id, session_meta)
+        run_dir = self._run_dir_from_storage(storage)
+        os.makedirs(run_dir, exist_ok=True)
+
+        filename = self._ranging_run_filename(run_index, meta)
+        path = os.path.join(run_dir, filename)
+        if not os.path.exists(path):
+            with open(path, "w", newline="", encoding="utf-8"):
+                pass
+
+        run_meta = dict(meta or {})
+        run_meta.update({
+            "stream_type": "ranging",
+            "index": int(run_index),
+            "files": [filename],
+            "storage": storage.copy(),
+            "data_source": "sensor_fusion_result",
+            "sample_count": int(run_meta.get("sample_count", 0) or 0),
+            "active": True,
+        })
+        self.append_or_update_run_meta(session_id, run_meta)
+        return {"filename": filename, "path": path, "storage": storage.copy()}
+
+    def append_ranging_run_sample(self, path: str, sample: dict, index: int) -> None:
+        if not path:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerow([self._build_position_text_record(sample, index)])
+
+    def finalize_ranging_run(
+        self,
+        session_id: str,
+        run_index: int,
+        files: list[str] | None = None,
+        meta: dict | None = None,
+        sample_count: int = 0,
+    ) -> list[str]:
+        session_meta = self.get_session_meta(session_id)
+        storage = self._ensure_session_storage(session_id, session_meta)
+        run_dir = self._run_dir_from_storage(storage)
+        resolved_files = list(files or [])
+        for filename in resolved_files:
+            self._mirror_browser_file(os.path.join(run_dir, filename), "ranging", session_id)
+
+        run_meta = dict(meta or {})
+        run_meta.update({
+            "stream_type": "ranging",
+            "index": int(run_index),
+            "files": resolved_files,
+            "storage": storage.copy(),
+            "data_source": "sensor_fusion_result",
+            "sample_count": int(sample_count or 0),
+            "active": False,
+        })
+        self.append_or_update_run_meta(session_id, run_meta)
+        return resolved_files
+
     def save_ranging_run(
         self,
         session_id: str,
@@ -557,7 +631,7 @@ class SessionRepository:
         files: list[str] = []
         merged = self._merge_positions(positions, fusion_positions)
         if merged:
-            filename = f"ranging_{run_index:03d}.csv"
+            filename = self._ranging_run_filename(run_index, meta)
             path = os.path.join(run_dir, filename)
             self._write_positions_csv(path, merged)
             self._mirror_browser_file(path, "ranging", session_id)
@@ -1031,7 +1105,9 @@ class SessionRepository:
         distances = [self._distance_m(pos, i, distances_by_anchor) for i in range(1, 5)]
         weights = [self._weight_raw(pos, i, weights_by_anchor) for i in range(1, 5)]
 
-        status = str(pos.get("status") or "Update")
+        status = str(pos.get("status") or "").strip()
+        if not status:
+            status = "Update" if self._value_int(pos.get("ukf_step", 0)) == 1 else "Predict"
         dt = self._value_float(pos.get("dt", 0.0))
         update_dt = dt if status in ("Init", "Update") else 0.0
         predict_dt = dt if status == "Predict" else 0.0

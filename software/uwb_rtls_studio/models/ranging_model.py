@@ -91,6 +91,7 @@ RANGING_STATS_EMIT_INTERVAL_S = 0.20
 class RangingModel(QObject):
     position_updated = pyqtSignal(float, float, float, float) # x, y, z, rms
     sensor_fusion_updated = pyqtSignal(dict)
+    session_sample_recorded = pyqtSignal(dict)
     calib_data_updated = pyqtSignal(dict)
     anchor_distances_updated = pyqtSignal(list)
     stats_updated = pyqtSignal(dict)
@@ -600,6 +601,7 @@ class RangingModel(QObject):
 
         self._last_fusion_sample = enriched.copy()
         self._fusion_history.append(enriched.copy())
+        self.session_sample_recorded.emit(enriched.copy())
         now = enriched.get("received_at", time.time())
         self._stats["total_count"] = int(self._stats.get("total_count", 0)) + 1
         self._stats["success_count"] = int(self._stats.get("success_count", 0)) + 1
