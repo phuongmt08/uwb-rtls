@@ -113,14 +113,17 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
     import repository.session_repository as session_repository_module
     from repository.session_repository import SessionRepository
     from services.session_run_manager import SessionRunManager
+    from simulation.module.module_csv import parse_csv_data
 
     data_root = tmp_path / "data"
+    shared_data_root = tmp_path / "shared_data"
     sessions_dir = data_root / "sessions"
     store_dir = data_root / "session_store"
     hot_dir = store_dir / "hot"
     archive_dir = store_dir / "archive"
     browser_dir = data_root / "session_browser"
     monkeypatch.setattr(session_repository_module, "DATA_DIR", str(data_root))
+    monkeypatch.setattr(session_repository_module, "SHARED_DATA_DIR", str(shared_data_root))
     monkeypatch.setattr(session_repository_module, "SESSIONS_DIR", str(sessions_dir))
     monkeypatch.setattr(session_repository_module, "INDEX_FILE", str(sessions_dir / "index.json"))
     monkeypatch.setattr(session_repository_module, "SESSION_STORE_DIR", str(store_dir))
@@ -146,10 +149,10 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
     manager = SessionRunManager(session_model, repo, ranging_model=ranging_model)
 
     manager.open_ranging_run()
-    for seq in range(1, 301):
+    for seq in range(1, 1201):
         ranging_model.session_sample_recorded.emit({
             "source": "sensor_fusion",
-            "seq": seq,
+            "seq": ((seq - 1) % 255) + 1,
             "timestamp_ms": seq * 100,
             "received_at": 1000.5 + seq,
             "ukf_step": 1 if seq % 3 == 0 else 0,
@@ -177,12 +180,20 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
 
     record_path = os.path.join(repo.get_session_storage_folder(session_id), files[0])
     rows = open(record_path, "r", encoding="utf-8").read().splitlines()
-    assert len(rows) == 300
+    assert len(rows) == 1200
     assert "Update" in rows[-1]
     assert "| ukf_x:" in rows[-1]
-    assert "| d1:  1.300000" in rows[-1]
+    assert "| d1:  2.200000" in rows[-1]
     assert "| w1: 90" in rows[-1]
 
+    studio_exports = list((shared_data_root / "studio").glob("*/*_sensor_fusion_result.csv"))
+    assert len(studio_exports) == 1
+    assert "g" in studio_exports[0].name and studio_exports[0].name.endswith("_sensor_fusion_result.csv")
+    studio_rows = studio_exports[0].read_text(encoding="utf-8").splitlines()
+    assert len(studio_rows) == 1200
+    assert studio_rows[-1] == rows[-1]
+    assert len(parse_csv_data(str(studio_exports[0]))) == 1200
+
     runs = repo.list_session_runs(session_id, "ranging")
-    assert runs[0]["sample_count"] == 300
+    assert runs[0]["sample_count"] == 1200
     assert runs[0]["files"] == files
