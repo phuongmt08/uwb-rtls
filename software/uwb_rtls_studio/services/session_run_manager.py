@@ -39,7 +39,6 @@ class SessionRunManager(QObject):
         self.ranging_model = ranging_model
         self.log_model = log_model
         self._active_ranging_record: dict[str, Any] | None = None
-        self._recorded_sensor_fusion_seqs: set[int] = set()
         if self.ranging_model and hasattr(self.ranging_model, "session_sample_recorded"):
             self.ranging_model.session_sample_recorded.connect(self._on_ranging_sample_recorded)
 
@@ -65,10 +64,11 @@ class SessionRunManager(QObject):
                 "session_id": session_id,
                 "run_index": run.index,
                 "path": record.get("path", ""),
+                "export_path": self.session_repository.begin_sensor_fusion_result_export(meta),
                 "files": [record.get("filename", "")] if record.get("filename") else [],
                 "sample_count": 0,
             }
-            self._recorded_sensor_fusion_seqs.clear()
+
         self._persist_session_meta()
         return run
 
@@ -91,7 +91,7 @@ class SessionRunManager(QObject):
             )
             sample_count = int(record.get("sample_count", 0) or 0)
             self._active_ranging_record = None
-            self._recorded_sensor_fusion_seqs.clear()
+
         else:
             positions = self._collect_positions()
             fusion = self._collect_fusion_positions()
@@ -228,12 +228,6 @@ class SessionRunManager(QObject):
         if str(sample.get("source", "") or "") != "sensor_fusion":
             return
 
-        seq = int(sample.get("seq", 0) or 0)
-        if seq > 0:
-            if seq in self._recorded_sensor_fusion_seqs:
-                return
-            self._recorded_sensor_fusion_seqs.add(seq)
-
         self._append_ranging_record(sample.copy())
 
     def _append_ranging_record(self, sample: dict) -> None:
@@ -243,6 +237,11 @@ class SessionRunManager(QObject):
         next_index = int(record.get("sample_count", 0) or 0) + 1
         self.session_repository.append_ranging_run_sample(
             str(record.get("path", "")),
+            sample,
+            next_index,
+        )
+        self.session_repository.append_sensor_fusion_result_export_sample(
+            str(record.get("export_path", "")),
             sample,
             next_index,
         )

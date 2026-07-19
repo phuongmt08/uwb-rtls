@@ -555,6 +555,37 @@ class SessionRepository:
         start_dt = self._run_start_datetime(meta)
         return f"{start_dt.strftime('%H-%M-%S')}_ranging_{int(run_index):03d}.csv"
 
+    def _sensor_fusion_result_export_filename(self, meta: dict | None = None) -> str:
+        start_dt = self._run_start_datetime(meta)
+        return f"{start_dt.strftime('%Y%m%d_%Hg%Mp')}_sensor_fusion_result.csv"
+
+    def begin_sensor_fusion_result_export(self, meta: dict | None = None) -> str:
+        start_dt = self._run_start_datetime(meta)
+        output_dir = os.path.join(SHARED_DATA_DIR, "studio", start_dt.strftime("%d_%m_%y"))
+        os.makedirs(output_dir, exist_ok=True)
+        filename = self._sensor_fusion_result_export_filename(meta)
+        path = os.path.join(output_dir, filename)
+        if os.path.exists(path):
+            prefix = filename[: -len("_sensor_fusion_result.csv")]
+            for suffix in range(1, 1000):
+                candidate = os.path.join(
+                    output_dir,
+                    f"{prefix}_{start_dt.strftime('%H%M%S')}_{suffix:03d}_sensor_fusion_result.csv",
+                )
+                if not os.path.exists(candidate):
+                    path = candidate
+                    break
+        with open(path, "w", newline="", encoding="utf-8"):
+            pass
+        return path
+
+    def append_sensor_fusion_result_export_sample(self, path: str, sample: dict, index: int) -> None:
+        if not path:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerow([self._build_position_text_record(sample, index)])
+
     def begin_ranging_run(self, session_id: str, run_index: int, meta: dict | None = None) -> dict:
         session_meta = self.get_session_meta(session_id)
         storage = self._ensure_session_storage(session_id, session_meta)
