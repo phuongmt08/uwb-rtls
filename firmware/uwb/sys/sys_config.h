@@ -77,7 +77,7 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            37     /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            42     /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
@@ -87,7 +87,7 @@ typedef struct
 #define DEFAULT_RX_TIMEOUT_MS     60
 #define DEFAULT_UWB_CHANNEL       4
 #define DEFAULT_UWB_PRF           64
-#define DEFAULT_UWB_DATA_RATE     2 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
+#define DEFAULT_UWB_DATA_RATE     1 /* 0=110kbps, 1=850kbps, 2=6.8Mbps */
 #define DEFAULT_ZONE_1_PREAMBLE_CODE 17
 #define DEFAULT_ZONE_2_PREAMBLE_CODE 18
 #define DEFAULT_ZONE_3_PREAMBLE_CODE 19

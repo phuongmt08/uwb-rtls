@@ -438,7 +438,7 @@
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_ENABLE
 /* Diagnostic bypass: keep raw IMU samples unchanged while isolating the
  * UKF-to-trilateration position offset. */
-#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       0
+#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       1
 #endif
 
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ

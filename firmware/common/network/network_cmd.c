@@ -1743,10 +1743,10 @@ bool network_send_ble_adv_config_set(network_core_t *stream, uint8_t dst, bool e
         pkt.params.ble_adv_config_set.device_name[sizeof(pkt.params.ble_adv_config_set.device_name) - 1] = '\0';
     }
 
-    RLOG_I(OBJECT_CODE, "Send BLE adv config dst=0x%02X enable=%d name=%s",
-           (unsigned)dst,
-           (int)pkt.params.ble_adv_config_set.enable,
-           pkt.params.ble_adv_config_set.device_name);
+    // RLOG_D(OBJECT_CODE, "Send BLE adv config dst=0x%02X enable=%d name=%s",
+    //        (unsigned)dst,
+    //        (int)pkt.params.ble_adv_config_set.enable,
+    //        pkt.params.ble_adv_config_set.device_name);
 
     return network_core_send_packet(stream, dst, &pkt);
 }

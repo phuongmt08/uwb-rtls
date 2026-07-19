@@ -125,7 +125,7 @@ const osThreadAttr_t SensorFusion_attributes = {
 osThreadId_t NetworkHandle;
 const osThreadAttr_t Network_attributes = {
   .name = "Network",
-  .stack_size = 768 * 4,
+  .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for SysMonitoring */
