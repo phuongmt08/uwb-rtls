@@ -127,6 +127,9 @@ typedef struct
 {
     float ax;
     float ay;
+    float az;
+    float gx;
+    float gy;
     float gz;
 } bsp_imu_data_t;
 
@@ -134,6 +137,9 @@ typedef struct
 {
     float bias_ax;
     float bias_ay;
+    float bias_az;
+    float bias_gx;
+    float bias_gy;
     float bias_gz;
 } bsp_imu_bias_t;
 

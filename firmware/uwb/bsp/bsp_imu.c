@@ -95,6 +95,9 @@ bsp_imu_err_t bsp_imu_get_raw_data(bsp_imu_data_t *p_imu_data)
 
 	p_imu_data->ax = raw_data.accel.x * GRAVITY;
 	p_imu_data->ay = raw_data.accel.y * GRAVITY;
+	p_imu_data->az = raw_data.accel.z * GRAVITY;
+	p_imu_data->gx = raw_data.gyro.x * DEG2RAD;
+	p_imu_data->gy = raw_data.gyro.y * DEG2RAD;
 	p_imu_data->gz = raw_data.gyro.z * DEG2RAD;
 	s_cached_temp = raw_data.temp;
 
@@ -112,6 +115,9 @@ bsp_imu_err_t bsp_imu_get_bias_data(bsp_imu_bias_t *p_bias)
 
 	p_bias->bias_ax = calib_data.accel_offset.x * GRAVITY;
 	p_bias->bias_ay = calib_data.accel_offset.y * GRAVITY;
+	p_bias->bias_az = calib_data.accel_offset.z * GRAVITY;
+	p_bias->bias_gx = calib_data.gyro_offset.x * DEG2RAD;
+	p_bias->bias_gy = calib_data.gyro_offset.y * DEG2RAD;
 	p_bias->bias_gz = calib_data.gyro_offset.z * DEG2RAD;
 
 	return BSP_IMU_OK;

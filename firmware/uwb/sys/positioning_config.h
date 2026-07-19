@@ -441,6 +441,29 @@
 #define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       1
 #endif
 
+/* Estimate roll/pitch from the complete 6-axis IMU and remove gravity before
+ * the planar UKF. The output remains in the yaw-free, levelled body frame;
+ * sys_sensor_fusion_predict() still performs the body-to-world yaw rotation. */
+#ifndef SYS_FUSION_IMU_PREFILTER_ENABLE
+#define SYS_FUSION_IMU_PREFILTER_ENABLE          1
+#endif
+
+#ifndef SYS_FUSION_IMU_GRAVITY_MPS2
+#define SYS_FUSION_IMU_GRAVITY_MPS2              9.80665f
+#endif
+
+/* Larger values trust gyro integration for longer and reject sustained
+ * translational acceleration more strongly. */
+#ifndef SYS_FUSION_IMU_ATTITUDE_TIME_CONSTANT_S
+#define SYS_FUSION_IMU_ATTITUDE_TIME_CONSTANT_S  1.5f
+#endif
+
+/* Accelerometer attitude correction fades to zero when |norm(a)-g| reaches
+ * this value. */
+#ifndef SYS_FUSION_IMU_ATTITUDE_ACC_TOLERANCE
+#define SYS_FUSION_IMU_ATTITUDE_ACC_TOLERANCE    1.5f
+#endif
+
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ
 #define SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ    0.5f
 #endif
@@ -450,7 +473,7 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN
-#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    25.0f
+#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    0.95f
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_ENABLE
@@ -472,7 +495,7 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE
-#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 25
+#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 1
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_VEL_VARIANCE
