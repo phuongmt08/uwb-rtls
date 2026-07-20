@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from typing import Tuple
 
 # TXT
-OUTPUT_TXT_ENABLED = True
+OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:/HOC/S/STM32/IDE/DATN/uwb-rtls/software/data/11_07_26/20260711_14g59p_ukf_log_data.csv"
+SOURCE_DATA_FILE = r"D:/HOC/S/STM32/IDE/DATN/uwb-rtls/software/data/scripts/18_07_26/20260718_17g39p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ TEST_UKF_Q_R_Params = False
 ANCHOR_1_X = 0.7
 ANCHOR_1_Y = 0.03
 
-ANCHOR_2_X = 2.70
+ANCHOR_2_X = 2.7
 ANCHOR_2_Y = 8.37
 
 ANCHOR_3_X = 7.5
@@ -69,8 +69,8 @@ P_PY = 0.1
 P_VX = 0.1
 P_VY = 0.1
 P_THETA = 1e-10
-P_BAX = 1e-05
-P_BAY = 1e-05
+P_BAX = 0.1
+P_BAY = 0.1
 P_BGZ = 1e-10
 
 INITIAL_P = np.diag([
@@ -86,9 +86,9 @@ Q_G_TEST = np.deg2rad(2)**2
 R_UWB_TEST = 0.1**2
 
 # MANUAL values (Editable from GUI else block)
-Q_A_MANUAL = 0.08
-Q_G_MANUAL = 4.78e-07
-R_UWB_MANUAL = 0.009
+Q_A_MANUAL = 0.04
+Q_G_MANUAL = 1e-10
+R_UWB_MANUAL = 0.01
 
 # Logic to select final values
 if TEST_UKF_Q_R_Params:

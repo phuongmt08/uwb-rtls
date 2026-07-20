@@ -247,7 +247,14 @@
 /* Transient rejects produce a predict-only frame. Rescue is allowed only
  * after the same anchor has failed this many consecutive gate evaluations. */
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK
-#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  5U
+#define MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK  2U
+#endif
+
+/* Never rescue an anchor whose spatial innovation is catastrophically far
+ * from the UKF prior.  This keeps controlled rescue from becoming an
+ * unconditional "always force three anchors" policy. */
+#ifndef MAHALANOBIS_PREFILTER_RESCUE_D2_MAX
+#define MAHALANOBIS_PREFILTER_RESCUE_D2_MAX        25.0f
 #endif
 
 #ifndef MAHALANOBIS_PREFILTER_RESCUE_NOISE_SCALE_MIN
@@ -387,6 +394,15 @@
 #define MW_UKF_R_MAX            0.25f
 #endif
 
+/* Numerical floors for the small single-precision UKF matrices. */
+#ifndef MW_UKF_INNOVATION_JITTER_MAX
+#define MW_UKF_INNOVATION_JITTER_MAX  1.0e-3f
+#endif
+
+#ifndef MW_UKF_P_DIAGONAL_FLOOR
+#define MW_UKF_P_DIAGONAL_FLOOR      1.0e-8f
+#endif
+
 #ifndef SYS_FUSION_UKF_INIT_P_PX
 #define SYS_FUSION_UKF_INIT_P_PX        0.1f
 #endif
@@ -422,7 +438,30 @@
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_ENABLE
 /* Diagnostic bypass: keep raw IMU samples unchanged while isolating the
  * UKF-to-trilateration position offset. */
-#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       0
+#define SYS_FUSION_IMU_BUTTERWORTH_ENABLE       1
+#endif
+
+/* Estimate roll/pitch from the complete 6-axis IMU and remove gravity before
+ * the planar UKF. The output remains in the yaw-free, levelled body frame;
+ * sys_sensor_fusion_predict() still performs the body-to-world yaw rotation. */
+#ifndef SYS_FUSION_IMU_PREFILTER_ENABLE
+#define SYS_FUSION_IMU_PREFILTER_ENABLE          1
+#endif
+
+#ifndef SYS_FUSION_IMU_GRAVITY_MPS2
+#define SYS_FUSION_IMU_GRAVITY_MPS2              9.80665f
+#endif
+
+/* Larger values trust gyro integration for longer and reject sustained
+ * translational acceleration more strongly. */
+#ifndef SYS_FUSION_IMU_ATTITUDE_TIME_CONSTANT_S
+#define SYS_FUSION_IMU_ATTITUDE_TIME_CONSTANT_S  1.5f
+#endif
+
+/* Accelerometer attitude correction fades to zero when |norm(a)-g| reaches
+ * this value. */
+#ifndef SYS_FUSION_IMU_ATTITUDE_ACC_TOLERANCE
+#define SYS_FUSION_IMU_ATTITUDE_ACC_TOLERANCE    1.5f
 #endif
 
 #ifndef SYS_FUSION_IMU_BUTTERWORTH_CUTOFF_HZ
@@ -434,7 +473,7 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN
-#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    25.0f
+#define SYS_FUSION_IMU_CUTOFF_NYQUIST_MARGIN    0.95f
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_ENABLE
@@ -456,7 +495,7 @@
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE
-#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 25
+#define SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE 1
 #endif
 
 #ifndef SYS_FUSION_IMU_ZUPT_VEL_VARIANCE

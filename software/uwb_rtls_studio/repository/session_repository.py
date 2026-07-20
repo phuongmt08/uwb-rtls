@@ -1164,6 +1164,7 @@ class SessionRepository:
             f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
             f"| w1: {weights[0]} | w2: {weights[1]} | w3: {weights[2]} | w4: {weights[3]} "
             f"| err: {self._value_int(pos.get('ranging_error_count', pos.get('err_cnt', 0)))} "
+            f"| pf_reject_count: {self._value_int(pos.get('prefilter_reject_count', 0))} "
             f"| amp1: {self._value_float(pos.get('fp_amp_norm1', 0.0)):9.6f} "
             f"| amp2: {self._value_float(pos.get('fp_amp_norm2', 0.0)):9.6f} "
             f"| amp3: {self._value_float(pos.get('fp_amp_norm3', 0.0)):9.6f} "
@@ -1223,6 +1224,7 @@ class SessionRepository:
             "tril_y_m": tril_y,
             "yaw_deg": fields.get("yaw", ""),
             "ranging_error_count": fields.get("err", ""),
+            "prefilter_reject_count": fields.get("pf_reject_count", ""),
             "zone_id": fields.get("zone", ""),
             "room_id": "",
             "local_x_m": "",
@@ -1287,6 +1289,7 @@ class SessionRepository:
                             "tril_y_m": row_dict.get("tril_y_m", ""),
                             "yaw_deg": row_dict.get("yaw_deg", ""),
                             "ranging_error_count": row_dict.get("ranging_error_count", ""),
+                            "prefilter_reject_count": row_dict.get("prefilter_reject_count", ""),
                             "zone_id": row_dict.get("zone_id", ""),
                             "room_id": row_dict.get("room_id", ""),
                             "local_x_m": row_dict.get("local_x_m", ""),
@@ -1325,6 +1328,7 @@ class SessionRepository:
                             "tril_y_m": row.get("tril_y_m", ""),
                             "yaw_deg": row.get("yaw_deg", ""),
                             "ranging_error_count": row.get("ranging_error_count", ""),
+                            "prefilter_reject_count": row.get("prefilter_reject_count", ""),
                             "zone_id": row.get("zone_id", ""),
                             "room_id": row.get("room_id", ""),
                             "local_x_m": row.get("local_x_m", ""),

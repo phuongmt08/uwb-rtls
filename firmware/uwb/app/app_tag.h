@@ -17,10 +17,6 @@
 #include "positioning_config.h"
 #include "sys_config.h"
 
-#if ENABLE_SYS_FUSION
-#include "sys_sensor_fusion.h"
-#endif
-
 /* Public function prototypes ----------------------------------------- */
 
 /**
@@ -38,12 +34,6 @@ void app_tag_process(void);
  * @brief Process queued UWB control requests on the UwbRanging task context.
  */
 void app_tag_process_uwb_control(sys_config_t *cfg);
-
-/**
- * @brief Get current ranging error frame count owned by the Tag ranging flow.
- * @return Current ranging error count.
- */
-uint32_t app_tag_get_ranging_error_count(void);
 
 /**
  * @brief Reset the sensor fusion filters, flags, and states when ranging stops.

@@ -481,6 +481,7 @@ class RangingModel(QObject):
             "anchor_mask": int(getattr(res, "anchor_mask", 0)),
             "anchor_mask_valid": True,
             "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
+            "prefilter_reject_count": int(getattr(res, "prefilter_reject_count", 0)),
             "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
             "zone_id": int(getattr(res, "zone_id", 0)),
             "anchors": anchors,

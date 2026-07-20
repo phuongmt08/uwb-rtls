@@ -378,7 +378,14 @@ self.onmessage = function(e) {
                 const distance = Array.isArray(entry.distances) && Number.isFinite(entry.distances[i]) && entry.distances[i] > 0.1
                     ? entry.distances[i]
                     : null;
-                gatedDist[i].push(distance);
+                const mask = Number.isFinite(Number(entry.mask))
+                    ? Number(entry.mask)
+                    : 0x0f;
+                const selectedForUpdate = mode === 1 && (mask & (1 << i)) !== 0;
+                // sensor_fusion_result exports raw valid anchors plus the
+                // final selected-anchor mask.  "Gated" must therefore mean
+                // selected for the recorded UKF update, not a copy of raw.
+                gatedDist[i].push(selectedForUpdate ? distance : null);
                 d2Scores[i].push(null);
             }
 

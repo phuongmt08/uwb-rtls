@@ -59,3 +59,6 @@ software/uwb_rtls_studio/execution/legacy/
 # UWB RTLS Studio temporary runtime packet capture logs
 software/uwb_rtls_studio/data/runtime/
 
+# Simulation cache
+.simulation_metadata_cache.json
+

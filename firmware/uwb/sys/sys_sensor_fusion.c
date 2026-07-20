@@ -110,8 +110,14 @@ typedef struct
 {
     imu_biquad_filter_t ax;
     imu_biquad_filter_t ay;
+    imu_biquad_filter_t az;
+    imu_biquad_filter_t gx;
+    imu_biquad_filter_t gy;
     imu_biquad_filter_t gz;
     bool butterworth_initialized;
+    bool attitude_initialized;
+    float roll;
+    float pitch;
     uint16_t zupt_count;
     bool zupt_active;
 } imu_conditioner_t;
@@ -126,6 +132,7 @@ extern bool g_ranging_enabled;
 static ukf_init_filter_t s_ukf_init_filter;
 static ukf_init_distance_filter_t s_ukf_init_dist_filter;
 static imu_conditioner_t s_imu_conditioner = {0};
+static bsp_imu_bias_t s_imu_bias = {0};
 // log
 float yaw = 0.0f;
 float b_gz_t = 0.0f;
@@ -135,6 +142,8 @@ static double 	s_latest_fp_snr[NUM_ANCHORS] = {0.0};
 static protobuf_anchor_data_t s_latest_anchor_data[pb_arraysize(protobuf_sensor_fusion_result_t, anchors)] = {0};
 static pb_size_t s_latest_anchor_data_count = 0U;
 static uint32_t s_error_count = 0U;
+static uint32_t s_latest_ranging_error_count = 0U;
+static uint32_t s_prefilter_reject_count = 0U;
 static uint8_t 	s_last_selected_anchors_mask = 0U;
 static float 	s_latest_tril_x = 0.0f;
 static float 	s_latest_tril_y = 0.0f;
@@ -188,8 +197,12 @@ static void reset_imu_conditioner(void);
 static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt);
 static void reset_biquad_filter(imu_biquad_filter_t *filter, float value);
 static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, float dt);
+static void compensate_gravity(bsp_imu_data_t *sample, float dt);
 static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned);
 static void apply_zupt_velocity_constraint(void);
+static bool invert_innovation_covariance(const float32_t covariance[9],
+                                         float32_t inverse[9]);
+static void stabilize_state_covariance(void);
 
 /* Function definitions ----------------------------------------------- */
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
@@ -217,8 +230,22 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
 
 	memset(&ukf, 0, sizeof(ukf));
 	yaw = 0.0f;
+	/* Convert the calibration values to the fusion body frame. The single-pose
+	 * accelerometer means contain gravity, so they must not be used as planar
+	 * linear-acceleration biases after gravity compensation. */
+	s_imu_bias.bias_ax = -imu_bias.bias_ay;
+	s_imu_bias.bias_ay = imu_bias.bias_ax;
+	s_imu_bias.bias_az = imu_bias.bias_az;
+	s_imu_bias.bias_gx = -imu_bias.bias_gy;
+	s_imu_bias.bias_gy = imu_bias.bias_gx;
+	s_imu_bias.bias_gz = imu_bias.bias_gz;
+#if SYS_FUSION_IMU_PREFILTER_ENABLE
+	ukf.state.b_ax = 0.0f;
+	ukf.state.b_ay = 0.0f;
+#else
 	ukf.state.b_ax = -imu_bias.bias_ay;
 	ukf.state.b_ay = imu_bias.bias_ax;
+#endif
 	ukf.state.b_gz = imu_bias.bias_gz;
 	b_gz_t = imu_bias.bias_gz;
 
@@ -280,6 +307,24 @@ sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf)
     sys_sensor_fusion_clear_predict_flag();
     reset_runtime_state();
 
+#if SYS_FUSION_IMU_PREFILTER_ENABLE
+    /* Calibration was captured while stationary, so it is a better initial
+     * gravity direction than the first predict sample (which may arrive after
+     * the chair has already started moving). */
+    const float calib_acc_norm = sqrtf(s_imu_bias.bias_ax * s_imu_bias.bias_ax
+                                     + s_imu_bias.bias_ay * s_imu_bias.bias_ay
+                                     + s_imu_bias.bias_az * s_imu_bias.bias_az);
+    if (calib_acc_norm > 0.1f)
+    {
+        s_imu_conditioner.roll = atan2f(s_imu_bias.bias_ay,
+                                        s_imu_bias.bias_az);
+        s_imu_conditioner.pitch = atan2f(-s_imu_bias.bias_ax,
+                                         sqrtf(s_imu_bias.bias_ay * s_imu_bias.bias_ay
+                                             + s_imu_bias.bias_az * s_imu_bias.bias_az));
+        s_imu_conditioner.attitude_initialized = true;
+    }
+#endif
+
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
     ukf.initialized = true;
 #endif
@@ -311,6 +356,9 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
         // Chuyển đổi hệ tọa độ
          ukf.imu_current.ax = -temp_imu.ay;
          ukf.imu_current.ay = temp_imu.ax;
+         ukf.imu_current.az = temp_imu.az;
+         ukf.imu_current.gx = -temp_imu.gy;
+         ukf.imu_current.gy = temp_imu.gx;
          ukf.imu_current.gz = temp_imu.gz;
 //        ukf.imu_current = temp_imu;
         has_imu = true;
@@ -671,7 +719,9 @@ void sys_sensor_fusion_clear_latest_anchor_metrics(void)
 
 void sys_sensor_fusion_reset_error(void)
 {
-    s_error_count = 0;
+    s_error_count = 0U;
+    s_latest_ranging_error_count = 0U;
+    s_prefilter_reject_count = 0U;
 }
 
 uint32_t sys_sensor_fusion_get_error_count(void)
@@ -838,9 +888,13 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     stream_data.tril_y_m 			= to_proto_fixed2(s_latest_tril_y);
     stream_data.yaw_deg 			= to_proto_fixed2(sys_sensor_fusion_get_yaw_deg());
     stream_data.anchor_mask 		= s_last_selected_anchors_mask;
-    stream_data.ranging_error_count = s_error_count;
+    stream_data.ranging_error_count =
+        (UINT32_MAX - s_latest_ranging_error_count < s_error_count)
+        ? UINT32_MAX
+        : (s_latest_ranging_error_count + s_error_count);
     stream_data.timestamp_ms 		= HAL_GetTick();
     stream_data.zone_id 			= cfg ? cfg->default_zone_id : 0U;
+    stream_data.prefilter_reject_count = s_prefilter_reject_count;
     stream_data.anchors_count 		= s_latest_anchor_data_count;
     memcpy(stream_data.anchors, s_latest_anchor_data,
     (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));
@@ -1182,15 +1236,14 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
     static float32_t P_dd_inv[NUM_UPDATE_NOISE * NUM_UPDATE_NOISE];
     static float32_t K_data[NUM_STATE * NUM_UPDATE_NOISE];
-    static arm_matrix_instance_f32 mat_Pdd, mat_Pdd_inv, mat_Pxd, mat_K;
+    static arm_matrix_instance_f32 mat_Pdd_inv, mat_Pxd, mat_K;
     memset(P_dd_inv, 0, sizeof(P_dd_inv));
     memset(K_data, 0, sizeof(K_data));
-    arm_mat_init_f32(&mat_Pdd, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd);
     arm_mat_init_f32(&mat_Pdd_inv, NUM_UPDATE_NOISE, NUM_UPDATE_NOISE, P_dd_inv);
     arm_mat_init_f32(&mat_Pxd, NUM_STATE, NUM_UPDATE_NOISE, P_xd);
     arm_mat_init_f32(&mat_K, NUM_STATE, NUM_UPDATE_NOISE, K_data);
 
-    if (arm_mat_inverse_f32(&mat_Pdd, &mat_Pdd_inv) != ARM_MATH_SUCCESS) 
+    if (!invert_innovation_covariance(P_dd, P_dd_inv))
     {
         sys_update_err_count++;
         sys_update_inverse_err_count++;
@@ -1233,6 +1286,7 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
 	// 3. Cập nhật P: P = P - K * (P_xd)^T
 	arm_mat_sub_f32(&ukf.mat_P, &mat_K_Pxd_t, &ukf.mat_P);
+    stabilize_state_covariance();
 
     if (p_ukf != NULL) *p_ukf = ukf.state;
 
@@ -1242,6 +1296,78 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 
 #endif
 
+}
+
+static bool invert_innovation_covariance(const float32_t covariance[9],
+                                         float32_t inverse[9])
+{
+    static const float32_t jitter_levels[] = {
+        0.0f, 1.0e-6f, 1.0e-5f, 1.0e-4f, MW_UKF_INNOVATION_JITTER_MAX
+    };
+    float32_t symmetric[9];
+    float32_t work[9];
+    arm_matrix_instance_f32 mat_work;
+    arm_matrix_instance_f32 mat_inverse;
+
+    if (covariance == NULL || inverse == NULL) {
+        return false;
+    }
+
+    for (uint8_t row = 0U; row < 3U; row++) {
+        for (uint8_t col = 0U; col < 3U; col++) {
+            float32_t value = 0.5f * (covariance[row * 3U + col]
+                                    + covariance[col * 3U + row]);
+            if (!isfinite(value)) {
+                return false;
+            }
+            symmetric[row * 3U + col] = value;
+        }
+    }
+
+    for (uint8_t attempt = 0U;
+         attempt < (uint8_t)(sizeof(jitter_levels) / sizeof(jitter_levels[0]));
+         attempt++) {
+        memcpy(work, symmetric, sizeof(work));
+        for (uint8_t diagonal = 0U; diagonal < 3U; diagonal++) {
+            work[diagonal * 3U + diagonal] += jitter_levels[attempt];
+        }
+        memset(inverse, 0, 9U * sizeof(inverse[0]));
+        arm_mat_init_f32(&mat_work, 3U, 3U, work);
+        arm_mat_init_f32(&mat_inverse, 3U, 3U, inverse);
+        if (arm_mat_inverse_f32(&mat_work, &mat_inverse) != ARM_MATH_SUCCESS) {
+            continue;
+        }
+
+        bool finite = true;
+        for (uint8_t index = 0U; index < 9U; index++) {
+            if (!isfinite(inverse[index])) {
+                finite = false;
+                break;
+            }
+        }
+        if (finite) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void stabilize_state_covariance(void)
+{
+    for (uint8_t row = 0U; row < NUM_STATE; row++) {
+        for (uint8_t col = (uint8_t)(row + 1U); col < NUM_STATE; col++) {
+            float32_t symmetric = 0.5f * (ukf.P_data[row * NUM_STATE + col]
+                                        + ukf.P_data[col * NUM_STATE + row]);
+            ukf.P_data[row * NUM_STATE + col] = symmetric;
+            ukf.P_data[col * NUM_STATE + row] = symmetric;
+        }
+
+        float32_t *diagonal = &ukf.P_data[row * NUM_STATE + row];
+        if (!isfinite(*diagonal) || *diagonal < MW_UKF_P_DIAGONAL_FLOOR) {
+            *diagonal = MW_UKF_P_DIAGONAL_FLOOR;
+        }
+    }
 }
 
 static float calc_dt(void)
@@ -1342,6 +1468,104 @@ static float apply_butterworth_2nd_order(imu_biquad_filter_t *filter, float x, f
     return y;
 }
 
+static void compensate_gravity(bsp_imu_data_t *sample, float dt)
+{
+#if SYS_FUSION_IMU_PREFILTER_ENABLE
+    if (sample == NULL)
+    {
+        return;
+    }
+
+    const float ax = sample->ax;
+    const float ay = sample->ay;
+    const float az = sample->az;
+    const float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
+
+    if (!s_imu_conditioner.attitude_initialized)
+    {
+        if (acc_norm > 0.1f)
+        {
+            s_imu_conditioner.roll = atan2f(ay, az);
+            s_imu_conditioner.pitch = atan2f(-ax, sqrtf(ay * ay + az * az));
+        }
+        s_imu_conditioner.attitude_initialized = true;
+    }
+
+    if (dt < 0.0f)
+    {
+        dt = 0.0f;
+    }
+    if (dt > 0.1f)
+    {
+        dt = 0.1f;
+    }
+
+    const float p = sample->gx - s_imu_bias.bias_gx;
+    const float q = sample->gy - s_imu_bias.bias_gy;
+    const float r = sample->gz - s_imu_bias.bias_gz;
+    const float sin_roll = sinf(s_imu_conditioner.roll);
+    const float cos_roll = cosf(s_imu_conditioner.roll);
+    float cos_pitch = cosf(s_imu_conditioner.pitch);
+    if (fabsf(cos_pitch) < 0.1f)
+    {
+        cos_pitch = (cos_pitch < 0.0f) ? -0.1f : 0.1f;
+    }
+    const float tan_pitch = sinf(s_imu_conditioner.pitch) / cos_pitch;
+
+    float roll_pred = s_imu_conditioner.roll
+                    + (p + sin_roll * tan_pitch * q
+                         + cos_roll * tan_pitch * r) * dt;
+    float pitch_pred = s_imu_conditioner.pitch
+                     + (cos_roll * q - sin_roll * r) * dt;
+
+    /* Accelerometer tilt is valid mainly when its magnitude is close to 1 g.
+     * Fade the correction continuously instead of accepting/rejecting it with
+     * a hard transition. Gyro propagation carries attitude during motion. */
+    float trust = 0.0f;
+    const float tolerance = SYS_FUSION_IMU_ATTITUDE_ACC_TOLERANCE;
+    if (acc_norm > 0.1f && tolerance > 0.0f)
+    {
+        trust = 1.0f - fabsf(acc_norm - SYS_FUSION_IMU_GRAVITY_MPS2) / tolerance;
+        if (trust < 0.0f) trust = 0.0f;
+        if (trust > 1.0f) trust = 1.0f;
+    }
+
+    if (trust > 0.0f)
+    {
+        const float roll_acc = atan2f(ay, az);
+        const float pitch_acc = atan2f(-ax, sqrtf(ay * ay + az * az));
+        float tau = SYS_FUSION_IMU_ATTITUDE_TIME_CONSTANT_S;
+        if (tau < 0.01f) tau = 0.01f;
+        const float gain = trust * dt / (tau + dt);
+        roll_pred += gain * normalize_angle(roll_acc - roll_pred);
+        pitch_pred += gain * normalize_angle(pitch_acc - pitch_pred);
+    }
+
+    s_imu_conditioner.roll = normalize_angle(roll_pred);
+    /* A chair-mounted IMU should remain far from pitch singularity. The clamp
+     * also prevents a damaged sample from making tan(pitch) unbounded. */
+    const float pitch_limit = 1.483529864f; /* 85 degrees */
+    if (pitch_pred > pitch_limit) pitch_pred = pitch_limit;
+    if (pitch_pred < -pitch_limit) pitch_pred = -pitch_limit;
+    s_imu_conditioner.pitch = pitch_pred;
+
+    /* Rotate body acceleration into a level frame without applying yaw. At
+     * rest gravity maps to level Z, hence level X/Y are linear acceleration
+     * and can be consumed by the existing planar UKF without a second yaw. */
+    const float sr = sinf(s_imu_conditioner.roll);
+    const float cr = cosf(s_imu_conditioner.roll);
+    const float sp = sinf(s_imu_conditioner.pitch);
+    const float cp = cosf(s_imu_conditioner.pitch);
+    sample->ax = cp * ax + sp * sr * ay + sp * cr * az;
+    sample->ay = cr * ay - sr * az;
+    sample->az = -sp * ax + cp * sr * ay + cp * cr * az
+               - SYS_FUSION_IMU_GRAVITY_MPS2;
+#else
+    (void)sample;
+    (void)dt;
+#endif
+}
+
 static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *conditioned)
 {
 #if SYS_FUSION_IMU_ZUPT_ENABLE
@@ -1357,11 +1581,25 @@ static void update_zupt_state(const bsp_imu_data_t *raw, const bsp_imu_data_t *c
         return;
     }
 
+    float acc_mag;
+#if SYS_FUSION_IMU_PREFILTER_ENABLE && SYS_FUSION_IMU_ZUPT_USE_FILTERED_SAMPLE
+    acc_mag = sqrtf(sample->ax * sample->ax
+                  + sample->ay * sample->ay
+                  + sample->az * sample->az);
+#elif SYS_FUSION_IMU_PREFILTER_ENABLE
+    const float raw_acc_norm = sqrtf(sample->ax * sample->ax
+                                   + sample->ay * sample->ay
+                                   + sample->az * sample->az);
+    acc_mag = fabsf(raw_acc_norm - SYS_FUSION_IMU_GRAVITY_MPS2);
+#else
     const float ax = sample->ax - ukf.state.b_ax;
     const float ay = sample->ay - ukf.state.b_ay;
-    const float gz = sample->gz - ukf.state.b_gz;
-    const float acc_mag = sqrtf(ax * ax + ay * ay);
-    const float gyr_mag = fabsf(gz);
+    acc_mag = sqrtf(ax * ax + ay * ay);
+#endif
+    const float gx = sample->gx - s_imu_bias.bias_gx;
+    const float gy = sample->gy - s_imu_bias.bias_gy;
+    const float gz = sample->gz - s_imu_bias.bias_gz;
+    const float gyr_mag = sqrtf(gx * gx + gy * gy + gz * gz);
 
     if (acc_mag < SYS_FUSION_IMU_ZUPT_ACC_THRESHOLD &&
         gyr_mag < SYS_FUSION_IMU_ZUPT_GYR_THRESHOLD)
@@ -1401,6 +1639,9 @@ static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt)
     {
         reset_biquad_filter(&s_imu_conditioner.ax, raw->ax);
         reset_biquad_filter(&s_imu_conditioner.ay, raw->ay);
+        reset_biquad_filter(&s_imu_conditioner.az, raw->az);
+        reset_biquad_filter(&s_imu_conditioner.gx, raw->gx);
+        reset_biquad_filter(&s_imu_conditioner.gy, raw->gy);
         reset_biquad_filter(&s_imu_conditioner.gz, raw->gz);
         s_imu_conditioner.butterworth_initialized = true;
     }
@@ -1408,9 +1649,14 @@ static bsp_imu_data_t condition_imu_sample(const bsp_imu_data_t *raw, float dt)
     {
         out.ax = apply_butterworth_2nd_order(&s_imu_conditioner.ax, raw->ax, dt);
         out.ay = apply_butterworth_2nd_order(&s_imu_conditioner.ay, raw->ay, dt);
+        out.az = apply_butterworth_2nd_order(&s_imu_conditioner.az, raw->az, dt);
+        out.gx = apply_butterworth_2nd_order(&s_imu_conditioner.gx, raw->gx, dt);
+        out.gy = apply_butterworth_2nd_order(&s_imu_conditioner.gy, raw->gy, dt);
         out.gz = apply_butterworth_2nd_order(&s_imu_conditioner.gz, raw->gz, dt);
     }
 #endif
+
+    compensate_gravity(&out, dt);
 
     update_zupt_state(raw, &out);
 
@@ -1457,6 +1703,8 @@ static void reset_runtime_state(void)
     clear_latest_anchor_metrics();
 
     s_error_count = 0U;
+    s_latest_ranging_error_count = 0U;
+    s_prefilter_reject_count = 0U;
     s_last_selected_anchors_mask = 0U;
     s_latest_tril_x = 0.0f;
     s_latest_tril_y = 0.0f;
@@ -1494,6 +1742,23 @@ static void clear_latest_anchor_metrics(void)
 
     memset(s_latest_anchor_data, 0, sizeof(s_latest_anchor_data));
     s_latest_anchor_data_count = 0U;
+}
+
+void sys_sensor_fusion_prefilter_record_reject(void)
+{
+    if (s_prefilter_reject_count < UINT32_MAX) {
+        s_prefilter_reject_count++;
+    }
+}
+
+void sys_sensor_fusion_set_ranging_error_count(uint32_t error_count)
+{
+    s_latest_ranging_error_count = error_count;
+}
+
+void sys_sensor_fusion_capture_ranging_snapshot(const uwb_distance_msg_t *ranging_msg)
+{
+    update_latest_anchor_data_snapshot(ranging_msg, NULL);
 }
 
 static const mw_tril_anchor_t *find_anchor_by_id(const mw_tril_anchor_t *anchors,
@@ -1581,6 +1846,7 @@ static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging
         } else {
             anchor->weight = 0;
         }
+
     }
 }
 

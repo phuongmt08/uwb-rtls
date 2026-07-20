@@ -437,6 +437,7 @@ class CommandFactory:
         pkt.sensor_fusion_result.ranging_error_count = 0
         pkt.sensor_fusion_result.timestamp_ms = 0
         pkt.sensor_fusion_result.zone_id = 0
+        pkt.sensor_fusion_result.prefilter_reject_count = 0
         return pkt
 
     def imu_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -629,7 +630,7 @@ class CommandFactory:
     def _fill_default_prefilter(cfg: pb.prefilter_cfg_t) -> None:
         cfg.enable = True
         cfg.recover_d2 = 5.0
-        cfg.reject_d2 = 7.5
+        cfg.reject_d2 = 6.0
         cfg.r_base = 0.05
         cfg.r_gate = 0.10
         cfg.velocity_weight = 0.5

@@ -315,9 +315,9 @@ typedef struct _protobuf_prefilter_cfg_t {
     bool enable;
     float recover_d2;
     float reject_d2;
-    float r_base;
+    float r_base; /* Legacy wire compatibility; runtime ignores it. */
     float r_gate;
-    float velocity_weight;
+    float velocity_weight; /* Legacy wire compatibility; runtime ignores it. */
     float min_covariance;
 } protobuf_prefilter_cfg_t;
 
@@ -525,6 +525,7 @@ typedef struct _protobuf_sensor_fusion_result_t {
     uint32_t zone_id;
     pb_size_t anchors_count;
     protobuf_anchor_data_t anchors[8];
+    uint32_t prefilter_reject_count;
 } protobuf_sensor_fusion_result_t;
 
 typedef PB_BYTES_ARRAY_T(192) protobuf_log_data_t_data_t;
@@ -1206,7 +1207,7 @@ extern "C" {
 #define protobuf_sensor_fusion_cfg_get_t_init_default {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
 #define protobuf_sensor_fusion_cfg_resp_t_init_default {false, protobuf_sensor_fusion_cfg_t_init_default}
-#define protobuf_sensor_fusion_result_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default}}
+#define protobuf_sensor_fusion_result_t_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default, protobuf_anchor_data_t_init_default}, 0}
 #define protobuf_prefilter_cfg_t_init_default    {0, 0, 0, 0, 0, 0, 0}
 #define protobuf_prefilter_cfg_get_t_init_default {0}
 #define protobuf_prefilter_cfg_set_t_init_default {false, protobuf_prefilter_cfg_t_init_default}
@@ -1306,7 +1307,7 @@ extern "C" {
 #define protobuf_sensor_fusion_cfg_get_t_init_zero {0}
 #define protobuf_sensor_fusion_cfg_set_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
 #define protobuf_sensor_fusion_cfg_resp_t_init_zero {false, protobuf_sensor_fusion_cfg_t_init_zero}
-#define protobuf_sensor_fusion_result_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero}}
+#define protobuf_sensor_fusion_result_t_init_zero {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero, protobuf_anchor_data_t_init_zero}, 0}
 #define protobuf_prefilter_cfg_t_init_zero       {0, 0, 0, 0, 0, 0, 0}
 #define protobuf_prefilter_cfg_get_t_init_zero   {0}
 #define protobuf_prefilter_cfg_set_t_init_zero   {false, protobuf_prefilter_cfg_t_init_zero}
@@ -1554,6 +1555,7 @@ extern "C" {
 #define protobuf_sensor_fusion_result_t_timestamp_ms_tag 10
 #define protobuf_sensor_fusion_result_t_zone_id_tag 11
 #define protobuf_sensor_fusion_result_t_anchors_tag 12
+#define protobuf_sensor_fusion_result_t_prefilter_reject_count_tag 13
 #define protobuf_log_data_t_type_tag             1
 #define protobuf_log_data_t_data_tag             2
 #define protobuf_log_clear_t_type_tag            1
@@ -1992,7 +1994,8 @@ X(a, STATIC,   SINGULAR, UINT32,   anchor_mask,       8) \
 X(a, STATIC,   SINGULAR, UINT32,   ranging_error_count,   9) \
 X(a, STATIC,   SINGULAR, UINT32,   timestamp_ms,     10) \
 X(a, STATIC,   SINGULAR, UINT32,   zone_id,          11) \
-X(a, STATIC,   REPEATED, MESSAGE,  anchors,          12)
+X(a, STATIC,   REPEATED, MESSAGE,  anchors,          12) \
+X(a, STATIC,   SINGULAR, UINT32,   prefilter_reject_count,  13)
 #define protobuf_sensor_fusion_result_t_CALLBACK NULL
 #define protobuf_sensor_fusion_result_t_DEFAULT NULL
 #define protobuf_sensor_fusion_result_t_anchors_MSGTYPE protobuf_anchor_data_t
@@ -2962,7 +2965,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_sensor_fusion_cfg_resp_t_size   72
 #define protobuf_sensor_fusion_cfg_set_t_size    72
 #define protobuf_sensor_fusion_cfg_t_size        70
-#define protobuf_sensor_fusion_result_t_size     266
+#define protobuf_sensor_fusion_result_t_size     272
 #define protobuf_sys_config_get_t_size           6
 #define protobuf_sys_config_resp_t_size          112
 #define protobuf_sys_config_set_t_size           112

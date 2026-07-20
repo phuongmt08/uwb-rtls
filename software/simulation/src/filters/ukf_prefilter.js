@@ -126,12 +126,12 @@ class UnscentedKalmanFilter {
         this.X_sigma_pred = Array.from({ length: this.num_sigmas }, () => new Float64Array(this.L));
 
         // Param config
-        this.alpha = config.ukf_alpha !== undefined ? config.ukf_alpha : 0.1;
+        this.alpha = config.ukf_alpha !== undefined ? config.ukf_alpha : 1.0;
         this.beta = config.ukf_beta !== undefined ? config.ukf_beta : 2.0;
         this.kappa = config.ukf_kappa !== undefined ? config.ukf_kappa : 0.0;
         
         this.q_a = config.q_a !== undefined ? config.q_a : 0.04;
-        this.q_g = config.q_g !== undefined ? config.q_g : 4.78e-7;
+        this.q_g = config.q_g !== undefined ? config.q_g : 4.066e-5;
         this.r_uwb = config.r_uwb !== undefined ? config.r_uwb : 0.01;
         this.r_gate = config.r_gate !== undefined ? config.r_gate : this.r_uwb;
         this.yaw_map_offset_rad = Number.isFinite(config.yaw_map_offset_rad)
@@ -257,14 +257,14 @@ class UnscentedKalmanFilter {
                 this.P[i][j] = 0.0;
             }
         }
-        this.P[0][0] = 1e-6; // px
-        this.P[1][1] = 1e-6; // py
-        this.P[2][2] = 1e-6; // vx
-        this.P[3][3] = 1e-6; // vy
-        this.P[4][4] = 1e-8; // theta (increased from 1e-20 for Cholesky 11x11 numerical stability)
-        this.P[5][5] = 1e-5; // bax
-        this.P[6][6] = 1e-5; // bay
-        this.P[7][7] = 1e-5; // bgz
+        this.P[0][0] = 0.1;   // px
+        this.P[1][1] = 0.1;   // py
+        this.P[2][2] = 0.1;   // vx
+        this.P[3][3] = 0.1;   // vy
+        this.P[4][4] = 1e-10; // theta
+        this.P[5][5] = 1e-8;  // bax
+        this.P[6][6] = 1e-8;  // bay
+        this.P[7][7] = 1e-10; // bgz
 
         this.is_initialized = true;
         this.seedSigmaPredictionFromState();
@@ -792,7 +792,7 @@ class MahalanobisPrefilter {
     }
 
     measurementNoiseFor(result) {
-        if (result && result.rescue) return SIM_CONFIG.FILTER.ADAPTIVE_R_MAX;
+        if (result && result.rescue) return this.rescue_noise_max;
         const weight = result && Number.isFinite(result.measurement_weight)
             ? result.measurement_weight
             : null;

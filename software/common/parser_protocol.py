@@ -123,12 +123,12 @@ class VvProtocol(_VvProtocol):
         dst: int,
         seq: int,
         enable: bool = True,
-        recover_d2: float = 0.25,
-        reject_d2: float = 4.0,
+        recover_d2: float = 5.0,
+        reject_d2: float = 6.0,
         r_base: float = 0.1,
-        r_gate: float = 0.5,
+        r_gate: float = 0.10,
         velocity_weight: float = 0.2,
-        min_covariance: float = 0.01,
+        min_covariance: float = 1.0e-6,
     ):
         return self._commands.prefilter_cfg_set(
             src, dst, seq,
