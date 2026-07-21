@@ -396,8 +396,6 @@ class DeviceInfoTab(QWidget):
             self._adv_table.setRowCount(len(devices))
 
         for i, dev in enumerate(devices):
-            d_type = dev.get("device_type", 0)
-            d_id = dev.get("device_id")
             device_name = str(dev.get("name") or "").strip()
             device_str = device_name or "-"
 
@@ -544,16 +542,18 @@ class DeviceInfoTab(QWidget):
 
                 # Update Set Time button connections only on change or rebuild
                 if btn_set_time:
-                    prev_did = btn_set_time.property("d_id")
-                    if prev_did != d_id or rebuild_needed:
-                        btn_set_time.setProperty("d_id", d_id)
+                    prev_sn = btn_set_time.property("sn_val")
+                    if prev_sn != sn_val or rebuild_needed:
+                        btn_set_time.setProperty("sn_val", sn_val)
                         try:
                             btn_set_time.clicked.disconnect()
                         except TypeError:
                             pass
-                        btn_set_time.clicked.connect(lambda checked, dt=d_type, di=d_id: self._vm.send_time_sync_adv(dt, di))
-                    
-                    btn_set_time.setEnabled(d_id is not None and state_str not in ("connecting", "disconnecting"))
+                        btn_set_time.clicked.connect(lambda checked, sn=sn_val: self._vm.send_time_sync_bcast(sn))
+
+                    # sn_val == 0 means "unknown serial" here, not the broadcast wildcard —
+                    # never wire a per-row action to the wildcard by accident.
+                    btn_set_time.setEnabled(bool(sn_val) and state_str not in ("connecting", "disconnecting"))
 
         self._update_adv_table_height(len(devices))
 

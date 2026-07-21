@@ -186,14 +186,40 @@ message time_sync_resp_t {
     uint64 unix_time_ms       = 1;
     int32 timezone_offset     = 2;
 }
-message time_sync_adv_set_t {
-    device_type_t device_type  = 1;
-    uint32 device_id           = 2;
-    uint64 unix_time_ms        = 3;
-    int32 timezone_offset      = 4;
+message time_sync_bcast_set_t {
+    uint32 serial_number       = 1;
+    uint64 unix_time_ms        = 2;
+    int32 timezone_offset      = 3;
 }
 
 /* UWB configuration -------------------------------------------------------- */
+
+/*
+ * Broadcast-targeted antenna delay set. Addressed by serial_number (the
+ * permanent factory identity) rather than device_type/device_id, since the
+ * antenna delay is a per-physical-unit calibration value that must stay
+ * bound to the exact hardware it was measured on, not to a reassignable
+ * logical role/slot.
+ */
+message antenna_delay_bcast_set_t {
+    uint32 serial_number    = 1;
+    uint32 tx_antenna_delay = 2;
+    uint32 rx_antenna_delay = 3;
+}
+
+/*
+ * Sent by a device (over BCAST) after it matches and processes a
+ * broadcast-targeted set command, so the sender knows exactly who applied
+ * it. Not routed through the generic ack_t path (see network_core_skip_ack_tb) —
+ * BCAST has no single "the" responder, so a dedicated, identity-carrying
+ * confirmation is used instead.
+ */
+message bcast_apply_ack_t {
+    uint32 serial_number = 1; // confirming device's own identity
+    uint32 cmd_seq       = 2; // hdr.seq of the bcast command being confirmed
+    uint32 cmd_tag       = 3; // which_params tag of that command
+    bool   success       = 4;
+}
 
 message uwb_cfg_t {
     device_role_t role          = 1;
@@ -867,7 +893,7 @@ message packet_t {
         time_sync_get_t           time_sync_get           = 6;
         time_sync_set_t           time_sync_set           = 7;
         time_sync_resp_t          time_sync_resp          = 8;
-        time_sync_adv_set_t       time_sync_adv_set        = 9;
+        time_sync_bcast_set_t     time_sync_bcast_set      = 9;
 
         /* System config */
         sys_config_get_t          sys_config_get          = 10;
@@ -993,6 +1019,10 @@ message packet_t {
         calib_stop_t              calib_stop              = 85;
         calib_candidate_apply_t   calib_candidate_apply   = 86;
         calib_data_t              calib_data              = 87;
+
+        /* UWB configuration */
+        antenna_delay_bcast_set_t antenna_delay_bcast_set = 88;
+        bcast_apply_ack_t         bcast_apply_ack         = 89;
 
     }
 }

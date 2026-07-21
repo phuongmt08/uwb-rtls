@@ -489,7 +489,8 @@ class CommunicationTab(QWidget):
             ("rtos_task_stats_get",     "rtos_task_stats_get"),
             ("── SET Commands ──────────────────", None),
             ("time_sync_set",           "time_sync_set"),
-            ("time_sync_adv_set",       "time_sync_adv_set"),
+            ("time_sync_bcast_set",     "time_sync_bcast_set"),
+            ("antenna_delay_bcast_set", "antenna_delay_bcast_set"),
             ("sys_config_set",          "sys_config_set"),
             ("sys_ranging_cfg_set",     "sys_ranging_cfg_set"),
             ("sensor_fusion_cfg_set",   "sensor_fusion_cfg_set"),
@@ -648,6 +649,14 @@ class CommunicationTab(QWidget):
         self.f_ble_adv_name = QLineEdit(self.tester_control_group)
         self.f_ble_adv_name.setPlaceholderText("Device name")
         add("device_name", "Device name:", self.f_ble_adv_name)
+
+        self.f_tx_antenna_delay = QLineEdit(self.tester_control_group)
+        self.f_tx_antenna_delay.setText("0")
+        add("tx_antenna_delay", "TX antenna delay:", self.f_tx_antenna_delay)
+
+        self.f_rx_antenna_delay = QLineEdit(self.tester_control_group)
+        self.f_rx_antenna_delay.setText("0")
+        add("rx_antenna_delay", "RX antenna delay:", self.f_rx_antenna_delay)
         # log_data / log_clear
         self.f_log_type = QComboBox(self.tester_control_group)
         self.f_log_type.addItem("DEVICE_LOG (1)", 1)
@@ -674,7 +683,8 @@ class CommunicationTab(QWidget):
     # Mapping: command_name → set of field keys to show
     _VISIBLE_FIELDS: dict[str, set[str]] = {
         "time_sync_set":       {"unix_time_ms", "timezone_offset"},
-        "time_sync_adv_set":   {"device_type", "device_id", "unix_time_ms", "timezone_offset"},
+        "time_sync_bcast_set": {"serial_number", "unix_time_ms", "timezone_offset"},
+        "antenna_delay_bcast_set": {"serial_number", "tx_antenna_delay", "rx_antenna_delay"},
         "device_type_set":     {"device_type"},
         "sys_config_set":      {"role", "device_id", "ranging_period_ms", "rx_timeout_ms", "uwb_channel"},
         "sys_ranging_cfg_set": {"period_ms", "timeout_ms"},
@@ -1254,14 +1264,18 @@ class CommunicationTab(QWidget):
                 self.f_timezone.text().strip() or "420", "timezone_offset"
             )
 
-        elif packet_name == "time_sync_adv_set":
+        elif packet_name == "time_sync_bcast_set":
             txt = self.f_unix_ms.text().strip()
-            params["device_type"] = int(self.f_device_type.currentData())
-            params["device_id"] = self._parse_int(self.f_device_id.text().strip() or "1", "device_id")
+            params["serial_number"] = self._parse_int(self.f_ble_adv_serial.text().strip() or "0", "serial_number")
             params["unix_time_ms"] = int(txt, 0) if txt else int(time.time() * 1000)
             params["timezone_offset"] = self._parse_int(
                 self.f_timezone.text().strip() or "420", "timezone_offset"
             )
+
+        elif packet_name == "antenna_delay_bcast_set":
+            params["serial_number"] = self._parse_int(self.f_ble_adv_serial.text().strip() or "0", "serial_number")
+            params["tx_antenna_delay"] = self._parse_int(self.f_tx_antenna_delay.text().strip() or "0", "tx_antenna_delay")
+            params["rx_antenna_delay"] = self._parse_int(self.f_rx_antenna_delay.text().strip() or "0", "rx_antenna_delay")
 
         elif packet_name == "device_type_set":
             params["device_type"] = int(self.f_device_type.currentData())

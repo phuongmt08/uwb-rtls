@@ -89,7 +89,8 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
 #ifndef BOOTLOADER
-static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt);
+static void network_cmd_time_sync_bcast_set(const protobuf_packet_t *pkt);
+static void network_cmd_antenna_delay_bcast_set(const protobuf_packet_t *pkt);
 #endif
 
 #ifndef BOOTLOADER
@@ -182,9 +183,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
 #endif /* !BOOTLOADER */
 
 #ifndef BOOTLOADER
-    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_time_sync_adv_set,           "time_sync_adv_set"),  /* 9  */
+    CMD_INFO(protobuf_packet_t_time_sync_bcast_set_tag,       network_cmd_time_sync_bcast_set,         "time_sync_bcast_set"),/* 9  */
+    CMD_INFO(protobuf_packet_t_antenna_delay_bcast_set_tag,   network_cmd_antenna_delay_bcast_set,     "ant_delay_bcast_set"),/* 88 */
 #else
-    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_unimplemented,               "time_sync_adv_set"),  /* 9  */
+    CMD_INFO(protobuf_packet_t_time_sync_bcast_set_tag,       network_cmd_unimplemented,               "time_sync_bcast_set"),/* 9  */
+    CMD_INFO(protobuf_packet_t_antenna_delay_bcast_set_tag,   network_cmd_unimplemented,               "ant_delay_bcast_set"),/* 88 */
 #endif
 
 #ifndef BOOTLOADER
@@ -354,6 +357,32 @@ static bool network_cmd_reconfigure_uwb(const protobuf_uwb_cfg_t *cfg)
 
     app_rtos_set_ranging_enabled(was_ranging_enabled);
     return status == BSP_OK;
+}
+
+/* serial_number == 0 is reserved to mean "apply to every device" for
+ * broadcast-targeted set commands. */
+static bool network_cmd_bcast_target_match(uint32_t serial_number)
+{
+    return serial_number == 0u || serial_number == bsp_util_get_serial_number();
+}
+
+/* Confirms (over BCAST) that this device matched and processed a
+ * broadcast-targeted set command. Not routed through the generic ack_t path
+ * (see network_core_skip_ack_tb) — BCAST has no single "the" responder, so a
+ * dedicated, identity-carrying confirmation is used instead. Sent once; any
+ * reliability/retry for this direction lives in the central BLE bridge
+ * firmware, not here. */
+static void network_cmd_send_bcast_apply_ack(const protobuf_packet_t *pkt, bool success)
+{
+    protobuf_packet_t ack;
+    memset(&ack, 0, sizeof(ack));
+    ack.hdr.addr.dst = protobuf_PACKET_ADDR_BCAST;
+    ack.which_params = protobuf_packet_t_bcast_apply_ack_tag;
+    ack.params.bcast_apply_ack.serial_number = bsp_util_get_serial_number();
+    ack.params.bcast_apply_ack.cmd_seq       = pkt->hdr.seq;
+    ack.params.bcast_apply_ack.cmd_tag       = pkt->which_params;
+    ack.params.bcast_apply_ack.success       = success;
+    network_cmd_send_packet(&ack);
 }
 #endif /* !BOOTLOADER */
 
@@ -759,37 +788,86 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
 }
 
 #ifndef BOOTLOADER
-static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt)
+static void network_cmd_time_sync_bcast_set(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
 
-    const sys_config_t *cfg = sys_config_get();
-    if (cfg == NULL) {
+    const protobuf_time_sync_bcast_set_t *bcast_set = &pkt->params.time_sync_bcast_set;
+
+    // Broadcast is addressed by the permanent factory serial number
+    // (serial_number == 0 means "every device").
+    if (!network_cmd_bcast_target_match(bcast_set->serial_number)) {
         return;
     }
 
-    const protobuf_time_sync_adv_set_t *adv_set = &pkt->params.time_sync_adv_set;
-
-    // Check device type and device id
-    if (adv_set->device_type == cfg->device_type && adv_set->device_id == cfg->uwb.device_id) {
-        if (bsp_rtc_sync_set(adv_set->unix_time_ms,
-                             adv_set->timezone_offset) != BSP_UTIL_OK) {
-            RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_adv_set");
-            return;
-        }
-
-        bsp_rtc_time_t rtc_time;
-        bsp_rtc_get_time(&rtc_time);
-        RLOG_I(OBJECT_CODE,
-               "RTC synced (adv_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
-               (unsigned)rtc_time.day,
-               (unsigned)rtc_time.month,
-               (unsigned)(2000u + rtc_time.year),
-               (unsigned)rtc_time.hour,
-               (unsigned)rtc_time.minute,
-               (unsigned)rtc_time.second,
-               (long)adv_set->timezone_offset);
+    if (bsp_rtc_sync_set(bcast_set->unix_time_ms,
+                         bcast_set->timezone_offset) != BSP_UTIL_OK) {
+        RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_bcast_set");
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
     }
+
+    bsp_rtc_time_t rtc_time;
+    bsp_rtc_get_time(&rtc_time);
+    RLOG_I(OBJECT_CODE,
+           "RTC synced (bcast_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
+           (unsigned)rtc_time.day,
+           (unsigned)rtc_time.month,
+           (unsigned)(2000u + rtc_time.year),
+           (unsigned)rtc_time.hour,
+           (unsigned)rtc_time.minute,
+           (unsigned)rtc_time.second,
+           (long)bcast_set->timezone_offset);
+    network_cmd_send_bcast_apply_ack(pkt, true);
+}
+
+static void network_cmd_antenna_delay_bcast_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    const protobuf_antenna_delay_bcast_set_t *req = &pkt->params.antenna_delay_bcast_set;
+
+    // Broadcast is addressed by the permanent factory serial number: antenna
+    // delay is a per-physical-unit calibration value, not a logical role/slot.
+    // (serial_number == 0 means "every device".)
+    if (!network_cmd_bcast_target_match(req->serial_number)) {
+        return;
+    }
+
+    if (req->tx_antenna_delay > 0xFFFFu || req->rx_antenna_delay > 0xFFFFu) {
+        RLOG_W(OBJECT_CODE,
+               "Invalid antenna delay in antenna_delay_bcast_set: TX=%lu RX=%lu",
+               (unsigned long)req->tx_antenna_delay,
+               (unsigned long)req->rx_antenna_delay);
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
+    }
+
+    sys_config_t *cfg = sys_config_get();
+    if (cfg == NULL) {
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
+    }
+
+    protobuf_uwb_cfg_t old_cfg = cfg->uwb;
+    cfg->uwb.tx_antenna_delay = req->tx_antenna_delay;
+    cfg->uwb.rx_antenna_delay = req->rx_antenna_delay;
+
+    if (!network_cmd_reconfigure_uwb(&cfg->uwb)) {
+        cfg->uwb = old_cfg;
+        (void)network_cmd_reconfigure_uwb(&cfg->uwb);
+        RLOG_E(OBJECT_CODE, ERR_HAL, "Failed to apply antenna_delay_bcast_set");
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
+    }
+
+    network_cmd_config_save("antenna_delay_bcast_set");
+
+    RLOG_I(OBJECT_CODE,
+           "Antenna delay applied via broadcast: TX=%lu RX=%lu",
+           (unsigned long)cfg->uwb.tx_antenna_delay,
+           (unsigned long)cfg->uwb.rx_antenna_delay);
+    network_cmd_send_bcast_apply_ack(pkt, true);
 }
 #endif
 

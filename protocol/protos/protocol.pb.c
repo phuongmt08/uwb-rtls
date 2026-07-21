@@ -36,7 +36,13 @@ PB_BIND(protobuf_time_sync_set_t, protobuf_time_sync_set_t, AUTO)
 PB_BIND(protobuf_time_sync_resp_t, protobuf_time_sync_resp_t, AUTO)
 
 
-PB_BIND(protobuf_time_sync_adv_set_t, protobuf_time_sync_adv_set_t, AUTO)
+PB_BIND(protobuf_time_sync_bcast_set_t, protobuf_time_sync_bcast_set_t, AUTO)
+
+
+PB_BIND(protobuf_antenna_delay_bcast_set_t, protobuf_antenna_delay_bcast_set_t, AUTO)
+
+
+PB_BIND(protobuf_bcast_apply_ack_t, protobuf_bcast_apply_ack_t, AUTO)
 
 
 PB_BIND(protobuf_uwb_cfg_t, protobuf_uwb_cfg_t, AUTO)

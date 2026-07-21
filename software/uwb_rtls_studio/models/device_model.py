@@ -2025,17 +2025,16 @@ class DeviceModel(QObject):
             timezone_offset = getattr(time, "altzone", timezone_offset)
         return int((-timezone_offset) / 60)
 
-    def send_time_sync_adv(self, device_type: int, device_id: int) -> bool:
-        """Send a time sync advertising set command to a specific device."""
+    def send_time_sync_bcast(self, serial_number: int) -> bool:
+        """Send a broadcast time sync set command to a specific device (serial_number == 0 means every device)."""
         host_time_ms = int(time.time() * 1000)
         tz_offset_min = self._host_timezone_offset_min()
-        log.info("Sending time_sync_adv_set to MCU: type=%d, id=%d, time=%d, tz=%d",
-        device_type, device_id, host_time_ms, tz_offset_min)
+        log.info("Sending time_sync_bcast_set to MCU: serial=%d, time=%d, tz=%d",
+        serial_number, host_time_ms, tz_offset_min)
         return self._send_command(
-            "time_sync_adv_set",
+            "time_sync_bcast_set",
             dst_addr=VvAddress.MCU,
-            device_type=device_type,
-            device_id=device_id,
+            serial_number=serial_number,
             unix_time_ms=host_time_ms,
             timezone_offset=tz_offset_min,
         )

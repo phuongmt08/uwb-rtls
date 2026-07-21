@@ -190,12 +190,34 @@ typedef struct _protobuf_time_sync_resp_t {
     int32_t timezone_offset;
 } protobuf_time_sync_resp_t;
 
-typedef struct _protobuf_time_sync_adv_set_t {
-    protobuf_device_type_t device_type;
-    uint32_t device_id;
+typedef struct _protobuf_time_sync_bcast_set_t {
+    uint32_t serial_number;
     uint64_t unix_time_ms;
     int32_t timezone_offset;
-} protobuf_time_sync_adv_set_t;
+} protobuf_time_sync_bcast_set_t;
+
+/* Broadcast-targeted antenna delay set. Addressed by serial_number (the
+ permanent factory identity) rather than device_type/device_id, since the
+ antenna delay is a per-physical-unit calibration value that must stay
+ bound to the exact hardware it was measured on, not to a reassignable
+ logical role/slot. */
+typedef struct _protobuf_antenna_delay_bcast_set_t {
+    uint32_t serial_number;
+    uint32_t tx_antenna_delay;
+    uint32_t rx_antenna_delay;
+} protobuf_antenna_delay_bcast_set_t;
+
+/* Sent by a device (over BCAST) after it matches and processes a
+ broadcast-targeted set command, so the sender knows exactly who applied
+ it. Not routed through the generic ack_t path (see network_core_skip_ack_tb) —
+ BCAST has no single "the" responder, so a dedicated, identity-carrying
+ confirmation is used instead. */
+typedef struct _protobuf_bcast_apply_ack_t {
+    uint32_t serial_number; /* confirming device's own identity */
+    uint32_t cmd_seq; /* hdr.seq of the bcast command being confirmed */
+    uint32_t cmd_tag; /* which_params tag of that command */
+    bool success;
+} protobuf_bcast_apply_ack_t;
 
 typedef PB_BYTES_ARRAY_T(8) protobuf_uwb_cfg_t_anchor_list_t;
 typedef struct _protobuf_uwb_cfg_t {
@@ -824,7 +846,7 @@ typedef struct _protobuf_packet_t {
         protobuf_time_sync_get_t time_sync_get;
         protobuf_time_sync_set_t time_sync_set;
         protobuf_time_sync_resp_t time_sync_resp;
-        protobuf_time_sync_adv_set_t time_sync_adv_set;
+        protobuf_time_sync_bcast_set_t time_sync_bcast_set;
         /* System config */
         protobuf_sys_config_get_t sys_config_get;
         protobuf_sys_config_set_t sys_config_set;
@@ -920,6 +942,9 @@ typedef struct _protobuf_packet_t {
         protobuf_calib_stop_t calib_stop;
         protobuf_calib_candidate_apply_t calib_candidate_apply;
         protobuf_calib_data_t calib_data;
+        /* UWB configuration */
+        protobuf_antenna_delay_bcast_set_t antenna_delay_bcast_set;
+        protobuf_bcast_apply_ack_t bcast_apply_ack;
     } params;
 } protobuf_packet_t;
 
@@ -1072,7 +1097,8 @@ extern "C" {
 
 
 
-#define protobuf_time_sync_adv_set_t_device_type_ENUMTYPE protobuf_device_type_t
+
+
 
 #define protobuf_uwb_cfg_t_role_ENUMTYPE protobuf_device_role_t
 #define protobuf_uwb_cfg_t_power_mode_ENUMTYPE protobuf_anchor_power_mode_t
@@ -1189,7 +1215,9 @@ extern "C" {
 #define protobuf_time_sync_get_t_init_default    {0}
 #define protobuf_time_sync_set_t_init_default    {0, 0}
 #define protobuf_time_sync_resp_t_init_default   {0, 0}
-#define protobuf_time_sync_adv_set_t_init_default {_protobuf_device_type_t_MIN, 0, 0, 0}
+#define protobuf_time_sync_bcast_set_t_init_default {0, 0, 0}
+#define protobuf_antenna_delay_bcast_set_t_init_default {0, 0, 0}
+#define protobuf_bcast_apply_ack_t_init_default  {0, 0, 0, 0}
 #define protobuf_uwb_cfg_t_init_default          {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN, 0, 0, 0, 0, 0, 0}
 #define protobuf_sys_config_get_t_init_default   {0}
 #define protobuf_sys_config_set_t_init_default   {false, protobuf_uwb_cfg_t_init_default}
@@ -1289,7 +1317,9 @@ extern "C" {
 #define protobuf_time_sync_get_t_init_zero       {0}
 #define protobuf_time_sync_set_t_init_zero       {0, 0}
 #define protobuf_time_sync_resp_t_init_zero      {0, 0}
-#define protobuf_time_sync_adv_set_t_init_zero   {_protobuf_device_type_t_MIN, 0, 0, 0}
+#define protobuf_time_sync_bcast_set_t_init_zero {0, 0, 0}
+#define protobuf_antenna_delay_bcast_set_t_init_zero {0, 0, 0}
+#define protobuf_bcast_apply_ack_t_init_zero     {0, 0, 0, 0}
 #define protobuf_uwb_cfg_t_init_zero             {_protobuf_device_role_t_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, _protobuf_anchor_power_mode_t_MIN, 0, 0, 0, 0, 0, 0}
 #define protobuf_sys_config_get_t_init_zero      {0}
 #define protobuf_sys_config_set_t_init_zero      {false, protobuf_uwb_cfg_t_init_zero}
@@ -1406,10 +1436,16 @@ extern "C" {
 #define protobuf_time_sync_set_t_timezone_offset_tag 2
 #define protobuf_time_sync_resp_t_unix_time_ms_tag 1
 #define protobuf_time_sync_resp_t_timezone_offset_tag 2
-#define protobuf_time_sync_adv_set_t_device_type_tag 1
-#define protobuf_time_sync_adv_set_t_device_id_tag 2
-#define protobuf_time_sync_adv_set_t_unix_time_ms_tag 3
-#define protobuf_time_sync_adv_set_t_timezone_offset_tag 4
+#define protobuf_time_sync_bcast_set_t_serial_number_tag 1
+#define protobuf_time_sync_bcast_set_t_unix_time_ms_tag 2
+#define protobuf_time_sync_bcast_set_t_timezone_offset_tag 3
+#define protobuf_antenna_delay_bcast_set_t_serial_number_tag 1
+#define protobuf_antenna_delay_bcast_set_t_tx_antenna_delay_tag 2
+#define protobuf_antenna_delay_bcast_set_t_rx_antenna_delay_tag 3
+#define protobuf_bcast_apply_ack_t_serial_number_tag 1
+#define protobuf_bcast_apply_ack_t_cmd_seq_tag   2
+#define protobuf_bcast_apply_ack_t_cmd_tag_tag   3
+#define protobuf_bcast_apply_ack_t_success_tag   4
 #define protobuf_uwb_cfg_t_role_tag              1
 #define protobuf_uwb_cfg_t_device_id_tag         2
 #define protobuf_uwb_cfg_t_ranging_period_ms_tag 3
@@ -1701,7 +1737,7 @@ extern "C" {
 #define protobuf_packet_t_time_sync_get_tag      6
 #define protobuf_packet_t_time_sync_set_tag      7
 #define protobuf_packet_t_time_sync_resp_tag     8
-#define protobuf_packet_t_time_sync_adv_set_tag  9
+#define protobuf_packet_t_time_sync_bcast_set_tag 9
 #define protobuf_packet_t_sys_config_get_tag     10
 #define protobuf_packet_t_sys_config_set_tag     11
 #define protobuf_packet_t_sys_config_resp_tag    12
@@ -1776,6 +1812,8 @@ extern "C" {
 #define protobuf_packet_t_calib_stop_tag         85
 #define protobuf_packet_t_calib_candidate_apply_tag 86
 #define protobuf_packet_t_calib_data_tag         87
+#define protobuf_packet_t_antenna_delay_bcast_set_tag 88
+#define protobuf_packet_t_bcast_apply_ack_tag    89
 
 /* Struct field encoding specification for nanopb */
 #define protobuf_addr_t_FIELDLIST(X, a) \
@@ -1845,13 +1883,27 @@ X(a, STATIC,   SINGULAR, INT32,    timezone_offset,   2)
 #define protobuf_time_sync_resp_t_CALLBACK NULL
 #define protobuf_time_sync_resp_t_DEFAULT NULL
 
-#define protobuf_time_sync_adv_set_t_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UENUM,    device_type,       1) \
-X(a, STATIC,   SINGULAR, UINT32,   device_id,         2) \
-X(a, STATIC,   SINGULAR, UINT64,   unix_time_ms,      3) \
-X(a, STATIC,   SINGULAR, INT32,    timezone_offset,   4)
-#define protobuf_time_sync_adv_set_t_CALLBACK NULL
-#define protobuf_time_sync_adv_set_t_DEFAULT NULL
+#define protobuf_time_sync_bcast_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   serial_number,     1) \
+X(a, STATIC,   SINGULAR, UINT64,   unix_time_ms,      2) \
+X(a, STATIC,   SINGULAR, INT32,    timezone_offset,   3)
+#define protobuf_time_sync_bcast_set_t_CALLBACK NULL
+#define protobuf_time_sync_bcast_set_t_DEFAULT NULL
+
+#define protobuf_antenna_delay_bcast_set_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   serial_number,     1) \
+X(a, STATIC,   SINGULAR, UINT32,   tx_antenna_delay,   2) \
+X(a, STATIC,   SINGULAR, UINT32,   rx_antenna_delay,   3)
+#define protobuf_antenna_delay_bcast_set_t_CALLBACK NULL
+#define protobuf_antenna_delay_bcast_set_t_DEFAULT NULL
+
+#define protobuf_bcast_apply_ack_t_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   serial_number,     1) \
+X(a, STATIC,   SINGULAR, UINT32,   cmd_seq,           2) \
+X(a, STATIC,   SINGULAR, UINT32,   cmd_tag,           3) \
+X(a, STATIC,   SINGULAR, BOOL,     success,           4)
+#define protobuf_bcast_apply_ack_t_CALLBACK NULL
+#define protobuf_bcast_apply_ack_t_DEFAULT NULL
 
 #define protobuf_uwb_cfg_t_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    role,              1) \
@@ -2520,7 +2572,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,device_information_resp,params.device
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,time_sync_get,params.time_sync_get),   6) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,time_sync_set,params.time_sync_set),   7) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,time_sync_resp,params.time_sync_resp),   8) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,time_sync_adv_set,params.time_sync_adv_set),   9) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,time_sync_bcast_set,params.time_sync_bcast_set),   9) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,sys_config_get,params.sys_config_get),  10) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,sys_config_set,params.sys_config_set),  11) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,sys_config_resp,params.sys_config_resp),  12) \
@@ -2594,7 +2646,9 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,zone_profile_resp,params.zone_profile
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_start,params.calib_start),  84) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_stop,params.calib_stop),  85) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_candidate_apply,params.calib_candidate_apply),  86) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_data,params.calib_data),  87)
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_data,params.calib_data),  87) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,antenna_delay_bcast_set,params.antenna_delay_bcast_set),  88) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (params,bcast_apply_ack,params.bcast_apply_ack),  89)
 #define protobuf_packet_t_CALLBACK NULL
 #define protobuf_packet_t_DEFAULT NULL
 #define protobuf_packet_t_hdr_MSGTYPE protobuf_hdr_t
@@ -2605,7 +2659,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_data,params.calib_data),  87)
 #define protobuf_packet_t_params_time_sync_get_MSGTYPE protobuf_time_sync_get_t
 #define protobuf_packet_t_params_time_sync_set_MSGTYPE protobuf_time_sync_set_t
 #define protobuf_packet_t_params_time_sync_resp_MSGTYPE protobuf_time_sync_resp_t
-#define protobuf_packet_t_params_time_sync_adv_set_MSGTYPE protobuf_time_sync_adv_set_t
+#define protobuf_packet_t_params_time_sync_bcast_set_MSGTYPE protobuf_time_sync_bcast_set_t
 #define protobuf_packet_t_params_sys_config_get_MSGTYPE protobuf_sys_config_get_t
 #define protobuf_packet_t_params_sys_config_set_MSGTYPE protobuf_sys_config_set_t
 #define protobuf_packet_t_params_sys_config_resp_MSGTYPE protobuf_sys_config_resp_t
@@ -2680,6 +2734,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (params,calib_data,params.calib_data),  87)
 #define protobuf_packet_t_params_calib_stop_MSGTYPE protobuf_calib_stop_t
 #define protobuf_packet_t_params_calib_candidate_apply_MSGTYPE protobuf_calib_candidate_apply_t
 #define protobuf_packet_t_params_calib_data_MSGTYPE protobuf_calib_data_t
+#define protobuf_packet_t_params_antenna_delay_bcast_set_MSGTYPE protobuf_antenna_delay_bcast_set_t
+#define protobuf_packet_t_params_bcast_apply_ack_MSGTYPE protobuf_bcast_apply_ack_t
 
 extern const pb_msgdesc_t protobuf_addr_t_msg;
 extern const pb_msgdesc_t protobuf_hdr_t_msg;
@@ -2691,7 +2747,9 @@ extern const pb_msgdesc_t protobuf_device_information_resp_t_msg;
 extern const pb_msgdesc_t protobuf_time_sync_get_t_msg;
 extern const pb_msgdesc_t protobuf_time_sync_set_t_msg;
 extern const pb_msgdesc_t protobuf_time_sync_resp_t_msg;
-extern const pb_msgdesc_t protobuf_time_sync_adv_set_t_msg;
+extern const pb_msgdesc_t protobuf_time_sync_bcast_set_t_msg;
+extern const pb_msgdesc_t protobuf_antenna_delay_bcast_set_t_msg;
+extern const pb_msgdesc_t protobuf_bcast_apply_ack_t_msg;
 extern const pb_msgdesc_t protobuf_uwb_cfg_t_msg;
 extern const pb_msgdesc_t protobuf_sys_config_get_t_msg;
 extern const pb_msgdesc_t protobuf_sys_config_set_t_msg;
@@ -2793,7 +2851,9 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_time_sync_get_t_fields &protobuf_time_sync_get_t_msg
 #define protobuf_time_sync_set_t_fields &protobuf_time_sync_set_t_msg
 #define protobuf_time_sync_resp_t_fields &protobuf_time_sync_resp_t_msg
-#define protobuf_time_sync_adv_set_t_fields &protobuf_time_sync_adv_set_t_msg
+#define protobuf_time_sync_bcast_set_t_fields &protobuf_time_sync_bcast_set_t_msg
+#define protobuf_antenna_delay_bcast_set_t_fields &protobuf_antenna_delay_bcast_set_t_msg
+#define protobuf_bcast_apply_ack_t_fields &protobuf_bcast_apply_ack_t_msg
 #define protobuf_uwb_cfg_t_fields &protobuf_uwb_cfg_t_msg
 #define protobuf_sys_config_get_t_fields &protobuf_sys_config_get_t_msg
 #define protobuf_sys_config_set_t_fields &protobuf_sys_config_set_t_msg
@@ -2894,8 +2954,10 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_anchor_layout_resp_t_size       184
 #define protobuf_anchor_layout_set_t_size        184
 #define protobuf_anchor_ranging_t_size           18
+#define protobuf_antenna_delay_bcast_set_t_size  18
 #define protobuf_battery_info_get_t_size         6
 #define protobuf_battery_info_resp_t_size        58
+#define protobuf_bcast_apply_ack_t_size          20
 #define protobuf_ble_adv_config_request_t_size   6
 #define protobuf_ble_adv_config_t_size           35
 #define protobuf_ble_adv_status_t_size           44
@@ -2970,7 +3032,7 @@ extern const pb_msgdesc_t protobuf_packet_t_msg;
 #define protobuf_sys_ranging_cfg_resp_t_size     14
 #define protobuf_sys_ranging_cfg_set_t_size      14
 #define protobuf_sys_ranging_cfg_t_size          12
-#define protobuf_time_sync_adv_set_t_size        30
+#define protobuf_time_sync_bcast_set_t_size      28
 #define protobuf_time_sync_get_t_size            6
 #define protobuf_time_sync_resp_t_size           22
 #define protobuf_time_sync_set_t_size            22

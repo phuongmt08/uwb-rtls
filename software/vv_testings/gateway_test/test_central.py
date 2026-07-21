@@ -31,7 +31,7 @@ DEVICE_TYPE_OPTIONS = {
     "DEBUG_TOOL": pb.DEVICE_TYPE_DEBUG_TOOL,
 }
 
-BCAST_KIND_OPTIONS = ("device_information_get", "time_sync_get", "none")
+BCAST_KIND_OPTIONS = ("device_information_get", "time_sync_get", "antenna_delay_set", "none")
 
 
 @dataclass
@@ -47,6 +47,9 @@ class GuiSettings:
     bcast_kind: str
     bcast_repeat: int
     bcast_interval_s: float
+    bcast_serial_number: int
+    bcast_tx_antenna_delay: int
+    bcast_rx_antenna_delay: int
     verbose: bool
 
 
@@ -104,6 +107,9 @@ class CentralTestGui(tk.Tk):
         self.bcast_kind_var = tk.StringVar(value=BCAST_KIND_OPTIONS[0])
         self.bcast_repeat_var = tk.StringVar(value="1")
         self.bcast_interval_var = tk.StringVar(value="0.25")
+        self.bcast_serial_var = tk.StringVar(value="0")
+        self.bcast_tx_delay_var = tk.StringVar(value="0")
+        self.bcast_rx_delay_var = tk.StringVar(value="0")
         self.verbose_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Idle")
 
@@ -153,6 +159,9 @@ class CentralTestGui(tk.Tk):
         ).grid(row=0, column=1, columnspan=3, sticky="w", padx=6, pady=5)
         self._entry(bcast, "Repeat", self.bcast_repeat_var, 1, 0, 7)
         self._entry(bcast, "Interval", self.bcast_interval_var, 1, 2, 7)
+        self._entry(bcast, "Serial# (0=all)", self.bcast_serial_var, 2, 0, 10)
+        self._entry(bcast, "TX delay", self.bcast_tx_delay_var, 3, 0, 7)
+        self._entry(bcast, "RX delay", self.bcast_rx_delay_var, 3, 2, 7)
 
         actions = ttk.Frame(root)
         actions.pack(side=tk.TOP, fill=tk.X, pady=(10, 8))
@@ -213,6 +222,9 @@ class CentralTestGui(tk.Tk):
             bcast_kind=self.bcast_kind_var.get(),
             bcast_repeat=max(1, int(self.bcast_repeat_var.get(), 0)),
             bcast_interval_s=float(self.bcast_interval_var.get()),
+            bcast_serial_number=int(self.bcast_serial_var.get(), 0),
+            bcast_tx_antenna_delay=int(self.bcast_tx_delay_var.get(), 0),
+            bcast_rx_antenna_delay=int(self.bcast_rx_delay_var.get(), 0),
             verbose=self.verbose_var.get(),
         )
 
@@ -353,6 +365,10 @@ class CentralTestGui(tk.Tk):
                     pkt.device_information_get.dummy = 0
                 elif cfg.bcast_kind == "time_sync_get":
                     pkt.time_sync_get.dummy = 0
+                elif cfg.bcast_kind == "antenna_delay_set":
+                    pkt.antenna_delay_bcast_set.serial_number = cfg.bcast_serial_number
+                    pkt.antenna_delay_bcast_set.tx_antenna_delay = cfg.bcast_tx_antenna_delay
+                    pkt.antenna_delay_bcast_set.rx_antenna_delay = cfg.bcast_rx_antenna_delay
                 else:
                     pkt.none.dummy = i
 

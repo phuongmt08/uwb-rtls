@@ -24,8 +24,10 @@ class VvProtocol(_VvProtocol):
         return self._commands.time_sync_set(src, dst, seq, unix_time_ms=unix_time_ms, timezone_offset=timezone_offset)
     def build_time_sync_resp(self, src: int, dst: int, seq: int):
         return self._commands.time_sync_resp(src, dst, seq)
-    def build_time_sync_adv_set(self, src: int, dst: int, seq: int, device_type: int | None = None, device_id: int = 1, unix_time_ms: int | None = None, timezone_offset: int = 7 * 60):
-        return self._commands.time_sync_adv_set(src, dst, seq, device_type=device_type, device_id=device_id, unix_time_ms=unix_time_ms, timezone_offset=timezone_offset)
+    def build_time_sync_bcast_set(self, src: int, dst: int, seq: int, serial_number: int = 0, unix_time_ms: int | None = None, timezone_offset: int = 7 * 60):
+        return self._commands.time_sync_bcast_set(src, dst, seq, serial_number=serial_number, unix_time_ms=unix_time_ms, timezone_offset=timezone_offset)
+    def build_antenna_delay_bcast_set(self, src: int, dst: int, seq: int, serial_number: int = 0, tx_antenna_delay: int = 0, rx_antenna_delay: int = 0):
+        return self._commands.antenna_delay_bcast_set(src, dst, seq, serial_number=serial_number, tx_antenna_delay=tx_antenna_delay, rx_antenna_delay=rx_antenna_delay)
     def build_sys_config_get(self, src: int, dst: int, seq: int):
         return self._commands.sys_config_get(src, dst, seq)
     def build_sys_config_set(

@@ -33,7 +33,8 @@ _MCU_COMMANDS = {
     "device_information_get",
     "time_sync_get",
     "time_sync_set",
-    "time_sync_adv_set",
+    "time_sync_bcast_set",
+    "antenna_delay_bcast_set",
     "sys_config_get",
     "sys_config_set",
     "sys_ranging_cfg_get",
@@ -210,36 +211,42 @@ class CommandFactory:
         pkt.time_sync_set.timezone_offset = timezone_offset
         return pkt
 
-    def time_sync_adv_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.time_sync_adv_set.device_type = pb.DEVICE_TYPE_ANCHOR
-        pkt.time_sync_adv_set.device_id = 1
-        pkt.time_sync_adv_set.unix_time_ms = int(time.time() * 1000)
-        pkt.time_sync_adv_set.timezone_offset = 7 * 60
-        return pkt
-
     def time_sync_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.time_sync_resp.unix_time_ms = int(time.time() * 1000)
         pkt.time_sync_resp.timezone_offset = 7 * 60
         return pkt
 
-    def time_sync_adv_set(
+    def time_sync_bcast_set(
         self,
         src: int,
         dst: int,
         seq: int,
-        device_type: int | None = None,
-        device_id: int = 1,
+        serial_number: int = 0,
         unix_time_ms: int | None = None,
         timezone_offset: int = 7 * 60,
     ) -> pb.packet_t:
-        # Test/mock helper: real devices should provide their own identity.
+        # serial_number == 0 means "every device".
         pkt = self._base(src, dst, seq)
-        pkt.time_sync_adv_set.device_type = self.default_device_type if device_type is None else device_type
-        pkt.time_sync_adv_set.device_id = device_id
-        pkt.time_sync_adv_set.unix_time_ms = unix_time_ms if unix_time_ms is not None else int(time.time() * 1000)
-        pkt.time_sync_adv_set.timezone_offset = timezone_offset
+        pkt.time_sync_bcast_set.serial_number = serial_number
+        pkt.time_sync_bcast_set.unix_time_ms = unix_time_ms if unix_time_ms is not None else int(time.time() * 1000)
+        pkt.time_sync_bcast_set.timezone_offset = timezone_offset
+        return pkt
+
+    def antenna_delay_bcast_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        serial_number: int = 0,
+        tx_antenna_delay: int = 0,
+        rx_antenna_delay: int = 0,
+    ) -> pb.packet_t:
+        # serial_number == 0 means "every device".
+        pkt = self._base(src, dst, seq)
+        pkt.antenna_delay_bcast_set.serial_number = serial_number
+        pkt.antenna_delay_bcast_set.tx_antenna_delay = tx_antenna_delay
+        pkt.antenna_delay_bcast_set.rx_antenna_delay = rx_antenna_delay
         return pkt
 
     def sys_config_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -1046,7 +1053,7 @@ class CommandCatalog:
             CommandSpec(6, "time_sync_get", self.factory.time_sync_get, "time_sync_resp"),
             CommandSpec(7, "time_sync_set", self.factory.time_sync_set, "time_sync_resp"),
             CommandSpec(8, "time_sync_resp", self.factory.time_sync_resp),
-            CommandSpec(9, "time_sync_adv_set", self.factory.time_sync_adv_set),
+            CommandSpec(9, "time_sync_bcast_set", self.factory.time_sync_bcast_set),
             CommandSpec(10, "sys_config_get", self.factory.sys_config_get, "sys_config_resp"),
             CommandSpec(11, "sys_config_set", self.factory.sys_config_set, "sys_config_resp"),
             CommandSpec(12, "sys_config_resp", self.factory.sys_config_resp),
@@ -1129,6 +1136,7 @@ class CommandCatalog:
             CommandSpec(84, "calib_start", self.factory.calib_start),
             CommandSpec(85, "calib_stop", self.factory.calib_stop),
             CommandSpec(86, "calib_candidate_apply", self.factory.calib_candidate_apply),
+            CommandSpec(88, "antenna_delay_bcast_set", self.factory.antenna_delay_bcast_set),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

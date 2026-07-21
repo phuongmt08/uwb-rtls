@@ -10,7 +10,7 @@ COMMAND_ENABLE = {
     "device_information_get": 1,
     "time_sync_get": 1,
     "time_sync_set": 1,
-    "time_sync_adv_set": 1,
+    "time_sync_bcast_set": 1,
     "sys_config_get": 1,
     "sys_config_set": 1,
     "sys_ranging_cfg_get": 1,

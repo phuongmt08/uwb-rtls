@@ -152,9 +152,9 @@ class DeviceInfoViewModel(QObject):
         """Called by View when user clicks Disconnect on the connected scanned device."""
         return self.model.disconnect_device(reason=reason)
 
-    def send_time_sync_adv(self, device_type: int, device_id: int):
-        """Forward time sync advertising set command to the model."""
-        self.model.send_time_sync_adv(device_type, device_id)
+    def send_time_sync_bcast(self, serial_number: int):
+        """Forward broadcast time sync set command to the model."""
+        self.model.send_time_sync_bcast(serial_number)
 
     def request_end_session(self, reason: int = 0, await_completion: bool = False):
         """Forward session shutdown request to the model command path."""

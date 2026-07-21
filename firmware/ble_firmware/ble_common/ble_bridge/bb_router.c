@@ -9,6 +9,7 @@
  * @brief      
  */
 /* Includes ----------------------------------------------------------- */
+#include <string.h>
 #include "bb_router.h"
 #include "bb_cmd_hdl.h"
 #include "app_timer.h"
@@ -17,8 +18,8 @@
 #include "nrf_log.h"
 #include "bb_debug.h"
 #include "bb_transport.h"
-#if defined(BLE_PERIPHERAL)
-#include "app_timer.h"
+#if defined(BLE_CENTRAL)
+#include "bb_broadcast.h"
 #endif
 #include "../../../protocol/nanopb/pb_decode.h"
 #include "../../../protocol/protos/protocol.pb.h"
@@ -36,6 +37,29 @@
 #define BB_ROUTER_APP_TIMER_TICKS_TO_MS(ticks) \
     ((uint32_t)(((uint64_t)(ticks) * (APP_TIMER_CONFIG_RTC_FREQUENCY + 1u) * 1000u) / 32768u))
 
+#if defined(BLE_CENTRAL)
+/* Retry-until-confirmed for broadcast-targeted set commands (central only:
+ * central is the sender of config, peripheral's scan duty cycle is low
+ * enough that a single burst can miss it entirely). */
+#define BB_RELIABLE_MAX_TRACKERS 2u
+#define BB_RELIABLE_MAX_RETRIES  5u
+#define BB_RELIABLE_RETRY_MS     1000u
+#endif
+
+/* Private enumerate/structure ------------------------------------------ */
+#if defined(BLE_CENTRAL)
+typedef struct
+{
+    bool active;
+    uint32_t which_params;
+    uint32_t seq;
+    uint8_t retries_left;
+    uint32_t last_action_tick;
+    uint16_t encoded_len;
+    uint8_t encoded[BLE_BROADCAST_MAX_PACKET_SIZE];
+} bb_reliable_tracker_t;
+#endif
+
 /* Private variables -------------------------------------------------- */
 static bb_router_state_t m_state;
 static bb_packet_source_t m_target_source;
@@ -45,6 +69,9 @@ volatile uint32_t g_bb_router_mcu_rx_id_count[BB_ROUTER_MCU_BLE_PACKET_ID_COUNT]
 #if BB_DEBUG_STREAM_MCU_PERI_ENABLED && (DEBUG_STREAM_MCU_PERI_STATS_INTERVAL_MS > 0)
 APP_TIMER_DEF(m_mcu_rx_stats_timer_id);
 #endif
+#endif
+#if defined(BLE_CENTRAL)
+static bb_reliable_tracker_t m_reliable[BB_RELIABLE_MAX_TRACKERS];
 #endif
 
 // Router-owned buffer that stores protobuf payloads only.
@@ -59,6 +86,11 @@ static void bb_router_state_check_dst_handle(void);
 static void bb_router_state_process_cmd_handle(void);
 static void bb_router_state_forward_handle(void);
 static void bb_router_log_packet(const char *direction, bb_packet_source_t source, uint8_t *p_data, uint16_t length);
+#if defined(BLE_CENTRAL)
+static void bb_reliable_track(uint32_t which_params, uint32_t seq, const uint8_t *data, uint16_t len);
+static void bb_reliable_on_ack(uint32_t cmd_seq, uint32_t cmd_tag);
+static void bb_reliable_process(void);
+#endif
 
 #if defined(BLE_PERIPHERAL)
 static int bb_router_mcu_ble_packet_index(uint32_t cmd_id);
@@ -105,6 +137,9 @@ ret_code_t bb_router_init(void)
 
 void bb_router_process(void)
 {
+#if defined(BLE_CENTRAL)
+    bb_reliable_process();
+#endif
 
     /* ---- Collapse state machine: process all ready states in one call ---- */
 
@@ -289,6 +324,80 @@ static void bb_router_log_packet(const char *direction, bb_packet_source_t sourc
 #endif
 }
 
+#if defined(BLE_CENTRAL)
+static void bb_reliable_track(uint32_t which_params, uint32_t seq, const uint8_t *data, uint16_t len)
+{
+    if (len > BLE_BROADCAST_MAX_PACKET_SIZE)
+    {
+        return;
+    }
+
+    /* Reuse the tracker already covering this command, else a free slot,
+     * else slot 0 (a newer command send supersedes an older one in flight). */
+    bb_reliable_tracker_t *t = &m_reliable[0];
+    for (uint8_t i = 0; i < BB_RELIABLE_MAX_TRACKERS; i++)
+    {
+        if (m_reliable[i].active && m_reliable[i].which_params == which_params)
+        {
+            t = &m_reliable[i];
+            break;
+        }
+        if (!m_reliable[i].active)
+        {
+            t = &m_reliable[i];
+        }
+    }
+
+    t->active = true;
+    t->which_params = which_params;
+    t->seq = seq;
+    t->retries_left = BB_RELIABLE_MAX_RETRIES - 1u; /* first send already happened via the normal forward path */
+    t->last_action_tick = app_timer_cnt_get();
+    t->encoded_len = len;
+    memcpy(t->encoded, data, len);
+}
+
+static void bb_reliable_on_ack(uint32_t cmd_seq, uint32_t cmd_tag)
+{
+    for (uint8_t i = 0; i < BB_RELIABLE_MAX_TRACKERS; i++)
+    {
+        if (m_reliable[i].active && m_reliable[i].which_params == cmd_tag && m_reliable[i].seq == cmd_seq)
+        {
+            m_reliable[i].active = false;
+            NRF_LOG_INFO("bb_router: bcast confirmed tag=%u seq=%u", (unsigned)cmd_tag, (unsigned)cmd_seq);
+        }
+    }
+}
+
+static void bb_reliable_process(void)
+{
+    uint32_t now = app_timer_cnt_get();
+
+    for (uint8_t i = 0; i < BB_RELIABLE_MAX_TRACKERS; i++)
+    {
+        bb_reliable_tracker_t *t = &m_reliable[i];
+        if (!t->active ||
+            app_timer_cnt_diff_compute(now, t->last_action_tick) < APP_TIMER_TICKS(BB_RELIABLE_RETRY_MS))
+        {
+            continue;
+        }
+
+        if (t->retries_left == 0u)
+        {
+            NRF_LOG_WARNING("bb_router: bcast gave up tag=%u seq=%u", (unsigned)t->which_params, (unsigned)t->seq);
+            t->active = false;
+            continue;
+        }
+
+        if (bb_broadcast_send(t->encoded, t->encoded_len) == NRF_SUCCESS)
+        {
+            t->retries_left--;
+        }
+        t->last_action_tick = now; /* also throttles retry attempts while the broadcaster is busy */
+    }
+}
+#endif /* BLE_CENTRAL */
+
 static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
 {
     m_route_packet_valid = false;
@@ -349,6 +458,13 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             if (addr == protobuf_PACKET_ADDR_BCAST && rx_src == BB_SOURCE_SERIAL)
             {
                 m_target_source = BB_SOURCE_BLE_BROADCAST;
+#if defined(BLE_CENTRAL)
+                if (pkt.which_params == protobuf_packet_t_time_sync_bcast_set_tag ||
+                    pkt.which_params == protobuf_packet_t_antenna_delay_bcast_set_tag)
+                {
+                    bb_reliable_track(pkt.which_params, pkt.hdr.seq, p_data, length);
+                }
+#endif
                 return false;
             }
 
@@ -356,6 +472,12 @@ static bool bb_router_check_dst(uint8_t *p_data, uint16_t length)
             m_target_source = (rx_src == BB_SOURCE_SERIAL)
                                 ? BB_SOURCE_BLE
                                 : BB_SOURCE_SERIAL;
+#if defined(BLE_CENTRAL)
+            if (rx_src == BB_SOURCE_BLE && pkt.which_params == protobuf_packet_t_bcast_apply_ack_tag)
+            {
+                bb_reliable_on_ack(pkt.params.bcast_apply_ack.cmd_seq, pkt.params.bcast_apply_ack.cmd_tag);
+            }
+#endif
             return false;
 #endif
         }

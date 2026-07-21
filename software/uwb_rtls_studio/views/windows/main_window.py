@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
             "enter_to_bootloader",
             "imu_reset",
             "imu_calib_start",
-            "time_sync_adv_set",
+            "time_sync_bcast_set",
         }
         return command_name in notify_commands
 
@@ -592,7 +592,7 @@ class MainWindow(QMainWindow):
             "enter_to_bootloader": "enter bootloader",
             "imu_reset": "IMU reset",
             "imu_calib_start": "IMU calibration start",
-            "time_sync_adv_set": "advertising device time sync",
+            "time_sync_bcast_set": "broadcast device time sync",
         }
         return labels.get(command_name, command_name.replace("_", " "))
 
