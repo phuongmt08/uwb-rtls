@@ -31,34 +31,43 @@ extern "C" {
 // =============================================================================
 // Sharing these parameters ensures seamless handshakes between Central & Peripheral
 
-/** 
+/**
  * @brief Advertising interval for the Peripheral.
- * Time between consecutive advertising packets. 
- * Value is in units of 0.625 ms. Example: 64 * 0.625 ms = 40 ms.
+ * Time between consecutive advertising packets.
+ * Value is in units of 0.625 ms. Example: 160 * 0.625 ms = 100 ms.
+ * Traded off against reconnect latency: raised from 40 ms to cut
+ * unconnected-state radio wake-ups by ~2.5x.
  */
-#define SYSTEM_CONFIG_ADV_INTERVAL        64     
+#define SYSTEM_CONFIG_ADV_INTERVAL        160
 
-/** 
+/**
  * @brief Minimum acceptable connection interval.
+ * The MCU<->peripheral UART link caps real throughput at ~184 kbps (230400
+ * baud, 8N1), well below what a 7.5 ms interval can carry — a shorter
+ * interval only wakes the radio more often for no extra usable throughput.
  */
-#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(7.5, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(15, UNIT_1_25_MS)
 
-/** 
+/**
  * @brief Maximum acceptable connection interval.
  */
-#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(15, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(30, UNIT_1_25_MS)
 
-/** 
+/**
  * @brief Slave latency.
- * Determines how many connection events the Peripheral (Slave) can safely
- * skip without dropping the connection. Set to 0 for maximum responsiveness.
+ * Lets the Peripheral (Slave) skip up to N connection events when it has
+ * nothing queued to send. Safe regardless of traffic pattern: under
+ * continuous streaming there is always data pending so no events are
+ * skipped; under bursty/idle traffic this cuts radio wake-ups for free.
  */
-#define SYSTEM_CONFIG_SLAVE_LATENCY       0
+#define SYSTEM_CONFIG_SLAVE_LATENCY      6
 
-/** 
+/**
  * @brief Connection supervisory time-out.
- * Maximum time allowed without receiving a packet before the stack drops 
- * the connection. Value provided in milliseconds.
+ * Maximum time allowed without receiving a packet before the stack drops
+ * the connection. Value provided in milliseconds. Must stay above
+ * (1 + SLAVE_LATENCY) * MAX_CONN_INTERVAL * 2 (currently 420 ms) if either
+ * of those is increased further.
  */
 #define SYSTEM_CONFIG_CONN_SUP_TIMEOUT    MSEC_TO_UNITS(4000, UNIT_10_MS)
 

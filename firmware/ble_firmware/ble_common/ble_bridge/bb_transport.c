@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include "bb_transport.h"
 #include "bb_debug.h"
+#include "bb_broadcast.h"
 #include "hdlc.h"
 #include "logger.h"
 #if defined(BLE_PERIPHERAL)
@@ -146,6 +147,9 @@ ret_code_t bb_transport_init(uint8_t * p_payload_buf, uint16_t * p_payload_len, 
     // Register BLE receive callback for Central
     ble_central_rx_cb_register(on_rx_ble);
 #endif
+
+    /* Reassembled broadcast packets are routed to the MCU like any BLE RX. */
+    bb_broadcast_register_rx_cb(on_rx_ble);
 
     return err_code;
 }
@@ -283,13 +287,7 @@ static ret_code_t bb_transport_send_ble(uint8_t const * p_data, uint16_t length)
 
 static ret_code_t bb_transport_send_ble_broadcast(uint8_t const * p_data, uint16_t length)
 {
-#if defined(BLE_PERIPHERAL)
-    return ble_peripheral_broadcast_send(p_data, length);
-#elif defined(BLE_CENTRAL)
-    return app_ble_central_broadcast_send(p_data, length);
-#else
-    return NRF_ERROR_NOT_SUPPORTED;
-#endif
+    return bb_broadcast_send(p_data, length);
 }
 
 /**

@@ -43,7 +43,7 @@
 
 #include "bsp_led.h"
 #include "bb_cmd_hdl.h"
-#include "ble_broadcast.h"
+#include "bb_broadcast.h"
 #include "protocol.pb.h"
 
 /* Private defines --------------------------------------------------------- */
@@ -54,9 +54,6 @@
 #define KNOWN_DEVICE_STALE_MS    5000U
 #define APP_BLE_CENTRAL_RSSI_UNKNOWN_DBM                (-127)
 #define APP_BLE_CENTRAL_DISCONNECT_REASON_NONE          0U
-#define BCAST_ADV_EVENTS_PER_FRAGMENT                   3U
-#define BCAST_RX_CONTEXTS                               4U
-#define BCAST_REASSEMBLY_TIMEOUT_MS                     1000U
 #define ADV_STATUS_CACHE_SIZE                           8U
 #define ADV_STATUS_HEARTBEAT_MS                         5000U
 
@@ -79,13 +76,6 @@ typedef struct
     uint32_t last_seen;                        /**< app_timer tick of last adv. */
 } known_device_t;
 
-typedef struct
-{
-    bool active;
-    uint8_t addr[BLE_GAP_ADDR_LEN];
-    uint8_t addr_type;
-    ble_broadcast_reassembly_t reassembly;
-} bcast_rx_slot_t;
 
 #pragma pack(push, 1)
 typedef struct
@@ -135,6 +125,7 @@ static bool           m_scan_active = false;
 
 static bool           m_has_pending_connect = false;
 static ble_gap_addr_t m_pending_target_addr;
+static bool           m_user_disconnect_requested = false;
 
 static uint16_t       m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
 static ble_gap_conn_params_t m_current_conn_params;
@@ -143,37 +134,9 @@ static int32_t        m_last_rssi_dbm = APP_BLE_CENTRAL_RSSI_UNKNOWN_DBM;
 static uint32_t       m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
 static ble_central_rx_cb_t m_ble_rx_cb = NULL;
 static uint32_t       m_pending_tx_chunks = 0;
-static uint8_t        m_bcast_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
-#if BLE_BROADCAST_USE_EXTENDED
-static uint8_t        m_bcast_advdata[BLE_GAP_ADV_SET_DATA_SIZE_EXTENDED_MAX_SUPPORTED];
-#else
-static uint8_t        m_bcast_advdata[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
-#endif
-static uint8_t        m_bcast_packet[BLE_BROADCAST_MAX_PACKET_SIZE];
-static uint8_t        m_bcast_packet_len = 0;
-static uint8_t        m_bcast_seq = 0;
-static uint8_t        m_bcast_frag_index = 0;
-static uint8_t        m_bcast_frag_count = 0;
-static bool           m_bcast_active = false;
-static bcast_rx_slot_t m_bcast_rx_slots[BCAST_RX_CONTEXTS];
 static adv_status_cache_t m_adv_status_cache[ADV_STATUS_CACHE_SIZE];
 static uint8_t        m_adv_status_cache_replace;
-static uint8_t        m_bcast_rx_packet[BLE_BROADCAST_MAX_PACKET_SIZE];
 APP_TIMER_DEF(m_scan_publish_timer);
-
-static ble_gap_adv_data_t m_bcast_adv_data =
-{
-    .adv_data =
-    {
-        .p_data = m_bcast_advdata,
-        .len    = 0
-    },
-    .scan_rsp_data =
-    {
-        .p_data = NULL,
-        .len    = 0
-    }
-};
 
 /* Private prototypes ------------------------------------------------------ */
 static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context);
@@ -185,11 +148,7 @@ static void lbs_c_init(void);
 static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool matched);
 static void ble_state_update(protobuf_ble_state_t new_state);
 static void scan_publish_timeout_handler(void *p_context);
-static void central_bcast_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report);
 static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report);
-static ret_code_t central_bcast_start_current_fragment(void);
-static void central_bcast_advance_fragment(void);
-static void central_bcast_finish(void);
 
 static void ble_state_update(protobuf_ble_state_t new_state)
 {
@@ -236,40 +195,6 @@ static void scan_publish_timeout_handler(void *p_context)
                                   m_known_devices[i].name,
                                   m_known_devices[i].serial_number);
     }
-}
-
-static bcast_rx_slot_t *central_bcast_rx_slot_get(ble_gap_addr_t const *addr)
-{
-    bcast_rx_slot_t *free_slot = NULL;
-    bcast_rx_slot_t *oldest_slot = &m_bcast_rx_slots[0];
-
-    for (uint8_t i = 0; i < BCAST_RX_CONTEXTS; i++)
-    {
-        bcast_rx_slot_t *slot = &m_bcast_rx_slots[i];
-        if (slot->active &&
-            slot->addr_type == addr->addr_type &&
-            memcmp(slot->addr, addr->addr, BLE_GAP_ADDR_LEN) == 0)
-        {
-            return slot;
-        }
-
-        if (!slot->active && free_slot == NULL)
-        {
-            free_slot = slot;
-        }
-
-        if (slot->reassembly.last_tick < oldest_slot->reassembly.last_tick)
-        {
-            oldest_slot = slot;
-        }
-    }
-
-    bcast_rx_slot_t *slot = (free_slot != NULL) ? free_slot : oldest_slot;
-    memset(slot, 0, sizeof(*slot));
-    slot->active = true;
-    slot->addr_type = addr->addr_type;
-    memcpy(slot->addr, addr->addr, BLE_GAP_ADDR_LEN);
-    return slot;
 }
 
 static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report)
@@ -372,230 +297,6 @@ static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const
     }
 }
 
-static void central_bcast_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report)
-{
-#if BLE_BROADCAST_USE_EXTENDED
-    if (p_adv_report->type.extended_pdu)
-    {
-        const uint8_t *p_payload = NULL;
-        uint16_t payload_len = 0;
-        uint16_t pos = 0;
-        while (pos < p_adv_report->data.len)
-        {
-            uint8_t field_len = p_adv_report->data.p_data[pos++];
-            if (field_len == 0u)
-            {
-                break;
-            }
-            if ((uint16_t)(pos + field_len) > p_adv_report->data.len)
-            {
-                break;
-            }
-
-            uint8_t ad_type = p_adv_report->data.p_data[pos];
-            const uint8_t *field_data = &p_adv_report->data.p_data[pos + 1u];
-            uint8_t field_data_len = (uint8_t)(field_len - 1u);
-
-            if (ad_type == 0xFFu && field_data_len >= 2u)
-            {
-                uint16_t company_id = (uint16_t)field_data[0] | ((uint16_t)field_data[1] << 8);
-                if (company_id == BLE_BROADCAST_COMPANY_ID &&
-                    (field_data_len - 2u) > BLE_BROADCAST_EXT_MANUF_TYPE_SIZE &&
-                    field_data[2] == BLE_BROADCAST_TYPE_EXT_PACKET)
-                {
-                    p_payload = &field_data[2u + BLE_BROADCAST_EXT_MANUF_TYPE_SIZE];
-                    payload_len = (uint16_t)(field_data_len - 2u - BLE_BROADCAST_EXT_MANUF_TYPE_SIZE);
-                    break;
-                }
-            }
-            pos = (uint16_t)(pos + field_len);
-        }
-
-        if (p_payload != NULL && payload_len > 0)
-        {
-            NRF_LOG_INFO("BLE BCAST RX EXT complete len=%u", (unsigned)payload_len);
-            bsp_led_rx_pulse();
-            if (m_ble_rx_cb != NULL)
-            {
-                m_ble_rx_cb(p_payload, payload_len);
-            }
-            return;
-        }
-    }
-#endif
-
-    ble_broadcast_fragment_t fragment;
-    if (!ble_broadcast_find_fragment(p_adv_report->data.p_data,
-                                     p_adv_report->data.len,
-                                     &fragment))
-    {
-        return;
-    }
-
-    bcast_rx_slot_t *slot = central_bcast_rx_slot_get(&p_adv_report->peer_addr);
-    uint8_t packet_len = 0;
-    bool complete = ble_broadcast_reassembly_push(&slot->reassembly,
-                                                   &fragment,
-                                                   app_timer_cnt_get(),
-                                                   APP_TIMER_TICKS(BCAST_REASSEMBLY_TIMEOUT_MS),
-                                                   m_bcast_rx_packet,
-                                                   sizeof(m_bcast_rx_packet),
-                                                   &packet_len);
-    if (!complete)
-    {
-        return;
-    }
-
-    NRF_LOG_INFO("BLE BCAST RX complete len=%u", (unsigned)packet_len);
-    bsp_led_rx_pulse();
-    if (m_ble_rx_cb != NULL)
-    {
-        m_ble_rx_cb(m_bcast_rx_packet, packet_len);
-    }
-}
-
-static ret_code_t central_bcast_start_current_fragment(void)
-{
-#if BLE_BROADCAST_USE_EXTENDED
-    uint8_t manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + BLE_BROADCAST_MAX_PACKET_SIZE];
-    manuf_payload[0] = BLE_BROADCAST_TYPE_EXT_PACKET;
-    memcpy(&manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE], m_bcast_packet, m_bcast_packet_len);
-
-    ble_advdata_manuf_data_t manuf_data;
-    manuf_data.company_identifier = BLE_BROADCAST_COMPANY_ID;
-    manuf_data.data.p_data        = manuf_payload;
-    manuf_data.data.size          = (uint16_t)(BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + m_bcast_packet_len);
-
-    ble_advdata_t advdata;
-    memset(&advdata, 0, sizeof(advdata));
-    advdata.name_type             = BLE_ADVDATA_NO_NAME;
-    advdata.p_manuf_specific_data = &manuf_data;
-
-    uint16_t adv_len = sizeof(m_bcast_advdata);
-    ret_code_t err_code = ble_advdata_encode(&advdata, m_bcast_advdata, &adv_len);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
-
-    m_bcast_adv_data.adv_data.p_data = m_bcast_advdata;
-    m_bcast_adv_data.adv_data.len = adv_len;
-    m_bcast_adv_data.scan_rsp_data.p_data = NULL;
-    m_bcast_adv_data.scan_rsp_data.len = 0;
-
-    ble_gap_adv_params_t adv_params;
-    memset(&adv_params, 0, sizeof(adv_params));
-    adv_params.properties.type = BLE_GAP_ADV_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED;
-    adv_params.primary_phy     = BLE_GAP_PHY_1MBPS;
-    adv_params.secondary_phy   = BLE_GAP_PHY_1MBPS;
-    adv_params.duration        = BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED;
-    adv_params.max_adv_evts    = SYSTEM_CONFIG_BCAST_ADV_EVENTS;
-    adv_params.filter_policy   = BLE_GAP_ADV_FP_ANY;
-    adv_params.interval        = SYSTEM_CONFIG_BCAST_ADV_INTERVAL;
-
-    err_code = sd_ble_gap_adv_set_configure(&m_bcast_adv_handle, &m_bcast_adv_data, &adv_params);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
-
-    err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_ADV, m_bcast_adv_handle, SYSTEM_CONFIG_TX_POWER);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
-
-    NRF_LOG_INFO("BLE BCAST EXT ADV len=%u evts=%u",
-                 (unsigned)m_bcast_packet_len,
-                 (unsigned)SYSTEM_CONFIG_BCAST_ADV_EVENTS);
-    return sd_ble_gap_adv_start(m_bcast_adv_handle, APP_BLE_CONN_CFG_TAG);
-#else
-    uint8_t manuf_data[BLE_BROADCAST_MANUF_DATA_MAX_SIZE];
-    uint8_t manuf_len = 0;
-
-    if (!ble_broadcast_encode_fragment(m_bcast_packet,
-                                       m_bcast_packet_len,
-                                       m_bcast_seq,
-                                       m_bcast_frag_index,
-                                       manuf_data,
-                                       sizeof(manuf_data),
-                                       &manuf_len))
-    {
-        return NRF_ERROR_INTERNAL;
-    }
-
-    uint8_t adv_len = 0;
-    if (!ble_broadcast_build_adv_data(manuf_data,
-                                      manuf_len,
-                                      m_bcast_advdata,
-                                      sizeof(m_bcast_advdata),
-                                      &adv_len))
-    {
-        return NRF_ERROR_DATA_SIZE;
-    }
-
-    m_bcast_adv_data.adv_data.p_data = m_bcast_advdata;
-    m_bcast_adv_data.adv_data.len = adv_len;
-    m_bcast_adv_data.scan_rsp_data.p_data = NULL;
-    m_bcast_adv_data.scan_rsp_data.len = 0;
-
-    ble_gap_adv_params_t adv_params;
-    memset(&adv_params, 0, sizeof(adv_params));
-    adv_params.properties.type = BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED;
-    adv_params.primary_phy     = BLE_GAP_PHY_1MBPS;
-    adv_params.duration        = BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED;
-    adv_params.max_adv_evts    = BCAST_ADV_EVENTS_PER_FRAGMENT;
-    adv_params.filter_policy   = BLE_GAP_ADV_FP_ANY;
-    adv_params.interval        = SYSTEM_CONFIG_ADV_INTERVAL;
-
-    ret_code_t err_code = sd_ble_gap_adv_set_configure(&m_bcast_adv_handle, &m_bcast_adv_data, &adv_params);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
-
-    err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_ADV, m_bcast_adv_handle, SYSTEM_CONFIG_TX_POWER);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
-
-    NRF_LOG_INFO("BLE BCAST ADV fragment %u/%u len=%u",
-                 (unsigned)(m_bcast_frag_index + 1u),
-                 (unsigned)m_bcast_frag_count,
-                 (unsigned)m_bcast_packet_len);
-    return sd_ble_gap_adv_start(m_bcast_adv_handle, APP_BLE_CONN_CFG_TAG);
-#endif
-}
-
-static void central_bcast_finish(void)
-{
-    m_bcast_active = false;
-}
-
-static void central_bcast_advance_fragment(void)
-{
-    if (!m_bcast_active)
-    {
-        return;
-    }
-
-    m_bcast_frag_index++;
-    if (m_bcast_frag_index >= m_bcast_frag_count)
-    {
-        NRF_LOG_INFO("BLE BCAST ADV burst complete");
-        central_bcast_finish();
-        return;
-    }
-
-    ret_code_t err_code = central_bcast_start_current_fragment();
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_WARNING("BLE BCAST ADV fragment start failed: 0x%08x", err_code);
-        central_bcast_finish();
-    }
-}
-
 void app_ble_central_scan_start(uint16_t interval_ms, uint16_t window_ms, uint16_t duration_ms, bool active)
 {
     if (interval_ms > 0 && window_ms > 0) {
@@ -645,7 +346,7 @@ void app_ble_central_scan_stop(void)
  */
 static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool matched)
 {
-    central_bcast_scan_report_handle(p_adv_report);
+    /* Broadcast RX is handled by bb_broadcast's own BLE observer. */
     central_adv_status_scan_report_handle(p_adv_report);
 
     /* ----- Extract device name ----------------------------------------- */
@@ -1020,6 +721,9 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             if (m_has_pending_connect)
             {
                 m_has_pending_connect = false;
+                /* A newer connect() request supersedes any earlier explicit
+                 * disconnect() intent racing against this same event. */
+                m_user_disconnect_requested = false;
                 NRF_LOG_INFO("CMD: Auto-connecting to queued MAC...");
                 nrf_ble_scan_stop();
                 m_scan_active = false;
@@ -1040,6 +744,13 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                     m_last_disconnect_reason = APP_BLE_CENTRAL_DISCONNECT_REASON_NONE;
                     ble_state_update(protobuf_BLE_STATE_CONNECTING);
                 }
+            }
+            else if (m_user_disconnect_requested)
+            {
+                /* Caller explicitly asked to disconnect: stay idle instead
+                 * of immediately reconnecting to the same peer. */
+                m_user_disconnect_requested = false;
+                ble_state_update(protobuf_BLE_STATE_IDLE);
             }
             else
             {
@@ -1165,14 +876,6 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             {
                 m_pending_tx_chunks--;
                 bsp_led_tx_pulse();
-            }
-            break;
-
-        case BLE_GAP_EVT_ADV_SET_TERMINATED:
-            if (m_bcast_active &&
-                p_gap_evt->params.adv_set_terminated.adv_handle == m_bcast_adv_handle)
-            {
-                central_bcast_advance_fragment();
             }
             break;
 
@@ -1364,6 +1067,10 @@ void ble_central_init(void)
     lbs_c_init();
     nus_c_init();
     scan_init();
+
+    /* Broadcast (TX + RX) lives in its own module with a dedicated adv set. */
+    bb_broadcast_init();
+
     ret_code_t err_code = app_timer_create(&m_scan_publish_timer,
                                            APP_TIMER_MODE_REPEATED,
                                            scan_publish_timeout_handler);
@@ -1484,7 +1191,14 @@ void app_ble_central_disconnect(void)
 {
     if (m_is_connected && m_current_conn_handle != BLE_CONN_HANDLE_INVALID)
     {
-        sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+        m_user_disconnect_requested = true;
+        ret_code_t err_code = sd_ble_gap_disconnect(m_current_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+        if (err_code != NRF_SUCCESS)
+        {
+            /* No DISCONNECTED event will follow; don't leave the flag armed
+             * for an unrelated future disconnect. */
+            m_user_disconnect_requested = false;
+        }
     }
 }
 
@@ -1586,48 +1300,6 @@ uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length)
         NRF_LOG_INFO("BLE Central NUS TX queued: %u bytes", send_len);
         m_pending_tx_chunks++;
 
-    }
-
-    return NRF_SUCCESS;
-}
-
-uint32_t app_ble_central_broadcast_send(uint8_t const *p_data, uint16_t length)
-{
-    if (p_data == NULL || length == 0u)
-    {
-        return NRF_ERROR_NULL;
-    }
-
-    if (length > BLE_BROADCAST_MAX_PACKET_SIZE)
-    {
-        NRF_LOG_WARNING("BLE BCAST packet too large: %u > %u",
-                        (unsigned)length,
-                        (unsigned)BLE_BROADCAST_MAX_PACKET_SIZE);
-        return NRF_ERROR_DATA_SIZE;
-    }
-
-    if (m_bcast_active)
-    {
-        return NRF_ERROR_BUSY;
-    }
-
-    memcpy(m_bcast_packet, p_data, length);
-    m_bcast_packet_len = (uint8_t)length;
-#if BLE_BROADCAST_USE_EXTENDED
-    m_bcast_frag_count = 1;
-#else
-    m_bcast_frag_count = (uint8_t)((length + BLE_BROADCAST_FRAGMENT_PAYLOAD_SIZE - 1u) /
-                                   BLE_BROADCAST_FRAGMENT_PAYLOAD_SIZE);
-#endif
-    m_bcast_frag_index = 0;
-    m_bcast_seq++;
-    m_bcast_active = true;
-    ret_code_t err_code = central_bcast_start_current_fragment();
-    if (err_code != NRF_SUCCESS)
-    {
-        NRF_LOG_WARNING("BLE BCAST start failed: 0x%08x", err_code);
-        central_bcast_finish();
-        return err_code;
     }
 
     return NRF_SUCCESS;
