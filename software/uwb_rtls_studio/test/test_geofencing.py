@@ -315,6 +315,8 @@ def test_live_tracking_anchor_telemetry_rows_follow_real_anchor_ids():
             {"anchor_id": 1, "label": "A1"},
             {"anchor_id": 2, "label": "A2"},
             {"anchor_id": 3, "label": "A3"},
+            {"anchor_id": 4, "label": "A4"},
+            {"anchor_id": 5, "label": "A5"},
         ]
 
     class FakeLabel:
@@ -327,7 +329,7 @@ def test_live_tracking_anchor_telemetry_rows_follow_real_anchor_ids():
     tab = LiveTrackingTab.__new__(LiveTrackingTab)
     tab._canvas = FakeCanvas()
     tab._anchor_telemetry_cache = {}
-    for row in range(1, 5):
+    for row in range(1, 7):
         setattr(tab, f"lbl_d{row}", FakeLabel())
         setattr(tab, f"d{row}_label", FakeLabel())
 
@@ -336,6 +338,7 @@ def test_live_tracking_anchor_telemetry_rows_follow_real_anchor_ids():
         [
             {"anchor_id": 0, "distance_mm": 1234, "weight": 75},
             {"anchor_id": 2, "distance_mm": 3456, "weight": 50},
+            {"anchor_id": 5, "distance_mm": 6789, "weight": 25},
         ],
     )
 
@@ -343,6 +346,8 @@ def test_live_tracking_anchor_telemetry_rows_follow_real_anchor_ids():
     assert tab.d1_label.text == "1.234 m  |  W: 0.75"
     assert tab.lbl_d3.text == "A2:"
     assert tab.d3_label.text == "3.456 m  |  W: 0.50"
+    assert tab.lbl_d6.text == "A5:"
+    assert tab.d6_label.text == "6.789 m  |  W: 0.25"
 
 
 def test_ranging_anchor_parser_preserves_anchor_zero_without_breaking_legacy_mask():

@@ -205,6 +205,8 @@ class MainViewModel(QObject):
                     "d2_mm": item.get("d2_mm", ""),
                     "d3_mm": item.get("d3_mm", ""),
                     "d4_mm": item.get("d4_mm", ""),
+                    "d5_mm": item.get("d5_mm", ""),
+                    "d6_mm": item.get("d6_mm", ""),
                     "ukf_x_m": item.get("ukf_x_m", ""),
                     "ukf_y_m": item.get("ukf_y_m", ""),
                     "ukf_yaw_deg": item.get("ukf_yaw_deg", ""),

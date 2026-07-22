@@ -1117,11 +1117,11 @@ class LiveTrackingTab(QWidget):
     def _clear_live_metrics(self):
         widgets = [
             "sof_label", "length_label", "anchor_mask_label", "fusion_ts_label",
-            "tx_frame_cnt_label", "error_frame_cnt_label",
+            "tx_frame_cnt_label", "error_frame_cnt_label", "prefilter_reject_count_label",
             "ukf_x_label", "ukf_y_label", "ukf_yaw_label",
             "tril_x_label", "tril_y_label", "yaw_label",
             "vx_label", "vy_label",
-            "d1_label", "d2_label", "d3_label", "d4_label",
+            "d1_label", "d2_label", "d3_label", "d4_label", "d5_label", "d6_label",
             "z_label", "error_label"
         ]
         for w in widgets:
@@ -1168,7 +1168,7 @@ class LiveTrackingTab(QWidget):
         for anchor_id in packet_anchor_ids or []:
             if anchor_id not in ordered:
                 ordered.append(anchor_id)
-        return ordered[:4]
+        return ordered[:6]
 
     def _show_anchor_telemetry(self, anchors):
         """Render cached distance and weight values using real anchor_id values."""
@@ -1188,7 +1188,7 @@ class LiveTrackingTab(QWidget):
             self._anchor_telemetry_cache[anchor_id] = cached
 
         display_ids = self._telemetry_display_anchor_ids(packet_anchor_ids)
-        for row in range(1, 5):
+        for row in range(1, 7):
             anchor_id = display_ids[row - 1] if row - 1 < len(display_ids) else None
             try:
                 name_widget = getattr(self, f"lbl_d{row}", None)
@@ -1211,6 +1211,30 @@ class LiveTrackingTab(QWidget):
         if hasattr(self, "lbl_fps"):
             self.lbl_fps.setText("Rate:")
 
+        # Keep the .ui file backward-compatible while inserting the new
+        # firmware counter directly below Err Frames in the COUNTERS group.
+        moved_rows = []
+        for index in range(self.pos_grid.count()):
+            row, column, row_span, column_span = self.pos_grid.getItemPosition(index)
+            if row >= 8:
+                widget = self.pos_grid.itemAt(index).widget()
+                if widget is not None:
+                    moved_rows.append((widget, row, column, row_span, column_span))
+        for widget, _, _, _, _ in moved_rows:
+            self.pos_grid.removeWidget(widget)
+        for widget, row, column, row_span, column_span in moved_rows:
+            self.pos_grid.addWidget(widget, row + 1, column, row_span, column_span)
+
+        self.lbl_prefilter_reject_count = QLabel("PF Rejects:", self)
+        self.lbl_prefilter_reject_count.setStyleSheet(
+            "font-size: 13px; color: #94A3B8; background-color: transparent;"
+        )
+        self.prefilter_reject_count_label = self._make_metric_label(
+            "--", color="#F59E0B", bold=True
+        )
+        self.pos_grid.addWidget(self.lbl_prefilter_reject_count, 8, 0)
+        self.pos_grid.addWidget(self.prefilter_reject_count_label, 8, 1)
+
         # Configure units for the statically loaded metric labels
         self.length_label.unit = "bytes"
         self.fusion_ts_label.unit = "ms"
@@ -1226,10 +1250,8 @@ class LiveTrackingTab(QWidget):
         self.vx_label.unit = "m/s"
         self.vy_label.unit = "m/s"
         
-        self.d1_label.unit = "m"
-        self.d2_label.unit = "m"
-        self.d3_label.unit = "m"
-        self.d4_label.unit = "m"
+        for row in range(1, 7):
+            getattr(self, f"d{row}_label").unit = "m"
         
         self.z_label.unit = "m"
         self.error_label.unit = "m"
@@ -1516,6 +1538,7 @@ class LiveTrackingTab(QWidget):
         raw_yaw = float(data.get("yaw_deg", 0.0))
         timestamp_ms = int(data.get("timestamp_ms", 0))
         err_count = int(data.get("ranging_error_count", 0))
+        prefilter_reject_count = int(data.get("prefilter_reject_count", 0))
         seq = int(data.get("seq", 0))
         ukf_step = int(data.get("ukf_step", 0))
 
@@ -1556,6 +1579,11 @@ class LiveTrackingTab(QWidget):
         self._set_metric_value(self.fusion_ts_label, timestamp_ms, "{:d}")
         self._set_metric_value(self.tx_frame_cnt_label, seq, "{:d}")
         self._set_metric_value(self.error_frame_cnt_label, err_count, "{:d}")
+        self._set_metric_value(
+            self.prefilter_reject_count_label,
+            prefilter_reject_count,
+            "{:d}",
+        )
 
         self._set_metric_value(self.ukf_x_label, x)
         self._set_metric_value(self.ukf_y_label, y)

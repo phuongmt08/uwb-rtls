@@ -430,7 +430,7 @@ class SessionRepository:
             f_copy = f.copy()
             dist_map = {a.get("anchor_id"): a.get("distance_mm", "") for a in f_copy.get("anchors", []) if a.get("anchor_id") is not None}
             weight_map = {a.get("anchor_id"): a.get("weight", "") for a in f_copy.get("anchors", []) if a.get("anchor_id") is not None}
-            for k in ["d1_mm", "d2_mm", "d3_mm", "d4_mm"]:
+            for k in [f"d{i}_mm" for i in range(1, 7)]:
                 if f_copy.get(k) is None or f_copy.get(k) == "":
                     try:
                         idx = int(k[1])
@@ -439,7 +439,7 @@ class SessionRepository:
                     except Exception:
                         pass
 
-            for k in ["w1", "w2", "w3", "w4"]:
+            for k in [f"w{i}" for i in range(1, 7)]:
                 try:
                     idx = int(k[1])
                     f_copy[k] = weight_map.get(idx, "")
@@ -1133,8 +1133,8 @@ class SessionRepository:
 
     def _build_position_text_record(self, pos: dict, index: int) -> str:
         distances_by_anchor, weights_by_anchor = self._anchor_maps(pos)
-        distances = [self._distance_m(pos, i, distances_by_anchor) for i in range(1, 5)]
-        weights = [self._weight_raw(pos, i, weights_by_anchor) for i in range(1, 5)]
+        distances = [self._distance_m(pos, i, distances_by_anchor) for i in range(1, 7)]
+        weights = [self._weight_raw(pos, i, weights_by_anchor) for i in range(1, 7)]
 
         status = str(pos.get("status") or "").strip()
         if not status:
@@ -1162,17 +1162,23 @@ class SessionRepository:
             f"| mask: {self._value_int(pos.get('anchor_mask', pos.get('mask', 0)))} "
             f"| d1: {distances[0]:9.6f} | d2: {distances[1]:9.6f} "
             f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
+            f"| d5: {distances[4]:9.6f} | d6: {distances[5]:9.6f} "
             f"| w1: {weights[0]} | w2: {weights[1]} | w3: {weights[2]} | w4: {weights[3]} "
+            f"| w5: {weights[4]} | w6: {weights[5]} "
             f"| err: {self._value_int(pos.get('ranging_error_count', pos.get('err_cnt', 0)))} "
             f"| pf_reject_count: {self._value_int(pos.get('prefilter_reject_count', 0))} "
             f"| amp1: {self._value_float(pos.get('fp_amp_norm1', 0.0)):9.6f} "
             f"| amp2: {self._value_float(pos.get('fp_amp_norm2', 0.0)):9.6f} "
             f"| amp3: {self._value_float(pos.get('fp_amp_norm3', 0.0)):9.6f} "
             f"| amp4: {self._value_float(pos.get('fp_amp_norm4', 0.0)):9.6f} "
+            f"| amp5: {self._value_float(pos.get('fp_amp_norm5', 0.0)):9.6f} "
+            f"| amp6: {self._value_float(pos.get('fp_amp_norm6', 0.0)):9.6f} "
             f"| snr1: {self._value_float(pos.get('fp_snr1', 0.0)):9.6f} "
             f"| snr2: {self._value_float(pos.get('fp_snr2', 0.0)):9.6f} "
             f"| snr3: {self._value_float(pos.get('fp_snr3', 0.0)):9.6f} "
-            f"| snr4: {self._value_float(pos.get('fp_snr4', 0.0)):9.6f}"
+            f"| snr4: {self._value_float(pos.get('fp_snr4', 0.0)):9.6f} "
+            f"| snr5: {self._value_float(pos.get('fp_snr5', 0.0)):9.6f} "
+            f"| snr6: {self._value_float(pos.get('fp_snr6', 0.0)):9.6f}"
         )
         return line
 
@@ -1196,7 +1202,7 @@ class SessionRepository:
         ukf_y = self._value_float(fields.get("ukf_y"))
         tril_x = self._value_float(fields.get("tril_x"))
         tril_y = self._value_float(fields.get("tril_y"))
-        distances_m = [self._value_float(fields.get(f"d{i}")) for i in range(1, 5)]
+        distances_m = [self._value_float(fields.get(f"d{i}")) for i in range(1, 7)]
 
         return {
             "time": "",
@@ -1213,10 +1219,14 @@ class SessionRepository:
             "d2_mm": str(int(round(distances_m[1] * 1000.0))) if distances_m[1] else "",
             "d3_mm": str(int(round(distances_m[2] * 1000.0))) if distances_m[2] else "",
             "d4_mm": str(int(round(distances_m[3] * 1000.0))) if distances_m[3] else "",
+            "d5_mm": str(int(round(distances_m[4] * 1000.0))) if distances_m[4] else "",
+            "d6_mm": str(int(round(distances_m[5] * 1000.0))) if distances_m[5] else "",
             "w1": fields.get("w1", ""),
             "w2": fields.get("w2", ""),
             "w3": fields.get("w3", ""),
             "w4": fields.get("w4", ""),
+            "w5": fields.get("w5", ""),
+            "w6": fields.get("w6", ""),
             "ukf_x_m": ukf_x,
             "ukf_y_m": ukf_y,
             "ukf_yaw_deg": fields.get("ukf_yaw", ""),
@@ -1278,10 +1288,14 @@ class SessionRepository:
                             "d2_mm": row_dict.get("d2_mm", ""),
                             "d3_mm": row_dict.get("d3_mm", ""),
                             "d4_mm": row_dict.get("d4_mm", ""),
+                            "d5_mm": row_dict.get("d5_mm", ""),
+                            "d6_mm": row_dict.get("d6_mm", ""),
                             "w1": row_dict.get("w1", ""),
                             "w2": row_dict.get("w2", ""),
                             "w3": row_dict.get("w3", ""),
                             "w4": row_dict.get("w4", ""),
+                            "w5": row_dict.get("w5", ""),
+                            "w6": row_dict.get("w6", ""),
                             "ukf_x_m": row_dict.get("ukf_x_m", ""),
                             "ukf_y_m": row_dict.get("ukf_y_m", ""),
                             "ukf_yaw_deg": row_dict.get("ukf_yaw_deg", ""),
@@ -1317,10 +1331,14 @@ class SessionRepository:
                             "d2_mm": row.get("d2_mm", ""),
                             "d3_mm": row.get("d3_mm", ""),
                             "d4_mm": row.get("d4_mm", ""),
+                            "d5_mm": row.get("d5_mm", ""),
+                            "d6_mm": row.get("d6_mm", ""),
                             "w1": row.get("w1", ""),
                             "w2": row.get("w2", ""),
                             "w3": row.get("w3", ""),
                             "w4": row.get("w4", ""),
+                            "w5": row.get("w5", ""),
+                            "w6": row.get("w6", ""),
                             "ukf_x_m": row.get("ukf_x_m", ""),
                             "ukf_y_m": row.get("ukf_y_m", ""),
                             "ukf_yaw_deg": row.get("ukf_yaw_deg", ""),

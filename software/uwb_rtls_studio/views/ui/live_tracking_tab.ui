@@ -713,7 +713,47 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
-              <item row="24" column="0" colspan="2">
+              <item row="24" column="0">
+               <widget class="QLabel" name="lbl_d5">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>D5:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="24" column="1">
+               <widget class="QLabel" name="d5_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="25" column="0">
+               <widget class="QLabel" name="lbl_d6">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>D6:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="25" column="1">
+               <widget class="QLabel" name="d6_label">
+                <property name="styleSheet">
+                 <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #A78BFA; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="26" column="0" colspan="2">
                <widget class="QLabel" name="lbl_grp_quality">
                 <property name="styleSheet">
                  <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
@@ -723,7 +763,7 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
-              <item row="25" column="0">
+              <item row="27" column="0">
                <widget class="QLabel" name="lbl_z_height">
                 <property name="styleSheet">
                  <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
@@ -733,7 +773,7 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
-              <item row="25" column="1">
+              <item row="27" column="1">
                <widget class="QLabel" name="z_label">
                 <property name="styleSheet">
                  <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #60A5FA; background-color: transparent;</string>
@@ -743,7 +783,7 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
-              <item row="26" column="0">
+              <item row="28" column="0">
                <widget class="QLabel" name="lbl_quality_error">
                 <property name="styleSheet">
                  <string notr="true">font-size: 13px; color: #94A3B8; background-color: transparent;</string>
@@ -753,7 +793,7 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
-              <item row="26" column="1">
+              <item row="28" column="1">
                <widget class="QLabel" name="error_label">
                 <property name="styleSheet">
                  <string notr="true">font-family: 'Consolas'; font-size: 14px; font-weight: bold; color: #F59E0B; background-color: transparent;</string>
