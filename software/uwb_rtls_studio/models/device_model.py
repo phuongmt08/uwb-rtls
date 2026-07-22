@@ -859,49 +859,20 @@ class DeviceModel(QObject):
         # BE/API: lifecycle action exposed to Config tab.
         return self._send_command("enter_to_bootloader", dst_addr=VvAddress.MCU)
 
-    def request_calibration_status(self, force: bool = False, traffic_class: str = ""):
-        return self._request_query(
-            "calib_status_get",
-            dst_addr=VvAddress.MCU,
-            cache_ttl_s=0.0 if force else None,
-            force=force,
-            traffic_class=traffic_class,
-        )
-
-    def request_calibration_start(
+    def request_antenna_delay_bcast_set(
         self,
-        sample_target: int = 32,
-        tag_x_m: float = 2.0,
-        tag_y_m: float = 2.0,
-        tag_z_m: float = 1.0,
+        serial_number: int,
+        tx_antenna_delay: int,
+        rx_antenna_delay: int,
+        persist: bool = True,
     ):
-        if self._is_anchor:
-            log.debug("request_calibration_start skipped: device is ANCHOR")
-            return None
         return self._send_command(
-            "calib_start",
+            "antenna_delay_bcast_set",
             dst_addr=VvAddress.MCU,
-            sample_target=sample_target,
-            tag_x_m=tag_x_m,
-            tag_y_m=tag_y_m,
-            tag_z_m=tag_z_m,
-            reference_position_valid=True,
-        )
-
-    def request_calibration_stop(self):
-        if self._is_anchor:
-            log.debug("request_calibration_stop skipped: device is ANCHOR")
-            return None
-        return self._send_command("calib_stop", dst_addr=VvAddress.MCU)
-
-    def request_calibration_candidate_apply(self, anchor_mask: int):
-        if self._is_anchor:
-            log.debug("request_calibration_candidate_apply skipped: device is ANCHOR")
-            return None
-        return self._send_command(
-            "calib_candidate_apply",
-            dst_addr=VvAddress.MCU,
-            anchor_mask=anchor_mask,
+            serial_number=serial_number,
+            tx_antenna_delay=tx_antenna_delay,
+            rx_antenna_delay=rx_antenna_delay,
+            persist=persist,
         )
 
     def request_imu_reset(self):
@@ -1377,7 +1348,6 @@ class DeviceModel(QObject):
             "sys_config_resp",
             "sys_ranging_cfg_resp",
             "pos_calib_cfg_resp",
-            "calib_status_resp",
             "ranging_status_resp",
             "device_type_set",
             "rtos_resource_resp",
@@ -1792,8 +1762,6 @@ class DeviceModel(QObject):
             requested = bool(self.request_pos_calib_config(force=force, traffic_class="bootstrap")) or requested
         # Baseline status APIs are fetched on every device session, even when
         # their tabs have not been opened yet.
-        if force or not self._query_received("calib_status_resp"):
-            requested = bool(self.request_calibration_status(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("ranging_status_resp"):
             requested = bool(self._request_query("ranging_status_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class="bootstrap", timeout_s=4.0)) or requested
         if force or not self._query_received("device_type_set"):
@@ -1834,7 +1802,6 @@ class DeviceModel(QObject):
                 ("sys_config_resp", self._query_received("sys_config_resp"), True),
                 ("sys_ranging_cfg_resp", self._query_received("sys_ranging_cfg_resp"), True),
                 ("pos_calib_cfg_resp", self._query_received("pos_calib_cfg_resp"), True),
-                ("calib_status_resp", self._query_received("calib_status_resp"), True),
                 ("ranging_status_resp", self._query_received("ranging_status_resp"), True),
                 ("device_type_set", self._query_received("device_type_set"), True),
                 ("rtos_resource_resp", self._query_received("rtos_resource_resp"), True),
@@ -2489,8 +2456,6 @@ class DeviceModel(QObject):
             self._mark_query_received("anchor_layout_resp")
         elif param_name == "zone_profile_resp":
             self._mark_query_received("zone_profile_resp")
-        elif param_name == "calib_status_resp":
-            self._mark_query_received("calib_status_resp")
         elif param_name == "ranging_status_resp":
             self._mark_query_received("ranging_status_resp")
 

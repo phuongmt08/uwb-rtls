@@ -106,7 +106,6 @@ class SharedAppState(QObject):
     log_streaming_changed = pyqtSignal(bool)       # Firmware log stream active/stopped
     ble_scan_active_changed = pyqtSignal(bool)     # User-triggered BLE scan active/stopped
     ranging_stats_changed = pyqtSignal(dict)       # total_count, success_count, rms_error_m...
-    calib_status_changed = pyqtSignal(dict)         # state, progress, iteration, peer ready mask...
     anchor_layout_changed = pyqtSignal(list)       # List of fixed anchors positions
     zone_profiles_changed = pyqtSignal(dict)       # zone_id -> zone profile/anchor layout from firmware
     sys_config_changed = pyqtSignal(dict)          # UWB role, channel, tx/rx antenna delays...
@@ -148,7 +147,6 @@ class SharedAppState(QObject):
         self._ble_scan_active = False
         self.current_session_id = ""
         self._ranging_stats: Dict[str, Any] = {}
-        self._calib_status: Dict[str, Any] = {}
         self._anchor_layout: List[Dict[str, Any]] = []
         self._zone_profiles: Dict[int, Dict[str, Any]] = {}
         self._sys_config: Dict[str, Any] = {}
@@ -256,15 +254,6 @@ class SharedAppState(QObject):
         if self._log_streaming != enabled:
             self._log_streaming = enabled
             self.log_streaming_changed.emit(enabled)
-
-    @property
-    def calib_status(self) -> Dict[str, Any]:
-        return self._calib_status.copy()
-
-    @calib_status.setter
-    def calib_status(self, val: Dict[str, Any]) -> None:
-        self._calib_status = val.copy()
-        self.calib_status_changed.emit(self._calib_status)
 
     @property
     def anchor_layout(self) -> List[Dict[str, Any]]:
@@ -387,7 +376,6 @@ class SharedAppState(QObject):
         "prefilter_cfg_resp",
         "pos_calib_cfg_resp",
         "ranging_status_resp",
-        "calib_status_resp",
         "rtos_resource_resp",
         "rtos_task_stats_resp",
         "device_type_set",
@@ -561,7 +549,6 @@ class SharedAppState(QObject):
         self._battery_info = {}
         self._ble_status = {}
         self._ranging_stats = {}
-        self._calib_status = {}
         self._anchor_layout = []
         self._zone_profiles = {}
         self._sys_config = {}
@@ -579,7 +566,6 @@ class SharedAppState(QObject):
         self.battery_info_changed.emit(self._battery_info)
         self.ble_status_changed.emit(self._ble_status)
         self.ranging_stats_changed.emit(self._ranging_stats)
-        self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)
         self.zone_profiles_changed.emit(self.zone_profiles)
         self.sys_config_changed.emit(self._sys_config)
@@ -602,7 +588,6 @@ class SharedAppState(QObject):
         self._log_streaming = False
         self._ble_scan_active = False
         self._ranging_stats = {}
-        self._calib_status = {}
         self._anchor_layout = []
         self._zone_profiles = {}
         self._sys_config = {}
@@ -624,7 +609,6 @@ class SharedAppState(QObject):
         self.device_type_changed.emit(0)
         self.log_streaming_changed.emit(self._log_streaming)
         self.ranging_stats_changed.emit(self._ranging_stats)
-        self.calib_status_changed.emit(self._calib_status)
         self.anchor_layout_changed.emit(self._anchor_layout)
         self.zone_profiles_changed.emit(self.zone_profiles)
         self.sys_config_changed.emit(self._sys_config)

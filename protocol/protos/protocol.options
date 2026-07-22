@@ -34,4 +34,3 @@ protobuf.session_end_reason_t                       long_names:false
 protobuf.vehicle_command_type_t                     long_names:false
 
 protobuf.zone_profile_t.anchors max_count:6
-protobuf.calib_status_resp_t.candidates max_count:6

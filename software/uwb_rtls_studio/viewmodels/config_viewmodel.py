@@ -215,7 +215,6 @@ class ConfigViewModel(QObject):
             self.read_pos_calib_config(force=force, traffic_class="bootstrap")
             self.read_ble_conn_params(force=force, traffic_class="bootstrap")
             self.read_device_type(force=force, traffic_class="bootstrap")
-            self.read_calibration_status(force=force, traffic_class="bootstrap")  # calib_status_get
             return True
 
         return operation()
@@ -495,11 +494,6 @@ class ConfigViewModel(QObject):
     def read_device_type(self, force: bool = False, traffic_class: str = ""):
         log.info("Requesting device type from MCU... (force=%s)", force)
         self.model.request_device_type(force=force, traffic_class=traffic_class)
-
-    def read_calibration_status(self, force: bool = False, traffic_class: str = ""):
-        # BE/API: fetch calibration status for the Config tab.
-        log.info("Requesting calibration status from MCU via global query queue... (force=%s)", force)
-        self.model.request_calibration_status(force=force, traffic_class=traffic_class)
 
     def write_device_type(self, device_type: int):
         log.info("Sending set device type command: %d", device_type)

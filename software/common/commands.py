@@ -63,7 +63,6 @@ _MCU_COMMANDS = {
     "anchor_layout_set",
     "battery_info_get",
     "enter_to_bootloader",
-    "calib_status_get",
     "factory_otp_write",
     "rtos_resource_get",
     "rtos_task_stats_get",
@@ -74,9 +73,6 @@ _MCU_COMMANDS = {
     "zone_switch",
     "zone_profile_set",
     "zone_profile_get",
-    "calib_start",
-    "calib_stop",
-    "calib_candidate_apply",
 }
 
 _CENTRAL_COMMANDS = {
@@ -241,12 +237,16 @@ class CommandFactory:
         serial_number: int = 0,
         tx_antenna_delay: int = 0,
         rx_antenna_delay: int = 0,
+        persist: bool = True,
     ) -> pb.packet_t:
-        # serial_number == 0 means "every device".
+        # serial_number == 0 means "every device". persist=False lets an
+        # iterative calibration search try values without wearing flash;
+        # only the final converged apply should pass persist=True.
         pkt = self._base(src, dst, seq)
         pkt.antenna_delay_bcast_set.serial_number = serial_number
         pkt.antenna_delay_bcast_set.tx_antenna_delay = tx_antenna_delay
         pkt.antenna_delay_bcast_set.rx_antenna_delay = rx_antenna_delay
+        pkt.antenna_delay_bcast_set.persist = persist
         return pkt
 
     def sys_config_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -772,20 +772,6 @@ class CommandFactory:
         pkt.fota_state_resp.state = pb.FOTA_STATE_IDLE
         return pkt
 
-    def calib_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_status_get.dummy = 0
-        return pkt
-
-    def calib_status_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_status_resp.SetInParent()
-        pkt.calib_status_resp.state = pb.CALIB_STATE_IDLE
-        pkt.calib_status_resp.progress_percent = 0
-        pkt.calib_status_resp.current_iteration = 0
-        pkt.calib_status_resp.total_iterations = 0
-        return pkt
-
     def factory_otp_write(
         self,
         src: int,
@@ -1006,41 +992,6 @@ class CommandFactory:
         )
         return pkt
 
-    def calib_start(
-        self,
-        src: int,
-        dst: int,
-        seq: int,
-        sample_target: int = 32,
-        tag_x_m: float = 2.0,
-        tag_y_m: float = 2.0,
-        tag_z_m: float = 1.0,
-        reference_position_valid: bool = True,
-    ) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_start.sample_target = max(0, int(sample_target))
-        pkt.calib_start.tag_x_m = float(tag_x_m)
-        pkt.calib_start.tag_y_m = float(tag_y_m)
-        pkt.calib_start.tag_z_m = float(tag_z_m)
-        pkt.calib_start.reference_position_valid = bool(reference_position_valid)
-        return pkt
-
-    def calib_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_stop.dummy = 0
-        return pkt
-
-    def calib_candidate_apply(
-        self,
-        src: int,
-        dst: int,
-        seq: int,
-        anchor_mask: int = 0xF,
-    ) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_candidate_apply.anchor_mask = max(0, int(anchor_mask))
-        return pkt
-
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -1113,9 +1064,7 @@ class CommandCatalog:
             CommandSpec(62, "battery_info_resp", self.factory.battery_info_resp),
             CommandSpec(63, "battery_info_get", self.factory.battery_info_get, "battery_info_resp"),
             CommandSpec(64, "enter_to_bootloader", self.factory.enter_to_bootloader),
-            # Calib status
-            CommandSpec(65, "calib_status_get", self.factory.calib_status_get, "calib_status_resp"),
-            CommandSpec(66, "calib_status_resp", self.factory.calib_status_resp),
+
             CommandSpec(67, "end_session", self.factory.end_session),
             # Factory OTP
             CommandSpec(68, "factory_otp_write", self.factory.factory_otp_write),
@@ -1133,9 +1082,6 @@ class CommandCatalog:
             CommandSpec(81, "zone_profile_set", self.factory.zone_profile_set),
             CommandSpec(82, "zone_profile_get", self.factory.zone_profile_get, "zone_profile_resp"),
             CommandSpec(83, "zone_profile_resp", self.factory.zone_profile_resp),
-            CommandSpec(84, "calib_start", self.factory.calib_start),
-            CommandSpec(85, "calib_stop", self.factory.calib_stop),
-            CommandSpec(86, "calib_candidate_apply", self.factory.calib_candidate_apply),
             CommandSpec(88, "antenna_delay_bcast_set", self.factory.antenna_delay_bcast_set),
         ]
 
