@@ -99,7 +99,7 @@ CFLAGS := $(CPUFLAGS) -std=gnu11 $(OPTFLAGS) $(DEFS) $(INCLUDES) -ffunction-sect
 ASFLAGS := $(CPUFLAGS) -x assembler-with-cpp $(DEFS) $(INCLUDES) -g3
 
 LDSCRIPT := STM32F411CEUX_FLASH.ld
-LDFLAGS := $(CPUFLAGS) -T$(LDSCRIPT) -Wl,-Map=$(TARGET).map,--gc-sections -Wl,--print-memory-usage -static -u _printf_float --specs=nano.specs --specs=nosys.specs -Wl,--start-group -lc -lm -Wl,--end-group
+LDFLAGS := $(CPUFLAGS) $(OPTFLAGS) -T$(LDSCRIPT) -Wl,-Map=$(TARGET).map,--gc-sections -Wl,--print-memory-usage -static -u _printf_float --specs=nano.specs --specs=nosys.specs -Wl,--start-group -lc -lm -Wl,--end-group
 
 LOCAL_OBJECTS_C := $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(LOCAL_SOURCES)))
 LOCAL_OBJECTS_ASM := $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(LOCAL_SOURCES))) $(patsubst %.s,$(BUILD_DIR)/%.o,$(filter %.s,$(LOCAL_SOURCES)))

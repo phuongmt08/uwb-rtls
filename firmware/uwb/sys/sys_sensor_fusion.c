@@ -870,10 +870,12 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     }
 #endif
 #else
+#if ENABLE_SYS_FUSION
     if (!ukf.initialized)
     {
         return;
     }
+#endif
 
 #if ENABLE_SYS_FUSION
     const sys_config_t *cfg = sys_config_get();
@@ -978,10 +980,12 @@ void sys_sensor_fusion_stream_uart(uint8_t ukf_step)
     }
 
 #else
+#if ENABLE_SYS_FUSION
     if (!ukf.initialized) 
     {
         return;
     }
+#endif
 
 #if ENABLE_SYS_FUSION
     if(ukf_step == UKF_STEP_PREDICT)
@@ -1074,18 +1078,27 @@ float sys_sensor_fusion_get_yaw_deg()
 
 void sys_sensor_fusion_task()
 {
-    if (g_imu_data_queue == NULL) 
-    {
-        return;
-    }
-
     bsp_imu_data_t imu_data = {0};
     if (bsp_imu_get_raw_data(&imu_data) == BSP_IMU_OK) 
     {
+#if ENABLE_SYS_FUSION
+        if (g_imu_data_queue == NULL)
+        {
+            return;
+        }
+
         if (ukf.initialized && ukf.enable_predict)
         {
             (void)osMessageQueuePut(g_imu_data_queue, &imu_data, 0U, 0U);
         }
+#else
+        /* Preserve the same board-to-navigation axis mapping used by the UKF,
+         * but keep this as raw telemetry only when MCU fusion is disabled. */
+        ukf.imu_current.ax = -imu_data.ay;
+        ukf.imu_current.ay = imu_data.ax;
+        ukf.imu_current.gz = imu_data.gz;
+        s_fusion_dt = calc_dt();
+#endif
     }
 }
 
@@ -1758,6 +1771,34 @@ void sys_sensor_fusion_set_ranging_error_count(uint32_t error_count)
 
 void sys_sensor_fusion_capture_ranging_snapshot(const uwb_distance_msg_t *ranging_msg)
 {
+    clear_latest_anchor_metrics();
+    s_last_selected_anchors_mask = 0U;
+
+    if (ranging_msg != NULL)
+    {
+        s_last_selected_anchors_mask = ranging_msg->mask;
+
+        uint32_t count = ranging_msg->count;
+        if (count > MAX_ANCHORS_SUPPORTED) {
+            count = MAX_ANCHORS_SUPPORTED;
+        }
+
+        for (uint32_t i = 0U; i < count; i++)
+        {
+            const uint8_t aid = ranging_msg->anchor_ids[i];
+            uint8_t layout_idx = 0U;
+            if (aid == 0U || aid > MAX_ANCHORS_SUPPORTED ||
+                (ranging_msg->mask & (1U << (aid - 1U))) == 0U ||
+                !active_anchor_index_for_id(aid, &layout_idx)) {
+                continue;
+            }
+
+            s_latest_distances[layout_idx] = ranging_msg->distances[i];
+            s_latest_fp_amp_norm[layout_idx] = ranging_msg->fp_amp_norm[i];
+            s_latest_fp_snr[layout_idx] = ranging_msg->fp_snr[i];
+        }
+    }
+
     update_latest_anchor_data_snapshot(ranging_msg, NULL);
 }
 

@@ -909,6 +909,10 @@ void sys_config_print(void)
     CFG_LOG("Host I/O      : %s",
            g_storage.config.host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
     CFG_LOG("Device ID     : 0x%02X", (unsigned)g_storage.config.uwb.device_id);
+    CFG_LOG("TDMA Anchors  : build=%u active=%lu max=%u",
+            (unsigned)NUM_ANCHORS,
+            (unsigned long)g_storage.config.anchor_count,
+            (unsigned)MAX_ANCHORS_SUPPORTED);
     CFG_LOG("-------------- UWB RADIO --------------");
     CFG_LOG("Channel       : %lu", g_storage.config.uwb.uwb_channel);
     CFG_LOG("PRF           : %lu MHz", g_storage.config.uwb.uwb_prf);

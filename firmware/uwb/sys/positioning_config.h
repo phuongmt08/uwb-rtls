@@ -44,7 +44,7 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.510f)
+#define TAG_HEIGHT_M            (0.585f)
 
 /**
  * @brief Anchor height from ground (meters)
@@ -124,7 +124,7 @@
 
 #define MAX_ANCHORS_SUPPORTED  8
 /* Maximum number of anchors participating in one zone/ranging cycle. */
-#define NUM_ANCHORS            4
+#define NUM_ANCHORS            6
 /* The anchor-to-anchor survey solver is geometrically fixed to four anchors. */
 #define SURVEY_NUM_ANCHORS     4
 
@@ -184,14 +184,14 @@
 #define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_5_ID   5
-#define ZONE_1_ANCHOR_5_X    0.0f
-#define ZONE_1_ANCHOR_5_Y    0.0f
-#define ZONE_1_ANCHOR_5_Z    ANCHOR_HEIGHT_M
+#define ZONE_1_ANCHOR_5_X    4.3f
+#define ZONE_1_ANCHOR_5_Y    0.8f
+#define ZONE_1_ANCHOR_5_Z    0.88f
 
 #define ZONE_1_ANCHOR_6_ID   6
-#define ZONE_1_ANCHOR_6_X    10.0f
-#define ZONE_1_ANCHOR_6_Y    0.0f
-#define ZONE_1_ANCHOR_6_Z    ANCHOR_HEIGHT_M
+#define ZONE_1_ANCHOR_6_X    4.3f
+#define ZONE_1_ANCHOR_6_Y    7.88f
+#define ZONE_1_ANCHOR_6_Z    1.44f
 
 /* Zone 2 is intentionally left unconfigured for now. */
 
@@ -313,6 +313,18 @@
 #define MW_TRIL_WGDOP_DET_MIN                      1.0e-8
 #endif
 
+/* Reject nearly-collinear triplets before WGDOP ranking.
+ * quality = |cross(B-A, C-A)| / max_edge^2; equilateral ~= 0.866. */
+#ifndef MW_TRIL_MIN_GEOMETRY_QUALITY
+#define MW_TRIL_MIN_GEOMETRY_QUALITY                0.15
+#endif
+
+/* Penalize a triplet whose trilaterated probe disagrees with all ranges that
+ * survived the frame prefilter. score = WGDOP + weight * residual_rms. */
+#ifndef MW_TRIL_RESIDUAL_SCORE_WEIGHT
+#define MW_TRIL_RESIDUAL_SCORE_WEIGHT               0.50
+#endif
+
 /* Trust the common UKF reference only while its radial 1-sigma uncertainty,
  * sqrt(Pxx + Pyy), stays below this limit. */
 #ifndef MW_TRIL_REFERENCE_MAX_STD_M
@@ -320,7 +332,7 @@
 #endif
 
 #ifndef MW_TRIL_SWITCH_MARGIN
-/* New triplet must improve WGDOP by 10 percent before switching. */
+/* New triplet must improve the composite selection score by 10 percent. */
 #define MW_TRIL_SWITCH_MARGIN                      0.10
 #endif
 
