@@ -3,8 +3,9 @@ UWB RTLS Studio - Antenna Delay Calibration Tab (host-driven, UI loaded from .ui
 
 Replaces the old firmware-driven antenna-delay flow (app_calib_master.c,
 calib_start/status/candidate_apply — removed). Place a reference tag at a
-known position, pick a target anchor, and this tab drives the closed-loop
-calibration entirely from the app via AntennaDelayCalibrationViewModel.
+known position, pick a target anchor (or click Start All Anchors for parallel
+TDMA calibration), and this tab drives the closed-loop calibration entirely
+from the app via AntennaDelayCalibrationViewModel.
 
 FE: Loaded from views/ui/antenna_delay_calib_tab.ui (editable in Qt Designer)
 BE: viewmodels/antenna_delay_calibration_viewmodel.py
@@ -34,6 +35,8 @@ class AntennaDelayCalibTab(QWidget):
         uic.loadUi(UI_FILE, self)
 
         self.btn_start.clicked.connect(self._on_start_clicked)
+        if hasattr(self, 'btn_start_all'):
+            self.btn_start_all.clicked.connect(self._on_start_all_clicked)
         self.btn_stop.clicked.connect(self._on_stop_clicked)
         self.btn_save_serial.clicked.connect(self._on_save_serial_clicked)
         self.anchor_id_spin.valueChanged.connect(self._refresh_serial_field)
@@ -81,6 +84,25 @@ class AntennaDelayCalibTab(QWidget):
         if ok:
             self.results_log.clear()
             self.btn_start.setEnabled(False)
+            if hasattr(self, 'btn_start_all'):
+                self.btn_start_all.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+
+    def _on_start_all_clicked(self):
+        if not self._vm:
+            return
+        self._vm.error_tolerance_m = self.tolerance_spin.value()
+        self._vm.max_iterations = self.max_iter_spin.value()
+        ok = self._vm.start_all(
+            tag_x_m=self.tag_x_spin.value(),
+            tag_y_m=self.tag_y_spin.value(),
+            tag_z_m=self.tag_z_spin.value(),
+        )
+        if ok:
+            self.results_log.clear()
+            self.btn_start.setEnabled(False)
+            if hasattr(self, 'btn_start_all'):
+                self.btn_start_all.setEnabled(False)
             self.btn_stop.setEnabled(True)
 
     def _on_stop_clicked(self):
@@ -90,24 +112,41 @@ class AntennaDelayCalibTab(QWidget):
     def _on_progress(self, status: dict):
         text = status.get("custom_status_text", "")
         self.status_label.setText(f"Status: {text}")
-        if "iteration" in status:
-            self.results_log.append(text)
+        self.results_log.append(text)
 
     def _on_finished(self, result: dict):
         self.btn_start.setEnabled(True)
+        if hasattr(self, 'btn_start_all'):
+            self.btn_start_all.setEnabled(True)
         self.btn_stop.setEnabled(False)
-        outcome = "CONVERGED" if result.get("converged") else "STOPPED"
-        self.results_log.append(
-            f"[{outcome}] anchor={result.get('anchor_id')} "
-            f"iterations={result.get('iterations')} "
-            f"final_delay={result.get('final_delay')} "
-            f"best_abs_error_m={result.get('best_abs_error_m')} "
-            f"reason={result.get('reason')}"
-        )
-        self.status_label.setText(f"Status: {outcome} — {result.get('reason', '')}")
+
+        if result.get("parallel"):
+            self.results_log.append("==================================================")
+            self.results_log.append("PARALLEL CALIBRATION COMPLETED ALL ANCHORS:")
+            res_dict = result.get("results", {})
+            for aid, data in res_dict.items():
+                conv = "CONVERGED" if data.get("converged") else "FAILED"
+                self.results_log.append(
+                    f"  Anchor #{aid}: {conv} | iter={data.get('iterations')} | "
+                    f"final_delay={data.get('final_delay')} | best_err={data.get('best_abs_error_m')}"
+                )
+            self.results_log.append("==================================================")
+            self.status_label.setText(f"Status: Completed parallel calibration for {len(res_dict)} anchors.")
+        else:
+            outcome = "CONVERGED" if result.get("converged") else "STOPPED"
+            self.results_log.append(
+                f"[{outcome}] anchor={result.get('anchor_id')} "
+                f"iterations={result.get('iterations')} "
+                f"final_delay={result.get('final_delay')} "
+                f"best_abs_error_m={result.get('best_abs_error_m')} "
+                f"reason={result.get('reason')}"
+            )
+            self.status_label.setText(f"Status: {outcome} — {result.get('reason', '')}")
 
     def _on_failed(self, message: str):
         self.btn_start.setEnabled(True)
+        if hasattr(self, 'btn_start_all'):
+            self.btn_start_all.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.status_label.setText(f"Status: Error - {message}")
         self.results_log.append(f"[ERROR] {message}")

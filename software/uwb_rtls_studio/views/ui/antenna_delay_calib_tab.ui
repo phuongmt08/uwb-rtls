@@ -83,7 +83,8 @@ QTextEdit {
      <layout class="QVBoxLayout" name="run_layout">
       <item>
        <layout class="QHBoxLayout" name="run_buttons_layout">
-        <item><widget class="QPushButton" name="btn_start"><property name="text"><string>&#9654; Start Calibration</string></property></widget></item>
+        <item><widget class="QPushButton" name="btn_start"><property name="text"><string>&#9654; Start Selected Anchor</string></property></widget></item>
+        <item><widget class="QPushButton" name="btn_start_all"><property name="text"><string>&#9654;&#9654; Start All Anchors (Parallel)</string></property></widget></item>
         <item><widget class="QPushButton" name="btn_stop"><property name="text"><string>&#9632; Stop</string></property></widget></item>
        </layout>
       </item>

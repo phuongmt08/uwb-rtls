@@ -813,10 +813,23 @@ static void network_cmd_antenna_delay_bcast_set(const protobuf_packet_t *pkt)
 
     const protobuf_antenna_delay_bcast_set_t *req = &pkt->params.antenna_delay_bcast_set;
 
+    uint32_t my_sn = bsp_util_get_serial_number();
+    RLOG_I(OBJECT_CODE,
+           "[BCAST_ANT_DLY] Rx pkt: target_sn=0x%08X (my_sn=0x%08X) TX=%lu RX=%lu persist=%d",
+           (unsigned int)req->serial_number,
+           (unsigned int)my_sn,
+           (unsigned long)req->tx_antenna_delay,
+           (unsigned long)req->rx_antenna_delay,
+           (int)req->persist);
+
     // Broadcast is addressed by the permanent factory serial number: antenna
     // delay is a per-physical-unit calibration value, not a logical role/slot.
     // (serial_number == 0 means "every device".)
     if (!network_cmd_bcast_target_match(req->serial_number)) {
+        RLOG_D(OBJECT_CODE,
+               "[BCAST_ANT_DLY] Ignored pkt: target_sn 0x%08X != my_sn 0x%08X",
+               (unsigned int)req->serial_number,
+               (unsigned int)my_sn);
         return;
     }
 
