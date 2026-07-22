@@ -360,6 +360,69 @@ function meanErr(arr) {
     return valid.length ? (valid.reduce((s, v) => s + v, 0) / valid.length).toFixed(3) : "N/A";
 }
 
+function buildGroundTruthSegmentProfiles(segments) {
+    const angleThresholdRad = Math.max(0, Number(SIM_CONFIG.ENV.GROUND_TRUTH_CURVE_ANGLE_DEG) || 0) * Math.PI / 180;
+    const endpointEpsilon = 1.0e-6;
+    const samePoint = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by) <= endpointEpsilon;
+
+    const profiles = segments.map(seg => {
+        const dx = seg[2] - seg[0];
+        const dy = seg[3] - seg[1];
+        return { length: Math.hypot(dx, dy), startCurve: false, endCurve: false };
+    });
+
+    const endpointIsCurve = (segmentIndex, atStart) => {
+        const seg = segments[segmentIndex];
+        const ex = atStart ? seg[0] : seg[2];
+        const ey = atStart ? seg[1] : seg[3];
+        const vx = (atStart ? seg[2] : seg[0]) - ex;
+        const vy = (atStart ? seg[3] : seg[1]) - ey;
+        const vLen = Math.hypot(vx, vy);
+        if (vLen <= endpointEpsilon) return false;
+
+        for (let j = 0; j < segments.length; j++) {
+            if (j === segmentIndex) continue;
+            const other = segments[j];
+            let ox;
+            let oy;
+            if (samePoint(ex, ey, other[0], other[1])) {
+                ox = other[2] - ex;
+                oy = other[3] - ey;
+            } else if (samePoint(ex, ey, other[2], other[3])) {
+                ox = other[0] - ex;
+                oy = other[1] - ey;
+            } else {
+                continue;
+            }
+
+            const oLen = Math.hypot(ox, oy);
+            if (oLen <= endpointEpsilon) continue;
+            const alignment = Math.min(1, Math.max(-1, Math.abs((vx * ox + vy * oy) / (vLen * oLen))));
+            if (Math.acos(alignment) >= angleThresholdRad) return true;
+        }
+        return false;
+    };
+
+    profiles.forEach((profile, index) => {
+        profile.startCurve = endpointIsCurve(index, true);
+        profile.endCurve = endpointIsCurve(index, false);
+    });
+    return profiles;
+}
+
+function groundTruthToleranceAtProjection(profile, projectionT) {
+    const straightTolerance = Math.max(0, Number(SIM_CONFIG.ENV.GROUND_TRUTH_TOLERANCE_STRAIGHT_M) || 0);
+    const curveTolerance = Math.max(straightTolerance, Number(SIM_CONFIG.ENV.GROUND_TRUTH_TOLERANCE_CURVE_M) || 0);
+    const curveRadius = Math.max(0, Number(SIM_CONFIG.ENV.GROUND_TRUTH_CURVE_INFLUENCE_RADIUS_M) || 0);
+    if (!profile || profile.length <= 0) return straightTolerance;
+
+    const distanceFromStart = projectionT * profile.length;
+    const distanceFromEnd = (1 - projectionT) * profile.length;
+    const inCurve = (profile.startCurve && distanceFromStart <= curveRadius) ||
+        (profile.endCurve && distanceFromEnd <= curveRadius);
+    return inCurve ? curveTolerance : straightTolerance;
+}
+
 function calcErrorMetrics(values) {
     const valid = (values || [])
         .filter(v => v !== null && v !== undefined)
@@ -370,6 +433,7 @@ function calcErrorMetrics(values) {
     if (!valid.length) {
         return {
             count: 0,
+            euclidean: null,
             mae: null,
             rmse: null,
             p50: null,
@@ -392,6 +456,9 @@ function calcErrorMetrics(values) {
 
     return {
         count: valid.length,
+        // Each value is already sqrt(dx^2 + dy^2); report its mean as the
+        // aggregate Euclidean position error for the selected trajectory.
+        euclidean: sum / valid.length,
         mae: sum / valid.length,
         rmse: Math.sqrt(sumSquares / valid.length),
         p50: percentile(50),

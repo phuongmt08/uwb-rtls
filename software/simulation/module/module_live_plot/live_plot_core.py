@@ -16,7 +16,7 @@ import pyqtgraph as pg
 from ..config import (
     UART_BAUDRATE, LIVE_FRAME_SIZE, UART_SOF,
     PRINT_DATA, MAX_SAMPLES, ROOM_SIZE_M, ANCHOR_POSITIONS, IMUSample, CSV_UKF_FILENAME_SUFFIX, CSV_UKF_FILENAME_PREFIX,
-    GROUND_TRUTH_D1, GROUND_TRUTH_D2, GROUND_TRUTH_D3, GROUND_TRUTH_D4
+    GROUND_TRUTH_DISTANCES, NUM_ANCHORS
 )
 from ..module_parse_frame import parse_live_frame
 from ..module_csv import generate_timestamp_filename, create_csv_file, write_frame_to_csv, print_frame_data
@@ -29,6 +29,7 @@ GROUND_TRUTH_HORIZONTAL_M = 2.8
 GROUND_TRUTH_VERTICAL_M = 6
 GROUND_TRUTH_START_1 = "start_1"
 GROUND_TRUTH_START_2 = "start_2"
+ANCHOR_PLOT_COLORS = ('r', 'g', 'b', 'm', 'c', (255, 140, 0))
 
 
 class DataThread(QThread):
@@ -78,7 +79,7 @@ class DataThread(QThread):
         self._dropped_chunks = 0
         self._last_tx_frame_cnt = None
         self._tx_gap_count = 0
-        self._zero_distance_counts = [0, 0, 0, 0]
+        self._zero_distance_counts = [0] * NUM_ANCHORS
         self._last_gui_emit = 0.0
 
     def stop(self):
@@ -477,7 +478,7 @@ class DataThread(QThread):
             'yaw_raw': self.imu_theta,
             'err_cnt': frame_data.get('err_cnt', 0),
             'mask': frame_data.get('anchor_mask', frame_data.get('mask', 0)),
-            'distances': frame_data.get('distances', [0.0, 0.0, 0.0, 0.0]),
+            'distances': frame_data.get('distances', [0.0] * NUM_ANCHORS),
             'dt': dt,
             'zero_distance_counts': self._zero_distance_counts.copy(),
             'ax': ax_in, # Used bias subtracted and ZUPT applied
@@ -647,38 +648,33 @@ class MainWindow(QMainWindow):
         self.graph_pos.addItem(self.ground_truth_start_markers)
         self.ground_truth_labels = []
         
-        self.plot_d1 = self.graph_d.plot(
-            pen=None, symbol='o', symbolSize=6,
-            symbolPen=pg.mkPen('r'), symbolBrush=pg.mkBrush('r'), name="d1"
-        )
-        self.plot_d2 = self.graph_d.plot(
-            pen=None, symbol='o', symbolSize=6,
-            symbolPen=pg.mkPen('g'), symbolBrush=pg.mkBrush('g'), name="d2"
-        )
-        self.plot_d3 = self.graph_d.plot(
-            pen=None, symbol='o', symbolSize=6,
-            symbolPen=pg.mkPen('b'), symbolBrush=pg.mkBrush('b'), name="d3"
-        )
-        self.plot_d4 = self.graph_d.plot(
-            pen=None, symbol='o', symbolSize=6,
-            symbolPen=pg.mkPen('m'), symbolBrush=pg.mkBrush('m'), name="d4"
-        )
-        
-        # Ground truth horizontal lines
-        self.gt_line_d1 = pg.InfiniteLine(pos=GROUND_TRUTH_D1, angle=0, pen=pg.mkPen('r', width=3, style=pg.QtCore.Qt.DashLine))
-        self.gt_line_d2 = pg.InfiniteLine(pos=GROUND_TRUTH_D2, angle=0, pen=pg.mkPen('g', width=3, style=pg.QtCore.Qt.DashLine))
-        self.gt_line_d3 = pg.InfiniteLine(pos=GROUND_TRUTH_D3, angle=0, pen=pg.mkPen('b', width=3, style=pg.QtCore.Qt.DashLine))
-        self.gt_line_d4 = pg.InfiniteLine(pos=GROUND_TRUTH_D4, angle=0, pen=pg.mkPen('m', width=3, style=pg.QtCore.Qt.DashLine))
-        self.graph_d.addItem(self.gt_line_d1)
-        self.graph_d.addItem(self.gt_line_d2)
-        self.graph_d.addItem(self.gt_line_d3)
-        self.graph_d.addItem(self.gt_line_d4)
+        self.distance_plots = []
+        self.ground_truth_distance_lines = []
+        for idx, (ground_truth, color) in enumerate(
+            zip(GROUND_TRUTH_DISTANCES, ANCHOR_PLOT_COLORS)
+        ):
+            plot = self.graph_d.plot(
+                pen=None,
+                symbol='o',
+                symbolSize=6,
+                symbolPen=pg.mkPen(color),
+                symbolBrush=pg.mkBrush(color),
+                name=f"d{idx + 1}",
+            )
+            ground_truth_line = pg.InfiniteLine(
+                pos=ground_truth,
+                angle=0,
+                pen=pg.mkPen(color, width=3, style=pg.QtCore.Qt.DashLine),
+            )
+            self.distance_plots.append(plot)
+            self.ground_truth_distance_lines.append(ground_truth_line)
+            self.graph_d.addItem(ground_truth_line)
         
         # Draw Anchors on plot
         for idx, anchor in enumerate(ANCHOR_POSITIONS):
             anchor_scatter = pg.ScatterPlotItem([anchor[0]], [anchor[1]], size=15, pen=pg.mkPen(None), brush=pg.mkBrush('k'), symbol='t')
             self.graph_pos.addItem(anchor_scatter)
-            text = pg.TextItem(f"A{idx}", color='k')
+            text = pg.TextItem(f"A{idx + 1}", color='k')
             text.setPos(anchor[0], anchor[1])
             self.graph_pos.addItem(text)
             
@@ -686,10 +682,10 @@ class MainWindow(QMainWindow):
         self.mcu_xs, self.mcu_ys = [], []
         self.tril_xs, self.tril_ys = [], []
         self.ukf_xs, self.ukf_ys = [], []
-        self.d1_data, self.d2_data, self.d3_data, self.d4_data = [], [], [], []
+        self.distance_data = [[] for _ in range(NUM_ANCHORS)]
         self.distance_xs = []
         self.distance_time_origin = time.monotonic()
-        self.zero_distance_counts = [0, 0, 0, 0]
+        self.zero_distance_counts = [0] * NUM_ANCHORS
         self.ground_truth_start = None
         self.ground_truth_start_kind = GROUND_TRUTH_START_1
         self.latest_data = None
@@ -842,10 +838,8 @@ class MainWindow(QMainWindow):
         self.tril_ys.clear()
         self.ukf_xs.clear()
         self.ukf_ys.clear()
-        self.d1_data.clear()
-        self.d2_data.clear()
-        self.d3_data.clear()
-        self.d4_data.clear()
+        for series in self.distance_data:
+            series.clear()
         self.distance_xs.clear()
         self.distance_time_origin = time.monotonic()
         self.ground_truth_start = None
@@ -860,10 +854,8 @@ class MainWindow(QMainWindow):
         self.plot_ukf.setData([], [])
         for marker in (self.current_mcu_marker, self.current_tril_marker, self.current_ukf_marker):
             marker.setData([], [])
-        self.plot_d1.setData([])
-        self.plot_d2.setData([])
-        self.plot_d3.setData([])
-        self.plot_d4.setData([])
+        for plot in self.distance_plots:
+            plot.setData([])
         self._update_ground_truth_plot()
         self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=True)
         
@@ -923,9 +915,8 @@ class MainWindow(QMainWindow):
         self.ukf_xs.append(data['ukf_x'])
         self.ukf_ys.append(data['ukf_y'])
         
-        d = data.get('distances', [0, 0, 0, 0])
-        distance_series = (self.d1_data, self.d2_data, self.d3_data, self.d4_data)
-        for idx, series in enumerate(distance_series):
+        d = data.get('distances', [0.0] * NUM_ANCHORS)
+        for idx, series in enumerate(self.distance_data):
             distance = d[idx] if idx < len(d) else 0.0
             series.append(distance if abs(distance) > 1e-6 else np.nan)
         self.distance_xs.append(time.monotonic() - self.distance_time_origin)
@@ -938,10 +929,8 @@ class MainWindow(QMainWindow):
             self.tril_ys.pop(0)
             self.ukf_xs.pop(0)
             self.ukf_ys.pop(0)
-            self.d1_data.pop(0)
-            self.d2_data.pop(0)
-            self.d3_data.pop(0)
-            self.d4_data.pop(0)
+            for series in self.distance_data:
+                series.pop(0)
             self.distance_xs.pop(0)
 
     def _update_zero_distance_title(self):
@@ -954,10 +943,8 @@ class MainWindow(QMainWindow):
         current_time = time.monotonic() - self.distance_time_origin
 
         if not self.distance_xs:
-            self.plot_d1.setData([], [])
-            self.plot_d2.setData([], [])
-            self.plot_d3.setData([], [])
-            self.plot_d4.setData([], [])
+            for plot in self.distance_plots:
+                plot.setData([], [])
             if self.checkBox_graphDSliding.isChecked():
                 self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
                 x_max = current_time
@@ -968,10 +955,8 @@ class MainWindow(QMainWindow):
                 self.graph_d.setXRange(0.0, current_time if current_time > 0.0 else 1.0, padding=0.0)
             return
 
-        self.plot_d1.setData(self.distance_xs, self.d1_data)
-        self.plot_d2.setData(self.distance_xs, self.d2_data)
-        self.plot_d3.setData(self.distance_xs, self.d3_data)
-        self.plot_d4.setData(self.distance_xs, self.d4_data)
+        for plot, series in zip(self.distance_plots, self.distance_data):
+            plot.setData(self.distance_xs, series)
         if self.checkBox_graphDSliding.isChecked():
             self.graph_d.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
             x_max = current_time

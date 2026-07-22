@@ -709,8 +709,11 @@ class MahalanobisPrefilter {
     constructor(config) {
         this.T2_high = config.T2_high;
         this.T2_low = config.T2_low;
-        this.is_rejected = [false, false, false, false];
-        this.reject_counts = [0, 0, 0, 0];
+        this.anchor_count = config.anchor_count !== undefined
+            ? config.anchor_count
+            : SIM_CONFIG.ENV.ANCHORS.length;
+        this.is_rejected = Array(this.anchor_count).fill(false);
+        this.reject_counts = Array(this.anchor_count).fill(0);
         this.min_frame_measurements = config.min_frame_measurements !== undefined ? config.min_frame_measurements : 3;
         this.rescue_min_reject_streak = config.rescue_min_reject_streak !== undefined
             ? config.rescue_min_reject_streak
@@ -726,8 +729,8 @@ class MahalanobisPrefilter {
 
     init(init_x, init_y, bias_ax, bias_ay, bias_gz) {
         this.ukf.init(init_x, init_y, bias_ax, bias_ay, bias_gz);
-        this.is_rejected = [false, false, false, false];
-        this.reject_counts = [0, 0, 0, 0];
+        this.is_rejected = Array(this.anchor_count).fill(false);
+        this.reject_counts = Array(this.anchor_count).fill(0);
     }
 
     predict(imu, dt) {

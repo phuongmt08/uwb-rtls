@@ -10,6 +10,14 @@ function updatePlots(res, samples, rawData) {
     } = res;
     const isPathCsv = isRecordedPathLog(rawData);
     const positionSamples = samples.slice(0, x_axis.length);
+    const anchorCount = gatedDist.length;
+    const selectedAnchorsText = (mask) => {
+        const numericMask = Number(mask) || 0;
+        const selected = anchors
+            .filter(anchor => (numericMask & (1 << (anchor.id - 1))) !== 0)
+            .map(anchor => `A${anchor.id}`);
+        return selected.length ? selected.join(', ') : 'None';
+    };
 
     // 1. Trajectory
     if (isPathCsv) {
@@ -27,7 +35,12 @@ function updatePlots(res, samples, rawData) {
             ],
             text: [
                 pathSamples.map((s, i) => `Idx: ${i}<br>Tril: ${s.tril_x}, ${s.tril_y}`),
-                pathSamples.map((s, i) => `Idx: ${i}<br>UKF: ${s.ukf_x}, ${s.ukf_y}`),
+                pathSamples.map((s, i) =>
+                    `Idx: ${i}` +
+                    `<br>UKF: ${s.ukf_x}, ${s.ukf_y}` +
+                    `<br>Selected anchors: ${selectedAnchorsText(s.mask)}` +
+                    `<br>Mask: 0x${(Number(s.mask) || 0).toString(16).toUpperCase()}`
+                ),
                 [], [], [], []
             ],
             name: ['Trilateration Path', 'UKF Path', '', '', '', ''],
@@ -103,7 +116,7 @@ function updatePlots(res, samples, rawData) {
     }
 
     // 2. Distances & Scores
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < anchorCount; i++) {
         Plotly.restyle('distances', {
             x: [x_axis, x_axis, rejectIdx[i], rescueIdx[i]],
             y: [
@@ -124,7 +137,10 @@ function updatePlots(res, samples, rawData) {
     }
     const T2_high = parseFloat(document.getElementById('t2_high_range').value);
     const T2_low  = parseFloat(document.getElementById('t2_low_range').value);
-    Plotly.restyle('scores', { x: [[0, x_axis.length], [0, x_axis.length]], y: [[T2_high, T2_high], [T2_low, T2_low]] }, [4, 5]);
+    Plotly.restyle('scores', {
+        x: [[0, x_axis.length], [0, x_axis.length]],
+        y: [[T2_high, T2_high], [T2_low, T2_low]]
+    }, [anchorCount, anchorCount + 1]);
     Plotly.relayout('scores', { 'yaxis.autorange': true });
 
     const debug = tripletDebug || {};
@@ -336,21 +352,32 @@ function updatePlots(res, samples, rawData) {
 
     function calcPathErrors(pathX, pathY) {
         const gtSegments = (typeof activeGroundTruth !== 'undefined' && activeGroundTruth && activeGroundTruth.segments) || [];
+        const gtProfiles = buildGroundTruthSegmentProfiles(gtSegments);
         return pathX.map((px, i) => {
             const py = pathY[i];
             if (!Number.isFinite(px) || !Number.isFinite(py) || gtSegments.length === 0) return null;
 
             let minDist = Infinity;
-            for (const seg of gtSegments) {
+            let nearestSegmentIndex = -1;
+            let nearestProjectionT = 0;
+            for (let segmentIndex = 0; segmentIndex < gtSegments.length; segmentIndex++) {
+                const seg = gtSegments[segmentIndex];
                 const [x1, y1, x2, y2] = seg;
                 const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
                 if (l2 <= 0.000001) continue;
                 const t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2));
                 const projX = x1 + t * (x2 - x1);
                 const projY = y1 + t * (y2 - y1);
-                minDist = Math.min(minDist, Math.hypot(px - projX, py - projY));
+                const distance = Math.hypot(px - projX, py - projY);
+                if (distance < minDist) {
+                    minDist = distance;
+                    nearestSegmentIndex = segmentIndex;
+                    nearestProjectionT = t;
+                }
             }
-            return Number.isFinite(minDist) ? minDist : null;
+            if (!Number.isFinite(minDist) || nearestSegmentIndex < 0) return null;
+            const tolerance = groundTruthToleranceAtProjection(gtProfiles[nearestSegmentIndex], nearestProjectionT);
+            return Math.max(0, minDist - tolerance);
         });
     }
 
@@ -376,19 +403,22 @@ function updatePlots(res, samples, rawData) {
             return `
                 <div class="stat-box">
                     <strong>${item.label}</strong>
-                    <div class="stat-row"><span>MAE</span><span>${formatErrorMetric(metrics.mae)}</span></div>
-                    <div class="stat-row"><span>RMSE</span><span>${formatErrorMetric(metrics.rmse)}</span></div>
-                    <div class="stat-row"><span>P50</span><span>${formatErrorMetric(metrics.p50)}</span></div>
-                    <div class="stat-row"><span>P90</span><span>${formatErrorMetric(metrics.p90)}</span></div>
-                    <div class="stat-row"><span>P95</span><span>${formatErrorMetric(metrics.p95)}</span></div>
-                    <div class="stat-row"><span>Max Error</span><span>${formatErrorMetric(metrics.max)}</span></div>
-                    <div class="stat-row"><span>Samples</span><span>${metrics.count}</span></div>
+                    <div class="position-metric-grid">
+                        <div class="position-metric euclidean" title="Mean of sqrt(dx^2 + dy^2) over valid samples"><span class="position-metric-label">Euclidean Position Error</span><span class="position-metric-value">${formatErrorMetric(metrics.euclidean)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">MAE</span><span class="position-metric-value">${formatErrorMetric(metrics.mae)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">RMSE</span><span class="position-metric-value">${formatErrorMetric(metrics.rmse)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">P50</span><span class="position-metric-value">${formatErrorMetric(metrics.p50)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">P90</span><span class="position-metric-value">${formatErrorMetric(metrics.p90)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">P95</span><span class="position-metric-value">${formatErrorMetric(metrics.p95)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">Max Error</span><span class="position-metric-value">${formatErrorMetric(metrics.max)}</span></div>
+                        <div class="position-metric"><span class="position-metric-label">Samples</span><span class="position-metric-value">${metrics.count}</span></div>
+                    </div>
                 </div>
             `;
         }).join('');
     }
 
-    const pathLossData = [0,1,2,3].map(i => {
+    const pathLossData = Array.from({ length: anchorCount }, (_, i) => {
         const x = [];
         const y = [];
         samples.slice(0, x_axis.length).forEach((s, idx) => {
@@ -402,9 +432,10 @@ function updatePlots(res, samples, rawData) {
         return { x, y };
     });
 
-    const sliced_amp = [0,1,2,3].map(i => (rawData.fp_logs.amp[i] || []).slice(0, x_axis.length).map(v => (v <= 0 || v > 5000) ? null : v));
-    const sliced_snr = [0,1,2,3].map(i => (rawData.fp_logs.snr[i] || []).slice(0, x_axis.length).map(v => (v <= 0 || v > 5000) ? null : v));
-    for(let i=0; i<4; ++i) {
+    const anchorIndices = Array.from({ length: anchorCount }, (_, i) => i);
+    const sliced_amp = anchorIndices.map(i => (rawData.fp_logs.amp[i] || []).slice(0, x_axis.length).map(v => (v <= 0 || v > 5000) ? null : v));
+    const sliced_snr = anchorIndices.map(i => (rawData.fp_logs.snr[i] || []).slice(0, x_axis.length).map(v => (v <= 0 || v > 5000) ? null : v));
+    for(let i=0; i<anchorCount; ++i) {
         const ampStats = getStats(sliced_amp[i]);
         Plotly.restyle('fp_amp', { 
             x: [x_axis], 

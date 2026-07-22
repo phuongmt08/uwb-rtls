@@ -71,19 +71,25 @@ const SIM_CONFIG = {
 
     // --- Visualization ---
     VIEW: {
-        COLORS: ['#2563eb', '#16a34a', '#d97706', '#7c3aed'],
+        COLORS: ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#dc2626', '#0891b2'],
         MAX_ERROR_RANGE: 1.5    // meters for plot Y-axis
     },
 
     // --- Environment / Setup ---
     ENV: {
-        TAG_HEIGHT: 0.510,
+        TAG_HEIGHT: 0.465,
+        GROUND_TRUTH_TOLERANCE_STRAIGHT_M: 0.0,
+        GROUND_TRUTH_TOLERANCE_CURVE_M: 0.01,
+        GROUND_TRUTH_CURVE_ANGLE_DEG: 5.0,
+        GROUND_TRUTH_CURVE_INFLUENCE_RADIUS_M: 0.30,
         LOG_DISTANCES_ARE_PLANAR: true,
         ANCHORS: [
-            { id: 1, x: 0.70, y: 0.03, z: 2.495 },
-            { id: 2, x: 2.70, y: 8.37, z: 2.495 },
-            { id: 3, x: 7.50, y: 8.37, z: 2.495 },
-            { id: 4, x: 7.50, y: 0.03, z: 2.495 }
+            { id: 1, x: 0.7, y: 0.03, z: 2.495 },
+            { id: 2, x: 2.7, y: 8.37, z: 2.495 },
+            { id: 3, x: 7.5, y: 8.37, z: 2.495 },
+            { id: 4, x: 7.5, y: 0.03, z: 2.495 },
+            { id: 5, x: 4.3, y: 0.8,  z: 0.88 },
+            { id: 6, x: 4.3, y: 7.88, z: 1.44 }
         ],
         GT_SQUARE: {
             x: [2.44, 7.32, 7.32, 2.44, 2.44],
