@@ -443,6 +443,10 @@ class CommandFactory:
         pkt.sensor_fusion_result.timestamp_ms = 0
         pkt.sensor_fusion_result.zone_id = 0
         pkt.sensor_fusion_result.prefilter_reject_count = 0
+        pkt.sensor_fusion_result.position_cov_xx_m2 = 0.0
+        pkt.sensor_fusion_result.position_cov_xy_m2 = 0.0
+        pkt.sensor_fusion_result.position_cov_yy_m2 = 0.0
+        pkt.sensor_fusion_result.position_cov_valid = False
         return pkt
 
     def imu_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:

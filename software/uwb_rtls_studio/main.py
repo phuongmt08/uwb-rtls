@@ -367,6 +367,10 @@ class MockSerialService(QObject):
             fs.yaw_deg = psi_deg
             fs.ranging_error_count = 0
             fs.timestamp_ms = res.timestamp_ms
+            fs.position_cov_xx_m2 = 0.025
+            fs.position_cov_xy_m2 = 0.006
+            fs.position_cov_yy_m2 = 0.040
+            fs.position_cov_valid = True
             
             frame_fusion = self._proto.wrap_packet(fusion_pkt)
             

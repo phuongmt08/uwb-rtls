@@ -79,6 +79,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from services.protocol_service import ProtocolService
 from common.transport import VvAddress
 from utils.app_state import shared_app_state, JobState, POLL_RANGING_STATUS_MS
+from utils.ukf_covariance import covariance_metrics
 
 log = logging.getLogger(__name__)
 
@@ -506,6 +507,12 @@ class RangingModel(QObject):
             "local_y_m": room_frame["local_y_m"],
             "local_z_m": room_frame["local_z_m"],
         }
+        sample.update(covariance_metrics(
+            float(getattr(res, "position_cov_xx_m2", 0.0)),
+            float(getattr(res, "position_cov_xy_m2", 0.0)),
+            float(getattr(res, "position_cov_yy_m2", 0.0)),
+            bool(getattr(res, "position_cov_valid", False)),
+        ))
         if sample["zone_id"] and sample.get("local_x_m") is None and sample.get("local_y_m") is None:
             sample["room_id"] = str(sample["zone_id"])
             sample["local_x_m"] = sample["ukf_x_m"]

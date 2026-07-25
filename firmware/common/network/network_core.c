@@ -42,6 +42,19 @@ static bool network_core_encode_and_send(network_core_t *core,
         return false;
     }
 
+    if (len > NETWORK_CORE_PACKET_WARN_SIZE) {
+        uint32_t which = packet ? packet->which_params : 0u;
+        uint32_t dst = (packet && packet->has_hdr && packet->hdr.has_addr) ?
+                       (uint32_t)packet->hdr.addr.dst : 0xFFu;
+        RLOG_W(OBJECT_CODE,
+               "large protobuf TX tag=%lu dst=%lu stream=%d len=%lu warn=%lu",
+               which,
+               dst,
+               (int)stream,
+               (unsigned long)len,
+               (unsigned long)NETWORK_CORE_PACKET_WARN_SIZE);
+    }
+
     int wr = _write(stream, (char *)buf, (int)len, 0);
     if (wr <= 0) {
         uint32_t which = packet ? packet->which_params : 0u;

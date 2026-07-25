@@ -1157,6 +1157,17 @@ class SessionRepository:
             f"| ukf_y: {self._first_float(pos, 'ukf_y_m', 'ukf_y'):9.6f} "
             f"| ukf_yaw: {self._first_float(pos, 'ukf_yaw_deg', 'ukf_yaw'):9.6f} "
             f"| yaw: {self._first_float(pos, 'yaw_deg', 'yaw'):9.6f} "
+            f"| cov_valid: {1 if pos.get('position_cov_valid', False) else 0} "
+            f"| cov_xx: {self._value_float(pos.get('position_cov_xx_m2', 0.0)):12.8f} "
+            f"| cov_xy: {self._value_float(pos.get('position_cov_xy_m2', 0.0)):12.8f} "
+            f"| cov_yy: {self._value_float(pos.get('position_cov_yy_m2', 0.0)):12.8f} "
+            f"| pos_std: {self._value_float(pos.get('position_std_m', 0.0)):9.6f} "
+            f"| sigma_major: {self._value_float(pos.get('position_sigma_major_m', 0.0)):9.6f} "
+            f"| sigma_minor: {self._value_float(pos.get('position_sigma_minor_m', 0.0)):9.6f} "
+            f"| ellipse95_major: {self._value_float(pos.get('position_ellipse_major_95_m', 0.0)):9.6f} "
+            f"| ellipse95_minor: {self._value_float(pos.get('position_ellipse_minor_95_m', 0.0)):9.6f} "
+            f"| ellipse_angle: {self._value_float(pos.get('position_ellipse_angle_deg', 0.0)):9.3f} "
+            f"| confidence: {str(pos.get('position_confidence', 'Unavailable'))} "
             f"| update_dt: {update_dt:9.6f} "
             f"| predict_dt: {predict_dt:9.6f} "
             f"| mask: {self._value_int(pos.get('anchor_mask', pos.get('mask', 0)))} "
@@ -1233,6 +1244,17 @@ class SessionRepository:
             "tril_x_m": tril_x,
             "tril_y_m": tril_y,
             "yaw_deg": fields.get("yaw", ""),
+            "position_cov_valid": bool(self._value_int(fields.get("cov_valid"))),
+            "position_cov_xx_m2": self._value_float(fields.get("cov_xx")),
+            "position_cov_xy_m2": self._value_float(fields.get("cov_xy")),
+            "position_cov_yy_m2": self._value_float(fields.get("cov_yy")),
+            "position_std_m": self._value_float(fields.get("pos_std")),
+            "position_sigma_major_m": self._value_float(fields.get("sigma_major")),
+            "position_sigma_minor_m": self._value_float(fields.get("sigma_minor")),
+            "position_ellipse_major_95_m": self._value_float(fields.get("ellipse95_major")),
+            "position_ellipse_minor_95_m": self._value_float(fields.get("ellipse95_minor")),
+            "position_ellipse_angle_deg": self._value_float(fields.get("ellipse_angle")),
+            "position_confidence": fields.get("confidence", "Unavailable"),
             "ranging_error_count": fields.get("err", ""),
             "prefilter_reject_count": fields.get("pf_reject_count", ""),
             "zone_id": fields.get("zone", ""),
@@ -1302,6 +1324,17 @@ class SessionRepository:
                             "tril_x_m": row_dict.get("tril_x_m", ""),
                             "tril_y_m": row_dict.get("tril_y_m", ""),
                             "yaw_deg": row_dict.get("yaw_deg", ""),
+                            "position_cov_valid": bool(int(row_dict.get("position_cov_valid") or 0)),
+                            "position_cov_xx_m2": float(row_dict.get("position_cov_xx_m2") or 0.0),
+                            "position_cov_xy_m2": float(row_dict.get("position_cov_xy_m2") or 0.0),
+                            "position_cov_yy_m2": float(row_dict.get("position_cov_yy_m2") or 0.0),
+                            "position_std_m": float(row_dict.get("position_std_m") or 0.0),
+                            "position_sigma_major_m": float(row_dict.get("position_sigma_major_m") or 0.0),
+                            "position_sigma_minor_m": float(row_dict.get("position_sigma_minor_m") or 0.0),
+                            "position_ellipse_major_95_m": float(row_dict.get("position_ellipse_major_95_m") or 0.0),
+                            "position_ellipse_minor_95_m": float(row_dict.get("position_ellipse_minor_95_m") or 0.0),
+                            "position_ellipse_angle_deg": float(row_dict.get("position_ellipse_angle_deg") or 0.0),
+                            "position_confidence": row_dict.get("position_confidence", "Unavailable"),
                             "ranging_error_count": row_dict.get("ranging_error_count", ""),
                             "prefilter_reject_count": row_dict.get("prefilter_reject_count", ""),
                             "zone_id": row_dict.get("zone_id", ""),
@@ -1345,6 +1378,17 @@ class SessionRepository:
                             "tril_x_m": row.get("tril_x_m", ""),
                             "tril_y_m": row.get("tril_y_m", ""),
                             "yaw_deg": row.get("yaw_deg", ""),
+                            "position_cov_valid": bool(self._csv_int(row, "position_cov_valid")),
+                            "position_cov_xx_m2": self._csv_float(row, "position_cov_xx_m2"),
+                            "position_cov_xy_m2": self._csv_float(row, "position_cov_xy_m2"),
+                            "position_cov_yy_m2": self._csv_float(row, "position_cov_yy_m2"),
+                            "position_std_m": self._csv_float(row, "position_std_m"),
+                            "position_sigma_major_m": self._csv_float(row, "position_sigma_major_m"),
+                            "position_sigma_minor_m": self._csv_float(row, "position_sigma_minor_m"),
+                            "position_ellipse_major_95_m": self._csv_float(row, "position_ellipse_major_95_m"),
+                            "position_ellipse_minor_95_m": self._csv_float(row, "position_ellipse_minor_95_m"),
+                            "position_ellipse_angle_deg": self._csv_float(row, "position_ellipse_angle_deg"),
+                            "position_confidence": row.get("position_confidence", "Unavailable"),
                             "ranging_error_count": row.get("ranging_error_count", ""),
                             "prefilter_reject_count": row.get("prefilter_reject_count", ""),
                             "zone_id": row.get("zone_id", ""),

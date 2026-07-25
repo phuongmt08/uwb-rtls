@@ -138,6 +138,10 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     pkt2.sensor_fusion_result.ranging_error_count = 4
     pkt2.sensor_fusion_result.prefilter_reject_count = 9
     pkt2.sensor_fusion_result.timestamp_ms = 2000
+    pkt2.sensor_fusion_result.position_cov_xx_m2 = 0.04
+    pkt2.sensor_fusion_result.position_cov_xy_m2 = 0.0
+    pkt2.sensor_fusion_result.position_cov_yy_m2 = 0.01
+    pkt2.sensor_fusion_result.position_cov_valid = True
     expected_anchors = []
     for anchor_id in range(1, 7):
         anchor = pkt2.sensor_fusion_result.anchors.add()
@@ -164,6 +168,12 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert latest["payload_size"] == pkt2.sensor_fusion_result.ByteSize()
     assert latest["ranging_error_count"] == 4
     assert latest["prefilter_reject_count"] == 9
+    assert latest["position_cov_valid"] is True
+    assert math.isclose(latest["position_cov_xx_m2"], 0.04, rel_tol=1e-6)
+    assert math.isclose(latest["position_cov_yy_m2"], 0.01, rel_tol=1e-6)
+    assert math.isclose(latest["position_std_m"], math.sqrt(0.05), rel_tol=1e-6)
+    assert math.isclose(latest["position_sigma_major_m"], 0.2, rel_tol=1e-6)
+    assert latest["position_confidence"] == "Medium"
     assert math.isclose(latest["vx_mps"], 1.5)
     assert math.isclose(latest["vy_mps"], 2.0)
     assert latest["seq"] == 2
@@ -697,6 +707,10 @@ class LiveTrackingPeripheralSimulator:
         fusion_pkt.sensor_fusion_result.yaw_deg = raw_yaw_deg
         fusion_pkt.sensor_fusion_result.ranging_error_count = 0
         fusion_pkt.sensor_fusion_result.timestamp_ms = timestamp_ms
+        fusion_pkt.sensor_fusion_result.position_cov_xx_m2 = 0.01
+        fusion_pkt.sensor_fusion_result.position_cov_xy_m2 = 0.002
+        fusion_pkt.sensor_fusion_result.position_cov_yy_m2 = 0.02
+        fusion_pkt.sensor_fusion_result.position_cov_valid = True
         self._send_packet(fusion_pkt)
 
         self._ranging_total_count += 1

@@ -62,6 +62,7 @@ from models.ranging_model import RangingModel
 from services.protocol_service import ProtocolService
 from data.raw_packet_store import shared_raw_packet_store
 from utils.app_state import shared_app_state
+from utils.ukf_covariance import rotate_covariance_metrics
 from models.geofence_model import GeofenceZone
 from models.ground_truth_model import GroundTruthTrack
 from repository.geofence_repository import GeofenceRepository
@@ -314,6 +315,17 @@ class LiveTrackingViewModel(QObject):
                 tril_x, tril_y = self._room_local_to_scene(tril_local_x, tril_local_y, room)
                 emitted["tril_x_m"] = float(tril_x)
                 emitted["tril_y_m"] = float(tril_y)
+        if resolved["is_local_frame"] and emitted.get("position_cov_valid", False):
+            room = self._find_room(resolved["room_id"])
+            if room is not None:
+                emitted["local_position_cov_xx_m2"] = emitted.get("position_cov_xx_m2", 0.0)
+                emitted["local_position_cov_xy_m2"] = emitted.get("position_cov_xy_m2", 0.0)
+                emitted["local_position_cov_yy_m2"] = emitted.get("position_cov_yy_m2", 0.0)
+                emitted.update(rotate_covariance_metrics(
+                    emitted,
+                    float(getattr(room, "local_frame_yaw_deg", 0.0)),
+                ))
+                emitted["position_cov_frame"] = "scene"
         self.sensor_fusion_updated.emit(emitted)
         x = emitted.get("ukf_x_m", 0.0)
         y = emitted.get("ukf_y_m", 0.0)

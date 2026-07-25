@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 PROJECT = os.path.normpath(os.path.join(ROOT, ".."))
@@ -164,6 +165,17 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
             "yaw_deg": 0.0,
             "anchor_mask": 0x3F,
             "ranging_error_count": 0,
+            "position_cov_valid": True,
+            "position_cov_xx_m2": 0.04,
+            "position_cov_xy_m2": 0.01,
+            "position_cov_yy_m2": 0.09,
+            "position_std_m": math.sqrt(0.13),
+            "position_sigma_major_m": 0.303940,
+            "position_sigma_minor_m": 0.193884,
+            "position_ellipse_major_95_m": 0.743923,
+            "position_ellipse_minor_95_m": 0.474501,
+            "position_ellipse_angle_deg": 79.099,
+            "position_confidence": "Medium",
             "anchors": [
                 {"anchor_id": 1, "distance_mm": 1000 + seq, "weight": 90},
                 {"anchor_id": 2, "distance_mm": 2000 + seq, "weight": 80},
@@ -189,6 +201,16 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
     assert "| d6:  7.200000" in rows[-1]
     assert "| w1: 90" in rows[-1]
     assert "| w6: 40" in rows[-1]
+    assert "| cov_valid: 1" in rows[-1]
+    assert "| cov_xx:   0.04000000" in rows[-1]
+    assert "| confidence: Medium" in rows[-1]
+    parsed_rows = repo._read_positions_csv(record_path)
+    assert len(parsed_rows) == 1200
+    assert parsed_rows[-1]["position_cov_valid"] is True
+    assert math.isclose(parsed_rows[-1]["position_cov_xx_m2"], 0.04)
+    assert math.isclose(parsed_rows[-1]["position_cov_xy_m2"], 0.01)
+    assert math.isclose(parsed_rows[-1]["position_cov_yy_m2"], 0.09)
+    assert parsed_rows[-1]["position_confidence"] == "Medium"
 
     studio_exports = list((shared_data_root / "studio").glob("*/*_sensor_fusion_result.csv"))
     assert len(studio_exports) == 1

@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+import logging
 from typing import List, Optional
 
 from google.protobuf.message import DecodeError
 
 from . import protocol_pb2 as pb
+
+log = logging.getLogger(__name__)
+
+
+def _packet_name(packet: pb.packet_t) -> str:
+    return packet.WhichOneof("params") or "unknown"
+
 
 class VvAddress(IntEnum):
     NONE = int(pb.PACKET_ADDR_UNSPECIFIED)
@@ -164,11 +172,28 @@ class VvProtocol:
         return self._seq
 
     def encode_packet(self, packet: pb.packet_t) -> bytes:
-        return packet.SerializeToString()
+        payload = packet.SerializeToString()
+        if len(payload) > int(pb.PROTOBUF_PACKET_WARN_BYTES):
+            log.warning(
+                "Large protobuf TX: type=%s seq=%s len=%d warn=%d",
+                _packet_name(packet),
+                getattr(getattr(packet, "hdr", None), "seq", "-"),
+                len(payload),
+                int(pb.PROTOBUF_PACKET_WARN_BYTES),
+            )
+        return payload
 
     def decode_packet(self, payload: bytes) -> pb.packet_t:
         pkt = pb.packet_t()
         pkt.ParseFromString(payload)
+        if len(payload) > int(pb.PROTOBUF_PACKET_WARN_BYTES):
+            log.warning(
+                "Large protobuf RX: type=%s seq=%s len=%d warn=%d",
+                _packet_name(pkt),
+                getattr(getattr(pkt, "hdr", None), "seq", "-"),
+                len(payload),
+                int(pb.PROTOBUF_PACKET_WARN_BYTES),
+            )
         return pkt
 
     def decode_from_frames(self, data: bytes) -> List[pb.packet_t]:

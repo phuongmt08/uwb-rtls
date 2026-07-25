@@ -304,8 +304,8 @@ void sys_ble_peripheral_send_adv_status(void)
 
     // 3. Fill diagnostic status fields
     status.status_flags = 0;
-    status.warning_count = 0;
-    status.error_count = 0;
+    status.warning_count = sys_logger_get_warning_count();
+    status.error_count = sys_logger_get_error_count();
     status.local_timestamp_s = bsp_rtc_get_timestamp_s();
     status.serial_number = s_ble_peri.serial_number;
 

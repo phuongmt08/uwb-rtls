@@ -406,6 +406,10 @@ def ranging_stream_loop() -> None:
             pkt_sf.sensor_fusion_result.yaw_deg = _fixed2(math.degrees(angle))
             pkt_sf.sensor_fusion_result.ranging_error_count = 0
             pkt_sf.sensor_fusion_result.timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
+            pkt_sf.sensor_fusion_result.position_cov_xx_m2 = 0.01
+            pkt_sf.sensor_fusion_result.position_cov_xy_m2 = 0.002
+            pkt_sf.sensor_fusion_result.position_cov_yy_m2 = 0.015
+            pkt_sf.sensor_fusion_result.position_cov_valid = True
             
             send_to_host(pkt_sf)
             

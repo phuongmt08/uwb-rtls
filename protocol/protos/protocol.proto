@@ -23,8 +23,9 @@ package protobuf;
 /* Enums -------------------------------------------------------------------- */
 
 enum common_constant_t {
-    UNSPECIFIED  = 0;
-    PROTOCOL_REV = 124;
+    UNSPECIFIED                = 0;
+    PROTOCOL_REV               = 125;
+    PROTOBUF_PACKET_WARN_BYTES = 220;
 }
 
 enum packet_ack_response_t {
@@ -340,6 +341,13 @@ message sensor_fusion_result_t {
     uint32 zone_id                  = 11;
     repeated anchor_data_t  anchors = 12;
     uint32 prefilter_reject_count   = 13;
+    // Symmetric 2D position block of UKF P after the step identified by
+    // ukf_step. Diagonal/off-diagonal units are m^2.
+    float position_cov_xx_m2        = 14;
+    float position_cov_xy_m2        = 15;
+    float position_cov_yy_m2        = 16;
+    // False when UKF is not initialized or the 2x2 block is not finite/PSD.
+    bool position_cov_valid         = 17;
 }
 
 /* Positioning prefilter ---------------------------------------------------- */

@@ -64,6 +64,8 @@ typedef struct
 static sys_logger_t g_logger __attribute__((section(".shared_log"), aligned(4), used));
                                         // Shared boot/app logger state
 static bool         initialized = false;  // Initialization flag
+static uint32_t     s_warning_log_cnt = 0u; // Counter for warning logs
+static uint32_t     s_error_log_cnt   = 0u; // Counter for error logs
 #ifndef HAVE_RTC
 static uint32_t log_seq_num = 0;  // Sequence number for logs when no RTC
 #endif
@@ -337,6 +339,8 @@ void sys_logger_clear(void)
 {
   g_logger.head = 0;
   g_logger.tail = 0;
+  s_warning_log_cnt = 0u;
+  s_error_log_cnt   = 0u;
 }
 
 uint16_t sys_logger_space_count(void)
@@ -647,6 +651,16 @@ bool sys_logger_write_record(uint8_t log_type, log_object_code_t obj_code, const
   // Log type
   record[LOG_HEADER_IDX_LOG_TYPE] = log_type;
 
+  // Track warning and error counts
+  if (log_type == WARNING_LOG)
+  {
+    s_warning_log_cnt++;
+  }
+  else if ((log_type != INFO_LOG) && (log_type != DEBUG_LOG))
+  {
+    s_error_log_cnt++;
+  }
+
   // Object code (set error source bit if applicable)
   record[LOG_HEADER_IDX_OBJ_CODE] = (uint8_t) obj_code;
 #ifdef UWB_DEVICE_TAG
@@ -724,6 +738,22 @@ void sys_logger_task(void)
     g_flash_sync_last_ms = now_ms;
   }
 #endif
+}
+
+uint32_t sys_logger_get_warning_count(void)
+{
+  return s_warning_log_cnt;
+}
+
+uint32_t sys_logger_get_error_count(void)
+{
+  return s_error_log_cnt;
+}
+
+void sys_logger_reset_counts(void)
+{
+  s_warning_log_cnt = 0u;
+  s_error_log_cnt   = 0u;
 }
 
 /* End of file -------------------------------------------------------------- */
