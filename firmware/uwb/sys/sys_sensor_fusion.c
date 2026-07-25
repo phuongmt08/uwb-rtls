@@ -59,6 +59,17 @@
 #define TEST_UKF_STREAM_MASK_PACKET_COUNT  50U
 #define TEST_UKF_STREAM_ANCHOR_COUNT       4U
 #define SYS_FUSION_PREDICT_TIMEOUT_MS      2000U
+/* Temporary A/B diagnostic: keep draining the IMU queue, but do not propagate
+ * the UKF state/covariance. Set to 0 after comparing update-only vs normal. */
+#define SYS_FUSION_DIAGNOSTIC_DISABLE_PREDICT  0
+/* Temporary pipeline diagnostic: publish the current trilateration position as
+ * the fusion position, bypassing the UKF range-measurement update entirely. */
+#define SYS_FUSION_DIAGNOSTIC_USE_TRIL_POSITION  0
+/* Reuse sensor_fusion_result as an update diagnostic packet. The host-side
+ * ukf_update_diagnostic.py parser owns the field mapping for ukf_step 101. */
+#define SYS_FUSION_DIAGNOSTIC_UPDATE_PACKET      0
+#define SYS_FUSION_DIAGNOSTIC_UPDATE_STEP        101U
+#define SYS_FUSION_DIAGNOSTIC_WEIGHT_SCALE       1000000.0f
 
 /* Private enumerate/structure ---------------------------------------- */
 typedef struct
@@ -96,6 +107,24 @@ typedef struct
 	uint32_t last_update_tick;
 
 } ukf_core_t;
+
+typedef struct
+{
+    bool valid;
+    float tril_x;
+    float tril_y;
+    float prior_px;
+    float prior_py;
+    float posterior_px;
+    float posterior_py;
+    float d_real[NUM_UPDATE_NOISE];
+    float d_mean[NUM_UPDATE_NOISE];
+    float r_diag[NUM_UPDATE_NOISE];
+    float prior_pxx;
+    float prior_pxy;
+    float prior_pyy;
+    uint8_t anchor_ids[NUM_UPDATE_NOISE];
+} ukf_update_diagnostic_t;
 
 // Filter
 typedef struct
@@ -159,6 +188,7 @@ unsigned long sys_update_cholesky_err_count = 0;
 unsigned long sys_update_inverse_err_count = 0;
 //
 static ukf_core_t ukf 	= {0};
+static ukf_update_diagnostic_t s_update_diagnostic = {0};
 float yaw_rad_cached   	= 0.0f;
 
 #if TEST_UKF_STREAM_BLE || TEST_UKF_STREAM_UART
@@ -183,6 +213,9 @@ static void update_latest_anchor_data_snapshot(const uwb_distance_msg_t *ranging
                                                const mw_tril_anchor_t selected_anchors[3]);
 static int16_t to_uart_fixed2(float value);
 static int32_t to_proto_fixed2(float value);
+static int32_t to_proto_fixed3(float value);
+static int32_t to_scaled_i32(float value, float scale);
+static uint32_t to_mm_u32(float value);
 #if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION
 static void configure_adv(network_core_t *stream);
 #endif
@@ -354,12 +387,13 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
     bool has_imu = false;
     while (osMessageQueueGet(g_imu_data_queue, &temp_imu, NULL, 0U) == osOK) {
         // Chuyển đổi hệ tọa độ
-         ukf.imu_current.ax = -temp_imu.ay;
-         ukf.imu_current.ay = temp_imu.ax;
-         ukf.imu_current.az = temp_imu.az;
-         ukf.imu_current.gx = -temp_imu.gy;
-         ukf.imu_current.gy = temp_imu.gx;
-         ukf.imu_current.gz = temp_imu.gz;
+        ukf.imu_current.ax = -temp_imu.ax;
+        ukf.imu_current.ay = -temp_imu.ay;
+        ukf.imu_current.gz = temp_imu.gz;
+        ukf.imu_current.az = temp_imu.az;
+        ukf.imu_current.gx = -temp_imu.gx;
+        ukf.imu_current.gy = -temp_imu.gy;
+        ukf.imu_current.gz = temp_imu.gz;
 //        ukf.imu_current = temp_imu;
         has_imu = true;
     }
@@ -367,6 +401,10 @@ sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_uk
     if (!has_imu) {
         return SYS_SENSOR_FUSION_OK;
     }
+
+#if SYS_FUSION_DIAGNOSTIC_DISABLE_PREDICT
+    return SYS_SENSOR_FUSION_OK;
+#endif
 
     uint32_t sys_predict_tick_ms = HAL_GetTick();
     float dt = calc_dt();
@@ -672,11 +710,32 @@ bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
     snapshot_latest_anchor_metrics(candidate_anchors, candidate_count);
     update_latest_anchor_data_snapshot(ranging_msg, selected_anchors);
 
+#if SYS_FUSION_DIAGNOSTIC_USE_TRIL_POSITION
+    ukf.state.px = (float)tril_position->x;
+    ukf.state.py = (float)tril_position->y;
+    ukf.state.vx = 0.0f;
+    ukf.state.vy = 0.0f;
+    *p_ukf = ukf.state;
+    ukf.last_update_tick = HAL_GetTick();
+    sys_sensor_fusion_set_predict_flag();
+    sys_sensor_fusion_stream_uart(UKF_STEP_UPDATE);
+    return true;
+#endif
+
     const uint8_t selected_anchor_ids[3] = {
         selected_anchors[0].id,
         selected_anchors[1].id,
         selected_anchors[2].id
     };
+
+#if SYS_FUSION_DIAGNOSTIC_UPDATE_PACKET
+    s_update_diagnostic.valid = false;
+    s_update_diagnostic.tril_x = (float)tril_position->x;
+    s_update_diagnostic.tril_y = (float)tril_position->y;
+    memcpy(s_update_diagnostic.anchor_ids,
+           selected_anchor_ids,
+           sizeof(s_update_diagnostic.anchor_ids));
+#endif
 
     /* measurement_weight is a precision (1 / variance). Keep the UKF update
      * numerically bounded, and never give a rescued range normal confidence. */
@@ -881,6 +940,81 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     const sys_config_t *cfg = sys_config_get();
 
     memset(&stream_data, 0, sizeof(stream_data));
+
+#if SYS_FUSION_DIAGNOSTIC_UPDATE_PACKET
+    /* In diagnostic mode, suppress ordinary predict/update telemetry. Predict
+     * calls still arrive because the disabled predictor returns OK, and those
+     * packets would otherwise consume the shared 20 ms stream rate limit.
+     * A pending diagnostic snapshot may be retried by any subsequent call. */
+    if (!s_update_diagnostic.valid)
+    {
+        return;
+    }
+
+    {
+        const float prior_position_covariance[NUM_UPDATE_NOISE] = {
+            s_update_diagnostic.prior_pxx,
+            s_update_diagnostic.prior_pxy,
+            s_update_diagnostic.prior_pyy
+        };
+
+        stream_data.ukf_step = SYS_FUSION_DIAGNOSTIC_UPDATE_STEP;
+        /* Diagnostic positions use raw fixed3. Studio's unchanged fixed2 CSV
+         * export therefore stores value_m * 10; the dedicated parser divides
+         * those CSV fields by 10 to recover meters at millimeter resolution. */
+        stream_data.ukf_x_m =
+            to_proto_fixed3(s_update_diagnostic.posterior_px);
+        stream_data.ukf_y_m =
+            to_proto_fixed3(s_update_diagnostic.posterior_py);
+        stream_data.ukf_yaw_deg =
+            to_proto_fixed3(s_update_diagnostic.prior_px);
+        stream_data.tril_x_m =
+            to_proto_fixed3(s_update_diagnostic.tril_x);
+        stream_data.tril_y_m =
+            to_proto_fixed3(s_update_diagnostic.tril_y);
+        stream_data.yaw_deg =
+            to_proto_fixed3(s_update_diagnostic.prior_py);
+        stream_data.anchor_mask = s_last_selected_anchors_mask;
+        stream_data.ranging_error_count =
+            ((uint32_t)s_update_diagnostic.anchor_ids[0])
+          | ((uint32_t)s_update_diagnostic.anchor_ids[1] << 8U)
+          | ((uint32_t)s_update_diagnostic.anchor_ids[2] << 16U);
+        stream_data.timestamp_ms = HAL_GetTick();
+        stream_data.zone_id = cfg ? cfg->default_zone_id : 0U;
+        stream_data.prefilter_reject_count = s_prefilter_reject_count;
+        stream_data.anchors_count = 2U * NUM_UPDATE_NOISE;
+
+        for (uint8_t i = 0U; i < NUM_UPDATE_NOISE; i++)
+        {
+            protobuf_anchor_data_t *measurement = &stream_data.anchors[i];
+            protobuf_anchor_data_t *prediction =
+                &stream_data.anchors[NUM_UPDATE_NOISE + i];
+
+            measurement->anchor_id = (uint32_t)i + 1U;
+            measurement->distance_mm =
+                to_mm_u32(s_update_diagnostic.d_real[i]);
+            measurement->weight =
+                to_scaled_i32(s_update_diagnostic.r_diag[i],
+                              SYS_FUSION_DIAGNOSTIC_WEIGHT_SCALE);
+
+            prediction->anchor_id =
+                (uint32_t)(NUM_UPDATE_NOISE + i) + 1U;
+            prediction->distance_mm =
+                to_mm_u32(s_update_diagnostic.d_mean[i]);
+            prediction->weight =
+                to_scaled_i32(prior_position_covariance[i],
+                              SYS_FUSION_DIAGNOSTIC_WEIGHT_SCALE);
+        }
+
+        if (network_send_sensor_fusion_result(&g_network_core,
+                                              protobuf_PACKET_ADDR_HOST,
+                                              &stream_data))
+        {
+            s_update_diagnostic.valid = false;
+        }
+        return;
+    }
+#endif
 
     stream_data.ukf_step            = ukf_step;
     stream_data.ukf_x_m 			= to_proto_fixed2(ukf.state.px);
@@ -1094,8 +1228,8 @@ void sys_sensor_fusion_task()
 #else
         /* Preserve the same board-to-navigation axis mapping used by the UKF,
          * but keep this as raw telemetry only when MCU fusion is disabled. */
-        ukf.imu_current.ax = -imu_data.ay;
-        ukf.imu_current.ay = imu_data.ax;
+        ukf.imu_current.ax = -imu_data.ax;
+        ukf.imu_current.ay = -imu_data.ay;
         ukf.imu_current.gz = imu_data.gz;
         s_fusion_dt = calc_dt();
 #endif
@@ -1266,6 +1400,23 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
     arm_mat_mult_f32(&mat_Pxd, &mat_Pdd_inv, &mat_K);
 
     float32_t D_real[3] = {d0, d1, d2};
+#if SYS_FUSION_DIAGNOSTIC_UPDATE_PACKET
+    s_update_diagnostic.prior_px = x_aug[0];
+    s_update_diagnostic.prior_py = x_aug[1];
+    s_update_diagnostic.prior_pxx = ukf.P_data[0U * NUM_STATE + 0U];
+    s_update_diagnostic.prior_pxy =
+        0.5f * (ukf.P_data[0U * NUM_STATE + 1U]
+              + ukf.P_data[1U * NUM_STATE + 0U]);
+    s_update_diagnostic.prior_pyy = ukf.P_data[1U * NUM_STATE + 1U];
+    for (uint8_t i = 0U; i < NUM_UPDATE_NOISE; i++)
+    {
+        s_update_diagnostic.d_real[i] = D_real[i];
+        s_update_diagnostic.d_mean[i] = d_mean[i];
+        s_update_diagnostic.r_diag[i] =
+            ukf.R_data[i * NUM_UPDATE_NOISE + i];
+    }
+#endif
+
     for(int i=0; i<NUM_STATE; i++)
     {
         float update_val = 0;
@@ -1300,6 +1451,12 @@ sys_sensor_fusion_err_t fusion_update(sys_sensor_fusion_data_t *p_ukf,
 	// 3. Cập nhật P: P = P - K * (P_xd)^T
 	arm_mat_sub_f32(&ukf.mat_P, &mat_K_Pxd_t, &ukf.mat_P);
     stabilize_state_covariance();
+
+#if SYS_FUSION_DIAGNOSTIC_UPDATE_PACKET
+    s_update_diagnostic.posterior_px = ukf.state.px;
+    s_update_diagnostic.posterior_py = ukf.state.py;
+    s_update_diagnostic.valid = true;
+#endif
 
     if (p_ukf != NULL) *p_ukf = ukf.state;
 
@@ -1712,6 +1869,7 @@ static void reset_runtime_state(void)
     mw_filter_ukf_init_reset(&s_ukf_init_filter);
     mw_filter_ukf_init_distance_reset(&s_ukf_init_dist_filter);
     reset_imu_conditioner();
+    memset(&s_update_diagnostic, 0, sizeof(s_update_diagnostic));
 
     clear_latest_anchor_metrics();
 
@@ -1908,6 +2066,40 @@ static int16_t to_uart_fixed2(float value)
 static int32_t to_proto_fixed2(float value)
 {
     return (int32_t)(value * 100.0f);
+}
+
+static int32_t to_proto_fixed3(float value)
+{
+    return to_scaled_i32(value, 1000.0f);
+}
+
+static int32_t to_scaled_i32(float value, float scale)
+{
+    if (!isfinite(value) || !isfinite(scale)) {
+        return 0;
+    }
+
+    double scaled = (double)value * (double)scale;
+    if (scaled >= (double)INT32_MAX) {
+        return INT32_MAX;
+    }
+    if (scaled <= (double)INT32_MIN) {
+        return INT32_MIN;
+    }
+    return (int32_t)lround(scaled);
+}
+
+static uint32_t to_mm_u32(float value)
+{
+    if (!isfinite(value) || value <= 0.0f) {
+        return 0U;
+    }
+
+    double scaled = (double)value * 1000.0;
+    if (scaled >= (double)UINT32_MAX) {
+        return UINT32_MAX;
+    }
+    return (uint32_t)lround(scaled);
 }
 
 #if TEST_UKF_STREAM_BLE && ENABLE_SYS_FUSION

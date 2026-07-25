@@ -416,11 +416,11 @@
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_PX
-#define SYS_FUSION_UKF_INIT_P_PX        0.1f
+#define SYS_FUSION_UKF_INIT_P_PX        0.4f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_PY
-#define SYS_FUSION_UKF_INIT_P_PY        0.1f
+#define SYS_FUSION_UKF_INIT_P_PY        0.4f
 #endif
 
 #ifndef SYS_FUSION_UKF_INIT_P_VX
