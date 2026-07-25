@@ -40,6 +40,18 @@ CSV_LOG_CATEGORIES = (
         'source': 'studio',
         'suffix': 'ukf_log_data',
     },
+    {
+        'key': 'fusion',
+        'title': 'Fusion Recordings',
+        'source': 'final_report_data',
+        'suffix': 'fusion_frame_log_data',
+    },
+    {
+        'key': 'log',
+        'title': 'UWB Log Recordings',
+        'source': 'final_report_data',
+        'suffix': 'ukf_log_data',
+    },
 )
 
 def classify_csv_log(path):
@@ -57,6 +69,17 @@ def classify_csv_log(path):
     for category in CSV_LOG_CATEGORIES:
         if source == category['source'] and filename.endswith(f"_{category['suffix']}.csv"):
             return category
+    # Support files from 13_07_26 / dashboard recordings
+    if filename.startswith('fusion_frame_'):
+        for category in CSV_LOG_CATEGORIES:
+            if category['key'] == 'fusion':
+                return category
+        return {'key': 'fusion', 'title': 'Fusion', 'suffix': 'fusion_frame_log_data'}
+    if filename.startswith('uwb_data_'):
+        for category in CSV_LOG_CATEGORIES:
+            if category['key'] == 'log':
+                return category
+        return {'key': 'log', 'title': 'Log', 'suffix': 'ukf_log_data'}
     return None
 
 def date_sort_key(folder_name):
@@ -98,11 +121,15 @@ GT_SQUARE = {
 }
 GT_STEP_HORIZONTAL_M = 2.8
 GT_STEP_VERTICAL_M = 5.6
+ANCHOR_COUNT = 6
+DEFAULT_ANCHOR_MASK = (1 << ANCHOR_COUNT) - 1
 DEFAULT_ANCHORS = [
-    {'id': 1, 'x': 0.0,  'y': 0.0,  'z': 0.895},
-    {'id': 2, 'x': 9.76, 'y': 0.0,  'z': 0.895},
-    {'id': 3, 'x': 0.0,  'y': 9.76, 'z': 0.895},
-    {'id': 4, 'x': 9.76, 'y': 9.76, 'z': 0.895},
+    {'id': 1, 'x': 0.7, 'y': 0.03, 'z': 2.495},
+    {'id': 2, 'x': 2.7, 'y': 8.37, 'z': 2.495},
+    {'id': 3, 'x': 7.5, 'y': 8.37, 'z': 2.495},
+    {'id': 4, 'x': 7.5, 'y': 0.03, 'z': 2.495},
+    {'id': 5, 'x': 4.3, 'y': 0.8,  'z': 0.88},
+    {'id': 6, 'x': 4.3, 'y': 7.88, 'z': 1.44},
 ]
 GROUND_TRUTH_PARAMS = {
     'custom_track': {
@@ -110,10 +137,24 @@ GROUND_TRUTH_PARAMS = {
         # anchor_relative: ground truth coordinates are relative to the selected anchor.
         'coordinate_frame': 'world',
         'anchor_id': 1,
-        'offset_x': 1,
-        'offset_y': 1,
+        'offset_x': 0.5,
+        'offset_y': 0.5,
     }
 }
+
+# Alternate route measured on the rainy-day recording. These are zero-based
+# plot/sample indices, matching the indices shown by the trajectory tooltip.
+RAIN_DETOUR_REFERENCE_CSV = os.path.join(DATA_DIR, '13_07_26', 'uwb_data_20260612_192531.csv')
+RAIN_DETOUR_START_INDEX = 2260
+RAIN_DETOUR_END_INDEX = 2600
+RAIN_DETOUR_FALLBACK_POINTS = [
+    (0.969, 12.546), (1.132, 12.370), (1.320, 12.073),
+    (1.358, 11.944), (1.464, 11.806), (1.541, 11.641),
+    (1.739, 11.460), (1.955, 11.317), (2.117, 11.172),
+    (2.273, 11.055), (2.375, 10.933), (2.519, 10.818),
+    (2.690, 10.707), (2.829, 10.538), (2.915, 10.405),
+    (3.014, 10.289), (3.152, 10.203), (3.257, 10.111),
+]
 
 def _anchor_origin(anchor_id):
     for anchor in DEFAULT_ANCHORS:
@@ -151,6 +192,72 @@ def apply_groundtruth_params(track):
     transformed['coordinate_frame'] = frame
     transformed['groundtruth_offset'] = {'x': offset_x, 'y': offset_y}
     return transformed
+
+def load_rain_detour_points():
+    points = []
+    try:
+        with open(RAIN_DETOUR_REFERENCE_CSV, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            for index, raw_row in enumerate(reader):
+                if index < RAIN_DETOUR_START_INDEX:
+                    continue
+                if index > RAIN_DETOUR_END_INDEX:
+                    break
+                row = {k.lower(): v for k, v in raw_row.items() if k is not None}
+                x = safe_float(row.get('ukf_x'), None)
+                y = safe_float(row.get('ukf_y'), None)
+                if x is not None and y is not None:
+                    points.append((x, y))
+    except (OSError, csv.Error):
+        points = []
+    sampled_points = points if len(points) >= 2 else list(RAIN_DETOUR_FALLBACK_POINTS)
+
+    # Fit one straight line through every UKF sample using orthogonal (total
+    # least-squares) regression. This keeps the physical ground truth straight
+    # without forcing it through two noisy endpoint samples.
+    mean_x = sum(point[0] for point in sampled_points) / len(sampled_points)
+    mean_y = sum(point[1] for point in sampled_points) / len(sampled_points)
+    sxx = sum((point[0] - mean_x) ** 2 for point in sampled_points)
+    syy = sum((point[1] - mean_y) ** 2 for point in sampled_points)
+    sxy = sum((point[0] - mean_x) * (point[1] - mean_y) for point in sampled_points)
+    theta = 0.5 * math.atan2(2.0 * sxy, sxx - syy)
+    ux = math.cos(theta)
+    uy = math.sin(theta)
+    projections = [(point[0] - mean_x) * ux + (point[1] - mean_y) * uy for point in sampled_points]
+    fitted_points = [
+        (mean_x + min(projections) * ux, mean_y + min(projections) * uy),
+        (mean_x + max(projections) * ux, mean_y + max(projections) * uy),
+    ]
+    if math.dist(fitted_points[0], sampled_points[0]) > math.dist(fitted_points[1], sampled_points[0]):
+        fitted_points.reverse()
+    return fitted_points
+
+def make_rain_detour_groundtruth(base_track):
+    if not base_track:
+        return None
+
+    points = load_rain_detour_points()
+    overlay_segments = [
+        [points[i][0], points[i][1], points[i + 1][0], points[i + 1][1], True]
+        for i in range(len(points) - 1)
+    ]
+
+    detour = dict(base_track)
+    detour['id'] = 'custom_track_adjusted_route'
+    detour['name'] = 'Custom Track Modified'
+    detour['segments'] = list(base_track.get('segments', [])) + overlay_segments
+    detour['x'] = list(base_track.get('x', []))
+    detour['y'] = list(base_track.get('y', []))
+    detour['overlay'] = {
+        'type': 'alternate_trajectory',
+        'reason': 'reference_route_adjustment',
+        'reference_csv': os.path.basename(RAIN_DETOUR_REFERENCE_CSV),
+        'start_index': RAIN_DETOUR_START_INDEX,
+        'end_index': RAIN_DETOUR_END_INDEX,
+        'fit': 'total_least_squares',
+        'points': points,
+    }
+    return detour
 
 def _segments_from_points(points):
     return [
@@ -209,7 +316,7 @@ def first_payload_position(payload):
 
     return 0.0, 0.0
 
-def parse_graphml_groundtruth(filepath):
+def parse_graphml_groundtruth(filepath, track_id='custom_track', display_name=None):
     if not os.path.exists(filepath):
         return None
 
@@ -264,8 +371,8 @@ def parse_graphml_groundtruth(filepath):
         y.extend([seg[1], seg[3], None])
 
     return {
-        'id': 'custom_track',
-        'name': os.path.basename(filepath),
+        'id': track_id,
+        'name': display_name or os.path.basename(filepath),
         'x': x,
         'y': y,
         'segments': segments
@@ -288,7 +395,17 @@ def load_ground_truths(payload=None):
 
     custom = parse_graphml_groundtruth(os.path.join(BASE_DIR, 'custom_track_modified.xml'))
     if custom:
-        tracks.append(apply_groundtruth_params(custom))
+        custom = apply_groundtruth_params(custom)
+        tracks.append(custom)
+        tracks.append(make_rain_detour_groundtruth(custom))
+
+    experiment_track = parse_graphml_groundtruth(
+        os.path.join(BASE_DIR, 'groundtruth_20260719.xml'),
+        track_id='experiment_20260719',
+        display_name='Ground Truth 20260719 (experiment-fitted)'
+    )
+    if experiment_track:
+        tracks.append(experiment_track)
 
     start_x, start_y = first_payload_position(payload)
     tracks.append(make_step_groundtruth(start_x, start_y, 'start_1'))
@@ -309,7 +426,7 @@ def convert_imu_accel(ax, ay):
 def parse_log(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         first_line = f.readline().strip()
-    if first_line.startswith('sof,') and 'ukf_x' in first_line and 'tril_x' in first_line:
+    if ('tx_frame_cnt' in first_line.lower() or first_line.startswith('sof,')) and 'ukf_x' in first_line.lower():
         return parse_path_csv_log(filepath)
 
     data = []
@@ -327,9 +444,12 @@ def parse_log(filepath):
         d2:\s*(?P<d2>[\d.-]+)\s+                   # Distance 2
         d3:\s*(?P<d3>[\d.-]+)\s+                   # Distance 3
         d4:\s*(?P<d4>[\d.-]+)                      # Distance 4
+        (?:\s+d5:\s*(?P<d5>[\d.-]+))?              # Distance 5 (Optional)
+        (?:\s+d6:\s*(?P<d6>[\d.-]+))?              # Distance 6 (Optional)
         \s+err:\s*(?P<err>\d+)                     # Error Code
     """, re.VERBOSE)
     try:
+        previous_timestamp_ms = None
         with open(filepath, 'r', encoding='utf-8') as f:
             for line_no, line in enumerate(f, 1):
                 raw_line = line.rstrip('\r\n')
@@ -355,6 +475,29 @@ def parse_log(filepath):
                         category = classify_csv_log(filepath)
                         is_log_cat = category and category['suffix'] == 'ukf_log_data'
                         source_format = 'ukf_log' if is_log_cat else ('fusion_frame_csv' if has_fusion_path else 'ukf_log')
+                        timestamp_ms = safe_int(fields.get('ts'), None)
+                        ukf_step = safe_int(
+                            fields.get('ukf_step'),
+                            1 if status_match.group('type') == 'Update' else 0
+                        )
+                        entry_type = status_match.group('type')
+                        if source_format == 'fusion_frame_csv':
+                            # Studio labels every sensor_fusion_result row as
+                            # "Update"; ukf_step is the actual firmware mode.
+                            entry_type = 'Update' if ukf_step == 1 else 'Predict'
+                            if (update_dt <= 0.0 and predict_dt <= 0.0 and
+                                    timestamp_ms is not None and
+                                    previous_timestamp_ms is not None):
+                                timestamp_delta = (
+                                    timestamp_ms - previous_timestamp_ms
+                                ) & 0xffffffff
+                                if timestamp_delta < 60000:
+                                    if entry_type == 'Update':
+                                        update_dt = timestamp_delta / 1000.0
+                                    else:
+                                        predict_dt = timestamp_delta / 1000.0
+                        if timestamp_ms is not None:
+                            previous_timestamp_ms = timestamp_ms
                         px_fw = tril_x if is_log_cat else (ukf_x if has_fusion_path else tril_x)
                         py_fw = tril_y if is_log_cat else (ukf_y if has_fusion_path else tril_y)
                         
@@ -365,9 +508,11 @@ def parse_log(filepath):
                             'raw_line': raw_line,
                             'frame_counter': frame_counter,
                             'tx_frame_cnt': tx_frame_cnt,
-                            'type': status_match.group('type'),
+                            'type': entry_type,
                             'source_format': source_format,
-                            'ukf_step': safe_int(fields.get('ukf_step'), 1 if status_match.group('type') == 'Update' else 0),
+                            'timestamp_ms': timestamp_ms,
+                            'zone': safe_int(fields.get('zone')),
+                            'ukf_step': ukf_step,
                             'ax': ax_conv,
                             'ay': ay_conv,
                             'gz': safe_float(fields.get('gz')),
@@ -382,14 +527,29 @@ def parse_log(filepath):
                             'ukf_y': ukf_y,
                             'yaw': safe_float(fields.get('yaw')),
                             'ukf_yaw': safe_float(fields.get('ukf_yaw')),
-                            'fp_amp_norm': [safe_float(fields.get(f'amp{i}')) for i in range(1, 5)],
-                            'fp_snr': [safe_float(fields.get(f'snr{i}')) for i in range(1, 5)],
-                            'fp_confidence': [safe_float(fields.get(f'fp_confidence{i}', fields.get(f'conf{i}'))) for i in range(1, 5)],
-                            'quality_valid': [safe_int(fields.get(f'quality_valid{i}', fields.get(f'qvalid{i}'))) for i in range(1, 5)],
-                            'mask': safe_int(fields.get('mask'), 15),
-                            'distances': [safe_float(fields.get(f'd{i}')) for i in range(1, 5)],
-                            'weights': [safe_int(fields.get(f'w{i}')) for i in range(1, 5)],
+                            'fp_amp_norm': [safe_float(fields.get(f'amp{i}')) for i in range(1, ANCHOR_COUNT + 1)],
+                            'fp_snr': [safe_float(fields.get(f'snr{i}')) for i in range(1, ANCHOR_COUNT + 1)],
+                            # Preserve missing quality fields as null.  Older
+                            # firmware logs only contain amp/snr; the replay
+                            # worker must be able to distinguish "not logged"
+                            # from a real confidence value of zero.
+                            'fp_confidence': [
+                                safe_optional_float(fields.get(
+                                    f'fp_confidence{i}', fields.get(f'conf{i}')
+                                ))
+                                for i in range(1, ANCHOR_COUNT + 1)
+                            ],
+                            'quality_valid': [
+                                safe_optional_int(fields.get(
+                                    f'quality_valid{i}', fields.get(f'qvalid{i}')
+                                ))
+                                for i in range(1, ANCHOR_COUNT + 1)
+                            ],
+                            'mask': safe_int(fields.get('mask'), DEFAULT_ANCHOR_MASK),
+                            'distances': [safe_float(fields.get(f'd{i}')) for i in range(1, ANCHOR_COUNT + 1)],
+                            'weights': [safe_int(fields.get(f'w{i}')) for i in range(1, ANCHOR_COUNT + 1)],
                             'err': safe_int(fields.get('err')),
+                            'prefilter_reject_count': safe_int(fields.get('pf_reject_count')),
                         })
                         continue
 
@@ -401,7 +561,8 @@ def parse_log(filepath):
                     tx_frame_cnt = int(counter_match.group('tx')) if counter_match else frame_counter
                     
                     def parse_float_list(s):
-                        return [float(x.strip()) for x in (s or "").split(',') if x.strip()] or [0,0,0,0]
+                        values = [float(x.strip()) for x in (s or "").split(',') if x.strip()]
+                        return (values + [0.0] * ANCHOR_COUNT)[:ANCHOR_COUNT]
 
                     def parse_quality(prefix):
                         bracket = re.search(rf"{prefix}:\s*\[([\d.,\s-]+)\]", raw_line)
@@ -409,15 +570,15 @@ def parse_log(filepath):
                             return parse_float_list(bracket.group(1))
 
                         values = []
-                        for anchor_idx in range(1, 5):
+                        for anchor_idx in range(1, ANCHOR_COUNT + 1):
                             scalar = re.search(rf"{prefix}{anchor_idx}:\s*([\d.-]+)", raw_line)
                             values.append(float(scalar.group(1)) if scalar else 0)
                         return values
 
-                    amp_vals = parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0,0,0,0]
-                    snr_vals = parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0,0,0,0]
-                    confidence_vals = parse_quality('conf') if 'conf' in raw_line else [0,0,0,0]
-                    quality_valid_vals = parse_quality('qvalid') if 'qvalid' in raw_line else [0,0,0,0]
+                    amp_vals = parse_quality('amp') if 'amp' in raw_line or 'fp_amp_norm' in raw_line else [0.0] * ANCHOR_COUNT
+                    snr_vals = parse_quality('snr') if 'snr' in raw_line or 'fp_snr' in raw_line else [0.0] * ANCHOR_COUNT
+                    confidence_vals = parse_quality('conf') if 'conf' in raw_line else [None] * ANCHOR_COUNT
+                    quality_valid_vals = parse_quality('qvalid') if 'qvalid' in raw_line else [None] * ANCHOR_COUNT
 
                     # Sanitize extreme outliers (values > 5000 or non-finite)
                     amp_vals = [v if (math.isfinite(v) and -5000.0 < v < 5000.0) else 0.0 for v in amp_vals]
@@ -437,8 +598,11 @@ def parse_log(filepath):
                         'fp_snr': snr_vals,
                         'fp_confidence': confidence_vals,
                         'quality_valid': quality_valid_vals,
-                        'mask': int(d['mask']) if d.get('mask') else 15,
-                        'distances': [float(d['d1']), float(d['d2']), float(d['d3']), float(d['d4'])],
+                        'mask': int(d['mask']) if d.get('mask') else DEFAULT_ANCHOR_MASK,
+                        'distances': [
+                            safe_float(d.get(f'd{i}'))
+                            for i in range(1, ANCHOR_COUNT + 1)
+                        ],
                         'err': int(d['err'])
                     })
     except: pass
@@ -457,14 +621,25 @@ def safe_int(value, default=0):
     except (TypeError, ValueError):
         return default
 
+def safe_optional_float(value):
+    if value is None or str(value).strip() == '':
+        return None
+    return safe_float(value, None)
+
+def safe_optional_int(value):
+    if value is None or str(value).strip() == '':
+        return None
+    return safe_int(value, None)
+
 def parse_path_csv_log(filepath):
     data = []
     prev_frame = None
     try:
         with open(filepath, 'r', encoding='utf-8', newline='') as f:
             reader = csv.DictReader(f)
-            for line_no, row in enumerate(reader, 2):
-                frame = safe_int(row.get('tx_frame_cnt'), len(data))
+            for line_no, raw_row in enumerate(reader, 2):
+                row = {k.lower(): v for k, v in raw_row.items() if k is not None}
+                frame = safe_int(row.get('tx_frame_cnt', row.get('frame_no')), len(data))
                 recorded_dt = safe_float(row.get('dt'), None)
                 if prev_frame is None:
                     dt = recorded_dt if recorded_dt is not None and recorded_dt > 0 else 0.0
@@ -482,7 +657,7 @@ def parse_path_csv_log(filepath):
 
                 data.append({
                     'line_no': line_no,
-                    'raw_line': ','.join(row.get(k, '') for k in (reader.fieldnames or [])),
+                    'raw_line': ','.join(raw_row.get(k, '') for k in (reader.fieldnames or [])),
                     'type': 'Update',
                     'source_format': 'path_csv',
                     'tx_frame_cnt': frame,
@@ -492,13 +667,16 @@ def parse_path_csv_log(filepath):
                     'tril_x': tril_x, 'tril_y': tril_y,
                     'yaw': yaw,
                     'ukf_yaw': safe_float(row.get('ukf_yaw'), yaw),
-                    'fp_amp_norm': [0, 0, 0, 0],
-                    'fp_snr': [0, 0, 0, 0],
-                    'fp_confidence': [0, 0, 0, 0],
-                    'quality_valid': [0, 0, 0, 0],
-                    'mask': safe_int(row.get('anchor_mask'), 15),
-                    'distances': [0.0, 0.0, 0.0, 0.0],
-                    'err': safe_int(row.get('error_frame_cnt'), 0)
+                    'fp_amp_norm': [0.0] * ANCHOR_COUNT,
+                    'fp_snr': [0.0] * ANCHOR_COUNT,
+                    'fp_confidence': [0.0] * ANCHOR_COUNT,
+                    'quality_valid': [0] * ANCHOR_COUNT,
+                    'mask': safe_int(row.get('anchor_mask'), DEFAULT_ANCHOR_MASK),
+                    'distances': [
+                        safe_float(row.get(f'd{i}'))
+                        for i in range(1, ANCHOR_COUNT + 1)
+                    ],
+                    'err': safe_int(row.get('error_frame_cnt', row.get('error')), 0)
                 })
     except Exception:
         pass
@@ -512,18 +690,21 @@ def run_gen(log_file):
     bias = {'ax': 0.0, 'ay': 0.0, 'gz': 0.0}
     fw_path = {'x': [], 'y': [], 'mask': []}
     tril_path = {'x': [], 'y': []}
-    fp_logs = {'amp': [[], [], [], []], 'snr': [[], [], [], []]}
+    fp_logs = {
+        'amp': [[] for _ in range(ANCHOR_COUNT)],
+        'snr': [[] for _ in range(ANCHOR_COUNT)]
+    }
     for entry in log_data:
         if entry['type'] == 'Init':
             bias['ax'], bias['ay'], bias['gz'] = entry['ax'], entry['ay'], entry['gz']
         if entry['type'] == 'Update' or is_recorded_path:
             fw_path['x'].append(entry['px_fw'])
             fw_path['y'].append(entry['py_fw'])
-            fw_path['mask'].append(entry.get('mask', 15))
+            fw_path['mask'].append(entry.get('mask', DEFAULT_ANCHOR_MASK))
             if is_recorded_path:
                 tril_path['x'].append(entry.get('tril_x', entry.get('px_fw')))
                 tril_path['y'].append(entry.get('tril_y', entry.get('py_fw')))
-            for i in range(4):
+            for i in range(ANCHOR_COUNT):
                 val_amp = entry['fp_amp_norm'][i] if len(entry.get('fp_amp_norm', [])) > i else 0
                 val_snr = entry['fp_snr'][i] if len(entry.get('fp_snr', [])) > i else 0
                 fp_logs['amp'][i].append(val_amp)
@@ -619,6 +800,7 @@ def get_report_source_mtime():
     paths = [
         'uwb-rtls_simulation.py',
         'custom_track_modified.xml',
+        'groundtruth_20260719.xml',
         'template_ukf_prefilter.html',
         'src/core/config.js',
         'src/core/math_utils.js',

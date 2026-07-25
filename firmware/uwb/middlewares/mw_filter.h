@@ -30,16 +30,14 @@ typedef struct {
     mahalanobis_anchor_state_t anchors[8];
     float T1;     /* Recover threshold */
     float T2;     /* Reject threshold */
-    float R_base;
     float R_gate;
-    float velocity_weight;
     float min_covariance;
     bool initialized;
 } mahalanobis_prefilter_t;
 
 void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
-                                float T1, float T2, float anchor_R_base,
-                                float R_gate, float velocity_weight,
+                                float T1, float T2,
+                                float R_gate,
                                 float min_covariance);
 
 float mw_filter_median_update(median_filter_1d_t *med, float new_val);
@@ -49,7 +47,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   float px, float py, float pz,
                                   float pxx, float pxy, float pyy,
                                   float ax, float ay, float az,
-                                  float *d_out, float *d2_score, float *R_adaptive);
+                                  float *d2_score);
 
 
 

@@ -269,7 +269,7 @@ class BuildController(QObject):
     def on_build(self):
         auto_inc = self.view.chk_auto_increment.isChecked()
         auto_flash = self.view.chk_auto_flash.isChecked()
-        opt_flag = self.view.combo_opt.currentText().split(" ")[0]
+        opt_flag = self.view.combo_opt.currentData() or "-Og"
         
         def job():
             self.signals.log.emit("=" * 60)
@@ -327,7 +327,7 @@ class BuildController(QObject):
         def job():
             self.signals.log.emit("=" * 60)
             self.signals.log.emit("[BUILD] Running make clean...")
-            opt_flag = self.view.combo_opt.currentText().split(" ")[0]
+            opt_flag = self.view.combo_opt.currentData() or "-Og"
             try:
                 BuildService.run_make_target("clean", opt_flag, self.signals.log.emit)
                 QMetaObject.invokeMethod(self, "invoke_reset_build_btn", Qt.QueuedConnection)

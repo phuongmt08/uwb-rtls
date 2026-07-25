@@ -23,13 +23,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#if ENABLE_SYS_FUSION
-#ifdef SYS_FUSION_PREFILTER_ENABLED
-#undef SYS_FUSION_PREFILTER_ENABLED
-#endif
-#define SYS_FUSION_PREFILTER_ENABLED 0
-#endif
-
 /* Private types ------------------------------------------------------ */
 typedef enum {
     APP_TAG_UWB_CONTROL_NONE = 0,
@@ -70,6 +63,7 @@ static void get_tdma_config(uint8_t *num_anchors, uint8_t *anchor_ids);
 static uint32_t estimate_tdma_cycle_ms(uint8_t num_anchors);
 static void update_period_schedule(uint32_t now_tick, uint32_t period_ms);
 static void record_ranging_error(void);
+static void queue_failed_ranging_cycle(uint32_t timestamp_ms);
 static void finish_failed_ranging_cycle(sys_ranging_err_t err,
                                         uint32_t now_tick,
                                         uint32_t period_ms,
@@ -376,6 +370,18 @@ static void record_ranging_error(void)
     s_error_count++;
 }
 
+static void queue_failed_ranging_cycle(uint32_t timestamp_ms)
+{
+    uwb_distance_msg_t msg = {0};
+    msg.timestamp_ms = timestamp_ms;
+    msg.ranging_error_count = s_error_count;
+
+    if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
+        RLOG_W(LOG_OBJECT_CODE_TAG,
+               "[FUSION] Distance queue full, dropping failed ranging cycle");
+    }
+}
+
 static void finish_failed_ranging_cycle(sys_ranging_err_t err,
                                         uint32_t now_tick,
                                         uint32_t period_ms,
@@ -387,6 +393,7 @@ static void finish_failed_ranging_cycle(sys_ranging_err_t err,
     }
 
     record_ranging_error();
+    queue_failed_ranging_cycle(now_tick);
     s_last_ranging_tick = now_tick;
     uint32_t cycle_ms = (s_cycle_start_tick != 0U)
                         ? (now_tick - s_cycle_start_tick)
@@ -437,26 +444,31 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
 
     if (valid_count < 3U) {
         record_ranging_error();
+        msg.ranging_error_count = s_error_count;
         if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Distance queue full, dropping failed ranging cycle");
+#if ENABLE_SYS_FUSION
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION INPUT] Distance queue full, dropping failed ranging cycle");
+#else
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[RAW STREAM] Distance queue full, dropping failed ranging cycle");
+#endif
         }
         return false;
     }
 
+    msg.ranging_error_count = s_error_count;
     if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
         record_ranging_error();
-        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Distance queue full, dropping ranging cycle");
+#if ENABLE_SYS_FUSION
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION INPUT] Distance queue full, dropping ranging cycle");
+#else
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[RAW STREAM] Distance queue full, dropping ranging cycle");
+#endif
         return false;
     }
     s_success_count++;
     return true;
 }
 /* Public functions --------------------------------------------------- */
-
-uint32_t app_tag_get_ranging_error_count(void)
-{
-    return s_error_count;
-}
 
 app_err_t app_tag_init(void)
 {
@@ -474,6 +486,13 @@ app_err_t app_tag_init(void)
     /* Log height configuration */
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
+
+#if ENABLE_SYS_FUSION
+    RLOG_I(LOG_OBJECT_CODE_TAG, "MCU Fusion: ON");
+#else
+    RLOG_I(LOG_OBJECT_CODE_TAG, "MCU Fusion: OFF (raw host stream ON, anchors=%u)",
+           (unsigned)NUM_ANCHORS);
+#endif
 
 #if SYS_FUSION_PREFILTER_ENABLED
     RLOG_I(LOG_OBJECT_CODE_TAG,
@@ -581,6 +600,7 @@ void app_tag_process(void)
             }
         } else {
             record_ranging_error();
+            queue_failed_ranging_cycle(now);
             update_period_schedule(now, period_ms);
         }
         return;
@@ -612,6 +632,7 @@ void app_tag_process(void)
             cycle_success = process_ranging_results(multi_results.results, multi_results.count);
         } else {
             record_ranging_error();
+            queue_failed_ranging_cycle(HAL_GetTick());
             RLOG_W(LOG_OBJECT_CODE_TAG, "[TAG] No TDMA results available");
         }
 
@@ -682,7 +703,11 @@ void app_tag_process(void)
 
 void app_tag_reset_fusion(void)
 {
+#if ENABLE_SYS_FUSION
     RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state...");
+#else
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[RAW STREAM] Resetting ranging counters and stream state...");
+#endif
     s_is_ranging_active = false;
     s_error_count = 0;
     s_last_ranging_tick = HAL_GetTick();

@@ -41,7 +41,6 @@ typedef struct {
     uint8_t id;        /* Anchor ID */
     bool valid;        /* true if measurement is valid */
     double d2_score;   /* Mahalanobis distance squared */
-    double r_adaptive; /* Adaptive covariance */
     double fp_amp_norm;
     double fp_snr;
     double fp_confidence;
@@ -49,6 +48,8 @@ typedef struct {
     bool rescued;       /* Reintroduced after persistent prefilter rejection */
     double wgdop;
     double residual_rms;
+    double geometry_quality;
+    double selection_score;
     double triplet_fp_weight; /* Mean FP-only confidence of the selected triplet */
     double measurement_weight; /* Final per-anchor precision used by WGDOP */
 } mw_tril_anchor_t;

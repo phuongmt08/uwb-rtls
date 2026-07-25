@@ -92,18 +92,14 @@ static bool sys_config_prefilter_valid(const sys_prefilter_cfg_t *prefilter)
 
     if (!isfinite(prefilter->recover_d2) ||
         !isfinite(prefilter->reject_d2) ||
-        !isfinite(prefilter->r_base) ||
         !isfinite(prefilter->r_gate) ||
-        !isfinite(prefilter->velocity_weight) ||
         !isfinite(prefilter->min_covariance)) {
         return false;
     }
 
     return prefilter->recover_d2 >= 0.0f &&
            prefilter->reject_d2 > prefilter->recover_d2 &&
-           prefilter->r_base > 0.0f &&
            prefilter->r_gate > 0.0f &&
-           prefilter->velocity_weight >= 0.0f &&
            prefilter->min_covariance > 0.0f;
 }
 
@@ -913,6 +909,10 @@ void sys_config_print(void)
     CFG_LOG("Host I/O      : %s",
            g_storage.config.host_transport == HOST_TRANSPORT_USB ? "USB" : "UART");
     CFG_LOG("Device ID     : 0x%02X", (unsigned)g_storage.config.uwb.device_id);
+    CFG_LOG("TDMA Anchors  : build=%u active=%lu max=%u",
+            (unsigned)NUM_ANCHORS,
+            (unsigned long)g_storage.config.anchor_count,
+            (unsigned)MAX_ANCHORS_SUPPORTED);
     CFG_LOG("-------------- UWB RADIO --------------");
     CFG_LOG("Channel       : %lu", g_storage.config.uwb.uwb_channel);
     CFG_LOG("PRF           : %lu MHz", g_storage.config.uwb.uwb_prf);
@@ -942,11 +942,10 @@ void sys_config_print(void)
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
     CFG_LOG("Power Mode    : %s (%lu)", sys_config_power_mode_name(g_storage.config.uwb.power_mode), g_storage.config.uwb.power_mode);
-    CFG_LOG("Prefilter     : %s recover=%.2f reject=%.2f r_base=%.3f r_gate=%.3f",
+    CFG_LOG("Prefilter     : %s recover=%.2f reject=%.2f r_gate=%.3f",
             g_storage.config.prefilter.enable ? "ON" : "OFF",
             g_storage.config.prefilter.recover_d2,
             g_storage.config.prefilter.reject_d2,
-            g_storage.config.prefilter.r_base,
             g_storage.config.prefilter.r_gate);
     CFG_LOG("==========================================");
     CFG_LOG("");

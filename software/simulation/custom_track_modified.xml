@@ -1805,48 +1805,20 @@
       <data key="d1">12.48</data>
     </node>
     <node id="500">
-      <data key="d0">3.61</data>
-      <data key="d1">0.07</data>
+      <data key="d0">3.19</data>
+      <data key="d1">0.92</data>
     </node>
     <node id="501">
-      <data key="d0">3.88</data>
-      <data key="d1">0.34</data>
+      <data key="d0">3.57</data>
+      <data key="d1">0.92</data>
     </node>
     <node id="502">
-      <data key="d0">4.17</data>
-      <data key="d1">0.59</data>
+      <data key="d0">3.19</data>
+      <data key="d1">0.54</data>
     </node>
     <node id="503">
-      <data key="d0">4.08</data>
-      <data key="d1">0.96</data>
-    </node>
-    <node id="504">
-      <data key="d0">3.82</data>
-      <data key="d1">1.24</data>
-    </node>
-    <node id="505">
-      <data key="d0">3.47</data>
-      <data key="d1">1.39</data>
-    </node>
-    <node id="506">
-      <data key="d0">3.10</data>
-      <data key="d1">1.30</data>
-    </node>
-    <node id="507">
-      <data key="d0">2.81</data>
-      <data key="d1">1.05</data>
-    </node>
-    <node id="508">
-      <data key="d0">2.76</data>
-      <data key="d1">0.68</data>
-    </node>
-    <node id="509">
-      <data key="d0">2.89</data>
-      <data key="d1">0.32</data>
-    </node>
-    <node id="510">
-      <data key="d0">3.16</data>
-      <data key="d1">0.06</data>
+      <data key="d0">3.57</data>
+      <data key="d1">0.54</data>
     </node>
     <edge source="50" target="49">
       <data key="d2">True</data>
@@ -1947,10 +1919,10 @@
     <edge source="47" target="46">
       <data key="d2">True</data>
     </edge>
-    <edge source="46" target="509">
+    <edge source="46" target="502">
       <data key="d2">True</data>
     </edge>
-    <edge source="501" target="39">
+    <edge source="503" target="39">
       <data key="d2">True</data>
     </edge>
     <edge source="39" target="38">
@@ -2025,10 +1997,10 @@
     <edge source="13" target="14">
       <data key="d2">True</data>
     </edge>
-    <edge source="14" target="503">
+    <edge source="14" target="501">
       <data key="d2">True</data>
     </edge>
-    <edge source="507" target="21">
+    <edge source="500" target="21">
       <data key="d2">True</data>
     </edge>
     <edge source="21" target="22">
@@ -2106,7 +2078,7 @@
     <edge source="78" target="77">
       <data key="d2">True</data>
     </edge>
-    <edge source="77" target="506">
+    <edge source="77" target="500">
       <data key="d2">True</data>
     </edge>
     <edge source="62" target="63">
@@ -2274,7 +2246,7 @@
     <edge source="125" target="124">
       <data key="d2">True</data>
     </edge>
-    <edge source="505" target="54">
+    <edge source="501" target="54">
       <data key="d2">True</data>
     </edge>
     <edge source="54" target="55">
@@ -3258,37 +3230,10 @@
     <edge source="356" target="403">
       <data key="d2">False</data>
     </edge>
-    <edge source="500" target="501">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="501" target="502">
+    <edge source="501" target="500">
       <data key="d2">True</data>
     </edge>
     <edge source="502" target="503">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="503" target="504">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="504" target="505">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="505" target="506">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="506" target="507">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="507" target="508">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="508" target="509">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="509" target="510">
-      <data key="d2">True</data>
-    </edge>
-    <edge source="510" target="500">
       <data key="d2">True</data>
     </edge>
   </graph>

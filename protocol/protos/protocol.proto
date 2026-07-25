@@ -339,6 +339,7 @@ message sensor_fusion_result_t {
     uint32 timestamp_ms             = 10;
     uint32 zone_id                  = 11;
     repeated anchor_data_t  anchors = 12;
+    uint32 prefilter_reject_count   = 13;
 }
 
 /* Positioning prefilter ---------------------------------------------------- */
@@ -347,9 +348,9 @@ message prefilter_cfg_t {
     bool enable            = 1;
     float recover_d2       = 2;
     float reject_d2        = 3;
-    float r_base           = 4;
+    float r_base           = 4 [deprecated = true]; // Legacy wire compatibility; runtime ignores it.
     float r_gate           = 5;
-    float velocity_weight  = 6;
+    float velocity_weight  = 6 [deprecated = true]; // Legacy wire compatibility; runtime ignores it.
     float min_covariance   = 7;
 }
 

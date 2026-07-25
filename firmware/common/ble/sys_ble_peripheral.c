@@ -229,7 +229,7 @@ bool sys_ble_peripheral_init(network_core_t *stream)
 void sys_ble_peripheral_set_config(void)
 {
     ble_refresh_adv_config();
-    RLOG_I(OBJECT_CODE, "BLE advertising name: %s", s_ble_peri.device_name);
+    // RLOG_D(OBJECT_CODE, "BLE advertising name: %s", s_ble_peri.device_name);
 
     if (!sys_ble_peripheral_send_config(protobuf_PACKET_ADDR_PERIPHERAL)) {
         RLOG_W(OBJECT_CODE, "ble_adv_config_set send failed");

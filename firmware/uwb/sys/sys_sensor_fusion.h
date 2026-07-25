@@ -76,6 +76,10 @@ bool sys_sensor_fusion_is_initialized(void);
 
 bool sys_sensor_fusion_get_position_covariance(float *pxx, float *pxy, float *pyy);
 
+void sys_sensor_fusion_prefilter_record_reject(void);
+void sys_sensor_fusion_set_ranging_error_count(uint32_t error_count);
+void sys_sensor_fusion_capture_ranging_snapshot(const uwb_distance_msg_t *ranging_msg);
+
 bool sys_sensor_fusion_update(sys_sensor_fusion_data_t *p_ukf,
                                                   const vec2d_t *tril_position,
                                                   const mw_tril_anchor_t selected_anchors[3],

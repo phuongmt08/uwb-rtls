@@ -159,6 +159,8 @@ class RangingRepository(QObject):
             "d2_mm": distances_by_anchor.get(2, ""),
             "d3_mm": distances_by_anchor.get(3, ""),
             "d4_mm": distances_by_anchor.get(4, ""),
+            "d5_mm": distances_by_anchor.get(5, ""),
+            "d6_mm": distances_by_anchor.get(6, ""),
             "anchors": anchors,
         }
         self._positions.append(sample)
@@ -177,6 +179,7 @@ class RangingRepository(QObject):
             }
             for anchor in getattr(res, "anchors", [])
         ]
+        distances_by_anchor = self._distances_by_anchor_id(anchors)
 
         sample = {
             "source": "sensor_fusion",
@@ -192,9 +195,16 @@ class RangingRepository(QObject):
             "anchor_mask": int(getattr(res, "anchor_mask", 0)),
             "anchor_mask_valid": True,
             "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
+            "prefilter_reject_count": int(getattr(res, "prefilter_reject_count", 0)),
             "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
             "zone_id": int(getattr(res, "zone_id", 0)),
             "anchors": anchors,
+            "d1_mm": distances_by_anchor.get(1, ""),
+            "d2_mm": distances_by_anchor.get(2, ""),
+            "d3_mm": distances_by_anchor.get(3, ""),
+            "d4_mm": distances_by_anchor.get(4, ""),
+            "d5_mm": distances_by_anchor.get(5, ""),
+            "d6_mm": distances_by_anchor.get(6, ""),
             "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": time.time(),
         }
@@ -297,9 +307,9 @@ class RangingRepository(QObject):
         dt = float(sample.get("dt", 0.0) or 0.0)
         update_dt = dt if status in ("Init", "Update") else 0.0
         predict_dt = dt if status == "Predict" else 0.0
-        distances = [self._calib_list_value(sample, "distance", i) for i in range(4)]
-        fp_amp = [self._calib_list_value(sample, "fp_amp_norm", i) for i in range(4)]
-        fp_snr = [self._calib_list_value(sample, "fp_snr", i) for i in range(4)]
+        distances = [self._calib_list_value(sample, "distance", i) for i in range(6)]
+        fp_amp = [self._calib_list_value(sample, "fp_amp_norm", i) for i in range(6)]
+        fp_snr = [self._calib_list_value(sample, "fp_snr", i) for i in range(6)]
 
         return (
             f"({int(index):4d}/{int(sample.get('tx_frame_cnt', 0) or 0):4d}) {status:<7s} "
@@ -320,12 +330,15 @@ class RangingRepository(QObject):
             f"| mask: {int(sample.get('anchor_mask', 0) or 0)} "
             f"| d1: {distances[0]:9.6f} | d2: {distances[1]:9.6f} "
             f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
-            f"| w1: 0 | w2: 0 | w3: 0 | w4: 0 "
+            f"| d5: {distances[4]:9.6f} | d6: {distances[5]:9.6f} "
+            f"| w1: 0 | w2: 0 | w3: 0 | w4: 0 | w5: 0 | w6: 0 "
             f"| err: {int(sample.get('error_frame_cnt', 0) or 0)} "
             f"| amp1: {fp_amp[0]:9.6f} | amp2: {fp_amp[1]:9.6f} "
             f"| amp3: {fp_amp[2]:9.6f} | amp4: {fp_amp[3]:9.6f} "
+            f"| amp5: {fp_amp[4]:9.6f} | amp6: {fp_amp[5]:9.6f} "
             f"| snr1: {fp_snr[0]:9.6f} | snr2: {fp_snr[1]:9.6f} "
-            f"| snr3: {fp_snr[2]:9.6f} | snr4: {fp_snr[3]:9.6f}"
+            f"| snr3: {fp_snr[2]:9.6f} | snr4: {fp_snr[3]:9.6f} "
+            f"| snr5: {fp_snr[4]:9.6f} | snr6: {fp_snr[5]:9.6f}"
         )
 
     @staticmethod
@@ -453,6 +466,8 @@ class RangingRepository(QObject):
                 "d2_mm": "",
                 "d3_mm": "",
                 "d4_mm": "",
+                "d5_mm": "",
+                "d6_mm": "",
                 "anchors": [],
             }
         )

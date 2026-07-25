@@ -441,6 +441,8 @@ class RangingModel(QObject):
             "d2_mm": distances_by_anchor.get(2, ""),
             "d3_mm": distances_by_anchor.get(3, ""),
             "d4_mm": distances_by_anchor.get(4, ""),
+            "d5_mm": distances_by_anchor.get(5, ""),
+            "d6_mm": distances_by_anchor.get(6, ""),
             "anchors": anchors,
             "room_id": room_frame["room_id"],
             "local_x_m": room_frame["local_x_m"],
@@ -469,6 +471,9 @@ class RangingModel(QObject):
             }
             for anchor in getattr(res, "anchors", [])
         ]
+        distances_by_anchor = {
+            anchor["anchor_id"]: anchor["distance_mm"] for anchor in anchors
+        }
         room_frame = self._extract_room_frame_fields(res)
         sample = {
             "ukf_step": int(getattr(res, "ukf_step", 0)),
@@ -481,9 +486,16 @@ class RangingModel(QObject):
             "anchor_mask": int(getattr(res, "anchor_mask", 0)),
             "anchor_mask_valid": True,
             "ranging_error_count": int(getattr(res, "ranging_error_count", 0)),
+            "prefilter_reject_count": int(getattr(res, "prefilter_reject_count", 0)),
             "timestamp_ms": int(getattr(res, "timestamp_ms", 0)),
             "zone_id": int(getattr(res, "zone_id", 0)),
             "anchors": anchors,
+            "d1_mm": distances_by_anchor.get(1, ""),
+            "d2_mm": distances_by_anchor.get(2, ""),
+            "d3_mm": distances_by_anchor.get(3, ""),
+            "d4_mm": distances_by_anchor.get(4, ""),
+            "d5_mm": distances_by_anchor.get(5, ""),
+            "d6_mm": distances_by_anchor.get(6, ""),
             "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": time.time(),
             "source": "sensor_fusion",
@@ -565,6 +577,8 @@ class RangingModel(QObject):
         stored.setdefault("d2_mm", "")
         stored.setdefault("d3_mm", "")
         stored.setdefault("d4_mm", "")
+        stored.setdefault("d5_mm", "")
+        stored.setdefault("d6_mm", "")
         self._position_history.append(stored)
         self._stats["total_count"] += 1
         self._stats["success_count"] += 1

@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from typing import Tuple
 
 # TXT
-OUTPUT_TXT_ENABLED = True
+OUTPUT_TXT_ENABLED = False
 
 # OUTPUT_FILE = r"D:\HOC\S\STM32\IDE\DATN\uwb-rtls\software\simulation\simulation.txt"
-SOURCE_DATA_FILE = r"D:/HOC/S/STM32/IDE/DATN/uwb-rtls/software/data/11_07_26/20260711_14g59p_ukf_log_data.csv"
+SOURCE_DATA_FILE = r"D:/HOC/S/STM32/IDE/DATN/uwb-rtls/software/data/scripts/18_07_26/20260718_17g39p_ukf_log_data.csv"
 # SOURCE_DATA_FILE = None
 
 # ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ TEST_UKF_Q_R_Params = False
 ANCHOR_1_X = 0.7
 ANCHOR_1_Y = 0.03
 
-ANCHOR_2_X = 2.70
+ANCHOR_2_X = 2.7
 ANCHOR_2_Y = 8.37
 
 ANCHOR_3_X = 7.5
@@ -47,13 +47,22 @@ ANCHOR_3_Y = 8.37
 ANCHOR_4_X = 7.5
 ANCHOR_4_Y = 0.03
 
-# Anchor positions in the room (three corners)
+ANCHOR_5_X = 4.3
+ANCHOR_5_Y = 0.8
+
+ANCHOR_6_X = 4.3
+ANCHOR_6_Y = 7.88
+
+# Keep this layout aligned with Zone 1 in firmware/uwb/sys/positioning_config.h.
 ANCHOR_POSITIONS = np.array([
     [ANCHOR_1_X, ANCHOR_1_Y],     
     [ANCHOR_2_X, ANCHOR_2_Y],     
     [ANCHOR_3_X, ANCHOR_3_Y],    
-    [ANCHOR_4_X, ANCHOR_4_Y]     
+    [ANCHOR_4_X, ANCHOR_4_Y],
+    [ANCHOR_5_X, ANCHOR_5_Y],
+    [ANCHOR_6_X, ANCHOR_6_Y],
 ])
+NUM_ANCHORS = len(ANCHOR_POSITIONS)
 
 # UKF configuration
 UKF_STATE_SIZE = 8
@@ -69,8 +78,8 @@ P_PY = 0.1
 P_VX = 0.1
 P_VY = 0.1
 P_THETA = 1e-10
-P_BAX = 1e-05
-P_BAY = 1e-05
+P_BAX = 0.1
+P_BAY = 0.1
 P_BGZ = 1e-10
 
 INITIAL_P = np.diag([
@@ -86,9 +95,9 @@ Q_G_TEST = np.deg2rad(2)**2
 R_UWB_TEST = 0.1**2
 
 # MANUAL values (Editable from GUI else block)
-Q_A_MANUAL = 0.08
-Q_G_MANUAL = 4.78e-07
-R_UWB_MANUAL = 0.009
+Q_A_MANUAL = 0.04
+Q_G_MANUAL = 1e-10
+R_UWB_MANUAL = 0.01
 
 # Logic to select final values
 if TEST_UKF_Q_R_Params:
@@ -161,6 +170,18 @@ GROUND_TRUTH_D1 = 5.357
 GROUND_TRUTH_D2 = 4.370
 GROUND_TRUTH_D3 = 5.357
 GROUND_TRUTH_D4 = 5.357
+# Geometric distances from the existing reference point (~4.1, 4.2 m)
+# to the newly configured A5 and A6 positions.
+GROUND_TRUTH_D5 = 3.406
+GROUND_TRUTH_D6 = 3.685
+GROUND_TRUTH_DISTANCES = np.array([
+    GROUND_TRUTH_D1,
+    GROUND_TRUTH_D2,
+    GROUND_TRUTH_D3,
+    GROUND_TRUTH_D4,
+    GROUND_TRUTH_D5,
+    GROUND_TRUTH_D6,
+])
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
@@ -172,12 +193,12 @@ GROUND_TRUTH_D4 = 5.357
 # - f: float (4 bytes) for gz
 # - f: float (4 bytes) for px
 # - f: float (4 bytes) for py
-# - 4f: 4 floats (16 bytes) for distance array
-# - 4d: 4 doubles (32 bytes) for fp_amp_norm array
-# - 4d: 4 doubles (32 bytes) for fp_snr array
+# - NUM_ANCHORS floats for distance array
+# - NUM_ANCHORS doubles for fp_amp_norm array
+# - NUM_ANCHORS doubles for fp_snr array
 # - I: unsigned int (4 bytes) for error_frame_cnt
 # - f: float (4 bytes) for dt
-LIVE_FRAME_FORMAT = '<BBBI5f4f4d4dIf'
+LIVE_FRAME_FORMAT = f'<BBBI5f{NUM_ANCHORS}f{NUM_ANCHORS}d{NUM_ANCHORS}dIf'
 import struct
 LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
 

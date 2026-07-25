@@ -161,6 +161,7 @@ self.onmessage = function(e) {
             : SIM_CONFIG.FILTER.DEFAULT_YAW_MAP_OFFSET_DEG) * Math.PI / 180.0),
         min_frame_measurements: params.rescue_min_anchors || 3,
         rescue_min_reject_streak: SIM_CONFIG.FILTER.DEFAULT_RESCUE_MIN_REJECT_STREAK,
+        anchor_count: anchors.length,
         tagHeight: tagHeight,
         max_update_position_step: SIM_CONFIG.FILTER.MAX_UWB_POS_CORRECTION,
         max_update_velocity_step: SIM_CONFIG.FILTER.MAX_UWB_VEL_CORRECTION,
@@ -175,11 +176,11 @@ self.onmessage = function(e) {
     const filter = new MahalanobisPrefilter(filterConfig);
     const filterLpf = new MahalanobisPrefilter(filterConfig);
 
-    const gatedDist = [[], [], [], []];
-    const d2Scores  = [[], [], [], []];
-    const rejectIdx = [[], [], [], []];
-    const rescueIdx = [[], [], [], []];
-    const rescueDist = [[], [], [], []];
+    const gatedDist = anchors.map(() => []);
+    const d2Scores  = anchors.map(() => []);
+    const rejectIdx = anchors.map(() => []);
+    const rescueIdx = anchors.map(() => []);
+    const rescueDist = anchors.map(() => []);
     const ambiguityEvents = [];
 
     const insideAnchorBounds = (pos, margin) => {
@@ -374,11 +375,18 @@ self.onmessage = function(e) {
             simPathUKF_allModes.push(mode);
             simPathUKF_allTimes.push(total_time);
 
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < anchors.length; i++) {
                 const distance = Array.isArray(entry.distances) && Number.isFinite(entry.distances[i]) && entry.distances[i] > 0.1
                     ? entry.distances[i]
                     : null;
-                gatedDist[i].push(distance);
+                const mask = Number.isFinite(Number(entry.mask))
+                    ? Number(entry.mask)
+                    : (1 << anchors.length) - 1;
+                const selectedForUpdate = mode === 1 && (mask & (1 << i)) !== 0;
+                // sensor_fusion_result exports raw valid anchors plus the
+                // final selected-anchor mask.  "Gated" must therefore mean
+                // selected for the recorded UKF update, not a copy of raw.
+                gatedDist[i].push(selectedForUpdate ? distance : null);
                 d2Scores[i].push(null);
             }
 
@@ -617,7 +625,7 @@ self.onmessage = function(e) {
 
         if (entry.type === 'Update') {
             let v_anchors = [], v_anchors_ruled = [], v_anchors_best = [];
-            let allowedAnchors = [0, 1, 2, 3], hasMatchingRule = false;
+            let allowedAnchors = anchors.map((_, i) => i), hasMatchingRule = false;
             for (const r of rules) {
                 if (sampleIdx >= r.start && sampleIdx <= r.end) {
                     allowedAnchors = r.anchors;
@@ -636,6 +644,7 @@ self.onmessage = function(e) {
 
             entry.distances.forEach((d, i) => {
                 const anc = anchors[i];
+                if (!anc) return;
                 const fpAmp = Array.isArray(entry.fp_amp_norm) ? entry.fp_amp_norm[i] : 0;
                 let fpConfidence = Array.isArray(entry.fp_confidence) ? entry.fp_confidence[i] : null;
                 let qualityValid = Array.isArray(entry.quality_valid)
@@ -906,18 +915,29 @@ self.onmessage = function(e) {
     const pos_errors_fw = [], pos_errors = [], pos_errors_wls = [], pos_errors_triplet = [], pos_errors_ukf = [], pos_errors_ukf_lpf = [];
     
     const gtSegments = (groundTruth && groundTruth.segments) || [];
+    const gtProfiles = buildGroundTruthSegmentProfiles(gtSegments);
     const calcErr = (pathX, pathY, out) => {
         pathX.forEach((px, i) => {
             if (px === null) { out.push(null); return; }
             let min_d = 999;
-            for (const seg of gtSegments) {
+            let nearestSegmentIndex = -1;
+            let nearestProjectionT = 0;
+            for (let segmentIndex = 0; segmentIndex < gtSegments.length; segmentIndex++) {
+                const seg = gtSegments[segmentIndex];
                 const [x1, y1, x2, y2] = seg;
                 const l2 = (x2-x1)**2 + (y2-y1)**2;
                 if (l2 <= 0.000001) continue;
                 let t = Math.max(0, Math.min(1, ((px-x1)*(x2-x1) + (pathY[i]-y1)*(y2-y1)) / l2));
-                min_d = Math.min(min_d, Math.sqrt((px - (x1 + t*(x2-x1)))**2 + (pathY[i] - (y1 + t*(y2-y1)))**2));
+                const distance = Math.sqrt((px - (x1 + t*(x2-x1)))**2 + (pathY[i] - (y1 + t*(y2-y1)))**2);
+                if (distance < min_d) {
+                    min_d = distance;
+                    nearestSegmentIndex = segmentIndex;
+                    nearestProjectionT = t;
+                }
             }
-            out.push(min_d);
+            if (nearestSegmentIndex < 0) { out.push(null); return; }
+            const tolerance = groundTruthToleranceAtProjection(gtProfiles[nearestSegmentIndex], nearestProjectionT);
+            out.push(Math.max(0, min_d - tolerance));
         });
     };
     calcErr(rawData.fw_path.x.slice(0, x_axis.length), rawData.fw_path.y.slice(0, x_axis.length), pos_errors_fw);

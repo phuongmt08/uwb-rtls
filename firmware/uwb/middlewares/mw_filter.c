@@ -47,8 +47,8 @@ float mw_filter_median_update(median_filter_1d_t *med, float new_val)
 }
 
 void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
-                                float T1, float T2, float anchor_R_base,
-                                float R_gate, float velocity_weight,
+                                float T1, float T2,
+                                float R_gate,
                                 float min_covariance)
 {
     if (!ctx) return;
@@ -58,9 +58,7 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
     }
     ctx->T1 = T1;
     ctx->T2 = T2;
-    ctx->R_base = anchor_R_base;
     ctx->R_gate = R_gate;
-    ctx->velocity_weight = velocity_weight;
     ctx->min_covariance = min_covariance;
     ctx->initialized = true;
 }
@@ -70,7 +68,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   float px, float py, float pz,
                                   float pxx, float pxy, float pyy,
                                   float ax, float ay, float az,
-                                  float *d_out, float *d2_score, float *R_adaptive)
+                                  float *d2_score)
 {
     if (!ctx || !ctx->initialized || anchor_id >= 8) return false;
 
@@ -80,9 +78,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
         !isfinite(px) || !isfinite(py) || !isfinite(pz) ||
         !isfinite(pxx) || !isfinite(pxy) || !isfinite(pyy) ||
         !isfinite(ax) || !isfinite(ay) || !isfinite(az)) {
-        if (d_out) *d_out = d_raw;
         if (d2_score) *d2_score = INFINITY;
-        if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
         if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
@@ -98,9 +94,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
 #endif
     float dxy = sqrtf((dx * dx) + (dy * dy));
     if (!isfinite(dxy) || dxy < 1.0e-6f) {
-        if (d_out) *d_out = d_raw;
         if (d2_score) *d2_score = INFINITY;
-        if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
         if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
@@ -113,9 +107,7 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                         + (hy * hy * pyy);
     float S = projected_cov + ctx->R_gate;
     if (!isfinite(d_pred) || !isfinite(S)) {
-        if (d_out) *d_out = d_raw;
         if (d2_score) *d2_score = INFINITY;
-        if (R_adaptive) *R_adaptive = ctx->R_base;
         state->rejected = true;
         if (state->reject_streak < UINT16_MAX) state->reject_streak++;
         return false;
@@ -127,7 +119,6 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     float r = d_raw - d_pred;
     float d2 = (r * r) / S;
 
-    if (d_out) *d_out = d_raw;
     if (d2_score) *d2_score = d2;
 
     bool accepted = false;
@@ -148,15 +139,6 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
     }
 
     state->reject_streak = 0U;
-
-    if (R_adaptive) {
-        float scale = 1.0f;
-        if (d2 > ctx->T1) {
-            scale = d2 / ctx->T1;
-            scale = scale * scale;
-        }
-        *R_adaptive = ctx->R_base * scale;
-    }
 
     return true;
 }
