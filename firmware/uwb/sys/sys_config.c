@@ -778,11 +778,6 @@ void sys_config_reset_to_defaults(void)
     g_storage.config.prefilter.velocity_weight              =           MAHALANOBIS_PREFILTER_VELOCITY_WEIGHT;
     g_storage.config.prefilter.min_covariance               =           MAHALANOBIS_PREFILTER_MIN_COVARIANCE;
     
-    /* Calibration Configuration
-       ---------- */
-    g_storage.config.calib.enable_anchor_auto_calib         =           0U;
-    g_storage.config.calib.enable_tag_auto_calib            =           0U;
-
     /* Anchor Layout Positions (X, Y, Z in meters)
        ================================================================================================
        ID  |    X_M     |    Y_M     |    Z_M
@@ -927,17 +922,6 @@ void sys_config_print(void)
         CFG_LOG("RX Ant Delay  : %lu", g_storage.config.uwb.rx_antenna_delay);
     }
     CFG_LOG("TX Power      : 0x%08lX", g_storage.config.uwb.tx_power);
-    CFG_LOG("Calib MeanErr : %+.3fm", g_storage.config.calib.last_pair_error_mean_m);
-    CFG_LOG("Calib Spread  : %.3fm", g_storage.config.calib.last_pair_error_spread_m);
-    CFG_LOG("Calib RMS     : %.3fm", g_storage.config.calib.last_pair_error_rms_m);
-    CFG_LOG("Calib AbsErr  : mean=%.3fm max=%.3fm",
-            g_storage.config.calib.last_pair_error_mean_abs_m,
-            g_storage.config.calib.last_pair_error_max_abs_m);
-    CFG_LOG("Calib PairCnt : %lu usable / %lu rejected",
-            (unsigned long)g_storage.config.calib.last_usable_pair_count,
-            (unsigned long)g_storage.config.calib.last_rejected_pair_count);
-    CFG_LOG("Calib Rejects : %lu", (unsigned long)g_storage.config.calib.rejected_batch_count);
-    CFG_LOG("Calib Iter    : %u", (unsigned)g_storage.config.calib.iterations_taken);
     CFG_LOG("-------------- TIMING -----------------");
     CFG_LOG("Ranging Period: %lu ms", g_storage.config.uwb.ranging_period_ms);
     CFG_LOG("RX Timeout    : %lu ms", g_storage.config.uwb.rx_timeout_ms);
@@ -962,18 +946,6 @@ host_transport_t sys_config_get_host_transport(void)
         return HOST_TRANSPORT_USB;
     }
     return g_storage.config.host_transport;
-}
-
-const sys_calib_cfg_t *sys_config_get_calib(void)
-{
-    return &g_storage.config.calib;
-}
-
-int sys_config_set_calib(const sys_calib_cfg_t *calib)
-{
-    if (!calib) return -1;
-    g_storage.config.calib = *calib;
-    return 0;
 }
 
 const sys_prefilter_cfg_t *sys_config_get_prefilter(void)

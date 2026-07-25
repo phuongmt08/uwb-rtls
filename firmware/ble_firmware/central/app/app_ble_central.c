@@ -1012,9 +1012,15 @@ void scan_init(void)
     scan_param.window        = MSEC_TO_UNITS(SYSTEM_CONFIG_SCAN_WINDOW_MS, UNIT_0_625_MS);
     scan_param.filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL;
     scan_param.timeout       = (SYSTEM_CONFIG_SCAN_DURATION_MS == 0)
-                               ? 0
-                               : (uint16_t)(SYSTEM_CONFIG_SCAN_DURATION_MS / 10U);
+                                ? 0
+                                : (uint16_t)(SYSTEM_CONFIG_SCAN_DURATION_MS / 10U);
     scan_param.scan_phys     = SYSTEM_CONFIG_PREFERRED_PHY;
+#if BLE_BROADCAST_USE_EXTENDED
+    /* Central commands may use Extended Advertising. Peripheral ACKs use the
+     * typed legacy form when they fit, but extended scan support is still
+     * required for the command path and larger broadcast payloads. */
+    scan_param.extended      = 1;
+#endif
 
     init_scan.connect_if_match = false; /**< Manual-connect via terminal / button. */
     init_scan.conn_cfg_tag     = APP_BLE_CONN_CFG_TAG;

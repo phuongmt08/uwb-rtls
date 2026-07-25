@@ -203,17 +203,6 @@ def handle_host_packet(pkt: pb.packet_t) -> None:
             cfg.r_uwb = 0.1
             send_to_host(resp)
             
-        elif param_name == "pos_calib_cfg_get":
-            resp = commands.pos_calib_cfg_resp(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, req_seq)
-            cfg = resp.pos_calib_cfg_resp.config
-            cfg.enable_anchor_auto_calib = False
-            cfg.enable_tag_auto_calib = False
-            cfg.ref_distance_xy_m = 2.0
-            cfg.tag_height_m = 1.0
-            cfg.anchor_height_m = 2.5
-            cfg.calib_anchor_id = 0
-            send_to_host(resp)
-            
         elif param_name == "ranging_status_get":
             resp = commands.ranging_status_resp(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, req_seq)
             resp.ranging_status_resp.ranging_period_ms = 200

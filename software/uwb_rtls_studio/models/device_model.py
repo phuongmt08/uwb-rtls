@@ -87,8 +87,8 @@ class DeviceModel(QObject):
     sys_ranging_cfg_parsed = pyqtSignal(dict)
     sensor_fusion_cfg_parsed = pyqtSignal(dict)
     prefilter_cfg_parsed = pyqtSignal(dict)
-    pos_calib_cfg_parsed = pyqtSignal(dict)
     device_type_parsed = pyqtSignal(int)
+    bcast_apply_ack_received = pyqtSignal(dict)
 
 
     def __init__(self, protocol: ProtocolService, telemetry_repo=None, ble_scan_repo=None, config_repo=None, command_bus=None, parent=None):
@@ -167,7 +167,6 @@ class DeviceModel(QObject):
             self._config_repo.sys_ranging_cfg_updated.connect(self._on_repository_sys_ranging_cfg)
             self._config_repo.sensor_fusion_cfg_updated.connect(self._on_repository_sensor_fusion_cfg)
             self._config_repo.prefilter_cfg_updated.connect(self._on_repository_prefilter_cfg)
-            self._config_repo.pos_calib_cfg_updated.connect(self._on_repository_pos_calib_cfg)
             self._config_repo.device_type_updated.connect(self._on_repository_device_type)
 
         # Prune timer for stale advertising devices
@@ -423,21 +422,6 @@ class DeviceModel(QObject):
                 sanitized[key] = cls._non_negative_value(sanitized[key], default)
         return sanitized
 
-    @classmethod
-    def _sanitize_pos_calib_config(cls, config_data: dict) -> dict:
-        sanitized = dict(config_data)
-        defaults = {
-            "calib_anchor_id": 1,
-            "samples": 10,
-            "min_delta_step": 1,
-            "max_rounds": 10,
-            "iterations": 100,
-        }
-        for key, default in defaults.items():
-            if key in sanitized:
-                sanitized[key] = cls._non_negative_value(sanitized[key], default)
-        return sanitized
-
     def request_end_session(self, reason: int = 0, await_completion: bool = False):
         """Request firmware/session shutdown through the shared command path."""
         # BE/API: session lifecycle action owned by Device Info flow.
@@ -568,18 +552,6 @@ class DeviceModel(QObject):
         if pkt is not None:
             shared_app_state.prefilter_cfg = params
         return pkt
-    def request_pos_calib_config(self, force: bool = False, traffic_class: str = ""):
-        # BE/API: legacy backend helper for Config tab orchestration.
-        return self._request_query("pos_calib_cfg_get", dst_addr=VvAddress.MCU, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
-
-    def set_pos_calib_config(self, config_data: dict):
-        # BE/API: legacy backend helper for Config tab orchestration.
-        return self._send_command(
-            "pos_calib_cfg_set",
-            dst_addr=VvAddress.MCU,
-            command_params=self._sanitize_pos_calib_config(config_data),
-        )
-
     def request_ble_conn_params(self, force: bool = False, traffic_class: str = ""):
         # BE/API: backend helper for Device Info BLE connection parameters.
         return self._request_query("ble_conn_params_get", dst_addr=VvAddress.CENTRAL, force=force, cache_ttl_s=0.0 if force else None, traffic_class=traffic_class)
@@ -868,7 +840,8 @@ class DeviceModel(QObject):
     ):
         return self._send_command(
             "antenna_delay_bcast_set",
-            dst_addr=VvAddress.MCU,
+            dst_addr=VvAddress.BCAST,
+            traffic_class="critical",
             serial_number=serial_number,
             tx_antenna_delay=tx_antenna_delay,
             rx_antenna_delay=rx_antenna_delay,
@@ -1314,6 +1287,38 @@ class DeviceModel(QObject):
     def is_scanning(self) -> bool:
         return self._is_scanning
 
+    def discovered_anchor_serial_number(self, anchor_id: int) -> int:
+        """Resolve one physical Anchor serial from the latest BLE ADV snapshot.
+
+        device_id is the logical Anchor ID advertised by firmware. Return 0
+        when no device, or more than one physical serial, matches so callers
+        never silently target an ambiguous Anchor.
+        """
+        anchor_id = int(anchor_id)
+        candidates: set[int] = set()
+        for device in self._adv_devices.values():
+            if int(device.get("device_id") or 0) != anchor_id:
+                continue
+
+            device_type = int(device.get("device_type") or 0)
+            name = str(device.get("name") or "").strip().upper()
+            if device_type not in (0, 2) or (device_type == 0 and "ANCHOR" not in name):
+                continue
+
+            serial_number = int(device.get("serial_number") or 0)
+            if serial_number > 0:
+                candidates.add(serial_number)
+
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        if len(candidates) > 1:
+            log.warning(
+                "Ambiguous BLE serial mapping for Anchor ID %d: %s",
+                anchor_id,
+                [f"0x{serial:08X}" for serial in sorted(candidates)],
+            )
+        return 0
+
     @property
     def is_connected(self) -> bool:
         return bool(self._connected_mac)
@@ -1347,7 +1352,6 @@ class DeviceModel(QObject):
             "device_information_resp",
             "sys_config_resp",
             "sys_ranging_cfg_resp",
-            "pos_calib_cfg_resp",
             "ranging_status_resp",
             "device_type_set",
             "rtos_resource_resp",
@@ -1758,8 +1762,6 @@ class DeviceModel(QObject):
             requested = bool(self.request_sys_config(force=force, traffic_class="bootstrap")) or requested
         if force or not self._query_received("sys_ranging_cfg_resp"):
             requested = bool(self.request_ranging_config(force=force, traffic_class="bootstrap")) or requested
-        if force or not self._query_received("pos_calib_cfg_resp"):
-            requested = bool(self.request_pos_calib_config(force=force, traffic_class="bootstrap")) or requested
         # Baseline status APIs are fetched on every device session, even when
         # their tabs have not been opened yet.
         if force or not self._query_received("ranging_status_resp"):
@@ -1801,7 +1803,6 @@ class DeviceModel(QObject):
                 ("device_information_resp", self._query_received("device_information_resp"), True),
                 ("sys_config_resp", self._query_received("sys_config_resp"), True),
                 ("sys_ranging_cfg_resp", self._query_received("sys_ranging_cfg_resp"), True),
-                ("pos_calib_cfg_resp", self._query_received("pos_calib_cfg_resp"), True),
                 ("ranging_status_resp", self._query_received("ranging_status_resp"), True),
                 ("device_type_set", self._query_received("device_type_set"), True),
                 ("rtos_resource_resp", self._query_received("rtos_resource_resp"), True),
@@ -2446,9 +2447,14 @@ class DeviceModel(QObject):
         elif param_name == "prefilter_cfg_resp":
             if self._config_repo is None:
                 self._handle_prefilter_cfg(pkt.prefilter_cfg_resp)
-        elif param_name == "pos_calib_cfg_resp":
-            if self._config_repo is None:
-                self._handle_pos_calib_cfg(pkt.pos_calib_cfg_resp)
+        elif param_name == "bcast_apply_ack":
+            ack = pkt.bcast_apply_ack
+            self.bcast_apply_ack_received.emit({
+                "serial_number": int(getattr(ack, "serial_number", 0) or 0),
+                "cmd_seq": int(getattr(ack, "cmd_seq", 0) or 0),
+                "cmd_tag": int(getattr(ack, "cmd_tag", 0) or 0),
+                "success": bool(getattr(ack, "success", False)),
+            })
         elif param_name == "device_type_set":
             if self._config_repo is None:
                 self._handle_device_type(pkt.device_type_set)
@@ -2500,10 +2506,6 @@ class DeviceModel(QObject):
     def _on_repository_prefilter_cfg(self, cfg_dict: dict) -> None:
         self._mark_query_received("prefilter_cfg_resp")
         self.prefilter_cfg_parsed.emit(dict(cfg_dict or {}))
-
-    def _on_repository_pos_calib_cfg(self, cfg_dict: dict) -> None:
-        self._mark_query_received("pos_calib_cfg_resp")
-        self.pos_calib_cfg_parsed.emit(dict(cfg_dict or {}))
 
     def _on_repository_device_type(self, device_type: int) -> None:
         self._mark_query_received("device_type_set")
@@ -3013,41 +3015,6 @@ class DeviceModel(QObject):
             "min_covariance": cfg.min_covariance,
         }
         self.prefilter_cfg_parsed.emit(cfg_dict)
-    def _handle_pos_calib_cfg(self, resp):
-        self._mark_query_received("pos_calib_cfg_resp")
-        if not resp.HasField("config"):
-            # Empty packet: emit {} so UI resets to placeholder "-".
-            self.pos_calib_cfg_parsed.emit({})
-            return
-        cfg = resp.config
-        cfg_dict = {
-            "enable_anchor_auto_calib": cfg.enable_anchor_auto_calib,
-            "enable_tag_auto_calib": cfg.enable_tag_auto_calib,
-            "ref_distance_xy_m": cfg.ref_distance_xy_m,
-            "tag_height_m": cfg.tag_height_m,
-            "anchor_height_m": cfg.anchor_height_m,
-            "calib_anchor_id": cfg.calib_anchor_id,
-            "samples": cfg.samples,
-            "error_threshold_m": cfg.error_threshold_m,
-            "min_delta_step": cfg.min_delta_step,
-            "max_rounds": cfg.max_rounds,
-            "max_std_m": cfg.max_std_m,
-            "damping": cfg.damping,
-            "iterations": cfg.iterations,
-            "last_pair_error_mean_m": cfg.last_pair_error_mean_m,
-            "iterations_taken": cfg.iterations_taken,
-            "last_pair_error_spread_m": cfg.last_pair_error_spread_m,
-            "last_pair_std_mean_m": cfg.last_pair_std_mean_m,
-            "last_usable_pair_count": cfg.last_usable_pair_count,
-            "last_rejected_pair_count": cfg.last_rejected_pair_count,
-            "rejected_batch_count": cfg.rejected_batch_count,
-            "last_pair_error_rms_m": cfg.last_pair_error_rms_m,
-            "last_pair_error_max_abs_m": cfg.last_pair_error_max_abs_m,
-            "last_pair_error_mean_abs_m": cfg.last_pair_error_mean_abs_m,
-        }
-        self.pos_calib_cfg_parsed.emit(cfg_dict)
-
-
     # Scan result handling
 
     def _handle_scan_result(self, res):
@@ -3078,6 +3045,7 @@ class DeviceModel(QObject):
         status_data = {
             "device_type": getattr(res, 'device', 0),
             "device_id": getattr(res, 'device_id', 0),
+            "serial_number": getattr(res, 'serial_number', 0),
             "bat_soc_percent": getattr(res, 'bat_soc_percent', 0),
             "local_timestamp_s": timestamp_s,
             "local_timestamp_ms": timestamp_ms,

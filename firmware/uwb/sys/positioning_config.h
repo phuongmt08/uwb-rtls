@@ -33,10 +33,6 @@
 #define ANCHOR_DEFAULT_TX_ANT_DLY   16187
 #define ANCHOR_DEFAULT_RX_ANT_DLY   16187
 
-/* Legacy fixed RX delay used by older calibration paths. V1 A2A summary
- * solver only logs candidate delays and does not apply this value. */
-#define CALIB_FIXED_RX_ANT_DLY      16436
-
 /* ===================================================================
  * HEIGHT CONFIGURATION
  * =================================================================== */
@@ -57,77 +53,12 @@
 #define HEIGHT_OFFSET_M         (ANCHOR_HEIGHT_M - TAG_HEIGHT_M)
 
 /* ===================================================================
- * ANCHOR/TAG AUTO-CALIBRATION
- * =================================================================== */
-
-/* 0 = normal ranging mode
- * 1 = mutual anchor-to-anchor calibration summary mode (A2A V1)             */
-
-/* ------------------------------------------------------------------
- * A2A (Anchor-to-Anchor) Mutual Calibration V1
- *
- * Mutual-only V1: each anchor ranges with every other anchor, collects
- * CALIB_ANCHOR_SAMPLES per pair, and sends CALIB_PAIR_SUMMARY to A4.
- * A4 runs the full-matrix solver and logs candidate delays only.
- * ------------------------------------------------------------------ */
-
-/* Samples collected per anchor pair per calibration epoch.
- * 20 is a good balance: enough to average out multipath,
- * fast enough for in-field calibration.                               */
-#define CALIB_ANCHOR_SAMPLES     20
-
-/* Reject a batch if std deviation exceeds this threshold.
- * Batch is discarded and re-collected automatically.                  */
-#define CALIB_ANCHOR_MAX_STD_M   0.08f
-
-/* DW1000: TWR combined delay -> distance.
- * 1 DW unit in combined (TX+RX) = c × 15.65ps / 2 ≈ 2.345 mm.
- * V1 uses this only to log candidate delay deltas.                    */
-#define CALIB_A2A_M_TO_DW_UNITS  213.0f
-
-/* Legacy gradient damping kept for compatibility with mw_calibration. */
-#define CALIB_A2A_DAMPING        0.4f
-
-/* Reject a calibration batch when per-pair residuals disagree by more
- * than this. A single antenna-delay scalar cannot fix link/angle bias. */
-#define CALIB_A2A_MAX_PAIR_ERROR_SPREAD_M  0.20f
-
-/* Reject a pair when too many TDMA rounds missed that peer while collecting.
- * timeout_rate = timeout_count / (valid_count + timeout_count). */
-#define CALIB_A2A_MAX_TIMEOUT_RATE         0.25f
-
-/* Final success gate. A calibration run is successful only when every
- * usable pair's absolute residual is below this value. */
-#define CALIB_A2A_CONVERGENCE_MAX_ABS_M    0.05f
-
-/* Combined delay clamp range.
- * Default DW1000 combined ≈ 32872 (2 × 16436).
- * Allow ±~4% headroom around factory default.                        */
-#define CALIB_A2A_ANT_MIN        30000U
-#define CALIB_A2A_ANT_MAX        36000U
-
-/* Legacy gradient iteration count kept for compatibility. V1 summary
- * calibration completes after one mutual collection epoch.            */
-#define CALIB_A2A_ITERATIONS     3U
-
-/* DW1000 physical constant.
- * 1 DW unit = 1/(499.2e6 × 128) ≈ 15.65 ps one-way.
- * TWR round-trip: 1 unit in combined (TX+RX) delay
- * → distance error = c × 15.65ps / 2 ≈ 2.345 mm.
- * Inverse is used when converting solved bias to logged candidate
- * delay deltas.                                                       */
-#define DW1000_M_PER_DLY_UNIT    0.002345f   /* meters per DW unit (TWR) */
-
-/* ===================================================================
  * ANCHOR LAYOUT
  * =================================================================== */
 
 #define MAX_ANCHORS_SUPPORTED  8
 /* Maximum number of anchors participating in one zone/ranging cycle. */
 #define NUM_ANCHORS            6
-/* The anchor-to-anchor survey solver is geometrically fixed to four anchors. */
-#define SURVEY_NUM_ANCHORS     4
-
 #if NUM_ANCHORS > MAX_ZONE_ANCHORS
 #error "NUM_ANCHORS exceeds protobuf zone-profile capacity"
 #endif

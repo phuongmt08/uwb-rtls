@@ -67,7 +67,6 @@ GENERIC_RESPONSES = {
     "sys_config_get": "sys_config_resp",
     "sys_ranging_cfg_get": "sys_ranging_cfg_resp",
     "sensor_fusion_cfg_get": "sensor_fusion_cfg_resp",
-    "pos_calib_cfg_get": "pos_calib_cfg_resp",
     "prefilter_cfg_get": "prefilter_cfg_resp",
     "device_type_get": "device_type_set",
     "ble_conn_params_get": "ble_conn_params_resp",

@@ -112,7 +112,6 @@ class SharedAppState(QObject):
     sys_ranging_cfg_changed = pyqtSignal(dict)     # Rx timeout, ranging period
     sensor_fusion_cfg_changed = pyqtSignal(dict)   # alpha, kappa, noise covariances...
     prefilter_cfg_changed = pyqtSignal(dict)       # Positioning prefilter thresholds
-    pos_calib_cfg_changed = pyqtSignal(dict)       # Auto calibration parameters
     rtos_resource_changed = pyqtSignal(dict)       # CPU, heap, stack, task count, health flags
     rtos_task_stats_changed = pyqtSignal(list)     # Per-task CPU and stack snapshots
     manual_test_mode_changed = pyqtSignal(bool)    # Communication tab test-mode gate
@@ -153,7 +152,6 @@ class SharedAppState(QObject):
         self._sys_ranging_cfg: Dict[str, Any] = {}
         self._sensor_fusion_cfg: Dict[str, Any] = {}
         self._prefilter_cfg: Dict[str, Any] = {}
-        self._pos_calib_cfg: Dict[str, Any] = {}
         self._rtos_resource: Dict[str, Any] = {}
         self._rtos_task_stats: List[Dict[str, Any]] = []
         self._manual_test_mode_enabled = False
@@ -322,15 +320,6 @@ class SharedAppState(QObject):
         self.device_type_changed.emit(self._device_type)
 
     @property
-    def pos_calib_cfg(self) -> Dict[str, Any]:
-        return self._pos_calib_cfg.copy()
-
-    @pos_calib_cfg.setter
-    def pos_calib_cfg(self, val: Dict[str, Any]) -> None:
-        self._pos_calib_cfg = val.copy()
-        self.pos_calib_cfg_changed.emit(self._pos_calib_cfg)
-
-    @property
     def rtos_resource(self) -> Dict[str, Any]:
         return self._rtos_resource.copy()
 
@@ -374,7 +363,6 @@ class SharedAppState(QObject):
         "sys_ranging_cfg_resp",
         "sensor_fusion_cfg_resp",
         "prefilter_cfg_resp",
-        "pos_calib_cfg_resp",
         "ranging_status_resp",
         "rtos_resource_resp",
         "rtos_task_stats_resp",
@@ -555,7 +543,6 @@ class SharedAppState(QObject):
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
         self._prefilter_cfg = {}
-        self._pos_calib_cfg = {}
         self._rtos_resource = {}
         self._rtos_task_stats = []
         self._device_type = 0
@@ -572,7 +559,6 @@ class SharedAppState(QObject):
         self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
         self.prefilter_cfg_changed.emit(self._prefilter_cfg)
-        self.pos_calib_cfg_changed.emit(self._pos_calib_cfg)
         self.rtos_resource_changed.emit(self._rtos_resource)
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
         self.device_type_changed.emit(0)
@@ -594,7 +580,6 @@ class SharedAppState(QObject):
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
         self._prefilter_cfg = {}
-        self._pos_calib_cfg = {}
         self._rtos_resource = {}
         self._rtos_task_stats = []
         self._device_type = 0
@@ -615,7 +600,6 @@ class SharedAppState(QObject):
         self.sys_ranging_cfg_changed.emit(self._sys_ranging_cfg)
         self.sensor_fusion_cfg_changed.emit(self._sensor_fusion_cfg)
         self.prefilter_cfg_changed.emit(self._prefilter_cfg)
-        self.pos_calib_cfg_changed.emit(self._pos_calib_cfg)
         self.rtos_resource_changed.emit(self._rtos_resource)
         self.rtos_task_stats_changed.emit(self.rtos_task_stats)
         self.device_session_reset.emit("device session state cleared")

@@ -8,11 +8,12 @@
  *
  * @brief      Self-contained BLE broadcast module (TX + RX). See bb_broadcast.h.
  *
- *             Broadcast runs on its own dedicated advertising set and its own
- *             BLE observer, so it never has to stop/restore the role's
- *             connectable advertising. On the peripheral this module also owns a
- *             duty-cycled scanner for RX; on the central it piggybacks on the
- *             application scanner that is already running.
+ *             Broadcast uses its own advertising set on roles without an
+ *             advertiser (central). A role that already owns the SoftDevice's
+ *             single advertising set (peripheral) lends that handle for one
+ *             short burst through the optional arbitration hooks. On the
+ *             peripheral this module also owns a duty-cycled scanner for RX;
+ *             on the central it piggybacks on the application scanner.
  */
 /* Includes ----------------------------------------------------------- */
 #include "bb_broadcast.h"
@@ -37,7 +38,9 @@
 #define BB_BROADCAST_HEADER_SIZE        8u
 
 #define BB_BROADCAST_CONN_CFG_TAG       1
-#define BB_BROADCAST_OBSERVER_PRIO      3
+/* Must run before nrf_ble_scan (priority 1). That module re-arms scanning and
+ * returns the ADV buffer to SoftDevice before later observers can parse it. */
+#define BB_BROADCAST_OBSERVER_PRIO      0
 
 /* Legacy fragmentation: ADV events aired per fragment. */
 #define BB_BROADCAST_ADV_EVENTS_PER_FRAGMENT   3u
@@ -53,9 +56,10 @@
 #define BB_BROADCAST_RX_CONTEXTS        2u
 #endif
 
-/* Peripheral duty-cycled RX scan (battery friendly). window < interval. */
+/* Continuous RX lets a short burst complete quickly and keeps the 3-second
+ * retry policy at the router level instead of using a scan duty-cycle delay. */
 #ifndef BB_BROADCAST_SCAN_INTERVAL_MS
-#define BB_BROADCAST_SCAN_INTERVAL_MS   300u
+#define BB_BROADCAST_SCAN_INTERVAL_MS   30u
 #endif
 #ifndef BB_BROADCAST_SCAN_WINDOW_MS
 #define BB_BROADCAST_SCAN_WINDOW_MS     30u
@@ -78,6 +82,10 @@ static bool m_initialized = false;
 
 /* ---- TX ---- */
 static uint8_t  m_bcast_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
+static bb_broadcast_adv_acquire_cb_t m_adv_acquire_cb = NULL;
+static bb_broadcast_adv_release_cb_t m_adv_release_cb = NULL;
+static bool     m_adv_handle_borrowed = false;
+static bool     m_bcast_adv_started = false;
 #if BLE_BROADCAST_USE_EXTENDED
 static uint8_t  m_bcast_advdata[BLE_GAP_ADV_SET_DATA_SIZE_EXTENDED_MAX_SUPPORTED];
 #else
@@ -90,6 +98,9 @@ static uint8_t  m_bcast_frag_index = 0;
 static uint8_t  m_bcast_frag_count = 0;
 static bool     m_bcast_active = false;
 static uint32_t m_bcast_start_tick = 0;
+#if BLE_BROADCAST_USE_EXTENDED
+static bool     m_bcast_use_typed_legacy = false;
+#endif
 
 static ble_gap_adv_data_t m_bcast_adv_data =
 {
@@ -111,7 +122,7 @@ static bool     m_scan_active = false;
 static uint8_t bb_broadcast_fragment_count(uint8_t packet_len);
 static ret_code_t bcast_start_current_fragment(void);
 static void bcast_advance_fragment(void);
-static void bcast_finish(void);
+static void bcast_finish(bool stop_advertising);
 static bb_broadcast_rx_slot_t *rx_slot_get(ble_gap_addr_t const *addr);
 static void rx_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report);
 static void bb_broadcast_ble_evt(ble_evt_t const *p_ble_evt, void *p_context);
@@ -398,9 +409,11 @@ bool bb_broadcast_reassembly_push(bb_broadcast_reassembly_t *ctx,
     return true;
 }
 
-/* ----- TX: burst state machine (dedicated advertising set) ---------- */
+/* ----- TX: burst state machine -------------------------------------- */
 static ret_code_t bcast_start_current_fragment(void)
 {
+    ret_code_t err_code;
+
 #if BLE_BROADCAST_USE_EXTENDED
     uint8_t manuf_payload[BLE_BROADCAST_EXT_MANUF_TYPE_SIZE + BLE_BROADCAST_MAX_PACKET_SIZE];
     manuf_payload[0] = BLE_BROADCAST_TYPE_EXT_PACKET;
@@ -417,7 +430,7 @@ static ret_code_t bcast_start_current_fragment(void)
     advdata.p_manuf_specific_data = &manuf_data;
 
     uint16_t adv_len = sizeof(m_bcast_advdata);
-    ret_code_t err_code = ble_advdata_encode(&advdata, m_bcast_advdata, &adv_len);
+    err_code = ble_advdata_encode(&advdata, m_bcast_advdata, &adv_len);
     if (err_code != NRF_SUCCESS)
     {
         return err_code;
@@ -430,9 +443,14 @@ static ret_code_t bcast_start_current_fragment(void)
 
     ble_gap_adv_params_t adv_params;
     memset(&adv_params, 0, sizeof(adv_params));
-    adv_params.properties.type = BLE_GAP_ADV_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED;
+    adv_params.properties.type = m_bcast_use_typed_legacy
+                                 ? BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED
+                                 : BLE_GAP_ADV_TYPE_EXTENDED_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED;
     adv_params.primary_phy     = BLE_GAP_PHY_1MBPS;
-    adv_params.secondary_phy   = BLE_GAP_PHY_1MBPS;
+    if (!m_bcast_use_typed_legacy)
+    {
+        adv_params.secondary_phy = BLE_GAP_PHY_1MBPS;
+    }
     adv_params.duration        = BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED;
     adv_params.max_adv_evts    = SYSTEM_CONFIG_BCAST_ADV_EVENTS;
     adv_params.filter_policy   = BLE_GAP_ADV_FP_ANY;
@@ -477,7 +495,7 @@ static ret_code_t bcast_start_current_fragment(void)
     adv_params.interval        = SYSTEM_CONFIG_ADV_INTERVAL;
 #endif
 
-    ret_code_t err_code = sd_ble_gap_adv_set_configure(&m_bcast_adv_handle, &m_bcast_adv_data, &adv_params);
+    err_code = sd_ble_gap_adv_set_configure(&m_bcast_adv_handle, &m_bcast_adv_data, &adv_params);
     if (err_code != NRF_SUCCESS)
     {
         return err_code;
@@ -493,12 +511,36 @@ static ret_code_t bcast_start_current_fragment(void)
                  (unsigned)(m_bcast_frag_index + 1u),
                  (unsigned)m_bcast_frag_count,
                  (unsigned)m_bcast_packet_len);
-    return sd_ble_gap_adv_start(m_bcast_adv_handle, BB_BROADCAST_CONN_CFG_TAG);
+    err_code = sd_ble_gap_adv_start(m_bcast_adv_handle, BB_BROADCAST_CONN_CFG_TAG);
+    if (err_code == NRF_SUCCESS)
+    {
+        m_bcast_adv_started = true;
+    }
+    return err_code;
 }
 
-static void bcast_finish(void)
+static void bcast_finish(bool stop_advertising)
 {
+    if (stop_advertising && m_bcast_adv_started)
+    {
+        ret_code_t err_code = sd_ble_gap_adv_stop(m_bcast_adv_handle);
+        if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
+        {
+            NRF_LOG_WARNING("BB BCAST stop failed: 0x%x", err_code);
+        }
+    }
+
+    m_bcast_adv_started = false;
     m_bcast_active = false;
+
+    if (m_adv_handle_borrowed)
+    {
+        m_adv_handle_borrowed = false;
+        if (m_adv_release_cb != NULL)
+        {
+            m_adv_release_cb(m_bcast_adv_handle);
+        }
+    }
 }
 
 static void bcast_advance_fragment(void)
@@ -512,7 +554,7 @@ static void bcast_advance_fragment(void)
     if (m_bcast_frag_index >= m_bcast_frag_count)
     {
         NRF_LOG_INFO("BB BCAST ADV burst complete");
-        bcast_finish();
+        bcast_finish(false);
         return;
     }
 
@@ -520,7 +562,7 @@ static void bcast_advance_fragment(void)
     if (err_code != NRF_SUCCESS)
     {
         NRF_LOG_WARNING("BB BCAST frag start failed: 0x%x", err_code);
-        bcast_finish();
+        bcast_finish(false);
     }
 }
 
@@ -548,9 +590,27 @@ ret_code_t bb_broadcast_send(const uint8_t *data, uint16_t length)
         return NRF_ERROR_BUSY;
     }
 
+    if (m_adv_acquire_cb != NULL)
+    {
+        ret_code_t err_code = m_adv_acquire_cb(&m_bcast_adv_handle);
+        if (err_code != NRF_SUCCESS)
+        {
+            return err_code;
+        }
+        m_adv_handle_borrowed = true;
+    }
+
     memcpy(m_bcast_packet, data, length);
     m_bcast_packet_len = (uint8_t)length;
 #if BLE_BROADCAST_USE_EXTENDED
+    /* Peripheral ACK packets fit in one legacy ADV event. Use that proven
+     * receive path toward Central; larger Central commands stay Extended. */
+#if defined(BLE_PERIPHERAL)
+    m_bcast_use_typed_legacy =
+        length <= BLE_BROADCAST_TYPED_LEGACY_MAX_PACKET_SIZE;
+#else
+    m_bcast_use_typed_legacy = false;
+#endif
     m_bcast_frag_count = 1;
 #else
     m_bcast_frag_count = (uint8_t)((length + BLE_BROADCAST_FRAGMENT_PAYLOAD_SIZE - 1u) /
@@ -565,7 +625,7 @@ ret_code_t bb_broadcast_send(const uint8_t *data, uint16_t length)
     if (err_code != NRF_SUCCESS)
     {
         NRF_LOG_WARNING("BB BCAST start failed: 0x%x", err_code);
-        bcast_finish();
+        bcast_finish(false);
         return err_code;
     }
 
@@ -610,7 +670,8 @@ static bb_broadcast_rx_slot_t *rx_slot_get(ble_gap_addr_t const *addr)
 static void rx_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report)
 {
 #if BLE_BROADCAST_USE_EXTENDED
-    if (p_adv_report->type.extended_pdu)
+    /* Typed packet format is valid in both Extended ADV and, when it fits,
+     * one legacy ADV event (used for Peripheral -> Central ACK). */
     {
         const uint8_t *p_payload = NULL;
         uint16_t payload_len = 0;
@@ -648,7 +709,9 @@ static void rx_scan_report_handle(ble_gap_evt_adv_report_t const *p_adv_report)
 
         if (p_payload != NULL && payload_len > 0)
         {
-            NRF_LOG_INFO("BB BCAST RX EXT complete len=%u", (unsigned)payload_len);
+            NRF_LOG_INFO("BB BCAST RX typed complete len=%u ext=%u",
+                         (unsigned)payload_len,
+                         (unsigned)p_adv_report->type.extended_pdu);
             if (m_rx_cb != NULL)
             {
                 m_rx_cb(p_payload, payload_len);
@@ -723,10 +786,11 @@ static void bb_broadcast_ble_evt(ble_evt_t const *p_ble_evt, void *p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_ADV_SET_TERMINATED:
-            /* Only our dedicated broadcast set drives the burst forward. */
+            /* Only the handle currently running our burst drives it forward. */
             if (m_bcast_active &&
                 p_ble_evt->evt.gap_evt.params.adv_set_terminated.adv_handle == m_bcast_adv_handle)
             {
+                m_bcast_adv_started = false;
                 bcast_advance_fragment();
             }
             break;
@@ -767,9 +831,18 @@ void bb_broadcast_register_rx_cb(bb_broadcast_rx_cb_t cb)
     m_rx_cb = cb;
 }
 
+void bb_broadcast_adv_hooks_set(bb_broadcast_adv_acquire_cb_t acquire_cb,
+                                bb_broadcast_adv_release_cb_t release_cb)
+{
+    m_adv_acquire_cb = acquire_cb;
+    m_adv_release_cb = release_cb;
+}
+
 ret_code_t bb_broadcast_init(void)
 {
     m_bcast_active = false;
+    m_bcast_adv_started = false;
+    m_adv_handle_borrowed = false;
     m_bcast_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
     memset(m_rx_slots, 0, sizeof(m_rx_slots));
     m_initialized = true;
@@ -795,7 +868,7 @@ void bb_broadcast_process(void)
             APP_TIMER_TICKS(BB_BROADCAST_WATCHDOG_MS))
     {
         NRF_LOG_WARNING("BB BCAST watchdog fired, forcing finish");
-        bcast_finish();
+        bcast_finish(true);
     }
 
 #if defined(BLE_PERIPHERAL)

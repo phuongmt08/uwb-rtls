@@ -97,7 +97,6 @@ class QueryQueueManager(QObject):
         "sys_ranging_cfg_set": "sys_ranging_cfg_resp",
         "sensor_fusion_cfg_get": "sensor_fusion_cfg_resp",
         "sensor_fusion_cfg_set": "sensor_fusion_cfg_resp",
-        "pos_calib_cfg_get": "pos_calib_cfg_resp",
         "ble_status_get": "ble_status_resp",
         "ble_conn_params_get": "ble_conn_params_resp",
         "ble_conn_params_set": "ble_conn_params_resp",

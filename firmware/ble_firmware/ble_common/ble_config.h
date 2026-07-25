@@ -152,9 +152,10 @@ extern "C" {
 
 /**
  * @brief Number of ADV events per broadcast burst.
- *        Higher = more reliable reception, but longer air time.
+ *        Both command and ACK use a short burst. Central-level retransmission
+ *        is handled separately and only starts after the ACK timeout.
  */
-#define SYSTEM_CONFIG_BCAST_ADV_EVENTS     5
+#define SYSTEM_CONFIG_BCAST_ADV_EVENTS     3
 
 #ifdef __cplusplus
 }

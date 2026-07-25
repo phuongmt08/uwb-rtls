@@ -178,37 +178,6 @@ class VvProtocol(_VvProtocol):
         pkt = self._commands.host_transport_set(src, dst, seq)
         pkt.host_transport_set.transport = int(transport)
         return pkt
-    def build_pos_calib_cfg_get(self, src: int, dst: int, seq: int):
-        return self._commands.pos_calib_cfg_get(src, dst, seq)
-    def build_pos_calib_cfg_set(
-        self,
-        src: int,
-        dst: int,
-        seq: int,
-        enable_anchor_auto_calib: bool = True,
-        enable_tag_auto_calib: bool = True,
-        ref_distance_xy_m: float = 2.0,
-        tag_height_m: float = 1.0,
-        anchor_height_m: float = 2.5,
-        calib_anchor_id: int = 1,
-        samples: int = 10,
-        error_threshold_m: float = 0.3,
-        min_delta_step: int = 1,
-        max_rounds: int = 10,
-        max_std_m: float = 0.2,
-        damping: float = 0.1,
-        iterations: int = 100,
-    ):
-        return self._commands.pos_calib_cfg_set(
-            src, dst, seq,
-            enable_anchor_auto_calib=enable_anchor_auto_calib, enable_tag_auto_calib=enable_tag_auto_calib,
-            ref_distance_xy_m=ref_distance_xy_m, tag_height_m=tag_height_m, anchor_height_m=anchor_height_m,
-            calib_anchor_id=calib_anchor_id, samples=samples, error_threshold_m=error_threshold_m,
-            min_delta_step=min_delta_step, max_rounds=max_rounds, max_std_m=max_std_m,
-            damping=damping, iterations=iterations,
-        )
-    def build_pos_calib_cfg_resp(self, src: int, dst: int, seq: int):
-        return self._commands.pos_calib_cfg_resp(src, dst, seq)
     def build_anchor_layout_get(self, src: int, dst: int, seq: int):
         return self._commands.anchor_layout_get(src, dst, seq)
     def build_anchor_layout_set(self, src: int, dst: int, seq: int, anchors: list | None = None):

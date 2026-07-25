@@ -618,7 +618,6 @@ class ConfigTab(QWidget):
                 getattr(self, "val_pg_delay", None),
                 getattr(self, "uwb_adv_separator", None),
                 getattr(self, "fusion_group", None),
-                getattr(self, "pos_calib_group", None),
                 getattr(self, "prefilter_group", None),
             )
             if widget is not None
@@ -775,7 +774,7 @@ class ConfigTab(QWidget):
 
         # Update visibility of inner developer-only widgets in UWB Group
         for w in self._dev_widgets:
-            if w not in (getattr(self, "fusion_group", None), getattr(self, "pos_calib_group", None), getattr(self, "prefilter_group", None)):
+            if w not in (getattr(self, "fusion_group", None), getattr(self, "prefilter_group", None)):
                 w.setVisible(enabled)
 
         # Show or hide connection parameters in BLE Group - always show in both modes
@@ -848,7 +847,6 @@ class ConfigTab(QWidget):
         self._vm.sys_ranging_cfg_updated.connect(self._on_sys_ranging_cfg_loaded)
         self._vm.sensor_fusion_cfg_updated.connect(self._on_sensor_fusion_cfg_loaded)
         self._vm.prefilter_cfg_updated.connect(self._on_prefilter_cfg_loaded)
-        self._vm.pos_calib_cfg_updated.connect(self._on_pos_calib_cfg_loaded)
         if hasattr(self._vm, "ble_conn_params_updated"):
             self._vm.ble_conn_params_updated.connect(self._on_ble_conn_params_loaded)
         if hasattr(self._vm, "device_type_updated"):
@@ -999,34 +997,6 @@ class ConfigTab(QWidget):
         ):
             if self._has_widget(widget_name):
                 set_widget_placeholder(getattr(self, widget_name))
-        # Reset Position Auto-Calibration widgets
-        if self._has_widget("chk_enable_anchor_calib"):
-            set_widget_placeholder(self.chk_enable_anchor_calib)
-        if self._has_widget("chk_enable_tag_calib"):
-            set_widget_placeholder(self.chk_enable_tag_calib)
-        if self._has_widget("pos_ref_dist_spin"):
-            set_widget_placeholder(self.pos_ref_dist_spin)
-        if self._has_widget("pos_tag_height_spin"):
-            set_widget_placeholder(self.pos_tag_height_spin)
-        if self._has_widget("pos_anchor_height_spin"):
-            set_widget_placeholder(self.pos_anchor_height_spin)
-        if self._has_widget("pos_calib_anchor_spin"):
-            set_widget_placeholder(self.pos_calib_anchor_spin)
-        if self._has_widget("pos_samples_spin"):
-            set_widget_placeholder(self.pos_samples_spin)
-        if self._has_widget("pos_err_thresh_spin"):
-            set_widget_placeholder(self.pos_err_thresh_spin)
-        if self._has_widget("pos_min_delta_spin"):
-            set_widget_placeholder(self.pos_min_delta_spin)
-        if self._has_widget("pos_max_rounds_spin"):
-            set_widget_placeholder(self.pos_max_rounds_spin)
-        if self._has_widget("pos_max_std_spin"):
-            set_widget_placeholder(self.pos_max_std_spin)
-        if self._has_widget("pos_damping_spin"):
-            set_widget_placeholder(self.pos_damping_spin)
-        if self._has_widget("pos_iterations_spin"):
-            set_widget_placeholder(self.pos_iterations_spin)
-
         # Reset BLE widgets
         set_widget_placeholder(self.chk_enable_ble)
         set_widget_placeholder(self.txt_ble_name)
@@ -1364,10 +1334,6 @@ class ConfigTab(QWidget):
         chk_prefilter.setChecked(False)
         dialog_layout.addWidget(chk_prefilter)
 
-        chk_calib = QCheckBox("Position Calibration Configuration")
-        chk_calib.setChecked(False)
-        dialog_layout.addWidget(chk_calib)
-
         chk_ble_adv = QCheckBox("BLE Advertising Configuration")
         chk_ble_adv.setChecked(False)
         dialog_layout.addWidget(chk_ble_adv)
@@ -1388,7 +1354,7 @@ class ConfigTab(QWidget):
 
         config_checkboxes = (
             chk_sys, chk_zone_profile, chk_ranging, chk_fusion, chk_prefilter,
-            chk_calib, chk_ble_adv, chk_ble_conn, chk_device_type,
+            chk_ble_adv, chk_ble_conn, chk_device_type,
             chk_host_transport, chk_otp,
         )
 
@@ -1547,24 +1513,6 @@ class ConfigTab(QWidget):
         if chk_host_transport.isChecked():
             transport_map = {"USB": 1, "UART": 2}
             host_transport = transport_map.get(self.combo_host_transport.currentText(), 1)
-        pos_calib_config = None
-        if chk_calib.isChecked() and self._has_widget("chk_enable_anchor_calib"):
-            pos_calib_config = dict(
-                enable_anchor_auto_calib=self.chk_enable_anchor_calib.isChecked(),
-                enable_tag_auto_calib=getattr(self, "chk_enable_tag_calib", self.chk_enable_anchor_calib).isChecked(),
-                ref_distance_xy_m=self._spin_value("pos_ref_dist_spin", 2.0),
-                tag_height_m=self._spin_value("pos_tag_height_spin", 1.0),
-                anchor_height_m=self._spin_value("pos_anchor_height_spin", 2.5),
-                calib_anchor_id=self._spin_value("pos_calib_anchor_spin", 1),
-                samples=self._spin_value("pos_samples_spin", 10),
-                error_threshold_m=self._spin_value("pos_err_thresh_spin", 0.3),
-                min_delta_step=self._spin_value("pos_min_delta_spin", 1),
-                max_rounds=self._spin_value("pos_max_rounds_spin", 10),
-                max_std_m=self._spin_value("pos_max_std_spin", 0.2),
-                damping=self._spin_value("pos_damping_spin", 0.1),
-                iterations=self._spin_value("pos_iterations_spin", 100)
-            )
-
         factory_otp_config = None
         if chk_otp.isChecked():
             if not self.otp_confirm_checkbox.isChecked():
@@ -1642,7 +1590,6 @@ class ConfigTab(QWidget):
             sys_config=sys_config,
             sensor_fusion_config=sensor_fusion_config,
             prefilter_config=prefilter_config,
-            pos_calib_config=pos_calib_config,
             ble_conn_params_config=ble_conn_params_config,
             ble_adv_config=ble_adv_config,
             device_type=selected_device_type,
@@ -1701,23 +1648,6 @@ class ConfigTab(QWidget):
         }
         prefilter_config = self._prefilter_config_from_ui()
 
-        pos_calib_config = {}
-        if self._has_widget("chk_enable_anchor_calib"):
-            pos_calib_config = {
-                "enable_anchor_auto_calib": self.chk_enable_anchor_calib.isChecked(),
-                "enable_tag_auto_calib": getattr(self, "chk_enable_tag_calib", self.chk_enable_anchor_calib).isChecked(),
-                "ref_distance_xy_m": self._spin_value("pos_ref_dist_spin", 2.0),
-                "tag_height_m": self._spin_value("pos_tag_height_spin", 1.0),
-                "anchor_height_m": self._spin_value("pos_anchor_height_spin", 2.5),
-                "calib_anchor_id": self._spin_value("pos_calib_anchor_spin", 1),
-                "samples": self._spin_value("pos_samples_spin", 10),
-                "error_threshold_m": self._spin_value("pos_err_thresh_spin", 0.3),
-                "min_delta_step": self._spin_value("pos_min_delta_spin", 1),
-                "max_rounds": self._spin_value("pos_max_rounds_spin", 10),
-                "max_std_m": self._spin_value("pos_max_std_spin", 0.2),
-                "damping": self._spin_value("pos_damping_spin", 0.1),
-                "iterations": self._spin_value("pos_iterations_spin", 100),
-            }
         return {
             "target": target,
             "anchors": anchors,
@@ -1725,7 +1655,6 @@ class ConfigTab(QWidget):
             "sys_config": sys_config,
             "sensor_fusion_config": sensor_fusion_config,
             "prefilter_config": prefilter_config,
-            "pos_calib_config": pos_calib_config,
         }
 
     def _on_anchor_layout_loaded(self, anchors):
@@ -1889,43 +1818,6 @@ class ConfigTab(QWidget):
         set_widget_value(self.prefilter_reject_d2_spin, cfg.get("reject_d2", 6.0))
         set_widget_value(self.prefilter_r_gate_spin, cfg.get("r_gate", 0.10))
         set_widget_value(self.prefilter_min_covariance_spin, cfg.get("min_covariance", 1.0e-6))
-    def _on_pos_calib_cfg_loaded(self, cfg):
-        from utils.helpers import set_widget_placeholder, set_widget_value
-        if not cfg:
-            for widget_name in ("chk_enable_anchor_calib", "chk_enable_tag_calib", "pos_ref_dist_spin",
-                                "pos_tag_height_spin", "pos_anchor_height_spin", "pos_calib_anchor_spin",
-                                "pos_samples_spin", "pos_err_thresh_spin", "pos_min_delta_spin",
-                                "pos_max_rounds_spin", "pos_max_std_spin", "pos_damping_spin", "pos_iterations_spin"):
-                if self._has_widget(widget_name):
-                    set_widget_placeholder(getattr(self, widget_name))
-            return
-        if self._has_widget("chk_enable_anchor_calib"):
-            set_widget_value(self.chk_enable_anchor_calib, cfg.get("enable_anchor_auto_calib", True))
-        if self._has_widget("chk_enable_tag_calib"):
-            set_widget_value(self.chk_enable_tag_calib, cfg.get("enable_tag_auto_calib", True))
-        if self._has_widget("pos_ref_dist_spin"):
-            set_widget_value(self.pos_ref_dist_spin, cfg.get("ref_distance_xy_m", 2.0))
-        if self._has_widget("pos_tag_height_spin"):
-            set_widget_value(self.pos_tag_height_spin, cfg.get("tag_height_m", 1.0))
-        if self._has_widget("pos_anchor_height_spin"):
-            set_widget_value(self.pos_anchor_height_spin, cfg.get("anchor_height_m", 2.5))
-        if self._has_widget("pos_calib_anchor_spin"):
-            set_widget_value(self.pos_calib_anchor_spin, cfg.get("calib_anchor_id", 1))
-        if self._has_widget("pos_samples_spin"):
-            set_widget_value(self.pos_samples_spin, cfg.get("samples", 10))
-        if self._has_widget("pos_err_thresh_spin"):
-            set_widget_value(self.pos_err_thresh_spin, cfg.get("error_threshold_m", 0.3))
-        if self._has_widget("pos_min_delta_spin"):
-            set_widget_value(self.pos_min_delta_spin, cfg.get("min_delta_step", 1))
-        if self._has_widget("pos_max_rounds_spin"):
-            set_widget_value(self.pos_max_rounds_spin, cfg.get("max_rounds", 10))
-        if self._has_widget("pos_max_std_spin"):
-            set_widget_value(self.pos_max_std_spin, cfg.get("max_std_m", 0.2))
-        if self._has_widget("pos_damping_spin"):
-            set_widget_value(self.pos_damping_spin, cfg.get("damping", 0.1))
-        if self._has_widget("pos_iterations_spin"):
-            set_widget_value(self.pos_iterations_spin, cfg.get("iterations", 100))
-
     def _on_host_transport_changed(self, index):
         index = max(0, int(index))
         if hasattr(self, "host_detail_stack"):

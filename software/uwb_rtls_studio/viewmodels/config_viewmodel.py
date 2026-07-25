@@ -130,7 +130,6 @@ class ConfigViewModel(QObject):
     sys_ranging_cfg_updated = pyqtSignal(dict)
     sensor_fusion_cfg_updated = pyqtSignal(dict)
     prefilter_cfg_updated = pyqtSignal(dict)
-    pos_calib_cfg_updated = pyqtSignal(dict)
     ble_conn_params_updated = pyqtSignal(dict)
     scan_devices_updated = pyqtSignal(list)
     device_type_updated = pyqtSignal(int)
@@ -156,7 +155,6 @@ class ConfigViewModel(QObject):
         shared_app_state.sys_ranging_cfg_changed.connect(self.sys_ranging_cfg_updated.emit)
         shared_app_state.sensor_fusion_cfg_changed.connect(self.sensor_fusion_cfg_updated.emit)
         shared_app_state.prefilter_cfg_changed.connect(self.prefilter_cfg_updated.emit)
-        shared_app_state.pos_calib_cfg_changed.connect(self.pos_calib_cfg_updated.emit)
         shared_app_state.zone_profiles_changed.connect(lambda profiles: self.zone_profile_updated.emit(dict(profiles).get(1, {})))
         if hasattr(self.model, "ble_conn_params_parsed"):
             self.model.ble_conn_params_parsed.connect(self.ble_conn_params_updated.emit)
@@ -179,8 +177,6 @@ class ConfigViewModel(QObject):
             self.sensor_fusion_cfg_updated.emit(self._shared_app_state.sensor_fusion_cfg)
         if self._shared_app_state.prefilter_cfg:
             self.prefilter_cfg_updated.emit(self._shared_app_state.prefilter_cfg)
-        if self._shared_app_state.pos_calib_cfg:
-            self.pos_calib_cfg_updated.emit(self._shared_app_state.pos_calib_cfg)
         if self._shared_app_state.device_type:
             self.device_type_updated.emit(self._shared_app_state.device_type)
         if self._ble_scan_repo:
@@ -212,7 +208,6 @@ class ConfigViewModel(QObject):
             self.read_sys_config(force=force, traffic_class="bootstrap")
             self.read_sensor_fusion_config(force=force, traffic_class="bootstrap")
             self.read_prefilter_config(force=force, traffic_class="bootstrap")
-            self.read_pos_calib_config(force=force, traffic_class="bootstrap")
             self.read_ble_conn_params(force=force, traffic_class="bootstrap")
             self.read_device_type(force=force, traffic_class="bootstrap")
             return True
@@ -228,7 +223,6 @@ class ConfigViewModel(QObject):
         sys_config: dict | None = None,
         sensor_fusion_config: dict | None = None,
         prefilter_config: dict | None = None,
-        pos_calib_config: dict | None = None,
         ble_conn_params_config: dict | None = None,
         ble_adv_config: dict | None = None,
         device_type: int | None = None,
@@ -295,13 +289,6 @@ class ConfigViewModel(QObject):
                 "command": "prefilter_cfg_set",
                 "method": "set_prefilter_config",
                 "args": [dict(prefilter_config or {})],
-            })
-        if pos_calib_config:
-            steps.append({
-                "label": "pos_calib_cfg_set",
-                "command": "pos_calib_cfg_set",
-                "method": "set_pos_calib_config",
-                "args": [dict(pos_calib_config or {})],
             })
         if ble_adv_config is not None:
             params = dict(ble_adv_config or {})
@@ -454,17 +441,6 @@ class ConfigViewModel(QObject):
         params = dict(config_data or {})
         log.info("Sending prefilter config set command to MCU: %s", params)
         self.model.set_prefilter_config(params)
-    def read_pos_calib_config(self, force: bool = False, traffic_class: str = ""):
-        # BE/API: fetch position-calibration config for the Config tab.
-        log.info("Requesting position calibration configuration from MCU via global query queue... (force=%s)", force)
-        self.model.request_pos_calib_config(force=force, traffic_class=traffic_class)
-
-    def write_pos_calib_config(self, config_data: dict):
-        # BE/API: update position-calibration config from Config tab.
-        params = dict(config_data or {})
-        log.info("Sending position calibration config set command to MCU: %s", params)
-        self.model.set_pos_calib_config(params)
-
     def write_ble_conn_params(
         self,
         min_interval_ms: int,

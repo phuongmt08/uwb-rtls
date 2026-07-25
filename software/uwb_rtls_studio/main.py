@@ -594,7 +594,6 @@ def main():
     from models.log_model import LogModel
     from viewmodels.log_viewmodel import LogViewModel
     from viewmodels.config_viewmodel import ConfigViewModel
-    from viewmodels.calibration_viewmodel import CalibrationViewModel
     from viewmodels.antenna_delay_calibration_viewmodel import AntennaDelayCalibrationViewModel
     from viewmodels.main_viewmodel import MainViewModel
     
@@ -641,8 +640,7 @@ def main():
         command_bus=command_bus,
         ble_scan_repo=ble_scan_repo,
     )
-    calibration_vm = CalibrationViewModel(device_model)
-    antenna_delay_calib_vm = AntennaDelayCalibrationViewModel(
+    calibration_vm = AntennaDelayCalibrationViewModel(
         device_model,
         ranging_model,
         geofence_repo=live_tracking_vm.geofence_repo,
@@ -666,7 +664,6 @@ def main():
         device_info_vm=device_info_vm,
         config_vm=config_vm,
         calibration_vm=calibration_vm,
-        antenna_delay_calib_vm=antenna_delay_calib_vm,
         dongle_vm=dongle_vm,
         log_vm=log_vm,
         main_vm=main_vm,

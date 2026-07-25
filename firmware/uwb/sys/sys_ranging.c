@@ -32,9 +32,6 @@
 #define MW_DSTWR_MSG_TYPE_FINAL  0xE3
 #define MW_DSTWR_MSG_TYPE_RESULT 0xE4 /* Anchor sends distance to TAG */
 
-#define CONTROL_MSG_SLOT_MS  100U
-#define CONTROL_MSG_MAX_SIZE 127U
-
 #define ANCHOR_SMART_DISCOVERY_ON_MS       70U
 #define ANCHOR_SMART_DISCOVERY_BALANCED_MS 120U
 #define ANCHOR_SMART_DISCOVERY_ECO_MS      220U
@@ -133,8 +130,7 @@ typedef struct __attribute__((packed))
   uint8_t  slot_id;
   uint64_t poll_rx_ts;
   uint64_t resp_tx_ts;
-  uint8_t  calib_status;
-  uint8_t  padding[3];
+  uint8_t  padding[4];
 } resp_msg_t;
 
 typedef struct __attribute__((packed))
@@ -180,16 +176,6 @@ typedef char result_msg_size_check_t[
 ];
 typedef char result_msg_legacy_size_check_t[
   (RESULT_MSG_LEGACY_SIZE == 13U) ? 1 : -1
-];
-
-typedef struct
-{
-  sys_uwb_control_msg_type_t type;
-  uint16_t                   size;
-} control_msg_desc_t;
-
-typedef char calib_pair_summary_fits_control_frame_t[
-  (sizeof(sys_calib_pair_summary_msg_t) <= CONTROL_MSG_MAX_SIZE) ? 1 : -1
 ];
 
 typedef struct
@@ -278,7 +264,6 @@ typedef struct {
         uint64_t resp_rx_ts;
         uint64_t poll_rx_ts;
         uint64_t resp_tx_ts;
-        uint8_t  calib_status;
         bool     valid;
     } anchor_resp[8];
 } sys_ranging_event_ctx_t;
@@ -332,7 +317,6 @@ static struct
 } s_tag_diag = {0};
 static tdma_scheduler_t s_tdma_tag    = { 0 };
 static tdma_scheduler_t s_tdma_anchor = { 0 };
-static sys_calib_status_t s_calib_status = SYS_CALIB_STATUS_NORMAL;
 static struct
 {
   uint32_t total_count;
@@ -349,12 +333,6 @@ static void anchor_smart_switch_tracking(const sys_ranging_result_t *result, uin
 static bool anchor_smart_tick_due(uint32_t now, uint32_t due);
 static uint32_t anchor_smart_tracking_window_ms(void);
 static uint32_t anchor_smart_tracking_half_window_ms(void);
-
-static const control_msg_desc_t s_control_msg_descs[] = {
-  { SYS_UWB_CTRL_CALIB_PAIR_SUMMARY, sizeof(sys_calib_pair_summary_msg_t) },
-  { SYS_UWB_CTRL_ACK,                sizeof(sys_uwb_control_ack_msg_t) },
-  { SYS_UWB_CTRL_SURVEY_FINISH,      sizeof(sys_survey_finish_msg_t) },
-};
 
 /* Static guard */
 static bool s_ranging_busy = false;
@@ -555,21 +533,6 @@ static float calculate_distance(const dstwr_timestamps_t *ts)
   return corrected_dist;
 }
 
-static uint16_t control_msg_size(uint8_t type)
-{
-  const uint8_t desc_count =
-      (uint8_t)(sizeof(s_control_msg_descs) / sizeof(s_control_msg_descs[0]));
-
-  for (uint8_t i = 0U; i < desc_count; i++)
-  {
-    if ((uint8_t)s_control_msg_descs[i].type == type)
-    {
-      return s_control_msg_descs[i].size;
-    }
-  }
-  return 0U;
-}
-
 static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t expected_type)
 {
   if (!data || data[0] != expected_type)
@@ -577,12 +540,7 @@ static inline bool validate_msg_type(const uint8_t *data, uint16_t len, uint8_t 
     return false;
   }
 
-  uint16_t min_len = control_msg_size(expected_type);
-  if (min_len != 0U)
-  {
-    return len >= min_len;
-  }
-
+  uint16_t min_len = 0U;
   switch (expected_type)
   {
   case MW_DSTWR_MSG_TYPE_POLL:   min_len = sizeof(poll_msg_t);   break;
@@ -653,35 +611,6 @@ static int hal_rx_wait_valid_msg_at(uint8_t  *buffer,
 
   *received_length = 0;
   return -1;
-}
-
-static sys_ranging_err_t hal_tx_immediate_wait_done(const void *data,
-                                                    uint16_t length,
-                                                    uint32_t timeout_ms)
-{
-  bsp_uwb_clear_event();
-  if (bsp_uwb_tx(data, length) != BSP_OK) {
-    return SYS_RANGING_ERR;
-  }
-
-  uint32_t start_ms = HAL_GetTick();
-  while ((HAL_GetTick() - start_ms) < timeout_ms) {
-    /*
-     * Summary exchange runs inside the UWB task while it owns the SPI mutex,
-     * so service the pending DW1000 IRQ here instead of waiting for the task
-     * loop to dispatch it.
-     */
-    bsp_uwb_dwt_isr();
-
-    bsp_uwb_event_t event;
-    while (bsp_uwb_get_event(&event)) {
-      if (event.type == BSP_UWB_EVENT_TX_DONE) {
-        return SYS_RANGING_OK;
-      }
-    }
-    __NOP();
-  }
-  return SYS_RANGING_ERR_TIMEOUT;
 }
 
 static void state_machine_reset(void)
@@ -906,17 +835,13 @@ static uint8_t event_result_mask(void)
   return mask;
 }
 
-static bool event_result_anchor_expected(uint8_t anchor_id, uint8_t *calib_status)
+static bool event_result_anchor_expected(uint8_t anchor_id)
 {
   for (uint8_t i = 0; i < 8; i++)
   {
     if (s_sys_ranging_ev.anchor_resp[i].valid &&
         s_sys_ranging_ev.anchor_resp[i].anchor_id == anchor_id)
     {
-      if (calib_status)
-      {
-        *calib_status = s_sys_ranging_ev.anchor_resp[i].calib_status;
-      }
       return true;
     }
   }
@@ -966,7 +891,6 @@ static bool event_tag_ingest_resp_payload(const uint8_t *data,
   memcpy(&s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts, &resp->resp_tx_ts, sizeof(uint64_t));
   s_sys_ranging_ev.anchor_resp[idx].poll_rx_ts &= DW_MASK_40;
   s_sys_ranging_ev.anchor_resp[idx].resp_tx_ts &= DW_MASK_40;
-  s_sys_ranging_ev.anchor_resp[idx].calib_status = resp->calib_status;
   s_sys_ranging_ev.anchor_resp[idx].valid = true;
   s_sys_ranging_ev.num_responses++;
   RANGING_LOG_D(LOG_OBJECT_CODE_RANGING, "[TAG] Got RESP from anchor %u", resp->anchor_id);
@@ -1015,8 +939,7 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
     }
   }
 
-  uint8_t calib_status = SYS_CALIB_STATUS_NORMAL;
-  bool expected_anchor = event_result_anchor_expected(res->anchor_id, &calib_status);
+  bool expected_anchor = event_result_anchor_expected(res->anchor_id);
   if (!expected_anchor)
   {
     RLOG_W(LOG_OBJECT_CODE_RANGING,
@@ -1056,7 +979,6 @@ static bool event_tag_ingest_result_payload(const uint8_t *data, uint16_t len)
              "[TAG] Legacy 13-byte RESULT accepted; confidence unavailable");
     }
   }
-  tr->calib_status     = calib_status;
   tr->valid            = (res->valid == 1);
   s_ctx.result_multi.count++;
   return true;
@@ -1400,149 +1322,6 @@ static uint32_t tdma_compute_final_wait_timeout_us(const tdma_scheduler_t *tdma,
     final_timeout_us = 100000U;
   }
   return final_timeout_us;
-}
-
-void sys_ranging_set_calib_status(sys_calib_status_t status)
-{
-  s_calib_status = status;
-}
-
-sys_calib_status_t sys_ranging_get_calib_status(void)
-{
-  return s_calib_status;
-}
-
-sys_ranging_err_t sys_ranging_control_send(sys_uwb_control_msg_type_t type,
-                                           const void *msg,
-                                           uint16_t msg_size,
-                                           uint8_t slot_id)
-{
-  uint16_t registered_size = control_msg_size((uint8_t)type);
-  if (!msg || registered_size == 0U || msg_size != registered_size ||
-      slot_id > MAX_ANCHORS_SUPPORTED)
-  {
-    return SYS_RANGING_ERR_PARAM;
-  }
-
-  if (msg_size > CONTROL_MSG_MAX_SIZE)
-  {
-    return SYS_RANGING_ERR_PARAM;
-  }
-
-  uint8_t tx_buf[CONTROL_MSG_MAX_SIZE] = { 0 };
-  memcpy(tx_buf, msg, msg_size);
-  tx_buf[0] = (uint8_t)type;
-  if (slot_id != 0U)
-  {
-    bsp_delay_ms((uint32_t)slot_id * CONTROL_MSG_SLOT_MS);
-  }
-
-  return hal_tx_immediate_wait_done(tx_buf, msg_size, 20U);
-}
-
-sys_ranging_err_t sys_ranging_control_receive(sys_uwb_control_msg_type_t type,
-                                              void *msg,
-                                              uint16_t msg_size,
-                                              uint32_t timeout_ms)
-{
-  uint16_t rx_len = 0U;
-  uint16_t registered_size = control_msg_size((uint8_t)type);
-  if (!msg || registered_size == 0U || msg_size != registered_size)
-  {
-    return SYS_RANGING_ERR_PARAM;
-  }
-
-  if (hal_rx_wait_valid_msg_at((uint8_t *)msg, msg_size, &rx_len,
-                               (uint8_t)type,
-                               timeout_ms * 1000U,
-                               RX_WAIT_IMMEDIATE,
-                               RX_WAIT_NO_DELAYED_TS_DW) != 0)
-  {
-    return SYS_RANGING_ERR_TIMEOUT;
-  }
-
-  return (rx_len == msg_size) ? SYS_RANGING_OK : SYS_RANGING_ERR_PROTO;
-}
-
-sys_ranging_err_t sys_ranging_control_send_ack(uint8_t epoch_id,
-                                               uint8_t sender_id,
-                                               sys_uwb_control_msg_type_t acked_type,
-                                               uint8_t acked_value,
-                                               uint8_t slot_id)
-{
-  if (sender_id == 0U || acked_type == SYS_UWB_CTRL_ACK ||
-      control_msg_size((uint8_t)acked_type) == 0U)
-  {
-    return SYS_RANGING_ERR_PARAM;
-  }
-
-  const sys_uwb_control_ack_msg_t ack = {
-    .epoch_id = epoch_id,
-    .sender_id = sender_id,
-    .acked_msg_type = (uint8_t)acked_type,
-    .acked_value = acked_value,
-  };
-  return sys_ranging_control_send(SYS_UWB_CTRL_ACK, &ack, sizeof(ack), slot_id);
-}
-
-sys_ranging_err_t sys_ranging_control_receive_ack(sys_uwb_control_msg_type_t acked_type,
-                                                  sys_uwb_control_ack_msg_t *ack,
-                                                  uint32_t timeout_ms)
-{
-  if (acked_type == SYS_UWB_CTRL_ACK ||
-      control_msg_size((uint8_t)acked_type) == 0U)
-  {
-    return SYS_RANGING_ERR_PARAM;
-  }
-
-  sys_ranging_err_t err =
-      sys_ranging_control_receive(SYS_UWB_CTRL_ACK, ack, sizeof(*ack), timeout_ms);
-  if (err != SYS_RANGING_OK)
-  {
-    return err;
-  }
-
-  return (ack->acked_msg_type == (uint8_t)acked_type)
-           ? SYS_RANGING_OK
-           : SYS_RANGING_ERR_PROTO;
-}
-
-sys_ranging_err_t sys_ranging_control_send_wait_ack(sys_uwb_control_msg_type_t type,
-                                                    const void *msg,
-                                                    uint16_t msg_size,
-                                                    uint8_t slot_id,
-                                                    uint8_t expected_ack_sender,
-                                                    uint8_t expected_ack_value,
-                                                    uint32_t ack_timeout_ms)
-{
-  if (!msg || msg_size < 2U || expected_ack_sender == 0U ||
-      type == SYS_UWB_CTRL_ACK)
-  {
-    return SYS_RANGING_ERR_PARAM;
-  }
-
-  sys_ranging_err_t err = sys_ranging_control_send(type, msg, msg_size, slot_id);
-  if (err != SYS_RANGING_OK)
-  {
-    return err;
-  }
-
-  sys_uwb_control_ack_msg_t ack;
-  err = sys_ranging_control_receive_ack(type, &ack, ack_timeout_ms);
-  if (err != SYS_RANGING_OK)
-  {
-    return err;
-  }
-
-  const uint8_t *msg_bytes = (const uint8_t *)msg;
-  if (ack.epoch_id != msg_bytes[1] ||
-      ack.sender_id != expected_ack_sender ||
-      ack.acked_value != expected_ack_value)
-  {
-    return SYS_RANGING_ERR_PROTO;
-  }
-
-  return SYS_RANGING_OK;
 }
 
 uint8_t sys_ranging_get_current_slot(void)
@@ -2143,7 +1922,6 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                   poll_sync.t2 = evt.rx_ts;
                   anchor_smart_switch_tracking(&poll_sync, HAL_GetTick());
               }
-              s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
               tdma_sync_to_poll(&s_tdma_anchor, s_sys_ranging_ev.poll_rx_ts);
               
               uint64_t rtx_dw=0;
@@ -2165,7 +1943,6 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
               uint64_t r_tx = s_sys_ranging_ev.resp_tx_ts & DW_MASK_40;
               memcpy(&rmsg.poll_rx_ts, &p_rx, sizeof(p_rx));
               memcpy(&rmsg.resp_tx_ts, &r_tx, sizeof(r_tx));
-              rmsg.calib_status = (uint8_t) s_calib_status;
               
               s_sys_ranging_ev.planned_tx_dw = rtx_dw;
               if (bsp_uwb_tx_delayed(&rmsg, sizeof(rmsg), rtx_dw) != BSP_OK) {
@@ -2331,7 +2108,6 @@ static sys_ranging_err_t anchor_process_tdma_event(uint8_t num_anchors,
                       s_ctx.result_single.quality =
                           (s_sys_ranging_ev.poll_quality.valid && final_evt.rx_quality.valid &&
                            s_sys_ranging_ev.poll_quality.confidence_valid && final_evt.rx_quality.confidence_valid) ? 1U : 0U;
-                      s_ctx.result_single.calib_status = SYS_CALIB_STATUS_NORMAL;
                       s_ctx.result_single.valid = (dist > 0.0f && dist < 100.0f);
                       
                       uint64_t expected_final_tx_dw = 0;
