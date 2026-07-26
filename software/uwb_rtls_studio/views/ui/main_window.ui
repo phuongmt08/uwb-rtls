@@ -117,7 +117,7 @@ QWidget#centralwidget { background-color: #0F172A; }</string>
              <string notr="true">color: #C084FC; background: transparent; font-weight: bold;</string>
             </property>
             <property name="text">
-             <string>🔵 UWB RTLS Studio</string>
+             <string>UWB RTLS Studio</string>
             </property>
            </widget>
           </item>
@@ -214,12 +214,12 @@ QComboBox QAbstractItemView { background: #1E1B2E; color: #F5F3FF; border: 1px s
             </property>
             <item>
              <property name="text">
-              <string>👤 User</string>
+              <string> User</string>
              </property>
             </item>
             <item>
              <property name="text">
-              <string>🔧 Developer</string>
+              <string> Developer</string>
              </property>
             </item>
            </widget>
@@ -243,7 +243,7 @@ QComboBox QAbstractItemView { background: #1E1B2E; color: #F5F3FF; border: 1px s
 QPushButton:hover { background: #EF4444; color: #F8FAFC; }</string>
             </property>
             <property name="text">
-             <string>🔴 End Session</string>
+             <string> End Session</string>
             </property>
            </widget>
           </item>
@@ -265,37 +265,37 @@ QTabBar::tab:hover:!selected { background: #302852; color: #F5F3FF; }</string>
       </property>
       <widget class="DeviceInfoTab" name="tab_device">
        <attribute name="title">
-        <string>📱 Device Info</string>
+        <string>Device Info</string>
        </attribute>
       </widget>
       <widget class="LiveTrackingTab" name="tab_tracking">
        <attribute name="title">
-        <string>📍 Live Tracking</string>
+        <string>Live Tracking</string>
        </attribute>
       </widget>
       <widget class="LiveTrackingTab" name="tab_spatial_constraints">
        <attribute name="title">
-        <string>📍 Geofencing</string>
+        <string>Geofencing</string>
        </attribute>
       </widget>
       <widget class="ConfigTab" name="tab_config">
        <attribute name="title">
-        <string>⚙ Config</string>
+        <string>Config</string>
        </attribute>
       </widget>
       <widget class="CalibrationTab" name="tab_calibration">
        <attribute name="title">
-        <string>🔧 Calibration</string>
+        <string>Calibration</string>
        </attribute>
       </widget>
       <widget class="LogTab" name="tab_log">
        <attribute name="title">
-        <string>📋 Log History</string>
+        <string>Log History</string>
        </attribute>
       </widget>
       <widget class="CommunicationTab" name="tab_communication">
        <attribute name="title">
-        <string>📡 Communication</string>
+        <string>Communication</string>
        </attribute>
       </widget>
      </widget>

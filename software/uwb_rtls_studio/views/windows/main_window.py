@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMessageBox, QProgressBar, QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import QTimer, QSize, Qt, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QIcon, QAction
+from PyQt6.QtGui import QFont, QIcon, QAction, QKeySequence, QShortcut
 from PyQt6 import uic
 from common import protocol_pb2 as pb
 from utils.app_state import shared_app_state
@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
 
     def _setup_header_progress(self):
         # Create Scan Device button
-        self.btn_scan_device = QPushButton("🔍 Scan Device")
+        self.btn_scan_device = QPushButton(" Scan Device")
         self.btn_scan_device.setObjectName("btn_scan_device")
         self.btn_scan_device.setMinimumSize(QSize(130, 36))
         self.btn_scan_device.setMaximumSize(QSize(130, 36))
@@ -275,9 +275,28 @@ class MainWindow(QMainWindow):
         self._conn_progress_bar.setFixedHeight(18)
         layout.addWidget(self._conn_progress_bar, 1)
 
-        # Insert button first, then progress status frame
+        # Create Fullscreen helper button
+        self.btn_fullscreen = QPushButton("Fullscreen (F11)")
+        self.btn_fullscreen.setObjectName("btn_fullscreen")
+        self.btn_fullscreen.setMinimumSize(QSize(150, 36))
+        self.btn_fullscreen.setMaximumSize(QSize(160, 36))
+        self.btn_fullscreen.setStyleSheet(
+            "QPushButton { background: rgba(168, 85, 247, 0.12); color: #C084FC; border: 1px solid #A855F7; border-radius: 8px; font-weight: bold; font-size: 13px; }"
+            "QPushButton:hover { background: #A855F7; color: #F8FAFC; }"
+            "QPushButton:disabled { background: rgba(51, 65, 85, 0.2); color: #64748B; border: 1px solid #475569; }"
+        )
+        self.btn_fullscreen.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_fullscreen.setToolTip("Toggle Fullscreen Mode (F11)")
+        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
+
+        # Setup F11 keyboard shortcut
+        self._fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        self._fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+
+        # Insert buttons, then progress status frame
         self.header_layout.insertWidget(2, self.btn_scan_device)
-        self.header_layout.insertWidget(3, self._conn_progress_frame)
+        self.header_layout.insertWidget(3, self.btn_fullscreen)
+        self.header_layout.insertWidget(4, self._conn_progress_frame)
         self.update_progress_style("IDLE")
 
     def update_progress_style(self, status: str):
@@ -685,28 +704,28 @@ class MainWindow(QMainWindow):
         status = self.statusbar
 
         # Connection status
-        self._status_conn = QLabel("\U0001F534 Disconnected")
+        self._status_conn = QLabel("Disconnected")
         self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
         status.addWidget(self._status_conn)
 
         status.addWidget(self._make_separator())
 
         # Battery
-        self._status_bat = QLabel("\U0001F50B ---")
+        self._status_bat = QLabel("---")
         self._status_bat.setStyleSheet("color: #94A3B8;")
         status.addWidget(self._status_bat)
 
         status.addWidget(self._make_separator())
 
         # Session timer
-        self._status_session = QLabel("\u23F2 Session: 00:00:00")
+        self._status_session = QLabel("Session: 00:00:00")
         self._status_session.setStyleSheet("color: #94A3B8;")
         status.addWidget(self._status_session)
 
         status.addWidget(self._make_separator())
 
         # RSSI
-        self._status_rssi = QLabel("\U0001F4E1 RSSI: ---")
+        self._status_rssi = QLabel("RSSI: ---")
         status.addWidget(self._status_rssi)
 
         status.addWidget(self._make_separator())
@@ -725,17 +744,17 @@ class MainWindow(QMainWindow):
         status.addWidget(self._make_separator())
 
         # RMS
-        self._status_rms = QLabel("\U0001F4CA RMS: ---")
+        self._status_rms = QLabel("RMS: ---")
         status.addWidget(self._status_rms)
 
         status.addWidget(self._make_separator())
 
         # Update rate
-        self._status_rate = QLabel("\U0001F504 ---")
+        self._status_rate = QLabel("Rate: ---")
         status.addWidget(self._status_rate)
 
         # Right side: mode indicator
-        self._status_mode = QLabel("\U0001F464 User Mode")
+        self._status_mode = QLabel("User Mode")
         self._status_mode.setStyleSheet("color: #22D3EE; font-weight: bold;")
         status.addPermanentWidget(self._status_mode)
 
@@ -779,17 +798,17 @@ class MainWindow(QMainWindow):
     def _on_telemetry_status(self, data: dict):
         soc = data.get("bat_soc_percent")
         if soc is None:
-            self._status_bat.setText("\U0001F50B --")
+            self._status_bat.setText("--")
             self._status_bat.setStyleSheet("color: #94A3B8;")
             return
         soc = int(soc)
-        self._status_bat.setText(f"\U0001F50B {soc}%")
+        self._status_bat.setText(f"{soc}%")
         self._status_bat.setStyleSheet("color: #10B981;" if soc > 20 else "color: #EF4444;")
 
     def _on_ble_info_status(self, data: dict):
         rssi = data.get("rssi_dbm")
         if rssi is not None:
-            self._status_rssi.setText(f"\U0001F4E1 RSSI: {rssi} dBm")
+            self._status_rssi.setText(f"RSSI: {rssi} dBm")
 
         state_label = data.get("display_state") or data.get("state_name")
         try:
@@ -829,7 +848,7 @@ class MainWindow(QMainWindow):
         self._status_link_health.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def _on_position_status(self, x, y, z, rms):
-        self._status_rms.setText(f"\U0001F4CA RMS: {rms:.3f} m")
+        self._status_rms.setText(f"RMS: {rms:.3f} m")
 
     def _on_ranging_stats_status(self, stats: dict):
         try:
@@ -837,11 +856,11 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             rate_hz = 0.0
         self._status_rate.setText(
-            f"\U0001F504 Rate: {rate_hz:.1f} Hz" if rate_hz > 0.0 else "\U0001F504 Rate: --"
+            f"Rate: {rate_hz:.1f} Hz" if rate_hz > 0.0 else "Rate: --"
         )
 
     def _reset_ranging_rate_status(self):
-        self._status_rate.setText("\U0001F504 Rate: --")
+        self._status_rate.setText("Rate: --")
 
     def _on_device_changed(self, info: dict):
         status_text = info.get("Status")
@@ -854,34 +873,34 @@ class MainWindow(QMainWindow):
 
         if status_text == "Connecting":
             self.btn_scan_device.setEnabled(False)
-            self._status_conn.setText(f"\u23F3 Connecting: {name}")
+            self._status_conn.setText(f"Connecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
-            self._status_rate.setText("\U0001F504 ---")
+            self._status_rate.setText("Rate: ---")
             return
 
         if status_text == "Disconnecting":
             self.btn_scan_device.setEnabled(False)
-            self._status_conn.setText(f"\U0001F6D1 Disconnecting: {name}")
+            self._status_conn.setText(f"Disconnecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
-            self._status_rate.setText("\U0001F504 ---")
+            self._status_rate.setText("Rate: ---")
             return
 
         if status_text == "Disconnected":
             self.btn_scan_device.setEnabled(True)
             self.device_badge.setText("● -")
             label_name = name if name and name != "-" else "-"
-            self._status_conn.setText(f"\U0001F534 Disconnected: {label_name}")
+            self._status_conn.setText(f"Disconnected: {label_name}")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
-            self._status_bat.setText("\U0001F50B ---")
+            self._status_bat.setText("---")
             self._status_bat.setStyleSheet("color: #94A3B8;")
-            self._status_rssi.setText("\U0001F4E1 RSSI: ---")
-            self._status_rms.setText("\U0001F4CA RMS: ---")
-            self._status_rate.setText("\U0001F504 ---")
+            self._status_rssi.setText("RSSI: ---")
+            self._status_rms.setText("RMS: ---")
+            self._status_rate.setText("Rate: ---")
             return
 
         if status_text == "Connected":
             self.btn_scan_device.setEnabled(True)
-            self._status_conn.setText(f"\U0001F7E2 Connected: {name}")
+            self._status_conn.setText(f"Connected: {name}")
             self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
             self._reset_ranging_rate_status()
             return
@@ -889,13 +908,13 @@ class MainWindow(QMainWindow):
         if not info:
             self.btn_scan_device.setEnabled(True)
             self.device_badge.setText("\u25CF -")
-            self._status_conn.setText("\U0001F534 Disconnected")
+            self._status_conn.setText("Disconnected")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
-            self._status_bat.setText("\U0001F50B ---")
+            self._status_bat.setText("---")
             self._status_bat.setStyleSheet("color: #94A3B8;")
-            self._status_rssi.setText("\U0001F4E1 RSSI: ---")
-            self._status_rms.setText("\U0001F4CA RMS: ---")
-            self._status_rate.setText("\U0001F504 ---")
+            self._status_rssi.setText("RSSI: ---")
+            self._status_rms.setText("RMS: ---")
+            self._status_rate.setText("Rate: ---")
 
     def _make_separator(self):
         sep = QLabel("|")
@@ -916,7 +935,7 @@ class MainWindow(QMainWindow):
         self._session_seconds = 0
         if self._log_vm:
             self._log_vm.clear_session_logs()
-        self._status_session.setText("\u23F2 Session: 00:00:00")
+        self._status_session.setText("Session: 00:00:00")
         self._status_session.setStyleSheet("color: #10B981;")
         self._session_timer.start(1000)
         self._set_session_button_active(True)
@@ -957,18 +976,18 @@ class MainWindow(QMainWindow):
         # Update status bar and active tab
         if self._is_developer:
             self.tabs.setCurrentWidget(self._tab_spatial_constraints)
-            self._status_mode.setText("\U0001F527 Developer Mode")
+            self._status_mode.setText("Developer Mode")
             self._status_mode.setStyleSheet("color: #F59E0B; font-weight: bold;")
         else:
             self.tabs.setCurrentWidget(self._tab_tracking)
-            self._status_mode.setText("\U0001F464 User Mode")
+            self._status_mode.setText("User Mode")
             self._status_mode.setStyleSheet("color: #22D3EE; font-weight: bold;")
 
     def _on_tab_changed(self, index):
         if index < 0 or not hasattr(self, "active_tab_title"):
             return
         text = self.tabs.tabText(index)
-        # Clean leading emoji and space if present (e.g., "📱 Device Info" -> "Device Info")
+        # Keep header text aligned with the tab label without icon prefixes
         cleaned_text = text
         for i, char in enumerate(text):
             if char.isalnum():
@@ -999,7 +1018,7 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._session_timer.stop()
-            self._status_session.setText("\u23F2 Session: Ending...")
+            self._status_session.setText("Session: Ending...")
             self._status_session.setStyleSheet("color: #F59E0B;")
             self.btn_end_session.setEnabled(False)
 
@@ -1015,7 +1034,7 @@ class MainWindow(QMainWindow):
             
     def _set_session_button_active(self, active: bool):
         if active:
-            self.btn_end_session.setText("\U0001F534 End Session")
+            self.btn_end_session.setText("End Session")
             self.btn_end_session.setToolTip("End current session and save active ranging/log runs")
             self.btn_end_session.setStyleSheet(
                 "QPushButton { background: rgba(239,68,68,0.12); color: #EF4444; border: 1px solid #EF4444; "
@@ -1023,7 +1042,7 @@ class MainWindow(QMainWindow):
                 "QPushButton:hover { background: #EF4444; color: #F8FAFC; }"
             )
         else:
-            self.btn_end_session.setText("\u25B6 Start Session")
+            self.btn_end_session.setText("Start Session")
             self.btn_end_session.setToolTip("Start a new app session")
             self.btn_end_session.setStyleSheet(
                 "QPushButton { background: rgba(16,185,129,0.12); color: #10B981; border: 1px solid #10B981; "
@@ -1047,13 +1066,13 @@ class MainWindow(QMainWindow):
         self._session_seconds = 0
         self._session_timer.stop()
         self.btn_end_session.setEnabled(True)
-        self._status_session.setText("\u23F2 Session: Ended")
+        self._status_session.setText("Session: Ended")
         self._status_session.setStyleSheet("color: #F59E0B;")
         self._set_session_button_active(False)
 
     def _on_session_save_failed(self, message: str):
         self.btn_end_session.setEnabled(True)
-        self._status_session.setText("\u23F2 Session: End Failed")
+        self._status_session.setText("Session: End Failed")
         self._status_session.setStyleSheet("color: #EF4444;")
         self._set_session_button_active(True)
         if self._shutdown_in_progress:
@@ -1147,7 +1166,7 @@ class MainWindow(QMainWindow):
             h = self._session_seconds // 3600
             m = (self._session_seconds % 3600) // 60
             s = self._session_seconds % 60
-            self._status_session.setText(f"\u23F2 Session: {h:02d}:{m:02d}:{s:02d}")
+            self._status_session.setText(f"Session: {h:02d}:{m:02d}:{s:02d}")
             self._status_session.setStyleSheet("color: #10B981;")
 
     def _on_dongle_disconnected(self):
@@ -1259,3 +1278,36 @@ class MainWindow(QMainWindow):
 
         self._safe_shutdown()
         event.ignore()
+
+    def toggle_fullscreen(self):
+        """Toggle full screen mode for the application window cleanly (F11 shortcut / button)."""
+        if self.isFullScreen():
+            if getattr(self, '_was_maximized_before_fullscreen', True):
+                self.showMaximized()
+            else:
+                self.showNormal()
+        else:
+            self._was_maximized_before_fullscreen = self.isMaximized()
+            self.showFullScreen()
+        self._update_fullscreen_button_ui()
+
+    def _update_fullscreen_button_ui(self):
+        if hasattr(self, 'btn_fullscreen') and self.btn_fullscreen:
+            if self.isFullScreen():
+                self.btn_fullscreen.setText("Fullscreen (F11)")
+                self.btn_fullscreen.setToolTip("Exit Fullscreen Mode (F11)")
+            else:
+                self.btn_fullscreen.setText("Fullscreen (F11)")
+                self.btn_fullscreen.setToolTip("Toggle Fullscreen Mode (F11)")
+
+    def changeEvent(self, event):
+        if event and event.type() == event.Type.WindowStateChange:
+            self._update_fullscreen_button_ui()
+        super().changeEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_F11:
+            self.toggle_fullscreen()
+            event.accept()
+        else:
+            super().keyPressEvent(event)

@@ -179,7 +179,6 @@ class _PreviewPane(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(221, 227, 234))
 
         zones = self._zones()

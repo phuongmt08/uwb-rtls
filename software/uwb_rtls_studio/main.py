@@ -414,11 +414,18 @@ def main():
     # High DPI scaling
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
-    # Configure hardware anti-aliasing for OpenGL
+    # Disable hardware anti-aliasing (0x MSAA) and VSync delays for OpenGL
     from PyQt6.QtGui import QSurfaceFormat
     fmt = QSurfaceFormat()
-    fmt.setSamples(8)  # 8x MSAA
+    fmt.setSamples(0)        # Disabled MSAA anti-aliasing completely for maximum performance
+    fmt.setSwapInterval(0)   # Disabled swap interval to eliminate frame wait delays
     QSurfaceFormat.setDefaultFormat(fmt)
+
+    try:
+        import pyqtgraph as pg
+        pg.setConfigOptions(antialias=False)
+    except Exception:
+        pass
 
     app = QApplication(sys.argv)
 

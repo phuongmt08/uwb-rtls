@@ -125,7 +125,7 @@ class DonglePopup(QDialog):
         layout.setContentsMargins(32, 28, 32, 28)
 
         # Title
-        title = QLabel("🔵 Dongle Detection")
+        title = QLabel("Dongle Detection")
         title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         title.setStyleSheet("color: #22D3EE; background: transparent;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)

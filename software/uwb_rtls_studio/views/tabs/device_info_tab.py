@@ -146,7 +146,7 @@ class DeviceInfoTab(QWidget):
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.addStretch()
         
-        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setObjectName("btn_refresh")
         self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_refresh.setStyleSheet(
@@ -372,10 +372,10 @@ class DeviceInfoTab(QWidget):
         if hasattr(self, "btn_refresh"):
             if is_scanning:
                 self.btn_refresh.setEnabled(False)
-                self.btn_refresh.setText("⏳ Scanning...")
+                self.btn_refresh.setText("Scanning...")
             else:
                 self.btn_refresh.setEnabled(True)
-                self.btn_refresh.setText("🔄 Refresh")
+                self.btn_refresh.setText("Refresh")
 
         # Scan status removed by user
 
