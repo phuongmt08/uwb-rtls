@@ -176,7 +176,9 @@ standard names. */
 #define portGET_RUN_TIME_COUNTER_VALUE()         getRunTimeCounterValue()
 uint32_t getRunTimeCounterValue(void);
 #define INCLUDE_pxTaskGetStackStart              1
+#ifdef DEVELOPER_MODE
 #include "SEGGER_SYSVIEW_FreeRTOS.h"
+#endif
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

@@ -95,7 +95,7 @@ INCLUDE_DIRS := Core/Inc Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS
 	middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10
 INCLUDES := $(addprefix -I,$(INCLUDE_DIRS))
 
-CFLAGS := $(CPUFLAGS) -std=gnu11 $(OPTFLAGS) $(DEFS) $(INCLUDES) -ffunction-sections -fdata-sections -fstack-usage -Wall --specs=nano.specs
+CFLAGS := $(CPUFLAGS) -std=gnu11 $(OPTFLAGS) $(DEFS) $(INCLUDES) -ffunction-sections -fdata-sections -fmerge-all-constants -fstack-usage -Wall --specs=nano.specs
 ASFLAGS := $(CPUFLAGS) -x assembler-with-cpp $(DEFS) $(INCLUDES) -g3
 
 LDSCRIPT := STM32F411CEUX_FLASH.ld

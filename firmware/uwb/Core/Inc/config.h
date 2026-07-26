@@ -15,7 +15,7 @@
 #define HAVE_BLE_PERIPHERAL
 
 /* Developer diagnostics */
-#define DEVELOPER_MODE
+#undef DEVELOPER_MODE
 
 #ifndef APP_RTOS_STATS_LOG_ENABLE
 #define APP_RTOS_STATS_LOG_ENABLE 1

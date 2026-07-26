@@ -33,17 +33,17 @@ Memory layout (memorylayout.h):
   MEM_APP_START  = 0x0800_C000
   MEM_APP_END    = 0x0804_0000  (208 KB app region)
 """
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-
 import os
+import serial
 import struct
 import sys
 import time
+import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from common import protocol_pb2 as pb
 from common.commands import CommandFactory
@@ -58,8 +58,18 @@ MEM_APP_LEN   = MEM_APP_END - MEM_APP_START   # 208 KB
 
 # ─── FOTA tuning ─────────────────────────────────────────────────────────────
 CHUNK_SIZE        = 200    # bytes per flash_write packet (must be multiple of 4)
+BLOCK_SIZE        = 8      # max host ACK window; frame boundaries may end it earlier
+MAX_BLOCK_RETRIES = 5
+FOTA_FLAG_COMPRESSED = 0x80000000
+FOTA_FLAG_ACK_REQ     = 0x40000000
+FOTA_RAW_BLOCK_SIZE   = 4096
+FOTA_COMP_BLOCK_MAX   = 4160
+FOTA_FRAME_MAGIC      = b"FD"
+FOTA_FRAME_VERSION    = 1
+
 ERASE_TIMEOUT_S   = 8.0   # sector erase can take ~1–2 s on F411
-WRITE_TIMEOUT_S   = 0.5    # per-chunk ACK timeout
+WRITE_TIMEOUT_S   = 0.5    # per-window ACK timeout
+TX_PACKET_GAP_S   = 0.005  # pace packets within each ACK window
 VERIFY_TIMEOUT_S  = 5.0   # CRC calc + vector check
 ENTER_TIMEOUT_S   = 0.5
 POST_ENTER_WAIT_S = 2   # wait after enter_to_bootloader ACK for reset+bootloader init
@@ -70,8 +80,6 @@ DEFAULT_BL_DST  = int(VvAddress.MCU)
 DEFAULT_BAUD = 115200
 
 assert CHUNK_SIZE % 4 == 0, "CHUNK_SIZE must be 4-byte aligned"
-
-# ─── Intel HEX parser ────────────────────────────────────────────────────────
 
 class HexParseError(Exception):
     pass
@@ -158,16 +166,84 @@ def _parse_intel_hex(hex_path: str) -> bytes:
     return bytes(blob)
 
 
-def _split_chunks(data: bytes, chunk_size: int) -> List[Tuple[int, bytes]]:
+def _compress_fota_blocks(data: bytes) -> Tuple[bytes, List[int]]:
+    """Encode independent 4 KB raw-DEFLATE frames for the bootloader."""
+    framed = bytearray()
+    frame_end_offsets = []
+
+    for offset in range(0, len(data), FOTA_RAW_BLOCK_SIZE):
+        raw = data[offset : offset + FOTA_RAW_BLOCK_SIZE]
+        compressor = zlib.compressobj(
+            level=6,
+            method=zlib.DEFLATED,
+            wbits=-12,
+        )
+        compressed = compressor.compress(raw) + compressor.flush()
+        if len(compressed) > FOTA_COMP_BLOCK_MAX:
+            raise ValueError(
+                f"compressed block too large: {len(compressed)} bytes"
+            )
+
+        framed.extend(
+            struct.pack(
+                "<2sBBHH",
+                FOTA_FRAME_MAGIC,
+                FOTA_FRAME_VERSION,
+                0,
+                len(raw),
+                len(compressed),
+            )
+        )
+        framed.extend(compressed)
+        frame_end_offsets.append(len(framed))
+
+    return bytes(framed), frame_end_offsets
+
+
+def _split_chunks(
+    data: bytes,
+    chunk_size: int,
+    pad_last: bool = True,
+) -> List[Tuple[int, bytes]]:
     """Split binary into (flash_address, chunk_bytes) pairs."""
     chunks = []
     for offset in range(0, len(data), chunk_size):
         chunk = data[offset : offset + chunk_size]
-        # Pad last chunk to multiple of 4
-        if len(chunk) % 4 != 0:
+        if pad_last and len(chunk) % 4 != 0:
             chunk = chunk + b"\xFF" * (4 - len(chunk) % 4)
         chunks.append((MEM_APP_START + offset, bytes(chunk)))
     return chunks
+
+
+def _group_chunks_for_ack(
+    chunks: List[Tuple[int, bytes]],
+    max_window_size: int,
+    frame_end_offsets: List[int] = None,
+) -> List[List[Tuple[int, int, bytes]]]:
+    """End an ACK window at both its size limit and each DEFLATE frame."""
+    if max_window_size <= 0:
+        raise ValueError("max_window_size must be positive")
+
+    frame_ends = frame_end_offsets or []
+    frame_index = 0
+    windows = []
+    window = []
+
+    for idx, (addr, data) in enumerate(chunks):
+        window.append((idx, addr, data))
+        chunk_end = (addr - MEM_APP_START) + len(data)
+        completes_frame = False
+
+        while frame_index < len(frame_ends) and frame_ends[frame_index] <= chunk_end:
+            completes_frame = True
+            frame_index += 1
+
+        is_last = idx == len(chunks) - 1
+        if len(window) >= max_window_size or completes_frame or is_last:
+            windows.append(window)
+            window = []
+
+    return windows
 
 
 # ─── Protocol helpers ────────────────────────────────────────────────────────
@@ -188,7 +264,6 @@ def _wait_for_fota_state(
                 print(f"  [FOTA STATE] {label} → state={state}")
                 if state == expected_state_value:
                     return pkt
-                # Error state from device → abort early
                 if state == pb.FOTA_STATE_ERROR:
                     print(f"  [ERROR] Device reported FOTA_STATE_ERROR during {label}")
                     return None
@@ -196,39 +271,41 @@ def _wait_for_fota_state(
     return None
 
 
-# ─── FOTA test steps ─────────────────────────────────────────────────────────
-
 def step_enter_bootloader(session: VvTestSession, factory: CommandFactory,
                           src: int, dst: int) -> bool:
     print("\n── STEP 1: enter_to_bootloader ──────────────────────────────────")
     seq = session.proto.next_seq()
     pkt = factory.enter_to_bootloader(src, dst, seq)
-    packets = send_and_print(session, "enter_to_bootloader", pkt,
-                             timeout_s=ENTER_TIMEOUT_S)
+    packets = send_and_print(
+        session,
+        "enter_to_bootloader",
+        pkt,
+        timeout_s=ENTER_TIMEOUT_S,
+    )
 
-    ack_ok = False
-    for p in packets:
-        if p.WhichOneof("params") == "ack" and p.ack.ack_seq == seq:
-            ack_ok = True
-            break
-
+    ack_ok = any(
+        p.WhichOneof("params") == "ack" and p.ack.ack_seq == seq
+        for p in packets
+    )
     resp = first_param(packets, "fota_state_resp")
 
-    # If app ACKed enter_to_bootloader, it is likely resetting now.
-    # Wait for bootloader to come up before sending flash_erase.
     if ack_ok:
-        print(f"  [INFO] enter_to_bootloader ACK received, wait {POST_ENTER_WAIT_S:.1f}s for reboot...")
+        print(
+            "  [INFO] enter_to_bootloader ACK received, wait "
+            f"{POST_ENTER_WAIT_S:.1f}s for reboot..."
+        )
         time.sleep(POST_ENTER_WAIT_S)
-        # Drain noisy packets from other nodes/links after reboot window.
         _ = session.recv_packets(timeout_s=0.2)
 
     if resp is None:
-        # Bootloader is already in IDLE; device may not echo if already there
-        print("  [WARN] No fota_state_resp received — assuming device is in bootloader")
-        return True   # non-fatal: device might not be running app
-    state = resp.fota_state_resp.state
-    print(f"  fota_state = {state}")
-    return True   # any response is acceptable at this stage
+        print(
+            "  [WARN] No fota_state_resp received — "
+            "assuming device is in bootloader"
+        )
+        return True
+
+    print(f"  fota_state = {resp.fota_state_resp.state}")
+    return True
 
 
 def step_flash_erase(session: VvTestSession, factory: CommandFactory,
@@ -269,44 +346,136 @@ def step_flash_erase(session: VvTestSession, factory: CommandFactory,
 
 
 def step_flash_write(session: VvTestSession, factory: CommandFactory,
-                     src: int, dst: int, chunks: List[Tuple[int, bytes]]) -> bool:
-    print(f"\n── STEP 3: flash_write ({len(chunks)} chunks × {CHUNK_SIZE}B) ──")
-    total = len(chunks)
-    for idx, (addr, data) in enumerate(chunks, 1):
-        seq = session.proto.next_seq()
-        pkt = factory._base(src, dst, seq)
-        pkt.flash_write.address = addr
-        pkt.flash_write.data = data
+                     src: int, dst: int, firmware_blob: bytes,
+                     compress: bool = True, block_size: int = BLOCK_SIZE) -> bool:
+    if compress:
+        compressed_data, frame_end_offsets = _compress_fota_blocks(firmware_blob)
+        frame_count = len(frame_end_offsets)
+        ratio = len(compressed_data) / len(firmware_blob) * 100.0
+        print(
+            "\n── STEP 3: flash_write "
+            f"(Block DEFLATE: {len(firmware_blob)}B -> "
+            f"{len(compressed_data)}B in {frame_count} frames "
+            f"[{ratio:.1f}%], {100.0 - ratio:.1f}% saved) ──"
+        )
+        raw_chunks = _split_chunks(
+            compressed_data,
+            CHUNK_SIZE,
+            pad_last=False,
+        )
+    else:
+        print(f"\n── STEP 3: flash_write (Uncompressed: {len(firmware_blob)}B) ──")
+        raw_chunks = _split_chunks(firmware_blob, CHUNK_SIZE)
+        frame_end_offsets = []
 
-        print(f"[{_ts()}] TX flash_write {idx}/{total} addr=0x{addr:08X} len={len(data)}")
-        session.send_packet(pkt)
+    total_chunks = len(raw_chunks)
+    raw_windows = _group_chunks_for_ack(
+        raw_chunks,
+        block_size,
+        frame_end_offsets,
+    )
+    sync_mode = ", DEFLATE-frame sync" if compress else ""
+    print(
+        f"Total chunks: {total_chunks} × {CHUNK_SIZE}B "
+        f"(ACK window<={block_size}{sync_mode})"
+    )
 
-        ack_received = False
-        deadline = time.time() + WRITE_TIMEOUT_S
+    packet_windows = []
+    for raw_window in raw_windows:
+        packet_window = []
+        for position, (idx, addr, data) in enumerate(raw_window):
+            req_ack = position == len(raw_window) - 1
 
-        while time.time() < deadline:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                break
+            flags = 0
+            if compress:
+                flags |= FOTA_FLAG_COMPRESSED
+            if req_ack:
+                flags |= FOTA_FLAG_ACK_REQ
 
-            packets = session.recv_packets(timeout_s=min(0.05, remaining))
-            for p in packets:
-                session.dbg(f"RX {session.packet_name(p)} ({session.packet_hdr(p)})")
-                if p.WhichOneof("params") == "ack" and p.ack.ack_seq == seq:
-                    ack_received = True
+            packet_addr = flags | (addr & 0x0FFFFFFF)
+
+            seq = session.proto.next_seq()
+            pkt = factory._base(src, dst, seq)
+            pkt.flash_write.address = packet_addr
+            pkt.flash_write.data = data
+            packet_window.append((idx, seq, req_ack, pkt))
+        packet_windows.append(packet_window)
+
+    i = 0
+    t_start = time.time()
+    for block in packet_windows:
+        last_in_block = block[-1]
+        block_retry_count = 0
+
+        while block_retry_count < MAX_BLOCK_RETRIES:
+            # Send all packets in current block continuously. The bootloader
+            # uses the compressed input address to skip already committed data.
+            transport_error = None
+            for idx, seq, req_ack, pkt in block:
+                try:
+                    session.send_packet(pkt)
+                except (
+                    serial.SerialTimeoutException,
+                    serial.SerialException,
+                ) as exc:
+                    transport_error = exc
+                    break
+                time.sleep(TX_PACKET_GAP_S)
+
+            ack_received = False
+            if transport_error is None:
+                deadline = time.time() + WRITE_TIMEOUT_S
+                while time.time() < deadline:
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        break
+                    packets = session.recv_packets(
+                        timeout_s=min(0.05, remaining)
+                    )
+                    for p in packets:
+                        if p.WhichOneof("params") == "ack" and p.ack.ack_seq == last_in_block[1]:
+                            if p.ack.response == pb.PACKET_ACK_RESPONSE_ACK:
+                                ack_received = True
+                            else:
+                                print(f"[{_ts()}] [NACK] Received NACK for seq {last_in_block[1]}")
+                                deadline = 0
+                                break
+
+                    if ack_received:
+                        break
+            else:
+                print(
+                    f"[{_ts()}] [TX BACKPRESSURE] chunk "
+                    f"{idx + 1}/{total_chunks}: {transport_error}"
+                )
+                if not isinstance(
+                    transport_error,
+                    serial.SerialTimeoutException,
+                ):
+                    print("[FAIL] Dongle COM handle is no longer valid")
+                    return False
+                time.sleep(0.1)
 
             if ack_received:
                 break
 
+            block_retry_count += 1
+            print(f"[{_ts()}] [RETRY] No ACK for block ending at chunk "
+                  f"{last_in_block[0]+1}/{total_chunks} "
+                  f"({block_retry_count}/{MAX_BLOCK_RETRIES})")
+
         if not ack_received:
-            print(f"[{_ts()}] [FAIL] No ACK for chunk {idx}/{total} addr=0x{addr:08X} in {WRITE_TIMEOUT_S:.1f}s")
+            print(f"[{_ts()}] [FAIL] Block ending at chunk "
+                  f"{last_in_block[0]+1}/{total_chunks} failed after "
+                  f"{MAX_BLOCK_RETRIES} attempts")
             return False
 
-        if idx % 20 == 0 or idx == total:
-            pct = idx * 100 // total
-            print(f"  Written {idx}/{total} chunks ({pct}%)...")
+        i += len(block)
+        pct = (i * 100) // total_chunks
+        print(f"  Written {i}/{total_chunks} chunks ({pct}%)...")
 
-    print("  [OK] All chunks written and ACK-ed")
+    t_elapsed = max(0.001, time.time() - t_start)
+    print(f"  [OK] All chunks written in {t_elapsed:.2f}s! ({len(firmware_blob)/t_elapsed/1024.0:.1f} KB/s effective throughput)")
     return True
 
 
@@ -426,7 +595,7 @@ def main() -> int:
             all_ok &= step_flash_erase(session, factory, src, bl_dst)
 
         if all_ok:
-            all_ok &= step_flash_write(session, factory, src, bl_dst, chunks)
+            all_ok &= step_flash_write(session, factory, src, bl_dst, firmware_blob, compress=True)
 
         if all_ok:
             all_ok &= step_flash_verify(session, factory, src, bl_dst)

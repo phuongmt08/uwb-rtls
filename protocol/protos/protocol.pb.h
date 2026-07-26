@@ -13,7 +13,7 @@
 typedef enum _protobuf_common_constant_t {
     protobuf_UNSPECIFIED = 0,
     protobuf_PROTOCOL_REV = 125,
-    protobuf_PROTOBUF_PACKET_WARN_BYTES = 220
+    protobuf_PROTOBUF_PACKET_WARN_BYTES = 230
 } protobuf_common_constant_t;
 
 typedef enum _protobuf_packet_ack_response_t {

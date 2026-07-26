@@ -1,8 +1,11 @@
 import os
+import serial
+import struct
 import sys
 import time
 from contextlib import contextmanager
 from typing import Optional
+import zlib
 
 # Ensure common is in sys.path
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -18,9 +21,17 @@ from serial.tools import list_ports
 MEM_APP_START = 0x0800_C000
 MEM_APP_END   = 0x0804_0000
 
-class HexParseError(Exception):
-    pass
 
+FOTA_FLAG_COMPRESSED = 0x80000000
+FOTA_FLAG_ACK_REQ     = 0x40000000
+BLOCK_SIZE            = 8
+MAX_BLOCK_RETRIES     = 5
+WRITE_ACK_TIMEOUT_S   = 3
+TX_PACKET_GAP_S       = 0.015
+FOTA_RAW_BLOCK_SIZE   = 4096
+FOTA_COMP_BLOCK_MAX   = 4160
+FOTA_FRAME_MAGIC      = b"FD"
+FOTA_FRAME_VERSION    = 1
 def _parse_intel_hex(hex_path: str) -> bytes:
     raw: dict[int, int] = {}
     base_addr = 0
@@ -61,14 +72,80 @@ def _parse_intel_hex(hex_path: str) -> bytes:
     for addr, val in app_bytes.items(): blob[addr - MEM_APP_START] = val
     return bytes(blob)
 
-def _split_chunks(data: bytes, chunk_size: int) -> list:
+def _compress_fota_blocks(data: bytes) -> tuple[bytes, list[int]]:
+    """Encode independent 4 KB raw-DEFLATE frames for bounded-RAM decoding."""
+    framed = bytearray()
+    frame_end_offsets = []
+
+    for offset in range(0, len(data), FOTA_RAW_BLOCK_SIZE):
+        raw = data[offset : offset + FOTA_RAW_BLOCK_SIZE]
+        compressor = zlib.compressobj(
+            level=6,
+            method=zlib.DEFLATED,
+            wbits=-12,
+        )
+        compressed = compressor.compress(raw) + compressor.flush()
+        if len(compressed) > FOTA_COMP_BLOCK_MAX:
+            raise ValueError(
+                f"compressed block too large: {len(compressed)} bytes"
+            )
+
+        framed.extend(
+            struct.pack(
+                "<2sBBHH",
+                FOTA_FRAME_MAGIC,
+                FOTA_FRAME_VERSION,
+                0,
+                len(raw),
+                len(compressed),
+            )
+        )
+        framed.extend(compressed)
+        frame_end_offsets.append(len(framed))
+
+    return bytes(framed), frame_end_offsets
+
+
+def _split_chunks(data: bytes, chunk_size: int, pad_last: bool = True) -> list:
     chunks = []
     for offset in range(0, len(data), chunk_size):
         chunk = data[offset : offset + chunk_size]
-        if len(chunk) % 4 != 0:
+        if pad_last and len(chunk) % 4 != 0:
             chunk = chunk + b"\xFF" * (4 - len(chunk) % 4)
         chunks.append((MEM_APP_START + offset, bytes(chunk)))
     return chunks
+
+
+def _group_chunks_for_ack(
+    chunks: list,
+    max_window_size: int,
+    frame_end_offsets: list[int] | None = None,
+) -> list:
+    """End an ACK window at both its size limit and each DEFLATE frame."""
+    if max_window_size <= 0:
+        raise ValueError("max_window_size must be positive")
+
+    frame_ends = frame_end_offsets or []
+    frame_index = 0
+    windows = []
+    window = []
+
+    for idx, (addr, data) in enumerate(chunks):
+        window.append((idx, addr, data))
+        chunk_end = (addr - MEM_APP_START) + len(data)
+        completes_frame = False
+
+        while frame_index < len(frame_ends) and frame_ends[frame_index] <= chunk_end:
+            completes_frame = True
+            frame_index += 1
+
+        is_last = idx == len(chunks) - 1
+        if len(window) >= max_window_size or completes_frame or is_last:
+            windows.append(window)
+            window = []
+
+    return windows
+
 
 class FotaService:
     def __init__(self):
@@ -408,42 +485,165 @@ class FotaService:
             if not receiving:
                 log_cb("[FOTA] [FAIL] Never reached RECEIVING state after erase.")
                 return
-                
-            # 3. flash_write chunks
-            log_cb(f"[FOTA] [STEP 3] Sending {len(chunks)} chunks...")
-            total = len(chunks)
-            for idx, (addr, data) in enumerate(chunks, 1):
-                retry_count = 0
-                success = False
-                while retry_count < 3 and not success:
+
+            # 2.5. Optimize BLE connection params for fast FOTA transfer (slave_latency = 0)
+            try:
+                log_cb("[FOTA] Setting BLE slave_latency=0 for high-speed transfer...")
+                seq_params = session.proto.next_seq()
+                pkt_params = self.factory.ble_conn_params_set(
+                    src=src,
+                    dst=int(VvAddress.CENTRAL),
+                    seq=seq_params,
+                    min_interval_ms=8,
+                    max_interval_ms=15,
+                    slave_latency=0,
+                    sup_timeout_ms=4000
+                )
+                session.send_packet(pkt_params)
+                time.sleep(0.2)
+                _ = session.recv_packets(0.1)
+            except Exception as e:
+                log_cb(f"[FOTA] [WARN] Could not set BLE conn params: {e}")
+
+            # 3. Stream independent raw-DEFLATE frames. Each frame expands to
+            # at most 4 KB, so the bootloader never buffers the complete image.
+            try:
+                compressed_blob, frame_end_offsets = _compress_fota_blocks(
+                    firmware_blob
+                )
+                frame_count = len(frame_end_offsets)
+                ratio = len(compressed_blob) / len(firmware_blob) * 100.0
+                log_cb(
+                    "[FOTA] [STEP 3] Block DEFLATE: "
+                    f"{len(firmware_blob)} B -> {len(compressed_blob)} B "
+                    f"in {frame_count} frames [{ratio:.1f}%] "
+                    f"({100.0 - ratio:.1f}% saved)"
+                )
+                raw_chunks = _split_chunks(
+                    compressed_blob,
+                    chunk_size,
+                    pad_last=False,
+                )
+                use_compress = True
+            except Exception as e:
+                log_cb(
+                    f"[FOTA] [WARN] Block DEFLATE failed ({e}), "
+                    "sending uncompressed."
+                )
+                raw_chunks = _split_chunks(firmware_blob, chunk_size)
+                frame_end_offsets = []
+                use_compress = False
+
+            total_chunks = len(raw_chunks)
+            raw_windows = _group_chunks_for_ack(
+                raw_chunks,
+                BLOCK_SIZE,
+                frame_end_offsets,
+            )
+            sync_mode = ", DEFLATE-frame sync" if use_compress else ""
+            log_cb(
+                f"[FOTA] Streaming {total_chunks} chunks "
+                f"(ACK window<={BLOCK_SIZE}{sync_mode}, "
+                f"TX gap={TX_PACKET_GAP_S * 1000:.0f} ms)..."
+            )
+
+            packet_windows = []
+            for raw_window in raw_windows:
+                packet_window = []
+                for position, (idx, addr, data) in enumerate(raw_window):
+                    req_ack = position == len(raw_window) - 1
+
+                    flags = 0
+                    if use_compress:
+                        flags |= FOTA_FLAG_COMPRESSED
+                    if req_ack:
+                        flags |= FOTA_FLAG_ACK_REQ
+
+                    packet_addr = flags | (addr & 0x0FFFFFFF)
                     seq = session.proto.next_seq()
                     pkt = self.factory._base(src, dst, seq)
-                    pkt.flash_write.address = addr
+                    pkt.flash_write.address = packet_addr
                     pkt.flash_write.data = data
-                    session.send_packet(pkt)
-                    
-                    ack_deadline = time.time() + 0.5
-                    while time.time() < ack_deadline:
-                        for p in session.recv_packets(0.05):
-                            if p.WhichOneof("params") == "ack" and p.ack.ack_seq == seq:
-                                success = True
+                    packet_window.append((idx, seq, req_ack, pkt))
+                packet_windows.append(packet_window)
+
+            i = 0
+            t_write_start = time.time()
+            for block in packet_windows:
+                last_in_block = block[-1]
+                block_retry_count = 0
+
+                while block_retry_count < MAX_BLOCK_RETRIES:
+                    # Retrying the full block is safe because the bootloader
+                    # skips compressed input addresses it has already committed.
+                    transport_error = None
+                    for idx, seq, req_ack, pkt in block:
+                        try:
+                            session.send_packet(pkt)
+                        except (
+                            serial.SerialTimeoutException,
+                            serial.SerialException,
+                        ) as exc:
+                            transport_error = exc
+                            break
+                        time.sleep(TX_PACKET_GAP_S)
+
+                    ack_received = False
+                    if transport_error is None:
+                        deadline = time.time() + WRITE_ACK_TIMEOUT_S
+                        while time.time() < deadline:
+                            for p in session.recv_packets(0.05):
+                                if p.WhichOneof("params") == "ack" and p.ack.ack_seq == last_in_block[1]:
+                                    if p.ack.response == pb.PACKET_ACK_RESPONSE_ACK:
+                                        ack_received = True
+                                    else:
+                                        log_cb(f"[FOTA] [WARN] Received NACK for block ending seq {last_in_block[1]}")
+                                        deadline = 0
+                                        break
+                            if ack_received:
                                 break
-                        if success: break
-                    
-                    if not success:
-                        retry_count += 1
-                        log_cb(f"[FOTA] [WARN] No ACK for chunk {idx}/{total}, retrying ({retry_count}/3)...")
-                        
-                if not success:
-                    log_cb(f"[FOTA] [FAIL] Chunk {idx}/{total} failed after 3 retries. Aborting OTA.")
+                    else:
+                        log_cb(
+                            "[FOTA] [WARN] Serial TX backpressure at chunk "
+                            f"{idx + 1}/{total_chunks}: {transport_error}"
+                        )
+                        if not isinstance(
+                            transport_error,
+                            serial.SerialTimeoutException,
+                        ):
+                            log_cb(
+                                "[FOTA] [FAIL] Dongle COM handle became "
+                                "invalid; waiting for automatic reconnect."
+                            )
+                            return
+                        time.sleep(0.1)
+
+                    if ack_received:
+                        break
+
+                    block_retry_count += 1
+                    log_cb(
+                        f"[FOTA] [WARN] No ACK for block chunk "
+                        f"{last_in_block[0]+1}/{total_chunks}, retrying "
+                        f"({block_retry_count}/{MAX_BLOCK_RETRIES})..."
+                    )
+
+                if not ack_received:
+                    log_cb(
+                        f"[FOTA] [FAIL] Block ending at chunk "
+                        f"{last_in_block[0]+1}/{total_chunks} failed after "
+                        f"{MAX_BLOCK_RETRIES} attempts. Aborting OTA."
+                    )
                     return
-                
-                pct = int((idx / total) * 100)
+
+                i += len(block)
+                pct = int((i / total_chunks) * 100)
                 progress_cb(pct)
-                if idx % 10 == 0 or idx == total:
-                    log_cb(f"[FOTA] Written {idx}/{total} chunks ({pct}%)...")
-                    
-            log_cb("[FOTA] All chunks written successfully.")
+                if i % 20 == 0 or i == total_chunks:
+                    log_cb(f"[FOTA] Streamed {i}/{total_chunks} chunks ({pct}%)...")
+
+            t_write_elapsed = max(0.001, time.time() - t_write_start)
+            log_cb(f"[FOTA] All chunks written in {t_write_elapsed:.2f}s ({len(firmware_blob)/t_write_elapsed/1024.0:.1f} KB/s effective throughput).")
             
             # 4. flash_verify
             log_cb("[FOTA] [STEP 4] Sending flash_verify...")
@@ -473,6 +673,23 @@ class FotaService:
             else:
                 log_cb("[FOTA] [FAIL] Image verification failed (no FINISHED state).")
                 
+            # 5. Restore BLE connection params (slave_latency = 6)
+            try:
+                seq_params = session.proto.next_seq()
+                pkt_params = self.factory.ble_conn_params_set(
+                    src=src,
+                    dst=int(VvAddress.CENTRAL),
+                    seq=seq_params,
+                    min_interval_ms=7.5,
+                    max_interval_ms=15,
+                    slave_latency=4,
+                    sup_timeout_ms=4000
+                )
+                session.send_packet(pkt_params)
+                log_cb("[FOTA] Restored BLE slave_latency=4 for low-latency operation.")
+            except Exception:
+                pass
+
             # The background monitor thread will query the actual BLE status of the dongle
             # and automatically transition the UI to Disconnected when the link is severed.
 

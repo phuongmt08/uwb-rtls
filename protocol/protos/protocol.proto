@@ -25,7 +25,7 @@ package protobuf;
 enum common_constant_t {
     UNSPECIFIED                = 0;
     PROTOCOL_REV               = 125;
-    PROTOBUF_PACKET_WARN_BYTES = 220;
+    PROTOBUF_PACKET_WARN_BYTES = 230;
 }
 
 enum packet_ack_response_t {
