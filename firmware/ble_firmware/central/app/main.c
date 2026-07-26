@@ -71,6 +71,7 @@
 #include "app_ble_central.h"
 #include "bb_router.h"
 #include "bb_cmd_hdl.h"
+#include "bb_broadcast.h"
 
 /* -------------------------------------------------------------------------
  * Compile-time feature flags
@@ -144,6 +145,7 @@ int main(void)
     for (;;)
     {
         bb_router_process(); /* Check for incoming data from UART and handle state transitions */
+        bb_broadcast_process(); /* Broadcast TX watchdog (RX is observer-driven). */
         bb_cmd_async_tx_process(); /* Retry asynchronous scan/status events when USB is busy. */
 #if APP_ENABLE_USB_CDC_ACM
         /* Drain the USB event queue before sleeping. */

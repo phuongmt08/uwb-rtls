@@ -12,7 +12,7 @@ keep_types = {
     'protobuf_time_sync_get_t',
     'protobuf_time_sync_set_t',
     'protobuf_time_sync_resp_t',
-    'protobuf_time_sync_adv_set_t',
+    'protobuf_time_sync_bcast_set_t',
     'protobuf_device_reset_t',
     'protobuf_enter_to_bootloader_t',
     'protobuf_flash_erase_t',
@@ -30,7 +30,7 @@ keep_types = {
 
 keep_fields = {
     'hdr', 'none', 'ack', 'device_information_get', 'device_information_resp',
-    'time_sync_get', 'time_sync_set', 'time_sync_resp', 'time_sync_adv_set',
+    'time_sync_get', 'time_sync_set', 'time_sync_resp', 'time_sync_bcast_set',
     'device_reset', 'flash_erase', 'flash_read', 'flash_data', 'flash_write',
     'ble_status_resp', 'log_data', 'log_clear', 'flash_verify',
     'fota_state_resp', 'enter_to_bootloader', 'end_session'

@@ -69,7 +69,6 @@ GENERIC_RESPONSES = {
     "sensor_fusion_cfg_get": "sensor_fusion_cfg_resp",
     "pos_calib_cfg_get": "pos_calib_cfg_resp",
     "prefilter_cfg_get": "prefilter_cfg_resp",
-    "calib_status_get": "calib_status_resp",
     "device_type_get": "device_type_set",
     "ble_conn_params_get": "ble_conn_params_resp",
     "rtos_resource_get": "rtos_resource_resp",

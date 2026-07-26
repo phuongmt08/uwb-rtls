@@ -36,7 +36,13 @@ PB_BIND(protobuf_time_sync_set_t, protobuf_time_sync_set_t, AUTO)
 PB_BIND(protobuf_time_sync_resp_t, protobuf_time_sync_resp_t, AUTO)
 
 
-PB_BIND(protobuf_time_sync_adv_set_t, protobuf_time_sync_adv_set_t, AUTO)
+PB_BIND(protobuf_time_sync_bcast_set_t, protobuf_time_sync_bcast_set_t, AUTO)
+
+
+PB_BIND(protobuf_antenna_delay_bcast_set_t, protobuf_antenna_delay_bcast_set_t, AUTO)
+
+
+PB_BIND(protobuf_bcast_apply_ack_t, protobuf_bcast_apply_ack_t, AUTO)
 
 
 PB_BIND(protobuf_uwb_cfg_t, protobuf_uwb_cfg_t, AUTO)
@@ -231,15 +237,6 @@ PB_BIND(protobuf_anchor_layout_set_t, protobuf_anchor_layout_set_t, AUTO)
 PB_BIND(protobuf_anchor_layout_resp_t, protobuf_anchor_layout_resp_t, AUTO)
 
 
-PB_BIND(protobuf_calib_status_get_t, protobuf_calib_status_get_t, AUTO)
-
-
-PB_BIND(protobuf_calib_anchor_candidate_t, protobuf_calib_anchor_candidate_t, AUTO)
-
-
-PB_BIND(protobuf_calib_status_resp_t, protobuf_calib_status_resp_t, 2)
-
-
 PB_BIND(protobuf_rtos_resource_get_t, protobuf_rtos_resource_get_t, AUTO)
 
 
@@ -291,21 +288,10 @@ PB_BIND(protobuf_zone_profile_get_t, protobuf_zone_profile_get_t, AUTO)
 PB_BIND(protobuf_zone_profile_resp_t, protobuf_zone_profile_resp_t, AUTO)
 
 
-PB_BIND(protobuf_calib_start_t, protobuf_calib_start_t, AUTO)
-
-
-PB_BIND(protobuf_calib_stop_t, protobuf_calib_stop_t, AUTO)
-
-
-PB_BIND(protobuf_calib_candidate_apply_t, protobuf_calib_candidate_apply_t, AUTO)
-
-
 PB_BIND(protobuf_calib_data_t, protobuf_calib_data_t, AUTO)
 
 
 PB_BIND(protobuf_packet_t, protobuf_packet_t, 2)
-
-
 
 
 

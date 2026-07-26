@@ -59,6 +59,7 @@
 #include "../ble_common/ble_bridge/bb_router.h"
 #include "../ble_common/ble_bridge/bb_cmd_hdl.h"
 #include "../ble_common/ble_bridge/bb_debug.h"
+#include "../ble_common/ble_bridge/bb_broadcast.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
@@ -137,6 +138,7 @@ int main(void)
         nrf_drv_wdt_channel_feed(m_wdt_channel_id);
         bb_router_process();
         ble_peripheral_process();
+        bb_broadcast_process();
         bb_cmd_ble_adv_config_request_process();
         idle_state_handle();
     }

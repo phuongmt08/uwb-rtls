@@ -174,6 +174,16 @@ class GeofenceRepository:
             "role": anchor.get("role", "anchor"),
             "device_type": anchor.get("device_type", "uwb_anchor"),
             "device_id": self._coerce_int_id(anchor.get("device_id"), anchor_id),
+            # Hardware serial_number (bsp_util_get_serial_number XOR of the STM32
+            # UID) — distinct from anchor_id/device_id, which are just this
+            # anchor's slot/position in the layout. Needed to target this
+            # physical anchor with antenna_delay_bcast_set. 0 = not yet known.
+            "serial_number": self._coerce_int_id(anchor.get("serial_number"), 0),
+            # Antenna-delay calibration has no read-back path (bcast set is
+            # fire-and-forget), so the app remembers the last combined delay
+            # it applied to this anchor as the next session's starting point.
+            # 32374 = firmware ANCHOR_DEFAULT_TX/RX_ANT_DLY (16187+16187).
+            "last_combined_delay": int(anchor.get("last_combined_delay", 32374) or 32374),
             "mac": anchor.get("mac", ""),
             "zone_id": anchor.get("zone_id", ""),
             "zone_name": anchor.get("zone_name", ""),

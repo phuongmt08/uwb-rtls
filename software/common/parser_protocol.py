@@ -24,8 +24,10 @@ class VvProtocol(_VvProtocol):
         return self._commands.time_sync_set(src, dst, seq, unix_time_ms=unix_time_ms, timezone_offset=timezone_offset)
     def build_time_sync_resp(self, src: int, dst: int, seq: int):
         return self._commands.time_sync_resp(src, dst, seq)
-    def build_time_sync_adv_set(self, src: int, dst: int, seq: int, device_type: int | None = None, device_id: int = 1, unix_time_ms: int | None = None, timezone_offset: int = 7 * 60):
-        return self._commands.time_sync_adv_set(src, dst, seq, device_type=device_type, device_id=device_id, unix_time_ms=unix_time_ms, timezone_offset=timezone_offset)
+    def build_time_sync_bcast_set(self, src: int, dst: int, seq: int, serial_number: int = 0, unix_time_ms: int | None = None, timezone_offset: int = 7 * 60):
+        return self._commands.time_sync_bcast_set(src, dst, seq, serial_number=serial_number, unix_time_ms=unix_time_ms, timezone_offset=timezone_offset)
+    def build_antenna_delay_bcast_set(self, src: int, dst: int, seq: int, serial_number: int = 0, tx_antenna_delay: int = 0, rx_antenna_delay: int = 0, persist: bool = True):
+        return self._commands.antenna_delay_bcast_set(src, dst, seq, serial_number=serial_number, tx_antenna_delay=tx_antenna_delay, rx_antenna_delay=rx_antenna_delay, persist=persist)
     def build_sys_config_get(self, src: int, dst: int, seq: int):
         return self._commands.sys_config_get(src, dst, seq)
     def build_sys_config_set(
@@ -264,35 +266,6 @@ class VvProtocol(_VvProtocol):
         return self._commands.battery_info_get(src, dst, seq)
     def build_enter_to_bootloader(self, src: int, dst: int, seq: int):
         return self._commands.enter_to_bootloader(src, dst, seq)
-    def build_calib_status_get(self, src: int, dst: int, seq: int):
-        return self._commands.calib_status_get(src, dst, seq)
-    def build_calib_status_resp(self, src: int, dst: int, seq: int):
-        return self._commands.calib_status_resp(src, dst, seq)
-    def build_calib_start(
-        self,
-        src: int,
-        dst: int,
-        seq: int,
-        sample_target: int = 32,
-        tag_x_m: float = 2.0,
-        tag_y_m: float = 2.0,
-        tag_z_m: float = 1.0,
-        reference_position_valid: bool = True,
-    ):
-        return self._commands.calib_start(
-            src,
-            dst,
-            seq,
-            sample_target=sample_target,
-            tag_x_m=tag_x_m,
-            tag_y_m=tag_y_m,
-            tag_z_m=tag_z_m,
-            reference_position_valid=reference_position_valid,
-        )
-    def build_calib_stop(self, src: int, dst: int, seq: int):
-        return self._commands.calib_stop(src, dst, seq)
-    def build_calib_candidate_apply(self, src: int, dst: int, seq: int, anchor_mask: int = 0xF):
-        return self._commands.calib_candidate_apply(src, dst, seq, anchor_mask=anchor_mask)
     def build_end_session(self, src: int, dst: int, seq: int, reason: int = 0):
         return self._commands.end_session(src, dst, seq, reason=reason)
     def build_factory_otp_write(

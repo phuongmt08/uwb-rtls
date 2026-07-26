@@ -32,6 +32,4 @@ void ble_peripheral_adv_status_update(const void * p_adv_status);
 
 uint32_t ble_peripheral_send_data(uint8_t const * p_data, uint16_t length);
 
-uint32_t ble_peripheral_broadcast_send(uint8_t const * p_data, uint16_t length);
-
 #endif // BLE_PERIPHERAL_H

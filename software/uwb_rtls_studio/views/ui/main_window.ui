@@ -288,6 +288,11 @@ QTabBar::tab:hover:!selected { background: #302852; color: #F5F3FF; }</string>
         <string>Calibration</string>
        </attribute>
       </widget>
+      <widget class="AntennaDelayCalibTab" name="tab_antenna_delay_calib">
+       <attribute name="title">
+        <string>📶 Antenna Delay</string>
+       </attribute>
+      </widget>
       <widget class="LogTab" name="tab_log">
        <attribute name="title">
         <string>Log History</string>
@@ -338,6 +343,12 @@ QStatusBar QLabel { background: transparent; }</string>
    <class>CalibrationTab</class>
    <extends>QWidget</extends>
    <header>views.tabs.calibration_tab</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>AntennaDelayCalibTab</class>
+   <extends>QWidget</extends>
+   <header>views.tabs.antenna_delay_calib_tab</header>
    <container>1</container>
   </customwidget>
   <customwidget>

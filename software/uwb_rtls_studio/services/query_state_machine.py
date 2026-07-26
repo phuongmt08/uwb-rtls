@@ -102,7 +102,6 @@ class QueryQueueManager(QObject):
         "ble_conn_params_get": "ble_conn_params_resp",
         "ble_conn_params_set": "ble_conn_params_resp",
         "ranging_status_get": "ranging_status_resp",
-        "calib_status_get": "calib_status_resp",
         "rtos_resource_get": "rtos_resource_resp",
         "rtos_task_stats_get": "rtos_task_stats_resp",
         "device_type_get": "device_type_set",

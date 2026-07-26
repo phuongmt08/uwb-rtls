@@ -110,15 +110,6 @@ enum anchor_power_mode_t {
     ANCHOR_POWER_MODE_DEEP_ECO    = 3;
 }
 
-enum calib_state_t {
-    CALIB_STATE_UNSPECIFIED = 0;
-    CALIB_STATE_IDLE        = 1;
-    CALIB_STATE_COLLECTING  = 2;
-    CALIB_STATE_CALCULATING = 3;
-    CALIB_STATE_DONE        = 4;
-    CALIB_STATE_ERROR       = 5;
-}
-
 enum session_end_reason_t {
     SESSION_END_REASON_UNSPECIFIED        = 0;
     SESSION_END_REASON_LOG_DATA           = 1;
@@ -186,14 +177,43 @@ message time_sync_resp_t {
     uint64 unix_time_ms       = 1;
     int32 timezone_offset     = 2;
 }
-message time_sync_adv_set_t {
-    device_type_t device_type  = 1;
-    uint32 device_id           = 2;
-    uint64 unix_time_ms        = 3;
-    int32 timezone_offset      = 4;
+message time_sync_bcast_set_t {
+    uint32 serial_number       = 1;
+    uint64 unix_time_ms        = 2;
+    int32 timezone_offset      = 3;
 }
 
 /* UWB configuration -------------------------------------------------------- */
+
+/*
+ * Broadcast-targeted antenna delay set. Addressed by serial_number (the
+ * permanent factory identity) rather than device_type/device_id, since the
+ * antenna delay is a per-physical-unit calibration value that must stay
+ * bound to the exact hardware it was measured on, not to a reassignable
+ * logical role/slot.
+ */
+message antenna_delay_bcast_set_t {
+    uint32 serial_number    = 1;
+    uint32 tx_antenna_delay = 2;
+    uint32 rx_antenna_delay = 3;
+    // Skip the flash write for trial values during an iterative calibration
+    // search; set true only on the final, converged apply.
+    bool   persist          = 4;
+}
+
+/*
+ * Sent by a device (over BCAST) after it matches and processes a
+ * broadcast-targeted set command, so the sender knows exactly who applied
+ * it. Not routed through the generic ack_t path (see network_core_skip_ack_tb) —
+ * BCAST has no single "the" responder, so a dedicated, identity-carrying
+ * confirmation is used instead.
+ */
+message bcast_apply_ack_t {
+    uint32 serial_number = 1; // confirming device's own identity
+    uint32 cmd_seq       = 2; // hdr.seq of the bcast command being confirmed
+    uint32 cmd_tag       = 3; // which_params tag of that command
+    bool   success       = 4;
+}
 
 message uwb_cfg_t {
     device_role_t role          = 1;
@@ -645,44 +665,6 @@ message anchor_layout_resp_t {
     repeated anchor_layout_item_t anchors = 1;
 }
 
-message calib_status_get_t {
-    uint32 dummy = 1;
-}
-
-message calib_anchor_candidate_t {
-    uint32 anchor_id = 1;
-    float known_m = 2;
-    float mean_m = 3;
-    float error_m = 4;
-    float std_m = 5;
-    float timeout_rate = 6;
-    uint32 valid_count = 7;
-    int32 delta_dw = 8;
-    uint32 suggested_combined_delay = 9;
-    uint32 suggested_tx_delay = 10;
-    uint32 suggested_rx_delay = 11;
-}
-
-message calib_status_resp_t {
-    calib_state_t state         = 1;
-    uint32 progress_percent     = 2;
-    uint32 current_iteration    = 3 [deprecated = true];
-    uint32 total_iterations     = 4 [deprecated = true];
-    float last_pair_error_mean_m = 5 [deprecated = true];
-    uint32 current_antenna_delay = 6;
-    uint32 peer_ready_mask      = 7;
-    float last_pair_error_spread_m = 8 [deprecated = true];
-    uint32 rejected_batch_count = 9;
-    float last_pair_error_rms_m = 10;
-    float last_pair_error_max_abs_m = 11;
-    float last_pair_error_mean_abs_m = 12;
-    uint32 sample_count = 13;
-    uint32 sample_target = 14;
-    uint32 candidate_mask = 15;
-    repeated calib_anchor_candidate_t candidates = 16;
-}
-
-
 /* Status / diagnostics ----------------------------------------------------- */
 
 /*
@@ -819,22 +801,6 @@ message zone_profile_resp_t {
     zone_profile_t profile = 1;
 }
 
-message calib_start_t {
-    uint32 sample_target = 1;
-    float tag_x_m = 2;
-    float tag_y_m = 3;
-    float tag_z_m = 4;
-    bool reference_position_valid = 5;
-}
-
-message calib_stop_t {
-    uint32 dummy = 1;
-}
-
-message calib_candidate_apply_t {
-    uint32 anchor_mask = 1;
-}
-
 message calib_data_t {
     uint32 anchor_mask               = 1;
     uint32 tx_frame_cnt              = 2;
@@ -855,6 +821,8 @@ message calib_data_t {
 message packet_t {
     hdr_t hdr = 1;
 
+    reserved 65, 66, 84, 85, 86; // formerly calib_status_get/resp, calib_start/stop/candidate_apply (firmware-side calibration removed)
+
     oneof params {
         /* Core */
         none_t                    none                    = 2;
@@ -868,7 +836,7 @@ message packet_t {
         time_sync_get_t           time_sync_get           = 6;
         time_sync_set_t           time_sync_set           = 7;
         time_sync_resp_t          time_sync_resp          = 8;
-        time_sync_adv_set_t       time_sync_adv_set        = 9;
+        time_sync_bcast_set_t     time_sync_bcast_set      = 9;
 
         /* System config */
         sys_config_get_t          sys_config_get          = 10;
@@ -961,9 +929,6 @@ message packet_t {
 
         enter_to_bootloader_t     enter_to_bootloader     = 64;
 
-        calib_status_get_t        calib_status_get        = 65;
-        calib_status_resp_t       calib_status_resp       = 66;
-        
         end_session_t             end_session             = 67;
 
         /* Factory OTP provisioning */
@@ -990,10 +955,11 @@ message packet_t {
         zone_profile_set_t        zone_profile_set        = 81;
         zone_profile_get_t        zone_profile_get        = 82;
         zone_profile_resp_t       zone_profile_resp       = 83;
-        calib_start_t             calib_start             = 84;
-        calib_stop_t              calib_stop              = 85;
-        calib_candidate_apply_t   calib_candidate_apply   = 86;
         calib_data_t              calib_data              = 87;
+
+        /* UWB configuration */
+        antenna_delay_bcast_set_t antenna_delay_bcast_set = 88;
+        bcast_apply_ack_t         bcast_apply_ack         = 89;
 
     }
 }

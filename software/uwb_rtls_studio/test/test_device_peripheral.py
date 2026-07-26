@@ -227,25 +227,6 @@ def handle_host_packet(pkt: pb.packet_t) -> None:
             resp.ranging_status_resp.last_update_timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFF
             send_to_host(resp)
             
-        elif param_name == "calib_status_get":
-            # Note: There isn't a pre-built factory command for calib_status_resp, so we build it manually or use a base if needed.
-            # But earlier we saw `commands.calib_status_get` in catalog, is there a `calib_status_resp` builder? 
-            # If not, we just build it manually using protocol base. Let's use `_base` via CommandFactory.
-            resp = commands._base(pb.PACKET_ADDR_MCU, pb.PACKET_ADDR_HOST, req_seq)
-            resp.calib_status_resp.state = pb.CALIB_STATE_IDLE
-            resp.calib_status_resp.progress_percent = 100
-            resp.calib_status_resp.current_iteration = 0
-            resp.calib_status_resp.total_iterations = 0
-            resp.calib_status_resp.last_pair_error_mean_m = 0.0
-            resp.calib_status_resp.current_antenna_delay = 16384
-            resp.calib_status_resp.peer_ready_mask = 0
-            resp.calib_status_resp.last_pair_error_spread_m = 0.0
-            resp.calib_status_resp.rejected_batch_count = 0
-            resp.calib_status_resp.last_pair_error_rms_m = 0.0
-            resp.calib_status_resp.last_pair_error_max_abs_m = 0.0
-            resp.calib_status_resp.last_pair_error_mean_abs_m = 0.0
-            send_to_host(resp)
-            
         elif param_name == "ranging_start":
             ranging_active = True
             log.info("▶ Started Ranging simulation loop")

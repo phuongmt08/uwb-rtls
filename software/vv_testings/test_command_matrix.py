@@ -24,7 +24,6 @@ EXPECTED_RESP_BY_REQUEST = {
     "ble_status_get": "ble_status_resp",
     "battery_info_get": "battery_info_resp",
     "pos_calib_cfg_get": "pos_calib_cfg_resp",
-    "calib_status_get": "calib_status_resp",
     "rtos_resource_get": "rtos_resource_resp",
     "rtos_task_stats_get": "rtos_task_stats_resp",
     "prefilter_cfg_get": "prefilter_cfg_resp",
@@ -37,7 +36,7 @@ GROUP_BY_REQUEST = {
     "device_information_get": "device_information",
     "time_sync_get": "time_sync",
     "time_sync_set": "time_sync",
-    "time_sync_adv_set": "time_sync",
+    "time_sync_bcast_set": "time_sync",
     "sys_config_get": "sys_config",
     "sys_config_set": "sys_config",
     "sys_ranging_cfg_get": "sys_ranging_cfg",
@@ -60,7 +59,6 @@ GROUP_BY_REQUEST = {
     "pos_calib_cfg_set": "pos_calib_cfg",
     "anchor_layout_get": "anchor_layout",
     "anchor_layout_set": "anchor_layout",
-    "calib_status_get": "calib_status",
     "rtos_resource_get": "rtos",
     "rtos_task_stats_get": "rtos",
     "battery_info_get": "battery_info",
@@ -69,9 +67,6 @@ GROUP_BY_REQUEST = {
     "zone_switch": "zone_switch",
     "zone_profile_set": "zone_profile",
     "zone_profile_get": "zone_profile",
-    "calib_start": "calib_control",
-    "calib_stop": "calib_control",
-    "calib_candidate_apply": "calib_control",
 }
 
 SHORT_NAME_BY_REQUEST = {
@@ -79,7 +74,7 @@ SHORT_NAME_BY_REQUEST = {
     "device_information_get": "get",
     "time_sync_get": "get",
     "time_sync_set": "set",
-    "time_sync_adv_set": "adv_set",
+    "time_sync_bcast_set": "bcast_set",
     "sys_config_get": "get",
     "sys_config_set": "set",
     "sys_ranging_cfg_get": "get",
@@ -102,7 +97,6 @@ SHORT_NAME_BY_REQUEST = {
     "pos_calib_cfg_set": "set",
     "anchor_layout_get": "get",
     "anchor_layout_set": "set",
-    "calib_status_get": "get",
     "rtos_resource_get": "resource_get",
     "rtos_task_stats_get": "task_stats_get",
     "battery_info_get": "get",
@@ -111,9 +105,6 @@ SHORT_NAME_BY_REQUEST = {
     "zone_switch": "set",
     "zone_profile_set": "set",
     "zone_profile_get": "get",
-    "calib_start": "start",
-    "calib_stop": "stop",
-    "calib_candidate_apply": "apply",
 }
 
 ACK_RESPONSE_NAMES = {
@@ -147,7 +138,6 @@ SKIPPED_REQUESTS = {
     "anchor_layout_resp",
     "ble_conn_params_resp",
     "battery_info_resp",
-    "calib_status_resp",
     "rtos_resource_resp",
     "rtos_task_stats_resp",
     "prefilter_cfg_resp",
@@ -176,9 +166,6 @@ SKIPPED_REQUESTS = {
     "zone_profile_set",
     "zone_profile_get",
     "zone_profile_resp",
-    "calib_start",
-    "calib_stop",
-    "calib_candidate_apply",
 }
 
 

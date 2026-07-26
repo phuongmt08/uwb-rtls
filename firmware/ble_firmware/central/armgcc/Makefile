@@ -54,7 +54,7 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uarte.c \
   $(PROJ_DIR)/../ble_common/boards.c \
   $(PROJ_DIR)/../ble_common/hdlc.c \
-  $(PROJ_DIR)/../ble_common/ble_broadcast.c \
+  $(PROJ_DIR)/../ble_common/ble_bridge/bb_broadcast.c \
   $(PROJ_DIR)/../ble_common/ble_bridge/bb_cmd_hdl.c \
   $(PROJ_DIR)/../ble_common/ble_bridge/bb_router.c \
   $(PROJ_DIR)/../ble_common/ble_bridge/bb_transport.c \

@@ -10,7 +10,6 @@
 /* Includes ----------------------------------------------------------- */
 #include "app_tag.h"
 #include "app_anchor.h"
-#include "app_calib_master.h"
 #include "app_rtos_handles.h"
 #include "bsp_io.h"
 #include "bsp_util.h"
@@ -29,9 +28,6 @@ typedef enum {
     APP_TAG_UWB_CONTROL_NONE = 0,
     APP_TAG_UWB_CONTROL_SWITCH_ZONE,
     APP_TAG_UWB_CONTROL_UPDATE_ACTIVE_ZONE_PROFILE,
-    APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION,
-    APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION,
-    APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION,
 } app_tag_uwb_control_op_t;
 
 /* Private variables -------------------------------------------------- */
@@ -51,11 +47,6 @@ static uint32_t s_period_overrun_count = 0;
 static volatile app_tag_uwb_control_op_t s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
 static uint32_t s_control_zone_id = 0U;
 static protobuf_zone_profile_t s_control_zone_profile = {0};
-static uint32_t s_control_sample_target = 0U;
-static uint32_t s_control_anchor_mask = 0U;
-static float s_control_tag_x_m = 0.0f;
-static float s_control_tag_y_m = 0.0f;
-static float s_control_tag_z_m = 0.0f;
 static uint32_t s_zone_switch_tick = 0U;
 static bool s_zone_switch_pending_save = false;
 #if SYS_ZONE_SWITCH_STRESS_TEST_ENABLE
@@ -122,38 +113,6 @@ bool app_rtos_request_active_zone_profile_update(const protobuf_zone_profile_t *
 
     s_control_zone_profile = *profile;
     return queue_uwb_control_request(APP_TAG_UWB_CONTROL_UPDATE_ACTIVE_ZONE_PROFILE);
-}
-
-bool app_rtos_request_tag_calibration_start(uint32_t sample_target,
-                                            float tag_x_m,
-                                            float tag_y_m,
-                                            float tag_z_m)
-{
-    if (s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
-        return false;
-    }
-
-    s_control_sample_target = sample_target;
-    s_control_tag_x_m = tag_x_m;
-    s_control_tag_y_m = tag_y_m;
-    s_control_tag_z_m = tag_z_m;
-    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION);
-}
-
-bool app_rtos_request_tag_calibration_stop(void)
-{
-    app_calib_master_set_active(false);
-    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION);
-}
-
-bool app_rtos_request_tag_calibration_apply(uint32_t anchor_mask)
-{
-    if (anchor_mask == 0U || s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
-        return false;
-    }
-
-    s_control_anchor_mask = anchor_mask;
-    return queue_uwb_control_request(APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION);
 }
 
 static void reset_app_after_radio_reconfigure(sys_config_t *cfg)
@@ -268,24 +227,9 @@ void app_tag_process_uwb_control(sys_config_t *cfg)
 
     uint32_t zone_id = s_control_zone_id;
     protobuf_zone_profile_t zone_profile = s_control_zone_profile;
-    uint32_t sample_target = s_control_sample_target;
-    uint32_t anchor_mask = s_control_anchor_mask;
-    float tag_x_m = s_control_tag_x_m;
-    float tag_y_m = s_control_tag_y_m;
-    float tag_z_m = s_control_tag_z_m;
     s_uwb_control_op = APP_TAG_UWB_CONTROL_NONE;
 
     (void)osMutexAcquire(g_spi1_mutexHandle, osWaitForever);
-
-    if ((op == APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION ||
-         op == APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION ||
-         op == APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION) &&
-        cfg->uwb.role != DEVICE_ROLE_TAG) {
-        RLOG_W(LOG_OBJECT_CODE_APPLICATION,
-               "[UWB] Ignoring tag calibration control request on non-tag role");
-        (void)osMutexRelease(g_spi1_mutexHandle);
-        return;
-    }
 
     if (op == APP_TAG_UWB_CONTROL_SWITCH_ZONE) {
         uint32_t old_zone_id = sys_config_get_active_zone_id();
@@ -358,67 +302,6 @@ void app_tag_process_uwb_control(sys_config_t *cfg)
             RLOG_E(LOG_OBJECT_CODE_UWB_DRIVER, ERR_HAL,
                    "[UWB] Active Zone %lu profile update failed; restored previous profile",
                    (unsigned long)active_zone_id);
-        }
-    } else if (op == APP_TAG_UWB_CONTROL_START_TAG_CALIBRATION) {
-        bool was_ranging_enabled = app_rtos_is_ranging_enabled();
-        sys_ranging_abort();
-        bsp_uwb_idle();
-        app_tag_reset_fusion();
-        cfg->calib.samples = sample_target;
-        app_calib_master_set_active(true);
-        if (app_calib_master_set_reference_position(tag_x_m, tag_y_m, tag_z_m) &&
-            app_calib_master_init() == APP_OK) {
-            app_rtos_set_ranging_enabled(true);
-            RLOG_I(LOG_OBJECT_CODE_TAG, "[CALIB][MASTER] start request accepted");
-        } else {
-            app_calib_master_set_active(false);
-            app_rtos_set_ranging_enabled(was_ranging_enabled);
-            RLOG_E(LOG_OBJECT_CODE_TAG, ERR_INVALID_PARAM,
-                   "[CALIB][MASTER] start request rejected");
-        }
-    } else if (op == APP_TAG_UWB_CONTROL_STOP_TAG_CALIBRATION) {
-        sys_ranging_abort();
-        bsp_uwb_idle();
-        app_calib_master_on_ranging_stopped();
-        app_calib_master_set_active(false);
-        app_rtos_set_ranging_enabled(true);
-        app_tag_reset_fusion();
-        (void)sys_config_save();
-    } else if (op == APP_TAG_UWB_CONTROL_APPLY_TAG_CALIBRATION) {
-        uint16_t tx_delay = 0U;
-        uint16_t rx_delay = 0U;
-        if (app_calib_master_get_average_candidate(anchor_mask, &tx_delay, &rx_delay)) {
-            uint32_t old_tx_delay = cfg->uwb.tx_antenna_delay;
-            uint32_t old_rx_delay = cfg->uwb.rx_antenna_delay;
-            bool old_calib_enabled = app_calib_master_is_active();
-            bool old_ranging_enabled = app_rtos_is_ranging_enabled();
-            sys_ranging_abort();
-            bsp_uwb_idle();
-            cfg->uwb.tx_antenna_delay = tx_delay;
-            cfg->uwb.rx_antenna_delay = rx_delay;
-            app_calib_master_set_active(false);
-            app_rtos_set_ranging_enabled(false);
-            if (bsp_uwb_configure(&cfg->uwb) == BSP_OK && sys_config_save() == 0) {
-                app_calib_master_on_ranging_stopped();
-                app_tag_reset_fusion();
-                app_rtos_set_ranging_enabled(true);
-                RLOG_I(LOG_OBJECT_CODE_TAG,
-                       "[CALIB][MASTER] applied tag delay TX=%u RX=%u",
-                       tx_delay,
-                       rx_delay);
-            } else {
-                cfg->uwb.tx_antenna_delay = old_tx_delay;
-                cfg->uwb.rx_antenna_delay = old_rx_delay;
-                app_calib_master_set_active(old_calib_enabled);
-                app_rtos_set_ranging_enabled(old_ranging_enabled);
-                (void)bsp_uwb_configure(&cfg->uwb);
-                RLOG_E(LOG_OBJECT_CODE_TAG, ERR_HAL,
-                       "[CALIB][MASTER] apply failed; restored previous delays");
-            }
-        } else {
-            RLOG_W(LOG_OBJECT_CODE_TAG,
-                   "[CALIB][MASTER] apply rejected: no completed candidates for mask=0x%02lX",
-                   (unsigned long)anchor_mask);
         }
     }
 

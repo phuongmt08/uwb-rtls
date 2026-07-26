@@ -8,7 +8,6 @@ if ROOT not in sys.path:
 if PROJECT not in sys.path:
     sys.path.insert(0, PROJECT)
 
-import pytest
 from PyQt6.QtCore import QCoreApplication
 
 _app = QCoreApplication.instance() or QCoreApplication([])
@@ -20,9 +19,8 @@ except RuntimeError:
     utils.app_state.shared_app_state = utils.app_state.SharedAppState()
 
 from PyQt6.QtCore import QObject, pyqtSignal
-from common.commands import CommandFactory
-from common.parser_protocol import VvProtocol
 from viewmodels.calibration_viewmodel import CalibrationViewModel
+from viewmodels.antenna_delay_calibration_viewmodel import AntennaDelayCalibrationViewModel
 
 
 class MockPacket:
@@ -33,165 +31,101 @@ class MockPacket:
 
 
 class MockDeviceModel(QObject):
-    sys_config_parsed = pyqtSignal(dict)
-    pos_calib_cfg_parsed = pyqtSignal(dict)
-
     def __init__(self, role="TAG"):
         super().__init__()
         self.connected_role = role
-        self.started = []
-        self.stopped = 0
-        self.applied_masks = []
         self.sent_pos_configs = []
-        self.status_requests = 0
-        self.sys_config_requests = 0
-
-    def request_calibration_start(self, sample_target: int = 32, tag_x_m: float = 2.0, tag_y_m: float = 2.0, tag_z_m: float = 1.0):
-        self.started.append({
-            "sample_target": sample_target,
-            "tag_x_m": tag_x_m,
-            "tag_y_m": tag_y_m,
-            "tag_z_m": tag_z_m,
-        })
-        return MockPacket()
-
-    def request_calibration_stop(self):
-        self.stopped += 1
-        return MockPacket()
-
-    def request_calibration_candidate_apply(self, anchor_mask: int):
-        self.applied_masks.append(anchor_mask)
-        return MockPacket()
+        self.pos_config_requests = 0
+        self.imu_resets = 0
+        self.imu_calibrations = 0
+        self.bcast_sets = []
 
     def set_pos_calib_config(self, config_data: dict):
         self.sent_pos_configs.append(dict(config_data or {}))
         return MockPacket()
 
     def request_pos_calib_config(self, force=False):
+        self.pos_config_requests += 1
+
+    def request_imu_reset(self):
+        self.imu_resets += 1
+        return MockPacket()
+
+    def request_imu_calibration(self):
+        self.imu_calibrations += 1
+        return MockPacket()
+
+    def request_antenna_delay_bcast_set(self, serial_number, tx_antenna_delay, rx_antenna_delay, persist=False):
+        self.bcast_sets.append({
+            "serial_number": serial_number,
+            "tx": tx_antenna_delay,
+            "rx": rx_antenna_delay,
+            "persist": persist
+        })
+
+
+class MockRangingModel(QObject):
+    anchor_distances_updated = pyqtSignal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.anchor_layout = [
+            {"anchor_id": 1, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0},
+            {"anchor_id": 2, "x_m": 10.0, "y_m": 0.0, "z_m": 0.0},
+        ]
+
+
+class MockGeofenceRepo:
+    def get_anchors(self):
+        return [
+            {"anchor_id": 1, "serial_number": 0xA1A1A1A1},
+            {"anchor_id": 2, "serial_number": 0xB2B2B2B2},
+        ]
+    def set_anchors(self, anchors):
         pass
 
-    def request_calibration_status(self):
-        self.status_requests += 1
 
-    def request_sys_config(self, force=False):
-        self.sys_config_requests += 1
-
-
-
-def test_start_calibration_uses_calib_start():
-    model = MockDeviceModel(role="TAG")
-    vm = CalibrationViewModel(model)
-
-    statuses = []
-    vm.status_updated.connect(lambda s: statuses.append(s))
-
-    ok = vm.start_calibration({"samples": 1000, "ref_distance_xy_m": 3.5, "tag_height_m": 1.25})
-
-    assert ok is True
-    assert len(model.started) == 1
-    assert model.started[0] == {
-        "sample_target": 64,
-        "tag_x_m": 3.5,
-        "tag_y_m": 0.0,
-        "tag_z_m": 1.25,
-    }
-    assert statuses[-1]["custom_status_text"] == "TAG antenna calibration started."
-    assert statuses[-1]["sample_target"] == 64
-
-
-
-def test_start_calibration_rejects_anchor_role():
+def test_save_position_config_sends_pos_calib_cfg_set():
     model = MockDeviceModel(role="ANCHOR")
     vm = CalibrationViewModel(model)
-
-    failures = []
-    vm.operation_failed.connect(lambda msg: failures.append(msg))
-
-    ok = vm.start_calibration({"samples": 10})
-
-    assert ok is False
-    assert model.started == []
-    assert "TAG firmware" in failures[-1]
-
-
-
-def test_stop_calibration_sends_calib_stop_for_tag():
-    model = MockDeviceModel(role="TAG")
-    vm = CalibrationViewModel(model)
-
-    vm.stop_calibration()
-
-    assert model.stopped == 1
-
-
-
-def test_save_position_config_only_sends_pos_calib_cfg_set():
-    model = MockDeviceModel(role="ANCHOR")
-    vm = CalibrationViewModel(model)
-
-    statuses = []
-    vm.status_updated.connect(lambda s: statuses.append(s))
     config = {"samples": 15, "iterations": 50}
 
     ok = vm.save_position_calibration_config(config)
 
     assert ok is True
     assert model.sent_pos_configs == [config]
-    assert model.started == []
-    assert statuses[-1]["custom_status_text"] == "Position calibration config sent."
 
 
-
-def test_candidate_apply_uses_candidate_mask():
+def test_reset_and_calibrate_imu_delegate_to_model():
     model = MockDeviceModel(role="TAG")
     vm = CalibrationViewModel(model)
-    vm._latest_status = {"state": 4, "candidate_mask": 0x05}
 
-    statuses = []
-    vm.status_updated.connect(lambda s: statuses.append(s))
+    vm.reset_imu()
+    vm.calibrate_imu()
 
-    ok = vm.apply_candidate_results()
+    assert model.imu_resets == 1
+    assert model.imu_calibrations == 1
 
+
+def test_antenna_delay_parallel_start_all():
+    dev_model = MockDeviceModel()
+    rng_model = MockRangingModel()
+    repo = MockGeofenceRepo()
+
+    vm = AntennaDelayCalibrationViewModel(dev_model, rng_model, repo)
+    vm.samples_per_round_target = 5
+
+    ok = vm.start_all(tag_x_m=0.0, tag_y_m=3.0, tag_z_m=0.0)
     assert ok is True
-    assert model.applied_masks == [0x05]
-    assert vm.is_applying
-    assert statuses[-1]["custom_status_text"] == "Applying candidate mask 0x05..."
+    assert vm.is_running is True
 
+    # Simulate incoming TDMA ranging samples for both Anchors
+    for _ in range(5):
+        rng_model.anchor_distances_updated.emit([
+            {"anchor_id": 1, "distance_mm": 3000},
+            {"anchor_id": 2, "distance_mm": 10440},
+        ])
 
-
-def test_candidate_apply_requires_done_state_and_mask():
-    model = MockDeviceModel(role="TAG")
-    vm = CalibrationViewModel(model)
-    failures = []
-    vm.operation_failed.connect(lambda msg: failures.append(msg))
-
-    vm._latest_status = {"state": 2, "candidate_mask": 0x01}
-    assert vm.apply_candidate_results() is False
-    assert "not done" in failures[-1]
-
-    vm._latest_status = {"state": 4, "candidate_mask": 0}
-    assert vm.apply_candidate_results() is False
-    assert "candidate mask" in failures[-1]
-    assert model.applied_masks == []
-
-
-
-def test_calib_command_builders_have_firmware_fields():
-    factory = CommandFactory()
-    pkt = factory.calib_start(1, 2, 3, sample_target=12, tag_x_m=1.1, tag_y_m=2.2, tag_z_m=3.3)
-    assert pkt.WhichOneof("params") == "calib_start"
-    assert pkt.calib_start.sample_target == 12
-    assert pkt.calib_start.tag_x_m == pytest.approx(1.1)
-    assert pkt.calib_start.tag_y_m == pytest.approx(2.2)
-    assert pkt.calib_start.tag_z_m == pytest.approx(3.3)
-    assert pkt.calib_start.reference_position_valid is True
-
-    pkt = factory.calib_candidate_apply(1, 2, 4, anchor_mask=0x21)
-    assert pkt.WhichOneof("params") == "calib_candidate_apply"
-    assert pkt.calib_candidate_apply.anchor_mask == 0x21
-
-    proto = VvProtocol()
-    pkt = proto.build_calib_start(1, 2, 5, sample_target=7, tag_x_m=4.0, tag_y_m=5.0, tag_z_m=6.0)
-    assert pkt.calib_start.sample_target == 7
-    pkt = proto.build_calib_candidate_apply(1, 2, 6, anchor_mask=0x03)
-    assert pkt.calib_candidate_apply.anchor_mask == 0x03
+    assert len(dev_model.bcast_sets) >= 2
+    assert any(b["serial_number"] == 0xA1A1A1A1 for b in dev_model.bcast_sets)
+    assert any(b["serial_number"] == 0xB2B2B2B2 for b in dev_model.bcast_sets)

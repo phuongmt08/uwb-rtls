@@ -18,7 +18,6 @@
     #include "sys_logger.h"
     #include "sys_pm.h"
     #include "otp/otp.h"
-    #include "app_calib_master.h"
     #include "app_rtos_handles.h"
     #include "version.h"
     #include "sys_sensor_fusion.h"
@@ -89,7 +88,8 @@ static void network_cmd_sys_config_set(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_get(const protobuf_packet_t *pkt);
 static void network_cmd_time_sync_set(const protobuf_packet_t *pkt);
 #ifndef BOOTLOADER
-static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt);
+static void network_cmd_time_sync_bcast_set(const protobuf_packet_t *pkt);
+static void network_cmd_antenna_delay_bcast_set(const protobuf_packet_t *pkt);
 #endif
 
 #ifndef BOOTLOADER
@@ -110,10 +110,6 @@ static void network_cmd_factory_otp_write(const protobuf_packet_t *pkt);
 static void network_cmd_zone_switch(const protobuf_packet_t *pkt);
 static void network_cmd_zone_profile_set(const protobuf_packet_t *pkt);
 static void network_cmd_zone_profile_get(const protobuf_packet_t *pkt);
-static void network_cmd_calib_start(const protobuf_packet_t *pkt);
-static void network_cmd_calib_stop(const protobuf_packet_t *pkt);
-static void network_cmd_calib_status_get(const protobuf_packet_t *pkt);
-static void network_cmd_calib_candidate_apply(const protobuf_packet_t *pkt);
 static void network_cmd_rtos_task_stats_get(const protobuf_packet_t *pkt);
 static void network_cmd_rtos_resource_get(const protobuf_packet_t *pkt);
 static void network_cmd_sensor_fusion_cfg_get(const protobuf_packet_t *pkt);
@@ -182,9 +178,11 @@ static const network_cmd_entry_t network_cmd_table[] = {
 #endif /* !BOOTLOADER */
 
 #ifndef BOOTLOADER
-    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_time_sync_adv_set,           "time_sync_adv_set"),  /* 9  */
+    CMD_INFO(protobuf_packet_t_time_sync_bcast_set_tag,       network_cmd_time_sync_bcast_set,         "time_sync_bcast_set"),/* 9  */
+    CMD_INFO(protobuf_packet_t_antenna_delay_bcast_set_tag,   network_cmd_antenna_delay_bcast_set,     "ant_delay_bcast_set"),/* 88 */
 #else
-    CMD_INFO(protobuf_packet_t_time_sync_adv_set_tag,         network_cmd_unimplemented,               "time_sync_adv_set"),  /* 9  */
+    CMD_INFO(protobuf_packet_t_time_sync_bcast_set_tag,       network_cmd_unimplemented,               "time_sync_bcast_set"),/* 9  */
+    CMD_INFO(protobuf_packet_t_antenna_delay_bcast_set_tag,   network_cmd_unimplemented,               "ant_delay_bcast_set"),/* 88 */
 #endif
 
 #ifndef BOOTLOADER
@@ -264,12 +262,6 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_battery_info_resp_tag,         network_cmd_unimplemented,               "battery_info_resp"),  /* 60 */
     CMD_INFO(protobuf_packet_t_battery_info_get_tag,          network_cmd_battery_info_get,            "battery_info_get"),   /* 61 */
 #endif /* !BOOTLOADER */
-#ifndef BOOTLOADER
-    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_calib_status_get,            "calib_status_get"),   /* 65 */
-#else
-    CMD_INFO(protobuf_packet_t_calib_status_get_tag,          network_cmd_unimplemented,               "calib_status_get"),   /* 65 */
-#endif
-    CMD_INFO(protobuf_packet_t_calib_status_resp_tag,         network_cmd_unimplemented,               "calib_status_resp"),  /* 66 */
     CMD_INFO(protobuf_packet_t_end_session_tag,               network_cmd_end_session,                 "end_session"),        /* 67 */
 #ifndef BOOTLOADER
     CMD_INFO(protobuf_packet_t_factory_otp_write_tag,         network_cmd_factory_otp_write,           "factory_otp_write"),  /* 68 */
@@ -284,9 +276,6 @@ static const network_cmd_entry_t network_cmd_table[] = {
     CMD_INFO(protobuf_packet_t_zone_profile_set_tag,          network_cmd_zone_profile_set,            "zone_profile_set"),   /* 81 */
     CMD_INFO(protobuf_packet_t_zone_profile_get_tag,          network_cmd_zone_profile_get,            "zone_profile_get"),   /* 82 */
     CMD_INFO(protobuf_packet_t_zone_profile_resp_tag,         network_cmd_unimplemented,               "zone_profile_resp"),  /* 83 */
-    CMD_INFO(protobuf_packet_t_calib_start_tag,               network_cmd_calib_start,                 "calib_start"),        /* 84 */
-    CMD_INFO(protobuf_packet_t_calib_stop_tag,                network_cmd_calib_stop,                  "calib_stop"),         /* 85 */
-    CMD_INFO(protobuf_packet_t_calib_candidate_apply_tag,     network_cmd_calib_candidate_apply,       "calib_candidate_apply"), /* 86 */
 #endif
     //      +=================================================+=======================================+========================+
 };
@@ -354,6 +343,32 @@ static bool network_cmd_reconfigure_uwb(const protobuf_uwb_cfg_t *cfg)
 
     app_rtos_set_ranging_enabled(was_ranging_enabled);
     return status == BSP_OK;
+}
+
+/* serial_number == 0 is reserved to mean "apply to every device" for
+ * broadcast-targeted set commands. */
+static bool network_cmd_bcast_target_match(uint32_t serial_number)
+{
+    return serial_number == 0u || serial_number == bsp_util_get_serial_number();
+}
+
+/* Confirms (over BCAST) that this device matched and processed a
+ * broadcast-targeted set command. Not routed through the generic ack_t path
+ * (see network_core_skip_ack_tb) — BCAST has no single "the" responder, so a
+ * dedicated, identity-carrying confirmation is used instead. Sent once; any
+ * reliability/retry for this direction lives in the central BLE bridge
+ * firmware, not here. */
+static void network_cmd_send_bcast_apply_ack(const protobuf_packet_t *pkt, bool success)
+{
+    protobuf_packet_t ack;
+    memset(&ack, 0, sizeof(ack));
+    ack.hdr.addr.dst = protobuf_PACKET_ADDR_BCAST;
+    ack.which_params = protobuf_packet_t_bcast_apply_ack_tag;
+    ack.params.bcast_apply_ack.serial_number = bsp_util_get_serial_number();
+    ack.params.bcast_apply_ack.cmd_seq       = pkt->hdr.seq;
+    ack.params.bcast_apply_ack.cmd_tag       = pkt->which_params;
+    ack.params.bcast_apply_ack.success       = success;
+    network_cmd_send_packet(&ack);
 }
 #endif /* !BOOTLOADER */
 
@@ -759,37 +774,104 @@ static void network_cmd_time_sync_set(const protobuf_packet_t *pkt)
 }
 
 #ifndef BOOTLOADER
-static void network_cmd_time_sync_adv_set(const protobuf_packet_t *pkt)
+static void network_cmd_time_sync_bcast_set(const protobuf_packet_t *pkt)
 {
     CHECK_VOID(pkt);
 
-    const sys_config_t *cfg = sys_config_get();
-    if (cfg == NULL) {
+    const protobuf_time_sync_bcast_set_t *bcast_set = &pkt->params.time_sync_bcast_set;
+
+    // Broadcast is addressed by the permanent factory serial number
+    // (serial_number == 0 means "every device").
+    if (!network_cmd_bcast_target_match(bcast_set->serial_number)) {
         return;
     }
 
-    const protobuf_time_sync_adv_set_t *adv_set = &pkt->params.time_sync_adv_set;
-
-    // Check device type and device id
-    if (adv_set->device_type == cfg->device_type && adv_set->device_id == cfg->uwb.device_id) {
-        if (bsp_rtc_sync_set(adv_set->unix_time_ms,
-                             adv_set->timezone_offset) != BSP_UTIL_OK) {
-            RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_adv_set");
-            return;
-        }
-
-        bsp_rtc_time_t rtc_time;
-        bsp_rtc_get_time(&rtc_time);
-        RLOG_I(OBJECT_CODE,
-               "RTC synced (adv_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
-               (unsigned)rtc_time.day,
-               (unsigned)rtc_time.month,
-               (unsigned)(2000u + rtc_time.year),
-               (unsigned)rtc_time.hour,
-               (unsigned)rtc_time.minute,
-               (unsigned)rtc_time.second,
-               (long)adv_set->timezone_offset);
+    if (bsp_rtc_sync_set(bcast_set->unix_time_ms,
+                         bcast_set->timezone_offset) != BSP_UTIL_OK) {
+        RLOG_W(OBJECT_CODE, "RTC sync set failed from time_sync_bcast_set");
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
     }
+
+    bsp_rtc_time_t rtc_time;
+    bsp_rtc_get_time(&rtc_time);
+    RLOG_I(OBJECT_CODE,
+           "RTC synced (bcast_set): datetime: %02u-%02u-%04u %02u:%02u:%02u, timezone offset: %ld s",
+           (unsigned)rtc_time.day,
+           (unsigned)rtc_time.month,
+           (unsigned)(2000u + rtc_time.year),
+           (unsigned)rtc_time.hour,
+           (unsigned)rtc_time.minute,
+           (unsigned)rtc_time.second,
+           (long)bcast_set->timezone_offset);
+    network_cmd_send_bcast_apply_ack(pkt, true);
+}
+
+static void network_cmd_antenna_delay_bcast_set(const protobuf_packet_t *pkt)
+{
+    CHECK_VOID(pkt);
+
+    const protobuf_antenna_delay_bcast_set_t *req = &pkt->params.antenna_delay_bcast_set;
+
+    uint32_t my_sn = bsp_util_get_serial_number();
+    RLOG_I(OBJECT_CODE,
+           "[BCAST_ANT_DLY] Rx pkt: target_sn=0x%08X (my_sn=0x%08X) TX=%lu RX=%lu persist=%d",
+           (unsigned int)req->serial_number,
+           (unsigned int)my_sn,
+           (unsigned long)req->tx_antenna_delay,
+           (unsigned long)req->rx_antenna_delay,
+           (int)req->persist);
+
+    // Broadcast is addressed by the permanent factory serial number: antenna
+    // delay is a per-physical-unit calibration value, not a logical role/slot.
+    // (serial_number == 0 means "every device".)
+    if (!network_cmd_bcast_target_match(req->serial_number)) {
+        RLOG_D(OBJECT_CODE,
+               "[BCAST_ANT_DLY] Ignored pkt: target_sn 0x%08X != my_sn 0x%08X",
+               (unsigned int)req->serial_number,
+               (unsigned int)my_sn);
+        return;
+    }
+
+    if (req->tx_antenna_delay > 0xFFFFu || req->rx_antenna_delay > 0xFFFFu) {
+        RLOG_W(OBJECT_CODE,
+               "Invalid antenna delay in antenna_delay_bcast_set: TX=%lu RX=%lu",
+               (unsigned long)req->tx_antenna_delay,
+               (unsigned long)req->rx_antenna_delay);
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
+    }
+
+    sys_config_t *cfg = sys_config_get();
+    if (cfg == NULL) {
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
+    }
+
+    protobuf_uwb_cfg_t old_cfg = cfg->uwb;
+    cfg->uwb.tx_antenna_delay = req->tx_antenna_delay;
+    cfg->uwb.rx_antenna_delay = req->rx_antenna_delay;
+
+    if (!network_cmd_reconfigure_uwb(&cfg->uwb)) {
+        cfg->uwb = old_cfg;
+        (void)network_cmd_reconfigure_uwb(&cfg->uwb);
+        RLOG_E(OBJECT_CODE, ERR_HAL, "Failed to apply antenna_delay_bcast_set");
+        network_cmd_send_bcast_apply_ack(pkt, false);
+        return;
+    }
+
+    // Iterative calibration searches apply many trial values before converging;
+    // only the final call (persist=true) is worth a flash write.
+    if (req->persist) {
+        network_cmd_config_save("antenna_delay_bcast_set");
+    }
+
+    RLOG_I(OBJECT_CODE,
+           "Antenna delay applied via broadcast: TX=%lu RX=%lu persist=%d",
+           (unsigned long)cfg->uwb.tx_antenna_delay,
+           (unsigned long)cfg->uwb.rx_antenna_delay,
+           (int)req->persist);
+    network_cmd_send_bcast_apply_ack(pkt, true);
 }
 #endif
 
@@ -1154,104 +1236,6 @@ static void network_cmd_zone_profile_get(const protobuf_packet_t *pkt)
     resp.params.zone_profile_resp.profile = cfg->zone_profiles[zone_id - 1];
 
     network_cmd_send_packet(&resp);
-}
-
-static void network_cmd_calib_start(const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(pkt);
-    const sys_config_t *cfg = sys_config_get();
-    if (cfg->uwb.role != DEVICE_ROLE_TAG) {
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-        return;
-    }
-
-    const protobuf_calib_start_t *req = &pkt->params.calib_start;
-    if (!req->reference_position_valid ||
-        !isfinite(req->tag_x_m) ||
-        !isfinite(req->tag_y_m) ||
-        !isfinite(req->tag_z_m)) {
-        RLOG_W(OBJECT_CODE, "calib_start rejected: explicit finite reference position required");
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_INVALID_TYPE);
-        return;
-    }
-
-    uint32_t sample_target = pkt->params.calib_start.sample_target;
-    if (sample_target == 0U) {
-        sample_target = CALIB_ANCHOR_SAMPLES;
-    }
-    if (sample_target > SYS_CONFIG_CALIB_MAX_SAMPLES ||
-        !app_rtos_request_tag_calibration_start(sample_target,
-                                                req->tag_x_m,
-                                                req->tag_y_m,
-                                                req->tag_z_m)) {
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-        return;
-    }
-
-    RLOG_I(OBJECT_CODE,
-           "calib_start queued: samples=%lu reference=(%.3f,%.3f,%.3f)",
-           (unsigned long)sample_target,
-           req->tag_x_m,
-           req->tag_y_m,
-           req->tag_z_m);
-    network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
-}
-
-static void network_cmd_calib_stop(const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(pkt);
-    if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG) {
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-        return;
-    }
-    bool queued = app_rtos_request_tag_calibration_stop();
-    RLOG_I(OBJECT_CODE, "calib_stop: request %s.", queued ? "queued" : "rejected");
-    network_cmd_send_handler_ack(pkt,
-                                 queued
-                                 ? protobuf_PACKET_ACK_RESPONSE_ACK
-                                 : protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-}
-
-static void network_cmd_calib_status_get(const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(pkt);
-
-    protobuf_packet_t resp;
-    memset(&resp, 0, sizeof(resp));
-    resp.hdr.addr.src = pkt->hdr.addr.dst;
-    resp.hdr.addr.dst = pkt->hdr.addr.src;
-    resp.hdr.seq = pkt->hdr.seq;
-    resp.which_params = protobuf_packet_t_calib_status_resp_tag;
-
-    app_calib_master_fill_status(&resp.params.calib_status_resp);
-
-    network_cmd_send_packet(&resp);
-}
-
-static void network_cmd_calib_candidate_apply(const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(pkt);
-    if (sys_config_get()->uwb.role != DEVICE_ROLE_TAG) {
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-        return;
-    }
-    uint32_t mask = pkt->params.calib_candidate_apply.anchor_mask;
-    uint16_t tx_delay = 0U;
-    uint16_t rx_delay = 0U;
-    if (!app_calib_master_get_average_candidate(mask, &tx_delay, &rx_delay)) {
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-        return;
-    }
-    RLOG_I(OBJECT_CODE,
-           "calib_candidate_apply queued mask=0x%02lX candidate_tx=%u candidate_rx=%u",
-           (unsigned long)mask,
-           tx_delay,
-           rx_delay);
-    bool queued = app_rtos_request_tag_calibration_apply(mask);
-    network_cmd_send_handler_ack(pkt,
-                                 queued
-                                 ? protobuf_PACKET_ACK_RESPONSE_ACK
-                                 : protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
 }
 
 #endif /* !BOOTLOADER */

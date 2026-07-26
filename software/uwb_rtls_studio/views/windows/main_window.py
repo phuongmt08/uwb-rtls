@@ -180,6 +180,7 @@ class MainWindow(QMainWindow):
         device_info_vm=None,
         config_vm=None,
         calibration_vm=None,
+        antenna_delay_calib_vm=None,
         dongle_vm=None,
         log_vm=None,
         main_vm=None,
@@ -193,6 +194,7 @@ class MainWindow(QMainWindow):
         self._device_info_vm = device_info_vm
         self._config_vm = config_vm
         self._calibration_vm = calibration_vm
+        self._antenna_delay_calib_vm = antenna_delay_calib_vm
         self._dongle_vm = dongle_vm
         self._log_vm = log_vm
         self._main_vm = main_vm
@@ -569,9 +571,7 @@ class MainWindow(QMainWindow):
             "sys_config_set",
             "sensor_fusion_cfg_set",
             "pos_calib_cfg_set",
-            "calib_start",
-            "calib_stop",
-            "calib_candidate_apply",
+            "antenna_delay_bcast_set",
             "ble_conn_params_set",
             "ble_adv_config_set",
             "device_type_set",
@@ -583,7 +583,7 @@ class MainWindow(QMainWindow):
             "enter_to_bootloader",
             "imu_reset",
             "imu_calib_start",
-            "time_sync_adv_set",
+            "time_sync_bcast_set",
         }
         return command_name in notify_commands
 
@@ -597,9 +597,7 @@ class MainWindow(QMainWindow):
             "sys_config_set": "system config set",
             "sensor_fusion_cfg_set": "sensor fusion config set",
             "pos_calib_cfg_set": "position calibration config set",
-            "calib_start": "TAG antenna calibration start",
-            "calib_stop": "TAG antenna calibration stop",
-            "calib_candidate_apply": "TAG calibration candidate apply",
+            "antenna_delay_bcast_set": "broadcast antenna delay set",
             "ble_conn_params_set": "BLE connection params set",
             "ble_adv_config_set": "BLE advertising config set",
             "device_type_set": "device type set",
@@ -611,7 +609,7 @@ class MainWindow(QMainWindow):
             "enter_to_bootloader": "enter bootloader",
             "imu_reset": "IMU reset",
             "imu_calib_start": "IMU calibration start",
-            "time_sync_adv_set": "advertising device time sync",
+            "time_sync_bcast_set": "broadcast device time sync",
         }
         return labels.get(command_name, command_name.replace("_", " "))
 
@@ -648,6 +646,7 @@ class MainWindow(QMainWindow):
         self._tab_spatial_constraints = self.tab_spatial_constraints
         self._tab_config = self.tab_config
         self._tab_calibration = self.tab_calibration
+        self._tab_antenna_delay_calib = self.tab_antenna_delay_calib
         self._tab_log = self.tab_log
         self._tab_communication = self.tab_communication
 
@@ -672,6 +671,9 @@ class MainWindow(QMainWindow):
         if self._calibration_vm:
             self._tab_calibration.set_viewmodel(self._calibration_vm)
 
+        if self._antenna_delay_calib_vm:
+            self._tab_antenna_delay_calib.set_viewmodel(self._antenna_delay_calib_vm)
+
         if self._log_vm:
             self._tab_log.set_viewmodel(self._log_vm)
 
@@ -686,12 +688,14 @@ class MainWindow(QMainWindow):
 
         # Get index for calibration and spatial constraints tabs
         self._calib_tab_index = self.tabs.indexOf(self._tab_calibration)
+        self._antenna_delay_calib_tab_index = self.tabs.indexOf(self._tab_antenna_delay_calib)
         self._spatial_tab_index = self.tabs.indexOf(self._tab_spatial_constraints)
         self._tracking_tab_index = self.tabs.indexOf(self._tab_tracking)
         self._communication_tab_index = self.tabs.indexOf(self._tab_communication)
 
         # Hide calibration and spatial constraints tabs in User mode
         self.tabs.setTabVisible(self._calib_tab_index, False)
+        self.tabs.setTabVisible(self._antenna_delay_calib_tab_index, False)
         self.tabs.setTabVisible(self._spatial_tab_index, False)
         self.tabs.setTabVisible(self._tracking_tab_index, True)
         self.tabs.setTabVisible(self._communication_tab_index, False)
@@ -957,6 +961,7 @@ class MainWindow(QMainWindow):
 
         # Toggle calibration, spatial constraints and communication tabs visibility
         self.tabs.setTabVisible(self._calib_tab_index, self._is_developer)
+        self.tabs.setTabVisible(self._antenna_delay_calib_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._spatial_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._tracking_tab_index, not self._is_developer)
         self.tabs.setTabVisible(self._communication_tab_index, self._is_developer)

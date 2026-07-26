@@ -40,7 +40,6 @@
     - sensor_fusion_cfg_get_t / _set_t / _resp_t (21-23)
     - pos_calib_cfg_get_t / _set_t / _resp_t (40-42)
     - ble_adv_config_t (33), ble_conn_params_* (47-49)
-    - calib_status_get_t / _resp_t (63-64)
 ===============================================================================
 """
 

@@ -33,7 +33,8 @@ _MCU_COMMANDS = {
     "device_information_get",
     "time_sync_get",
     "time_sync_set",
-    "time_sync_adv_set",
+    "time_sync_bcast_set",
+    "antenna_delay_bcast_set",
     "sys_config_get",
     "sys_config_set",
     "sys_ranging_cfg_get",
@@ -62,7 +63,6 @@ _MCU_COMMANDS = {
     "anchor_layout_set",
     "battery_info_get",
     "enter_to_bootloader",
-    "calib_status_get",
     "factory_otp_write",
     "rtos_resource_get",
     "rtos_task_stats_get",
@@ -73,9 +73,6 @@ _MCU_COMMANDS = {
     "zone_switch",
     "zone_profile_set",
     "zone_profile_get",
-    "calib_start",
-    "calib_stop",
-    "calib_candidate_apply",
 }
 
 _CENTRAL_COMMANDS = {
@@ -210,36 +207,46 @@ class CommandFactory:
         pkt.time_sync_set.timezone_offset = timezone_offset
         return pkt
 
-    def time_sync_adv_set(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.time_sync_adv_set.device_type = pb.DEVICE_TYPE_ANCHOR
-        pkt.time_sync_adv_set.device_id = 1
-        pkt.time_sync_adv_set.unix_time_ms = int(time.time() * 1000)
-        pkt.time_sync_adv_set.timezone_offset = 7 * 60
-        return pkt
-
     def time_sync_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.time_sync_resp.unix_time_ms = int(time.time() * 1000)
         pkt.time_sync_resp.timezone_offset = 7 * 60
         return pkt
 
-    def time_sync_adv_set(
+    def time_sync_bcast_set(
         self,
         src: int,
         dst: int,
         seq: int,
-        device_type: int | None = None,
-        device_id: int = 1,
+        serial_number: int = 0,
         unix_time_ms: int | None = None,
         timezone_offset: int = 7 * 60,
     ) -> pb.packet_t:
-        # Test/mock helper: real devices should provide their own identity.
+        # serial_number == 0 means "every device".
         pkt = self._base(src, dst, seq)
-        pkt.time_sync_adv_set.device_type = self.default_device_type if device_type is None else device_type
-        pkt.time_sync_adv_set.device_id = device_id
-        pkt.time_sync_adv_set.unix_time_ms = unix_time_ms if unix_time_ms is not None else int(time.time() * 1000)
-        pkt.time_sync_adv_set.timezone_offset = timezone_offset
+        pkt.time_sync_bcast_set.serial_number = serial_number
+        pkt.time_sync_bcast_set.unix_time_ms = unix_time_ms if unix_time_ms is not None else int(time.time() * 1000)
+        pkt.time_sync_bcast_set.timezone_offset = timezone_offset
+        return pkt
+
+    def antenna_delay_bcast_set(
+        self,
+        src: int,
+        dst: int,
+        seq: int,
+        serial_number: int = 0,
+        tx_antenna_delay: int = 0,
+        rx_antenna_delay: int = 0,
+        persist: bool = True,
+    ) -> pb.packet_t:
+        # serial_number == 0 means "every device". persist=False lets an
+        # iterative calibration search try values without wearing flash;
+        # only the final converged apply should pass persist=True.
+        pkt = self._base(src, dst, seq)
+        pkt.antenna_delay_bcast_set.serial_number = serial_number
+        pkt.antenna_delay_bcast_set.tx_antenna_delay = tx_antenna_delay
+        pkt.antenna_delay_bcast_set.rx_antenna_delay = rx_antenna_delay
+        pkt.antenna_delay_bcast_set.persist = persist
         return pkt
 
     def sys_config_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -766,20 +773,6 @@ class CommandFactory:
         pkt.fota_state_resp.state = pb.FOTA_STATE_IDLE
         return pkt
 
-    def calib_status_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_status_get.dummy = 0
-        return pkt
-
-    def calib_status_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_status_resp.SetInParent()
-        pkt.calib_status_resp.state = pb.CALIB_STATE_IDLE
-        pkt.calib_status_resp.progress_percent = 0
-        pkt.calib_status_resp.current_iteration = 0
-        pkt.calib_status_resp.total_iterations = 0
-        return pkt
-
     def factory_otp_write(
         self,
         src: int,
@@ -1000,41 +993,6 @@ class CommandFactory:
         )
         return pkt
 
-    def calib_start(
-        self,
-        src: int,
-        dst: int,
-        seq: int,
-        sample_target: int = 32,
-        tag_x_m: float = 2.0,
-        tag_y_m: float = 2.0,
-        tag_z_m: float = 1.0,
-        reference_position_valid: bool = True,
-    ) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_start.sample_target = max(0, int(sample_target))
-        pkt.calib_start.tag_x_m = float(tag_x_m)
-        pkt.calib_start.tag_y_m = float(tag_y_m)
-        pkt.calib_start.tag_z_m = float(tag_z_m)
-        pkt.calib_start.reference_position_valid = bool(reference_position_valid)
-        return pkt
-
-    def calib_stop(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_stop.dummy = 0
-        return pkt
-
-    def calib_candidate_apply(
-        self,
-        src: int,
-        dst: int,
-        seq: int,
-        anchor_mask: int = 0xF,
-    ) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.calib_candidate_apply.anchor_mask = max(0, int(anchor_mask))
-        return pkt
-
 
 class CommandCatalog:
     def __init__(self, factory: CommandFactory | None = None) -> None:
@@ -1047,7 +1005,7 @@ class CommandCatalog:
             CommandSpec(6, "time_sync_get", self.factory.time_sync_get, "time_sync_resp"),
             CommandSpec(7, "time_sync_set", self.factory.time_sync_set, "time_sync_resp"),
             CommandSpec(8, "time_sync_resp", self.factory.time_sync_resp),
-            CommandSpec(9, "time_sync_adv_set", self.factory.time_sync_adv_set),
+            CommandSpec(9, "time_sync_bcast_set", self.factory.time_sync_bcast_set),
             CommandSpec(10, "sys_config_get", self.factory.sys_config_get, "sys_config_resp"),
             CommandSpec(11, "sys_config_set", self.factory.sys_config_set, "sys_config_resp"),
             CommandSpec(12, "sys_config_resp", self.factory.sys_config_resp),
@@ -1107,9 +1065,7 @@ class CommandCatalog:
             CommandSpec(62, "battery_info_resp", self.factory.battery_info_resp),
             CommandSpec(63, "battery_info_get", self.factory.battery_info_get, "battery_info_resp"),
             CommandSpec(64, "enter_to_bootloader", self.factory.enter_to_bootloader),
-            # Calib status
-            CommandSpec(65, "calib_status_get", self.factory.calib_status_get, "calib_status_resp"),
-            CommandSpec(66, "calib_status_resp", self.factory.calib_status_resp),
+
             CommandSpec(67, "end_session", self.factory.end_session),
             # Factory OTP
             CommandSpec(68, "factory_otp_write", self.factory.factory_otp_write),
@@ -1127,9 +1083,7 @@ class CommandCatalog:
             CommandSpec(81, "zone_profile_set", self.factory.zone_profile_set),
             CommandSpec(82, "zone_profile_get", self.factory.zone_profile_get, "zone_profile_resp"),
             CommandSpec(83, "zone_profile_resp", self.factory.zone_profile_resp),
-            CommandSpec(84, "calib_start", self.factory.calib_start),
-            CommandSpec(85, "calib_stop", self.factory.calib_stop),
-            CommandSpec(86, "calib_candidate_apply", self.factory.calib_candidate_apply),
+            CommandSpec(88, "antenna_delay_bcast_set", self.factory.antenna_delay_bcast_set),
         ]
 
     def all(self) -> Iterable[CommandSpec]:

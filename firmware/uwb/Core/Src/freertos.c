@@ -22,7 +22,7 @@
 #include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
-
+// testing
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
@@ -31,7 +31,6 @@
 #include "app_anchor.h"
 #include "app_tag.h"
 #include "ble/sys_ble_peripheral.h"
-#include "app_calib_master.h"
 #include "bsp_battery.h"
 #include "bsp_io.h"
 #include "bsp_imu.h"
@@ -359,14 +358,7 @@ void uwb_ranging_entry(void *argument)
         bsp_uwb_dwt_isr();
         if (cfg->uwb.role == DEVICE_ROLE_TAG)
         {
-          if (app_calib_master_should_run())
-          {
-            app_calib_master_process();
-          }
-          else
-          {
-            app_tag_process();
-          }
+          app_tag_process();
         }
         else
         {
@@ -384,14 +376,7 @@ void uwb_ranging_entry(void *argument)
     bsp_uwb_dwt_isr();
     if (cfg->uwb.role == DEVICE_ROLE_TAG)
     {
-      if (app_calib_master_should_run())
-      {
-        app_calib_master_process();
-      }
-      else
-      {
-        app_tag_process();
-      }
+      app_tag_process();
     }
     else
     {
@@ -1145,7 +1130,6 @@ static void reset_ranging_runtime_state(sys_config_t *cfg)
     }
 
     if (cfg->uwb.role == DEVICE_ROLE_TAG) {
-        app_calib_master_on_ranging_stopped();
         app_tag_reset_fusion();
     } else {
         (void)app_anchor_init();

@@ -115,6 +115,7 @@
       <file file_name="../../ble_common/logger.c" />
     </folder>
     <folder Name="ble_bridge">
+      <file file_name="../../ble_common/ble_bridge/bb_broadcast.c" />
       <file file_name="../../ble_common/ble_bridge/bb_cmd_hdl.c" />
       <file file_name="../../ble_common/ble_bridge/bb_router.c" />
       <file file_name="../../ble_common/ble_bridge/bb_transport.c" />
