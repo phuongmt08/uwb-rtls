@@ -42,6 +42,19 @@ static bool network_core_encode_and_send(network_core_t *core,
         return false;
     }
 
+    if (len > NETWORK_CORE_PACKET_WARN_SIZE) {
+        uint32_t which = packet ? packet->which_params : 0u;
+        uint32_t dst = (packet && packet->has_hdr && packet->hdr.has_addr) ?
+                       (uint32_t)packet->hdr.addr.dst : 0xFFu;
+        RLOG_W(OBJECT_CODE,
+               "large protobuf TX tag=%lu dst=%lu stream=%d len=%lu warn=%lu",
+               which,
+               dst,
+               (int)stream,
+               (unsigned long)len,
+               (unsigned long)NETWORK_CORE_PACKET_WARN_SIZE);
+    }
+
     int wr = _write(stream, (char *)buf, (int)len, 0);
     if (wr <= 0) {
         uint32_t which = packet ? packet->which_params : 0u;
@@ -228,6 +241,23 @@ static bool network_core_process_one_stream(network_core_t *core, stream_type_t 
     }
 
     core->latest_packet_tick = bsp_util_get_ticks();
+    if (packet.has_hdr && packet.hdr.has_addr &&
+        packet.hdr.addr.dst == protobuf_PACKET_ADDR_BCAST) {
+        RLOG_I(OBJECT_CODE,
+               "[BCAST_RX] stream=%d tag=%lu seq=%lu src=0x%02lX",
+               (int)in_stream,
+               (unsigned long)packet.which_params,
+               (unsigned long)packet.hdr.seq,
+               (unsigned long)packet.hdr.addr.src);
+    }
+
+    if (packet.has_hdr && packet.hdr.has_addr) {
+        if (packet.hdr.addr.src == protobuf_PACKET_ADDR_DEBUG) {
+            core->serial_connection_active = true;
+        } else if (packet.hdr.addr.src == protobuf_PACKET_ADDR_HOST) {
+            core->ble_connection_active = true;
+        }
+    }
 
     /* ---- Routing decision based on dst ---- */
     bool for_us = network_core_is_for_us(core, &packet);

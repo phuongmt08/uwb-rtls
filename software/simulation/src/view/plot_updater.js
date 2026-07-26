@@ -404,7 +404,6 @@ function updatePlots(res, samples, rawData) {
                 <div class="stat-box">
                     <strong>${item.label}</strong>
                     <div class="position-metric-grid">
-                        <div class="position-metric euclidean" title="Mean of sqrt(dx^2 + dy^2) over valid samples"><span class="position-metric-label">Euclidean Position Error</span><span class="position-metric-value">${formatErrorMetric(metrics.euclidean)}</span></div>
                         <div class="position-metric"><span class="position-metric-label">MAE</span><span class="position-metric-value">${formatErrorMetric(metrics.mae)}</span></div>
                         <div class="position-metric"><span class="position-metric-label">RMSE</span><span class="position-metric-value">${formatErrorMetric(metrics.rmse)}</span></div>
                         <div class="position-metric"><span class="position-metric-label">P50</span><span class="position-metric-value">${formatErrorMetric(metrics.p50)}</span></div>

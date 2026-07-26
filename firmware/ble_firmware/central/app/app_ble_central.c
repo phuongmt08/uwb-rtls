@@ -49,6 +49,7 @@
 /* Private defines --------------------------------------------------------- */
 #define APP_BLE_CONN_CFG_TAG     1  /**< SoftDevice BLE configuration tag. */
 #define APP_BLE_OBSERVER_PRIO    3  /**< BLE observer priority.            */
+#define APP_BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE 8U
 
 #define MAX_KNOWN_DEVICES        15 /**< Maximum devices tracked in scan list. */
 #define KNOWN_DEVICE_STALE_MS    5000U
@@ -813,7 +814,13 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             err_code = sd_ble_gap_conn_param_update(
                            p_gap_evt->conn_handle,
                            p_req);
-            APP_ERROR_CHECK(err_code);
+            if (err_code != NRF_SUCCESS &&
+                err_code != NRF_ERROR_BUSY &&
+                err_code != NRF_ERROR_INVALID_STATE)
+            {
+                NRF_LOG_WARNING("ConnParam request reply failed: 0x%08x",
+                                err_code);
+            }
         } break;
 
         /* ---- PHY update request ------------------------------------- */
@@ -1012,9 +1019,15 @@ void scan_init(void)
     scan_param.window        = MSEC_TO_UNITS(SYSTEM_CONFIG_SCAN_WINDOW_MS, UNIT_0_625_MS);
     scan_param.filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL;
     scan_param.timeout       = (SYSTEM_CONFIG_SCAN_DURATION_MS == 0)
-                               ? 0
-                               : (uint16_t)(SYSTEM_CONFIG_SCAN_DURATION_MS / 10U);
+                                ? 0
+                                : (uint16_t)(SYSTEM_CONFIG_SCAN_DURATION_MS / 10U);
     scan_param.scan_phys     = SYSTEM_CONFIG_PREFERRED_PHY;
+#if BLE_BROADCAST_USE_EXTENDED
+    /* Central commands may use Extended Advertising. Peripheral ACKs use the
+     * typed legacy form when they fit, but extended scan support is still
+     * required for the command path and larger broadcast payloads. */
+    scan_param.extended      = 1;
+#endif
 
     init_scan.connect_if_match = false; /**< Manual-connect via terminal / button. */
     init_scan.conn_cfg_tag     = APP_BLE_CONN_CFG_TAG;
@@ -1269,38 +1282,30 @@ uint32_t app_ble_central_send_data(uint8_t const *p_data, uint16_t length)
         return NRF_ERROR_DATA_SIZE;
     }
 
-    uint16_t send_len = length;
+    ble_gattc_write_params_t write_params;
+    memset(&write_params, 0, sizeof(write_params));
+    write_params.write_op = BLE_GATT_OP_WRITE_CMD;
+    write_params.flags    = BLE_GATT_EXEC_WRITE_FLAG_PREPARED_WRITE;
+    write_params.handle   = m_ble_nus_c.handles.nus_rx_handle;
+    write_params.offset   = 0;
+    write_params.len      = length;
+    write_params.p_value  = p_data;
+
+    ret_code_t err_code =
+        sd_ble_gattc_write(m_current_conn_handle, &write_params);
+    if (err_code == NRF_ERROR_RESOURCES)
     {
-
-        ret_code_t err_code;
-        uint32_t retries = 0;
-        do
-        {
-            err_code = ble_nus_c_string_send(&m_ble_nus_c, (uint8_t *)p_data, send_len);
-            if (err_code == NRF_ERROR_RESOURCES)
-            {
-                // Spin wait instead of blocking delay to prevent freezing main loop
-                nrf_delay_ms(2);
-                retries++;
-            }
-        } while (err_code == NRF_ERROR_RESOURCES && retries < 50);
-
-        if (err_code == NRF_ERROR_RESOURCES)
-        {
-            NRF_LOG_WARNING("BLE Central TX buffer full after retries, packet not queued: %u bytes",
-                            (unsigned)length);
-            return err_code;
-        }
-        else if (err_code != NRF_SUCCESS)
-        {
-            NRF_LOG_ERROR("BLE Central Send Failed! Code: 0x%x", (unsigned int)err_code);
-            return err_code;
-        }
-
-        NRF_LOG_INFO("BLE Central NUS TX queued: %u bytes", send_len);
-        m_pending_tx_chunks++;
-
+        return err_code;
     }
+    if (err_code != NRF_SUCCESS)
+    {
+        NRF_LOG_ERROR("BLE Central Send Failed! Code: 0x%x",
+                      (unsigned int)err_code);
+        return err_code;
+    }
+
+    NRF_LOG_INFO("BLE Central NUS TX queued: %u bytes", length);
+    m_pending_tx_chunks++;
 
     return NRF_SUCCESS;
 }

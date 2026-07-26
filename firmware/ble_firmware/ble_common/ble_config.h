@@ -46,12 +46,12 @@ extern "C" {
  * baud, 8N1), well below what a 7.5 ms interval can carry — a shorter
  * interval only wakes the radio more often for no extra usable throughput.
  */
-#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(15, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MIN_CONN_INTERVAL   MSEC_TO_UNITS(7.5, UNIT_1_25_MS)
 
 /**
  * @brief Maximum acceptable connection interval.
  */
-#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(30, UNIT_1_25_MS)
+#define SYSTEM_CONFIG_MAX_CONN_INTERVAL   MSEC_TO_UNITS(15, UNIT_1_25_MS)
 
 /**
  * @brief Slave latency.
@@ -60,7 +60,7 @@ extern "C" {
  * continuous streaming there is always data pending so no events are
  * skipped; under bursty/idle traffic this cuts radio wake-ups for free.
  */
-#define SYSTEM_CONFIG_SLAVE_LATENCY      6
+#define SYSTEM_CONFIG_SLAVE_LATENCY      4
 
 /**
  * @brief Connection supervisory time-out.
@@ -152,9 +152,10 @@ extern "C" {
 
 /**
  * @brief Number of ADV events per broadcast burst.
- *        Higher = more reliable reception, but longer air time.
+ *        Both command and ACK use a short burst. Central-level retransmission
+ *        is handled separately and only starts after the ACK timeout.
  */
-#define SYSTEM_CONFIG_BCAST_ADV_EVENTS     5
+#define SYSTEM_CONFIG_BCAST_ADV_EVENTS     3
 
 #ifdef __cplusplus
 }

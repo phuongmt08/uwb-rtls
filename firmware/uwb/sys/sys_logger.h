@@ -237,6 +237,23 @@ uint16_t sys_logger_ram_peek_packet(uint8_t *out, uint16_t max_len);
 
 #endif /* defined(HAVE_FLASH_STORAGE) && defined(ENABLE_FLASH_LOG) */
 
+/**
+ * @brief Get total number of warning log records generated
+ * @return Count of warning logs
+ */
+uint32_t sys_logger_get_warning_count(void);
+
+/**
+ * @brief Get total number of error log records generated
+ * @return Count of error logs
+ */
+uint32_t sys_logger_get_error_count(void);
+
+/**
+ * @brief Reset warning and error log counters to zero
+ */
+void sys_logger_reset_counts(void);
+
 /* -------------------------------------------------------------------------- */
 
 #endif /* __SYS_LOGGER_H */

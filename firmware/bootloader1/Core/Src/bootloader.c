@@ -2,19 +2,6 @@
  * @file    bootloader.c
  * @brief   Minimal USB DFU + BLE FOTA bootloader for STM32F411CEU6
  * @author  Phuong Mai
- *
- * Boot flow:
- *   1. main() opens a DFU/FOTA window for BL_DFU_TIMEOUT_MS.
- *   2. nRF52 boots independently and self-advertises — STM32 does NOT
- *      call ble_enable or start_adv. STM32 only listens for ble_status_resp
- *      pushed by nRF when state changes (ADVERTISING → CONNECTED etc.).
- *   3. When a host connects over BLE and sends a flash_erase command,
- *      the FOTA receiver is armed:
- *        a. Erase app partition.
- *        b. Accept flash_write packets.
- *        c. On flash_verify: verify CRC + vector table.
- *        d. If OK → reboot into new image. If fail → keep old image.
- *   4. If no FOTA within the timeout → jump to existing app (if valid).
  */
 
 #include "bootloader.h"
@@ -26,6 +13,7 @@
 #include "network_core.h"
 #include "network_cmd.h"
 #include "bsp_flash_bl.h"
+#include "zlib_decoder.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -34,6 +22,16 @@ extern USBD_HandleTypeDef hUsbDeviceFS;
 
 #define OBJECT_CODE  LOG_OBJECT_CODE_NETWORK
 
+#define FOTA_FLAG_COMPRESSED  (0x80000000UL)
+#define FOTA_FLAG_ACK_REQ     (0x40000000UL)
+#define FOTA_ADDR_MASK        (0x0FFFFFFFUL)
+#define FOTA_FLASH_BUFFER_SIZE 256U
+#define FOTA_FRAME_HEADER_SIZE 8U
+#define FOTA_FRAME_VERSION     1U
+#define FOTA_RAW_BLOCK_SIZE    4096U
+#define FOTA_COMP_BLOCK_MAX    4160U
+#define FOTA_FRAME_MAGIC_0     0x46U /* 'F' */
+#define FOTA_FRAME_MAGIC_1     0x44U /* 'D' */
 bool bl_app_vector_valid(void)
 {
     const uint32_t magic        = *(uint32_t *)(MEM_APP_HEADER_ADDR + 0U);
@@ -92,10 +90,185 @@ typedef struct {
     bool                        host_disconnected;
     uint32_t                    last_processed_seq;  /* Track last processed packet seq to prevent duplicates */
     uint32_t                    last_flash_write_ms;  /* Last flash_write activity while receiving */
+    bool                        is_compressed_mode;
+    uint32_t                    compressed_next_addr;
 } bl_fota_ctx_t;
 
+typedef struct {
+    uint8_t  buf[FOTA_FLASH_BUFFER_SIZE];
+    uint16_t buf_len;
+    uint32_t flash_addr;
+} flash_write_buf_t;
+
+typedef struct {
+    uint8_t  header[FOTA_FRAME_HEADER_SIZE];
+    uint8_t  header_len;
+    uint16_t raw_len;
+    uint16_t compressed_len;
+    uint16_t received_len;
+    uint32_t total_raw_len;
+    uint8_t  compressed[FOTA_COMP_BLOCK_MAX];
+} fota_frame_rx_t;
+
 static bl_fota_ctx_t         s_fota;
+static flash_write_buf_t     s_write_buf;
+static fota_frame_rx_t       s_frame_rx;
 static network_core_t       *s_net_core_ref;   /* for packet handler */
+
+static bool bl_flush_write_buf(bool pad_to_word)
+{
+    uint16_t write_len = s_write_buf.buf_len;
+
+    if (write_len == 0U) {
+        return true;
+    }
+
+    if (pad_to_word) {
+        uint16_t aligned_len = (uint16_t)((write_len + 3U) & ~3U);
+        while (write_len < aligned_len) {
+            s_write_buf.buf[write_len++] = 0xFFU;
+        }
+    }
+
+    if ((write_len & 3U) != 0U ||
+        s_write_buf.flash_addr >= MEM_APP_END ||
+        write_len > (MEM_APP_END - s_write_buf.flash_addr)) {
+        return false;
+    }
+
+    if (bsp_fl_app_write(s_write_buf.flash_addr,
+                         s_write_buf.buf,
+                         write_len) != BSP_FL_OK) {
+        return false;
+    }
+
+    s_write_buf.flash_addr += write_len;
+    s_write_buf.buf_len = 0U;
+    return true;
+}
+
+static bool deflate_flash_write_cb(uint8_t byte, uint32_t output_index, void *user_data)
+{
+    (void)output_index;
+    (void)user_data;
+
+    if (s_write_buf.flash_addr >= MEM_APP_END ||
+        s_write_buf.buf_len >= (MEM_APP_END - s_write_buf.flash_addr)) {
+        return false;
+    }
+
+    s_write_buf.buf[s_write_buf.buf_len++] = byte;
+
+    if (s_write_buf.buf_len == FOTA_FLASH_BUFFER_SIZE) {
+        return bl_flush_write_buf(false);
+    }
+    return true;
+}
+
+static uint16_t bl_read_le16(const uint8_t *data)
+{
+    return (uint16_t)data[0] | ((uint16_t)data[1] << 8U);
+}
+
+static void bl_frame_rx_reset(void)
+{
+    memset(&s_frame_rx, 0, sizeof(s_frame_rx));
+}
+
+static bool bl_frame_header_parse(void)
+{
+    if (s_frame_rx.header[0] != FOTA_FRAME_MAGIC_0 ||
+        s_frame_rx.header[1] != FOTA_FRAME_MAGIC_1 ||
+        s_frame_rx.header[2] != FOTA_FRAME_VERSION ||
+        s_frame_rx.header[3] != 0U) {
+        return false;
+    }
+
+    s_frame_rx.raw_len = bl_read_le16(&s_frame_rx.header[4]);
+    s_frame_rx.compressed_len = bl_read_le16(&s_frame_rx.header[6]);
+    s_frame_rx.received_len = 0U;
+
+    if (s_frame_rx.raw_len == 0U ||
+        s_frame_rx.raw_len > FOTA_RAW_BLOCK_SIZE ||
+        (s_frame_rx.raw_len & 3U) != 0U ||
+        s_frame_rx.compressed_len == 0U ||
+        s_frame_rx.compressed_len > FOTA_COMP_BLOCK_MAX ||
+        s_frame_rx.total_raw_len + s_frame_rx.raw_len > MEM_APP_LENGTH) {
+        return false;
+    }
+
+    uint32_t logical_output =
+        s_write_buf.flash_addr + (uint32_t)s_write_buf.buf_len;
+    return logical_output ==
+           (MEM_APP_START + s_frame_rx.total_raw_len);
+}
+
+static bool bl_frame_decode_complete(void)
+{
+    int result = zlib_decompress_raw(s_frame_rx.compressed,
+                                     s_frame_rx.compressed_len,
+                                     s_frame_rx.raw_len,
+                                     deflate_flash_write_cb,
+                                     NULL);
+    if (result != TINF_OK) {
+        return false;
+    }
+
+    s_frame_rx.total_raw_len += s_frame_rx.raw_len;
+    s_frame_rx.header_len = 0U;
+    s_frame_rx.raw_len = 0U;
+    s_frame_rx.compressed_len = 0U;
+    s_frame_rx.received_len = 0U;
+    return true;
+}
+
+static bool bl_frame_stream_process(const uint8_t *data, uint32_t length)
+{
+    uint32_t offset = 0U;
+
+    while (offset < length) {
+        if (s_frame_rx.header_len < FOTA_FRAME_HEADER_SIZE) {
+            uint32_t needed =
+                FOTA_FRAME_HEADER_SIZE - s_frame_rx.header_len;
+            uint32_t available = length - offset;
+            uint32_t copy_len = (available < needed) ? available : needed;
+
+            memcpy(&s_frame_rx.header[s_frame_rx.header_len],
+                   &data[offset],
+                   copy_len);
+            s_frame_rx.header_len =
+                (uint8_t)(s_frame_rx.header_len + copy_len);
+            offset += copy_len;
+
+            if (s_frame_rx.header_len < FOTA_FRAME_HEADER_SIZE) {
+                continue;
+            }
+            if (!bl_frame_header_parse()) {
+                return false;
+            }
+        }
+
+        uint32_t needed =
+            (uint32_t)s_frame_rx.compressed_len -
+            s_frame_rx.received_len;
+        uint32_t available = length - offset;
+        uint32_t copy_len = (available < needed) ? available : needed;
+
+        memcpy(&s_frame_rx.compressed[s_frame_rx.received_len],
+               &data[offset],
+               copy_len);
+        s_frame_rx.received_len =
+            (uint16_t)(s_frame_rx.received_len + copy_len);
+        offset += copy_len;
+
+        if (s_frame_rx.received_len == s_frame_rx.compressed_len &&
+            !bl_frame_decode_complete()) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 static void bl_send_fota_state(const protobuf_packet_t *req,
                                protobuf_fota_state_index_t state)
@@ -126,6 +299,11 @@ static void bl_enter_error_and_erase_app(const protobuf_packet_t *req)
     s_fota.state = protobuf_FOTA_STATE_IDLE;
     s_fota.host_disconnected = false;
     s_fota.last_processed_seq = 0xFFFFFFFFU;
+    s_fota.is_compressed_mode = false;
+    s_fota.compressed_next_addr = MEM_APP_START;
+    s_write_buf.buf_len = 0U;
+    s_write_buf.flash_addr = MEM_APP_START;
+    bl_frame_rx_reset();
     bl_send_fota_state(req, s_fota.state);
 }
 
@@ -176,6 +354,12 @@ static void bl_on_flash_erase(const protobuf_packet_t *pkt)
         return;
     }
 
+    s_write_buf.buf_len = 0U;
+    s_write_buf.flash_addr = MEM_APP_START;
+    bl_frame_rx_reset();
+    s_fota.is_compressed_mode = false;
+    s_fota.compressed_next_addr = MEM_APP_START;
+
     s_fota.state         = protobuf_FOTA_STATE_RECEIVING;
     s_fota.bytes_written = 0u;
     s_fota.last_flash_write_ms = HAL_GetTick();
@@ -189,26 +373,60 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
         return false;
     }
 
-    uint32_t       address = pkt->params.flash_write.address;
-    const uint8_t *data    = pkt->params.flash_write.data.bytes;
-    uint32_t       length  = pkt->params.flash_write.data.size;
+    uint32_t       raw_addr = pkt->params.flash_write.address;
+    const uint8_t *data     = pkt->params.flash_write.data.bytes;
+    uint32_t       length   = pkt->params.flash_write.data.size;
 
-    uint32_t end = address + length;
-    if (length == 0u ||
-        address < MEM_APP_START ||
-        end < address ||
-        end > MEM_APP_END) {
-        RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
-               "BL: bad write addr=0x%08lX len=%lu",
-               (unsigned long)address, (unsigned long)length);
-        bl_enter_error_and_erase_app(pkt);
+    bool is_compressed = (raw_addr & FOTA_FLAG_COMPRESSED) != 0U;
+    bool has_fota_flags = (raw_addr & (FOTA_FLAG_COMPRESSED | FOTA_FLAG_ACK_REQ)) != 0U;
+    uint32_t address = has_fota_flags ? (raw_addr & FOTA_ADDR_MASK) : raw_addr;
+
+    if (length == 0u) {
         return false;
     }
 
-    if (bsp_fl_app_write(address, data, length) != BSP_FL_OK) {
-        RLOG_E(OBJECT_CODE, ERR_HAL, "BL: flash write failed");
-        bl_enter_error_and_erase_app(pkt);
-        return false;
+    if (is_compressed) {
+        uint32_t input_end = address + length;
+        if (address < MEM_APP_START || input_end < address) {
+            return false;
+        }
+
+        if (address < s_fota.compressed_next_addr) {
+            if (input_end <= s_fota.compressed_next_addr) {
+                s_fota.last_flash_write_ms = HAL_GetTick();
+                return true;
+            }
+            return false;
+        }
+
+        if (address > s_fota.compressed_next_addr) {
+            return false;
+        }
+
+        s_fota.is_compressed_mode = true;
+        if (!bl_frame_stream_process(data, length)) {
+            RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
+                   "BL: invalid/failed compressed frame at input=0x%08lX",
+                   (unsigned long)address);
+            bl_enter_error_and_erase_app(pkt);
+            return false;
+        }
+        s_fota.compressed_next_addr = input_end;
+    } else {
+        uint32_t end = address + length;
+        if (address < MEM_APP_START || end < address || end > MEM_APP_END) {
+            RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
+                   "BL: bad write addr=0x%08lX len=%lu",
+                   (unsigned long)address, (unsigned long)length);
+            bl_enter_error_and_erase_app(pkt);
+            return false;
+        }
+
+        if (bsp_fl_app_write(address, data, length) != BSP_FL_OK) {
+            RLOG_E(OBJECT_CODE, ERR_HAL, "BL: flash write failed");
+            bl_enter_error_and_erase_app(pkt);
+            return false;
+        }
     }
 
     s_fota.bytes_written += length;
@@ -225,14 +443,59 @@ static void bl_on_flash_verify(const protobuf_packet_t *pkt)
         return;
     }
 
+    if (s_fota.is_compressed_mode) {
+        if (s_frame_rx.header_len != 0U ||
+            s_frame_rx.received_len != 0U ||
+            s_frame_rx.compressed_len != 0U ||
+            s_frame_rx.total_raw_len == 0U) {
+            RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
+                   "BL: incomplete compressed frame (hdr=%u recv=%u/%u raw=%lu)",
+                   (unsigned int)s_frame_rx.header_len,
+                   (unsigned int)s_frame_rx.received_len,
+                   (unsigned int)s_frame_rx.compressed_len,
+                   (unsigned long)s_frame_rx.total_raw_len);
+            bl_enter_error_and_erase_app(pkt);
+            return;
+        }
+
+        if (!bl_flush_write_buf(true)) {
+            RLOG_E(OBJECT_CODE, ERR_HAL, "BL: flush write buf failed");
+            bl_enter_error_and_erase_app(pkt);
+            return;
+        }
+
+        uint32_t written_end =
+            s_write_buf.flash_addr;
+        if (written_end != MEM_APP_START + s_frame_rx.total_raw_len) {
+            RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
+                   "BL: decompressed length mismatch (%lu/%lu)",
+                   (unsigned long)(written_end - MEM_APP_START),
+                   (unsigned long)s_frame_rx.total_raw_len);
+            bl_enter_error_and_erase_app(pkt);
+            return;
+        }
+    }
+
     uint32_t image_len = 0u;
     uint32_t expected_crc = 0u;
     uint32_t computed_crc = 0u;
-    bsp_fl_status_t crc_status = bsp_fl_app_verify_crc_ex(&image_len, &expected_crc, &computed_crc);
+    bsp_fl_status_t crc_status =
+        bsp_fl_app_verify_crc_ex(&image_len, &expected_crc, &computed_crc);
+
+    if (crc_status == BSP_FL_OK &&
+        s_fota.is_compressed_mode &&
+        image_len != s_frame_rx.total_raw_len) {
+        RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
+               "BL: header image len=%lu differs from decoded len=%lu",
+               (unsigned long)image_len,
+               (unsigned long)s_frame_rx.total_raw_len);
+        bl_enter_error_and_erase_app(pkt);
+        return;
+    }
 
     if (crc_status == BSP_FL_OK) {
         RLOG_I(OBJECT_CODE, "BL: image verified (%lu B)",
-               (unsigned long)s_fota.bytes_written);
+               (unsigned long)image_len);
         s_fota.state = protobuf_FOTA_STATE_FINISHED;
         bl_send_fota_state(pkt, s_fota.state);
     } else {
@@ -282,25 +545,31 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
 
         case protobuf_packet_t_flash_write_tag:
         {
+            uint32_t raw_addr = pkt->params.flash_write.address;
+            bool req_ack = (raw_addr & FOTA_FLAG_ACK_REQ) != 0U ||
+                           ((raw_addr & (FOTA_FLAG_COMPRESSED | FOTA_FLAG_ACK_REQ)) == 0U);
+
             /* Detect and skip duplicate packets */
             if (pkt->has_hdr && pkt->hdr.seq == s_fota.last_processed_seq) {
                 RLOG_W(OBJECT_CODE, "BL: duplicate flash_write detected (seq=%d), skipping",
                        (int)pkt->hdr.seq);
-                /* Don't re-process, but still ACK to prevent retransmit storm */
-                network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                if (req_ack) {
+                    network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                }
                 return true;
             }
 
-            /* Track this sequence number */
-            if (pkt->has_hdr) {
-                s_fota.last_processed_seq = pkt->hdr.seq;
-            }
-
-            /* Process and send ACK only if successful */
+            /* Process write */
             bool success = bl_on_flash_write(pkt);
             if (success) {
-                network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                if (pkt->has_hdr) {
+                    s_fota.last_processed_seq = pkt->hdr.seq;
+                }
+                if (req_ack) {
+                    network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                }
             } else {
+                /* Always NACK on failure */
                 network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
             }
             return true;
@@ -328,6 +597,10 @@ void bl_fota_init(network_core_t *net_core)
     s_fota.state   = protobuf_FOTA_STATE_IDLE;
     s_fota.last_processed_seq = 0xFFFFFFFFU;  /* Initialize to invalid sequence number */
     s_fota.last_flash_write_ms = 0u;
+    s_fota.compressed_next_addr = MEM_APP_START;
+    s_write_buf.buf_len = 0U;
+    s_write_buf.flash_addr = MEM_APP_START;
+    bl_frame_rx_reset();
     s_net_core_ref = net_core;
 
     if (!sys_ble_peripheral_init(net_core)) {

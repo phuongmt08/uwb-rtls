@@ -176,10 +176,7 @@ static bool find_next_stress_zone(const sys_config_t *cfg, uint32_t current_zone
 
 static void schedule_zone_switch_stress_test(sys_config_t *cfg)
 {
-    if (!cfg ||
-        cfg->calib.enable_tag_auto_calib ||
-        cfg->calib.enable_anchor_auto_calib ||
-        s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
+    if (!cfg || s_uwb_control_op != APP_TAG_UWB_CONTROL_NONE) {
         return;
     }
 
@@ -542,8 +539,6 @@ app_err_t app_tag_init(void)
     s_successful_cycles_in_window = 0;
     s_period_miss_count = 0;
     s_period_overrun_count = 0;
-
-    sys_ranging_set_calib_status(SYS_CALIB_STATUS_NORMAL);
 
     return APP_OK;
 }

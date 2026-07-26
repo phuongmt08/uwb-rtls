@@ -3160,6 +3160,42 @@ class PositionCanvas(_PositionCanvasBase):
             painter.setBrush(QColor(239, 68, 68, 20))
             painter.drawEllipse(active_x - error_radius, active_y - error_radius, error_radius * 2, error_radius * 2)
 
+        # Draw the joint 95% UKF position-confidence ellipse from Pxy.
+        if active_tag.get("position_cov_valid", False):
+            major_radius = max(
+                0.0,
+                float(active_tag.get("position_ellipse_major_95_m", 0.0)),
+            ) * scale_px
+            minor_radius = max(
+                0.0,
+                float(active_tag.get("position_ellipse_minor_95_m", 0.0)),
+            ) * scale_px
+            if major_radius > 0.0 and minor_radius > 0.0:
+                confidence_color = {
+                    "High": QColor(16, 185, 129),
+                    "Medium": QColor(245, 158, 11),
+                    "Low": QColor(248, 113, 113),
+                }.get(
+                    str(active_tag.get("position_confidence", "Unavailable")),
+                    QColor(148, 163, 184),
+                )
+                fill_color = QColor(confidence_color)
+                fill_color.setAlpha(28)
+                line_color = QColor(confidence_color)
+                line_color.setAlpha(175)
+                painter.save()
+                painter.translate(active_x, active_y)
+                painter.rotate(-float(active_tag.get("position_ellipse_angle_deg", 0.0)))
+                painter.setPen(QPen(line_color, 2, Qt.PenStyle.DashLine))
+                painter.setBrush(fill_color)
+                painter.drawEllipse(QRectF(
+                    -major_radius,
+                    -minor_radius,
+                    2.0 * major_radius,
+                    2.0 * minor_radius,
+                ))
+                painter.restore()
+
         # UKF center marker as a small dot
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(ukf_color)
@@ -3208,6 +3244,16 @@ class PositionCanvas(_PositionCanvasBase):
         # Tag coordinates text overlay
         if self.fusion_position is not None:
             coord_text = f"UKF {active_tag['x']:.2f}, {active_tag['y']:.2f}"
+            if active_tag.get("position_cov_valid", False):
+                covariance_stage = (
+                    "Update" if int(active_tag.get("ukf_step", 0)) == 1 else "Predict"
+                )
+                coord_text += (
+                    f" | {active_tag.get('position_confidence', 'Unavailable')}/"
+                    f"{covariance_stage} "
+                    f"95% {float(active_tag.get('position_ellipse_major_95_m', 0.0)):.2f}"
+                    f"x{float(active_tag.get('position_ellipse_minor_95_m', 0.0)):.2f}m"
+                )
         else:
             coord_text = f"{active_tag['x']:.2f}, {active_tag['y']:.2f}"
 

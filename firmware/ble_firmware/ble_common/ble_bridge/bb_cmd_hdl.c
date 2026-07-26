@@ -259,6 +259,12 @@ bb_cmd_action_t bb_cmd_hdl_process(uint8_t * p_buf, uint16_t * p_length, uint16_
         return BB_CMD_ACTION_ERROR;
     }
 
+    /* ACKs complete MCU-side tracking and require no nRF application handler. */
+    if (in_pkt.which_params == protobuf_packet_t_ack_tag)
+    {
+        return BB_CMD_ACTION_NONE;
+    }
+
     uint32_t cmd_idx = in_pkt.which_params;
     bb_cmd_handler_t handler = NULL;
 

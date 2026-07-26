@@ -31,21 +31,6 @@ typedef enum
 } sys_ranging_err_t;
 
 /**
- * @brief Local calibration state advertised in UWB packets.
- *
- * This is intentionally 1 byte so it can fit into existing packet padding.
- * Only two states matter:
- *   NORMAL = local survey data is not ready
- *   DONE   = local survey summary was acknowledged by the collector
- * Network exit is coordinated separately by SURVEY_COMPLETE/ABORT.
- */
-typedef enum
-{
-  SYS_CALIB_STATUS_NORMAL = 0,
-  SYS_CALIB_STATUS_DONE   = 1
-} sys_calib_status_t;
-
-/**
  * @brief Ranging result
  */
 typedef struct
@@ -57,7 +42,6 @@ typedef struct
   uint16_t fp_snr_q8;
   uint8_t  fp_confidence_q8;
   uint8_t  quality;
-  uint8_t  calib_status;
   bool     valid;
 } sys_ranging_result_t;
 
@@ -71,62 +55,6 @@ typedef struct
   uint8_t count;          /* Number of valid results */
   uint8_t sequence_num;   /* Sequence number */
 } sys_ranging_multi_result_t;
-
-/**
- * @brief Registered control-message types carried outside DS-TWR exchanges.
- */
-typedef enum
-{
-  SYS_UWB_CTRL_CALIB_PAIR_SUMMARY = 0xE5,
-  SYS_UWB_CTRL_ACK                = 0xE6,
-  SYS_UWB_CTRL_SURVEY_FINISH      = 0xE7
-} sys_uwb_control_msg_type_t;
-
-typedef enum
-{
-  SYS_SURVEY_FINISH_ABORT    = 0,
-  SYS_SURVEY_FINISH_COMPLETE = 1
-} sys_survey_finish_outcome_t;
-
-/* Control-message wire formats ------------------------------------- */
-typedef struct __attribute__((packed))
-{
-  uint8_t  peer_id;
-  float    known_m;
-  float    mean_m;
-  float    std_m;
-  float    timeout_rate;
-  uint8_t  valid_count;
-} sys_calib_pair_summary_item_t;
-
-typedef struct __attribute__((packed))
-{
-  uint8_t msg_type;
-  uint8_t epoch_id;
-  uint8_t sender_id;
-  uint8_t pair_count;
-  uint16_t current_tx_delay;
-  uint16_t current_rx_delay;
-  uint16_t current_combined_delay;
-  sys_calib_pair_summary_item_t pair[SURVEY_NUM_ANCHORS - 1U];
-} sys_calib_pair_summary_msg_t;
-
-typedef struct __attribute__((packed))
-{
-  uint8_t msg_type;
-  uint8_t epoch_id;
-  uint8_t sender_id;
-  uint8_t acked_msg_type;
-  uint8_t acked_value;
-} sys_uwb_control_ack_msg_t;
-
-typedef struct __attribute__((packed))
-{
-  uint8_t msg_type;
-  uint8_t epoch_id;
-  uint8_t collector_id;
-  uint8_t outcome;
-} sys_survey_finish_msg_t;
 
 /**
  * @brief Ranging configuration
@@ -205,16 +133,6 @@ sys_ranging_err_t sys_ranging_anchor_start_tdma(uint8_t anchor_id,
                                                 uint32_t rx_timeout_ms);
 
 /**
- * @brief Set the calibration state advertised by the local device in outgoing packets.
- */
-void sys_ranging_set_calib_status(sys_calib_status_t status);
-
-/**
- * @brief Read back the current outgoing calibration state.
- */
-sys_calib_status_t sys_ranging_get_calib_status(void);
-
-/**
  * @brief Get the current TDMA slot ID (0=Idle/Poll, 1-N=Anchor slots)
  */
 uint8_t sys_ranging_get_current_slot(void);
@@ -250,40 +168,6 @@ sys_ranging_err_t sys_ranging_anchor_process_tdma(uint8_t num_anchors,
  * @return SYS_RANGING_OK if result available
  */
 sys_ranging_err_t sys_ranging_anchor_get_result_tdma(sys_ranging_result_t *result);
-
-/* ====================================================================
- * CONTROL MESSAGE API
- * ==================================================================== */
-
-/**
- * @brief Send or receive a registered control message.
- *
- * Control messages use byte 0 as type and byte 1 as epoch. A non-zero slot_id
- * applies the shared deterministic control-message slot delay before TX.
- */
-sys_ranging_err_t sys_ranging_control_send(sys_uwb_control_msg_type_t type,
-                                           const void *msg,
-                                           uint16_t msg_size,
-                                           uint8_t slot_id);
-sys_ranging_err_t sys_ranging_control_receive(sys_uwb_control_msg_type_t type,
-                                              void *msg,
-                                              uint16_t msg_size,
-                                              uint32_t timeout_ms);
-sys_ranging_err_t sys_ranging_control_send_ack(uint8_t epoch_id,
-                                               uint8_t sender_id,
-                                               sys_uwb_control_msg_type_t acked_type,
-                                               uint8_t acked_value,
-                                               uint8_t slot_id);
-sys_ranging_err_t sys_ranging_control_receive_ack(sys_uwb_control_msg_type_t acked_type,
-                                                  sys_uwb_control_ack_msg_t *ack,
-                                                  uint32_t timeout_ms);
-sys_ranging_err_t sys_ranging_control_send_wait_ack(sys_uwb_control_msg_type_t type,
-                                                    const void *msg,
-                                                    uint16_t msg_size,
-                                                    uint8_t slot_id,
-                                                    uint8_t expected_ack_sender,
-                                                    uint8_t expected_ack_value,
-                                                    uint32_t ack_timeout_ms);
 
 /* ====================================================================
  * NON-BLOCKING API - LEGACY SINGLE-ANCHOR MODE (backward compatible)

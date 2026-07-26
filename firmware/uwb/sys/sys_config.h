@@ -26,7 +26,6 @@
 typedef protobuf_device_role_t        device_role_t;
 typedef protobuf_device_type_t        device_type_t;
 typedef protobuf_host_transport_t     host_transport_t;
-typedef protobuf_pos_calib_cfg_t      sys_calib_cfg_t;
 typedef protobuf_anchor_layout_item_t sys_anchor_layout_t;
 typedef protobuf_prefilter_cfg_t      sys_prefilter_cfg_t;
 
@@ -67,7 +66,6 @@ typedef struct
   host_transport_t    host_transport;
   protobuf_uwb_cfg_t  uwb; /* maps to sys_config_set/resp.config */
   sys_prefilter_cfg_t prefilter;
-  sys_calib_cfg_t     calib;
   uint32_t            anchor_count;
   sys_anchor_layout_t anchor_layout[SYS_CONFIG_MAX_ANCHORS];
 
@@ -77,7 +75,7 @@ typedef struct
 } sys_config_t;
 
 /* Default values ----------------------------------------------------------- */
-#define CONFIG_VERSION            51     /* bump → forces flash reset on upgrade */
+#define CONFIG_VERSION            52     /* bump → forces flash reset on upgrade */
 
 #define DEFAULT_DEVICE_ROLE       DEVICE_TYPE_ANCHOR
 #define DEFAULT_DEVICE_TYPE       DEVICE_TYPE_ANCHOR
@@ -123,8 +121,6 @@ int                    sys_config_set_host_transport(host_transport_t host_trans
 int                    sys_config_set_device_id(uint8_t id);
 device_type_t          sys_config_get_device_type(void);
 host_transport_t       sys_config_get_host_transport(void);
-const sys_calib_cfg_t *sys_config_get_calib(void);
-int                    sys_config_set_calib(const sys_calib_cfg_t *calib);
 const sys_prefilter_cfg_t *sys_config_get_prefilter(void);
 int                    sys_config_set_prefilter(const sys_prefilter_cfg_t *prefilter);
 void                   sys_config_get_anchor_layout(sys_anchor_layout_t *anchors, uint32_t *count);

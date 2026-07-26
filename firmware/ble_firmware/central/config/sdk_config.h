@@ -51,7 +51,7 @@
 //==========================================================
 // <o> NRF_BLE_GQ_QUEUE_SIZE - Queue size for BLE GATT Queue module. 
 #ifndef NRF_BLE_GQ_QUEUE_SIZE
-#define NRF_BLE_GQ_QUEUE_SIZE 4
+#define NRF_BLE_GQ_QUEUE_SIZE 16
 #endif
 
 // </h> 
@@ -198,7 +198,7 @@
 
 // <o> NRF_BLE_GQ_DATAPOOL_ELEMENT_COUNT - Default number of elements in the pool of memory objects. 
 #ifndef NRF_BLE_GQ_DATAPOOL_ELEMENT_COUNT
-#define NRF_BLE_GQ_DATAPOOL_ELEMENT_COUNT 8
+#define NRF_BLE_GQ_DATAPOOL_ELEMENT_COUNT 16
 #endif
 
 // <o> NRF_BLE_GQ_GATTC_WRITE_MAX_DATA_LEN - Maximal size of the data inside GATTC write request (in bytes). 
@@ -232,7 +232,7 @@
 #endif
 // <o> NRF_BLE_SCAN_BUFFER - Data length for an advertising set. 
 #ifndef NRF_BLE_SCAN_BUFFER
-#define NRF_BLE_SCAN_BUFFER 31
+#define NRF_BLE_SCAN_BUFFER 255
 #endif
 
 // <o> NRF_BLE_SCAN_NAME_MAX_LEN - Maximum size for the name to search in the advertisement report. 

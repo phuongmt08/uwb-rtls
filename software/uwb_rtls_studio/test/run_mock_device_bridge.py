@@ -263,6 +263,10 @@ class MockDeviceSimulator:
             fs.yaw_deg = psi_deg
             fs.ranging_error_count = 0
             fs.timestamp_ms = res.timestamp_ms
+            fs.position_cov_xx_m2 = 0.01
+            fs.position_cov_xy_m2 = 0.002
+            fs.position_cov_yy_m2 = 0.015
+            fs.position_cov_valid = True
             
             self.send_packet(fusion_pkt)
             time.sleep(0.1)  # 10 Hz

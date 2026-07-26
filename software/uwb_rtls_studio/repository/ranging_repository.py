@@ -17,6 +17,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from utils.app_state import shared_app_state
+from utils.ukf_covariance import covariance_metrics
 
 log = logging.getLogger(__name__)
 
@@ -208,6 +209,12 @@ class RangingRepository(QObject):
             "packet_timestamp_ms": int(packet_timestamp_ms or 0),
             "received_at": time.time(),
         }
+        sample.update(covariance_metrics(
+            float(getattr(res, "position_cov_xx_m2", 0.0)),
+            float(getattr(res, "position_cov_xy_m2", 0.0)),
+            float(getattr(res, "position_cov_yy_m2", 0.0)),
+            bool(getattr(res, "position_cov_valid", False)),
+        ))
         if sample["zone_id"]:
             sample["room_id"] = str(sample["zone_id"])
             sample["local_x_m"] = sample["ukf_x_m"]

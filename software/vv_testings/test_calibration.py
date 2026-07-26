@@ -32,25 +32,9 @@ def _format_anchor_layout(anchors) -> str:
 
 def run(session: VvTestSession, src: int, dst: int) -> bool:
     factory = CommandFactory()
-    print("\n=== CALIBRATION / LAYOUT TESTS ===")
+    print("\n=== ANCHOR LAYOUT TESTS ===")
 
     ok = True
-
-    set_calib_pkt = factory.pos_calib_cfg_set(src, dst, session.proto.next_seq())
-    send_and_print(session, "pos_calib_cfg_set", set_calib_pkt)
-
-    calib_packets = send_and_print(
-        session,
-        "pos_calib_cfg_get",
-        factory.pos_calib_cfg_get(src, dst, session.proto.next_seq()),
-    )
-    calib_resp = first_param(calib_packets, "pos_calib_cfg_resp")
-    if calib_resp is None:
-        ok = False
-
-    print("Manual check pos_calib_cfg:")
-    print(f"  SET config={set_calib_pkt.pos_calib_cfg_set.config}")
-    print(f"  GET config={calib_resp.pos_calib_cfg_resp.config if calib_resp else '<not received>'}")
 
     set_layout_pkt = factory.anchor_layout_set(src, dst, session.proto.next_seq())
     send_and_print(session, "anchor_layout_set", set_layout_pkt)

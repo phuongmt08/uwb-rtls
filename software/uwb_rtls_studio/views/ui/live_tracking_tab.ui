@@ -803,6 +803,100 @@ QPushButton:hover { background: #475569; }</string>
                 </property>
                </widget>
               </item>
+              <item row="29" column="0" colspan="2">
+               <widget class="QLabel" name="lbl_grp_ukf_confidence">
+                <property name="styleSheet">
+                 <string notr="true">font-size: 11px; font-weight: bold; color: #64748B; margin-top: 5px; background-color: transparent;</string>
+                </property>
+                <property name="text">
+                 <string>UKF CONFIDENCE (Pxy)</string>
+                </property>
+               </widget>
+              </item>
+              <item row="30" column="0">
+               <widget class="QLabel" name="lbl_position_confidence">
+                <property name="text">
+                 <string>Confidence:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="30" column="1">
+               <widget class="QLabel" name="position_confidence_label">
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="31" column="0">
+               <widget class="QLabel" name="lbl_position_std">
+                <property name="text">
+                 <string>Radial σ:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="31" column="1">
+               <widget class="QLabel" name="position_std_label">
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="32" column="0">
+               <widget class="QLabel" name="lbl_position_ellipse">
+                <property name="text">
+                 <string>Ellipse 95%:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="32" column="1">
+               <widget class="QLabel" name="position_ellipse_label">
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="33" column="0">
+               <widget class="QLabel" name="lbl_cov_xx">
+                <property name="text">
+                 <string>Pxx (m²):</string>
+                </property>
+               </widget>
+              </item>
+              <item row="33" column="1">
+               <widget class="QLabel" name="cov_xx_label">
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="34" column="0">
+               <widget class="QLabel" name="lbl_cov_xy">
+                <property name="text">
+                 <string>Pxy (m²):</string>
+                </property>
+               </widget>
+              </item>
+              <item row="34" column="1">
+               <widget class="QLabel" name="cov_xy_label">
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
+              <item row="35" column="0">
+               <widget class="QLabel" name="lbl_cov_yy">
+                <property name="text">
+                 <string>Pyy (m²):</string>
+                </property>
+               </widget>
+              </item>
+              <item row="35" column="1">
+               <widget class="QLabel" name="cov_yy_label">
+                <property name="text">
+                 <string>--</string>
+                </property>
+               </widget>
+              </item>
              </layout>
             </item>
             <item>

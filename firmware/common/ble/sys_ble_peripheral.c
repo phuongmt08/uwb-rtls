@@ -268,6 +268,11 @@ void sys_ble_peripheral_on_status_resp(const protobuf_packet_t *pkt)
    BLE_CHECK_VOID(pkt);
    BLE_CHECK_VOID(pkt->which_params == protobuf_packet_t_ble_status_resp_tag);
 
+   if (s_ble_peri.stream != NULL) {
+       s_ble_peri.stream->ble_connection_active =
+           (pkt->params.ble_status_resp.state == protobuf_BLE_STATE_CONNECTED);
+   }
+
    ble_set_state(pkt->params.ble_status_resp.state,
                  pkt->params.ble_status_resp.rssi_dbm);
 }
@@ -299,8 +304,8 @@ void sys_ble_peripheral_send_adv_status(void)
 
     // 3. Fill diagnostic status fields
     status.status_flags = 0;
-    status.warning_count = 0;
-    status.error_count = 0;
+    status.warning_count = sys_logger_get_warning_count();
+    status.error_count = sys_logger_get_error_count();
     status.local_timestamp_s = bsp_rtc_get_timestamp_s();
     status.serial_number = s_ble_peri.serial_number;
 

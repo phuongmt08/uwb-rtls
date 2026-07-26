@@ -21,7 +21,6 @@ class ConfigRepository(QObject):
     sys_ranging_cfg_updated = pyqtSignal(dict)
     sensor_fusion_cfg_updated = pyqtSignal(dict)
     prefilter_cfg_updated = pyqtSignal(dict)
-    pos_calib_cfg_updated = pyqtSignal(dict)
     device_type_updated = pyqtSignal(int)
     zone_profile_updated = pyqtSignal(dict)
 
@@ -32,7 +31,6 @@ class ConfigRepository(QObject):
         self._sys_ranging_cfg: dict = {}
         self._sensor_fusion_cfg: dict = {}
         self._prefilter_cfg: dict = {}
-        self._pos_calib_cfg: dict = {}
         self._zone_profiles: dict[int, dict] = {}
         shared_app_state.device_session_reset.connect(self.reset_session)
 
@@ -41,7 +39,6 @@ class ConfigRepository(QObject):
         self._sys_ranging_cfg = {}
         self._sensor_fusion_cfg = {}
         self._prefilter_cfg = {}
-        self._pos_calib_cfg = {}
         self._zone_profiles = {}
 
     @property
@@ -59,10 +56,6 @@ class ConfigRepository(QObject):
     @property
     def prefilter_cfg(self) -> dict:
         return self._prefilter_cfg.copy()
-
-    @property
-    def pos_calib_cfg(self) -> dict:
-        return self._pos_calib_cfg.copy()
 
     @property
     def zone_profiles(self) -> dict[int, dict]:
@@ -98,14 +91,6 @@ class ConfigRepository(QObject):
                 self.save_prefilter_cfg({})
             else:
                 self.save_prefilter_cfg(self.parse_prefilter_cfg(cfg))
-            return True
-        if param_name == "pos_calib_cfg_resp":
-            cfg = pkt.pos_calib_cfg_resp.config
-            # ByteSize()==0: firmware chưa config pos_calib → hiện placeholder thay vì 0
-            if cfg.ByteSize() == 0:
-                self.save_pos_calib_cfg({})
-            else:
-                self.save_pos_calib_cfg(self.parse_pos_calib_cfg(cfg))
             return True
         if param_name == "device_type_set":
             self.save_device_type(int(getattr(pkt.device_type_set, "device_type", 0)))
@@ -215,33 +200,6 @@ class ConfigRepository(QObject):
             "anchors": anchors,
         }
 
-    def parse_pos_calib_cfg(self, cfg) -> dict:
-        return {
-            "enable_anchor_auto_calib": bool(getattr(cfg, "enable_anchor_auto_calib", False)),
-            "enable_tag_auto_calib": bool(getattr(cfg, "enable_tag_auto_calib", False)),
-            "ref_distance_xy_m": float(getattr(cfg, "ref_distance_xy_m", 0.0)),
-            "tag_height_m": float(getattr(cfg, "tag_height_m", 0.0)),
-            "anchor_height_m": float(getattr(cfg, "anchor_height_m", 0.0)),
-            "calib_anchor_id": int(getattr(cfg, "calib_anchor_id", 0)),
-            "samples": int(getattr(cfg, "samples", 0)),
-            "error_threshold_m": float(getattr(cfg, "error_threshold_m", 0.0)),
-            "min_delta_step": int(getattr(cfg, "min_delta_step", 0)),
-            "max_rounds": int(getattr(cfg, "max_rounds", 0)),
-            "max_std_m": float(getattr(cfg, "max_std_m", 0.0)),
-            "damping": float(getattr(cfg, "damping", 0.0)),
-            "iterations": int(getattr(cfg, "iterations", 0)),
-            "last_pair_error_mean_m": float(getattr(cfg, "last_pair_error_mean_m", 0.0)),
-            "iterations_taken": int(getattr(cfg, "iterations_taken", 0)),
-            "last_pair_error_spread_m": float(getattr(cfg, "last_pair_error_spread_m", 0.0)),
-            "last_pair_std_mean_m": float(getattr(cfg, "last_pair_std_mean_m", 0.0)),
-            "last_usable_pair_count": int(getattr(cfg, "last_usable_pair_count", 0)),
-            "last_rejected_pair_count": int(getattr(cfg, "last_rejected_pair_count", 0)),
-            "rejected_batch_count": int(getattr(cfg, "rejected_batch_count", 0)),
-            "last_pair_error_rms_m": float(getattr(cfg, "last_pair_error_rms_m", 0.0)),
-            "last_pair_error_max_abs_m": float(getattr(cfg, "last_pair_error_max_abs_m", 0.0)),
-            "last_pair_error_mean_abs_m": float(getattr(cfg, "last_pair_error_mean_abs_m", 0.0)),
-        }
-
     def save_sys_config(self, data: dict) -> None:
         self._sys_config = data.copy()
         shared_app_state.sys_config = self._sys_config
@@ -261,12 +219,6 @@ class ConfigRepository(QObject):
         self._prefilter_cfg = data.copy()
         shared_app_state.prefilter_cfg = self._prefilter_cfg
         self.prefilter_cfg_updated.emit(self.prefilter_cfg)
-    def save_pos_calib_cfg(self, data: dict) -> None:
-        self._pos_calib_cfg = data.copy()
-        shared_app_state.pos_calib_cfg = self._pos_calib_cfg
-        self.pos_calib_cfg_updated.emit(self.pos_calib_cfg)
-
-
     @staticmethod
     def _is_numeric_zone_id(value) -> bool:
         text = str(value or "").strip().lower()

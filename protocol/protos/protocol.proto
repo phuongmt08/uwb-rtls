@@ -23,8 +23,9 @@ package protobuf;
 /* Enums -------------------------------------------------------------------- */
 
 enum common_constant_t {
-    UNSPECIFIED  = 0;
-    PROTOCOL_REV = 123;
+    UNSPECIFIED                = 0;
+    PROTOCOL_REV               = 125;
+    PROTOBUF_PACKET_WARN_BYTES = 230;
 }
 
 enum packet_ack_response_t {
@@ -340,6 +341,13 @@ message sensor_fusion_result_t {
     uint32 zone_id                  = 11;
     repeated anchor_data_t  anchors = 12;
     uint32 prefilter_reject_count   = 13;
+    // Symmetric 2D position block of UKF P after the step identified by
+    // ukf_step. Diagonal/off-diagonal units are m^2.
+    float position_cov_xx_m2        = 14;
+    float position_cov_xy_m2        = 15;
+    float position_cov_yy_m2        = 16;
+    // False when UKF is not initialized or the 2x2 block is not finite/PSD.
+    bool position_cov_valid         = 17;
 }
 
 /* Positioning prefilter ---------------------------------------------------- */
@@ -606,46 +614,6 @@ message host_transport_set_t {
     host_transport_t transport = 1;
 }
 
-message pos_calib_cfg_t {
-    bool enable_anchor_auto_calib = 1;
-    bool enable_tag_auto_calib    = 2;
-    float ref_distance_xy_m       = 3;
-    float tag_height_m            = 4;
-    float anchor_height_m         = 5;
-    uint32 calib_anchor_id        = 6;
-    uint32 samples                = 7;
-    float error_threshold_m       = 8;
-    uint32 min_delta_step         = 9;
-    uint32 max_rounds             = 10;
-    float max_std_m               = 11;
-    float damping                 = 12; /* Added for gradient descent tuning */
-    uint32 iterations             = 13; /* Total iterations to run */
-    
-    // Diagnostics from the last evaluated calibration batch.
-    float last_pair_error_mean_m  = 14;
-    uint32 iterations_taken       = 15;
-    float last_pair_error_spread_m = 16;
-    float last_pair_std_mean_m    = 17;
-    uint32 last_usable_pair_count = 18;
-    uint32 last_rejected_pair_count = 19;
-    uint32 rejected_batch_count   = 20;
-    float last_pair_error_rms_m   = 21;
-    float last_pair_error_max_abs_m = 22;
-    float last_pair_error_mean_abs_m = 23;
-}
-
-message pos_calib_cfg_get_t {
-    uint32 dummy = 1;
-}
-
-message pos_calib_cfg_set_t {
-    pos_calib_cfg_t config = 1;
-}
-
-message pos_calib_cfg_resp_t {
-    pos_calib_cfg_t config = 1;
-}
-
 message anchor_layout_item_t {
     uint32 anchor_id = 1;
     float x_m        = 2;
@@ -821,7 +789,10 @@ message calib_data_t {
 message packet_t {
     hdr_t hdr = 1;
 
-    reserved 65, 66, 84, 85, 86; // formerly calib_status_get/resp, calib_start/stop/candidate_apply (firmware-side calibration removed)
+    reserved 46, 47, 48, 65, 66, 84, 85, 86;
+    reserved "pos_calib_cfg_get", "pos_calib_cfg_set", "pos_calib_cfg_resp",
+             "calib_status_get", "calib_status_resp",
+             "calib_start", "calib_stop", "calib_candidate_apply";
 
     oneof params {
         /* Core */
@@ -892,11 +863,6 @@ message packet_t {
 
         /* Host transport control */
         host_transport_set_t      host_transport_set      = 45;
-
-        /* Calibration config */
-        pos_calib_cfg_get_t       pos_calib_cfg_get       = 46;
-        pos_calib_cfg_set_t       pos_calib_cfg_set       = 47;
-        pos_calib_cfg_resp_t      pos_calib_cfg_resp      = 48;
 
         /* Anchor layout */
         anchor_layout_get_t       anchor_layout_get       = 49;

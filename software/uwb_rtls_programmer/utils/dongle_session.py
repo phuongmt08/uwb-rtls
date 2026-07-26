@@ -30,7 +30,12 @@ class DongleSession:
         self.ser = None
 
     def __enter__(self):
-        self.ser = serial.Serial(self.port, self.baud, timeout=READ_TIMEOUT_S)
+        self.ser = serial.Serial(
+            self.port,
+            self.baud,
+            timeout=READ_TIMEOUT_S,
+            write_timeout=3.0,
+        )
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
         time.sleep(0.06)
@@ -76,8 +81,11 @@ class DongleSession:
             raise RuntimeError("Session is not opened")
         frame = self.proto.wrap_packet(pkt)
         self.dbg(f"TX {self.packet_name(pkt)} ({self.packet_hdr(pkt)})")
-        self.ser.write(frame)
-        self.ser.flush()
+        written = self.ser.write(frame)
+        if written != len(frame):
+            raise serial.SerialTimeoutException(
+                f"Short serial write: {written}/{len(frame)} bytes"
+            )
 
     def send_and_wait(self, pkt, timeout_s: float = 0.35) -> list:
         self.send_packet(pkt)

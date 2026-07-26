@@ -34,7 +34,6 @@
 #define RESP_RETRY_MAX                  2
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      3000u
-#define NETWORK_HOST_ACTIVITY_TIMEOUT_MS 30000u
 #ifndef SENSOR_FUSION_STREAM_PERIOD_MS
 #define SENSOR_FUSION_STREAM_PERIOD_MS  20u
 #endif
@@ -99,8 +98,6 @@ static void network_cmd_sys_ranging_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_ranging_start(const protobuf_packet_t *pkt);
 static void network_cmd_ranging_stop(const protobuf_packet_t *pkt);
 static void network_cmd_host_transport_set(const protobuf_packet_t *pkt);
-static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt);
-static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_prefilter_cfg_get(const protobuf_packet_t *pkt);
 static void network_cmd_prefilter_cfg_set(const protobuf_packet_t *pkt);
 static void network_cmd_anchor_layout_get(const protobuf_packet_t *pkt);
@@ -239,10 +236,6 @@ static const network_cmd_entry_t network_cmd_table[] = {
 #endif
 
 #ifndef BOOTLOADER
-    CMD_INFO(protobuf_packet_t_pos_calib_cfg_get_tag,         network_cmd_pos_calib_cfg_get,           "calib_cfg_get"),      /* 40 */
-    CMD_INFO(protobuf_packet_t_pos_calib_cfg_set_tag,         network_cmd_pos_calib_cfg_set,           "calib_cfg_set"),      /* 41 */
-    CMD_INFO(protobuf_packet_t_pos_calib_cfg_resp_tag,        network_cmd_unimplemented,               "calib_cfg_resp"),     /* 42 */
-
     CMD_INFO(protobuf_packet_t_anchor_layout_get_tag,         network_cmd_anchor_layout_get,           "anchor_layout_get"),  /* 43 */
     CMD_INFO(protobuf_packet_t_anchor_layout_set_tag,         network_cmd_anchor_layout_set,           "anchor_layout_set"),  /* 44 */
     CMD_INFO(protobuf_packet_t_anchor_layout_resp_tag,        network_cmd_unimplemented,               "anchor_layout_resp"), /* 45 */
@@ -368,7 +361,13 @@ static void network_cmd_send_bcast_apply_ack(const protobuf_packet_t *pkt, bool 
     ack.params.bcast_apply_ack.cmd_seq       = pkt->hdr.seq;
     ack.params.bcast_apply_ack.cmd_tag       = pkt->which_params;
     ack.params.bcast_apply_ack.success       = success;
-    network_cmd_send_packet(&ack);
+    RLOG_I(OBJECT_CODE,
+           "[BCAST_ACK_TX] serial=0x%08lX cmd_tag=%lu cmd_seq=%lu success=%d",
+           (unsigned long)ack.params.bcast_apply_ack.serial_number,
+           (unsigned long)ack.params.bcast_apply_ack.cmd_tag,
+           (unsigned long)ack.params.bcast_apply_ack.cmd_seq,
+           (int)ack.params.bcast_apply_ack.success);
+    (void)network_cmd_send_packet(&ack);
 }
 #endif /* !BOOTLOADER */
 
@@ -814,30 +813,15 @@ static void network_cmd_antenna_delay_bcast_set(const protobuf_packet_t *pkt)
     const protobuf_antenna_delay_bcast_set_t *req = &pkt->params.antenna_delay_bcast_set;
 
     uint32_t my_sn = bsp_util_get_serial_number();
-    RLOG_I(OBJECT_CODE,
-           "[BCAST_ANT_DLY] Rx pkt: target_sn=0x%08X (my_sn=0x%08X) TX=%lu RX=%lu persist=%d",
-           (unsigned int)req->serial_number,
-           (unsigned int)my_sn,
-           (unsigned long)req->tx_antenna_delay,
-           (unsigned long)req->rx_antenna_delay,
-           (int)req->persist);
 
     // Broadcast is addressed by the permanent factory serial number: antenna
     // delay is a per-physical-unit calibration value, not a logical role/slot.
     // (serial_number == 0 means "every device".)
     if (!network_cmd_bcast_target_match(req->serial_number)) {
-        RLOG_D(OBJECT_CODE,
-               "[BCAST_ANT_DLY] Ignored pkt: target_sn 0x%08X != my_sn 0x%08X",
-               (unsigned int)req->serial_number,
-               (unsigned int)my_sn);
         return;
     }
 
     if (req->tx_antenna_delay > 0xFFFFu || req->rx_antenna_delay > 0xFFFFu) {
-        RLOG_W(OBJECT_CODE,
-               "Invalid antenna delay in antenna_delay_bcast_set: TX=%lu RX=%lu",
-               (unsigned long)req->tx_antenna_delay,
-               (unsigned long)req->rx_antenna_delay);
         network_cmd_send_bcast_apply_ack(pkt, false);
         return;
     }
@@ -898,34 +882,6 @@ static void network_cmd_host_transport_set(const protobuf_packet_t *pkt)
     }
 
     network_cmd_config_save("host_transport");
-}
-
-static void network_cmd_pos_calib_cfg_get(const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(pkt && s_network_cmd.stream);
-
-    const sys_calib_cfg_t *calib_cfg = sys_config_get_calib();
-    if (!calib_cfg) {
-        RLOG_E(OBJECT_CODE, ERR_UWB_CALIBRATION, "Failed to get calibration config");
-        return;
-    }
-
-    protobuf_packet_t resp = network_cmd_make_resp(pkt, protobuf_packet_t_pos_calib_cfg_resp_tag);
-    resp.params.pos_calib_cfg_resp.config = *calib_cfg;
-
-    network_cmd_send_packet(&resp);
-}
-
-static void network_cmd_pos_calib_cfg_set(const protobuf_packet_t *pkt)
-{
-    CHECK_VOID(pkt);
-
-    if (sys_config_set_calib(&pkt->params.pos_calib_cfg_set.config) != 0) {
-        RLOG_W(OBJECT_CODE, "Invalid calibration config received from host");
-        return;
-    }
-
-    network_cmd_config_save("calibration config");
 }
 
 static void network_cmd_prefilter_cfg_get(const protobuf_packet_t *pkt)
@@ -997,11 +953,6 @@ static void network_cmd_anchor_layout_set(const protobuf_packet_t *pkt)
 
     const sys_config_t *cfg = sys_config_get();
     uint32_t zone_id = sys_config_get_active_zone_id();
-    if (cfg->calib.enable_tag_auto_calib || cfg->calib.enable_anchor_auto_calib) {
-        RLOG_W(OBJECT_CODE, "Anchor layout update rejected while calibration is active");
-        network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-        return;
-    }
     protobuf_zone_profile_t profile = cfg->zone_profiles[zone_id - 1U];
     profile.anchor_count = count;
     profile.anchors_count = count;
@@ -1159,8 +1110,6 @@ static void network_cmd_zone_switch(const protobuf_packet_t *pkt)
     const sys_config_t *cfg = sys_config_get();
     if (zone_id < 1U || zone_id > 4U ||
         !sys_config_zone_profile_valid(&cfg->zone_profiles[zone_id - 1U]) ||
-        cfg->calib.enable_tag_auto_calib ||
-        cfg->calib.enable_anchor_auto_calib ||
         !app_rtos_request_zone_switch(zone_id)) {
         RLOG_W(OBJECT_CODE, "zone_switch rejected: unavailable/invalid zone_id %lu",
                (unsigned long)zone_id);
@@ -1193,11 +1142,6 @@ static void network_cmd_zone_profile_set(const protobuf_packet_t *pkt)
     }
 
     if (sys_config_get_active_zone_id() == zone_id) {
-        const sys_config_t *cfg = sys_config_get();
-        if (cfg->calib.enable_tag_auto_calib || cfg->calib.enable_anchor_auto_calib) {
-            network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
-            return;
-        }
         if (!app_rtos_request_active_zone_profile_update(prof)) {
             network_cmd_send_handler_ack(pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
             return;
@@ -1517,17 +1461,8 @@ static void log_tracker_callback(network_ack_tracker_t *p_tracker, const protobu
 static bool network_cmd_host_active(void)
 {
     CHECK(s_network_cmd.stream, false);
-
-    if (s_network_cmd.stream->serial_connection_active) {
-        return true;
-    }
-
-    uint32_t last_tick = s_network_cmd.stream->latest_packet_tick;
-    if (last_tick == 0u) {
-        return false;
-    }
-
-    return (uint32_t)(bsp_util_get_ticks() - last_tick) <= NETWORK_HOST_ACTIVITY_TIMEOUT_MS;
+    return s_network_cmd.stream->serial_connection_active ||
+           s_network_cmd.stream->ble_connection_active;
 }
 
 /* ---- Public API ---- */
@@ -1573,9 +1508,13 @@ void network_cmd_process(void)
 #ifndef BOOTLOADER
     static uint32_t last_telemetry_ms = 0;
     uint32_t now = bsp_util_get_ticks();
-    if (network_cmd_host_active()) {
-        if (now - last_telemetry_ms >= 1000) {
-            last_telemetry_ms = now;
+    if (network_cmd_host_active() && now - last_telemetry_ms >= 1000) {
+        last_telemetry_ms = now;
+
+        if (s_network_cmd.stream->serial_connection_active) {
+            network_send_pm_telemetry(s_network_cmd.stream, protobuf_PACKET_ADDR_DEBUG);
+        }
+        if (s_network_cmd.stream->ble_connection_active) {
             network_send_pm_telemetry(s_network_cmd.stream, protobuf_PACKET_ADDR_HOST);
         }
     }

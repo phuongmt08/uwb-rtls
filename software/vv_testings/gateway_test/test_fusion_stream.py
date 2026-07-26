@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import msvcrt
 import sys
 import time
@@ -394,12 +395,25 @@ def _run_stream(session: VvTestSession, seconds: float, verbose: bool, control_r
                     dt_s = (now - last_rx_time) if last_rx_time is not None else 0.0
                     last_rx_time = now
                     s = pkt.sensor_fusion_result
+                    cov_text = "cov=unavailable"
+                    if s.position_cov_valid:
+                        radial_std_m = math.sqrt(max(
+                            0.0,
+                            s.position_cov_xx_m2 + s.position_cov_yy_m2,
+                        ))
+                        cov_text = (
+                            f"cov=({s.position_cov_xx_m2:.6f},"
+                            f"{s.position_cov_xy_m2:.6f},"
+                            f"{s.position_cov_yy_m2:.6f}) "
+                            f"sigma_r={radial_std_m:.3f}m"
+                        )
                     print(
                         f"[RX] count={pkt_count} dt={dt_s:.3f}s "
-                        f"t={s.timestamp_ms} "
+                        f"t={s.timestamp_ms} step={s.ukf_step} "
                         f"ukf=({s.ukf_x_m:.3f},{s.ukf_y_m:.3f},{s.ukf_yaw_deg:.2f}) "
                         f"tril=({s.tril_x_m:.3f},{s.tril_y_m:.3f}) "
-                        f"yaw={s.yaw_deg:.2f} err={s.ranging_error_count}",
+                        f"yaw={s.yaw_deg:.2f} err={s.ranging_error_count} "
+                        f"{cov_text}",
                         flush=True,
                     )
                 elif verbose:

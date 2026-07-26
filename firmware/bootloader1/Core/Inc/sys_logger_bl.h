@@ -22,7 +22,15 @@ extern "C" {
 #define SYS_LOGGER_MAX_MSG_LEN  120U
 #define RLOG_MAX_RECORD_SIZE    (LOG_HEADER_LEN + SYS_LOGGER_MAX_MSG_LEN)
 
+/* Disable heavy logging strings in bootloader to prevent FLASH overflow */
+#define RLOG_DISABLE_BL 1
 
+#if RLOG_DISABLE_BL
+#define RLOG_I(_OBJ_CODE, _FORMAT, ...) ((void)0)
+#define RLOG_D(_OBJ_CODE, _FORMAT, ...) ((void)0)
+#define RLOG_W(_OBJ_CODE, _FORMAT, ...) ((void)0)
+#define RLOG_E(_OBJ_CODE, _ERR_CODE, _FORMAT, ...) ((void)0)
+#else
 #define RLOG_I(_OBJ_CODE, _FORMAT, ...) \
     sys_logger_write_record(INFO_LOG,    _OBJ_CODE, _FORMAT, ##__VA_ARGS__)
 
@@ -34,7 +42,10 @@ extern "C" {
 
 #define RLOG_E(_OBJ_CODE, _ERR_CODE, _FORMAT, ...) \
     sys_logger_write_record(_ERR_CODE,   _OBJ_CODE, _FORMAT, ##__VA_ARGS__)
+#endif
 
+static inline uint32_t sys_logger_get_warning_count(void) { return 0U; }
+static inline uint32_t sys_logger_get_error_count(void) { return 0U; }
 
 void     sys_logger_init(void);
 void     sys_logger_clear(void);
@@ -50,4 +61,4 @@ void     sys_logger_ram_consume(uint16_t len);
 
 #ifdef __cplusplus
 }
-#endif
+#endif

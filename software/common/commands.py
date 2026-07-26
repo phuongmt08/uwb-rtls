@@ -57,8 +57,6 @@ _MCU_COMMANDS = {
     "flash_verify",
     "log_clear",
     "host_transport_set",
-    "pos_calib_cfg_get",
-    "pos_calib_cfg_set",
     "anchor_layout_get",
     "anchor_layout_set",
     "battery_info_get",
@@ -445,6 +443,10 @@ class CommandFactory:
         pkt.sensor_fusion_result.timestamp_ms = 0
         pkt.sensor_fusion_result.zone_id = 0
         pkt.sensor_fusion_result.prefilter_reject_count = 0
+        pkt.sensor_fusion_result.position_cov_xx_m2 = 0.0
+        pkt.sensor_fusion_result.position_cov_xy_m2 = 0.0
+        pkt.sensor_fusion_result.position_cov_yy_m2 = 0.0
+        pkt.sensor_fusion_result.position_cov_valid = False
         return pkt
 
     def imu_reset(self, src: int, dst: int, seq: int) -> pb.packet_t:
@@ -587,47 +589,6 @@ class CommandFactory:
         pkt = self._base(src, dst, seq)
         pkt.host_transport_set.transport = int(transport)
         return pkt
-    def pos_calib_cfg_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.pos_calib_cfg_get.dummy = 0
-        return pkt
-
-    def pos_calib_cfg_set(self, src: int, dst: int, seq: int,
-                          enable_anchor_auto_calib: bool = True,
-                          enable_tag_auto_calib: bool = True,
-                          ref_distance_xy_m: float = 2.0,
-                          tag_height_m: float = 1.0,
-                          anchor_height_m: float = 2.5,
-                          calib_anchor_id: int = 1,
-                          samples: int = 10,
-                          error_threshold_m: float = 0.3,
-                          min_delta_step: int = 1,
-                          max_rounds: int = 10,
-                          max_std_m: float = 0.2,
-                          damping: float = 0.1,
-                          iterations: int = 100) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        cfg = pkt.pos_calib_cfg_set.config
-        cfg.enable_anchor_auto_calib = enable_anchor_auto_calib
-        cfg.enable_tag_auto_calib = enable_tag_auto_calib
-        cfg.ref_distance_xy_m = ref_distance_xy_m
-        cfg.tag_height_m = tag_height_m
-        cfg.anchor_height_m = anchor_height_m
-        cfg.calib_anchor_id = calib_anchor_id
-        cfg.samples = samples
-        cfg.error_threshold_m = error_threshold_m
-        cfg.min_delta_step = min_delta_step
-        cfg.max_rounds = max_rounds
-        cfg.max_std_m = max_std_m
-        cfg.damping = damping
-        cfg.iterations = iterations
-        return pkt
-
-    def pos_calib_cfg_resp(self, src: int, dst: int, seq: int) -> pb.packet_t:
-        pkt = self._base(src, dst, seq)
-        pkt.pos_calib_cfg_resp.config.enable_anchor_auto_calib = True
-        return pkt
-
     def prefilter_cfg_get(self, src: int, dst: int, seq: int) -> pb.packet_t:
         pkt = self._base(src, dst, seq)
         pkt.prefilter_cfg_get.dummy = 0
@@ -1042,10 +1003,6 @@ class CommandCatalog:
             CommandSpec(43, "log_data", self.factory.log_data),
             CommandSpec(44, "log_clear", self.factory.log_clear),
             CommandSpec(45, "host_transport_set", self.factory.host_transport_set),
-            # Calibration
-            CommandSpec(46, "pos_calib_cfg_get", self.factory.pos_calib_cfg_get, "pos_calib_cfg_resp"),
-            CommandSpec(47, "pos_calib_cfg_set", self.factory.pos_calib_cfg_set),
-            CommandSpec(48, "pos_calib_cfg_resp", self.factory.pos_calib_cfg_resp),
             CommandSpec(49, "anchor_layout_get", self.factory.anchor_layout_get, "anchor_layout_resp"),
             CommandSpec(50, "anchor_layout_set", self.factory.anchor_layout_set, "anchor_layout_resp"),
             CommandSpec(51, "anchor_layout_resp", self.factory.anchor_layout_resp),

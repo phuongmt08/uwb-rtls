@@ -52,6 +52,8 @@ static bool m_is_initialized = false;
 static bool m_is_advertising = false;
 static bool m_advertising_enabled = false;
 static bool m_adv_restart_pending = false;
+static bool m_adv_reconfigure_pending = false;
+static bool m_broadcast_owns_adv = false;
 static uint32_t m_adv_retry_tick = 0;
 
 static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;
@@ -158,6 +160,69 @@ static ret_code_t advertising_configure_current(void)
         err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_ADV, m_adv_handle, SYSTEM_CONFIG_TX_POWER);
     }
     return err_code;
+}
+
+static ret_code_t broadcast_adv_acquire(uint8_t *adv_handle)
+{
+    if (adv_handle == NULL)
+    {
+        return NRF_ERROR_NULL;
+    }
+    if (m_broadcast_owns_adv)
+    {
+        return NRF_ERROR_BUSY;
+    }
+    if (m_adv_handle == BLE_GAP_ADV_SET_HANDLE_NOT_SET)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    if (m_is_advertising)
+    {
+        ret_code_t err_code = sd_ble_gap_adv_stop(m_adv_handle);
+        if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
+        {
+            return err_code;
+        }
+    }
+
+    m_is_advertising = false;
+    m_adv_restart_pending = false;
+    m_broadcast_owns_adv = true;
+    *adv_handle = m_adv_handle;
+    return NRF_SUCCESS;
+}
+
+static void broadcast_adv_release(uint8_t adv_handle)
+{
+    if (!m_broadcast_owns_adv || adv_handle != m_adv_handle)
+    {
+        return;
+    }
+
+    m_broadcast_owns_adv = false;
+
+    if (m_adv_reconfigure_pending)
+    {
+        m_adv_reconfigure_pending = false;
+        advertising_init();
+    }
+    else
+    {
+        ret_code_t err_code = advertising_configure_current();
+        if (err_code != NRF_SUCCESS)
+        {
+            NRF_LOG_WARNING("BLE advertising restore configure failed: 0x%x", err_code);
+            m_adv_restart_pending = m_advertising_enabled &&
+                                    (m_conn_handle == BLE_CONN_HANDLE_INVALID);
+            return;
+        }
+    }
+
+    if (m_advertising_enabled && m_conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        ble_peripheral_advertising_start();
+    }
 }
 
 static void advertising_init(void)
@@ -298,7 +363,8 @@ void ble_peripheral_init(void)
     advertising_init();
     conn_params_init();
 
-    /* Broadcast owns its own advertising set + RX scanner (see bb_broadcast). */
+    /* S132 has one advertising set. Broadcast borrows this handle per burst. */
+    bb_broadcast_adv_hooks_set(broadcast_adv_acquire, broadcast_adv_release);
     bb_broadcast_init();
 
     m_is_initialized = true;
@@ -309,6 +375,11 @@ void ble_peripheral_advertising_start(void)
     if (!m_is_initialized || !m_advertising_enabled) return;
     if (m_is_advertising) return;
     if (m_conn_handle != BLE_CONN_HANDLE_INVALID) return;
+    if (m_broadcast_owns_adv)
+    {
+        m_adv_restart_pending = true;
+        return;
+    }
 
     ret_code_t err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
     if (err_code == NRF_SUCCESS)
@@ -325,7 +396,8 @@ void ble_peripheral_advertising_start(void)
 
 void ble_peripheral_process(void)
 {
-    if (!m_adv_restart_pending || !m_advertising_enabled || m_is_advertising ||
+    if (m_broadcast_owns_adv ||
+        !m_adv_restart_pending || !m_advertising_enabled || m_is_advertising ||
         m_conn_handle != BLE_CONN_HANDLE_INVALID)
     {
         return;
@@ -451,16 +523,6 @@ static void ble_stack_init(void)
     err_code = nrf_sdh_ble_default_cfg_set(APP_BLE_CONN_CFG_TAG, &ram_start);
     APP_ERROR_CHECK(err_code);
 
-    /* Two advertising sets: connectable advertising + broadcast (bb_broadcast).
-     * The dedicated broadcast set lets us advertise a burst without disturbing
-     * the connectable advertiser. Raises SoftDevice RAM use (check linker). */
-    ble_cfg_t ble_cfg;
-    memset(&ble_cfg, 0, sizeof(ble_cfg));
-    ble_cfg.gap_cfg.role_count_cfg.adv_set_count     = 2;
-    ble_cfg.gap_cfg.role_count_cfg.periph_role_count = NRF_SDH_BLE_PERIPHERAL_LINK_COUNT;
-    err_code = sd_ble_cfg_set(BLE_GAP_CFG_ROLE_COUNT, &ble_cfg, ram_start);
-    APP_ERROR_CHECK(err_code);
-
     err_code = nrf_sdh_ble_enable(&ram_start);
     APP_ERROR_CHECK(err_code);
 
@@ -521,6 +583,11 @@ bool ble_peripheral_adv_config_set(bool enable, const char * device_name)
         }
 
         // Re-encode advertisement data to reflect the latest device name.
+        if (m_broadcast_owns_adv)
+        {
+            m_adv_reconfigure_pending = true;
+            return true;
+        }
         advertising_init();
 
         if (m_conn_handle == BLE_CONN_HANDLE_INVALID)

@@ -1552,6 +1552,17 @@ class LiveTrackingTab(QWidget):
             "tril_x": tril_x,
             "tril_y": tril_y,
             "source": "sensor_fusion",
+            "position_cov_valid": bool(data.get("position_cov_valid", False)),
+            "position_cov_xx_m2": float(data.get("position_cov_xx_m2", 0.0)),
+            "position_cov_xy_m2": float(data.get("position_cov_xy_m2", 0.0)),
+            "position_cov_yy_m2": float(data.get("position_cov_yy_m2", 0.0)),
+            "position_std_m": float(data.get("position_std_m", 0.0)),
+            "position_sigma_major_m": float(data.get("position_sigma_major_m", 0.0)),
+            "position_sigma_minor_m": float(data.get("position_sigma_minor_m", 0.0)),
+            "position_ellipse_major_95_m": float(data.get("position_ellipse_major_95_m", 0.0)),
+            "position_ellipse_minor_95_m": float(data.get("position_ellipse_minor_95_m", 0.0)),
+            "position_ellipse_angle_deg": float(data.get("position_ellipse_angle_deg", 0.0)),
+            "position_confidence": str(data.get("position_confidence", "Unavailable")),
         }
         self._canvas.update_position(position)
         if self._map_view_stack.currentWidget() is self._map_3d:
@@ -1587,6 +1598,44 @@ class LiveTrackingTab(QWidget):
         self._set_metric_value(self.ukf_x_label, x)
         self._set_metric_value(self.ukf_y_label, y)
         self._set_metric_value(self.ukf_yaw_label, yaw, "{:.1f}")
+        cov_valid = bool(data.get("position_cov_valid", False))
+        confidence = str(data.get("position_confidence", "Unavailable"))
+        covariance_stage = "Update" if ukf_step == 1 else "Predict"
+        if hasattr(self, "position_confidence_label"):
+            self.position_confidence_label.setText(
+                f"{confidence} · {covariance_stage}" if cov_valid else "--"
+            )
+            confidence_color = {
+                "High": "#10B981",
+                "Medium": "#F59E0B",
+                "Low": "#F87171",
+            }.get(confidence, "#94A3B8")
+            self.position_confidence_label.setStyleSheet(
+                "font-family: 'Consolas'; font-size: 14px; font-weight: bold; "
+                f"color: {confidence_color}; background-color: transparent;"
+            )
+        if cov_valid:
+            self._set_metric_value(self.position_std_label, data.get("position_std_m", 0.0), "{:.3f} m")
+            self.position_ellipse_label.setText(
+                "{:.3f} x {:.3f} m".format(
+                    float(data.get("position_ellipse_major_95_m", 0.0)),
+                    float(data.get("position_ellipse_minor_95_m", 0.0)),
+                )
+            )
+            self._set_metric_value(self.cov_xx_label, data.get("position_cov_xx_m2", 0.0), "{:.6f}")
+            self._set_metric_value(self.cov_xy_label, data.get("position_cov_xy_m2", 0.0), "{:.6f}")
+            self._set_metric_value(self.cov_yy_label, data.get("position_cov_yy_m2", 0.0), "{:.6f}")
+        else:
+            for label_name in (
+                "position_std_label",
+                "position_ellipse_label",
+                "cov_xx_label",
+                "cov_xy_label",
+                "cov_yy_label",
+            ):
+                label = getattr(self, label_name, None)
+                if label is not None:
+                    label.setText("--")
 
         self._set_metric_value(self.tril_x_label, tril_x)
         self._set_metric_value(self.tril_y_label, tril_y)

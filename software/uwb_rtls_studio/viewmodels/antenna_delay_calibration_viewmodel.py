@@ -39,9 +39,13 @@ DW_UNITS_PER_METER = 1.0 / 0.002345
 
 STATE_IDLE = "idle"
 STATE_COLLECTING = "collecting"
+STATE_APPLYING = "applying"
 STATE_SETTLING = "settling"
 STATE_DONE = "done"
 STATE_ERROR = "error"
+
+BCAST_ANTENNA_DELAY_TAG = 88
+BCAST_APPLY_ACK_TIMEOUT_MS = 11000
 
 
 @dataclass
@@ -68,6 +72,7 @@ class AnchorCalibState:
     # right after a change would mix old-delay and new-delay distances.
     settle_until: float = 0.0
     last_sample_at: float = 0.0
+    apply_pending: bool = False
 
 
 class AntennaDelayCalibrationViewModel(QObject):
@@ -112,10 +117,18 @@ class AntennaDelayCalibrationViewModel(QObject):
 
         # Parallel multi-anchor state dictionary
         self._states: dict[int, AnchorCalibState] = {}
+        self._started_ranging_for_calibration = False
+        self._apply_queue: list[dict] = []
+        self._pending_apply: dict | None = None
+        self._pending_single_result: dict | None = None
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._on_timer)
+
+        self._apply_ack_timer = QTimer(self)
+        self._apply_ack_timer.setSingleShot(True)
+        self._apply_ack_timer.timeout.connect(self._on_apply_ack_timeout)
 
         self._parallel_watchdog_timer = QTimer(self)
         self._parallel_watchdog_timer.setInterval(1000)
@@ -123,18 +136,44 @@ class AntennaDelayCalibrationViewModel(QObject):
 
         if self._ranging_model is not None:
             self._ranging_model.anchor_distances_updated.connect(self._on_anchor_distances)
+        if self._model is not None and hasattr(self._model, "scan_data_updated"):
+            self._model.scan_data_updated.connect(self._on_scan_data_updated)
+        if self._model is not None and hasattr(self._model, "bcast_apply_ack_received"):
+            self._model.bcast_apply_ack_received.connect(self._on_bcast_apply_ack)
 
     @property
     def is_running(self) -> bool:
         return self._state not in (STATE_IDLE, STATE_DONE, STATE_ERROR)
 
-    def known_distance_for(self, anchor_id: int, tag_x_m: float, tag_y_m: float, tag_z_m: float) -> float | None:
-        for anchor in (self._ranging_model.anchor_layout if self._ranging_model else []):
+    def _current_anchor_layout(self) -> list[dict]:
+        """Use the currently loaded Studio map, then fall back to device layout."""
+        if self._geofence_repo is not None and hasattr(self._geofence_repo, "get_anchors"):
+            map_anchors = self._geofence_repo.get_anchors()
+            if map_anchors:
+                return map_anchors
+        if self._ranging_model is not None:
+            return list(self._ranging_model.anchor_layout or [])
+        return []
+
+    def known_distance_for(
+        self,
+        anchor_id: int,
+        tag_x_m: float,
+        tag_y_m: float,
+        tag_z_m: float = 0.0,
+    ) -> float | None:
+        """Return the 2D ground-truth distance in the current anchor-layout frame.
+
+        The ranging distance consumed by this calibration workflow is treated
+        as planar, so Z must not be mixed into the calibration error.
+        tag_z_m remains accepted only for compatibility with older callers.
+        """
+        _ = tag_z_m
+        for anchor in self._current_anchor_layout():
             if int(anchor.get("anchor_id", -1)) == int(anchor_id):
                 dx = float(anchor.get("x_m", 0.0)) - tag_x_m
                 dy = float(anchor.get("y_m", 0.0)) - tag_y_m
-                dz = float(anchor.get("z_m", 0.0)) - tag_z_m
-                return (dx * dx + dy * dy + dz * dz) ** 0.5
+                return (dx * dx + dy * dy) ** 0.5
         return None
 
     def _find_anchor_entry(self, anchor_id: int) -> dict | None:
@@ -145,9 +184,38 @@ class AntennaDelayCalibrationViewModel(QObject):
                 return anchor
         return None
 
+    def discovered_serial_number_for(self, anchor_id: int) -> int:
+        resolver = getattr(self._model, "discovered_anchor_serial_number", None)
+        if not callable(resolver):
+            return 0
+        return int(resolver(anchor_id) or 0)
+
     def serial_number_for(self, anchor_id: int) -> int:
         entry = self._find_anchor_entry(anchor_id)
-        return int(entry.get("serial_number", 0) or 0) if entry else 0
+        saved_serial = int(entry.get("serial_number", 0) or 0) if entry else 0
+        discovered_serial = self.discovered_serial_number_for(anchor_id)
+
+        if discovered_serial > 0:
+            if discovered_serial != saved_serial:
+                self.save_anchor_serial_number(anchor_id, discovered_serial)
+            return discovered_serial
+        return saved_serial
+
+    def _on_scan_data_updated(self, _devices: list) -> None:
+        anchor_ids = {
+            int(anchor.get("anchor_id", -1))
+            for anchor in self._current_anchor_layout()
+            if int(anchor.get("anchor_id", -1)) >= 0
+        }
+        for anchor_id in anchor_ids:
+            serial_number = self.discovered_serial_number_for(anchor_id)
+            if serial_number <= 0:
+                continue
+            entry = self._find_anchor_entry(anchor_id)
+            saved_serial = int(entry.get("serial_number", 0) or 0) if entry else 0
+            if saved_serial == serial_number:
+                continue
+            self.save_anchor_serial_number(anchor_id, serial_number)
 
     def save_anchor_serial_number(self, anchor_id: int, serial_number: int) -> bool:
         if not self._geofence_repo or serial_number <= 0:
@@ -165,6 +233,15 @@ class AntennaDelayCalibrationViewModel(QObject):
         if hasattr(self._geofence_repo, "save"):
             self._geofence_repo.save()
         return True
+
+    def _has_reference_tag_connection(self) -> bool:
+        role = str(getattr(self._model, "connected_role", "") or "").strip().upper()
+        if role == "TAG":
+            return True
+        self.operation_failed.emit(
+            "Connect Studio to the reference Tag before starting antenna-delay calibration."
+        )
+        return False
 
     def _last_known_combined_delay(self, anchor_id: int) -> int:
         entry = self._find_anchor_entry(anchor_id)
@@ -184,16 +261,25 @@ class AntennaDelayCalibrationViewModel(QObject):
         if hasattr(self._geofence_repo, "save"):
             self._geofence_repo.save()
 
-    def start(self, anchor_id: int, tag_x_m: float, tag_y_m: float, tag_z_m: float):
+    def start(
+        self,
+        anchor_id: int,
+        tag_x_m: float,
+        tag_y_m: float,
+        tag_z_m: float = 0.0,
+    ):
         """Single Anchor Calibration Mode"""
         if self.is_running:
             self.operation_failed.emit("Calibration already running.")
+            return False
+        if not self._has_reference_tag_connection():
             return False
 
         serial_number = self.serial_number_for(anchor_id)
         if serial_number <= 0:
             self.operation_failed.emit(
-                f"Anchor {anchor_id} has no serial_number assigned in the anchor layout — set it first."
+                f"Anchor {anchor_id} was not found in the BLE ADV snapshot. "
+                "Run a BLE scan so Studio can map Anchor ID to its advertised serial."
             )
             return False
 
@@ -213,16 +299,25 @@ class AntennaDelayCalibrationViewModel(QObject):
         self._damping = self.damping
         self._reject_count = 0
         self._max_rejects = self.max_iterations * 3
+        self._reset_apply_pipeline()
+        self._ensure_ranging_started()
         self._start_round(STATE_COLLECTING)
         return True
 
-    def start_all(self, tag_x_m: float, tag_y_m: float, tag_z_m: float):
+    def start_all(
+        self,
+        tag_x_m: float,
+        tag_y_m: float,
+        tag_z_m: float = 0.0,
+    ):
         """TDMA Multi-Anchor Parallel Calibration Mode"""
         if self.is_running:
             self.operation_failed.emit("Calibration already running.")
             return False
+        if not self._has_reference_tag_connection():
+            return False
 
-        anchors_layout = self._ranging_model.anchor_layout if self._ranging_model else []
+        anchors_layout = self._current_anchor_layout()
         if not anchors_layout:
             self.operation_failed.emit("No anchors found in current layout.")
             return False
@@ -237,8 +332,7 @@ class AntennaDelayCalibrationViewModel(QObject):
 
             dx = float(anchor.get("x_m", 0.0)) - tag_x_m
             dy = float(anchor.get("y_m", 0.0)) - tag_y_m
-            dz = float(anchor.get("z_m", 0.0)) - tag_z_m
-            known_m = (dx * dx + dy * dy + dz * dz) ** 0.5
+            known_m = (dx * dx + dy * dy) ** 0.5
 
             initial_delay = self._last_known_combined_delay(aid)
             now = time.monotonic()
@@ -260,26 +354,57 @@ class AntennaDelayCalibrationViewModel(QObject):
         self._max_rejects = self.max_iterations * 3
         self._is_parallel_mode = True
         self._state = STATE_COLLECTING
+        self._reset_apply_pipeline()
+        self._ensure_ranging_started()
         self._parallel_watchdog_timer.start()
         self._emit_progress(f"Started parallel calibration for {len(self._states)} anchors...")
         return True
+
+    def _ensure_ranging_started(self) -> None:
+        self._started_ranging_for_calibration = False
+        if self._ranging_model is None or bool(getattr(self._ranging_model, "is_ranging", False)):
+            return
+        start_ranging = getattr(self._ranging_model, "start_ranging", None)
+        if callable(start_ranging):
+            start_ranging()
+            self._started_ranging_for_calibration = True
+
+    def _stop_owned_ranging(self) -> None:
+        if not self._started_ranging_for_calibration:
+            return
+        self._started_ranging_for_calibration = False
+        stop_ranging = getattr(self._ranging_model, "stop_ranging", None)
+        if callable(stop_ranging):
+            stop_ranging()
 
     def stop(self):
         if not self.is_running:
             return
         self._timer.stop()
+        self._parallel_watchdog_timer.stop()
+        self._reset_apply_pipeline()
+        self._stop_owned_ranging()
         if self._is_parallel_mode:
-            self._parallel_watchdog_timer.stop()
             for st in self._states.values():
                 if not st.done:
                     st.done = True
                     st.reason = "Stopped by user."
-                    self._apply_delay_for_anchor(st.serial_number, st.anchor_id, st.best_delay, persist=True)
             self._state = STATE_ERROR
             self.finished.emit({"parallel": True, "results": self._collect_parallel_results(), "reason": "Stopped by user."})
             self._state = STATE_IDLE
         else:
-            self._finish(converged=False, reason="Stopped by user.")
+            result = {
+                "anchor_id": self._anchor_id,
+                "serial_number": self._serial_number,
+                "converged": False,
+                "iterations": self._iteration,
+                "final_delay": self._best_delay,
+                "best_abs_error_m": self._best_abs_error,
+                "reason": "Stopped by user.",
+            }
+            self._state = STATE_ERROR
+            self.finished.emit(result)
+            self._state = STATE_IDLE
 
     def _start_round(self, state: str):
         self._state = state
@@ -299,7 +424,7 @@ class AntennaDelayCalibrationViewModel(QObject):
                     continue
 
                 st = self._states[aid]
-                if st.done:
+                if st.done or st.apply_pending:
                     continue
 
                 # The anchor showed up in this TDMA cycle, so it's alive even if
@@ -314,8 +439,7 @@ class AntennaDelayCalibrationViewModel(QObject):
                 if len(st.samples) >= self.samples_per_round_target:
                     self._process_parallel_anchor_round(st)
 
-            if self._states and all(st.done for st in self._states.values()):
-                self._finish_all_parallel()
+            self._maybe_finish_all_parallel()
         else:
             for anchor in anchors:
                 if int(anchor.get("anchor_id", -1)) == self._anchor_id:
@@ -331,7 +455,7 @@ class AntennaDelayCalibrationViewModel(QObject):
             return
         now = time.monotonic()
         for st in self._states.values():
-            if st.done:
+            if st.done or st.apply_pending:
                 continue
             if now - st.last_sample_at > self.anchor_silence_timeout_s:
                 st.reject_count += 1
@@ -342,8 +466,7 @@ class AntennaDelayCalibrationViewModel(QObject):
                     st.reason = "No ranging data received (anchor unreachable?)."
                     log.warning(f"Anchor {st.anchor_id} giving up: {st.reason}")
 
-        if self._states and all(st.done for st in self._states.values()):
-            self._finish_all_parallel()
+        self._maybe_finish_all_parallel()
 
     def _on_timer(self):
         if not self._is_parallel_mode:
@@ -425,9 +548,14 @@ class AntennaDelayCalibrationViewModel(QObject):
             )
             return
 
-        self._apply_delay(self._combined_delay, persist=False)
-        self._state = STATE_SETTLING
-        self._timer.start(int(self.settle_time_s * 1000))
+        self._state = STATE_APPLYING
+        self._queue_delay_apply(
+            self._serial_number,
+            self._anchor_id,
+            self._combined_delay,
+            persist=False,
+            purpose="single_iteration",
+        )
 
     def _process_parallel_anchor_round(self, st: AnchorCalibState):
         """Parallel Multi-Anchor Processor per anchor batch"""
@@ -484,32 +612,165 @@ class AntennaDelayCalibrationViewModel(QObject):
             st.done = True
             st.converged = reached_tolerance
             st.reason = "Converged." if reached_tolerance else "Reached max iterations without converging."
-            self._apply_delay_for_anchor(st.serial_number, st.anchor_id, st.best_delay, persist=True)
+            st.apply_pending = True
+            st.settle_until = float("inf")
+            self._queue_delay_apply(
+                st.serial_number,
+                st.anchor_id,
+                st.best_delay,
+                persist=True,
+                purpose="parallel_final",
+            )
         else:
             # Give the anchor a moment to actually pick up the new delay before
             # trusting the next batch of samples for this anchor.
-            st.settle_until = time.monotonic() + self.settle_time_s
-            self._apply_delay_for_anchor(st.serial_number, st.anchor_id, st.combined_delay, persist=False)
+            st.apply_pending = True
+            st.settle_until = float("inf")
+            self._queue_delay_apply(
+                st.serial_number,
+                st.anchor_id,
+                st.combined_delay,
+                persist=False,
+                purpose="parallel_iteration",
+            )
 
-    def _apply_delay(self, combined_delay: int, persist: bool):
-        self._apply_delay_for_anchor(self._serial_number, self._anchor_id, combined_delay, persist)
+    def _reset_apply_pipeline(self) -> None:
+        self._apply_ack_timer.stop()
+        self._apply_queue.clear()
+        self._pending_apply = None
+        self._pending_single_result = None
 
-    def _apply_delay_for_anchor(self, serial_number: int, anchor_id: int, combined_delay: int, persist: bool):
+    def _queue_delay_apply(
+        self,
+        serial_number: int,
+        anchor_id: int,
+        combined_delay: int,
+        *,
+        persist: bool,
+        purpose: str,
+    ) -> None:
+        self._apply_queue.append({
+            "serial_number": int(serial_number),
+            "anchor_id": int(anchor_id),
+            "combined_delay": int(combined_delay),
+            "persist": bool(persist),
+            "purpose": str(purpose),
+        })
+        self._send_next_delay_apply()
+
+    def _send_next_delay_apply(self) -> None:
+        if self._pending_apply is not None or not self._apply_queue:
+            return
+
+        request = self._apply_queue.pop(0)
+        combined_delay = request["combined_delay"]
         tx_delay = combined_delay // 2
         rx_delay = combined_delay - tx_delay
-        self._model.request_antenna_delay_bcast_set(
-            serial_number=serial_number,
+        pkt = self._model.request_antenna_delay_bcast_set(
+            serial_number=request["serial_number"],
             tx_antenna_delay=tx_delay,
             rx_antenna_delay=rx_delay,
-            persist=persist,
+            persist=request["persist"],
         )
-        self._remember_combined_delay(anchor_id, combined_delay)
+        hdr = getattr(pkt, "hdr", None)
+        if hdr is None:
+            self._complete_delay_apply(request, success=False, detail="BCAST command was not transmitted.")
+            self._send_next_delay_apply()
+            return
 
-    def _finish(self, converged: bool, reason: str):
+        request["cmd_seq"] = int(getattr(hdr, "seq", 0) or 0)
+        self._pending_apply = request
+        self._apply_ack_timer.start(BCAST_APPLY_ACK_TIMEOUT_MS)
+        self._emit_progress(
+            f"Applying delay to Anchor {request['anchor_id']} "
+            f"(seq={request['cmd_seq']}, persist={int(request['persist'])})..."
+        )
+
+    def _on_bcast_apply_ack(self, ack: dict) -> None:
+        request = self._pending_apply
+        if request is None:
+            return
+        if (
+            int(ack.get("serial_number", 0) or 0) != request["serial_number"]
+            or int(ack.get("cmd_seq", 0) or 0) != request["cmd_seq"]
+            or int(ack.get("cmd_tag", 0) or 0) != BCAST_ANTENNA_DELAY_TAG
+        ):
+            return
+
+        self._apply_ack_timer.stop()
+        self._pending_apply = None
+        success = bool(ack.get("success", False))
+        detail = "ACK confirmed." if success else "Target reported apply failure."
+        self._complete_delay_apply(request, success=success, detail=detail)
+        self._send_next_delay_apply()
+        self._maybe_finish_all_parallel()
+
+    def _on_apply_ack_timeout(self) -> None:
+        request = self._pending_apply
+        if request is None:
+            return
+        self._pending_apply = None
+        self._complete_delay_apply(
+            request,
+            success=False,
+            detail="No matching BCAST apply ACK after Central retries.",
+        )
+        self._send_next_delay_apply()
+        self._maybe_finish_all_parallel()
+
+    def _complete_delay_apply(self, request: dict, *, success: bool, detail: str) -> None:
+        anchor_id = request["anchor_id"]
+        purpose = request["purpose"]
+        if success:
+            self._remember_combined_delay(anchor_id, request["combined_delay"])
+
+        self._emit_progress(
+            f"Anchor {anchor_id}: {detail}",
+            extra={
+                "anchor_id": anchor_id,
+                "apply_success": success,
+                "combined_delay": request["combined_delay"],
+            },
+        )
+
+        if purpose == "single_iteration":
+            if success:
+                self._state = STATE_SETTLING
+                self._timer.start(int(self.settle_time_s * 1000))
+            else:
+                self._finish(
+                    converged=False,
+                    reason=f"Could not apply candidate delay: {detail}",
+                    apply_final=False,
+                )
+            return
+
+        if purpose == "single_final":
+            result = self._pending_single_result
+            self._pending_single_result = None
+            if result is None:
+                return
+            if not success:
+                result["converged"] = False
+                result["reason"] = f"{result['reason']} Final delay was not confirmed: {detail}"
+            self._finalize_single(result)
+            return
+
+        st = self._states.get(anchor_id)
+        if st is None:
+            return
+        st.apply_pending = False
+        if not success:
+            st.done = True
+            st.converged = False
+            st.reason = f"Delay apply failed: {detail}"
+            return
+        if purpose == "parallel_iteration":
+            st.settle_until = time.monotonic() + self.settle_time_s
+
+    def _finish(self, converged: bool, reason: str, *, apply_final: bool = True):
+        self._timer.stop()
         final_delay = self._best_delay if self._best_abs_error is not None else self._combined_delay
-        self._apply_delay(final_delay, persist=True)
-
-        self._state = STATE_DONE if converged else STATE_ERROR
         result = {
             "anchor_id": self._anchor_id,
             "serial_number": self._serial_number,
@@ -519,6 +780,23 @@ class AntennaDelayCalibrationViewModel(QObject):
             "best_abs_error_m": self._best_abs_error,
             "reason": reason,
         }
+        if not apply_final:
+            self._finalize_single(result)
+            return
+
+        self._state = STATE_APPLYING
+        self._pending_single_result = result
+        self._queue_delay_apply(
+            self._serial_number,
+            self._anchor_id,
+            final_delay,
+            persist=True,
+            purpose="single_final",
+        )
+
+    def _finalize_single(self, result: dict) -> None:
+        self._state = STATE_DONE if result.get("converged") else STATE_ERROR
+        self._stop_owned_ranging()
         self.finished.emit(result)
         self._state = STATE_IDLE
 
@@ -536,6 +814,7 @@ class AntennaDelayCalibrationViewModel(QObject):
 
     def _finish_all_parallel(self):
         self._parallel_watchdog_timer.stop()
+        self._stop_owned_ranging()
         self._state = STATE_DONE
         self.finished.emit({
             "parallel": True,
@@ -543,6 +822,16 @@ class AntennaDelayCalibrationViewModel(QObject):
             "reason": "All anchors completed.",
         })
         self._state = STATE_IDLE
+
+    def _maybe_finish_all_parallel(self) -> None:
+        if (
+            self._is_parallel_mode
+            and self._states
+            and all(st.done and not st.apply_pending for st in self._states.values())
+            and self._pending_apply is None
+            and not self._apply_queue
+        ):
+            self._finish_all_parallel()
 
     def _emit_progress(self, text: str, extra: dict | None = None):
         payload = {"state": self._state, "anchor_id": self._anchor_id, "custom_status_text": text}

@@ -606,15 +606,12 @@ swap_sector(bsp_flash_dual_t *dr, const void *data, uint32_t size, uint32_t sub_
     return BSP_FLASH_ERR_ERASE;
   }
 
-  /* Preserve the latest config snapshot in the new sector before writing
-   * the record that triggered the swap. This keeps config alive when the
-   * active sector flips because of log growth.
+  /* This helper is used only by bsp_flash_cfg_write(), so the record that
+   * triggered the swap is already the newest complete config snapshot.
+   * Copying the previous snapshot is redundant and, if it keeps its old high
+   * data offset, makes the freshly erased config partition look full again.
    */
   uint32_t next_meta_offset = 0u;
-  if (copy_latest_cfg_snapshot(old, nr, dr->crc32_cb, &next_meta_offset) != BSP_FLASH_OK)
-  {
-    return BSP_FLASH_ERR_PROGRAM;
-  }
 
   /* Determine new generation */
   uint32_t                    old_offset = 0u;
@@ -647,7 +644,7 @@ swap_sector(bsp_flash_dual_t *dr, const void *data, uint32_t size, uint32_t sub_
   uint32_t data_crc  = dr->crc32_cb ? dr->crc32_cb(data, size) : 0u;
   uint32_t timestamp = dr->timestamp_cb ? dr->timestamp_cb() : 0u;
 
-  /* Write metadata after the optional copied config snapshot. */
+  /* The new config becomes the first record in the compacted sector. */
   if (append_metadata_entry(nr->base, next_meta_offset, new_gen, sub_offset, size, timestamp, data_crc, 0xFFFFFFFFu,
                             dr->crc32_cb)
       != BSP_FLASH_OK)
@@ -696,8 +693,13 @@ static bsp_flash_status_t copy_latest_cfg_snapshot(const bsp_flash_region_t *src
   if (!best_entry)
     return BSP_FLASH_OK;
 
+  /* Compact the retained config to the start of its sub-partition. Keeping
+   * best_entry->data_offset would preserve the old high-water mark and cause
+   * the next config write to swap sectors immediately.
+   */
+  const uint32_t compact_offset = BSP_FLASH_CFG_DATA_OFFSET;
   uint32_t read_addr  = src->base + BSP_FLASH_METADATA_SIZE + best_entry->data_offset;
-  uint32_t write_addr = dst->base + BSP_FLASH_METADATA_SIZE + best_entry->data_offset;
+  uint32_t write_addr = dst->base + BSP_FLASH_METADATA_SIZE + compact_offset;
 
   HAL_FLASH_Unlock();
   if (flash_write_block(write_addr, (const void *) read_addr, best_entry->data_length) != BSP_FLASH_OK)
@@ -706,7 +708,7 @@ static bsp_flash_status_t copy_latest_cfg_snapshot(const bsp_flash_region_t *src
     return BSP_FLASH_ERR_PROGRAM;
   }
 
-  if (append_metadata_entry(dst->base, 0u, best_entry->gen, best_entry->data_offset, best_entry->data_length,
+  if (append_metadata_entry(dst->base, 0u, best_entry->gen, compact_offset, best_entry->data_length,
                             best_entry->timestamp, best_entry->crc32, best_entry->log_read_pos, crc_cb)
       != BSP_FLASH_OK)
   {

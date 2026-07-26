@@ -938,32 +938,8 @@ void io_entry(void *argument)
       break;
     }
     case BSP_IO_EVENT_DOUBLE_CLICK:
-      if (cfg->uwb.role == DEVICE_ROLE_ANCHOR)
-      {
-        bool enable = !app_anchor_is_survey_active();
-        g_ranging_enabled = false;
-        if (!abort_uwb_ranging_locked(cfg)) {
-          RLOG_W(LOG_OBJECT_CODE_APPLICATION, "[CALIB] UWB wake failed; survey toggle skipped");
-          break;
-        }
-        app_anchor_set_survey_active(enable);
-        app_anchor_init();
-        g_ranging_enabled = true;
-        if (g_uwb_isr_semHandle != NULL) {
-          (void)osSemaphoreRelease(g_uwb_isr_semHandle);
-        }
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION,
-               "[CALIB] Anchor survey %s",
-               enable ? "enabled" : "disabled");
-        break;
-      }
       break;
     case BSP_IO_EVENT_CLICK:
-      if (cfg->uwb.role == DEVICE_ROLE_ANCHOR &&
-          app_anchor_is_survey_active())
-      {
-        break;
-      }
       bool enable_ranging = !g_ranging_enabled;
       bool ranging_changed = apply_ranging_enabled(cfg, enable_ranging);
       if (ranging_changed && enable_ranging)

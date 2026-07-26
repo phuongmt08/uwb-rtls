@@ -39,6 +39,8 @@ extern "C" {
 #define BLE_BROADCAST_EXT_MANUF_TYPE_SIZE     1u
 #define BLE_BROADCAST_EXT_MANUF_OVERHEAD      (4u + BLE_BROADCAST_EXT_MANUF_TYPE_SIZE)
 #define BLE_BROADCAST_MAX_PACKET_SIZE         (BLE_BROADCAST_EXT_ADV_DATA_SIZE - BLE_BROADCAST_EXT_MANUF_OVERHEAD)
+#define BLE_BROADCAST_TYPED_LEGACY_MAX_PACKET_SIZE \
+    (BLE_BROADCAST_ADV_DATA_MAX_SIZE - BLE_BROADCAST_EXT_MANUF_OVERHEAD)
 #define BLE_BROADCAST_FRAGMENT_PAYLOAD_SIZE   16u
 #define BLE_BROADCAST_MAX_FRAGMENTS           16u
 #define BLE_BROADCAST_MANUF_DATA_MAX_SIZE     24u
@@ -79,9 +81,28 @@ typedef struct
  */
 typedef void (*bb_broadcast_rx_cb_t)(const uint8_t *data, uint16_t length);
 
+/**
+ * @brief Optional advertising-handle arbitration hooks.
+ *
+ *        Roles that already own an advertising set (the peripheral) can lend
+ *        that handle to the broadcaster for one short burst. Roles without an
+ *        existing advertiser (the central) leave these hooks unset and the
+ *        broadcast module configures its own handle.
+ */
+typedef ret_code_t (*bb_broadcast_adv_acquire_cb_t)(uint8_t *adv_handle);
+typedef void (*bb_broadcast_adv_release_cb_t)(uint8_t adv_handle);
+
 /* Public macros ------------------------------------------------------ */
 
 /* Public function prototypes ----------------------------------------- */
+/**
+ * @brief Register optional hooks used to borrow an existing advertising set.
+ *        Call before @ref bb_broadcast_init. Pass NULL/NULL to let this module
+ *        own its advertising set.
+ */
+void bb_broadcast_adv_hooks_set(bb_broadcast_adv_acquire_cb_t acquire_cb,
+                                bb_broadcast_adv_release_cb_t release_cb);
+
 /**
  * @brief Initialise the module: reset state and (peripheral) start the RX scan.
  *        Call once after the SoftDevice is enabled.

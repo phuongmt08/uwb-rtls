@@ -213,18 +213,6 @@ PB_BIND(protobuf_log_clear_t, protobuf_log_clear_t, AUTO)
 PB_BIND(protobuf_host_transport_set_t, protobuf_host_transport_set_t, AUTO)
 
 
-PB_BIND(protobuf_pos_calib_cfg_t, protobuf_pos_calib_cfg_t, AUTO)
-
-
-PB_BIND(protobuf_pos_calib_cfg_get_t, protobuf_pos_calib_cfg_get_t, AUTO)
-
-
-PB_BIND(protobuf_pos_calib_cfg_set_t, protobuf_pos_calib_cfg_set_t, AUTO)
-
-
-PB_BIND(protobuf_pos_calib_cfg_resp_t, protobuf_pos_calib_cfg_resp_t, AUTO)
-
-
 PB_BIND(protobuf_anchor_layout_item_t, protobuf_anchor_layout_item_t, AUTO)
 
 

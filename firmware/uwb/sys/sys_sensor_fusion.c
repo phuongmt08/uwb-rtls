@@ -611,8 +611,13 @@ bool sys_sensor_fusion_get_position_covariance(float *pxx, float *pxy, float *py
     const float p01 = 0.5f * (ukf.P_data[0U * NUM_STATE + 1U]
                             + ukf.P_data[1U * NUM_STATE + 0U]);
     const float p11 = ukf.P_data[1U * NUM_STATE + 1U];
+    const float determinant = p00 * p11 - p01 * p01;
+    const float determinant_tolerance =
+        1.0e-6f * fmaxf(1.0f, fabsf(p00 * p11));
     if (!isfinite(p00) || !isfinite(p01) || !isfinite(p11)
-        || p00 < 0.0f || p11 < 0.0f) {
+        || !isfinite(determinant)
+        || p00 < 0.0f || p11 < 0.0f
+        || determinant < -determinant_tolerance) {
         return false;
     }
 
@@ -982,6 +987,15 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
         stream_data.timestamp_ms = HAL_GetTick();
         stream_data.zone_id = cfg ? cfg->default_zone_id : 0U;
         stream_data.prefilter_reject_count = s_prefilter_reject_count;
+        stream_data.position_cov_xx_m2 = s_update_diagnostic.prior_pxx;
+        stream_data.position_cov_xy_m2 = s_update_diagnostic.prior_pxy;
+        stream_data.position_cov_yy_m2 = s_update_diagnostic.prior_pyy;
+        stream_data.position_cov_valid =
+            isfinite(stream_data.position_cov_xx_m2)
+            && isfinite(stream_data.position_cov_xy_m2)
+            && isfinite(stream_data.position_cov_yy_m2)
+            && stream_data.position_cov_xx_m2 >= 0.0f
+            && stream_data.position_cov_yy_m2 >= 0.0f;
         stream_data.anchors_count = 2U * NUM_UPDATE_NOISE;
 
         for (uint8_t i = 0U; i < NUM_UPDATE_NOISE; i++)
@@ -1031,6 +1045,11 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     stream_data.timestamp_ms 		= HAL_GetTick();
     stream_data.zone_id 			= cfg ? cfg->default_zone_id : 0U;
     stream_data.prefilter_reject_count = s_prefilter_reject_count;
+    stream_data.position_cov_valid =
+        sys_sensor_fusion_get_position_covariance(
+            &stream_data.position_cov_xx_m2,
+            &stream_data.position_cov_xy_m2,
+            &stream_data.position_cov_yy_m2);
     stream_data.anchors_count 		= s_latest_anchor_data_count;
     memcpy(stream_data.anchors, s_latest_anchor_data,
     (size_t)s_latest_anchor_data_count * sizeof(stream_data.anchors[0]));

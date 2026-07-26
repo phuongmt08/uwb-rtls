@@ -78,20 +78,59 @@ def main():
         print(f"  - Combined:      {args.tx + args.rx} DW units")
         print(f"  - Persist Flash: {args.persist}")
 
-        session.send_packet(pkt)
-        print("\nPacket sent successfully! Waiting for response/logs (3 seconds)...")
+        expected_seq = pkt.hdr.seq
+        expected_tag = pb.packet_t.DESCRIPTOR.fields_by_name["antenna_delay_bcast_set"].number
 
+        session.send_packet(pkt)
+        print("\nPacket queued to Gateway. Waiting up to 11 seconds for target ACK...")
+
+        ack_received = False
+        ack_success = False
         start_time = time.time()
-        while time.time() - start_time < 3.0:
+        while time.time() - start_time < 11.0:
             packets = session.recv_packets(timeout_s=0.5)
             for resp_pkt in packets:
                 ptype = resp_pkt.WhichOneof("params") or "<none>"
                 print(f"  [RX] Received packet: {ptype}")
                 if ptype == "bcast_apply_ack":
                     ack = resp_pkt.bcast_apply_ack
-                    print(f"  >>> RECEIVED ACK from Serial 0x{ack.serial_number:08X}: status={ack.status}")
+                    if ack.cmd_seq != expected_seq or ack.cmd_tag != expected_tag:
+                        print(
+                            "  >>> Ignored unrelated BCAST ACK "
+                            f"(seq={ack.cmd_seq}, tag={ack.cmd_tag})"
+                        )
+                        continue
+                    if serial_number != 0 and ack.serial_number != serial_number:
+                        print(
+                            "  >>> Ignored ACK from another device: "
+                            f"0x{ack.serial_number:08X}"
+                        )
+                        continue
 
-    print("\nTest completed.")
+                    ack_received = True
+                    ack_success = bool(ack.success)
+                    result = "APPLIED" if ack_success else "REJECTED"
+                    print(
+                        f"  >>> {result} by Serial 0x{ack.serial_number:08X} "
+                        f"(seq={ack.cmd_seq}, tag={ack.cmd_tag})"
+                    )
+                    break
+            if ack_received:
+                break
+
+    if not ack_received:
+        print(
+            "\nERROR: No matching bcast_apply_ack was received. "
+            "The serial may not match, the target may have missed the broadcast, "
+            "or one of the devices is running old firmware."
+        )
+        sys.exit(2)
+
+    if not ack_success:
+        print("\nERROR: Target received the command but rejected/apply failed.")
+        sys.exit(3)
+
+    print("\nTest completed: target confirmed the antenna delay was applied.")
 
 
 if __name__ == "__main__":

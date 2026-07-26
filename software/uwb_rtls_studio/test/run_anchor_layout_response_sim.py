@@ -67,7 +67,6 @@ GENERIC_RESPONSES = {
     "sys_config_get": "sys_config_resp",
     "sys_ranging_cfg_get": "sys_ranging_cfg_resp",
     "sensor_fusion_cfg_get": "sensor_fusion_cfg_resp",
-    "pos_calib_cfg_get": "pos_calib_cfg_resp",
     "prefilter_cfg_get": "prefilter_cfg_resp",
     "device_type_get": "device_type_set",
     "ble_conn_params_get": "ble_conn_params_resp",
@@ -394,6 +393,10 @@ class AnchorLayoutResponder:
         fs.ranging_error_count = self.failed_count
         fs.timestamp_ms = timestamp_ms
         fs.zone_id = 1
+        fs.position_cov_xx_m2 = 0.01 + 0.004 * abs(math.sin(self.angle))
+        fs.position_cov_xy_m2 = 0.002 * math.sin(self.angle * 0.5)
+        fs.position_cov_yy_m2 = 0.015 + 0.004 * abs(math.cos(self.angle))
+        fs.position_cov_valid = True
         del fs.anchors[:]
 
         total_rssi = 0.0
