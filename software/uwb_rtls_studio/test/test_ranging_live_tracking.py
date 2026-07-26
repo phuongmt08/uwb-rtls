@@ -134,14 +134,21 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     pkt2.sensor_fusion_result.tril_x_m = _fixed2(2.4)
     pkt2.sensor_fusion_result.tril_y_m = _fixed2(4.1)
     pkt2.sensor_fusion_result.yaw_deg = _fixed2(11.0)
-    pkt2.sensor_fusion_result.anchor_mask = 0x0A
+    pkt2.sensor_fusion_result.anchor_mask = 0x3F
     pkt2.sensor_fusion_result.ranging_error_count = 4
     pkt2.sensor_fusion_result.prefilter_reject_count = 9
     pkt2.sensor_fusion_result.timestamp_ms = 2000
-    anchor = pkt2.sensor_fusion_result.anchors.add()
-    anchor.anchor_id = 2
-    anchor.distance_mm = 2345
-    anchor.weight = 87
+    expected_anchors = []
+    for anchor_id in range(1, 7):
+        anchor = pkt2.sensor_fusion_result.anchors.add()
+        anchor.anchor_id = anchor_id
+        anchor.distance_mm = 1000 + anchor_id
+        anchor.weight = 90 - anchor_id
+        expected_anchors.append({
+            "anchor_id": anchor_id,
+            "distance_mm": 1000 + anchor_id,
+            "weight": 90 - anchor_id,
+        })
 
     assert repo.handle_packet("sensor_fusion_result", pkt1) is True
     assert repo.handle_packet("sensor_fusion_result", pkt2) is True
@@ -152,7 +159,7 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert math.isclose(latest["ukf_y_m"], 4.0)
     assert math.isclose(latest["tril_x_m"], 2.4, rel_tol=1e-6)
     assert math.isclose(latest["tril_y_m"], 4.1, rel_tol=1e-6)
-    assert latest["anchor_mask"] == 0x0A
+    assert latest["anchor_mask"] == 0x3F
     assert latest["anchor_mask_valid"] is True
     assert latest["payload_size"] == pkt2.sensor_fusion_result.ByteSize()
     assert latest["ranging_error_count"] == 4
@@ -160,9 +167,8 @@ def test_sensor_fusion_result_reaches_ranging_model_with_velocity():
     assert math.isclose(latest["vx_mps"], 1.5)
     assert math.isclose(latest["vy_mps"], 2.0)
     assert latest["seq"] == 2
-    expected_anchor = {"anchor_id": 2, "distance_mm": 2345, "weight": 87}
-    assert latest["anchors"] == [expected_anchor]
-    assert anchor_updates[-1] == [expected_anchor]
+    assert latest["anchors"] == expected_anchors
+    assert anchor_updates[-1] == expected_anchors
     assert len(model.fusion_history) == 2
     assert model.fusion_history[-1]["source"] == "sensor_fusion"
     assert app is not None
@@ -304,6 +310,8 @@ def test_live_tracking_anchor_rows_cache_missing_values():
     tab.d2_label = StubLabel()
     tab.d3_label = StubLabel()
     tab.d4_label = StubLabel()
+    tab.d5_label = StubLabel()
+    tab.d6_label = StubLabel()
     tab._anchor_telemetry_cache = {}
 
     LiveTrackingTab._show_anchor_telemetry(
@@ -311,12 +319,16 @@ def test_live_tracking_anchor_rows_cache_missing_values():
         [
             {"anchor_id": 1, "distance_mm": 1111, "weight": 90},
             {"anchor_id": 2, "distance_mm": 2222, "weight": 80},
+            {"anchor_id": 5, "distance_mm": 5555, "weight": 50},
+            {"anchor_id": 6, "distance_mm": 6666, "weight": 40},
         ],
     )
     assert tab.d1_label.text() == "1.111 m  |  W: 0.90"
     assert tab.d2_label.text() == "2.222 m  |  W: 0.80"
     assert tab.d3_label.text() == "-"
     assert tab.d4_label.text() == "-"
+    assert tab.d5_label.text() == "5.555 m  |  W: 0.50"
+    assert tab.d6_label.text() == "6.666 m  |  W: 0.40"
 
     LiveTrackingTab._show_anchor_telemetry(
         tab,
@@ -328,6 +340,8 @@ def test_live_tracking_anchor_rows_cache_missing_values():
     assert tab.d2_label.text() == "2.222 m  |  W: 0.80"
     assert tab.d3_label.text() == "-"
     assert tab.d4_label.text() == "-"
+    assert tab.d5_label.text() == "5.555 m  |  W: 0.50"
+    assert tab.d6_label.text() == "6.666 m  |  W: 0.40"
 
 class TcpSerialAdapter:
     def __init__(self, host: str, port: int):

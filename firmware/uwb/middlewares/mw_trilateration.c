@@ -145,11 +145,39 @@ void mw_trilateration_compute_weights(mw_tril_anchor_t *candidates,
     }
 }
 
+static double triplet_geometry_quality(const mw_tril_anchor_t *a,
+                                       const mw_tril_anchor_t *b,
+                                       const mw_tril_anchor_t *c)
+{
+    double abx = b->position.x - a->position.x;
+    double aby = b->position.y - a->position.y;
+    double acx = c->position.x - a->position.x;
+    double acy = c->position.y - a->position.y;
+    double bcx = c->position.x - b->position.x;
+    double bcy = c->position.y - b->position.y;
+    double ab2 = (abx * abx) + (aby * aby);
+    double ac2 = (acx * acx) + (acy * acy);
+    double bc2 = (bcx * bcx) + (bcy * bcy);
+    double max_edge2 = fmax(ab2, fmax(ac2, bc2));
+
+    if (!(max_edge2 > MAXZERO) || !isfinite(max_edge2)) {
+        return 0.0;
+    }
+
+    return fabs((abx * acy) - (aby * acx)) / max_edge2;
+}
+
 static double triplet_wgdop(const mw_tril_anchor_t *a,
                             const mw_tril_anchor_t *b,
                             const mw_tril_anchor_t *c,
                             const vec2d_t *position)
 {
+    double geometry_quality = triplet_geometry_quality(a, b, c);
+    if (!isfinite(geometry_quality) ||
+        geometry_quality < MW_TRIL_MIN_GEOMETRY_QUALITY) {
+        return 1.0e9;
+    }
+
     const mw_tril_anchor_t *triplet[3] = {a, b, c};
     double hxx = 0.0;
     double hxy = 0.0;
@@ -243,14 +271,23 @@ static bool snapshot_selected_triplet(mw_tril_anchor_t selected[3],
     }
 
     const vec2d_t *score_position = reference_valid ? &reference_position : &probe;
-    double score = triplet_wgdop(&selected[0], &selected[1], &selected[2], score_position);
+    double wgdop = triplet_wgdop(&selected[0], &selected[1], &selected[2], score_position);
+    if (wgdop >= 1.0e8) {
+        return false;
+    }
     double residual = frame_residual_rms(selected, 3U, &probe);
+    double geometry_quality = triplet_geometry_quality(&selected[0],
+                                                       &selected[1],
+                                                       &selected[2]);
+    double score = wgdop + (MW_TRIL_RESIDUAL_SCORE_WEIGHT * residual);
     double fp_weight = (fp_huber_weight(&selected[0])
                       + fp_huber_weight(&selected[1])
                       + fp_huber_weight(&selected[2])) / 3.0;
     for (uint8_t i = 0U; i < 3U; i++) {
-        selected[i].wgdop = score;
+        selected[i].wgdop = wgdop;
         selected[i].residual_rms = residual;
+        selected[i].geometry_quality = geometry_quality;
+        selected[i].selection_score = score;
         selected[i].triplet_fp_weight = fp_weight;
     }
 
@@ -287,14 +324,18 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
 
     uint8_t best_i = 0U, best_j = 1U, best_k = 2U;
     double  best_score = 1.0e9;
+    double  best_wgdop = 1.0e9;
     double  best_residual = 0.0;
+    double  best_geometry_quality = 0.0;
     double  best_fp_weight = 0.0;
     uint8_t best_mask = 0U;
 
     bool    prev_found = false;
     uint8_t prev_i = 0U, prev_j = 1U, prev_k = 2U;
     double  prev_score = 1.0e9;
+    double  prev_wgdop = 1.0e9;
     double  prev_residual = 0.0;
+    double  prev_geometry_quality = 0.0;
     double  prev_fp_weight = 0.0;
 
     for (uint8_t i = 0U; i < candidate_count - 2U; i++) {
@@ -323,7 +364,10 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
                 double avg_fp_weight = (fp_huber_weight(&candidates[i])
                                       + fp_huber_weight(&candidates[j])
                                       + fp_huber_weight(&candidates[k])) / 3.0;
-                double score = wgdop;
+                double geometry_quality = triplet_geometry_quality(&candidates[i],
+                                                                   &candidates[j],
+                                                                   &candidates[k]);
+                double score = wgdop + (MW_TRIL_RESIDUAL_SCORE_WEIGHT * residual);
 
                 uint8_t mask = (1U << (candidates[i].id - 1U))
                              | (1U << (candidates[j].id - 1U))
@@ -334,7 +378,9 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
                     best_i = i;
                     best_j = j;
                     best_k = k;
+                    best_wgdop = wgdop;
                     best_residual = residual;
+                    best_geometry_quality = geometry_quality;
                     best_fp_weight = avg_fp_weight;
                     best_mask = mask;
                 }
@@ -345,7 +391,9 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
                     prev_j = j;
                     prev_k = k;
                     prev_score = score;
+                    prev_wgdop = wgdop;
                     prev_residual = residual;
+                    prev_geometry_quality = geometry_quality;
                     prev_fp_weight = avg_fp_weight;
                 }
             }
@@ -360,7 +408,9 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
     uint8_t selected_j = best_j;
     uint8_t selected_k = best_k;
     double  selected_score = best_score;
+    double  selected_wgdop = best_wgdop;
     double  selected_residual = best_residual;
+    double  selected_geometry_quality = best_geometry_quality;
     double  selected_fp_weight = best_fp_weight;
 
     if (prev_found && best_mask != prev_mask) {
@@ -372,7 +422,9 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
             selected_j = prev_j;
             selected_k = prev_k;
             selected_score = prev_score;
+            selected_wgdop = prev_wgdop;
             selected_residual = prev_residual;
+            selected_geometry_quality = prev_geometry_quality;
             selected_fp_weight = prev_fp_weight;
         }
     }
@@ -382,15 +434,18 @@ uint8_t mw_trilateration_select_best_3(const mw_tril_anchor_t *candidates,
     selected_out[2] = candidates[selected_k];
 
     for (uint8_t i = 0; i < 3U; i++) {
-        selected_out[i].wgdop = selected_score;
+        selected_out[i].wgdop = selected_wgdop;
         selected_out[i].residual_rms = selected_residual;
+        selected_out[i].geometry_quality = selected_geometry_quality;
+        selected_out[i].selection_score = selected_score;
         selected_out[i].triplet_fp_weight = selected_fp_weight;
     }
 #ifdef ENABLE_DEBUG_LOGGING
     RLOG_D(LOG_OBJECT_CODE_TAG,
-            "Best WGDOP anchors: #%u #%u #%u (wgdop=%.3fm residual=%.3fm fp_weight=%.3f)",
+            "Best WGDOP anchors: #%u #%u #%u (score=%.3f wgdop=%.3fm residual=%.3fm geom=%.3f fp_weight=%.3f)",
             selected_out[0].id, selected_out[1].id, selected_out[2].id,
-            selected_score, selected_residual, selected_fp_weight);
+            selected_score, selected_wgdop, selected_residual,
+            selected_geometry_quality, selected_fp_weight);
 #endif
 
     return 3U;

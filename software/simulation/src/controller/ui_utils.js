@@ -25,7 +25,7 @@ function defaultAnchorLayouts() {
 function ensureAnchorLayouts() {
     if (!anchorLayouts) anchorLayouts = defaultAnchorLayouts();
     ANCHOR_LAYOUT_IDS.forEach(id => {
-        if (!Array.isArray(anchorLayouts[id]) || anchorLayouts[id].length !== anchors.length) {
+        if (!Array.isArray(anchorLayouts[id])) {
             anchorLayouts[id] = cloneAnchors(SIM_CONFIG.ENV.ANCHORS);
         }
     });
@@ -62,39 +62,96 @@ function initAnchorEditor(anchorList) {
     const container = document.getElementById('anchor_editor');
     if (!container) return;
 
-    container.innerHTML = anchorList.map(a => `
-        <div class="anchor-row" data-anchor-id="${a.id}">
-            <strong>A${a.id}</strong>
-            <label for="anchor_${a.id}_x">X</label>
-            <input id="anchor_${a.id}_x" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="x" type="number" step="0.001" value="${a.x}" oninput="updateAnchorsFromInputs()">
-            <label for="anchor_${a.id}_y">Y</label>
-            <input id="anchor_${a.id}_y" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="y" type="number" step="0.001" value="${a.y}" oninput="updateAnchorsFromInputs()">
-            <label for="anchor_${a.id}_z">Z</label>
-            <input id="anchor_${a.id}_z" class="anchor-pos" data-anchor-index="${a.id - 1}" data-axis="z" type="number" step="0.001" value="${a.z}" oninput="updateAnchorsFromInputs()">
-        </div>
+    let rowsHTML = (anchorList || []).map((a, idx) => `
+        <tr class="anchor-row-tr" data-anchor-id="${a.id}">
+            <td style="padding:6px 10px; font-weight:bold; color:#1e293b;">A${a.id}</td>
+            <td style="padding:4px 6px;">
+                <input class="anchor-pos" data-anchor-index="${idx}" data-axis="x" type="number" step="0.001" value="${a.x}" oninput="updateAnchorsFromInputs()" style="width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+            </td>
+            <td style="padding:4px 6px;">
+                <input class="anchor-pos" data-anchor-index="${idx}" data-axis="y" type="number" step="0.001" value="${a.y}" oninput="updateAnchorsFromInputs()" style="width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+            </td>
+            <td style="padding:4px 6px;">
+                <input class="anchor-pos" data-anchor-index="${idx}" data-axis="z" type="number" step="0.001" value="${a.z}" oninput="updateAnchorsFromInputs()" style="width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+            </td>
+            <td style="padding:4px 6px; text-align:center;">
+                <button type="button" onclick="removeAnchor(${a.id})" style="cursor:pointer; background:#fee2e2; color:#ef4444; border:1px solid #fca5a5; border-radius:4px; padding:3px 8px; font-size:0.75rem; font-weight:bold;" title="Xóa Anchor A${a.id}">🗑 Xóa</button>
+            </td>
+        </tr>
     `).join('');
+
+    container.innerHTML = `
+        <table style="width:100%; border-collapse:collapse; font-size:0.8rem; border:1px solid #e2e8f0; border-radius:6px; overflow:hidden; background:white;">
+            <thead>
+                <tr style="background:#f1f5f9; text-align:left; color:#475569;">
+                    <th style="padding:6px 10px; border-bottom:1px solid #cbd5e1;">Anchor</th>
+                    <th style="padding:6px 10px; border-bottom:1px solid #cbd5e1;">X (m)</th>
+                    <th style="padding:6px 10px; border-bottom:1px solid #cbd5e1;">Y (m)</th>
+                    <th style="padding:6px 10px; border-bottom:1px solid #cbd5e1;">Z (m)</th>
+                    <th style="padding:6px 10px; border-bottom:1px solid #cbd5e1; text-align:center;">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rowsHTML}
+            </tbody>
+        </table>
+    `;
+}
+
+function addNewAnchor() {
+    saveActiveAnchorLayout();
+    const maxId = anchors.reduce((max, a) => Math.max(max, a.id), 0);
+    const nextId = maxId + 1;
+    anchors.push({ id: nextId, x: 0.0, y: 0.0, z: 2.495 });
+    ensureAnchorLayouts();
+    anchorLayouts[activeAnchorLayoutId] = cloneAnchors(anchors);
+    initAnchorEditor(anchors);
+    updateAnchorPlot(anchors);
+    refreshRuleAnchorCheckboxes();
+    if (typeof update === 'function') update();
+}
+
+function removeAnchor(anchorId) {
+    if (anchors.length <= 3) {
+        alert('Cần tối thiểu 3 Anchor để thực hiện thuật toán định vị!');
+        return;
+    }
+    saveActiveAnchorLayout();
+    anchors = anchors.filter(a => a.id !== anchorId);
+    ensureAnchorLayouts();
+    anchorLayouts[activeAnchorLayoutId] = cloneAnchors(anchors);
+    initAnchorEditor(anchors);
+    updateAnchorPlot(anchors);
+    refreshRuleAnchorCheckboxes();
+    if (typeof update === 'function') update();
 }
 
 function readAnchorsFromInputs() {
-    const next = cloneAnchors(anchors);
-    document.querySelectorAll('.anchor-pos').forEach(input => {
-        const idx = parseInt(input.dataset.anchorIndex);
-        const axis = input.dataset.axis;
-        const value = parseFloat(input.value);
-        if (next[idx] && Number.isFinite(value)) {
-            next[idx][axis] = value;
+    const next = [];
+    document.querySelectorAll('.anchor-row-tr').forEach(tr => {
+        const id = parseInt(tr.dataset.anchorId);
+        const xInput = tr.querySelector('.anchor-pos[data-axis="x"]');
+        const yInput = tr.querySelector('.anchor-pos[data-axis="y"]');
+        const zInput = tr.querySelector('.anchor-pos[data-axis="z"]');
+        const x = xInput ? parseFloat(xInput.value) : 0;
+        const y = yInput ? parseFloat(yInput.value) : 0;
+        const z = zInput ? parseFloat(zInput.value) : 0;
+        if (Number.isFinite(id)) {
+            next.push({
+                id: id,
+                x: Number.isFinite(x) ? x : 0,
+                y: Number.isFinite(y) ? y : 0,
+                z: Number.isFinite(z) ? z : 0
+            });
         }
     });
-    return next;
+    return next.length > 0 ? next : cloneAnchors(anchors);
 }
 
 function setAnchorInputs(anchorList) {
-    anchorList.forEach((a, idx) => {
-        ['x', 'y', 'z'].forEach(axis => {
-            const input = document.querySelector(`.anchor-pos[data-anchor-index="${idx}"][data-axis="${axis}"]`);
-            if (input) input.value = a[axis];
-        });
-    });
+    anchors = cloneAnchors(anchorList);
+    initAnchorEditor(anchors);
+    refreshRuleAnchorCheckboxes();
 }
 
 function updateAnchorPlot(anchorList) {
@@ -119,8 +176,9 @@ function resetAnchorsToDefault() {
     anchors = cloneAnchors(SIM_CONFIG.ENV.ANCHORS);
     ensureAnchorLayouts();
     anchorLayouts[activeAnchorLayoutId] = cloneAnchors(anchors);
-    setAnchorInputs(anchors);
+    initAnchorEditor(anchors);
     updateAnchorPlot(anchors);
+    refreshRuleAnchorCheckboxes();
     if (typeof update === 'function') update();
 }
 
@@ -204,9 +262,13 @@ function initGroundTruthSelector() {
         const id = gt.id || `gt_${idx}`;
         return `<option value="${id}">Ground Truth: ${gt.name || id}</option>`;
     }).join('');
-
+    const fileMatchedOverlay = (typeof sourceFilename !== 'undefined')
+        ? groundTruths.find(gt => gt.overlay && gt.overlay.reference_csv === sourceFilename)
+        : null;
     const saved = localStorage.getItem('uwb_sim_groundtruth');
-    if (saved && groundTruths.some((gt, idx) => (gt.id || `gt_${idx}`) === saved)) {
+    if (fileMatchedOverlay) {
+        select.value = fileMatchedOverlay.id;
+    } else if (saved && groundTruths.some((gt, idx) => (gt.id || `gt_${idx}`) === saved)) {
         select.value = saved;
     }
     refreshActiveGroundTruth();
@@ -215,11 +277,23 @@ function initGroundTruthSelector() {
 function updateGroundTruthPlot(track) {
     const plot = document.getElementById('trajectory');
     if (!plot || !plot.data) return;
+    const overlay = track && track.overlay;
+    const overlayPoints = overlay && Array.isArray(overlay.points) ? overlay.points : [];
+    const hasOverlay = overlayPoints.length >= 2;
     Plotly.restyle('trajectory', {
         x: [track.x],
         y: [track.y],
-        name: [`Ground Truth (${track.name || track.id})`]
+        name: ['Ground Truth'],
+        line: [{ color: '#f87171', dash: 'dot', width: 1 }]
     }, [1]);
+    Plotly.restyle('trajectory', {
+        x: [overlayPoints.map(point => point[0])],
+        y: [overlayPoints.map(point => point[1])],
+        name: ['Ground Truth Detour'],
+        visible: [hasOverlay],
+        showlegend: [false],
+        line: [{ color: '#f87171', dash: 'dot', width: 1 }]
+    }, [8]);
 }
 
 function onGroundTruthChanged() {
@@ -254,7 +328,7 @@ function decodeMask(mask) {
 function addRule(start, end, activeAnchors) {
     start = start !== undefined ? start : 0;
     end = end !== undefined ? end : 100000;
-    activeAnchors = activeAnchors || [0, 1, 2, 3];
+    activeAnchors = activeAnchors || anchors.map((_, idx) => idx);
 
     const id = ruleCounter++;
     const div = document.createElement('div');
@@ -268,11 +342,10 @@ function addRule(start, end, activeAnchors) {
     div.style.border = '1px solid #e2e8f0';
     div.style.fontSize = '0.8rem';
 
-    let checksHTML = '';
-    for (let i = 0; i < 4; i++) {
+    let checksHTML = anchors.map((anc, i) => {
         const checked = activeAnchors.includes(i) ? 'checked' : '';
-        checksHTML += `<label style="display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" class="rule-anchor" value="${i}" ${checked} onchange="update()"> A${i+1}</label>`;
-    }
+        return `<label style="display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" class="rule-anchor" value="${i}" ${checked} onchange="update()"> A${anc.id}</label>`;
+    }).join('');
 
     div.innerHTML = `
         <div style="display:flex; align-items:center; gap:5px;">
@@ -281,7 +354,7 @@ function addRule(start, end, activeAnchors) {
             <span>-</span>
             <input type="number" class="rule-end" value="${end}" style="width: 60px; padding: 3px; border:1px solid #cbd5e1; border-radius:4px;" onchange="update()">
         </div>
-        <div style="display:flex; gap: 8px; margin-left: 10px; flex-grow: 1;">
+        <div class="rule-anchors-container" style="display:flex; gap: 8px; margin-left: 10px; flex-grow: 1; flex-wrap: wrap;">
             ${checksHTML}
         </div>
         <button onclick="removeRule(${id})" style="cursor:pointer; color: #ef4444; border:none; background:none; font-weight:bold; font-size:1rem; padding:0 4px;" title="Remove Rule">&times;</button>
@@ -289,6 +362,20 @@ function addRule(start, end, activeAnchors) {
 
     document.getElementById('rules_container').appendChild(div);
     if (typeof update === 'function') update();
+}
+
+function refreshRuleAnchorCheckboxes() {
+    document.querySelectorAll('#rules_container > div').forEach(div => {
+        const checkboxes = Array.from(div.querySelectorAll('.rule-anchor'));
+        const activeIdxs = checkboxes.filter(cb => cb.checked).map(cb => parseInt(cb.value));
+        const container = div.querySelector('.rule-anchors-container');
+        if (container) {
+            container.innerHTML = anchors.map((anc, i) => {
+                const checked = activeIdxs.includes(i) || activeIdxs.length === 0 ? 'checked' : '';
+                return `<label style="display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" class="rule-anchor" value="${i}" ${checked} onchange="update()"> A${anc.id}</label>`;
+            }).join('');
+        }
+    });
 }
 
 function removeRule(id) {
@@ -474,25 +561,25 @@ function updateD2DistanceStats(d2Scores, gatedDist, rejectIdx, rescueIdx, ambigu
     const elem = document.getElementById('d2_distance_stats');
     if (!elem) return;
 
-    const rawCounts = [0, 0, 0, 0];
+    const rawCounts = anchors.map(() => 0);
     samples.slice(0, xAxisLength).forEach(s => {
-        for (let i = 0; i < 4; i++) {
-            if (s.distances[i] > 0.1) rawCounts[i]++;
+        for (let i = 0; i < anchors.length; i++) {
+            if (s.distances && s.distances[i] > 0.1) rawCounts[i]++;
         }
     });
 
-    const anchorStats = [0, 1, 2, 3].map(i => {
+    const anchorStats = anchors.map((anc, i) => {
         const d2 = meanFinite(d2Scores[i]);
-        const gatedCount = gatedDist[i].filter(v => Number.isFinite(v)).length;
-        const rejectCount = rejectIdx[i].length;
+        const gatedCount = gatedDist[i] ? gatedDist[i].filter(v => Number.isFinite(v)).length : 0;
+        const rejectCount = rejectIdx[i] ? rejectIdx[i].length : 0;
         const rescueCount = rescueIdx && rescueIdx[i] ? rescueIdx[i].length : 0;
         const meanText = d2.mean === null ? '--' : d2.mean.toFixed(3);
         return `
             <div class="stat-box">
-                <strong>A${i + 1}</strong>
+                <strong>A${anc.id}</strong>
                 <div class="stat-row"><span>Mean D2</span><span>${meanText}</span></div>
                 <div class="stat-row"><span>D2 Count</span><span>${d2.count}</span></div>
-                <div class="stat-row"><span>Raw Dist</span><span>${rawCounts[i]}</span></div>
+                <div class="stat-row"><span>Raw Dist</span><span>${rawCounts[i] || 0}</span></div>
                 <div class="stat-row"><span>Gated Dist</span><span>${gatedCount}</span></div>
                 <div class="stat-row"><span>Rescued</span><span>${rescueCount}</span></div>
                 <div class="stat-row"><span>Rejected</span><span>${rejectCount}</span></div>

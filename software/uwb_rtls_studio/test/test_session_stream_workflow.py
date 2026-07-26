@@ -162,13 +162,15 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
             "tril_x_m": float(seq),
             "tril_y_m": 1.0,
             "yaw_deg": 0.0,
-            "anchor_mask": 0x0F,
+            "anchor_mask": 0x3F,
             "ranging_error_count": 0,
             "anchors": [
                 {"anchor_id": 1, "distance_mm": 1000 + seq, "weight": 90},
                 {"anchor_id": 2, "distance_mm": 2000 + seq, "weight": 80},
                 {"anchor_id": 3, "distance_mm": 3000 + seq, "weight": 70},
                 {"anchor_id": 4, "distance_mm": 4000 + seq, "weight": 60},
+                {"anchor_id": 5, "distance_mm": 5000 + seq, "weight": 50},
+                {"anchor_id": 6, "distance_mm": 6000 + seq, "weight": 40},
             ],
         })
 
@@ -184,7 +186,9 @@ def test_ranging_run_streams_sensor_fusion_records_until_stop(tmp_path, monkeypa
     assert "Update" in rows[-1]
     assert "| ukf_x:" in rows[-1]
     assert "| d1:  2.200000" in rows[-1]
+    assert "| d6:  7.200000" in rows[-1]
     assert "| w1: 90" in rows[-1]
+    assert "| w6: 40" in rows[-1]
 
     studio_exports = list((shared_data_root / "studio").glob("*/*_sensor_fusion_result.csv"))
     assert len(studio_exports) == 1

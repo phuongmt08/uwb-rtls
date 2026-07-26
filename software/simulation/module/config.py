@@ -47,13 +47,22 @@ ANCHOR_3_Y = 8.37
 ANCHOR_4_X = 7.5
 ANCHOR_4_Y = 0.03
 
-# Anchor positions in the room (three corners)
+ANCHOR_5_X = 4.3
+ANCHOR_5_Y = 0.8
+
+ANCHOR_6_X = 4.3
+ANCHOR_6_Y = 7.88
+
+# Keep this layout aligned with Zone 1 in firmware/uwb/sys/positioning_config.h.
 ANCHOR_POSITIONS = np.array([
     [ANCHOR_1_X, ANCHOR_1_Y],     
     [ANCHOR_2_X, ANCHOR_2_Y],     
     [ANCHOR_3_X, ANCHOR_3_Y],    
-    [ANCHOR_4_X, ANCHOR_4_Y]     
+    [ANCHOR_4_X, ANCHOR_4_Y],
+    [ANCHOR_5_X, ANCHOR_5_Y],
+    [ANCHOR_6_X, ANCHOR_6_Y],
 ])
+NUM_ANCHORS = len(ANCHOR_POSITIONS)
 
 # UKF configuration
 UKF_STATE_SIZE = 8
@@ -161,6 +170,18 @@ GROUND_TRUTH_D1 = 5.357
 GROUND_TRUTH_D2 = 4.370
 GROUND_TRUTH_D3 = 5.357
 GROUND_TRUTH_D4 = 5.357
+# Geometric distances from the existing reference point (~4.1, 4.2 m)
+# to the newly configured A5 and A6 positions.
+GROUND_TRUTH_D5 = 3.406
+GROUND_TRUTH_D6 = 3.685
+GROUND_TRUTH_DISTANCES = np.array([
+    GROUND_TRUTH_D1,
+    GROUND_TRUTH_D2,
+    GROUND_TRUTH_D3,
+    GROUND_TRUTH_D4,
+    GROUND_TRUTH_D5,
+    GROUND_TRUTH_D6,
+])
 
 # Frame Structure Format (little-endian)
 # - B: unsigned char (1 byte) for sof
@@ -172,12 +193,12 @@ GROUND_TRUTH_D4 = 5.357
 # - f: float (4 bytes) for gz
 # - f: float (4 bytes) for px
 # - f: float (4 bytes) for py
-# - 4f: 4 floats (16 bytes) for distance array
-# - 4d: 4 doubles (32 bytes) for fp_amp_norm array
-# - 4d: 4 doubles (32 bytes) for fp_snr array
+# - NUM_ANCHORS floats for distance array
+# - NUM_ANCHORS doubles for fp_amp_norm array
+# - NUM_ANCHORS doubles for fp_snr array
 # - I: unsigned int (4 bytes) for error_frame_cnt
 # - f: float (4 bytes) for dt
-LIVE_FRAME_FORMAT = '<BBBI5f4f4d4dIf'
+LIVE_FRAME_FORMAT = f'<BBBI5f{NUM_ANCHORS}f{NUM_ANCHORS}d{NUM_ANCHORS}dIf'
 import struct
 LIVE_FRAME_SIZE = struct.calcsize(LIVE_FRAME_FORMAT)
 

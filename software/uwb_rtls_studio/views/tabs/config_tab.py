@@ -1337,7 +1337,13 @@ class ConfigTab(QWidget):
         label.setStyleSheet("font-weight: bold;")
         dialog_layout.addWidget(label)
 
-        # Checkboxes
+        # Configuration groups are opt-in so an accidental confirmation does
+        # not overwrite settings the user did not explicitly select.
+        chk_select_all = QCheckBox("Select All")
+        chk_select_all.setTristate(True)
+        chk_select_all.setStyleSheet("font-weight: bold;")
+        dialog_layout.addWidget(chk_select_all)
+
         chk_sys = QCheckBox("UWB Configuration (Sys Config)")
         chk_sys.setChecked(False)
         dialog_layout.addWidget(chk_sys)
@@ -1375,12 +1381,37 @@ class ConfigTab(QWidget):
         dialog_layout.addWidget(chk_device_type)
 
         chk_host_transport = QCheckBox("Host Transport Interface")
-        chk_host_transport.setChecked(False)
         dialog_layout.addWidget(chk_host_transport)
 
         chk_otp = QCheckBox("Factory OTP Configuration")
-        chk_otp.setChecked(False) # Unchecked by default for safety
         dialog_layout.addWidget(chk_otp)
+
+        config_checkboxes = (
+            chk_sys, chk_zone_profile, chk_ranging, chk_fusion, chk_prefilter,
+            chk_calib, chk_ble_adv, chk_ble_conn, chk_device_type,
+            chk_host_transport, chk_otp,
+        )
+
+        def set_all_configurations(checked: bool):
+            for checkbox in config_checkboxes:
+                checkbox.setChecked(checked)
+
+        def update_select_all_state():
+            checked_count = sum(checkbox.isChecked() for checkbox in config_checkboxes)
+            if checked_count == 0:
+                state = Qt.CheckState.Unchecked
+            elif checked_count == len(config_checkboxes):
+                state = Qt.CheckState.Checked
+            else:
+                state = Qt.CheckState.PartiallyChecked
+
+            chk_select_all.blockSignals(True)
+            chk_select_all.setCheckState(state)
+            chk_select_all.blockSignals(False)
+
+        chk_select_all.clicked.connect(set_all_configurations)
+        for checkbox in config_checkboxes:
+            checkbox.toggled.connect(update_select_all_state)
 
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         dialog_layout.addWidget(button_box)

@@ -97,12 +97,15 @@ function initPlots(anchors, gt_square, rawData, samples) {
     const colors = SIM_CONFIG.VIEW.COLORS;
     const isPathCsv = rawData.log_format === 'path_csv';
     const tripletAxis = tripletAxisData(anchors);
+    const gtOverlay = gt_square && gt_square.overlay;
+    const gtOverlayPoints = gtOverlay && Array.isArray(gtOverlay.points) ? gtOverlay.points : [];
+    const hasGtOverlay = gtOverlayPoints.length >= 2;
     // 1. Trajectory
     Plotly.newPlot('trajectory', [
         { x: anchors.map(a => a.x), y: anchors.map(a => a.y), mode: 'markers+text',
           name: 'Anchors', text: anchors.map(a => 'A'+a.id), textposition: 'top center',
           marker: { color: '#1e293b', size: 10, symbol: 'triangle-up' } },
-        { x: gt_square.x, y: gt_square.y, mode: 'lines', name: `Ground Truth (${gt_square.name || 'Original Square'})`,
+        { x: gt_square.x, y: gt_square.y, mode: 'lines', name: 'Ground Truth',
           line: { color: '#f87171', dash: 'dot', width: 1 } },
         { x: isPathCsv ? samples.map(e => e.tril_x) : samples.map(e => e.px_fw),
           y: isPathCsv ? samples.map(e => e.tril_y) : samples.map(e => e.py_fw), mode: 'lines+markers',
@@ -118,11 +121,14 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion)',
            visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#8b5cf6', width: 2 } },
         { x: [], y: [], mode: 'lines+markers', name: 'Simulated Path (UKF Fusion + IMU Butterworth)',
-           visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#0ea5e9', width: 2 } }
+           visible: isPathCsv ? false : true, type: 'scattergl', marker: { size: 3 }, line: { color: '#0ea5e9', width: 2 } },
+        { x: gtOverlayPoints.map(point => point[0]), y: gtOverlayPoints.map(point => point[1]), mode: 'lines',
+          name: 'Ground Truth Detour', visible: hasGtOverlay, showlegend: false, type: 'scattergl',
+          line: { color: '#f87171', dash: 'dot', width: 1 } }
     ], {
         margin: { t: 40, b: 100, l: 50, r: 50 },
         xaxis: { title: 'X (m)', gridcolor: '#f1f5f9' },
-        yaxis: { title: 'Y (m)', gridcolor: '#f1f5f9' },
+        yaxis: { title: 'Y (m)', gridcolor: '#f1f5f9', scaleanchor: 'x', scaleratio: 1 },
         hovermode: 'closest',
         legend: {
             orientation: 'h',
@@ -130,9 +136,7 @@ function initPlots(anchors, gt_square, rawData, samples) {
             y: -0.15,
             xanchor: 'center',
             x: 0.5
-        },
-        width: 800,
-        height: 800
+        }
     }, {
         responsive: true,
         scrollZoom: true
@@ -198,8 +202,9 @@ function initPlots(anchors, gt_square, rawData, samples) {
     Plotly.newPlot('distances', distTraces, {
         margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
-        yaxis: { title: 'Distance (m)' }, hovermode: 'x unified',
-        height: 800
+        yaxis: { title: 'Distance (m)' }, hovermode: 'x unified'
+    }, {
+        responsive: true
     });
 
     // 3. D2 Scores
@@ -400,7 +405,9 @@ function initPlots(anchors, gt_square, rawData, samples) {
         { x: [0, 100], y: [null], xaxis: 'x2', showlegend: false, hoverinfo: 'none' }
     ];
     Plotly.newPlot('pos_error', errTraces, {
-        margin: { t: 40, b: 40, l: 50, r: 50 }, xaxis: { title: 'Sample Index' },
+        margin: { t: 58, b: 42, l: 52, r: 18 },
+        legend: { orientation: 'h', x: 0, y: 1.18, xanchor: 'left', yanchor: 'bottom', font: { size: 10 } },
+        xaxis: { title: 'Sample Index' },
         xaxis2: { title: 'Time (s)', overlaying: 'x', side: 'top', showticklabels: true, showline: true, autorange: false, fixedrange: true },
         yaxis: { title: 'Error (m)', range: [0, SIM_CONFIG.VIEW.MAX_ERROR_RANGE] }, hovermode: 'x unified'
     });

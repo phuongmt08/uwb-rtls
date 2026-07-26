@@ -6,7 +6,8 @@ from .config import (
     FUSION_FRAME_NO_STEP_FORMAT, FUSION_FRAME_NO_STEP_SIZE, FUSION_FRAME_NO_STEP_PAYLOAD_LEN,
     FUSION_FRAME_LEGACY_FORMAT, FUSION_FRAME_LEGACY_SIZE, FUSION_FRAME_LEGACY_PAYLOAD_LEN,
     IMU_FRAME_FORMAT, IMU_FRAME_SIZE,
-    UWB_FRAME_FORMAT, UWB_FRAME_SIZE
+    UWB_FRAME_FORMAT, UWB_FRAME_SIZE,
+    NUM_ANCHORS
 )
 
 def parse_uwb_frame(data_bytes):
@@ -30,6 +31,10 @@ def parse_live_frame(data_bytes):
             return None
         if unpacked[2] != 0:
             print(f"[PARSER] Detected non-zero mask: {unpacked[2]} | Frame hex: {data_bytes[:10].hex()}")
+        distance_start = 9
+        fp_amp_start = distance_start + NUM_ANCHORS
+        fp_snr_start = fp_amp_start + NUM_ANCHORS
+        err_index = fp_snr_start + NUM_ANCHORS
         return {
             'sof': unpacked[0],
             'length': unpacked[1],
@@ -40,11 +45,11 @@ def parse_live_frame(data_bytes):
             'gz': unpacked[6],
             'px': unpacked[7],
             'py': unpacked[8],
-            'distances': list(unpacked[9:13]),
-            'fp_amp_norm': list(unpacked[13:17]),
-            'fp_snr': list(unpacked[17:21]),
-            'err_cnt': unpacked[21],
-            'dt': unpacked[22]
+            'distances': list(unpacked[distance_start:fp_amp_start]),
+            'fp_amp_norm': list(unpacked[fp_amp_start:fp_snr_start]),
+            'fp_snr': list(unpacked[fp_snr_start:err_index]),
+            'err_cnt': unpacked[err_index],
+            'dt': unpacked[err_index + 1]
         }
     except struct.error:
         return None

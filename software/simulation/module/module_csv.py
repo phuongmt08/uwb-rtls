@@ -2,7 +2,7 @@ import os
 import glob
 import re
 import numpy as np
-from .config import SensorEvent, SOURCE_DATA_FILE
+from .config import NUM_ANCHORS, SensorEvent, SOURCE_DATA_FILE
 
 def _software_data_path(*parts):
     software_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -101,7 +101,9 @@ def parse_csv_data(filepath: str) -> list[SensorEvent]:
                         gz=float(row['gz']),
                         px=float(row['px']) if row.get('px') else 0.0,
                         py=float(row['py']) if row.get('py') else 0.0,
-                        distances=np.array([float(row['d1']), float(row['d2']), float(row['d3']), float(row['d4'])]),
+                        distances=np.array([
+                            _csv_float(row.get(f'd{i}')) for i in range(1, NUM_ANCHORS + 1)
+                        ]),
                         dt=dt_val,
                         mask=int(row['mask']) if row.get('mask') else 0,
                         raw_line=",".join(str(v) for v in row.values())
@@ -241,7 +243,9 @@ def _parse_live_text_record(line):
         gz=_csv_float(values.get("gz")),
         px=_csv_float(values.get("tril_x")),
         py=_csv_float(values.get("tril_y")),
-        distances=np.array([_csv_float(values.get(f"d{i}")) for i in range(1, 5)]),
+        distances=np.array([
+            _csv_float(values.get(f"d{i}")) for i in range(1, NUM_ANCHORS + 1)
+        ]),
         dt=dt,
         mask=_csv_int(values.get("mask")),
         raw_line=raw_line,
@@ -304,10 +308,32 @@ def build_live_text_record(frame_data, rx_cnt=0, tx_cnt=None, status=None):
     update_dt = dt if status in ("Init", "Update") else 0.0
     predict_dt = dt if status == "Predict" else 0.0
 
-    distances = [_distance_m(frame_data, index) for index in range(4)]
-    weights = [_anchor_weight(frame_data, index) for index in range(4)]
-    fp_amp = [_csv_float(_list_value(frame_data, "fp_amp_norm", index)) for index in range(4)]
-    fp_snr = [_csv_float(_list_value(frame_data, "fp_snr", index)) for index in range(4)]
+    distances = [_distance_m(frame_data, index) for index in range(NUM_ANCHORS)]
+    weights = [_anchor_weight(frame_data, index) for index in range(NUM_ANCHORS)]
+    fp_amp = [
+        _csv_float(_list_value(frame_data, "fp_amp_norm", index))
+        for index in range(NUM_ANCHORS)
+    ]
+    fp_snr = [
+        _csv_float(_list_value(frame_data, "fp_snr", index))
+        for index in range(NUM_ANCHORS)
+    ]
+    distance_fields = " ".join(
+        f"| d{index + 1}: {distance:9.6f}"
+        for index, distance in enumerate(distances)
+    )
+    weight_fields = " ".join(
+        f"| w{index + 1}: {weight}"
+        for index, weight in enumerate(weights)
+    )
+    amplitude_fields = " ".join(
+        f"| amp{index + 1}: {amplitude:9.6f}"
+        for index, amplitude in enumerate(fp_amp)
+    )
+    snr_fields = " ".join(
+        f"| snr{index + 1}: {snr:9.6f}"
+        for index, snr in enumerate(fp_snr)
+    )
 
     line = (
         f"({int(rx_cnt):4d}/{tx_frame_cnt:4d}) {status:<7s} "
@@ -326,14 +352,11 @@ def build_live_text_record(frame_data, rx_cnt=0, tx_cnt=None, status=None):
         f"| update_dt: {update_dt:9.6f} "
         f"| predict_dt: {predict_dt:9.6f} "
         f"| mask: {_csv_int(frame_data.get('anchor_mask', frame_data.get('mask', 0)))} "
-        f"| d1: {distances[0]:9.6f} | d2: {distances[1]:9.6f} "
-        f"| d3: {distances[2]:9.6f} | d4: {distances[3]:9.6f} "
-        f"| w1: {weights[0]} | w2: {weights[1]} | w3: {weights[2]} | w4: {weights[3]} "
+        f"{distance_fields} "
+        f"{weight_fields} "
         f"| err: {_csv_int(frame_data.get('ranging_error_count', frame_data.get('error_count', frame_data.get('err_cnt', 0))))} "
-        f"| amp1: {fp_amp[0]:9.6f} | amp2: {fp_amp[1]:9.6f} "
-        f"| amp3: {fp_amp[2]:9.6f} | amp4: {fp_amp[3]:9.6f} "
-        f"| snr1: {fp_snr[0]:9.6f} | snr2: {fp_snr[1]:9.6f} "
-        f"| snr3: {fp_snr[2]:9.6f} | snr4: {fp_snr[3]:9.6f}"
+        f"{amplitude_fields} "
+        f"{snr_fields}"
     )
     return line
 

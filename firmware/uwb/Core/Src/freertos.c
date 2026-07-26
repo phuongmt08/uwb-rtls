@@ -63,7 +63,7 @@ typedef struct
 {
   mw_tril_anchor_t candidate_anchors[MAX_ANCHORS_SUPPORTED];
   mw_tril_anchor_t selected_anchors[3U];
-#if ENABLE_MAHALANOBIS_PREFILTER
+#if SYS_FUSION_PREFILTER_ENABLED
   mw_tril_anchor_t rejected_anchors[MAX_ANCHORS_SUPPORTED];
 #endif
 } sensor_fusion_workspace_t;
@@ -101,7 +101,9 @@ bool imu_test_mutex_flag = false;
 
 /* Owner variables for decoupled active Sensor Fusion */
 sys_sensor_fusion_data_t ukf_data;
+#if SYS_FUSION_PREFILTER_ENABLED
 static mahalanobis_prefilter_t s_prefilter;
+#endif
 
 static uint8_t s_last_selected_anchors_mask = 0U;
 static volatile bool s_fusion_reset_requested = false;
@@ -417,8 +419,10 @@ void sensor_fusion_entry(void *argument)
   }
   /* Init prefilter */
   sensor_fusion_reset_state();
+#if ENABLE_SYS_FUSION
   sensor_fusion_workspace_t workspace_storage = {0};
   sensor_fusion_workspace_t *const workspace = &workspace_storage;
+#endif
 
   /* TEST */
 #if TEST_UKF_STREAM_UART
@@ -470,12 +474,14 @@ void sensor_fusion_entry(void *argument)
       uwb_distance_msg_t newer_msg;
       while (osMessageQueueGet(g_uwb_distance_queue, &newer_msg, NULL, 0U) == osOK)
       {
+#if ENABLE_SYS_FUSION
         /* A failed ranging frame is already included in app_tag's counter.
          * A valid frame discarded here never reaches the fusion update, so
          * account for it once as a fusion-side missed update. */
         if (sensor_fusion_count_valid_ranges(msg.mask) >= 3U) {
           sys_sensor_fusion_report_error();
         }
+#endif
         msg = newer_msg;
       }
 
@@ -484,6 +490,7 @@ void sensor_fusion_entry(void *argument)
 
     (void)sys_sensor_fusion_task();
 
+#if ENABLE_SYS_FUSION
 #if TEST_UKF_DISTANCE_ZERO_SIMULATION
     if (g_imu_data_queue != NULL && osMessageQueueGetCount(g_imu_data_queue) > 0U)
     {
@@ -497,16 +504,18 @@ void sensor_fusion_entry(void *argument)
       fusion_predict_performed = (sys_sensor_fusion_predict(&ukf_data) == SYS_SENSOR_FUSION_OK);
     }
 #endif
+#endif
 
     if (has_uwb_msg)
     {
+#if ENABLE_SYS_FUSION
         /* 1. Calculate dynamic dt for ranging if needed, and update logs */
 
         /* 2. Process, project to 2D, and Mahalanobis filter the ranges */
         memset(workspace, 0, sizeof(*workspace));
         uint8_t candidate_count = 0U;
 
-			#if ENABLE_MAHALANOBIS_PREFILTER
+			#if SYS_FUSION_PREFILTER_ENABLED
         uint8_t prefilter_reject_count = 0U;
 			#endif
 
@@ -571,10 +580,12 @@ void sensor_fusion_entry(void *argument)
             anchor_entry.quality_valid = (msg.quality_valid[i] != 0U);
             anchor_entry.wgdop = 0.0;
             anchor_entry.residual_rms = 0.0;
+            anchor_entry.geometry_quality = 0.0;
+            anchor_entry.selection_score = 0.0;
             anchor_entry.triplet_fp_weight = 0.0;
             anchor_entry.measurement_weight = 0.0;
 
-#if ENABLE_MAHALANOBIS_PREFILTER
+#if SYS_FUSION_PREFILTER_ENABLED
             bool pass = true;
             const sys_prefilter_cfg_t *active_prefilter_cfg = sys_config_get_prefilter();
             if (sys_sensor_fusion_is_initialized() && ukf_cov_valid && active_prefilter_cfg->enable)
@@ -625,7 +636,7 @@ void sensor_fusion_entry(void *argument)
             }
         }
 
-#if (ENABLE_MAHALANOBIS_PREFILTER && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
+#if (SYS_FUSION_PREFILTER_ENABLED && (MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS > 0U))
         if (candidate_count < MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS && prefilter_reject_count > 0U) {
             for (uint8_t i = 1U; i < prefilter_reject_count; i++) {
                 mw_tril_anchor_t key = workspace->rejected_anchors[i];
@@ -733,13 +744,19 @@ void sensor_fusion_entry(void *argument)
         }
 
         /* Update logging metrics mailbox passively when in Sensor Fusion mode */
+#else
+        /* Fusion disabled: keep only the raw UWB snapshot used by the host-side
+         * live plot. Do not run projection, Mahalanobis, rescue, trilateration,
+         * or UKF update on the MCU. */
+        sys_sensor_fusion_capture_ranging_snapshot(&msg);
+#endif
     }
 
     if (!has_uwb_msg)
     {
         sys_sensor_fusion_clear_latest_anchor_metrics();
 
-#if TEST_UKF_DISTANCE_ZERO_SIMULATION
+#if TEST_UKF_DISTANCE_ZERO_SIMULATION && ENABLE_SYS_FUSION
         const sys_config_t *fusion_cfg = sys_config_get();
         memset(workspace, 0, sizeof(*workspace));
         uint8_t simulation_candidate_count = 0U;
@@ -1224,12 +1241,15 @@ static void sensor_fusion_reset_state(void)
     sys_sensor_fusion_reset_error();
     s_last_selected_anchors_mask = 0U;
 
+#if ENABLE_SYS_FUSION
+#if SYS_FUSION_PREFILTER_ENABLED
     const sys_prefilter_cfg_t *prefilter_cfg = sys_config_get_prefilter();
     mw_filter_mahalanobis_init(&s_prefilter,
                                prefilter_cfg->recover_d2,
                                prefilter_cfg->reject_d2,
                                prefilter_cfg->r_gate,
                                prefilter_cfg->min_covariance);
+#endif
 
     if (sys_sensor_fusion_init(&ukf_data) != SYS_SENSOR_FUSION_OK)
     {
@@ -1239,6 +1259,9 @@ static void sensor_fusion_reset_state(void)
     {
         RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] UKF re-initialized successfully");
     }
+#else
+    sys_sensor_fusion_clear_latest_anchor_metrics();
+#endif
 }
 
 /* USER CODE END Application */

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/graphml.xsd">
+  <key id="d2" for="edge" attr.name="dotted" attr.type="boolean" />
+  <key id="d1" for="node" attr.name="y" attr.type="double" />
+  <key id="d0" for="node" attr.name="x" attr.type="double" />
+  <graph id="groundtruth_20260719" edgedefault="directed">
+    <!--
+      Topology and endpoints come from ground_truths.json.
+      The horizontal/vertical centerlines were robust-fitted against
+      20260719_17g36p_sensor_fusion_result.csv:
+        bottom y=1.585, center x=4.310, top y=7.025,
+        right x=8.030, middle y=3.690, return x=4.340,
+        final y=6.600.
+    -->
+    <node id="p0">
+      <data key="d0">1.600</data>
+      <data key="d1">1.585</data>
+    </node>
+    <node id="p1">
+      <data key="d0">4.310</data>
+      <data key="d1">1.585</data>
+    </node>
+    <node id="p2">
+      <data key="d0">4.310</data>
+      <data key="d1">7.025</data>
+    </node>
+    <node id="p3">
+      <data key="d0">8.030</data>
+      <data key="d1">7.025</data>
+    </node>
+    <node id="p4">
+      <data key="d0">8.030</data>
+      <data key="d1">3.690</data>
+    </node>
+    <node id="p5">
+      <data key="d0">4.340</data>
+      <data key="d1">3.690</data>
+    </node>
+    <node id="p6">
+      <data key="d0">4.340</data>
+      <data key="d1">6.600</data>
+    </node>
+    <node id="p7">
+      <data key="d0">2.300</data>
+      <data key="d1">6.600</data>
+    </node>
+    <edge id="e0" source="p0" target="p1">
+      <data key="d2">false</data>
+    </edge>
+    <edge id="e1" source="p1" target="p2">
+      <data key="d2">false</data>
+    </edge>
+    <edge id="e2" source="p2" target="p3">
+      <data key="d2">false</data>
+    </edge>
+    <edge id="e3" source="p3" target="p4">
+      <data key="d2">false</data>
+    </edge>
+    <edge id="e4" source="p4" target="p5">
+      <data key="d2">false</data>
+    </edge>
+    <edge id="e5" source="p5" target="p6">
+      <data key="d2">false</data>
+    </edge>
+    <edge id="e6" source="p6" target="p7">
+      <data key="d2">false</data>
+    </edge>
+  </graph>
+</graphml>

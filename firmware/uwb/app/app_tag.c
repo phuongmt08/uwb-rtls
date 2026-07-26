@@ -563,7 +563,11 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
         record_ranging_error();
         msg.ranging_error_count = s_error_count;
         if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
-            RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Distance queue full, dropping failed ranging cycle");
+#if ENABLE_SYS_FUSION
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION INPUT] Distance queue full, dropping failed ranging cycle");
+#else
+            RLOG_W(LOG_OBJECT_CODE_TAG, "[RAW STREAM] Distance queue full, dropping failed ranging cycle");
+#endif
         }
         return false;
     }
@@ -571,7 +575,11 @@ static bool process_ranging_results(sys_ranging_result_t *results, int num_succe
     msg.ranging_error_count = s_error_count;
     if (osMessageQueuePut(g_uwb_distance_queue, &msg, 0U, 0U) != osOK) {
         record_ranging_error();
-        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION] Distance queue full, dropping ranging cycle");
+#if ENABLE_SYS_FUSION
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[FUSION INPUT] Distance queue full, dropping ranging cycle");
+#else
+        RLOG_W(LOG_OBJECT_CODE_TAG, "[RAW STREAM] Distance queue full, dropping ranging cycle");
+#endif
         return false;
     }
     s_success_count++;
@@ -595,6 +603,13 @@ app_err_t app_tag_init(void)
     /* Log height configuration */
     RLOG_I(LOG_OBJECT_CODE_TAG, "Height: Tag=%.2fm Anchor=%.2fm dZ=%.2fm",
            TAG_HEIGHT_M, ANCHOR_HEIGHT_M, HEIGHT_OFFSET_M);
+
+#if ENABLE_SYS_FUSION
+    RLOG_I(LOG_OBJECT_CODE_TAG, "MCU Fusion: ON");
+#else
+    RLOG_I(LOG_OBJECT_CODE_TAG, "MCU Fusion: OFF (raw host stream ON, anchors=%u)",
+           (unsigned)NUM_ANCHORS);
+#endif
 
 #if SYS_FUSION_PREFILTER_ENABLED
     RLOG_I(LOG_OBJECT_CODE_TAG,
@@ -805,7 +820,11 @@ void app_tag_process(void)
 
 void app_tag_reset_fusion(void)
 {
+#if ENABLE_SYS_FUSION
     RLOG_I(LOG_OBJECT_CODE_TAG, "[FUSION] Resetting sensor fusion filters and state...");
+#else
+    RLOG_I(LOG_OBJECT_CODE_TAG, "[RAW STREAM] Resetting ranging counters and stream state...");
+#endif
     s_is_ranging_active = false;
     s_error_count = 0;
     s_last_ranging_tick = HAL_GetTick();
