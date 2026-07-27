@@ -682,12 +682,15 @@ class MainWindow(QMainWindow):
         self._calib_tab_index = self.tabs.indexOf(self._tab_calibration)
         self._spatial_tab_index = self.tabs.indexOf(self._tab_spatial_constraints)
         self._tracking_tab_index = self.tabs.indexOf(self._tab_tracking)
+        self._config_tab_index = self.tabs.indexOf(self._tab_config)
         self._communication_tab_index = self.tabs.indexOf(self._tab_communication)
 
-        # Hide calibration and spatial constraints tabs in User mode
+        # User mode owns the full Config tab. Developer mode uses its dedicated
+        # calibration, spatial-constraints, and communication tabs instead.
         self.tabs.setTabVisible(self._calib_tab_index, False)
         self.tabs.setTabVisible(self._spatial_tab_index, False)
         self.tabs.setTabVisible(self._tracking_tab_index, True)
+        self.tabs.setTabVisible(self._config_tab_index, True)
         self.tabs.setTabVisible(self._communication_tab_index, False)
 
         # Initialize active tab title
@@ -950,6 +953,7 @@ class MainWindow(QMainWindow):
         self._is_developer = (index == 1)
 
         # Toggle calibration, spatial constraints and communication tabs visibility
+        self.tabs.setTabVisible(self._config_tab_index, not self._is_developer)
         self.tabs.setTabVisible(self._calib_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._spatial_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._tracking_tab_index, not self._is_developer)
@@ -958,7 +962,7 @@ class MainWindow(QMainWindow):
         # Update config, log, device info, tracking and communication tabs
         if hasattr(self._tab_device, "set_developer_mode"):
             self._tab_device.set_developer_mode(self._is_developer)
-        self._tab_config.set_developer_mode(self._is_developer)
+        self._tab_config.set_developer_mode(False)
         self._tab_log.set_developer_mode(self._is_developer)
         self._tab_tracking.set_developer_mode(False)
         self._tab_spatial_constraints.set_developer_mode(True)

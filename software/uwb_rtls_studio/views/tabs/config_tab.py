@@ -483,7 +483,7 @@ class ConfigTab(QWidget):
         for w in anchor_fields:
             if w is not None:
                 # Anchor fields are visible if developer mode is enabled
-                w.setVisible(self._is_developer)
+                w.setVisible(True)
 
         # Right column container (col3_container) contains Sensor Fusion and Prefilter
         if hasattr(self, "col3_container") and self.col3_container is not None:
@@ -767,7 +767,7 @@ class ConfigTab(QWidget):
         pass
 
     def set_developer_mode(self, enabled: bool):
-        self._is_developer = enabled
+        self._is_developer = False
 
         # Clear existing layout bindings
         self._clear_main_layout()
@@ -775,7 +775,7 @@ class ConfigTab(QWidget):
         # Update visibility of inner developer-only widgets in UWB Group
         for w in self._dev_widgets:
             if w not in (getattr(self, "fusion_group", None), getattr(self, "prefilter_group", None)):
-                w.setVisible(enabled)
+                w.setVisible(True)
 
         # Show or hide connection parameters in BLE Group - always show in both modes
         ble_advanced_widgets = [
