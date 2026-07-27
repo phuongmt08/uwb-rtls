@@ -693,7 +693,7 @@ def step_auto_scan_and_connect(session: VvTestSession, factory: CommandFactory,
         mac_str_target = ":".join(f"{b:02X}" for b in reversed(expected_mac))
         print(f"[+] Scanning specifically for MAC: {mac_str_target}...")
     else:
-        filter_desc = target_name_filter if target_name_filter else "UWB, TAG, ANCHOR, NUS, RTLS"
+        filter_desc = target_name_filter if target_name_filter else "UWB, Tag, Anchor, NUS, RTLS"
         print(f"[+] Scanning for target UWB Peripherals matching: {filter_desc}...")
 
     print(f"[*] Scanning for {scan_timeout_s:.1f} seconds to gather active devices...")

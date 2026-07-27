@@ -163,7 +163,7 @@ class LogViewModel(QObject):
         log.info("Requesting start of log stream from device...")
         if self._session_run_manager:
             self._session_run_manager.open_log_run()
-        if self._log_model and self._log_model.request_log_stream(force=True):
+        if self._log_model and self._log_model.request_log_stream():
             self._log_poll_timer.start()
             return True
         return False

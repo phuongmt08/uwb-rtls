@@ -18,6 +18,12 @@ from utils.app_state import shared_app_state
 
 log = logging.getLogger(__name__)
 
+# Developer-tunable log-stream reliability settings.
+# The first log_data trigger is sent once. It is sent again only when this
+# timeout expires, up to the configured total number of attempts.
+LOG_START_RESPONSE_TIMEOUT_S = 3.0
+LOG_START_MAX_SEND_ATTEMPTS = 3
+
 LOG_PACKET_TRACE_TO_LIVE_LOG = False
 PACKET_TRACE_TAG_WIDTH = 7
 PACKET_TRACE_NAME_WIDTH = 18
@@ -29,11 +35,11 @@ LOG_UI_MAX_ENTRIES_PER_FLUSH = 5
 
 
 class LogModel(QObject):
-    LOG_POLL_TIMEOUT_S = 3.0
+    LOG_POLL_TIMEOUT_S = LOG_START_RESPONSE_TIMEOUT_S
     # Total send attempts for one log ACK, including the first send.
     LOG_LOG_ACK_MAX_SEND_ATTEMPTS = 1
     # Total send attempts for the initial log poll request, including first send.
-    LOG_POLL_MAX_SEND_ATTEMPTS = 3
+    LOG_POLL_MAX_SEND_ATTEMPTS = LOG_START_MAX_SEND_ATTEMPTS
     LOG_ACK_RETRY_PERIOD_S = 1.0
 
     log_entry_added = pyqtSignal(dict)
@@ -92,6 +98,8 @@ class LogModel(QObject):
 
     def set_developer_mode(self, enabled: bool) -> None:
         self._packet_trace_to_live_log = bool(enabled)
+        if not enabled:
+            self._deferred_ack_trace_by_ack_seq.clear()
 
     def clear_live_logs(self) -> None:
         self._live_logs.clear()
@@ -125,13 +133,24 @@ class LogModel(QObject):
         self._append_entry(entry)
         return entry
 
+    @staticmethod
+    def _commands_for_protocol(protocol):
+        """Return the CommandFactory exposed by the real ProtocolService."""
+        if protocol is None:
+            return None
+        commands = getattr(protocol, "commands", None)
+        if commands is not None:
+            return commands
+        # Compatibility for lightweight protocol fakes and older services.
+        return getattr(protocol, "_commands", None)
+
     def send_host_log_packet(self, packet_name: str, command_params: dict | None = None) -> dict:
         """Send a developer-selected host packet to the MCU from the Log tab."""
         if not self._command_bus:
             return {"ok": False, "error": "Command bus is not available"}
 
         protocol = getattr(self._command_bus, "_protocol", None)
-        commands = getattr(protocol, "_commands", None) if protocol is not None else None
+        commands = self._commands_for_protocol(protocol)
         if protocol is None or commands is None:
             return {"ok": False, "error": "Protocol service is not available"}
 
@@ -191,12 +210,15 @@ class LogModel(QObject):
 
         try:
             protocol = getattr(self._command_bus, "_protocol", None)
-            commands = getattr(protocol, "_commands", None) if protocol is not None else None
+            commands = self._commands_for_protocol(protocol)
             if protocol is None or commands is None:
+                log.warning("Cannot ACK log_data: ProtocolService CommandFactory is unavailable")
                 return False
 
             ack_seq = int(segment_info.get("seq", 0))
-            ack_dst = int(segment_info.get("dst_addr", VvAddress.MCU))
+            # ACK must return to the sender of this log_data packet (MCU), not
+            # to its destination (HOST).
+            ack_dst = int(segment_info.get("src_addr", VvAddress.MCU))
             ack_pkt = commands.ack(VvAddress.HOST, ack_dst, protocol.next_seq())
             ack_pkt.ack.ack_seq = ack_seq
             self._send_packet(protocol, ack_pkt, live_log_ack_after_seq=ack_seq)
@@ -216,17 +238,14 @@ class LogModel(QObject):
         self._append_entry(entry)
 
     def _on_log_segment_received(self, segment_info: dict) -> None:
-        # Firmware may push log_data without a UI-started stream; still keep it for the session.
-        was_requested = self._log_stream_requested
-        if not was_requested and self._log_stream_suppressed_after_stop:
+        # Always transport-ACK MCU log_data, but only start collecting log
+        # entries after the user explicitly presses Start Log.
+        if not self._log_stream_requested:
             self._print_rx_log_segment(segment_info)
             self.acknowledge_log_segment(segment_info, force=True, track_pending=False)
-            log.debug("Ignoring late log_data after explicit log stop: seq=%s", segment_info.get("seq", ""))
+            reason = "late after explicit stop" if self._log_stream_suppressed_after_stop else "before Start Log"
+            log.debug("Ignoring log_data %s: seq=%s", reason, segment_info.get("seq", ""))
             return
-        if not was_requested:
-            self._log_stream_requested = True
-            shared_app_state.log_streaming = True
-            self.log_stream_state_changed.emit(True)
         self._log_first_segment_seen = True
         self._latest_mcu_log_seq = int(segment_info.get("seq", 0))
         self._print_rx_log_segment(segment_info)
@@ -381,7 +400,7 @@ class LogModel(QObject):
 
         try:
             protocol = getattr(self._command_bus, "_protocol", None)
-            commands = getattr(protocol, "_commands", None) if protocol is not None else None
+            commands = self._commands_for_protocol(protocol)
             if protocol is None or commands is None:
                 return False
 
@@ -403,11 +422,12 @@ class LogModel(QObject):
         self._pending_log_ack_confirm_seq = None
         self._pending_log_ack_retries = 0
 
-    def _on_ack_received(self, ack_seq: int, response: int) -> None:
+    def _on_ack_received(self, ack_seq: int, response: int, _src_addr: int | None = None) -> None:
         if self._pending_log_ack_confirm_seq is not None and int(ack_seq) == self._pending_log_ack_confirm_seq:
-            line = f"[FLOW]  host_ack confirmed by MCU seq={self._pending_log_ack_confirm_seq}"
-            print(line, flush=True)
-            self._append_packet_trace_entry(line)
+            if self._packet_trace_to_live_log:
+                line = f"[FLOW]  host_ack confirmed by MCU seq={self._pending_log_ack_confirm_seq}"
+                print(line, flush=True)
+                self._append_packet_trace_entry(line)
             self._clear_pending_log_ack()
 
     def _send_packet(self, protocol, pkt, live_log_ack_after_seq: int | None = None) -> None:
@@ -469,11 +489,12 @@ class LogModel(QObject):
             int(pkt.hdr.addr.dst),
             extra,
         )
-        print(line, flush=True)
-        if live_log_ack_after_seq is not None:
-            self._deferred_ack_trace_by_ack_seq[int(live_log_ack_after_seq)] = line
-        else:
-            self._append_packet_trace_entry(line)
+        if self._packet_trace_to_live_log:
+            print(line, flush=True)
+            if live_log_ack_after_seq is not None:
+                self._deferred_ack_trace_by_ack_seq[int(live_log_ack_after_seq)] = line
+            else:
+                self._append_packet_trace_entry(line)
 
     def _print_rx_log_segment(self, segment_info: dict) -> None:
         name = "log_data"
@@ -483,17 +504,24 @@ class LogModel(QObject):
             name,
             self._rx_counts[name],
             int(segment_info.get("seq", 0)),
-            int(segment_info.get("dst_addr", VvAddress.MCU)),
-            int(VvAddress.HOST),
+            int(segment_info.get("src_addr", VvAddress.MCU)),
+            int(segment_info.get("dst_addr", VvAddress.HOST)),
             f"type={segment_info.get('log_type', 0)} bytes={segment_info.get('length', 0)}",
         )
-        print(line, flush=True)
-        self._append_packet_trace_entry(line)
+        if self._packet_trace_to_live_log:
+            print(line, flush=True)
+            self._append_packet_trace_entry(line)
 
     def _append_packet_trace_entry(self, line: str) -> None:
-        # Protocol RX/TX traces belong to terminal/debug output only.
-        # Live Log must stay reserved for firmware/device-originated log entries.
-        return
+        if not self._packet_trace_to_live_log:
+            return
+        self._append_entry({
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "level": "TRACE",
+            "source": "PROTOCOL",
+            "message": line,
+            "raw_line": line,
+        })
 
     def _flush_deferred_ack_trace(self, ack_seq: int) -> None:
         line = self._deferred_ack_trace_by_ack_seq.pop(int(ack_seq), None)
