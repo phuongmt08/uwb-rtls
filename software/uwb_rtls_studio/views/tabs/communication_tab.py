@@ -6,9 +6,9 @@
   Description : Two-sub-tab Communication panel for Developer Mode.
 
   Sub-tabs:
-    1. 📊 Live Monitor  — Passive observer of ALL packets (TX + RX) flowing
+    1.  Live Monitor  — Passive observer of ALL packets (TX + RX) flowing
                           through the protocol service.  Nothing is sent here.
-    2. 🧪 Packet Tester — Manual packet sender / response inspector.
+    2.  Packet Tester — Manual packet sender / response inspector.
                           Activating "Manual Test Mode" blocks background
                           auto-queries so the user can test
                           individual packets with a real dongle + hardware.
@@ -184,12 +184,12 @@ class CommunicationTab(QWidget):
         # ── Tab 1: Live Monitor
         self.tab_monitor = QWidget()
         self._build_monitor_tab()
-        self.sub_tabs.addTab(self.tab_monitor, "📊 Live Monitor")
+        self.sub_tabs.addTab(self.tab_monitor, "Live Monitor")
 
         # ── Tab 2: Packet Tester
         self.tab_tester = QWidget()
         self._build_tester_tab()
-        self.sub_tabs.addTab(self.tab_tester, "🧪 Packet Tester")
+        self.sub_tabs.addTab(self.tab_tester, "Packet Tester")
 
         self.main_layout.addWidget(self.sub_tabs)
 
@@ -230,7 +230,7 @@ class CommunicationTab(QWidget):
         # ── Clear button row
         clear_row = QHBoxLayout()
         clear_row.addStretch()
-        self.btn_monitor_clear = QPushButton("🗑️ Clear Monitor", self.tab_monitor)
+        self.btn_monitor_clear = QPushButton("Clear Monitor", self.tab_monitor)
         self.btn_monitor_clear.setStyleSheet(self._secondary_btn_style())
         self.btn_monitor_clear.clicked.connect(self._clear_monitor)
         clear_row.addWidget(self.btn_monitor_clear)
@@ -335,7 +335,7 @@ class CommunicationTab(QWidget):
         self.tester_status_label.setStyleSheet("color: #94A3B8; font-style: italic;")
         action_row.addWidget(self.tester_status_label, 2)
 
-        self.btn_send_packet = QPushButton("▶ Send Packet", self.tester_control_group)
+        self.btn_send_packet = QPushButton("Send Packet", self.tester_control_group)
         self.btn_send_packet.setStyleSheet("""
             QPushButton {
                 background-color: rgba(34,211,238,0.15); color: #22D3EE;
@@ -356,7 +356,7 @@ class CommunicationTab(QWidget):
         # ── Clear tester button
         clear_row = QHBoxLayout()
         clear_row.addStretch()
-        self.btn_tester_clear = QPushButton("🗑️ Clear Tester", self.tab_tester)
+        self.btn_tester_clear = QPushButton("Clear Tester", self.tab_tester)
         self.btn_tester_clear.setStyleSheet(self._secondary_btn_style())
         self.btn_tester_clear.clicked.connect(self._clear_tester)
         clear_row.addWidget(self.btn_tester_clear)
@@ -771,7 +771,7 @@ class CommunicationTab(QWidget):
             shared_command_bus.manual_test_mode_enabled = checked
             if checked:
                 self.tester_status_label.setText(
-                    "⚠️ Test Mode ACTIVE — background traffic blocked"
+                    "Test Mode ACTIVE - background traffic blocked"
                 )
                 self.tester_status_label.setStyleSheet("color: #F59E0B; font-weight: bold;")
             else:
@@ -779,7 +779,7 @@ class CommunicationTab(QWidget):
                 self.tester_status_label.setStyleSheet("color: #10B981;")
             log.info("Manual Test Mode: %s", "ENABLED" if checked else "DISABLED")
         else:
-            self.tester_status_label.setText("⚠️ CommandBus not available")
+            self.tester_status_label.setText("CommandBus not available")
             self.tester_status_label.setStyleSheet("color: #EF4444;")
 
     # ─────────────────────────────────────────────────────────────────────────

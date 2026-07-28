@@ -78,7 +78,6 @@ class _OrientationGizmo(QWidget):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         center = QPointF(32.0, 64.0)
         axis_length = 24.0

@@ -483,7 +483,7 @@ class ConfigTab(QWidget):
         for w in anchor_fields:
             if w is not None:
                 # Anchor fields are visible if developer mode is enabled
-                w.setVisible(self._is_developer)
+                w.setVisible(True)
 
         # Right column container (col3_container) contains Sensor Fusion and Prefilter
         if hasattr(self, "col3_container") and self.col3_container is not None:
@@ -498,7 +498,7 @@ class ConfigTab(QWidget):
         self.prefilter_form.setHorizontalSpacing(10)
         self.prefilter_form.setVerticalSpacing(8)
 
-        self.lbl_prefilter = QLabel("🔍 Prefilter:")
+        self.lbl_prefilter = QLabel("Prefilter:")
         self.lbl_prefilter.setStyleSheet("color: #94A3B8; font-weight: bold;")
         self.chk_prefilter_enable = QCheckBox("Enable")
         self.chk_prefilter_enable.setChecked(True)
@@ -518,10 +518,10 @@ class ConfigTab(QWidget):
             self.prefilter_form.addRow(lbl, spin)
             return spin
 
-        add_double("prefilter_recover_d2_spin", "Recover d2:", "📈", 5.0, decimals=3)
-        add_double("prefilter_reject_d2_spin", "Reject d2:", "📉", 6.0, decimals=3)
-        add_double("prefilter_r_gate_spin", "R gate:", "📐", 0.10, decimals=5)
-        add_double("prefilter_min_covariance_spin", "Min covariance:", "📊", 1.0e-6, decimals=8, maximum=1.0)
+        add_double("prefilter_recover_d2_spin", "Recover d2:", "", 5.0, decimals=3)
+        add_double("prefilter_reject_d2_spin", "Reject d2:", "", 6.0, decimals=3)
+        add_double("prefilter_r_gate_spin", "R gate:", "", 0.10, decimals=5)
+        add_double("prefilter_min_covariance_spin", "Min covariance:", "", 1.0e-6, decimals=8, maximum=1.0)
 
         self.col3_container = QWidget()
         self.col3_layout = QVBoxLayout(self.col3_container)
@@ -767,7 +767,7 @@ class ConfigTab(QWidget):
         pass
 
     def set_developer_mode(self, enabled: bool):
-        self._is_developer = enabled
+        self._is_developer = False
 
         # Clear existing layout bindings
         self._clear_main_layout()
@@ -775,7 +775,7 @@ class ConfigTab(QWidget):
         # Update visibility of inner developer-only widgets in UWB Group
         for w in self._dev_widgets:
             if w not in (getattr(self, "fusion_group", None), getattr(self, "prefilter_group", None)):
-                w.setVisible(enabled)
+                w.setVisible(True)
 
         # Show or hide connection parameters in BLE Group - always show in both modes
         ble_advanced_widgets = [

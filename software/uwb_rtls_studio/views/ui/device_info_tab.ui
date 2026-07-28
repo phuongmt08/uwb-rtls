@@ -134,7 +134,7 @@ QHeaderView::section {
            <item>
             <widget class="QGroupBox" name="dev_group">
              <property name="title">
-              <string>📱 Connected Device</string>
+              <string>Connected Device</string>
              </property>
              <layout class="QGridLayout" name="dev_grid">
               <property name="spacing">
@@ -306,7 +306,7 @@ QHeaderView::section {
            <item>
             <widget class="QGroupBox" name="ble_group">
              <property name="title">
-              <string>📶 BLE Connection</string>
+              <string>BLE Connection</string>
              </property>
              <layout class="QGridLayout" name="ble_grid">
               <property name="spacing">
@@ -418,7 +418,7 @@ QHeaderView::section {
            <item>
             <widget class="QGroupBox" name="bat_group">
              <property name="title">
-              <string>🔋 Battery</string>
+              <string>Battery</string>
              </property>
              <layout class="QVBoxLayout" name="bat_layout">
               <item>
@@ -539,7 +539,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
            <item>
             <widget class="QGroupBox" name="time_group">
              <property name="title">
-              <string>🕒 Time Sync</string>
+              <string>Time Synchronization</string>
              </property>
              <layout class="QVBoxLayout" name="time_layout">
               <item>
@@ -608,7 +608,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
            <item>
             <widget class="QGroupBox" name="temp_group">
              <property name="title">
-              <string>🌡 Temperature</string>
+              <string>Temperature</string>
              </property>
              <layout class="QGridLayout" name="temp_grid">
               <property name="spacing">
@@ -680,7 +680,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
            <item>
             <widget class="QGroupBox" name="volt_group">
              <property name="title">
-              <string>⚡ Voltage</string>
+              <string>Voltage</string>
              </property>
              <layout class="QGridLayout" name="volt_grid">
               <item row="0" column="0">
@@ -729,7 +729,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
            <item>
             <widget class="QGroupBox" name="sys_group">
              <property name="title">
-              <string>💻 System Resources</string>
+              <string>System Resources</string>
              </property>
              <layout class="QGridLayout" name="sys_grid">
               <property name="spacing">
@@ -862,7 +862,7 @@ QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0
             </sizepolicy>
            </property>
            <property name="title">
-            <string>📡 Other Advertising Devices</string>
+            <string>Other Advertising Devices</string>
            </property>
            <layout class="QVBoxLayout" name="adv_layout">
             <property name="spacing">

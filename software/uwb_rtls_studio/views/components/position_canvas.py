@@ -24,15 +24,8 @@ from PyQt6.QtGui import (
     QPolygon,
 )
 from PyQt6.QtWidgets import QLineEdit, QWidget
-try:
-    from PyQt6.QtOpenGLWidgets import QOpenGLWidget
-
-    _POSITION_CANVAS_OPENGL = True
-except Exception:
-    QOpenGLWidget = QWidget
-    _POSITION_CANVAS_OPENGL = False
-
-_PositionCanvasBase = QOpenGLWidget if _POSITION_CANVAS_OPENGL else QWidget
+_POSITION_CANVAS_OPENGL = False
+_PositionCanvasBase = QWidget
 from utils.config_dim import GRID_SPACING_M
 from views.components.zone_property_panel import ZonePropertyPanel
 
@@ -3091,7 +3084,6 @@ class PositionCanvas(_PositionCanvasBase):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.fillRect(self.rect(), QColor(30, 41, 59))
 

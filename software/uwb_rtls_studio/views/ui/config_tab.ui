@@ -128,7 +128,7 @@ QComboBox QAbstractItemView {
      <item row="0" column="0" colspan="2">
       <widget class="QGroupBox" name="anchor_group">
        <property name="title">
-        <string>🏭 Factory OTP Configuration</string>
+        <string>Factory OTP Configuration</string>
        </property>
        <layout class="QFormLayout" name="anchor_layout">
         <property name="leftMargin"><number>12</number></property>
@@ -420,7 +420,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
      <item row="1" column="1">
       <widget class="QGroupBox" name="ble_group">
        <property name="title">
-        <string>📶 BLE Configuration</string>
+        <string>BLE Configuration</string>
        </property>
        <layout class="QGridLayout" name="ble_grid">
         <property name="spacing"><number>10</number></property>
@@ -433,7 +433,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item row="1" column="0">
          <widget class="QLabel" name="lbl_ble_name">
           <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-          <property name="text"><string>🏷️ Device Name:</string></property>
+          <property name="text"><string>Device Name:</string></property>
          </widget>
         </item>
         <item row="1" column="1">
@@ -444,7 +444,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item row="2" column="0">
          <widget class="QLabel" name="lbl_ble_min_int">
           <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-          <property name="text"><string>⏱️ Min Interval (ms):</string></property>
+          <property name="text"><string>Min Interval (ms):</string></property>
          </widget>
         </item>
         <item row="2" column="1">
@@ -457,7 +457,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item row="3" column="0">
          <widget class="QLabel" name="lbl_ble_max_int">
           <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-          <property name="text"><string>⏱️ Max Interval (ms):</string></property>
+          <property name="text"><string>Max Interval (ms):</string></property>
          </widget>
         </item>
         <item row="3" column="1">
@@ -470,7 +470,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item row="4" column="0">
          <widget class="QLabel" name="lbl_ble_latency">
           <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-          <property name="text"><string>⏱️ Slave Latency:</string></property>
+          <property name="text"><string>Slave Latency:</string></property>
          </widget>
         </item>
         <item row="4" column="1">
@@ -483,7 +483,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item row="5" column="0">
          <widget class="QLabel" name="lbl_ble_timeout">
           <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-          <property name="text"><string>⏱️ Sup. Timeout (ms):</string></property>
+          <property name="text"><string>Sup. Timeout (ms):</string></property>
          </widget>
         </item>
         <item row="5" column="1">
@@ -499,7 +499,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; padding: 5px; }
 QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
           </property>
-          <property name="text"><string>Set BLE Config</string></property>
+          <property name="text"><string>Config</string></property>
          </widget>
         </item>
        </layout>
@@ -518,7 +518,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item>
          <widget class="QGroupBox" name="uwb_config_group">
           <property name="title">
-           <string>⚙️ UWB Configuration</string>
+           <string>UWB Configuration</string>
           </property>
           <layout class="QFormLayout" name="uwb_config_form">
            <property name="horizontalSpacing"><number>10</number></property>
@@ -526,7 +526,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="0" column="0">
             <widget class="QLabel" name="lbl_channel">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>📡 Channel:</string></property>
+             <property name="text"><string>Channel:</string></property>
             </widget>
            </item>
            <item row="0" column="1">
@@ -543,7 +543,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="1" column="0">
             <widget class="QLabel" name="lbl_role">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>👥 Role:</string></property>
+             <property name="text"><string>Role:</string></property>
             </widget>
            </item>
            <item row="1" column="1">
@@ -557,7 +557,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="2" column="0">
             <widget class="QLabel" name="lbl_datarate">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>📊 Data Rate:</string></property>
+             <property name="text"><string>Data Rate:</string></property>
             </widget>
            </item>
            <item row="2" column="1">
@@ -571,7 +571,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="3" column="0">
             <widget class="QLabel" name="lbl_prf">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>⚡ PRF:</string></property>
+             <property name="text"><string>PRF:</string></property>
             </widget>
            </item>
            <item row="3" column="1">
@@ -584,7 +584,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="4" column="0">
             <widget class="QLabel" name="lbl_deviceid">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>🆔 Device ID:</string></property>
+             <property name="text"><string>Device ID:</string></property>
             </widget>
            </item>
            <item row="4" column="1">
@@ -596,7 +596,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="5" column="0">
             <widget class="QLabel" name="lbl_rng_period">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>⏱️ Ranging Period (ms):</string></property>
+             <property name="text"><string>Ranging Period (ms):</string></property>
             </widget>
            </item>
            <item row="5" column="1">
@@ -609,7 +609,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="6" column="0">
             <widget class="QLabel" name="lbl_rx_timeout">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>⏱️ RX Timeout (ms):</string></property>
+             <property name="text"><string>RX Timeout (ms):</string></property>
             </widget>
            </item>
            <item row="6" column="1">
@@ -629,7 +629,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="8" column="0">
             <widget class="QLabel" name="lbl_tx_delay">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>📤 TX Antenna Delay:</string></property>
+             <property name="text"><string>TX Antenna Delay:</string></property>
             </widget>
            </item>
            <item row="8" column="1">
@@ -642,7 +642,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="9" column="0">
             <widget class="QLabel" name="lbl_rx_delay">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>📥 RX Antenna Delay:</string></property>
+             <property name="text"><string>RX Antenna Delay:</string></property>
             </widget>
            </item>
            <item row="9" column="1">
@@ -655,7 +655,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="10" column="0">
             <widget class="QLabel" name="lbl_tx_power">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>⚡ TX Power (dBm):</string></property>
+             <property name="text"><string>TX Power (dBm):</string></property>
             </widget>
            </item>
            <item row="10" column="1">
@@ -668,7 +668,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <item row="11" column="0">
             <widget class="QLabel" name="lbl_preamble">
              <property name="styleSheet"><string>color: #94A3B8; font-weight: bold;</string></property>
-             <property name="text"><string>🔢 Preamble Code:</string></property>
+             <property name="text"><string>Preamble Code:</string></property>
             </widget>
            </item>
            <item row="11" column="1">
@@ -684,13 +684,13 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <item>
          <widget class="QGroupBox" name="dev_type_group">
           <property name="title">
-           <string>⚙️ Device Type Configuration</string>
+           <string>Device Type Configuration</string>
           </property>
           <layout class="QGridLayout" name="dev_type_grid">
            <property name="spacing"><number>10</number></property>
            <item row="0" column="0">
             <widget class="QLabel" name="lbl_device_type">
-             <property name="text"><string>🏷️ Device Type:</string></property>
+             <property name="text"><string>Device Type:</string></property>
             </widget>
            </item>
            <item row="0" column="1">
@@ -731,7 +731,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
      <item row="0" column="3" rowspan="2">
       <widget class="QGroupBox" name="fusion_group">
        <property name="title">
-        <string>🧠 Sensor Fusion (UKF)</string>
+        <string>Sensor Fusion (UKF)</string>
        </property>
        <layout class="QFormLayout" name="fusion_form">
         <property name="horizontalSpacing"><number>10</number></property>
@@ -943,7 +943,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         <size><width>16777215</width><height>100</height></size>
        </property>
        <property name="title">
-        <string>⚡ Device Operations</string>
+        <string>Device Operations</string>
        </property>
        <layout class="QHBoxLayout" name="device_ops_layout">
         <item>
@@ -961,7 +961,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
         </item>
         <item>
          <widget class="QPushButton" name="btn_read_device">
-          <property name="text"><string>📥 Read from Device</string></property>
+          <property name="text"><string>Read from Device</string></property>
          </widget>
         </item>
         <item>
@@ -970,7 +970,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <string>QPushButton { background: #0E7490; color: #F8FAFC; border: 1px solid #22D3EE; border-radius: 6px; font-weight: bold; }
 QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
           </property>
-          <property name="text"><string>💾 Write to Device</string></property>
+          <property name="text"><string>Write to Device</string></property>
          </widget>
         </item>
         <item>
@@ -979,7 +979,7 @@ QPushButton:hover { background: #22D3EE; color: #0F172A; }</string>
            <string>QPushButton { background: rgba(30, 41, 59, 0.5); color: #94A3B8; border: 1px solid #334155; border-radius: 6px; font-weight: bold; }
 QPushButton:hover { background: #334155; color: #F8FAFC; }</string>
           </property>
-          <property name="text"><string>✨ Write All Devices</string></property>
+          <property name="text"><string>Write All Devices</string></property>
          </widget>
         </item>
        </layout>
@@ -992,12 +992,12 @@ QPushButton:hover { background: #334155; color: #F8FAFC; }</string>
         <size><width>16777215</width><height>100</height></size>
        </property>
        <property name="title">
-        <string>🔧 System Commands</string>
+        <string>System Commands</string>
        </property>
        <layout class="QHBoxLayout" name="sys_layout">
         <item>
          <widget class="QPushButton" name="btn_device_reset">
-          <property name="text"><string>🔄 Device Reset</string></property>
+          <property name="text"><string>Device Reset</string></property>
          </widget>
         </item>
         <item>
@@ -1006,7 +1006,7 @@ QPushButton:hover { background: #334155; color: #F8FAFC; }</string>
            <string>QPushButton { background: rgba(249,115,22,0.15); color: #F97316; border: 1px solid #F97316; border-radius: 6px; font-weight: bold; }
 QPushButton:hover { background: #F97316; color: #F8FAFC; }</string>
           </property>
-          <property name="text"><string>⚡ Enter Bootloader</string></property>
+          <property name="text"><string>Enter Bootloader</string></property>
          </widget>
         </item>
        </layout>
