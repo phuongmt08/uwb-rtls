@@ -42,7 +42,7 @@ extern "C" {
 
 /**
  * @brief Minimum acceptable connection interval.
- * The MCU<->peripheral UART link caps real throughput at ~184 kbps (230400
+ * The MCU<->peripheral UART link caps real throughput at ~461 kbps (576000
  * baud, 8N1), well below what a 7.5 ms interval can carry — a shorter
  * interval only wakes the radio more often for no extra usable throughput.
  */

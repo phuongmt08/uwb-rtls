@@ -122,6 +122,7 @@ static known_device_t m_known_devices[MAX_KNOWN_DEVICES]; /**< Live scan list.  
 static bool           m_is_connected = false;             /**< Connection flag.          */
 static bool           m_is_connecting = false;            /**< Connecting flag.          */
 static bool           m_nus_ready = false;                /**< NUS handles/notifications ready. */
+static bool           m_nus_notif_enable_pending = false; /**< Waiting for NUS TX CCCD write response. */
 static bool           m_scan_active = false;
 
 static bool           m_has_pending_connect = false;
@@ -255,14 +256,12 @@ static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const
                 bool changed = memcmp(&cache->status, &packed, sizeof(packed)) != 0;
                 uint32_t heartbeat_ticks = APP_TIMER_TICKS(ADV_STATUS_HEARTBEAT_MS);
                 uint32_t age = (now - cache->last_forward_tick) & 0x00FFFFFFu;
-                if (!changed && cache->last_forward_tick != 0u && age < heartbeat_ticks)
-                {
-                    return;
-                }
 
-                cache->status = packed;
-                cache->last_forward_tick = now;
-
+                /*
+                 * Always refresh the MAC-owned scan entry. Notification
+                 * dedupe below must suppress only USB traffic, not local
+                 * identity association.
+                 */
                 for (uint8_t i = 0u; i < MAX_KNOWN_DEVICES; i++)
                 {
                     if (m_known_devices[i].active &&
@@ -274,6 +273,14 @@ static void central_adv_status_scan_report_handle(ble_gap_evt_adv_report_t const
                         break;
                     }
                 }
+
+                if (!changed && cache->last_forward_tick != 0u && age < heartbeat_ticks)
+                {
+                    return;
+                }
+
+                cache->status = packed;
+                cache->last_forward_tick = now;
 
                 protobuf_ble_adv_status_t status = protobuf_ble_adv_status_t_init_zero;
                 status.device = (protobuf_device_type_t)packed.device_type;
@@ -347,9 +354,6 @@ void app_ble_central_scan_stop(void)
  */
 static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool matched)
 {
-    /* Broadcast RX is handled by bb_broadcast's own BLE observer. */
-    central_adv_status_scan_report_handle(p_adv_report);
-
     /* ----- Extract device name ----------------------------------------- */
     char     dev_name[NRF_BLE_SCAN_NAME_MAX_LEN + 1] = "<no_name>";
     uint16_t offset    = 0;
@@ -480,6 +484,12 @@ static void scan_report_log(ble_gap_evt_adv_report_t const *p_adv_report, bool m
         m_last_rssi_dbm = p_adv_report->rssi;
     }
 
+    /*
+     * Parse status only after the peer's MAC entry exists. This lets the
+     * status handler attach serial_number to the exact MAC before its
+     * change/heartbeat dedupe suppresses later identical advertisements.
+     */
+    central_adv_status_scan_report_handle(p_adv_report);
 }
 
 /* -------------------------------------------------------------------------
@@ -580,9 +590,8 @@ static void nus_c_evt_handler(ble_nus_c_t *p_ble_nus_c, ble_nus_c_evt_t const *p
 
             err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
             APP_ERROR_CHECK(err_code);
-            m_nus_ready = true;
-            ble_state_update(protobuf_BLE_STATE_CONNECTED);
-            NRF_LOG_INFO("BLE data channel ready (NUS discovery complete)");
+            m_nus_notif_enable_pending = true;
+            NRF_LOG_INFO("NUS notification enable queued; waiting for CCCD write response");
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
@@ -597,6 +606,7 @@ static void nus_c_evt_handler(ble_nus_c_t *p_ble_nus_c, ble_nus_c_evt_t const *p
         case BLE_NUS_C_EVT_DISCONNECTED:
             NRF_LOG_INFO("NUS Service disconnected");
             m_nus_ready = false;
+            m_nus_notif_enable_pending = false;
             break;
 
         default:
@@ -672,6 +682,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_is_connected = true;
             m_is_connecting = false;
             m_nus_ready = false;
+            m_nus_notif_enable_pending = false;
             m_current_conn_handle = p_gap_evt->conn_handle;
             m_current_conn_params = p_gap_evt->params.connected.conn_params;
 
@@ -714,6 +725,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
             m_is_connected = false;
             m_is_connecting = false;
             m_nus_ready = false;
+            m_nus_notif_enable_pending = false;
             m_current_conn_handle = BLE_CONN_HANDLE_INVALID;
             m_pending_tx_chunks = 0;
 
@@ -771,6 +783,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
                 m_is_connected = false;
                 m_is_connecting = false;
                 m_nus_ready = false;
+                m_nus_notif_enable_pending = false;
                 
                 m_last_disconnect_reason = p_gap_evt->params.timeout.src;
                 ble_state_update(protobuf_BLE_STATE_IDLE);
@@ -879,12 +892,34 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
         } break;
 
         case BLE_GATTC_EVT_WRITE_RSP:
-            if (m_pending_tx_chunks > 0)
+        {
+            ble_gattc_evt_t const *p_gattc_evt = &p_ble_evt->evt.gattc_evt;
+            ble_gattc_evt_write_rsp_t const *p_write_rsp = &p_gattc_evt->params.write_rsp;
+
+            if (m_nus_notif_enable_pending &&
+                p_gattc_evt->conn_handle == m_current_conn_handle &&
+                p_write_rsp->handle == m_ble_nus_c.handles.nus_tx_cccd_handle)
+            {
+                m_nus_notif_enable_pending = false;
+                if (p_gattc_evt->gatt_status == BLE_GATT_STATUS_SUCCESS)
+                {
+                    m_nus_ready = true;
+                    ble_state_update(protobuf_BLE_STATE_CONNECTED);
+                    NRF_LOG_INFO("BLE data channel ready (NUS notifications enabled)");
+                }
+                else
+                {
+                    m_nus_ready = false;
+                    NRF_LOG_ERROR("NUS notification enable failed: gatt_status=0x%04x",
+                                  p_gattc_evt->gatt_status);
+                }
+            }
+            else if (m_pending_tx_chunks > 0)
             {
                 m_pending_tx_chunks--;
                 bsp_led_tx_pulse();
             }
-            break;
+        } break;
 
         /* ---- GATT Server timeout ------------------------------------ */
         case BLE_GATTS_EVT_TIMEOUT:

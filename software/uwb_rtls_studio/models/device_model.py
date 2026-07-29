@@ -1124,7 +1124,10 @@ class DeviceModel(QObject):
         self._set_background_polling_enabled(False)
         self._reset_query_pipeline()
         shared_app_state.enable_device_session_payloads("connect handshake")
-        self._handshake_timeout_timer.start(6000)
+        # The identity GET crosses USB -> central -> BLE -> peripheral UART ->
+        # MCU and back. Allow the initial attempt plus three 2.5 s retries to
+        # finish before the outer handshake timer tears the link down.
+        self._handshake_timeout_timer.start(12000)
         self._emit_connection_progress(
             65,
             "BLE link established. Reading device information...",
@@ -1137,6 +1140,7 @@ class DeviceModel(QObject):
             cache_ttl_s=0.0,
             force=True,
             traffic_class="connection",
+            max_retries=3,
         )
         log.info("Application connect handshake started: device_information_get -> time_sync_set -> ble_status_get.")
 

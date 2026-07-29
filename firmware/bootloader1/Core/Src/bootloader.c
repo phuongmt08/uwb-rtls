@@ -114,6 +114,56 @@ static bl_fota_ctx_t         s_fota;
 static flash_write_buf_t     s_write_buf;
 static fota_frame_rx_t       s_frame_rx;
 static network_core_t       *s_net_core_ref;   /* for packet handler */
+volatile bl_fota_diag_t       g_bl_fota_diag;
+
+static bl_fota_diag_result_t  s_write_diag_result;
+static uint32_t               s_write_diag_address;
+static uint32_t               s_write_diag_expected;
+
+static void bl_diag_record_write(const protobuf_packet_t *pkt,
+                                 bool req_ack,
+                                 uint8_t ack_response,
+                                 bool ack_send_ok)
+{
+    uint32_t const index =
+        g_bl_fota_diag.event_write_index % BL_FOTA_DIAG_EVENT_COUNT;
+    volatile bl_fota_diag_event_t *event = &g_bl_fota_diag.events[index];
+
+    event->tick_ms = HAL_GetTick();
+    event->seq = (pkt && pkt->has_hdr) ? pkt->hdr.seq : 0xFFFFFFFFU;
+    event->address = s_write_diag_address;
+    event->expected_address = s_write_diag_expected;
+    event->length = (pkt != NULL)
+                  ? (uint16_t)pkt->params.flash_write.data.size : 0U;
+    event->result = (uint8_t)s_write_diag_result;
+    event->ack_response = ack_response;
+    event->ack_requested = req_ack ? 1U : 0U;
+    event->ack_send_ok = ack_send_ok ? 1U : 0U;
+    event->reserved = 0U;
+    g_bl_fota_diag.event_write_index++;
+}
+
+static bool bl_diag_send_write_ack(const protobuf_packet_t *pkt,
+                                   protobuf_packet_ack_response_t response)
+{
+    bool const sent = network_core_send_ack(s_net_core_ref, pkt, response);
+
+    if (response == protobuf_PACKET_ACK_RESPONSE_ACK) {
+        if (sent) {
+            g_bl_fota_diag.ack_sent++;
+        } else {
+            g_bl_fota_diag.ack_send_failed++;
+        }
+    } else {
+        if (sent) {
+            g_bl_fota_diag.nack_sent++;
+        } else {
+            g_bl_fota_diag.nack_send_failed++;
+        }
+    }
+
+    return sent;
+}
 
 static bool bl_flush_write_buf(bool pad_to_word)
 {
@@ -369,37 +419,53 @@ static void bl_on_flash_erase(const protobuf_packet_t *pkt)
 
 static bool bl_on_flash_write(const protobuf_packet_t *pkt)
 {
+    uint32_t raw_addr = pkt->params.flash_write.address;
+    bool is_compressed = (raw_addr & FOTA_FLAG_COMPRESSED) != 0U;
+    bool has_fota_flags =
+        (raw_addr & (FOTA_FLAG_COMPRESSED | FOTA_FLAG_ACK_REQ)) != 0U;
+    uint32_t address = has_fota_flags ? (raw_addr & FOTA_ADDR_MASK) : raw_addr;
+
+    s_write_diag_result = BL_FOTA_DIAG_OK;
+    s_write_diag_address = address;
+    s_write_diag_expected = is_compressed
+                          ? s_fota.compressed_next_addr : address;
+
     if (s_fota.state != protobuf_FOTA_STATE_RECEIVING) {
+        s_write_diag_result = BL_FOTA_DIAG_NOT_RECEIVING;
         return false;
     }
 
-    uint32_t       raw_addr = pkt->params.flash_write.address;
     const uint8_t *data     = pkt->params.flash_write.data.bytes;
     uint32_t       length   = pkt->params.flash_write.data.size;
 
-    bool is_compressed = (raw_addr & FOTA_FLAG_COMPRESSED) != 0U;
-    bool has_fota_flags = (raw_addr & (FOTA_FLAG_COMPRESSED | FOTA_FLAG_ACK_REQ)) != 0U;
-    uint32_t address = has_fota_flags ? (raw_addr & FOTA_ADDR_MASK) : raw_addr;
-
     if (length == 0u) {
+        s_write_diag_result = BL_FOTA_DIAG_ZERO_LENGTH;
         return false;
     }
 
     if (is_compressed) {
         uint32_t input_end = address + length;
-        if (address < MEM_APP_START || input_end < address) {
+        if (address < MEM_APP_START) {
+            s_write_diag_result = BL_FOTA_DIAG_ADDRESS_BELOW_APP;
+            return false;
+        }
+        if (input_end < address) {
+            s_write_diag_result = BL_FOTA_DIAG_ADDRESS_OVERFLOW;
             return false;
         }
 
         if (address < s_fota.compressed_next_addr) {
             if (input_end <= s_fota.compressed_next_addr) {
+                s_write_diag_result = BL_FOTA_DIAG_DUPLICATE_ADDRESS;
                 s_fota.last_flash_write_ms = HAL_GetTick();
                 return true;
             }
+            s_write_diag_result = BL_FOTA_DIAG_ADDRESS_OVERLAP;
             return false;
         }
 
         if (address > s_fota.compressed_next_addr) {
+            s_write_diag_result = BL_FOTA_DIAG_ADDRESS_GAP;
             return false;
         }
 
@@ -408,6 +474,7 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
             RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
                    "BL: invalid/failed compressed frame at input=0x%08lX",
                    (unsigned long)address);
+            s_write_diag_result = BL_FOTA_DIAG_FRAME_PROCESS;
             bl_enter_error_and_erase_app(pkt);
             return false;
         }
@@ -415,6 +482,7 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
     } else {
         uint32_t end = address + length;
         if (address < MEM_APP_START || end < address || end > MEM_APP_END) {
+            s_write_diag_result = BL_FOTA_DIAG_RAW_RANGE;
             RLOG_E(OBJECT_CODE, ERR_INVALID_PARAM,
                    "BL: bad write addr=0x%08lX len=%lu",
                    (unsigned long)address, (unsigned long)length);
@@ -423,6 +491,7 @@ static bool bl_on_flash_write(const protobuf_packet_t *pkt)
         }
 
         if (bsp_fl_app_write(address, data, length) != BSP_FL_OK) {
+            s_write_diag_result = BL_FOTA_DIAG_FLASH_WRITE;
             RLOG_E(OBJECT_CODE, ERR_HAL, "BL: flash write failed");
             bl_enter_error_and_erase_app(pkt);
             return false;
@@ -548,29 +617,71 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
             uint32_t raw_addr = pkt->params.flash_write.address;
             bool req_ack = (raw_addr & FOTA_FLAG_ACK_REQ) != 0U ||
                            ((raw_addr & (FOTA_FLAG_COMPRESSED | FOTA_FLAG_ACK_REQ)) == 0U);
+            bool const is_compressed =
+                (raw_addr & FOTA_FLAG_COMPRESSED) != 0U;
+            uint32_t const address =
+                (raw_addr & (FOTA_FLAG_COMPRESSED | FOTA_FLAG_ACK_REQ)) != 0U
+                ? (raw_addr & FOTA_ADDR_MASK) : raw_addr;
+
+            g_bl_fota_diag.flash_write_rx++;
+            if (req_ack) {
+                g_bl_fota_diag.ack_requested++;
+            }
 
             /* Detect and skip duplicate packets */
             if (pkt->has_hdr && pkt->hdr.seq == s_fota.last_processed_seq) {
+                bool ack_send_ok = true;
+                s_write_diag_result = BL_FOTA_DIAG_DUPLICATE_SEQ;
+                s_write_diag_address = address;
+                s_write_diag_expected = is_compressed
+                                      ? s_fota.compressed_next_addr : address;
+                g_bl_fota_diag.duplicate_seq++;
                 RLOG_W(OBJECT_CODE, "BL: duplicate flash_write detected (seq=%d), skipping",
                        (int)pkt->hdr.seq);
                 if (req_ack) {
-                    network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                    ack_send_ok = bl_diag_send_write_ack(
+                        pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
                 }
+                bl_diag_record_write(pkt,
+                                     req_ack,
+                                     req_ack
+                                         ? (uint8_t)protobuf_PACKET_ACK_RESPONSE_ACK
+                                         : BL_FOTA_DIAG_NO_ACK,
+                                     ack_send_ok);
                 return true;
             }
 
             /* Process write */
             bool success = bl_on_flash_write(pkt);
             if (success) {
+                bool ack_send_ok = true;
                 if (pkt->has_hdr) {
                     s_fota.last_processed_seq = pkt->hdr.seq;
                 }
-                if (req_ack) {
-                    network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                g_bl_fota_diag.flash_write_ok++;
+                if (s_write_diag_result == BL_FOTA_DIAG_DUPLICATE_ADDRESS) {
+                    g_bl_fota_diag.duplicate_address++;
                 }
+                if (req_ack) {
+                    ack_send_ok = bl_diag_send_write_ack(
+                        pkt, protobuf_PACKET_ACK_RESPONSE_ACK);
+                }
+                bl_diag_record_write(pkt,
+                                     req_ack,
+                                     req_ack
+                                         ? (uint8_t)protobuf_PACKET_ACK_RESPONSE_ACK
+                                         : BL_FOTA_DIAG_NO_ACK,
+                                     ack_send_ok);
             } else {
                 /* Always NACK on failure */
-                network_core_send_ack(s_net_core_ref, pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+                g_bl_fota_diag.flash_write_failed++;
+                bool const nack_send_ok = bl_diag_send_write_ack(
+                    pkt, protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED);
+                bl_diag_record_write(
+                    pkt,
+                    req_ack,
+                    (uint8_t)protobuf_PACKET_ACK_RESPONSE_NACK_CMD_FAILED,
+                    nack_send_ok);
             }
             return true;
         }
@@ -594,6 +705,7 @@ static bool bl_packet_handler(const protobuf_packet_t *pkt)
 void bl_fota_init(network_core_t *net_core)
 {
     memset(&s_fota, 0, sizeof(s_fota));
+    memset((void *)&g_bl_fota_diag, 0, sizeof(g_bl_fota_diag));
     s_fota.state   = protobuf_FOTA_STATE_IDLE;
     s_fota.last_processed_seq = 0xFFFFFFFFU;  /* Initialize to invalid sequence number */
     s_fota.last_flash_write_ms = 0u;

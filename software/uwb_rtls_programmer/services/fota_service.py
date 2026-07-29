@@ -26,12 +26,14 @@ FOTA_FLAG_COMPRESSED = 0x80000000
 FOTA_FLAG_ACK_REQ     = 0x40000000
 BLOCK_SIZE            = 8
 MAX_BLOCK_RETRIES     = 5
-WRITE_ACK_TIMEOUT_S   = 3
-TX_PACKET_GAP_S       = 0.015
+WRITE_ACK_TIMEOUT_S   = 2
+TX_PACKET_GAP_S       = 0.05
 FOTA_RAW_BLOCK_SIZE   = 4096
 FOTA_COMP_BLOCK_MAX   = 4160
 FOTA_FRAME_MAGIC      = b"FD"
 FOTA_FRAME_VERSION    = 1
+
+
 def _parse_intel_hex(hex_path: str) -> bytes:
     raw: dict[int, int] = {}
     base_addr = 0
@@ -153,6 +155,7 @@ class FotaService:
         self._persistent_session = None
         self._device_verification_attempted = False
         self._verified_device_info = None
+        self._scan_results_by_mac: dict[str, dict] = {}
 
     def open_persistent_session(self, port):
         self.close_persistent_session()
@@ -293,19 +296,31 @@ class FotaService:
             while time.time() < deadline:
                 pkts = session.recv_packets(0.1)
                 for p in pkts:
-                    if p.WhichOneof("params") == "ble_status_resp" and ble_status_cb:
+                    param_name = p.WhichOneof("params")
+                    if param_name == "ble_status_resp" and ble_status_cb:
                         ble_status_cb(self.ble_status_dict(p.ble_status_resp))
-                    if p.WhichOneof("params") == "ble_scan_result":
+
+                    if param_name == "ble_scan_result":
                         mac = p.ble_scan_result.mac_address.hex().upper()
                         mac_str = ":".join(mac[i:i+2] for i in range(0, len(mac), 2))
+                        previous = (
+                            results.get(mac_str)
+                            or self._scan_results_by_mac.get(mac_str)
+                            or {}
+                        )
+                        name = str(p.ble_scan_result.name or "").strip() or "-"
+                        scan_serial = int(
+                            getattr(p.ble_scan_result, "serial_number", 0) or 0
+                        )
                         current = {
-                            'name': p.ble_scan_result.name,
-                            'rssi': p.ble_scan_result.rssi_dbm,
-                            'sn': p.ble_scan_result.serial_number
+                            "name": name,
+                            "rssi": int(p.ble_scan_result.rssi_dbm),
+                            "sn": scan_serial or int(previous.get("sn") or 0),
                         }
                         if results.get(mac_str) != current:
                             results[mac_str] = current
-                            result_cb({mac_str: current})
+                            self._scan_results_by_mac[mac_str] = current.copy()
+                            result_cb({mac_str: current.copy()})
 
     def connect_to_device(self, port, mac_bytes, mac_str, log_cb, connected_cb, ble_status_cb=None):
         if not port:
@@ -571,6 +586,9 @@ class FotaService:
             t_write_start = time.time()
             for block in packet_windows:
                 last_in_block = block[-1]
+                block_seq_to_chunk = {
+                    seq: idx for idx, seq, _req_ack, _pkt in block
+                }
                 block_retry_count = 0
 
                 while block_retry_count < MAX_BLOCK_RETRIES:
@@ -589,17 +607,36 @@ class FotaService:
                         time.sleep(TX_PACKET_GAP_S)
 
                     ack_received = False
+                    nack_info = None
                     if transport_error is None:
                         deadline = time.time() + WRITE_ACK_TIMEOUT_S
                         while time.time() < deadline:
                             for p in session.recv_packets(0.05):
-                                if p.WhichOneof("params") == "ack" and p.ack.ack_seq == last_in_block[1]:
-                                    if p.ack.response == pb.PACKET_ACK_RESPONSE_ACK:
+                                if p.WhichOneof("params") != "ack":
+                                    continue
+
+                                ack_seq = int(p.ack.ack_seq)
+                                ack_response = int(p.ack.response)
+                                if (ack_response != pb.PACKET_ACK_RESPONSE_ACK and
+                                        ack_seq in block_seq_to_chunk):
+                                    nack_info = (
+                                        ack_seq,
+                                        ack_response,
+                                        block_seq_to_chunk[ack_seq],
+                                    )
+                                    log_cb(
+                                        "[FOTA] [WARN] Bootloader NACK: "
+                                        f"seq={ack_seq}, response={ack_response}, "
+                                        f"chunk={block_seq_to_chunk[ack_seq] + 1}/"
+                                        f"{total_chunks}, block_end_seq="
+                                        f"{last_in_block[1]}"
+                                    )
+                                    deadline = 0
+                                    break
+
+                                if ack_seq == last_in_block[1]:
+                                    if ack_response == pb.PACKET_ACK_RESPONSE_ACK:
                                         ack_received = True
-                                    else:
-                                        log_cb(f"[FOTA] [WARN] Received NACK for block ending seq {last_in_block[1]}")
-                                        deadline = 0
-                                        break
                             if ack_received:
                                 break
                     else:
@@ -622,11 +659,18 @@ class FotaService:
                         break
 
                     block_retry_count += 1
-                    log_cb(
-                        f"[FOTA] [WARN] No ACK for block chunk "
-                        f"{last_in_block[0]+1}/{total_chunks}, retrying "
-                        f"({block_retry_count}/{MAX_BLOCK_RETRIES})..."
-                    )
+                    if nack_info is not None:
+                        log_cb(
+                            "[FOTA] [WARN] Retrying block after NACK "
+                            f"({block_retry_count}/{MAX_BLOCK_RETRIES})..."
+                        )
+                    else:
+                        log_cb(
+                            f"[FOTA] [WARN] No matching ACK for block chunk "
+                            f"{last_in_block[0]+1}/{total_chunks} "
+                            f"(expected ack_seq={last_in_block[1]}), retrying "
+                            f"({block_retry_count}/{MAX_BLOCK_RETRIES})..."
+                        )
 
                 if not ack_received:
                     log_cb(

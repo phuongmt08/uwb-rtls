@@ -565,5 +565,8 @@ class DeviceInfoTab(QWidget):
             self._adv_table.setItem(row, col, QTableWidgetItem(text))
 
     def _on_refresh_clicked(self):
-        if self._vm and hasattr(self._vm, "refresh_advertising_devices"):
-            self._vm.refresh_advertising_devices()
+        if self._vm:
+            if hasattr(self._vm, "start_ble_scan"):
+                self._vm.start_ble_scan()
+            elif hasattr(self._vm, "refresh_advertising_devices"):
+                self._vm.refresh_advertising_devices()

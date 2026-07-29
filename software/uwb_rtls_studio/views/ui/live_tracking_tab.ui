@@ -214,59 +214,66 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
              </widget>
             </item>
             <item>
-             <widget class="QPushButton" name="btn_start">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>38</height>
-               </size>
+             <layout class="QHBoxLayout" name="layout_ctrl_buttons">
+              <property name="spacing">
+               <number>8</number>
               </property>
-              <property name="styleSheet">
-               <string notr="true">QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981; border-radius: 8px; font-weight: bold; font-size: 14px; }
+              <item>
+               <widget class="QPushButton" name="btn_start">
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>34</height>
+                 </size>
+                </property>
+                <property name="styleSheet">
+                 <string notr="true">QPushButton { background: #059669; color: #F8FAFC; border: 1px solid #10B981; border-radius: 6px; font-weight: bold; font-size: 12px; }
 QPushButton:hover { background: #10B981; }</string>
-              </property>
-              <property name="text">
-               <string>Start Ranging</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="btn_stop">
-              <property name="enabled">
-               <bool>false</bool>
-              </property>
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>38</height>
-               </size>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 14px; }
+                </property>
+                <property name="text">
+                 <string>Start Ranging</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_stop">
+                <property name="enabled">
+                 <bool>false</bool>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>34</height>
+                 </size>
+                </property>
+                <property name="styleSheet">
+                 <string notr="true">QPushButton { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid #EF4444; border-radius: 6px; font-weight: bold; font-size: 12px; }
 QPushButton:hover { background: #EF4444; color: #F8FAFC; }
 QPushButton:disabled { background: #1E293B; color: #475569; border-color: #334155; }</string>
-              </property>
-              <property name="text">
-               <string>Stop Ranging</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="btn_clear">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>38</height>
-               </size>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">QPushButton { background: #334155; color: #F8FAFC; border: 1px solid #475569; border-radius: 8px; font-weight: bold; font-size: 14px; }
+                </property>
+                <property name="text">
+                 <string>Stop Ranging</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_clear">
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>34</height>
+                 </size>
+                </property>
+                <property name="styleSheet">
+                 <string notr="true">QPushButton { background: #334155; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; font-weight: bold; font-size: 12px; }
 QPushButton:hover { background: #475569; }</string>
-              </property>
-              <property name="text">
-               <string>Clear Trail</string>
-              </property>
-             </widget>
+                </property>
+                <property name="text">
+                 <string>Clear Trail</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
             </item>
             <item>
              <widget class="QFrame" name="separator_1">

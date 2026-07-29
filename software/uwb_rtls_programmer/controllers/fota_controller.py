@@ -332,11 +332,13 @@ class FotaController(QObject):
 
     def _on_scan_result(self, result_dict: dict):
         for mac, info in result_dict.items():
+            serial_number = int(info.get("sn") or 0)
+            serial_text = f"0x{serial_number:08X}" if serial_number else ""
             found = False
             for row in range(self.view.table_ble.rowCount()):
                 if self.view.table_ble.item(row, 1).text() == mac:
                     self.view.table_ble.setItem(row, 0, QTableWidgetItem(info['name']))
-                    self.view.table_ble.setItem(row, 2, QTableWidgetItem(str(info['sn'])))
+                    self.view.table_ble.setItem(row, 2, QTableWidgetItem(serial_text))
                     self.view.table_ble.setItem(row, 3, QTableWidgetItem(str(info['rssi'])))
                     found = True
                     break
@@ -345,7 +347,7 @@ class FotaController(QObject):
                 self.view.table_ble.insertRow(row)
                 self.view.table_ble.setItem(row, 0, QTableWidgetItem(info['name']))
                 self.view.table_ble.setItem(row, 1, QTableWidgetItem(mac))
-                self.view.table_ble.setItem(row, 2, QTableWidgetItem(str(info['sn'])))
+                self.view.table_ble.setItem(row, 2, QTableWidgetItem(serial_text))
                 self.view.table_ble.setItem(row, 3, QTableWidgetItem(str(info['rssi'])))
 
     def on_scan(self):

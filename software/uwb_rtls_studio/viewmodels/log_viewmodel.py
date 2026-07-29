@@ -44,6 +44,12 @@ class LogViewModel(QObject):
             return bool(self._log_model.is_log_streaming)
         return False
 
+    @property
+    def session_id(self) -> str:
+        if self._session_run_manager:
+            return str(self._session_run_manager.session_id or "")
+        return ""
+
     def clear_session_logs(self):
         if self._log_model:
             self._log_model.clear_session_logs()
@@ -112,7 +118,6 @@ class LogViewModel(QObject):
                     "avg_rms": s.get("avg_rms_error_m", 0.0),
                     "ranging_count": self._count_ranging_runs(session_id),
                     "session_file_count": self._count_ranging_runs(session_id) + self._count_log_runs(session_id),
-                    "browser_path": self.browser.get_session_storage_folder(session_id) if hasattr(self.browser, "get_session_storage_folder") else self.browser.get_browser_root(),
                 })
             self.session_list_updated.emit(formatted_sessions)
         except Exception as exc:

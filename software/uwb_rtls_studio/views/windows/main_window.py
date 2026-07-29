@@ -238,19 +238,6 @@ class MainWindow(QMainWindow):
         self._begin_session(initial=True)
 
     def _setup_header_progress(self):
-        # Create Scan Device button
-        self.btn_scan_device = QPushButton(" Scan Device")
-        self.btn_scan_device.setObjectName("btn_scan_device")
-        self.btn_scan_device.setMinimumSize(QSize(130, 36))
-        self.btn_scan_device.setMaximumSize(QSize(130, 36))
-        self.btn_scan_device.setStyleSheet(
-            "QPushButton { background: rgba(6, 182, 212, 0.12); color: #06B6D4; border: 1px solid #06B6D4; border-radius: 8px; font-weight: bold; font-size: 13px; }"
-            "QPushButton:hover { background: #06B6D4; color: #F8FAFC; }"
-            "QPushButton:disabled { background: rgba(51, 65, 85, 0.2); color: #64748B; border: 1px solid #475569; }"
-        )
-        self.btn_scan_device.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_scan_device.clicked.connect(self._on_scan_device_clicked)
-
         self._conn_progress_frame = QFrame(self.header_content_frame)
         self._conn_progress_frame.setObjectName("ble_process_frame")
         self._conn_progress_frame.setFixedHeight(36)
@@ -275,28 +262,12 @@ class MainWindow(QMainWindow):
         self._conn_progress_bar.setFixedHeight(18)
         layout.addWidget(self._conn_progress_bar, 1)
 
-        # Create Fullscreen helper button
-        self.btn_fullscreen = QPushButton("Fullscreen (F11)")
-        self.btn_fullscreen.setObjectName("btn_fullscreen")
-        self.btn_fullscreen.setMinimumSize(QSize(150, 36))
-        self.btn_fullscreen.setMaximumSize(QSize(160, 36))
-        self.btn_fullscreen.setStyleSheet(
-            "QPushButton { background: rgba(168, 85, 247, 0.12); color: #C084FC; border: 1px solid #A855F7; border-radius: 8px; font-weight: bold; font-size: 13px; }"
-            "QPushButton:hover { background: #A855F7; color: #F8FAFC; }"
-            "QPushButton:disabled { background: rgba(51, 65, 85, 0.2); color: #64748B; border: 1px solid #475569; }"
-        )
-        self.btn_fullscreen.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_fullscreen.setToolTip("Toggle Fullscreen Mode (F11)")
-        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
-
         # Setup F11 keyboard shortcut
         self._fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
         self._fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
 
-        # Insert buttons, then progress status frame
-        self.header_layout.insertWidget(2, self.btn_scan_device)
-        self.header_layout.insertWidget(3, self.btn_fullscreen)
-        self.header_layout.insertWidget(4, self._conn_progress_frame)
+        # Insert progress status frame
+        self.header_layout.insertWidget(2, self._conn_progress_frame)
         self.update_progress_style("IDLE")
 
     def update_progress_style(self, status: str):
@@ -678,15 +649,19 @@ class MainWindow(QMainWindow):
         if hasattr(self._tab_communication, "set_developer_mode"):
             self._tab_communication.set_developer_mode(False)
 
-        # Get index for calibration and spatial constraints tabs
+        # Get index for tabs
+        self._device_tab_index = self.tabs.indexOf(self._tab_device)
+        self._log_tab_index = self.tabs.indexOf(self._tab_log)
         self._calib_tab_index = self.tabs.indexOf(self._tab_calibration)
         self._spatial_tab_index = self.tabs.indexOf(self._tab_spatial_constraints)
         self._tracking_tab_index = self.tabs.indexOf(self._tab_tracking)
         self._config_tab_index = self.tabs.indexOf(self._tab_config)
         self._communication_tab_index = self.tabs.indexOf(self._tab_communication)
 
-        # User mode owns the full Config tab. Developer mode uses its dedicated
-        # calibration, spatial-constraints, and communication tabs instead.
+        # User mode owns Device Info, Log, Tracking and Config tabs.
+        # Developer mode owns Calibration, Spatial Constraints, and Communication tabs.
+        self.tabs.setTabVisible(self._device_tab_index, True)
+        self.tabs.setTabVisible(self._log_tab_index, True)
         self.tabs.setTabVisible(self._calib_tab_index, False)
         self.tabs.setTabVisible(self._spatial_tab_index, False)
         self.tabs.setTabVisible(self._tracking_tab_index, True)
@@ -869,21 +844,24 @@ class MainWindow(QMainWindow):
             self.device_badge.setText("\u25CF -")
 
         if status_text == "Connecting":
-            self.btn_scan_device.setEnabled(False)
+            if hasattr(self, "btn_scan_device"):
+                self.btn_scan_device.setEnabled(False)
             self._status_conn.setText(f"Connecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
             self._status_rate.setText("Rate: ---")
             return
 
         if status_text == "Disconnecting":
-            self.btn_scan_device.setEnabled(False)
+            if hasattr(self, "btn_scan_device"):
+                self.btn_scan_device.setEnabled(False)
             self._status_conn.setText(f"Disconnecting: {name}")
             self._status_conn.setStyleSheet("color: #F59E0B; font-weight: bold;")
             self._status_rate.setText("Rate: ---")
             return
 
         if status_text == "Disconnected":
-            self.btn_scan_device.setEnabled(True)
+            if hasattr(self, "btn_scan_device"):
+                self.btn_scan_device.setEnabled(True)
             self.device_badge.setText("● -")
             label_name = name if name and name != "-" else "-"
             self._status_conn.setText(f"Disconnected: {label_name}")
@@ -896,14 +874,16 @@ class MainWindow(QMainWindow):
             return
 
         if status_text == "Connected":
-            self.btn_scan_device.setEnabled(True)
+            if hasattr(self, "btn_scan_device"):
+                self.btn_scan_device.setEnabled(True)
             self._status_conn.setText(f"Connected: {name}")
             self._status_conn.setStyleSheet("color: #10B981; font-weight: bold;")
             self._reset_ranging_rate_status()
             return
 
         if not info:
-            self.btn_scan_device.setEnabled(True)
+            if hasattr(self, "btn_scan_device"):
+                self.btn_scan_device.setEnabled(True)
             self.device_badge.setText("\u25CF -")
             self._status_conn.setText("Disconnected")
             self._status_conn.setStyleSheet("color: #EF4444; font-weight: bold;")
@@ -952,11 +932,14 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, index):
         self._is_developer = (index == 1)
 
-        # Toggle calibration, spatial constraints and communication tabs visibility
+        # Toggle tab visibilities based on mode (Device Info & Log History hidden in Developer Mode)
+        self.tabs.setTabVisible(self._device_tab_index, not self._is_developer)
+        self.tabs.setTabVisible(self._log_tab_index, not self._is_developer)
         self.tabs.setTabVisible(self._config_tab_index, not self._is_developer)
+        self.tabs.setTabVisible(self._tracking_tab_index, not self._is_developer)
+
         self.tabs.setTabVisible(self._calib_tab_index, self._is_developer)
         self.tabs.setTabVisible(self._spatial_tab_index, self._is_developer)
-        self.tabs.setTabVisible(self._tracking_tab_index, not self._is_developer)
         self.tabs.setTabVisible(self._communication_tab_index, self._is_developer)
 
         # Update config, log, device info, tracking and communication tabs

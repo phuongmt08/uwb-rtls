@@ -39,14 +39,10 @@ extern "C" {
 
 #ifdef BLE_RX_BYPASS_P005
 #define RX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 5)   // Map P0.05 → UART_RX (BLE_RX) do hỏng chân P0.08
-#define RTS_PIN_NUMBER  0xFFFFFFFF               // Ngắt cấu hình RTS để tránh xung đột trên chân P0.05
 #else
 #define RX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 8)   // P0.08 → UART_RX (BLE_RX from gateway)
-#define RTS_PIN_NUMBER  NRF_GPIO_PIN_MAP(0, 5)   // P0.05 → RTS
 #endif
 #define TX_PIN_NUMBER   NRF_GPIO_PIN_MAP(0, 6)   // P0.06 → UART_TX (BLE_TX to gateway)
-#define CTS_PIN_NUMBER  NRF_GPIO_PIN_MAP(0, 7)   // P0.07 → CTS
-#define HWFC            true
 
 // ─── SWD (debug interface) ────────────────────────────────────────────────────
 // BLE_SWDIO → pin 8 (SWDIO), BLE_SWDCLK → pin 7 (SWDCLK)

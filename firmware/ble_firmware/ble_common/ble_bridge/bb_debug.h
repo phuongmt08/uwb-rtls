@@ -6,7 +6,7 @@
  * MCU -> peripheral stream. Default keeps the existing logs enabled.
  */
 #ifndef DEBUG_STREAM_MCU_PERI
-#define DEBUG_STREAM_MCU_PERI 1
+#define DEBUG_STREAM_MCU_PERI 0
 #endif
 
 /* Peripheral MCU RX statistics print interval. Set to 0 to disable. */
@@ -16,7 +16,7 @@
 
 /* Enable detailed transport routing logs (BLE/UART RX/TX, cmd_id, src, dst) */
 #ifndef BB_DEBUG_TRANSPORT_LOG_ENABLED
-#define BB_DEBUG_TRANSPORT_LOG_ENABLED 0
+#define BB_DEBUG_TRANSPORT_LOG_ENABLED 1
 #endif
 
 #if defined(BLE_PERIPHERAL) && DEBUG_STREAM_MCU_PERI

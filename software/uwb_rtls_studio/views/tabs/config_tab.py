@@ -353,56 +353,24 @@ class ConfigTab(QWidget):
     def _setup_role_tab_bar(self):
         from PyQt6.QtWidgets import QTabBar, QHBoxLayout
 
-        # 1. Create the Tab Bar
+        # 1. Create the Tab Bar (hidden per user request)
         self.role_tab_bar = QTabBar()
         self.role_tab_bar.setObjectName("role_tab_bar")
         self.role_tab_bar.addTab("Tag")
         self.role_tab_bar.addTab("Anchor")
-        self.role_tab_bar.setStyleSheet("""
-            QTabBar#role_tab_bar {
-                background-color: transparent;
-                background: transparent;
-                border: none;
-                padding: 0px;
-            }
-            QTabBar#role_tab_bar::tab {
-                background: #0F172A;
-                color: #94A3B8;
-                border: 1px solid #334155;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                border-bottom-left-radius: 6px;
-                border-bottom-right-radius: 6px;
-                padding: 8px 24px;
-                font-weight: bold;
-                font-size: 13px;
-                margin-right: 8px;
-            }
-            QTabBar#role_tab_bar::tab:selected {
-                background: #1E293B;
-                color: #22D3EE;
-                border-color: #334155;
-            }
-            QTabBar#role_tab_bar::tab:hover:!selected {
-                background: #253346;
-                color: #22D3EE;
-            }
-        """)
+        self.role_tab_bar.setVisible(False)
 
-        # 2. Wrap it in a QHBoxLayout to align left
+        # 2. Wrap it in a QHBoxLayout
         self.tab_container_layout = QHBoxLayout()
         self.tab_container_layout.setContentsMargins(0, 0, 0, 0)
         self.tab_container_layout.addWidget(self.role_tab_bar)
         self.tab_container_layout.addStretch()
 
-        # 3. Insert it at the top of outer_layout (before main_layout)
-        self.outer_layout.insertLayout(0, self.tab_container_layout)
-
-        # 4. Connect signals
+        # 3. Connect signals
         self.role_tab_bar.currentChanged.connect(self._on_role_tab_changed)
         self.val_role.currentTextChanged.connect(self._on_role_combo_changed)
 
-        # 5. Default state
+        # 4. Default state
         self._sync_role_tab_to_data()
 
     def _on_role_tab_changed(self, index):
@@ -435,7 +403,7 @@ class ConfigTab(QWidget):
     def _sync_role_tab_to_data(self):
         if not hasattr(self, "role_tab_bar") or self.role_tab_bar is None:
             return
-        index = 1 if self._current_role == 2 else 0
+        index = 0  # Always force Tag mode layout (index 0) per user requirement
         self.role_tab_bar.blockSignals(True)
         self.role_tab_bar.setCurrentIndex(index)
         self.role_tab_bar.blockSignals(False)
@@ -830,7 +798,7 @@ class ConfigTab(QWidget):
 
         # Sync main tab bar visibility and active state
         if hasattr(self, "role_tab_bar") and self.role_tab_bar is not None:
-            self.role_tab_bar.setVisible(True)  # Always visible in both User Mode and Developer Mode
+            self.role_tab_bar.setVisible(False)  # Hidden per user request; always force Tag layout
             self._sync_role_tab_to_data()
 
         # Row Stretch - give Row 0 (Anchor Layout) more height than Row 1 to prevent table clipping

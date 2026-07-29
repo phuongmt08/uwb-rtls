@@ -6,6 +6,8 @@ FE: Loaded from views/ui/log_tab.ui (editable in Qt Designer)
 BE: Log filtering + session management (this file)
 """
 import os
+import re
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
     QPushButton, QTextEdit, QComboBox, QLineEdit,
@@ -43,6 +45,10 @@ OBJECT_CODE_FILTERS = [
     ("SPECIAL", 0x7F),
 ]
 
+LOG_TIMESTAMP_RE = re.compile(
+    r"^\[(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2})(?:[.,]\d+)?\]"
+)
+
 
 class LogTab(QWidget):
     def __init__(self, parent=None, is_developer=False):
@@ -56,6 +62,7 @@ class LogTab(QWidget):
         self._current_session_name = None
         self._detail_mode = "ranging"
         self._detail_rows = []
+        self._log_date_display = datetime.now().strftime("%d/%m/%Y")
 
         # Load UI from .ui file
         uic.loadUi(UI_FILE, self)
@@ -68,6 +75,7 @@ class LogTab(QWidget):
         self._setup_dev_widgets()
         self._connect_signals()
         self._vm = None
+        self._refresh_log_metadata()
 
         # Create virtual history after 50 ms if no ViewModel is attached
         from PyQt6.QtCore import QTimer
@@ -102,15 +110,14 @@ class LogTab(QWidget):
         self.session_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.session_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.session_table.setMinimumHeight(260)
-        self.session_table.setColumnCount(6)
+        self.session_table.setColumnCount(5)
         self.session_table.setColumnWidth(0, 240)
         self.session_table.setColumnWidth(1, 130)
         self.session_table.setColumnWidth(2, 112)
         self.session_table.setColumnWidth(3, 110)
-        self.session_table.setColumnWidth(4, 86)
-        self.session_table.setColumnWidth(5, 150)
+        self.session_table.setColumnWidth(4, 100)
         self.session_table.setHorizontalHeaderLabels(
-            ["Session", "Started", "Elapsed", "Ranging Runs", "Session Files", "Browser"]
+            ["Session", "Started", "Elapsed", "Ranging Runs", "Session Files"]
         )
         self.session_table.horizontalHeader().setStretchLastSection(True)
 
@@ -156,31 +163,6 @@ class LogTab(QWidget):
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         return item
 
-    def _set_browser_cell(self, row: int, session_id: str, browser_path: str) -> None:
-        container = QWidget(self.session_table)
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        path_label = QLabel(browser_path, container)
-        path_label.setToolTip(browser_path)
-        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-
-        browse_btn = QPushButton("...", container)
-        browse_btn.setFixedWidth(32)
-        browse_btn.setToolTip("Copy this session to another folder")
-        browse_btn.clicked.connect(lambda _=False, sid=session_id: self._export_session_to_custom_folder(sid))
-
-        layout.addWidget(path_label, 1)
-        layout.addWidget(browse_btn, 0)
-        self.session_table.setCellWidget(row, 5, container)
-
-    def _default_browser_root(self) -> str:
-        browser_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "session_browser"))
-        os.makedirs(os.path.join(browser_root, "ranging"), exist_ok=True)
-        os.makedirs(os.path.join(browser_root, "log"), exist_ok=True)
-        return browser_root
-
     def set_viewmodel(self, vm):
         self._vm = vm
         self._vm.log_entry_added.connect(self._append_log_entry)
@@ -193,18 +175,13 @@ class LogTab(QWidget):
             self._vm.set_developer_mode(self._is_developer)
         self._vm.refresh_sessions()
         self._update_log_stream_button(self._vm.is_log_streaming)
+        self._refresh_log_metadata()
 
     def _append_log_entry(self, entry: dict):
-        raw_line = entry.get("raw_line")
-        if raw_line:
-            line = str(raw_line)
-        else:
-            timestamp = entry.get("timestamp", "")
-            level = entry.get("level", "")
-            message = entry.get("message", "")
-            object_code = entry.get("object_code")
-            object_text = f"0x{int(object_code):02X}" if object_code is not None else "--"
-            line = f"[{timestamp}] [{level:<5}] [{object_text}] {message}".strip()
+        line, log_date = self._format_log_entry(entry)
+        if log_date:
+            self._log_date_display = log_date
+        self._refresh_log_metadata()
 
         self._all_log_lines.append(line)
         self._log_entry_count = len(self._all_log_lines)
@@ -270,6 +247,68 @@ class LogTab(QWidget):
             if is_streaming else
             "Start device log stream"
         )
+        self._refresh_log_metadata(is_streaming=is_streaming)
+
+    @staticmethod
+    def _format_date(date_text: str) -> str:
+        try:
+            return datetime.strptime(date_text, "%Y-%m-%d").strftime("%d/%m/%Y")
+        except (TypeError, ValueError):
+            return str(date_text or "")
+
+    def _format_log_entry(self, entry: dict) -> tuple[str, str]:
+        """Keep the date in metadata and render each log line with HH:MM:SS only."""
+        raw_line = str(entry.get("raw_line") or "")
+        timestamp = str(entry.get("timestamp") or "")
+        match = LOG_TIMESTAMP_RE.match(raw_line) or LOG_TIMESTAMP_RE.match(f"[{timestamp}]")
+        log_date = self._format_date(match.group("date")) if match else ""
+        display_time = match.group("time") if match else timestamp
+
+        if raw_line:
+            if match and LOG_TIMESTAMP_RE.match(raw_line):
+                return LOG_TIMESTAMP_RE.sub(f"[{display_time}]", raw_line, count=1), log_date
+            return raw_line, log_date
+
+        level = entry.get("level", "")
+        message = entry.get("message", "")
+        object_code = entry.get("object_code")
+        object_text = f"0x{int(object_code):02X}" if object_code is not None else "--"
+        return f"[{display_time}] [{level:<5}] [{object_text}] {message}".strip(), log_date
+
+    def _refresh_log_metadata(self, is_streaming: bool | None = None) -> None:
+        if not hasattr(self, "meta_date_value"):
+            return
+
+        session_id = ""
+        if self._vm is not None:
+            session_id = str(getattr(self._vm, "session_id", "") or "")
+
+        try:
+            from utils.app_state import shared_app_state
+            device = dict(shared_app_state.connected_device or {})
+            device_name = (
+                device.get("name")
+                or device.get("Device Name")
+                or device.get("Serial Number")
+                or "-"
+            )
+        except Exception:
+            device_name = "-"
+
+        if is_streaming is None:
+            is_streaming = bool(self._vm and self._vm.is_log_streaming)
+
+        self.meta_date_value.setText(self._log_date_display)
+        self.meta_session_value.setText(session_id or "-")
+        self.meta_session_value.setToolTip(session_id or "No active session")
+        self.meta_device_value.setText(str(device_name))
+        self.meta_device_value.setToolTip(str(device_name))
+        self.meta_stream_value.setText("Streaming" if is_streaming else "Idle")
+        self.meta_stream_value.setStyleSheet(
+            "color: #10B981; font-size: 11px; font-weight: bold;"
+            if is_streaming else
+            "color: #94A3B8; font-size: 11px; font-weight: bold;"
+        )
 
 
 
@@ -290,7 +329,6 @@ class LogTab(QWidget):
             session_file_count = str(s.get("session_file_count", 0))
             self.session_table.setItem(row, 3, self._readonly_item(ranging_count))
             self.session_table.setItem(row, 4, self._readonly_item(session_file_count))
-            self._set_browser_cell(row, s["session_id"], s.get("browser_path", ""))
 
             self._session_records[s["session_id"]] = s
 
@@ -435,7 +473,6 @@ class LogTab(QWidget):
             ]
             for col, value in enumerate(values):
                 self.session_table.setItem(row, col, self._readonly_item(value))
-            self._set_browser_cell(row, record["session"], self._default_browser_root())
         if session_specs:
             first_session = self.session_table.item(0, 0).text()
             self.session_table.selectRow(0)

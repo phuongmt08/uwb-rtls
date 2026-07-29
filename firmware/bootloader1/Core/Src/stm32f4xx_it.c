@@ -276,4 +276,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   }
 }
 
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == &huart2) {
+    ble_bridge_uart_rx_error(huart->ErrorCode);
+  }
+}
+
 /* USER CODE END 1 */

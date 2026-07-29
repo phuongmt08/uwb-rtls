@@ -671,20 +671,24 @@ class LiveTrackingTab(QWidget):
         self._position_ground_truth_selector()
 
     def _setup_yaw_offset_control(self):
-        self.yaw_offset_group = QGroupBox("Yaw Offset", self.scroll_content)
+        from PyQt6.QtWidgets import QFrame
+        self.yaw_offset_group = QFrame(self.scroll_content)
+        self.yaw_offset_group.setObjectName("yaw_offset_frame")
         self.yaw_offset_group.setStyleSheet(
-            "QGroupBox { background-color: rgba(15, 23, 42, 0.72); color: #38BDF8; "
-            "font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; "
-            "border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 8px; padding-top: 14px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; background: transparent; }"
+            "QFrame#yaw_offset_frame { background-color: rgba(15, 23, 42, 0.6); "
+            "border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 2px 4px; }"
             "QDoubleSpinBox { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; "
-            "border-radius: 6px; padding: 4px 6px; font-family: 'Consolas'; font-size: 13px; }"
-            "QCheckBox { color: #E2E8F0; font-weight: normal; spacing: 8px; }"
-            "QCheckBox::indicator { width: 15px; height: 15px; }"
+            "border-radius: 4px; padding: 2px 4px; font-family: 'Consolas'; font-size: 12px; }"
+            "QCheckBox { color: #CBD5E1; font-size: 12px; font-weight: normal; spacing: 6px; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; }"
         )
-        layout = QFormLayout(self.yaw_offset_group)
-        layout.setContentsMargins(10, 16, 10, 10)
-        layout.setSpacing(8)
+        layout = QHBoxLayout(self.yaw_offset_group)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(10)
+
+        lbl_yaw = QLabel("Yaw offset:", self.yaw_offset_group)
+        lbl_yaw.setStyleSheet("color: #38BDF8; font-weight: bold; font-size: 12px;")
+        layout.addWidget(lbl_yaw)
 
         self.yaw_offset_spin = QDoubleSpinBox(self.yaw_offset_group)
         self.yaw_offset_spin.setRange(-360.0, 360.0)
@@ -693,11 +697,11 @@ class LiveTrackingTab(QWidget):
         self.yaw_offset_spin.setSuffix(" deg")
         self.yaw_offset_spin.setToolTip("Yaw offset used locally and sent as ranging_start.yaw_deg when starting.")
         self.yaw_offset_spin.valueChanged.connect(self._on_yaw_offset_changed)
-        layout.addRow("Yaw offset:", self.yaw_offset_spin)
+        layout.addWidget(self.yaw_offset_spin)
 
         self.reinit_ukf_check = QCheckBox("Reinit UKF", self.yaw_offset_group)
         self.reinit_ukf_check.setToolTip("Send ranging_start.is_ukf_reinit=true when starting.")
-        layout.addRow("", self.reinit_ukf_check)
+        layout.addWidget(self.reinit_ukf_check)
 
         insert_at = self.right_panel.indexOf(self.separator_1) if hasattr(self, "separator_1") else -1
         if insert_at >= 0:

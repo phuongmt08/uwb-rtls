@@ -185,11 +185,8 @@ class DeviceInfoViewModel(QObject):
         self.model.start_scan(clear_results=False, force=True, duration_ms=duration_ms)
 
     def refresh_advertising_devices(self):
-        """Refresh the advertising-device table from the cached snapshot only."""
-        if hasattr(self.model, "refresh_scan_results"):
-            self.model.refresh_scan_results()
-            return
-        self._emit_current_scan_devices()
+        """Refresh advertising devices by triggering a BLE scan."""
+        self.start_ble_scan()
 
 
     # ═══════════════════════════════════════════════════════════════════
