@@ -35,3 +35,7 @@ app/version_build.h
 !tools/
 !tools/**
 tools/__pycache__/
+!tests/
+!tests/host/
+!tests/host/*.c
+!tests/host/*.py

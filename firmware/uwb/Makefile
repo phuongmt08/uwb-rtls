@@ -72,6 +72,7 @@ LOCAL_SOURCES := \
 	$(wildcard middlewares/Third_Party/SEGGER/SystemView/SYSVIEW/*.c) \
 	$(wildcard middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10/*.c) \
 	$(wildcard middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10/Config/Cortex-M/*.c) \
+	$(wildcard middlewares/smf/src/*.c) \
 	$(wildcard sys/*.c)
 COMMON_SOURCES := \
 	$(wildcard $(REPO_ROOT)/firmware/common/serial/*.c) \
@@ -92,7 +93,8 @@ INCLUDE_DIRS := Core/Inc Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS
 	middlewares/Third_Party/SEGGER/SystemView/SYSVIEW \
 	middlewares/Third_Party/SEGGER/RTT/Config \
 	middlewares/Third_Party/SEGGER/RTT/RTT \
-	middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10
+	middlewares/Third_Party/SEGGER/SystemView/Sample/FreeRTOSV10 \
+	middlewares/smf/include
 INCLUDES := $(addprefix -I,$(INCLUDE_DIRS))
 
 CFLAGS := $(CPUFLAGS) -std=gnu11 $(OPTFLAGS) $(DEFS) $(INCLUDES) -ffunction-sections -fdata-sections -fmerge-all-constants -fstack-usage -Wall --specs=nano.specs

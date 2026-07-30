@@ -1,5 +1,6 @@
 /* ============================== sys_ranging.h ==============================
  * @file       sys_ranging.h
+ * @author     Phuong Mai
  * @brief      Non-blocking ranging API with TDMA support
  * @version    5.0.0
  * @date       2026-01-31

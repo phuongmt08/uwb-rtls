@@ -106,6 +106,7 @@ static mahalanobis_prefilter_t s_prefilter;
 
 static uint8_t s_last_selected_anchors_mask = 0U;
 static volatile bool s_fusion_reset_requested = false;
+static volatile bool s_button_ranging_toggle_requested = false;
 
 /* USER CODE END Variables */
 /* Definitions for UwbRanging */
@@ -199,6 +200,7 @@ static bool abort_uwb_ranging_locked(sys_config_t *cfg);
 static void stop_uwb_ranging_locked(void);
 static void reset_ranging_runtime_state(sys_config_t *cfg);
 static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled);
+static void process_button_ranging_request(sys_config_t *cfg);
 /* USER CODE END FunctionPrototypes */
 
 void uwb_ranging_entry(void *argument);
@@ -319,6 +321,7 @@ void uwb_ranging_entry(void *argument)
 	  uwb_entry_cnt++;
 	  if(uwb_entry_cnt >= 255) uwb_entry_cnt = 0;
 
+    process_button_ranging_request(cfg);
     app_tag_process_uwb_control(cfg);
 
     /* Calculate dynamic timeout based on UWB deadline to prevent missing FINAL TX slot */
@@ -940,16 +943,10 @@ void io_entry(void *argument)
     case BSP_IO_EVENT_DOUBLE_CLICK:
       break;
     case BSP_IO_EVENT_CLICK:
-      bool enable_ranging = !g_ranging_enabled;
-      bool ranging_changed = apply_ranging_enabled(cfg, enable_ranging);
-      if (ranging_changed && enable_ranging)
-      {
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging started");
-      }
-      else if (ranging_changed)
-      {
-        RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging stopped");
-      }
+      /* UWB task owns the ranging state and DW1000 control. */
+      s_button_ranging_toggle_requested = true;
+      (void)osSemaphoreRelease(g_uwb_isr_semHandle);
+      RLOG_I(LOG_OBJECT_CODE_APPLICATION, "Ranging toggle requested");
       break;
     default:
       break;
@@ -1130,6 +1127,27 @@ static bool apply_ranging_enabled(sys_config_t *cfg, bool enabled)
         (void)osSemaphoreRelease(g_uwb_isr_semHandle);
     }
     return true;
+}
+
+static void process_button_ranging_request(sys_config_t *cfg)
+{
+    bool requested;
+
+    taskENTER_CRITICAL();
+    requested = s_button_ranging_toggle_requested;
+    s_button_ranging_toggle_requested = false;
+    taskEXIT_CRITICAL();
+
+    if (!requested) {
+        return;
+    }
+
+    bool enable_ranging = !g_ranging_enabled;
+    bool ranging_changed = apply_ranging_enabled(cfg, enable_ranging);
+    if (ranging_changed) {
+        RLOG_I(LOG_OBJECT_CODE_APPLICATION,
+               enable_ranging ? "Ranging started" : "Ranging stopped");
+    }
 }
 
 static bool convert_3d_to_2d_distance(double r3d, double dz, double *r2d_out)
