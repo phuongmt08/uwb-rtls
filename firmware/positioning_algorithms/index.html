@@ -1,0 +1,2759 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-Precision Indoor Real-Time Location System for Autonomous Mobile Robots">
+      
+      
+        <meta name="author" content="Phuong Mai & HCMUTE Project Team">
+      
+      
+        <link rel="canonical" href="https://phuongmt08.github.io/uwb-rtls/firmware/positioning_algorithms/">
+      
+      
+        <link rel="prev" href="../ranging_protocol/">
+      
+      
+        <link rel="next" href="../../hardware/schematics_and_specs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Embedded Positioning Algorithms - UWB-RTLS Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#embedded-positioning-algorithm" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="UWB-RTLS Documentation" class="md-header__button md-logo" aria-label="UWB-RTLS Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            UWB-RTLS Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Embedded Positioning Algorithms
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/phuongmt08/uwb-rtls" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    phuongmt08/uwb-rtls
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting_started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Firmware Documentation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../hardware/schematics_and_specs/" class="md-tabs__link">
+          
+  
+  
+  Hardware Engineering
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../software/rtls_studio_and_tools/" class="md-tabs__link">
+          
+  
+  
+  Software & Tools
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../deployment/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deployment & Commissioning
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../assets/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Asset Catalog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="UWB-RTLS Documentation" class="md-nav__button md-logo" aria-label="UWB-RTLS Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    UWB-RTLS Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/phuongmt08/uwb-rtls" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    phuongmt08/uwb-rtls
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firmware Documentation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Firmware Documentation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firmware Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firmware Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ranging_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DS-TWR Ranging Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Embedded Positioning Algorithms
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Embedded Positioning Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-positioning-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Positioning Problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-mathematical-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Mathematical Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Mathematical Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-state-vector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 State vector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-motion-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Motion model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-uwb-observation-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 UWB observation model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-noise-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Noise model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-algorithm-interfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Algorithm Interfaces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-i-ukf-state-estimator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part I - UKF State Estimator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part I - UKF State Estimator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#4-unscented-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Unscented Transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-ukf-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. UKF Initialization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-ukf-prediction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. UKF Prediction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. UKF Prediction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-discrete-motion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Discrete motion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-sigma-point-propagation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Sigma-point propagation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-stationary-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Stationary constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-ukf-range-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. UKF Range Update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-ii-uwb-measurement-front-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part II - UWB Measurement Front End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part II - UWB Measurement Front End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#8-range-validation-and-projection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Range Validation and Projection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-spatial-consistency-prefilter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Spatial Consistency Prefilter
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Spatial Consistency Prefilter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-innovation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Innovation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-hysteresis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 Hysteresis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-controlled-rescue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 Controlled rescue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-measurement-precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Measurement Precision
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Measurement Precision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-common-influence-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 Common influence function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-range-variance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 Range variance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-spatial-influence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 Spatial influence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-first-path-influence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 First-path influence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105-robust-residual-influence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 Robust residual influence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11-anchor-triplet-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Anchor-Triplet Selection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Anchor-Triplet Selection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-geometry-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 Geometry gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-weighted-geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 Weighted geometry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-residual-score-and-switch-hysteresis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 Residual score and switch hysteresis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-front-end-output-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Front-End Output Contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-iii-runtime-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part III - Runtime Integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part III - Runtime Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#13-execution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Execution Order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-result-and-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Result and Diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-traceability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Traceability
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hardware Engineering
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Hardware Engineering
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../hardware/schematics_and_specs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hardware Specs & Pinouts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../hardware/antenna_calibration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Antenna Delay Calibration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Software & Tools
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Software & Tools
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../software/rtls_studio_and_tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RTLS Studio & Programmer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment & Commissioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../assets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asset Catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-positioning-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Positioning Problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-mathematical-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Mathematical Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Mathematical Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-state-vector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 State vector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-motion-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Motion model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-uwb-observation-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 UWB observation model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-noise-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Noise model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-algorithm-interfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Algorithm Interfaces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-i-ukf-state-estimator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part I - UKF State Estimator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part I - UKF State Estimator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#4-unscented-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Unscented Transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-ukf-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. UKF Initialization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-ukf-prediction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. UKF Prediction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. UKF Prediction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-discrete-motion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Discrete motion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-sigma-point-propagation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Sigma-point propagation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-stationary-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Stationary constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-ukf-range-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. UKF Range Update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-ii-uwb-measurement-front-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part II - UWB Measurement Front End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part II - UWB Measurement Front End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#8-range-validation-and-projection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Range Validation and Projection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-spatial-consistency-prefilter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Spatial Consistency Prefilter
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Spatial Consistency Prefilter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-innovation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Innovation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-hysteresis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 Hysteresis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-controlled-rescue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 Controlled rescue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-measurement-precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Measurement Precision
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Measurement Precision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-common-influence-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 Common influence function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-range-variance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 Range variance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-spatial-influence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 Spatial influence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-first-path-influence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 First-path influence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105-robust-residual-influence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 Robust residual influence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11-anchor-triplet-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Anchor-Triplet Selection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Anchor-Triplet Selection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-geometry-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 Geometry gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-weighted-geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 Weighted geometry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-residual-score-and-switch-hysteresis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 Residual score and switch hysteresis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-front-end-output-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Front-End Output Contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-iii-runtime-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part III - Runtime Integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part III - Runtime Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#13-execution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Execution Order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-result-and-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Result and Diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-traceability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Traceability
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="embedded-positioning-algorithm">Embedded Positioning Algorithm</h1>
+<p><a href="../">Firmware guide</a> | <a href="../architecture/">Architecture</a> | Previous: <a href="../ranging_protocol/">Ranging</a></p>
+<p>The positioning system contains two separate algorithmic modules:</p>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>UKF State Estimator</strong></td>
+<td>Predict and update the Tag motion state</td>
+</tr>
+<tr>
+<td><strong>UWB Measurement Front End</strong></td>
+<td>Validate, filter, weight and select UWB ranges</td>
+</tr>
+</tbody>
+</table>
+<p>The front end does not estimate the final pose. The UKF does not decide which Anchors are trustworthy. Their interface is a selected three-range vector and its covariance.</p>
+<h2 id="1-positioning-problem">1. Positioning Problem</h2>
+<p><img alt="System mathematical model" src="../../assets/images/thesis/chapter4/figure-4-12-system-mathematical-model.png" /></p>
+<p>The Tag moves in the global frame <span class="arithmatex">\(\{G\}\)</span>. IMU data is measured in the body frame <span class="arithmatex">\(\{B\}\)</span>. Fixed Anchors constrain the Tag position through UWB ranges.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Information provided</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Acceleration <span class="arithmatex">\(\mathbf a^B\)</span></td>
+<td>Short-term velocity and position change</td>
+</tr>
+<tr>
+<td>Angular rate <span class="arithmatex">\(\omega_z^B\)</span></td>
+<td>Short-term yaw change</td>
+</tr>
+<tr>
+<td>Anchor coordinate <span class="arithmatex">\(\mathbf a_i\)</span></td>
+<td>Fixed point in the global map</td>
+</tr>
+<tr>
+<td>UWB range <span class="arithmatex">\(d_i\)</span></td>
+<td>Distance from the Tag to Anchor <span class="arithmatex">\(i\)</span></td>
+</tr>
+</tbody>
+</table>
+<p>Yaw is zero along positive <span class="arithmatex">\(X^G\)</span> and increases counter-clockwise.</p>
+<h2 id="2-mathematical-model">2. Mathematical Model</h2>
+<h3 id="21-state-vector">2.1 State vector</h3>
+<div class="arithmatex">\[
+\boxed{
+\mathbf x=
+\begin{bmatrix}
+p_x&amp;p_y&amp;v_x&amp;v_y&amp;\theta&amp;b_{ax}&amp;b_{ay}&amp;b_{gz}
+\end{bmatrix}^{\mathsf T}
+}
+\]</div>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(\mathbf p^G=[p_x,p_y]^{\mathsf T}\)</span></td>
+<td>Global position</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\mathbf v^G=[v_x,v_y]^{\mathsf T}\)</span></td>
+<td>Global velocity</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\theta\)</span></td>
+<td>Global yaw</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\mathbf b_a=[b_{ax},b_{ay}]^{\mathsf T}\)</span></td>
+<td>Accelerometer bias</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(b_{gz}\)</span></td>
+<td>Z-axis gyroscope bias</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-motion-model">2.2 Motion model</h3>
+<p>The body-to-global planar rotation is</p>
+<div class="arithmatex">\[
+\mathbf R_B^G(\theta)=
+\begin{bmatrix}
+\cos\theta&amp;-\sin\theta\\
+\sin\theta&amp; \cos\theta
+\end{bmatrix}.
+\]</div>
+<p>The continuous process model is</p>
+<div class="arithmatex">\[
+\boxed{
+\begin{aligned}
+\dot{\mathbf p}^{G} &amp;= \mathbf v^{G},\\
+\dot{\mathbf v}^{G} &amp;=
+\mathbf R_B^G(\theta)
+\left(\mathbf a^B-\mathbf b_a-\mathbf n_a\right),\\
+\dot\theta &amp;=
+\omega_z^B-b_{gz}-n_g,\\
+\dot{\mathbf b}_a &amp;= \mathbf w_{ba},\\
+\dot b_{gz} &amp;= w_{bg}.
+\end{aligned}
+}
+\]</div>
+<p>The IMU drives the motion state. Bias states model slowly changing offsets; process-noise terms represent unobserved motion and bias variation.</p>
+<h3 id="23-uwb-observation-model">2.3 UWB observation model</h3>
+<p>For Anchor <span class="arithmatex">\(i\)</span> at <span class="arithmatex">\(\mathbf a_i=[a_{x,i},a_{y,i}]^{\mathsf T}\)</span>:</p>
+<div class="arithmatex">\[
+\hat d_i=h_i(\mathbf x)
+=
+\left\lVert
+\mathbf p^G-\mathbf a_i
+\right\rVert_2.
+\]</div>
+<p>The physical measurement is</p>
+<div class="arithmatex">\[
+\boxed{
+d_i=
+\left\lVert
+\mathbf p^G-\mathbf a_i
+\right\rVert_2
++b_i^{\mathrm{NLOS}}
++\varepsilon_i
+}
+\]</div>
+<p><span class="arithmatex">\(\varepsilon_i\)</span> is random range noise. <span class="arithmatex">\(b_i^{\mathrm{NLOS}}\)</span> represents positive bias caused by obstruction or multipath. It is treated as a measurement disturbance, not an additional UKF state.</p>
+<h3 id="24-noise-model">2.4 Noise model</h3>
+<p>Prediction uses</p>
+<div class="arithmatex">\[
+\mathbf Q=
+\operatorname{diag}
+\left(0.04,\;0.04,\;10^{-10}\right).
+\]</div>
+<p>The range update uses</p>
+<div class="arithmatex">\[
+\mathbf R_k=
+\operatorname{diag}
+\left(R_{1,k},R_{2,k},R_{3,k}\right).
+\]</div>
+<p>The UWB front end determines each <span class="arithmatex">\(R_{i,k}\)</span> from measurement quality.</p>
+<h2 id="3-algorithm-interfaces">3. Algorithm Interfaces</h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Inputs</th>
+<th>Outputs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UKF prediction</td>
+<td>Previous posterior, IMU sample, <span class="arithmatex">\(\mathbf Q\)</span></td>
+<td>Predicted state <span class="arithmatex">\(\mathbf x_k^-\)</span> and covariance <span class="arithmatex">\(\mathbf P_k^-\)</span></td>
+</tr>
+<tr>
+<td>UWB front end</td>
+<td>Raw range frame, Anchor layout, predicted position/covariance</td>
+<td>Selected Anchors, <span class="arithmatex">\(\mathbf d_k\)</span>, <span class="arithmatex">\(\mathbf R_k\)</span></td>
+</tr>
+<tr>
+<td>UKF update</td>
+<td><span class="arithmatex">\(\mathbf x_k^-\)</span>, <span class="arithmatex">\(\mathbf P_k^-\)</span>, selected Anchors, <span class="arithmatex">\(\mathbf d_k\)</span>, <span class="arithmatex">\(\mathbf R_k\)</span></td>
+<td>Posterior <span class="arithmatex">\(\mathbf x_k^+\)</span> and <span class="arithmatex">\(\mathbf P_k^+\)</span></td>
+</tr>
+</tbody>
+</table>
+<p>The predicted state is exposed to the front end only as a reference for range consistency. The selected ranges and covariance are returned to the UKF as one measurement package.</p>
+<h2 id="part-i-ukf-state-estimator">Part I - UKF State Estimator</h2>
+<h3 id="4-unscented-transform">4. Unscented Transform</h3>
+<p>The UKF propagates deterministic sigma points through nonlinear models. For augmented dimension <span class="arithmatex">\(L\)</span>:</p>
+<div class="arithmatex">\[
+\lambda=\alpha^2(L+\kappa)-L,
+\qquad
+\alpha=1,\quad\beta=2,\quad\kappa=0.
+\]</div>
+<p>From augmented mean <span class="arithmatex">\(\mathbf x^a\)</span> and covariance <span class="arithmatex">\(\mathbf P^a\)</span>:</p>
+<div class="arithmatex">\[
+\begin{aligned}
+\boldsymbol\chi_0^a &amp;= \mathbf x^a,\\
+\boldsymbol\chi_j^a &amp;=
+\mathbf x^a+
+\left[\sqrt{(L+\lambda)\mathbf P^a}\right]_j,\\
+\boldsymbol\chi_{j+L}^a &amp;=
+\mathbf x^a-
+\left[\sqrt{(L+\lambda)\mathbf P^a}\right]_j.
+\end{aligned}
+\]</div>
+<p>The sigma-point weights are</p>
+<div class="arithmatex">\[
+\begin{aligned}
+W_0^{(m)} &amp;= \frac{\lambda}{L+\lambda},\\
+W_0^{(c)} &amp;= W_0^{(m)}+1-\alpha^2+\beta,\\
+W_j^{(m)} &amp;= W_j^{(c)}
+=\frac{1}{2(L+\lambda)}.
+\end{aligned}
+\]</div>
+<p>Both UKF operations augment eight states with three noise variables. Therefore <span class="arithmatex">\(L=11\)</span> and each transform uses <span class="arithmatex">\(2L+1=23\)</span> sigma points.</p>
+<h3 id="5-ukf-initialization">5. UKF Initialization</h3>
+<p>The range-only estimator needs an initial Cartesian position.</p>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Initial value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Position</td>
+<td>Coordinate-wise median of 20 trilateration results after discarding 10 early results</td>
+</tr>
+<tr>
+<td>Selected ranges</td>
+<td>Median of the corresponding 20 accepted triplets</td>
+</tr>
+<tr>
+<td>Velocity</td>
+<td><span class="arithmatex">\(\mathbf v_0=\mathbf 0\)</span></td>
+</tr>
+<tr>
+<td>Yaw</td>
+<td>Cached initial yaw</td>
+</tr>
+<tr>
+<td>IMU biases</td>
+<td>IMU calibration and conditioning result</td>
+</tr>
+</tbody>
+</table>
+<p>The initial covariance is</p>
+<div class="arithmatex">\[
+\mathbf P_0=
+\operatorname{diag}
+\left(
+0.4,\;0.4,\;0.1,\;0.1,\;
+10^{-10},\;0.001,\;0.001,\;10^{-10}
+\right).
+\]</div>
+<p>Three-range initialization solves</p>
+<div class="arithmatex">\[
+\left\lVert
+\mathbf p-\mathbf a_i
+\right\rVert_2^2=d_i^2,
+\qquad i\in\{1,2,3\}.
+\]</div>
+<p>Subtracting the first circle equation gives the linear system</p>
+<div class="arithmatex">\[
+\underbrace{
+2\begin{bmatrix}
+(\mathbf a_2-\mathbf a_1)^{\mathsf T}\\
+(\mathbf a_3-\mathbf a_1)^{\mathsf T}
+\end{bmatrix}}_{\mathbf A}
+\mathbf p
+=
+\underbrace{
+\begin{bmatrix}
+d_1^2-d_2^2+\lVert\mathbf a_2\rVert^2-\lVert\mathbf a_1\rVert^2\\
+d_1^2-d_3^2+\lVert\mathbf a_3\rVert^2-\lVert\mathbf a_1\rVert^2
+\end{bmatrix}}_{\mathbf b}.
+\]</div>
+<p>When <span class="arithmatex">\(\mathbf A\)</span> is nonsingular, <span class="arithmatex">\(\mathbf p=\mathbf A^{-1}\mathbf b\)</span>. After initialization, trilateration is used only as a geometry and diagnostic probe.</p>
+<h3 id="6-ukf-prediction">6. UKF Prediction</h3>
+<h4 id="61-discrete-motion">6.1 Discrete motion</h4>
+<p>The implementation averages consecutive IMU samples:</p>
+<div class="arithmatex">\[
+\begin{aligned}
+\bar\omega_z &amp;=
+\frac{\omega_{z,k-1}+\omega_{z,k}}{2}-b_{gz},\\
+\theta_k^- &amp;=
+\operatorname{wrap}
+\left(\theta_{k-1}+\bar\omega_z\Delta t\right),\\
+\mathbf a_{k-1}^{G} &amp;=
+\mathbf R_B^G(\theta_{k-1})
+\left(\mathbf a_{k-1}^{B}-\mathbf b_a\right),\\
+\mathbf a_k^{G} &amp;=
+\mathbf R_B^G(\theta_k^-)
+\left(\mathbf a_k^{B}-\mathbf b_a\right),\\
+\bar{\mathbf a}^{G} &amp;=
+\frac{\mathbf a_{k-1}^{G}+\mathbf a_k^{G}}{2},\\
+\mathbf p_k^- &amp;=
+\mathbf p_{k-1}
++\mathbf v_{k-1}\Delta t
++\frac{1}{2}\bar{\mathbf a}^{G}\Delta t^2,\\
+\mathbf v_k^- &amp;=
+\mathbf v_{k-1}
++\bar{\mathbf a}^{G}\Delta t.
+\end{aligned}
+\]</div>
+<h4 id="62-sigma-point-propagation">6.2 Sigma-point propagation</h4>
+<p>Each augmented sigma point passes through the motion model:</p>
+<div class="arithmatex">\[
+\boldsymbol\chi_{k,j}^{-}
+=
+f\left(
+\boldsymbol\chi_{k-1,j}^{+},
+\mathbf u_k,
+\mathbf n_{k,j}
+\right).
+\]</div>
+<p>The predicted state and covariance are</p>
+<div class="arithmatex">\[
+\begin{aligned}
+\hat{\mathbf x}_k^- &amp;=
+\sum_j W_j^{(m)}
+\boldsymbol\chi_{k,j}^-,\\
+\mathbf P_k^- &amp;=
+\sum_j W_j^{(c)}
+\left(
+\boldsymbol\chi_{k,j}^--\hat{\mathbf x}_k^-
+\right)
+\left(
+\boldsymbol\chi_{k,j}^--\hat{\mathbf x}_k^-
+\right)^{\mathsf T}.
+\end{aligned}
+\]</div>
+<h4 id="63-stationary-constraint">6.3 Stationary constraint</h4>
+<p>After more than 10 stationary samples, ZUPT constrains velocity:</p>
+<div class="arithmatex">\[
+\mathbf v_k^-\leftarrow\mathbf 0,
+\qquad
+P_{v_xv_x}=P_{v_yv_y}=10^{-4}.
+\]</div>
+<p>ZUPT limits drift but does not generate a position measurement.</p>
+<h3 id="7-ukf-range-update">7. UKF Range Update</h3>
+<p>The UKF receives one measurement package from the UWB front end:</p>
+<div class="arithmatex">\[
+\mathbf d_k=
+\begin{bmatrix}
+d_1&amp;d_2&amp;d_3
+\end{bmatrix}^{\mathsf T},
+\qquad
+\mathbf R_k=
+\operatorname{diag}
+\left(R_1,R_2,R_3\right).
+\]</div>
+<p>For update sigma point <span class="arithmatex">\(j\)</span> and selected Anchor <span class="arithmatex">\(i\)</span>:</p>
+<div class="arithmatex">\[
+Z_{i,j}=
+\left\lVert
+\boldsymbol\chi_{\mathbf p,j}
+-\mathbf a_i
+\right\rVert_2+n_{i,j}.
+\]</div>
+<p>The predicted measurement and covariance are</p>
+<div class="arithmatex">\[
+\begin{aligned}
+\hat{\mathbf d}_k &amp;=
+\sum_j W_j^{(m)}\mathbf Z_j,\\
+\mathbf P_{dd} &amp;=
+\sum_j W_j^{(c)}
+\left(
+\mathbf Z_j-\hat{\mathbf d}_k
+\right)
+\left(
+\mathbf Z_j-\hat{\mathbf d}_k
+\right)^{\mathsf T},\\
+\mathbf P_{xd} &amp;=
+\sum_j W_j^{(c)}
+\left(
+\boldsymbol\chi_j-\hat{\mathbf x}_k^-
+\right)
+\left(
+\mathbf Z_j-\hat{\mathbf d}_k
+\right)^{\mathsf T}.
+\end{aligned}
+\]</div>
+<p>The posterior update is</p>
+<div class="arithmatex">\[
+\boxed{
+\begin{aligned}
+\mathbf K_k &amp;=
+\mathbf P_{xd}\mathbf P_{dd}^{-1},\\
+\mathbf x_k^+ &amp;=
+\mathbf x_k^-
++\mathbf K_k
+\left(
+\mathbf d_k-\hat{\mathbf d}_k
+\right),\\
+\mathbf P_k^+ &amp;=
+\mathbf P_k^-
+-\mathbf K_k
+\mathbf P_{xd}^{\mathsf T}.
+\end{aligned}
+}
+\]</div>
+<p>Covariance symmetry, diagonal floors and innovation jitter protect the single-precision matrix operations.</p>
+<p>The range function directly observes position. Velocity, yaw and bias can change only through cross-covariance with position; yaw propagation itself comes from the gyroscope.</p>
+<h2 id="part-ii-uwb-measurement-front-end">Part II - UWB Measurement Front End</h2>
+<h3 id="8-range-validation-and-projection">8. Range Validation and Projection</h3>
+<p>The front end first creates a compact set of unique planar candidates.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Candidate is rejected when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Frame validity</td>
+<td>Anchor result is not marked valid</td>
+</tr>
+<tr>
+<td>Anchor identity</td>
+<td>ID is outside the configured layout</td>
+</tr>
+<tr>
+<td>Coordinate lookup</td>
+<td>Anchor position is unavailable</td>
+</tr>
+<tr>
+<td>Planar geometry</td>
+<td><span class="arithmatex">\(d_{3D,i}^2&lt;(a_{z,i}-z_{\mathrm{Tag}})^2\)</span></td>
+</tr>
+<tr>
+<td>Duplicate detection</td>
+<td>The Anchor already exists in the candidate set</td>
+</tr>
+</tbody>
+</table>
+<p>The slant range is projected as</p>
+<div class="arithmatex">\[
+d_i=
+\sqrt{
+d_{3D,i}^{\,2}
+-
+\left(a_{z,i}-z_{\mathrm{Tag}}\right)^2
+}.
+\]</div>
+<h3 id="9-spatial-consistency-prefilter">9. Spatial Consistency Prefilter</h3>
+<p>The front end receives predicted position <span class="arithmatex">\(\mathbf p_k^-\)</span> and position covariance <span class="arithmatex">\(\mathbf P_{p,k}^-\)</span> from the UKF.</p>
+<h4 id="91-innovation">9.1 Innovation</h4>
+<div class="arithmatex">\[
+\nu_i=
+d_i-
+\left\lVert
+\mathbf p_k^--\mathbf a_i
+\right\rVert_2.
+\]</div>
+<p>The position Jacobian is</p>
+<div class="arithmatex">\[
+\mathbf H_i=
+\frac{1}{\hat d_i}
+\begin{bmatrix}
+p_x^--a_{x,i}&amp;p_y^--a_{y,i}
+\end{bmatrix}.
+\]</div>
+<p>Innovation variance and squared Mahalanobis distance are</p>
+<div class="arithmatex">\[
+\begin{aligned}
+S_i &amp;=
+\mathbf H_i
+\mathbf P_{p,k}^-
+\mathbf H_i^{\mathsf T}
++R_{\mathrm{gate}},\\
+D_i^2 &amp;=
+\frac{\nu_i^2}
+{\max(S_i,S_{\min})}.
+\end{aligned}
+\]</div>
+<h4 id="92-hysteresis">9.2 Hysteresis</h4>
+<table>
+<thead>
+<tr>
+<th>Anchor state</th>
+<th>Transition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Accepted</td>
+<td>Reject when <span class="arithmatex">\(D_i^2&gt;6\)</span></td>
+</tr>
+<tr>
+<td>Rejected</td>
+<td>Recover when <span class="arithmatex">\(D_i^2&lt;5\)</span></td>
+</tr>
+<tr>
+<td>Weak UKF reference</td>
+<td>Skip gating when <span class="arithmatex">\(\sqrt{P_{xx}+P_{yy}}&gt;0.50\,\mathrm m\)</span></td>
+</tr>
+</tbody>
+</table>
+<p>Separate reject and recovery thresholds prevent state chatter.</p>
+<h4 id="93-controlled-rescue">9.3 Controlled rescue</h4>
+<p>When fewer than three candidates remain, the least inconsistent rejected range may be restored only if</p>
+<div class="arithmatex">\[
+D_i^2\le25
+\qquad\text{and}\qquad
+\text{reject streak}_i\ge2.
+\]</div>
+<p>The rescued flag remains attached to the range and forces conservative covariance at the module output.</p>
+<h3 id="10-measurement-precision">10. Measurement Precision</h3>
+<p>Each accepted range receives</p>
+<div class="arithmatex">\[
+\boxed{
+w_i=
+\frac{
+q_i^M q_i^A q_i^R
+}{
+\sigma_i^2
+}
+}
+\]</div>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Evidence represented</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(1/\sigma_i^2\)</span></td>
+<td>Distance-dependent base precision</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(q_i^M\)</span></td>
+<td>Spatial consistency</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(q_i^A\)</span></td>
+<td>First-path radio confidence</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(q_i^R\)</span></td>
+<td>Robust frame residual</td>
+</tr>
+</tbody>
+</table>
+<h4 id="101-common-influence-function">10.1 Common influence function</h4>
+<div class="arithmatex">\[
+q(u;c)=
+\begin{cases}
+1,&amp;|u|\le c,\\
+\max\left(0.10,\dfrac{c}{|u|}\right),&amp;|u|&gt;c.
+\end{cases}
+\]</div>
+<h4 id="102-range-variance">10.2 Range variance</h4>
+<div class="arithmatex">\[
+\bar\sigma_i=
+\min\left(
+\sqrt{0.10^2+(0.015d_i)^2},
+0.35
+\right).
+\]</div>
+<div class="arithmatex">\[
+\sigma_i^2=
+\begin{cases}
+\bar\sigma_i^2,&amp;\text{normal range},\\
+4\bar\sigma_i^2,&amp;\text{rescued range}.
+\end{cases}
+\]</div>
+<h4 id="103-spatial-influence">10.3 Spatial influence</h4>
+<div class="arithmatex">\[
+q_i^M=
+q\left(
+\sqrt{D_i^2};
+\sqrt{5}
+\right).
+\]</div>
+<h4 id="104-first-path-influence">10.4 First-path influence</h4>
+<p>For session confidence <span class="arithmatex">\(c_i^{FP}\in[0,1]\)</span>:</p>
+<div class="arithmatex">\[
+u_i^A=1-c_i^{FP},
+\qquad
+q_i^A=q(u_i^A;0.35).
+\]</div>
+<p>Missing radio-quality data uses a conservative deficit of <span class="arithmatex">\(0.5\)</span>.</p>
+<h4 id="105-robust-residual-influence">10.5 Robust residual influence</h4>
+<p>Residual evidence requires a trusted reference and at least four candidates:</p>
+<div class="arithmatex">\[
+r_i=
+d_i-
+\left\lVert
+\mathbf p_{\mathrm{ref}}-\mathbf a_i
+\right\rVert_2.
+\]</div>
+<div class="arithmatex">\[
+\begin{aligned}
+\tilde r &amp;=
+\operatorname{median}(r_i),\\
+\sigma_{\mathrm{MAD}} &amp;=
+1.4826
+\operatorname{median}
+\left(
+|r_i-\tilde r|
+\right),\\
+u_i^R &amp;=
+\frac{
+|r_i-\tilde r|
+}{
+\max(\sigma_{\mathrm{MAD}},\sigma_i)
+},\\
+q_i^R &amp;= q(u_i^R;1.50).
+\end{aligned}
+\]</div>
+<p>With fewer than four candidates, <span class="arithmatex">\(q_i^R=1\)</span>.</p>
+<h3 id="11-anchor-triplet-selection">11. Anchor-Triplet Selection</h3>
+<p>Every combination of three accepted Anchors is evaluated.</p>
+<h4 id="111-geometry-gate">11.1 Geometry gate</h4>
+<div class="arithmatex">\[
+g=
+\frac{
+\left|
+(\mathbf a_B-\mathbf a_A)
+\times
+(\mathbf a_C-\mathbf a_A)
+\right|
+}{
+\max\left(
+\lVert\mathbf a_B-\mathbf a_A\rVert^2,
+\lVert\mathbf a_C-\mathbf a_A\rVert^2,
+\lVert\mathbf a_C-\mathbf a_B\rVert^2
+\right)
+}.
+\]</div>
+<p>A triplet is rejected when <span class="arithmatex">\(g&lt;0.15\)</span>.</p>
+<h4 id="112-weighted-geometry">11.2 Weighted geometry</h4>
+<div class="arithmatex">\[
+\mathbf W=
+\operatorname{diag}
+\left(w_1,w_2,w_3\right),
+\qquad
+\mathbf C_p=
+\left(
+\mathbf H^{\mathsf T}\mathbf W\mathbf H
+\right)^{-1}.
+\]</div>
+<div class="arithmatex">\[
+\operatorname{WGDOP}
+=
+\sqrt{
+\operatorname{tr}
+\left(\mathbf C_p\right)
+}.
+\]</div>
+<p>Lower WGDOP means stronger geometry after range confidence is included.</p>
+<h4 id="113-residual-score-and-switch-hysteresis">11.3 Residual score and switch hysteresis</h4>
+<p>For a trilaterated probe <span class="arithmatex">\(\mathbf p_{\mathrm{probe}}\)</span>:</p>
+<div class="arithmatex">\[
+e_{\mathrm{RMS}}
+=
+\sqrt{
+\frac{1}{N}
+\sum_{i=1}^{N}
+\left(
+\lVert
+\mathbf p_{\mathrm{probe}}-\mathbf a_i
+\rVert
+-d_i
+\right)^2
+}.
+\]</div>
+<p>The composite score is</p>
+<div class="arithmatex">\[
+J=
+\operatorname{WGDOP}
++0.5e_{\mathrm{RMS}}.
+\]</div>
+<p>The previous triplet is retained when</p>
+<div class="arithmatex">\[
+J_{\mathrm{previous}}
+\le
+1.10J_{\mathrm{best}}+0.02.
+\]</div>
+<h3 id="12-front-end-output-contract">12. Front-End Output Contract</h3>
+<p>The selected three ranges are converted into the exact package consumed by the UKF:</p>
+<div class="arithmatex">\[
+\mathbf d_k=
+\begin{bmatrix}
+d_1&amp;d_2&amp;d_3
+\end{bmatrix}^{\mathsf T}.
+\]</div>
+<div class="arithmatex">\[
+R_{ii}=
+\begin{cases}
+0.25,&amp;\text{rescued Anchor},\\
+\operatorname{clamp}
+\left(
+\dfrac{1}{w_i},
+0.0025,
+0.25
+\right),
+&amp;\text{otherwise}.
+\end{cases}
+\]</div>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Consumer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Three Anchor IDs and coordinates</td>
+<td>UKF measurement function</td>
+</tr>
+<tr>
+<td>Range vector <span class="arithmatex">\(\mathbf d_k\)</span></td>
+<td>UKF innovation</td>
+</tr>
+<tr>
+<td>Covariance <span class="arithmatex">\(\mathbf R_k\)</span></td>
+<td>Augmented UKF measurement noise</td>
+</tr>
+<tr>
+<td>Quality diagnostics</td>
+<td>Telemetry and fault analysis</td>
+</tr>
+</tbody>
+</table>
+<h2 id="part-iii-runtime-integration">Part III - Runtime Integration</h2>
+<h3 id="13-execution-order">13. Execution Order</h3>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Module invoked</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IMU data available</td>
+<td>UKF prediction</td>
+<td>Refresh <span class="arithmatex">\(\mathbf x_k^-\)</span> and <span class="arithmatex">\(\mathbf P_k^-\)</span></td>
+</tr>
+<tr>
+<td>UWB frame available</td>
+<td>UWB front end</td>
+<td>Produce selected Anchors, <span class="arithmatex">\(\mathbf d_k\)</span> and <span class="arithmatex">\(\mathbf R_k\)</span></td>
+</tr>
+<tr>
+<td>Valid front-end package</td>
+<td>UKF update</td>
+<td>Produce <span class="arithmatex">\(\mathbf x_k^+\)</span> and <span class="arithmatex">\(\mathbf P_k^+\)</span></td>
+</tr>
+<tr>
+<td>No valid UWB package</td>
+<td>No UKF update</td>
+<td>Retain predict-only state</td>
+</tr>
+</tbody>
+</table>
+<p>This runtime order does not merge the two algorithms. The front end uses the latest UKF prior only as a statistical reference; the UKF receives only the final measurement package.</p>
+<h3 id="14-result-and-diagnostics">14. Result and Diagnostics</h3>
+<table>
+<thead>
+<tr>
+<th>Output group</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Navigation</td>
+<td>Position, velocity and yaw</td>
+</tr>
+<tr>
+<td>Measurement quality</td>
+<td>Accepted, rejected and rescued Anchors</td>
+</tr>
+<tr>
+<td>Selection quality</td>
+<td>Selected mask, WGDOP, geometry and residual</td>
+</tr>
+<tr>
+<td>Filter health</td>
+<td>Position covariance, update status and error counters</td>
+</tr>
+</tbody>
+</table>
+<p>SensorFusion is queue-driven. Queue blocking, computation and explicit delay are separate timing components; the loop is not a guaranteed fixed-rate 50 Hz task.</p>
+<h2 id="source-traceability">Source Traceability</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Firmware source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runtime integration</td>
+<td>firmware/uwb/Core/Src/freertos.c</td>
+</tr>
+<tr>
+<td>UKF state estimator</td>
+<td>firmware/uwb/sys/sys_sensor_fusion.c</td>
+</tr>
+<tr>
+<td>Spatial prefilter</td>
+<td>firmware/uwb/middlewares/mw_filter.c</td>
+</tr>
+<tr>
+<td>Precision and Anchor selection</td>
+<td>firmware/uwb/middlewares/mw_trilateration.c</td>
+</tr>
+<tr>
+<td>Numerical parameters</td>
+<td>firmware/uwb/sys/positioning_config.h</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
