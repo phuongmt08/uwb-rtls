@@ -1,6 +1,0 @@
-[submodule "protocol/nanopb"]
-	path = protocol/nanopb
-	url = https://github.com/nanopb/nanopb.git
-[submodule "docs"]
-	path = docs
-	url = https://github.com/phuongmt08/uwb-rtls-docs.git
