@@ -1,0 +1,76 @@
+site_name: UWB-RTLS Documentation
+site_description: High-Precision Indoor Real-Time Location System for Autonomous Mobile Robots
+site_author: Phuong Mai & HCMUTE Project Team
+site_url: https://phuongmt08.github.io/uwb-rtls/
+
+repo_name: phuongmt08/uwb-rtls
+repo_url: https://github.com/phuongmt08/uwb-rtls
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  palette:
+    # Dark Mode (Default)
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    # Light Mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - tables
+  - attr_list
+  - md_in_html
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: README.md
+  - Getting Started: getting_started.md
+  - Firmware Documentation:
+      - Firmware Guide: firmware/README.md
+      - Firmware Architecture: firmware/architecture.md
+      - DS-TWR Ranging Protocol: firmware/ranging_protocol.md
+      - Embedded Positioning Algorithms: firmware/positioning_algorithms.md
+  - Hardware Engineering:
+      - Hardware Specs & Pinouts: hardware/schematics_and_specs.md
+      - Antenna Delay Calibration: hardware/antenna_calibration.md
+  - Software & Tools:
+      - RTLS Studio & Programmer: software/rtls_studio_and_tools.md
+  - Deployment & Commissioning: deployment.md
+  - Asset Catalog: assets/README.md

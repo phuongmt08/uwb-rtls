@@ -62,3 +62,8 @@ software/uwb_rtls_studio/data/runtime/
 # Simulation cache
 .simulation_metadata_cache.json
 
+# MkDocs and local temp files
+site/
+output/
+tmp/
+
