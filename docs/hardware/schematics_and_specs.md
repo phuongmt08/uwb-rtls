@@ -8,7 +8,13 @@ This document provides visual hardware references, 3D PCB layouts, component spe
 
 ## 1. Hardware Ecosystem Overview
 
-The UWB-RTLS system utilizes three dedicated hardware boards designed for distinct roles in the positioning infrastructure:
+<div align="center">
+
+![Hardware System Architecture](../assets/images/thesis/chapter3/figure-3-2-hardware-block-diagram.png)
+
+</div>
+
+The UWB-RTLS system utilizes three dedicated hardware entities designed for distinct roles in the positioning infrastructure:
 
 | Hardware Entity | Core MCU | RF / Sensing Hardware | Power Supply | Primary System Role |
 | --- | --- | --- | --- | --- |
@@ -32,7 +38,7 @@ The Tag board is mounted directly onto the Autonomous Mobile Robot (AMR). It per
 | **UWB Radio** | Decawave DW1000 / BU01 | SPI1 @ 20 MHz + PB0 (EXTI) | Sub-nanosecond timestamping for time-of-flight |
 | **Inertial Sensor** | 6-DOF IMU (Accel + Gyro) | SPI2 @ 100 Hz | High-rate motion prediction for UKF state propagation |
 | **Wireless Bridge** | Nordic nRF52832 | USART1 @ 115200 baud | BLE 5.0 telemetry broadcast and OTA configuration |
-| **Robot Link** | USB Type-C OTG FS | USB CDC Virtual COM | Streams $10\text{ Hz}$ pose (`px, py, vx, vy, yaw`) to robot computer |
+| **Robot Link** | USB Type-C OTG FS | USB CDC Virtual COM | Streams real-time pose (`px, py, vx, vy, yaw`) to robot computer |
 | **User Control** | Pushbutton (`PA0`) | EXTI0 | Hold ~3s: Role toggle & reboot; Click: Toggle ranging |
 
 ---

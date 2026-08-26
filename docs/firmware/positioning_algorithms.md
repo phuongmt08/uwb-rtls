@@ -13,7 +13,11 @@ The front end does not estimate the final pose. The UKF does not decide which An
 
 ## 1. Positioning Problem
 
+<div align="center">
+
 ![System mathematical model](../assets/images/thesis/chapter4/figure-4-12-system-mathematical-model.png)
+
+</div>
 
 The Tag moves in the global frame $\{G\}$. IMU data is measured in the body frame $\{B\}$. Fixed Anchors constrain the Tag position through UWB ranges.
 
@@ -127,6 +131,12 @@ The UWB front end determines each $R_{i,k}$ from measurement quality.
 
 ## 3. Algorithm Interfaces
 
+<div align="center">
+
+![Extended Positioning Algorithm Execution Flow](../assets/images/thesis/chapter4/figure-4-14-extended-positioning-flow.png)
+
+</div>
+
 | Module | Inputs | Outputs |
 |---|---|---|
 | UKF prediction | Previous posterior, IMU sample, $\mathbf Q$ | Predicted state $\mathbf x_k^-$ and covariance $\mathbf P_k^-$ |
@@ -136,6 +146,12 @@ The UWB front end determines each $R_{i,k}$ from measurement quality.
 The predicted state is exposed to the front end only as a reference for range consistency. The selected ranges and covariance are returned to the UKF as one measurement package.
 
 ## Part I - UKF State Estimator
+
+<div align="center">
+
+![UKF Estimation Execution Flow](../assets/images/thesis/chapter4/figure-4-13-ukf-flow.png)
+
+</div>
 
 ### 4. Unscented Transform
 
@@ -175,6 +191,12 @@ $$
 Both UKF operations augment eight states with three noise variables. Therefore $L=11$ and each transform uses $2L+1=23$ sigma points.
 
 ### 5. UKF Initialization
+
+<div align="center">
+
+![Trilateration Initial Positioning Flow](../assets/images/thesis/chapter4/figure-4-11-initial-positioning-flow.png)
+
+</div>
 
 The range-only estimator needs an initial Cartesian position.
 

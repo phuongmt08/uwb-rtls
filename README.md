@@ -1,170 +1,262 @@
 <div align="center">
 
 # UWB-RTLS
-### High-Precision Indoor Real-Time Location System for Autonomous Mobile Robots
 
-<a href="#5-key-hardware--software-specs"><img src="https://img.shields.io/badge/MCU-STM32F411-1e293b?style=flat-square&logo=stmicroelectronics&logoColor=white" alt="MCU" /></a>
-<a href="#5-key-hardware--software-specs"><img src="https://img.shields.io/badge/UWB-Decawave%20DW1000-0f766e?style=flat-square" alt="UWB" /></a>
-<a href="#5-key-hardware--software-specs"><img src="https://img.shields.io/badge/BLE-Nordic%20nRF52-0284c7?style=flat-square&logo=nordicsemiconductor&logoColor=white" alt="BLE" /></a>
-<a href="#3-core-features"><img src="https://img.shields.io/badge/RTOS-FreeRTOS-047857?style=flat-square" alt="RTOS" /></a>
-<a href="#4-positioning-pipeline"><img src="https://img.shields.io/badge/Fusion-8--State%20UKF-6b21a8?style=flat-square" alt="Fusion" /></a>
-<a href="#3-core-features"><img src="https://img.shields.io/badge/Protocol-Protobuf-2563eb?style=flat-square&logo=google&logoColor=white" alt="Protocol" /></a>
-<a href="#3-core-features"><img src="https://img.shields.io/badge/GUI-PyQt6-15803d?style=flat-square&logo=qt&logoColor=white" alt="GUI" /></a>
-<a href="#9-project-team--credits"><img src="https://img.shields.io/badge/Institution-HCMUTE-991b1b?style=flat-square" alt="Institution" /></a>
+### On-device indoor positioning for autonomous mobile robots
+
+[![STM32](https://img.shields.io/badge/MCU-STM32F411-1e293b?style=flat-square&logo=stmicroelectronics&logoColor=white)](#hardware-and-software)
+[![UWB](https://img.shields.io/badge/UWB-DW1000-0f766e?style=flat-square)](#system-overview)
+[![RTOS](https://img.shields.io/badge/RTOS-FreeRTOS-047857?style=flat-square)](docs/firmware/architecture.md)
+[![Fusion](https://img.shields.io/badge/Fusion-8--State%20UKF-6b21a8?style=flat-square)](docs/firmware/positioning_algorithms.md)
+[![GUI](https://img.shields.io/badge/Studio-PyQt6-15803d?style=flat-square&logo=qt&logoColor=white)](docs/software/rtls_studio_and_tools.md)
+
+**[Results](#experimental-validation) · [System](#system-overview) · [Features](#core-capabilities) · [Quick start](#quick-start) · [Documentation](#documentation)**
 
 </div>
 
----
+UWB-RTLS is an end-to-end real-time location system developed for indoor mobile robots. Fixed UWB Anchors measure their distance to a mobile Tag using DS-TWR. The Tag validates the ranges, selects a reliable Anchor subset, fuses UWB with IMU data, and calculates its pose directly on an STM32F411. RTLS Studio provides wireless configuration, live diagnostics, visualization, and experiment logging.
 
-## Table of Contents
+<table>
+  <tr>
+    <th align="center">Best evaluated MAE</th>
+    <th align="center">Best evaluated RMSE</th>
+    <th align="center">Positioning</th>
+    <th align="center">Validation</th>
+  </tr>
+  <tr>
+    <td align="center"><strong>8.5 cm</strong></td>
+    <td align="center"><strong>10.9 cm</strong></td>
+    <td align="center"><strong>On the Tag</strong></td>
+    <td align="center"><strong>2 real environments</strong></td>
+  </tr>
+</table>
 
-1. [Executive Summary](#1-executive-summary)
-2. [System Architecture](#2-system-architecture)
-3. [Core Features](#3-core-features)
-4. [Positioning Pipeline](#4-positioning-pipeline)
-5. [Key Hardware & Software Specs](#5-key-hardware--software-specs)
-6. [Repository Structure](#6-repository-structure)
-7. [Quick Start Guide](#7-quick-start-guide)
-8. [Documentation Index](#8-documentation-index)
-9. [Project Team & Credits](#9-project-team--credits)
+## System Overview
 
----
-
-## 1. Executive Summary
-
-**UWB-RTLS** is an integrated indoor real-time positioning solution designed specifically for Autonomous Mobile Robots (AMRs). The system pairs fixed Ultra-Wideband (UWB) Anchors with mobile Tags mounted on moving vehicles. Using **Asymmetric Double-Sided Two-Way Ranging (DS-TWR)** and on-tag **Unscented Kalman Filter (UKF)** sensor fusion, the system provides sub-decimeter real-time localization independent of external computing infrastructure.
-
-> **Note:** Positioning calculations execute entirely on the embedded STM32 MCU on the Tag. Desktop tools and BLE gateways are used solely for real-time visualization, telemetry monitoring, and system configuration.
-
----
-
-## 2. System Architecture
+Fixed Anchors provide UWB references around the operating area. The mobile Tag performs ranging and position estimation, sends pose data directly to the vehicle controller, and exposes configuration and telemetry through the BLE gateway.
 
 ```mermaid
 flowchart TD
-    Anchors["Fixed Anchors (0..N)"] <-->|UWB DS-TWR| Tag["Mobile Tag Node"]
-    Tag -->|USB CDC @ 10 Hz| Robot["Robot Navigation Controller"]
-    Tag <-->|BLE 5.0 Wireless| Gateway["nRF52840 USB Dongle"]
-    Gateway <-->|USB Virtual COM| Studio["RTLS Studio Desktop GUI"]
+    Anchors["Fixed UWB Anchors"] <-->|"DS-TWR ranging"| Tag["Mobile Tag<br/>On-device positioning"]
+    Tag -->|"Pose over USB"| Robot["Vehicle Controller"]
+    Tag <-->|"Configuration + telemetry"| Gateway["BLE Gateway"]
+    Gateway <-->|"USB serial"| Studio["RTLS Studio"]
 ```
 
-> See [Firmware Architecture](docs/firmware/architecture.md) for the complete embedded layer design, RTOS task model, and data channels.
+Positioning remains operational without the desktop application: RTLS Studio is a configuration and observability tool, not the positioning engine.
 
----
+## System in Practice
 
-## 3. Core Features
+The experimental platform uses the developed Anchor/Tag hardware and a 1:10-scale vehicle. The photographs below show the actual Chapter 5 test-yard deployment.
 
-| Category | Capability | Abstract Description |
-| --- | --- | --- |
-| **Positioning Engine** | 8-State UKF & IMU Fusion | Tight integration of UWB ranges with 6-DOF IMU motion ($\mathbf{x} = [p_x, p_y, v_x, v_y, \theta, b_{ax}, b_{ay}, b_{gz}]^T$) |
-| **Range Validation** | Mahalanobis Prefilter | Rejects multipath anomalies and NLOS spikes using spatial innovation statistics |
-| **Robust Weighting** | Huber-WGDOP Triplet Selection | Evaluates geometric precision (WGDOP) and down-weights weak first-path UWB signals |
-| **Hardware Flexibility** | Unified Dual-Role Firmware | STM32 codebase runs as Tag or Anchor (toggle via User Button hold); Anchor ID set via 3-position DIP switch (up to 8 Anchors) |
-| **Wireless Protocol** | COBS + Protobuf Messaging | Compact serialized protocol contracts shared between embedded C and Python desktop |
-| **Desktop Suite** | RTLS Studio Visualization | Real-time map rendering, node configuration, telemetry logging, and diagnostic profiling |
+<p align="center">
+  <img src="docs/assets/images/results/chapter5-test-yard.jpg" alt="Full UWB RTLS test-yard environment" width="100%"><br>
+  <sub>Full four-Anchor test-yard deployment</sub>
+</p>
 
----
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-test-yard-anchor.jpg" alt="UWB Anchor mounted at the test yard" width="100%"><br><sub>Anchor installed at the surveyed height</sub></td>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-vehicle-tag.jpg" alt="Mobile robot carrying the UWB Tag" width="100%"><br><sub>1:10-scale vehicle carrying the Tag</sub></td>
+  </tr>
+</table>
 
-## 4. Positioning Pipeline
+RTLS Studio provides the host-side view of the deployed system for device configuration, diagnostics, and experiment recording.
 
-```mermaid
-flowchart LR
-    P1["1. Raw UWB Timestamps"] --> P2["2. DS-TWR Ranging"] --> P3["3. Mahalanobis Prefilter"] --> P4["4. WGDOP Triplet Selection"] --> P5["5. 8-State UKF Fusion"] --> P6["6. Pose Telemetry"]
-```
+<p align="center">
+  <img src="docs/assets/images/results/rtls_studio_live_tracking.png" alt="RTLS Studio diagnostics and session history" width="92%"><br>
+  <sub>Connected-device diagnostics, live logs, and recorded ranging sessions</sub>
+</p>
 
-> For mathematical formulations, state-transition matrices, and filter parameters, see [Positioning Algorithms Guide](docs/firmware/positioning_algorithms.md).
+## Experimental Validation
 
----
+Two dynamic cases were evaluated: a large, mostly line-of-sight test yard and a furnished classroom with stronger multipath and partial obstruction. Direct trilateration and UKF outputs were recorded simultaneously so both estimators saw the same motion and UWB measurements.
 
-## 5. Key Hardware & Software Specs
+### Evaluation protocol
 
-### 5.1. Hardware Platform
+| Item | Method |
+|---|---|
+| Reference path | Manually surveyed control points connected by interpolation |
+| Point error | Euclidean distance from each estimate to the nearest point on the reference path |
+| Active interval | Samples before departure and after the vehicle stopped were excluded |
+| Repetition | Three runs for each trajectory or Anchor configuration |
+| Reported metrics | MAE, RMSE, 95th-percentile error, and maximum error |
 
-| Component | Module | Technical Function |
-| --- | --- | --- |
-| **MCU** | STM32F411CEU6 (100 MHz Cortex-M4F) | RTOS tasks, DS-TWR ranging, UKF fusion |
-| **UWB Radio** | Decawave DW1000 / BU01 | Precision pulse timestamping |
-| **Sensor** | 6-DOF SPI IMU (Accel & Gyro) | High-rate motion prediction for UKF |
-| **Wireless Bridge** | Nordic nRF52832 & nRF52840 | BLE telemetry bridge & USB gateway |
+### Case 1 — Test yard, four Anchors
 
-### 5.2. Software & Environment Version Matrix
+The first case used a **9.76 m × 11.64 m** indoor test yard with mostly clear line of sight. Four Anchors surrounded the working area at **0.895 m**, while the Tag was mounted at **0.350 m**. The vehicle followed two surveyed trajectories, each repeated three times.
 
-| Ecosystem Layer | Tool / Component | Verified Version | Purpose |
-| --- | --- | --- | --- |
-| **IDE / Toolchain** | STM32CubeIDE | `v1.19.0` (or `v1.10+`) | Core IDE & bundled compiler plugins |
-| **Arm Compiler** | `arm-none-eabi-gcc` | `v10.3.1` / `v13.3.rel1` | STM32F411 Cortex-M4F compiler |
-| **Build Utility** | GNU Make | `v4.4.1` (ST Plugin) | Firmware & Protobuf build automation |
-| **Wireless SDK** | Nordic nRF5 SDK | `v17.1.0` | BLE central/peripheral firmware |
-| **Host Runtime** | Python | `v3.10+` (v3.12 verified) | Desktop GUI & Protocol generator |
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-test-yard-trajectory.png" alt="Test-yard reference, trilateration, and UKF trajectories" width="100%"></td>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-test-yard-error.jpg" alt="Test-yard position error over time" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Reference path, direct trilateration, and UKF trajectory</sub></td>
+    <td align="center"><sub>Position error from the same representative run</sub></td>
+  </tr>
+</table>
 
----
+| Estimator | MAE (m) | RMSE (m) | P95 (m) | Max (m) |
+|---|---:|---:|---:|---:|
+| Direct trilateration | 0.102 ± 0.006 | 0.134 ± 0.010 | 0.268 ± 0.024 | 0.782 ± 0.281 |
+| **UKF** | **0.091 ± 0.005** | **0.117 ± 0.005** | **0.236 ± 0.014** | **0.456 ± 0.063** |
 
-## 6. Repository Structure
+Across the test-yard runs, the UKF reduced average MAE by **10.9%**, RMSE by **12.8%**, and maximum error from **0.782 m to 0.456 m**.
 
-```
-uwb-rtls/
-├── firmware/         STM32F411 application, BLE bridge firmware, and bootloader
-├── software/         RTLS Studio GUI and firmware programmer tools
-├── protocol/         Protobuf message definitions (.proto) and nanopb runtime
-├── hardware/         PCB designs, schematics, and antenna calibration data
-└── docs/             Technical guides, system architecture, and thesis material
-```
+### Case 2 — Classroom, four and six Anchors
 
----
+The second case used an **8.3 m × 8.7 m** classroom containing desks, people, and reflective surfaces. Anchors were installed at **2.495 m** and the Tag at **0.585 m**. Both four- and six-Anchor layouts were tested to measure the value of additional spatial redundancy.
 
-## 7. Quick Start Guide
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-classroom-anchor.jpg" alt="UWB Anchor mounted on a classroom wall" width="100%"></td>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-classroom.jpg" alt="Classroom UWB RTLS deployment" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Wall-mounted Anchor</sub></td>
+    <td align="center"><sub>Classroom deployment with furniture and occupants</sub></td>
+  </tr>
+</table>
 
-> **Detailed Setup & Toolchain Guide:** For complete step-by-step instructions on setting up STM32CubeIDE plugins (`GCC_PATH`), Nordic nRF5 SDK (`SDK_ROOT`), Python virtual environment (`venv`), and troubleshooting, refer to the **[Getting Started & Setup Guide](docs/getting_started.md)**.
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-classroom-6-anchor-trajectory.jpg" alt="Six-Anchor classroom trajectory result" width="100%"></td>
+    <td width="50%" align="center"><img src="docs/assets/images/results/chapter5-classroom-6-anchor-error.jpg" alt="Six-Anchor classroom position error" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Six-Anchor reference, trilateration, and UKF trajectories</sub></td>
+    <td align="center"><sub>Position error from the same representative run</sub></td>
+  </tr>
+</table>
 
-### 7.1. Clone Repository & Submodules
-```bash
+| Layout | Estimator | MAE (m) | RMSE (m) | P95 (m) | Max (m) |
+|---|---|---:|---:|---:|---:|
+| 4 Anchors | Direct trilateration | 0.173 ± 0.027 | 0.230 ± 0.037 | 0.457 ± 0.084 | 1.099 ± 0.131 |
+| 4 Anchors | **UKF** | **0.139 ± 0.036** | **0.185 ± 0.043** | **0.393 ± 0.085** | **0.583 ± 0.064** |
+| 6 Anchors | Direct trilateration | 0.123 ± 0.006 | 0.177 ± 0.007 | 0.340 ± 0.035 | 1.150 ± 0.562 |
+| 6 Anchors | **UKF** | **0.085 ± 0.013** | **0.109 ± 0.015** | **0.215 ± 0.035** | **0.340 ± 0.026** |
+
+The six-Anchor UKF configuration produced the strongest overall result: **8.5 cm MAE**, **10.9 cm RMSE**, **21.5 cm P95**, and **34.0 cm maximum error**. The result demonstrates the benefit of additional valid ranging links in a difficult indoor environment.
+
+> **Measurement scope:** the reference trajectory was reconstructed from manually measured control points, not an independent motion-capture system. The results therefore quantify tracking performance under the documented procedure rather than metrology-grade absolute accuracy.
+
+## Core Capabilities
+
+| Area | Implemented capability | Purpose |
+|---|---|---|
+| Ranging | Asymmetric DS-TWR with TDMA scheduling | Measures multiple Tag-to-Anchor ranges without clock synchronization |
+| Measurement validation | Spatial innovation prefilter | Rejects inconsistent range combinations before estimation |
+| Anchor selection | Robust precision and WGDOP ranking | Chooses a geometrically useful three-Anchor measurement set |
+| Sensor fusion | 8-state UWB/IMU UKF | Estimates planar position, velocity, yaw, and IMU biases |
+| Embedded runtime | FreeRTOS task-based firmware | Separates ranging, fusion, communication, storage, and supervision |
+| Hardware flexibility | Unified Tag/Anchor STM32 firmware | Selects the device role and Anchor identity without maintaining separate applications |
+| Configuration | Persistent profiles with CRC-protected storage | Keeps deployment parameters across resets |
+| Communication | Shared Protobuf messages with COBS-framed transport | Maintains one contract across STM32, BLE, and Python |
+| Desktop tooling | RTLS Studio and firmware programmer | Supports commissioning, live diagnostics, logs, and updates |
+
+## Hardware and Software
+
+| Layer | Main technology | Responsibility |
+|---|---|---|
+| Tag and Anchor MCU | STM32F411CEU6, Cortex-M4F | Real-time protocol, positioning, sensor fusion, and interfaces |
+| UWB radio | Decawave/Qorvo DW1000 module | Precision packet timestamping for DS-TWR |
+| Motion sensor | 6-DOF SPI IMU | Acceleration and yaw-rate input to the UKF |
+| BLE nodes | Nordic nRF52 | Wireless configuration and telemetry |
+| USB gateway | Nordic nRF52840 dongle | BLE central and USB bridge |
+| Embedded OS | FreeRTOS | Deterministic task and queue organization |
+| Desktop | Python 3.10+ and PyQt6 | RTLS Studio, programming, and analysis tools |
+
+### Verified Development Environment
+
+| Tool | Verified version |
+|---|---|
+| STM32CubeIDE | 1.19.0; project supports the 1.10+ workflow |
+| Arm GNU Toolchain | 10.3.1 and 13.3.Rel1 |
+| GNU Make | 4.4.1 |
+| Nordic nRF5 SDK | 17.1.0 |
+| Python | 3.10+; 3.12 verified |
+
+## Quick Start
+
+The commands below build the repository and launch RTLS Studio. Device flashing, antenna-delay calibration, Anchor surveying, and commissioning are covered in the [Getting Started Guide](docs/getting_started.md) and [Deployment Guide](docs/deployment.md).
+
+### 1. Clone and generate the shared protocol
+
+```powershell
 git clone --recursive https://github.com/phuongmt08/uwb-rtls.git
 cd uwb-rtls
-```
-
-### 7.2. Generate Protocol Buffers Code
-```powershell
 make -C protocol
 ```
 
-### 7.3. Build STM32 Firmware
+### 2. Build the STM32 firmware
+
+Install STM32CubeIDE or an Arm GNU toolchain, then point `GCC_PATH` to its compiler `bin` directory.
+
 ```powershell
+$env:GCC_PATH = "C:\path\to\arm-none-eabi\bin"
 make -C firmware/uwb -j8
 ```
 
-### 7.4. Build BLE Firmware
+The build produces ELF, HEX, and BIN files under `firmware/uwb/build`.
+
+### 3. Build the BLE firmware when required
+
+The gateway and BLE bridge targets use Nordic nRF5 SDK 17.1.0.
+
 ```powershell
+$env:SDK_ROOT = "C:\nRF5_SDK_17.1.0_ddde5a0"
 make -C firmware/ble_firmware/central/armgcc
 make -C firmware/ble_firmware/peripheral/armgcc
 ```
 
-### 7.5. Run RTLS Studio GUI
+### 4. Launch RTLS Studio
+
 ```powershell
-cd software/uwb_rtls_studio
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+cd software
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python main.py
+python uwb_rtls_studio/main.py
 ```
 
----
+### 5. Commission a deployment
 
-## 8. Documentation Index
+1. Install at least four Anchors around the operating area and assign unique IDs.
+2. Survey their coordinates and create the deployment profile in RTLS Studio.
+3. Mount the Tag on the vehicle and enter the Tag height.
+4. Connect the BLE gateway, select the Tag, and push the configuration.
+5. Start ranging and confirm that at least three valid Anchor links are available.
+6. Monitor the embedded pose or record a session for offline evaluation.
 
-- **[Live Documentation Website](https://phuongmt08.github.io/uwb-rtls/)** — Interactive MkDocs Material documentation site.
-- **[Getting Started & Setup Guide](docs/getting_started.md)** — Detailed toolchain, PATH setup, and build guide.
-- **[Firmware Architecture](docs/firmware/architecture.md)** — Embedded roles, layers, runtime tasks, and source structure.
-- **[DS-TWR Ranging Protocol](docs/firmware/ranging_protocol.md)** — Timestamp mechanics and TDMA frame scheduling.
-- **[Embedded Positioning Algorithms](docs/firmware/positioning_algorithms.md)** — Outlier rejection, Huber weighting, and UKF math.
-- **[Hardware Specifications](docs/hardware/schematics_and_specs.md)** — PCB design references and specs.
-- **[RTLS Studio User Guide](docs/software/rtls_studio_and_tools.md)** — Desktop application user manual.
+## Repository Structure
 
----
+```text
+uwb-rtls/
+├── firmware/     STM32 application, BLE firmware, and bootloader
+├── software/     RTLS Studio, programmer, and analysis tools
+├── protocol/     Protobuf contracts and generated bindings
+├── hardware/     Schematics, PCB sources, and calibration data
+└── docs/         Setup, deployment, architecture, algorithms, and thesis
+```
 
-## 9. Project Team & Credits
+## Documentation
+
+| Start here | Scope |
+|---|---|
+| **[Getting Started](docs/getting_started.md)** | Toolchains, builds, flashing, and first connection |
+| **[Deployment and Commissioning](docs/deployment.md)** | Physical layout, Anchor survey, calibration, and validation |
+| **[Firmware Architecture](docs/firmware/architecture.md)** | Embedded layers, RTOS tasks, queues, and runtime ownership |
+| **[DS-TWR Ranging Protocol](docs/firmware/ranging_protocol.md)** | Packet sequence, timestamps, timing, and TDMA behavior |
+| **[Positioning Algorithms](docs/firmware/positioning_algorithms.md)** | Mathematical model, prefilter, Anchor selection, and UKF |
+| **[Schematics and Specifications](docs/hardware/schematics_and_specs.md)** | Hardware boards, interfaces, and design references |
+| **[RTLS Studio and Tools](docs/software/rtls_studio_and_tools.md)** | Desktop configuration, monitoring, logging, and programming |
+| **[Thesis](docs/thesis/thesis_final.pdf)** | Full design, implementation, and experimental evaluation |
+
+## Team
 
 Developed at the **Faculty of Mechanical Engineering**, Ho Chi Minh City University of Technology and Engineering (**HCMUTE**).
 
-- **Phuong Mai** — Lead Firmware & System Architecture
-- **Dong Son** — Project Co-Developer
-- **Trung Quan** — Project Co-Developer
+- **Phuong Mai** — Firmware and system architecture
+- **Dong Son** — Project co-developer
+- **Trung Quan** — Project co-developer

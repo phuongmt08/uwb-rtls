@@ -8,6 +8,12 @@ The STM32 firmware uses asymmetric Double-Sided Two-Way Ranging (DS-TWR) over th
 
 ## 1. Message Exchange & Timestamp Mechanics
 
+<div align="center">
+
+![DS-TWR Message Exchange Sequence](../assets/images/thesis/chapter4/figure-4-8-ds-twr-sequence.png)
+
+</div>
+
 One successful ranging exchange executes a 4-message transaction:
 
 1. `POLL`: The Tag broadcasts a ranging request.
@@ -27,7 +33,13 @@ $$\text{Distance} = \text{ToF} \times c$$
 
 ---
 
-## 2. Runtime State Handling
+## 2. Runtime State Flow
+
+<div align="center">
+
+![Tag and Anchor State Flow](../assets/images/thesis/chapter4/figure-4-9-tag-anchor-state-flow.png)
+
+</div>
 
 The Tag state machine schedules target Anchors sequentially, transmits `POLL`, listens for `RESP`, dispatches `FINAL`, and parses `RESULT`.
 
@@ -36,6 +48,12 @@ Unexpected sequence numbers, CRC mismatches, timestamp overflow errors, or reply
 ---
 
 ## 3. TDMA Timing & Superframe Budget
+
+<div align="center">
+
+![TDMA Superframe Structure](../assets/images/thesis/chapter4/figure-4-10-tdma-superframe.png)
+
+</div>
 
 The multi-Anchor scheduler is governed by the following timing constants:
 
@@ -51,22 +69,27 @@ The total superframe period for $N$ Anchors is parameterized as:
 
 $$T_{\text{superframe}} = 17,500\,\mu\text{s} + 6,000\,\mu\text{s} \times N_{\text{anchors}}$$
 
-- **4 Anchors**: $41.5\text{ ms}$ ($24.1\text{ Hz}$ maximum rate)
-- **6 Anchors**: $53.5\text{ ms}$ ($18.7\text{ Hz}$ maximum rate)
-- **8 Anchors**: $65.5\text{ ms}$ ($15.2\text{ Hz}$ maximum rate)
+- **4 Anchors**: $41.5\text{ ms}$
+- **6 Anchors**: $53.5\text{ ms}$
+- **8 Anchors**: $65.5\text{ ms}$
 
 ---
 
-## 4. Zones and Anchor Limits
+## 4. Zones and Anchor Capacity
 
 - **Zone Configuration**: Binds a Tag to a designated Anchor constellation.
-- **Constellation Capacity**: Current zone messages support up to 6 simultaneous Anchors per zone, with a nominal update period of $100\text{ ms}$ ($10\text{ Hz}$).
+- **Constellation Capacity**: Current zone messages support up to 6 simultaneous Anchors per zone.
 
 ---
 
-## 5. Measurement Quality & Signal Metrics
+## 5. Channel Impulse Response (CIR) & Signal Quality
 
-Each `RESULT` packet carries physical RF channel quality metrics:
+Each `RESULT` packet carries physical RF channel quality metrics derived from the DW1000 Channel Impulse Response (CIR):
+
+| Line-of-Sight (LOS) CIR Sample | Non-Line-of-Sight (NLOS) CIR Sample |
+| :---: | :---: |
+| ![LOS CIR Sample](../assets/images/thesis/chapter4/figure-4-16-los-cir-sample.png) | ![NLOS CIR Sample](../assets/images/thesis/chapter4/figure-4-15-nlos-cir-sample.png) |
+
 - **First Path Signal Power (FPL)**: Signal level of the direct line-of-sight path.
 - **Receive Signal Power (RXL)**: Total integrated RF energy.
 - **Power Differential $(\Delta P = RXL - FPL)$**: Primary indicator used by the positioning prefilter to detect Non-Line-of-Sight (NLOS) and multipath obstruction.

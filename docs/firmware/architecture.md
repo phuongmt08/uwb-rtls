@@ -32,12 +32,11 @@ firmware/uwb/
 
 Role logic stays in `app/`; system workflows stay in `sys/`; hardware access stays behind `bsp/`. This is the practical dependency boundary represented by thesis Figure 4.3.
 
-<details>
-<summary><strong>Thesis Figure 4.3: firmware layers</strong></summary>
+<div align="center">
 
-![Firmware layering from thesis Figure 4.3](../assets/diagrams/thesis/chapter4/figure-4-3-firmware-layering.png)
+![Firmware Layering Architecture](../assets/diagrams/thesis/chapter4/figure-4-3-firmware-layering.png)
 
-</details>
+</div>
 
 ## FreeRTOS Execution Architecture
 
@@ -129,19 +128,17 @@ UwbRanging / app_tag
 | SPI is busy | IMU/UWB waits on the mutex; PM uses a non-blocking attempt | Power telemetry cannot delay active ranging |
 | Log data is produced | Data remains in RAM until the background flush | Flash latency is removed from the critical UWB path |
 
-### Timing: Thesis Versus Current Firmware
+### Task Execution Timing & Periodic Semantics
 
-| Item | Thesis Table 4.1 | Current implementation |
+| Task | Execution Period / Trigger | Scheduling Behavior |
 |---|---|---|
-| `UwbRanging` | UWB semaphore or dynamic timeout | Same |
-| `SensorFusion` | 20 ms cycle plus queue data | Queue wait up to 20 ms, processing, then 20 ms delay |
-| `Network` | 5 ms periodic service | 2 ms delay |
-| `SysMonitoring` | 30 s | Same |
-| `FlashStorage` | 2 s | Same |
-| `PM` | 100 ms | Same |
-| `IO` | Button semaphore and 100 ms timeout | Same |
-
-The `SensorFusion` loop is **not a guaranteed 50 Hz periodic task**. Its iteration time includes queue blocking, computation and the final 20 ms delay. SystemView measurements must report active execution separately from Blocked time.
+| `UwbRanging` | Event-driven (UWB Semaphore) + dynamic deadline timeout | Realtime preemption for timestamp dispatch |
+| `SensorFusion` | Event-driven (Wait up to 20 ms for UWB distance queue) | Drains stale frames, executes UKF prediction & update |
+| `Network` | 2 ms periodic service | Processes serial packets and BLE telemetry |
+| `SysMonitoring` | 30 s periodic | Samples CPU load, heap usage, and stack watermarks |
+| `FlashStorage` | 2 s periodic | Flushes RAM log buffers to persistent Flash |
+| `PM` | 100 ms periodic | Battery voltage sensing and thermal policy |
+| `IO` | Button EXTI + 100 ms timeout | Debounces pushbutton and services LED blink patterns |
 
 ## Source Traceability
 
@@ -152,7 +149,6 @@ The `SensorFusion` loop is **not a guaranteed 50 Hz periodic task**. Its iterati
 | Completed range-frame producer | `firmware/uwb/app/app_tag.c` |
 | IMU queue and UKF ownership | `firmware/uwb/sys/sys_sensor_fusion.c` |
 | Button ISR signaling | `firmware/uwb/bsp/bsp_io.c` |
-| Thesis design | Chapter 4.2.2.2 and Table 4.1 in [the thesis](../thesis/thesis_final.pdf) |
 
 ## Continue Reading
 

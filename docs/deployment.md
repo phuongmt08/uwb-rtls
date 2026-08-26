@@ -8,7 +8,11 @@ This guide provides a practical, step-by-step procedure for deploying the **UWB-
 
 ## 1. System Deployment Topology
 
-![System Deployment Model from Thesis Figure 3.1](assets/diagrams/thesis/chapter3/figure-3-1-system-deployment-model.png)
+<div align="center">
+
+![System Deployment Model](assets/diagrams/thesis/chapter3/figure-3-1-system-deployment-model.png)
+
+</div>
 
 | Entity | Hardware | Function in Deployment |
 | --- | --- | --- |
@@ -26,25 +30,14 @@ This guide provides a practical, step-by-step procedure for deploying the **UWB-
 - **Hold User Button (~3s)**: Toggles node between **Tag Mode** and **Anchor Mode** (LED flashes 3 times, saves to Flash, and reboots).
 - **Single Click**: Toggles active UWB ranging on/off.
 
-### 2.2. Anchor ID Selection (3-position DIP Switch on Anchor Boards)
+### 2.2. Anchor ID Selection (3-position DIP Switch `SW1`)
 
-Anchor boards use a **3-position DIP switch (`SW1`)** to select the Anchor ID from $0 \dots 7$ ($2^3 = 8$ Anchors supported) using binary encoding ($\text{ID} = \text{SW1} \cdot 1 + \text{SW2} \cdot 2 + \text{SW3} \cdot 4$).
+Anchor IDs ($0 \dots 7$) are set via binary encoding: $\text{ID} = \text{SW1} \cdot 1 + \text{SW2} \cdot 2 + \text{SW3} \cdot 4$.
 
-```
-[ ON  ]  ■  ■  ■
-[ OFF ]  1  2  3
-```
-
-| Anchor ID | Switch 1 (Bit 0) | Switch 2 (Bit 1) | Switch 3 (Bit 2) | Binary / Function |
-| :---: | :---: | :---: | :---: | --- |
-| **Anchor 0** | **OFF** | **OFF** | **OFF** | `000` — Room Origin $(0, 0, z)$ |
-| **Anchor 1** | **ON** | **OFF** | **OFF** | `001` |
-| **Anchor 2** | **OFF** | **ON** | **OFF** | `010` |
-| **Anchor 3** | **ON** | **ON** | **OFF** | `011` |
-| **Anchor 4** | **OFF** | **OFF** | **ON** | `100` (Optional) |
-| **Anchor 5** | **ON** | **OFF** | **ON** | `101` (Optional) |
-| **Anchor 6** | **OFF** | **ON** | **ON** | `110` (Optional) |
-| **Anchor 7** | **ON** | **ON** | **ON** | `111` (Optional) |
+| Anchor ID | `0` | `1` | `2` | `3` | `4` | `5` | `6` | `7` |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Binary (`SW1..SW3`)** | `000` | `100` | `010` | `110` | `001` | `101` | `011` | `111` |
+| **Switch States (1, 2, 3)** | OFF, OFF, OFF | ON, OFF, OFF | OFF, ON, OFF | ON, ON, OFF | OFF, OFF, ON | ON, OFF, ON | OFF, ON, ON | ON, ON, ON |
 
 ---
 
@@ -73,16 +66,16 @@ Anchor boards use a **3-position DIP switch (`SW1`)** to select the Anchor ID fr
 
 ## 4. Step 3: Measure Anchor Coordinates (Surveying)
 
-Establish one corner Anchor as **Origin $(0.0, 0.0, z_0)$**, then measure $(X, Y, Z)$ using a laser distance meter:
+Measure the 3D coordinates $(X, Y, Z)$ of all Anchors relative to your defined global room coordinate frame $\{G\}$ using a laser distance meter:
 
 ### Example Room Setup ($8.0\text{ m} \times 5.0\text{ m}$)
 
 | Anchor Node | X (Width) | Y (Depth) | Z (Height) | Placement Position |
 | :---: | :---: | :---: | :---: | --- |
-| **Anchor 0** | `0.00 m` | `0.00 m` | `2.00 m` | Front-left corner (Origin) |
-| **Anchor 1** | `8.00 m` | `0.00 m` | `2.00 m` | Front-right corner |
-| **Anchor 2** | `8.00 m` | `5.00 m` | `2.00 m` | Back-right corner |
-| **Anchor 3** | `0.00 m` | `5.00 m` | `2.00 m` | Back-left corner |
+| **Anchor 0** | `1.00 m` | `1.00 m` | `2.00 m` | Front-left area |
+| **Anchor 1** | `7.00 m` | `1.00 m` | `2.00 m` | Front-right area |
+| **Anchor 2** | `7.00 m` | `4.50 m` | `2.00 m` | Back-right area |
+| **Anchor 3** | `1.00 m` | `4.50 m` | `2.00 m` | Back-left area |
 
 ---
 

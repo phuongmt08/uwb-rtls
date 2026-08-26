@@ -1,21 +1,22 @@
-# UWB-RTLS Getting Started & Environment Setup Guide
+# Getting Started & Environment Setup Guide
 
-[Documentation Home](README.md) · [Firmware Architecture](firmware/architecture.md)
+[Documentation Home](README.md) · [Firmware Architecture](firmware/architecture.md) · [Deployment Guide](deployment.md)
 
-This guide provides a high-level, step-by-step walkthrough for configuring build toolchains, submodules, and software environments for the **UWB-RTLS** repository.
+This guide provides step-by-step instructions for configuring build toolchains, compiling firmware binaries, and launching desktop software for the **UWB-RTLS** repository.
 
 ---
 
 ## Table of Contents
 
 1. [Environment & Version Matrix](#1-environment--version-matrix)
-2. [High-Level Setup Flow](#2-high-level-setup-flow)
-3. [Step 1: Clone Repository & Submodules](#3-step-1-clone-repository--submodules)
-4. [Step 2: Generate Protocol Buffers Code](#4-step-2-generate-protocol-buffers-code)
-5. [Step 3: Toolchain Setup & STM32 Firmware Build](#5-step-3-toolchain-setup--stm32-firmware-build)
-6. [Step 4: Build BLE Firmware](#6-step-4-build-ble-firmware)
-7. [Step 5: Setup Virtual Environment & Run RTLS Studio](#7-step-5-setup-virtual-environment--run-rtls-studio)
-8. [Troubleshooting](#8-troubleshooting)
+2. [Setup Flow](#2-setup-flow)
+3. [Step-by-Step Setup Guide](#3-step-by-step-setup-guide)
+   - [3.1. Clone Repository & Submodules](#31-clone-repository--submodules)
+   - [3.2. Generate Protocol Buffers Code](#32-generate-protocol-buffers-code)
+   - [3.3. Toolchain Setup & STM32 Firmware Build](#33-toolchain-setup--stm32-firmware-build)
+   - [3.4. Build Nordic BLE Firmware](#34-build-nordic-ble-firmware)
+   - [3.5. Setup Python Virtual Environment & Run RTLS Studio](#35-setup-python-virtual-environment--run-rtls-studio)
+4. [Troubleshooting](#4-troubleshooting)
 
 ---
 
@@ -31,18 +32,22 @@ This guide provides a high-level, step-by-step walkthrough for configuring build
 
 ---
 
-## 2. High-Level Setup Flow
+## 2. Setup Flow
 
 ```mermaid
-flowchart LR
-    S1["1. Clone & Submodules<br/>git clone --recursive"] --> S2["2. Protobuf CodeGen<br/>make -C protocol"] --> S3["3. Build STM32 Firmware<br/>make -C firmware/uwb"] --> S4["4. Run RTLS Studio<br/>python main.py"]
+flowchart TD
+    S1["1. Clone Repository & Submodules (git clone --recursive)"] --> S2["2. Generate Protocol Buffers (make -C protocol)"]
+    S2 --> S3["3. Build STM32 Firmware (make -C firmware/uwb)"]
+    S3 --> S4["4. Launch RTLS Studio (python main.py)"]
 ```
 
 ---
 
-## 3. Step 1: Clone Repository & Submodules
+## 3. Step-by-Step Setup Guide
 
-This repository uses submodules for `protocol/nanopb` (embedded C Protobuf compiler) and `docs` (thesis documentation).
+### 3.1. Clone Repository & Submodules
+
+Clone the repository with recursive submodules (for `protocol/nanopb` embedded C compiler):
 
 ```bash
 git clone --recursive https://github.com/phuongmt08/uwb-rtls.git
@@ -51,11 +56,9 @@ cd uwb-rtls
 
 > **Note:** If you already cloned without `--recursive`, run `git submodule update --init --recursive` to fetch missing submodules.
 
----
+### 3.2. Generate Protocol Buffers Code
 
-## 4. Step 2: Generate Protocol Buffers Code
-
-Generate binary serialization bindings for C firmware and Python desktop software:
+Generate binary serialization bindings for embedded C and Python desktop software:
 
 ```powershell
 make -C protocol
@@ -64,13 +67,11 @@ make -C protocol
 - **C Firmware Headers**: `protocol/protos/*.pb.c` and `*.pb.h`
 - **Python Host Module**: `software/common/protocol_pb2.py`
 
----
-
-## 5. Step 3: Toolchain Setup & STM32 Firmware Build
+### 3.3. Toolchain Setup & STM32 Firmware Build
 
 > **Note:** Both `arm-none-eabi-gcc.exe` and `make.exe` are bundled inside your **STM32CubeIDE** installation plugins. No standalone downloads are required.
 
-### 5.1. Option A: Build via Command Line (PowerShell)
+#### Option A: Build via Command Line (PowerShell)
 
 Set your PowerShell session paths to point to STM32CubeIDE plugins:
 
@@ -87,15 +88,13 @@ make -C firmware/uwb -j8
 
 *Build Artifacts (`firmware/uwb/build/`):* `uwb-rtls.elf`, `uwb-rtls.hex`, `uwb-rtls.bin`
 
-### 5.2. Option B: Build inside STM32CubeIDE GUI
+#### Option B: Build inside STM32CubeIDE GUI
 
 1. Open **STM32CubeIDE**.
-2. **File -> Open Projects from File System...** -> Select `firmware/uwb`.
+2. **File $\rightarrow$ Open Projects from File System...** $\rightarrow$ Select `firmware/uwb`.
 3. Press **Ctrl + B** to build.
 
----
-
-## 6. Step 4: Build BLE Firmware
+### 3.4. Build Nordic BLE Firmware
 
 1. Download [Nordic nRF5 SDK v17.1.0](https://www.nordicsemi.com/Products/Development-software/nRF5-SDK).
 2. Set `SDK_ROOT` and compile:
@@ -106,9 +105,7 @@ make -C firmware/ble_firmware/central/armgcc
 make -C firmware/ble_firmware/peripheral/armgcc
 ```
 
----
-
-## 7. Step 5: Setup Virtual Environment & Run RTLS Studio
+### 3.5. Setup Python Virtual Environment & Run RTLS Studio
 
 Create Python virtual environment, install dependencies, and launch the GUI:
 
@@ -126,9 +123,11 @@ python main.py
 
 ---
 
-## 8. Troubleshooting
+## 4. Troubleshooting
 
-- **`GCC_PATH is not set`**: Ensure `$env:GCC_PATH` points to the `bin/` directory inside STM32CubeIDE plugins.
-- **`make: command not found`**: Ensure the STM32CubeIDE Make plugin directory is added to `$env:PATH`.
-- **`nanopb_generator.py missing`**: Run `git submodule update --init --recursive`.
-- **`No module named protocol_pb2`**: Run `make -C protocol` before starting RTLS Studio.
+| Error Message / Symptom | Root Cause | Solution |
+| --- | --- | --- |
+| **`GCC_PATH is not set`** | Missing environment variable. | Set `$env:GCC_PATH` to point to the `bin/` directory inside STM32CubeIDE plugins. |
+| **`make: command not found`** | Make tool is not in session `PATH`. | Add STM32CubeIDE Make plugin directory to `$env:PATH`. |
+| **`nanopb_generator.py missing`** | Submodule was not initialized. | Run `git submodule update --init --recursive`. |
+| **`No module named protocol_pb2`** | Protobuf bindings not compiled. | Run `make -C protocol` before starting RTLS Studio. |
