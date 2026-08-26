@@ -9,12 +9,13 @@ This section details the embedded firmware running on the STM32F411 microcontrol
 ## 1. Reading Order
 
 ```mermaid
-flowchart LR
-    A[1. Architecture] --> B[2. Ranging Protocol] --> C[3. Positioning Algorithms]
+flowchart TD
+    A["1. Firmware Architecture"] --> B["2. DS-TWR Ranging Protocol"]
+    B --> C["3. Positioning Algorithms"]
 ```
 
 1. **[Embedded Firmware Architecture](architecture.md)**
-   - Role selection (Tag vs. Anchor via DIP switch).
+   - Role selection (Tag vs. Anchor via User Button hold).
    - Layered architecture (HAL $\rightarrow$ BSP $\rightarrow$ Middleware $\rightarrow$ Services $\rightarrow$ App).
    - FreeRTOS runtime task model and inter-task communication.
 

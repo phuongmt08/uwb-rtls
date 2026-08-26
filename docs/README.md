@@ -1,6 +1,6 @@
 # UWB-RTLS Documentation Index
 
-[GitHub Repository](https://github.com/phuongmt08/uwb-rtls) · [Live Documentation Website](https://phuongmt08.github.io/uwb-rtls/)
+[GitHub Repository](https://github.com/phuongmt08/uwb-rtls)
 
 This directory contains the comprehensive technical documentation for the **UWB-RTLS** embedded indoor positioning system, covering firmware architecture, RF ranging protocols, positioning mathematics, hardware specifications, and desktop tools.
 

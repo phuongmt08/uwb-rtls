@@ -85,8 +85,10 @@ flowchart TD
 ## 4. Step-by-Step Calibration via RTLS Studio
 
 ```mermaid
-flowchart LR
-    A["1. Setup Baseline<br/>Tag-to-Anchor d_known"] --> B["2. Open RTLS Studio<br/>Switch to Developer Mode"] --> C["3. Tab 4: Calibration<br/>Enter d_known"] --> D["4. Click Start<br/>Auto-Iterates & Saves to Flash"]
+flowchart TD
+    A["1. Setup Baseline (Tag-to-Anchor d_known)"] --> B["2. Open RTLS Studio & Switch to Developer Mode"]
+    B --> C["3. Tab 4: Calibration -> Enter d_known"]
+    C --> D["4. Click Start -> Auto-Iterates & Saves to Flash"]
 ```
 
 1. **Physical Setup**:

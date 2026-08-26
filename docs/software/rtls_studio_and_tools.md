@@ -29,8 +29,10 @@ This user guide explains how to operate the **RTLS Studio** desktop application 
 ## 2. Connecting to Nodes via USB Dongle
 
 ```mermaid
-flowchart LR
-    S1["1. Plug nRF52840 Dongle<br/>into Laptop USB"] --> S2["2. Launch RTLS Studio<br/>python main.py"] --> S3["3. Auto-Detect Dongle<br/>Popup appears"] --> S4["4. Click Scan BLE<br/>Select UWB-Tag -> Connect"]
+flowchart TD
+    S1["1. Plug nRF52840 Dongle into Laptop USB"] --> S2["2. Launch RTLS Studio (python main.py)"]
+    S2 --> S3["3. Auto-Detect Dongle Popup Appears"]
+    S3 --> S4["4. Click Scan BLE & Connect to UWB-Tag"]
 ```
 
 1. **Insert USB Dongle**: Plug the nRF52840 Dongle into your computer.
@@ -116,8 +118,10 @@ You can toggle between **User Mode** and **Developer Mode** using the dropdown i
 The **RTLS Programmer** tool flashes firmware binaries directly to STM32 nodes over USB DFU without requiring an ST-Link hardware programmer.
 
 ```mermaid
-flowchart LR
-    P1["1. Put Node in DFU Mode<br/>Hold BOOT0 + Plug USB"] --> P2["2. Launch Programmer<br/>python main.py"] --> P3["3. Select HEX File<br/>uwb-rtls.hex"] --> P4["4. Click Flash Firmware<br/>Auto Erase & Verify"]
+flowchart TD
+    P1["1. Put Node in DFU Mode (Hold BOOT0 + Plug USB)"] --> P2["2. Launch Programmer (python main.py)"]
+    P2 --> P3["3. Select HEX File (uwb-rtls.hex)"]
+    P3 --> P4["4. Click Flash Firmware (Auto Erase & Verify)"]
 ```
 
 ### Step-by-Step Flashing Procedure

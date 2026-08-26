@@ -3,7 +3,6 @@
 # UWB-RTLS
 ### High-Precision Indoor Real-Time Location System for Autonomous Mobile Robots
 
-<a href="https://phuongmt08.github.io/uwb-rtls/"><img src="https://img.shields.io/badge/Documentation-Live%20Website-0f766e?style=flat-square&logo=google-chrome&logoColor=white" alt="Live Docs Website" /></a>
 <a href="#5-key-hardware--software-specs"><img src="https://img.shields.io/badge/MCU-STM32F411-1e293b?style=flat-square&logo=stmicroelectronics&logoColor=white" alt="MCU" /></a>
 <a href="#5-key-hardware--software-specs"><img src="https://img.shields.io/badge/UWB-Decawave%20DW1000-0f766e?style=flat-square" alt="UWB" /></a>
 <a href="#5-key-hardware--software-specs"><img src="https://img.shields.io/badge/BLE-Nordic%20nRF52-0284c7?style=flat-square&logo=nordicsemiconductor&logoColor=white" alt="BLE" /></a>
@@ -42,11 +41,11 @@
 ## 2. System Architecture
 
 ```mermaid
-flowchart LR
-    Anchors <-->|UWB| Tag
-    Tag -->|USB| Robot
-    Tag <-->|BLE| Gateway
-    Gateway <-->|USB| Studio
+flowchart TD
+    Anchors["Fixed Anchors (0..N)"] <-->|UWB DS-TWR| Tag["Mobile Tag Node"]
+    Tag -->|USB CDC @ 10 Hz| Robot["Robot Navigation Controller"]
+    Tag <-->|BLE 5.0 Wireless| Gateway["nRF52840 USB Dongle"]
+    Gateway <-->|USB Virtual COM| Studio["RTLS Studio Desktop GUI"]
 ```
 
 > See [Firmware Architecture](docs/firmware/architecture.md) for the complete embedded layer design, RTOS task model, and data channels.

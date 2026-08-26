@@ -96,8 +96,10 @@ Establish one corner Anchor as **Origin $(0.0, 0.0, z_0)$**, then measure $(X, Y
 ## 6. Step 5: Commission via RTLS Studio
 
 ```mermaid
-flowchart LR
-    A["1. Insert USB Dongle<br/>into Laptop"] --> B["2. Launch RTLS Studio<br/>python main.py"] --> C["3. Scan & Connect<br/>Select Tag over BLE"] --> D["4. Enter Coordinates<br/>in Config Tab -> Save to Flash"]
+flowchart TD
+    A["1. Insert USB Dongle into Laptop"] --> B["2. Launch RTLS Studio (python main.py)"]
+    B --> C["3. Scan BLE & Connect to UWB-Tag"]
+    C --> D["4. Enter Coordinates in Config Tab -> Save to Flash"]
 ```
 
 1. Insert nRF52840 USB Dongle into laptop.
