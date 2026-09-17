@@ -596,6 +596,23 @@ sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion
 	return SYS_SENSOR_FUSION_OK;
 }
 
+sys_sensor_fusion_err_t sys_sensor_fusion_realign_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0)
+{
+	ukf.state.px = x0;
+	ukf.state.py = y0;
+	ukf.state.vx = 0.0f;
+	ukf.state.vy = 0.0f;
+	/* Inflate position covariance to allow rapid filter re-adaptation */
+	ukf.P_data[0U * NUM_STATE + 0U] = 0.25f;
+	ukf.P_data[0U * NUM_STATE + 1U] = 0.0f;
+	ukf.P_data[1U * NUM_STATE + 0U] = 0.0f;
+	ukf.P_data[1U * NUM_STATE + 1U] = 0.25f;
+	ukf.last_update_tick = HAL_GetTick();
+	sys_sensor_fusion_set_predict_flag();
+	if (p_ukf != NULL) *p_ukf = ukf.state;
+	return SYS_SENSOR_FUSION_OK;
+}
+
 bool sys_sensor_fusion_is_initialized(void)
 {
     return ukf.initialized;
