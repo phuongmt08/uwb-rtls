@@ -9,11 +9,12 @@ Mục tiêu:
   xác minh CRC rồi reboot sang app mới.
 
   !!! QUAN TRỌNG !!!
-    File hex cần dùng là APP firmware mới nhất trong: firmware/uwb/build_version/
-  KHÔNG phải bootloader hex — bootloader không thể tự FOTA chính nó.
+    Phải chỉ rõ APP firmware bằng --hex và khóa SHA-256 bằng --expect-sha256.
+  KHÔNG dùng cơ chế tự chọn file mới nhất. KHÔNG dùng bootloader hex —
+  bootloader không thể FOTA chính nó.
 
 Flow:
-  1. Auto-probe cổng USB-CDC (expect device_information_resp).
+  1. Mở đúng cổng USB-CDC đã chỉ định; kiểm serial/type/role của bo.
   2. send enter_to_bootloader  →  fota_state_resp(IDLE)
   3. send flash_erase          →  fota_state_resp(ERASING)
                                    fota_state_resp(RECEIVING)
@@ -24,15 +25,17 @@ Flow:
   7. Report PASS / FAIL
 
 Usage:
-  python test_fota.py
-    python test_fota.py --hex ../../firmware/uwb/build_version/<latest>.hex
-    python test_fota.py --port COM5 --hex ../../firmware/uwb/build_version/<latest>.hex
-  python test_fota.py --chunk-size 64
+  python test_fota.py --port /dev/serial/by-id/<tag> --hex <uwb-rtls.hex> \
+    --expect-sha256 <64-hex> --expect-serial 5071420 --expect-role tag --dry-run
+  python test_fota.py --port /dev/serial/by-id/<tag> --hex <uwb-rtls.hex> \
+    --expect-sha256 <64-hex> --expect-serial 5071420 --expect-role tag --yes
 
 Memory layout (memorylayout.h):
   MEM_APP_START  = 0x0800_C000
   MEM_APP_END    = 0x0804_0000  (208 KB app region)
 """
+import argparse
+import hashlib
 import os
 import serial
 import struct
@@ -347,7 +350,8 @@ def step_flash_erase(session: VvTestSession, factory: CommandFactory,
 
 def step_flash_write(session: VvTestSession, factory: CommandFactory,
                      src: int, dst: int, firmware_blob: bytes,
-                     compress: bool = True, block_size: int = BLOCK_SIZE) -> bool:
+                     compress: bool = True, block_size: int = BLOCK_SIZE,
+                     chunk_size: int = CHUNK_SIZE) -> bool:
     if compress:
         compressed_data, frame_end_offsets = _compress_fota_blocks(firmware_blob)
         frame_count = len(frame_end_offsets)
@@ -360,12 +364,12 @@ def step_flash_write(session: VvTestSession, factory: CommandFactory,
         )
         raw_chunks = _split_chunks(
             compressed_data,
-            CHUNK_SIZE,
+            chunk_size,
             pad_last=False,
         )
     else:
         print(f"\n── STEP 3: flash_write (Uncompressed: {len(firmware_blob)}B) ──")
-        raw_chunks = _split_chunks(firmware_blob, CHUNK_SIZE)
+        raw_chunks = _split_chunks(firmware_blob, chunk_size)
         frame_end_offsets = []
 
     total_chunks = len(raw_chunks)
@@ -376,7 +380,7 @@ def step_flash_write(session: VvTestSession, factory: CommandFactory,
     )
     sync_mode = ", DEFLATE-frame sync" if compress else ""
     print(
-        f"Total chunks: {total_chunks} × {CHUNK_SIZE}B "
+        f"Total chunks: {total_chunks} × {chunk_size}B "
         f"(ACK window<={block_size}{sync_mode})"
     )
 
@@ -515,46 +519,87 @@ def step_flash_verify(session: VvTestSession, factory: CommandFactory,
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
-def _find_default_hex() -> Optional[str]:
-    """
-    Auto-detect APP firmware hex: newest *.hex in firmware/uwb/build_version/
-    (script lives at software/vv_testings/, so go up 2 levels → uwb-rtls root)
-    """
-    script_dir = Path(__file__).resolve().parent
-
-    # Always prefer newest versioned hex in build_version/
-    build_version_dir = (script_dir.parent.parent
-                         / "firmware" / "uwb" / "build_version")
-    if build_version_dir.is_dir():
-        hexes = sorted(build_version_dir.glob("*.hex"), key=lambda p: p.stat().st_mtime,
-                       reverse=True)
-        if hexes:
-            return str(hexes[0])
-
-    # Compatibility fallback for older local workflows
-    candidate = (script_dir.parent.parent
-                 / "firmware" / "uwb" / "Debug" / "uwb-rtls.hex")
-    if candidate.exists():
-        return str(candidate)
-
-    return None
+def _parse_int_auto(value: str) -> int:
+    return int(value, 0)
 
 
-def main() -> int:
-    # ── Resolve HEX file ──────────────────────────────────────────────────────
-    hex_path = _find_default_hex()
-    if hex_path is None:
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_target_identity(info, expected_serial: int, expected_role: str) -> bool:
+    role_map = {
+        "tag": pb.DEVICE_ROLE_TAG,
+        "anchor": pb.DEVICE_ROLE_ANCHOR,
+    }
+    type_map = {
+        "tag": pb.DEVICE_TYPE_TAG,
+        "anchor": pb.DEVICE_TYPE_ANCHOR,
+    }
+    actual_serial = int(info.serial_number)
+    actual_role = int(info.role)
+    actual_type = int(info.device_type)
+    print(
+        "Target    : "
+        f"serial={actual_serial} device_type={actual_type} role={actual_role}"
+    )
+    if actual_serial != expected_serial:
+        print(f"ERROR: target serial mismatch: expected {expected_serial}, got {actual_serial}")
+        return False
+    if actual_role != role_map[expected_role] or actual_type != type_map[expected_role]:
         print(
-            "ERROR: APP firmware hex not found.\n"
-            "  Expected: firmware/uwb/build_version/*.hex (newest file auto-selected)\n"
-            "  Use --hex <path> to specify manually.\n"
-            "  NOTE: do NOT use bootloader1.hex — bootloader cannot FOTA itself!"
+            f"ERROR: target identity mismatch: expected type/role={expected_role}, "
+            f"got device_type={actual_type} role={actual_role}"
         )
+        return False
+    return True
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="FOTA over an explicitly selected USB-CDC port and verified APP HEX"
+    )
+    parser.add_argument("--port", required=True, help="Exact COM port or /dev/serial/by-id path")
+    parser.add_argument("--hex", required=True, help="Exact APP firmware HEX path")
+    parser.add_argument("--expect-sha256", required=True, help="Expected SHA-256 of the HEX file")
+    parser.add_argument("--expect-serial", required=True, type=_parse_int_auto,
+                        help="Expected board serial number (decimal or 0x...)")
+    parser.add_argument("--expect-role", required=True, choices=("tag", "anchor"),
+                        help="Expected device type and runtime role")
+    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE,
+                        help=f"Flash payload bytes per chunk (4..{CHUNK_SIZE}, multiple of 4)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Validate arguments, SHA-256 and HEX without opening the serial port")
+    parser.add_argument("--yes", action="store_true",
+                        help="Required acknowledgement for erase/write/verify")
+    args = parser.parse_args(argv)
+
+    if args.chunk_size < 4 or args.chunk_size > CHUNK_SIZE or args.chunk_size % 4:
+        parser.error(f"--chunk-size must be a multiple of 4 in range 4..{CHUNK_SIZE}")
+
+    # ── Resolve HEX file ──────────────────────────────────────────────────────
+    hex_file = Path(args.hex).expanduser().resolve()
+    if not hex_file.is_file():
+        print(f"ERROR: HEX file not found: {hex_file}")
         return 1
-    if not os.path.isfile(hex_path):
-        print(f"ERROR: HEX file not found: {hex_path}")
+    hex_path = str(hex_file)
+    expected_sha256 = args.expect_sha256.strip().lower()
+    if len(expected_sha256) != 64 or any(c not in "0123456789abcdef" for c in expected_sha256):
+        print("ERROR: --expect-sha256 must contain exactly 64 hexadecimal characters")
         return 1
-    print(f"HEX file : {hex_path}  (APP firmware)")
+    actual_sha256 = _sha256_file(hex_file)
+    print(f"HEX file : {hex_file}  (APP firmware)")
+    print(f"SHA-256  : {actual_sha256}")
+    if actual_sha256 != expected_sha256:
+        print(f"ERROR: HEX SHA-256 mismatch: expected {expected_sha256}")
+        return 1
+    if "bootloader" in hex_file.name.lower():
+        print("ERROR: refusing a file whose name contains 'bootloader'")
+        return 1
 
     # ── Parse HEX ─────────────────────────────────────────────────────────────
     try:
@@ -565,48 +610,66 @@ def main() -> int:
     print(f"Image size: {len(firmware_blob)} bytes "
           f"(0x{MEM_APP_START:08X}..0x{MEM_APP_START + len(firmware_blob):08X})")
 
-    chunk_size = CHUNK_SIZE
-    chunks = _split_chunks(firmware_blob, CHUNK_SIZE)
-    print(f"Chunks    : {len(chunks)} × {chunk_size} B")
+    chunks = _split_chunks(firmware_blob, args.chunk_size)
+    print(f"Chunks    : {len(chunks)} x {args.chunk_size} B")
 
-    # ── Probe / connect ───────────────────────────────────────────────────────
-    print("Auto-probing serial ports...")
-    probe = VvTestSession.auto_probe(src=DEFAULT_SRC, debug=False)
-    if probe is None:
-        print("ERROR: No compatible device found. Is the bootloader running?")
+    if args.dry_run:
+        print("DRY RUN PASSED: artifact verified; serial port was not opened")
+        return 0
+    if not args.yes:
+        print("ERROR: refusing to erase/flash without explicit --yes (run --dry-run first)")
         return 1
 
-    port = probe.port
+    # ── Connect only to the explicitly selected target ───────────────────────
+    port = args.port
     baud = DEFAULT_BAUD
     src = DEFAULT_SRC
     app_dst = DEFAULT_APP_DST
     bl_dst = DEFAULT_BL_DST
-    print(f"Port      : {port} @ {baud}  (SN={probe.serial_number})")
+    print(f"Port      : {port} @ {baud}")
     print(f"Address   : src={src} app_dst={app_dst} bl_dst={bl_dst}")
     factory = CommandFactory()
 
     # ── Run FOTA steps ────────────────────────────────────────────────────────
     all_ok = True
-    with VvTestSession(port, baud=baud, debug=True) as session:
-        all_ok &= step_enter_bootloader(session, factory, src, app_dst)
-        if not all_ok:
-            print("[ABORT] enter_to_bootloader failed")
-        else:
-            all_ok &= step_flash_erase(session, factory, src, bl_dst)
+    try:
+        with VvTestSession(port, baud=baud, debug=True) as session:
+            info_pkt = factory.device_information_get(src, app_dst, session.proto.next_seq())
+            info, _packets = session.send_expect_param(
+                info_pkt, "device_information_resp", timeout_s=0.8
+            )
+            if info is None:
+                print("ERROR: device_information_get timed out; refusing to enter bootloader")
+                return 1
+            if not _verify_target_identity(info, args.expect_serial, args.expect_role):
+                print("ERROR: target verification failed; refusing to enter bootloader")
+                return 1
 
-        if all_ok:
-            all_ok &= step_flash_write(session, factory, src, bl_dst, firmware_blob, compress=True)
+            all_ok &= step_enter_bootloader(session, factory, src, app_dst)
+            if not all_ok:
+                print("[ABORT] enter_to_bootloader failed")
+            else:
+                all_ok &= step_flash_erase(session, factory, src, bl_dst)
 
-        if all_ok:
-            all_ok &= step_flash_verify(session, factory, src, bl_dst)
+            if all_ok:
+                all_ok &= step_flash_write(
+                    session, factory, src, bl_dst, firmware_blob,
+                    compress=True, chunk_size=args.chunk_size,
+                )
+
+            if all_ok:
+                all_ok &= step_flash_verify(session, factory, src, bl_dst)
+    except (serial.SerialException, OSError) as exc:
+        print(f"ERROR: cannot use serial port {port}: {type(exc).__name__}: {exc}")
+        return 1
 
     # ── Result ────────────────────────────────────────────────────────────────
-    print("\n" + "═" * 58)
+    print("\n" + "=" * 58)
     if all_ok:
-        print("FOTA TEST  ✓  PASSED")
+        print("FOTA TEST PASSED")
     else:
-        print("FOTA TEST  ✗  FAILED")
-    print("═" * 58)
+        print("FOTA TEST FAILED")
+    print("=" * 58)
     return 0 if all_ok else 1
 
 

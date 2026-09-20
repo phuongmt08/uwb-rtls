@@ -44,7 +44,7 @@ FW_IMAGE_META_SCRIPT := tools/generate_fw_image_meta.py
 
 # Version is updated by firmware/uwb/tools/update_version.py before build
 
-.PHONY: all clean rebuild patch_fota_header flash size
+.PHONY: all clean rebuild patch_fota_header flash size force_fw_image_meta
 
 # DFU flashing (bootloader1 exposes alt-0 "@App Flash" at MEM_APP_START)
 DFUUTIL ?= dfu-util
@@ -119,14 +119,17 @@ PROTOCOL_OBJECTS := $(BUILD_DIR)/protocol/protos/protocol.pb.o \
 OBJECTS := $(LOCAL_OBJECTS) $(COMMON_OBJECTS) $(PROTOCOL_OBJECTS)
 OBJECTS += $(BUILD_DIR)/$(STARTUP:.s=.o)
 
-$(FW_IMAGE_META_HEADER): $(FW_IMAGE_META_SCRIPT)
+force_fw_image_meta:
+
+$(FW_IMAGE_META_HEADER): force_fw_image_meta $(FW_IMAGE_META_SCRIPT)
 	@mkdir -p $(GENERATED_DIR)
 	@$(PYTHON) $(FW_IMAGE_META_SCRIPT) \
 		--output $(FW_IMAGE_META_HEADER) \
 		--git-sha $(FW_GIT_SHA) \
 		--timestamp $(FW_IMAGE_TIMESTAMP) \
 		--image-length $(FW_IMAGE_LENGTH) \
-		--image-crc $(FW_IMAGE_CRC)
+		--image-crc $(FW_IMAGE_CRC) \
+		--preserve-timestamp-if-same-sha
 
 $(TARGET).elf: $(OBJECTS)
 	@mkdir -p $(dir $@)
@@ -162,6 +165,7 @@ $(BUILD_DIR)/%.o: %.S
 
 clean:
 	rm -rf $(BUILD_DIR) build_obj
+	rm -f $(FW_IMAGE_META_HEADER)
 
 rebuild: clean all
 
