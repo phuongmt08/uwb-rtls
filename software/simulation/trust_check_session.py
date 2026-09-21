@@ -241,6 +241,15 @@ def check_plan(plan_path, fusion_dir, checks, report):
 
 def self_test() -> bool:
     ok = True
+    try:
+        import numpy  # noqa: F401
+        import pandas  # noqa: F401
+        from module.module_trust_dataset import build_text_recording  # noqa: F401
+        print("[OK]   S0 dependency doc fusion: numpy + pandas + module_trust_dataset")
+    except Exception as exc:  # noqa: BLE001 - field preflight must report every dependency failure
+        print(f"[FAIL] S0 dependency doc fusion: {type(exc).__name__}: {exc}")
+        ok = False
+
     with tempfile.TemporaryDirectory() as tmp:
         plan = os.path.join(tmp, "plan.csv")
         with open(plan, "w", encoding="utf-8-sig", newline="") as fh:

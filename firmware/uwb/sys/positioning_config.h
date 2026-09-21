@@ -40,7 +40,7 @@
 /**
  * @brief Tag height from ground (meters)
  */
-#define TAG_HEIGHT_M            (0.47f)
+#define TAG_HEIGHT_M            (0.088f)
 
 /**
  * @brief Anchor height from ground (meters)
