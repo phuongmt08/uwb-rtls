@@ -100,18 +100,18 @@
 #define ZONE_1_ANCHOR_1_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_2_ID   2
-#define ZONE_1_ANCHOR_2_X    10.026f
+#define ZONE_1_ANCHOR_2_X    10.26f
 #define ZONE_1_ANCHOR_2_Y    -0.5f
 #define ZONE_1_ANCHOR_2_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_3_ID   3      
 #define ZONE_1_ANCHOR_3_X    -0.5f
-#define ZONE_1_ANCHOR_3_Y    10.026f
+#define ZONE_1_ANCHOR_3_Y    10.26f
 #define ZONE_1_ANCHOR_3_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_4_ID   4
-#define ZONE_1_ANCHOR_4_X    10.026f
-#define ZONE_1_ANCHOR_4_Y    10.026f
+#define ZONE_1_ANCHOR_4_X    10.26f
+#define ZONE_1_ANCHOR_4_Y    10.26f
 #define ZONE_1_ANCHOR_4_Z    ANCHOR_HEIGHT_M
 
 #define ZONE_1_ANCHOR_5_ID   5
