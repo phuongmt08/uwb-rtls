@@ -214,6 +214,43 @@ def have(tool: str) -> bool:
     return shutil.which(tool) is not None
 
 
+def flash_runtime_import_error() -> ImportError | None:
+    """Return the first missing host dependency needed to identify/flash a board."""
+    try:
+        import serial  # noqa: F401
+        from common.commands import CommandFactory  # noqa: F401
+        from common.transport import VvAddress, VvProtocol  # noqa: F401
+    except ImportError as exc:
+        return exc
+    return None
+
+
+def ensure_flash_runtime() -> bool:
+    """Use the repository venv for flash operations, or fail without a traceback."""
+    missing = flash_runtime_import_error()
+    if missing is None:
+        return True
+
+    current_python = Path(sys.executable).absolute()
+    venv_python = VENV_PYTHON.absolute()
+    if VENV_PYTHON.is_file() and current_python != venv_python:
+        print(f"\nMissing Python module {missing.name!r} in {sys.executable}.")
+        print(f"Restarting with the repository environment: {VENV_PYTHON}")
+        sys.stdout.flush()
+        try:
+            os.execv(
+                str(VENV_PYTHON),
+                [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]],
+            )
+        except OSError as exc:
+            print(f"ERROR: could not start {VENV_PYTHON}: {exc}")
+
+    print(f"\nERROR: Python module {missing.name!r} is required to flash the Tag.")
+    print(f"       Run the script with: {VENV_PYTHON} {str(Path(__file__).resolve())!r}")
+    print("       Or create the venv:   python3 software/install.py --profile orin")
+    return False
+
+
 def confirm(question: str, assume_yes: bool) -> bool:
     if assume_yes:
         print(f"{question} -> yes (--yes)")
@@ -454,9 +491,14 @@ def check_embedded_sha(config: str) -> bool:
 
 def enter_bootloader() -> bool:
     """Ask the Tag to reboot into its DFU bootloader, as the VEHICLE."""
-    from common.commands import CommandFactory
-    from common.transport import VvAddress, VvProtocol
-    import serial
+    try:
+        from common.commands import CommandFactory
+        from common.transport import VvAddress, VvProtocol
+        import serial
+    except ImportError as exc:
+        print(f"\nERROR: cannot enter the bootloader; missing Python module {exc.name!r}.")
+        print(f"       Run the script with: {VENV_PYTHON} {str(Path(__file__).resolve())!r}")
+        return False
 
     port = find_vcp()
     if port is None:
@@ -852,6 +894,12 @@ def main() -> int:
         help="answer the flash confirmation with yes (for scripted runs)",
     )
     args = parser.parse_args()
+
+    # Building only needs the toolchain. Every other mode either accesses the
+    # serial/DFU device immediately or shows the interactive device status.
+    needs_flash_runtime = args.enter_dfu or args.all or args.flash or not args.build
+    if needs_flash_runtime and not ensure_flash_runtime():
+        return 1
 
     global SELECTED_PORT
     SELECTED_PORT = args.port
