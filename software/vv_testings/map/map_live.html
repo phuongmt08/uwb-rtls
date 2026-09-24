@@ -8,6 +8,7 @@
     --ink:#161d1c; --ink-2:#4b5654; --ink-3:#77817f;
     --road:#1d2624; --divider:#b1811b; --lane:#93a7b8; --edge:#d62728;
     --accent:#0d7a86; --live:#c0392b; --raw:#3a6ea5; --ok:#1d7a4c; --warn:#b4432c;
+    --lpf:#7d5ba6;
   }
   @media (prefers-color-scheme: dark){
     :root{
@@ -15,6 +16,7 @@
       --ink:#e7ecea; --ink-2:#a3aeac; --ink-3:#77827f;
       --road:#e9efed; --divider:#e0a93a; --lane:#566a78; --edge:#ff6b6b;
       --accent:#3fc3cf; --live:#ff6b52; --raw:#7fb2ef; --ok:#4cc38a; --warn:#ef7a5e;
+      --lpf:#c09ae8;
     }
   }
   *{box-sizing:border-box}
@@ -46,6 +48,15 @@
   .legend i{display:inline-block; width:15px; border-top:2px solid; vertical-align:middle;
     margin-right:6px}
   .raw{color:var(--raw)}
+  .ukf{color:var(--live)}
+  .lpf{color:var(--lpf)}
+  /* Chi hien khi server chay voi --lpf-hz; JS bat len o lan dau thay mau co LPF. */
+  .lpf-only{display:none}
+  /* Ba nut chon nguon vi tri, ghep lien thanh mot cum. */
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden}
+  .seg .chk{border:0; border-left:1px solid var(--line); border-radius:0}
+  .seg .chk:first-child{border-left:0}
+  .seg .chk.on{background:var(--surface-2); font-weight:600}
   .rail{flex:0 0 300px; display:flex; flex-direction:column; gap:12px; padding:12px; min-height:0;
     background:var(--surface); border:1px solid var(--line); border-radius:10px; overflow-y:auto}
   .rail h2{margin:0; font-size:11px; font-weight:600; letter-spacing:.08em;
@@ -73,10 +84,14 @@
     <h1>Vị trí xe trên track</h1>
     <span class="sub" id="status">đang kết nối…</span>
     <span class="spacer"></span>
+    <span class="seg" role="group" aria-label="nguồn vị trí — bật được nhiều cái cùng lúc">
+      <label class="chk" id="lb-tril"><input type="checkbox" id="md-tril"> tril x,y</label>
+      <label class="chk on" id="lb-ukf"><input type="checkbox" id="md-ukf" checked> UKF x,y</label>
+      <label class="chk lpf-only" id="lb-lpf"><input type="checkbox" id="md-lpf"> <span id="lb-lpf-t">LPF x,y</span></label>
+    </span>
     <label class="chk"><input type="checkbox" id="ck-follow"> bám xe</label>
     <label class="chk"><input type="checkbox" id="ck-trail" checked> vết đi</label>
-    <label class="chk"><input type="checkbox" id="ck-raw" checked> vị trí thô</label>
-    <label class="chk"><input type="checkbox" id="ck-link"> nối thô ↔ lọc</label>
+    <label class="chk"><input type="checkbox" id="ck-nhan"> tên node</label>
     <button id="btn-fit">Vừa khung</button>
   </header>
 
@@ -84,14 +99,11 @@
     <div class="stage">
       <canvas id="cv"></canvas>
       <div class="readout" id="readout">x — , y —</div>
-      <div class="legend">
-        <span><i style="border-color:var(--raw); border-top-style:dashed"></i>thô (tril)</span>
-        <span><i style="border-color:var(--live)"></i>đã lọc (UKF)</span>
-      </div>
+      <div class="legend" id="legend"></div>
     </div>
 
     <aside class="rail">
-      <h2>Đã lọc — UKF</h2>
+      <h2 id="pos-title">Vị trí — UKF</h2>
       <div class="grid">
         <div><span>x</span><b class="big" id="v-x">—</b></div>
         <div><span>y</span><b class="big" id="v-y">—</b></div>
@@ -103,12 +115,16 @@
         <div><span>số mẫu</span><b id="v-n">0</b></div>
       </div>
       <hr>
-      <h2>Chưa lọc — tril</h2>
+      <h2>Ba nguồn — x , y</h2>
       <div class="grid">
-        <div><span>x</span><b class="raw" id="r-x">—</b></div>
-        <div><span>y</span><b class="raw" id="r-y">—</b></div>
-        <div><span>lệch so với UKF</span><b id="r-d">—</b></div>
+        <div><span>tril (thô)</span><b class="raw" id="s-tril">—</b></div>
+        <div><span>UKF</span><b class="ukf" id="s-ukf">—</b></div>
+        <div class="lpf-only"><span>LPF</span><b class="lpf" id="s-lpf">—</b></div>
+        <div><span>lệch tril ↔ UKF</span><b id="r-d">—</b></div>
         <div><span>mẫu có tril</span><b id="r-n">0</b></div>
+        <div><span>tần số lấy mẫu</span><b id="v-pkt">—</b></div>
+        <div><span>nhịp ra nghiệm</span><b id="v-fix">—</b></div>
+        <div><span>trễ bộ lọc</span><b class="lpf" id="v-tre">—</b></div>
       </div>
       <hr>
       <h2>Bám vào graph</h2>
@@ -142,7 +158,8 @@
   // getComputedStyle bat trinh duyet tinh lai style; goi hang chuc lan moi khung
   // hinh la du de giat. Doc mot lan, doc lai khi doi sang/toi.
   const CSSV = {};
-  const CSS_KEYS = ["--edge","--ink-3","--live","--raw","--surface","--accent","--ink"];
+  const CSS_KEYS = ["--edge","--ink","--ink-2","--ink-3","--line","--live","--raw",
+                   "--lpf","--surface","--accent"];
   function readCss(){
     const cs = getComputedStyle(document.documentElement);
     for (const k of CSS_KEYS) CSSV[k] = cs.getPropertyValue(k).trim();
@@ -150,7 +167,23 @@
   const css = v => CSSV[v];
   readCss();
 
-  let nodes = [], layers = {edge:[]}, YMAX = 0, bounds = null;
+  let nodes = [], layers = {edge:[]}, bounds = null;
+
+  // ---- Ba khung toa do, dat rieng nhau ----
+  // "hien thi" la khung chuan: met, x sang phai, y len tren, goc (0,0) la goc
+  // cua truc do met ve tren map. Graph va xe deu duoc dat vao khung nay, nhung
+  // dat doc lap: keo graph di khong lam xe nhuc nhich, va nguoc lai.
+  //
+  //   Goc truc nam o dau trong khung UWB. Xe do bang UWB nen chinh hai so nay
+  //   la dat vi tri xe so voi truc.
+  const GOC_UWB_X = 0.26, GOC_UWB_Y = -0.01;
+  //   Node nay cua graph phai nam dung toa do nay tren truc. Doi hai so duoi
+  //   la ca graph truot theo, truc va xe dung yen.
+  const GRAPH_NODE = "50";
+  const NODE_X = 1.68, NODE_Y = 0.55;
+  let N50X = 0, N50Y = 0;          // toa do node moc trong he graph, doc tu map.json
+  // Pham vi graph trong khung hien thi, dung de ve truc va tinh bounds.
+  let HX0 = 0, HX1 = 0, HY0 = 0, HY1 = 0;
   let view = {s:60, tx:0, ty:0}, hover = null, pose = null, trail = [], rateHist = [];
   let dpr = 1, count = 0, rawCount = 0;
 
@@ -167,15 +200,139 @@
   function align(x, y){
     return [x*rotC - y*rotS + A.dx, x*rotS + y*rotC + A.dy];
   }
-  const toWorldPt = (gx, gy) => [gy - YMAX, gx];     // khop voi node.dx/dy trong map.json
+  // Khung hien thi -> toa do ve tren canvas. Canvas co y di xuong nen lat dau.
+  const toWorldPt = (hx, hy) => [hx, -hy];
+  // UWB (da align) -> khung hien thi. Day cung la so hien cho nguoi doc.
+  const docXY = g => [g[0] - GOC_UWB_X, g[1] - GOC_UWB_Y];
+  // Node graph -> khung hien thi: keo sao cho node moc nam dung (NODE_X,NODE_Y).
+  const hienGraph = (nx, ny) => [nx - N50X + NODE_X, ny - N50Y + NODE_Y];
   const toScreen = (x,y) => [x*view.s + view.tx, y*view.s + view.ty];
   const toWorld = (px,py) => [(px - view.tx)/view.s, (py - view.ty)/view.s];
-  const place = (x,y) => { const g = align(x,y); return toScreen(...toWorldPt(g[0],g[1])); };
+  const place = (x,y) => toScreen(...toWorldPt(...docXY(align(x,y))));
   const hasRaw = s => !!(s.tril_x_m || s.tril_y_m);   // (0,0) = chua co nghiem tril
+  // Server chi gui hai khoa nay khi chay voi --lpf-hz.
+  const hasLpf = s => s.tril_x_lpf_m !== undefined;
+
+  // Ba nguon vi tri; moi luc chi ve mot nguon. ix = cot trong mang vet di.
+  const MODES = {
+    tril: {ix:2, col:"--raw",  ten:"tril (thô)", dash:[3,3],
+           lay:s => hasRaw(s) ? [s.tril_x_m, s.tril_y_m] : null},
+    ukf:  {ix:0, col:"--live", ten:"UKF", dash:null,
+           lay:s => [s.ukf_x_m, s.ukf_y_m]},
+    lpf:  {ix:4, col:"--lpf",  ten:"LPF", dash:null,
+           lay:s => hasLpf(s) ? [s.tril_x_lpf_m, s.tril_y_lpf_m] : null},
+  };
+  // Bat duoc nhieu nguon mot luc de so sanh. mode = nguon chinh: cai duoc ve
+  // day du (mui ten huong, vong ±1σ) va la cai bang so ben phai dang noi den.
+  // Nguon vua bat len se thanh nguon chinh.
+  const hien = {tril:false, ukf:true, lpf:false};
+  let mode = "ukf";
+  // Chua tung chon thi xem LPF, vi server mac dinh bat bo loc. Server khong
+  // gui du lieu LPF thi dat luc khoi dong tu lui ve UKF.
+  let want = {hien:{tril:false, ukf:false, lpf:true}, mode:"lpf"};
+  try {
+    const luu = JSON.parse(localStorage.getItem("uwb-src") || "null");
+    if (luu && luu.hien && MODES[luu.mode]) want = luu;
+  } catch {}
+  const M = () => MODES[mode];
+  // Vi tri dang xem, da doi sang khung graph; null = mau nay nguon do khong co nghiem.
+  const posNow = () => { const p = pose && M().lay(pose); return p ? align(p[0], p[1]) : null; };
+
+  let lpfSeen = false, lpfHz = 0, lpfMed = 1;
+  // Server bao chuoi loc dang dung ngay luc mo ket noi, de khong bao gio
+  // nhin nham duong nay la mot cau hinh khac.
+  function setCfg(c){
+    lpfHz = +c.lpf_hz || 0;
+    if (!lpfHz) return;
+    const med = lpfMed = +c.lpf_median || 1;
+    MODES.lpf.ten = "LPF " + lpfHz.toFixed(1) + " Hz";
+    $("lb-lpf-t").textContent = MODES.lpf.ten;
+    $("lb-lpf").title = (med > 1 ? "trung vị " + med + " mẫu → " : "")
+                      + "lowpass " + lpfHz.toFixed(1) + " Hz";
+    if (hien.lpf) dongBo();                        // ve lai nhan cho khop
+  }
+  function enableLpfUi(){
+    if (lpfSeen) return;
+    lpfSeen = true;
+    for (const el of document.querySelectorAll(".lpf-only")) el.style.display = "";
+    // Lan truoc co bat LPF thi tra lai dung lua chon do, gio moi bat duoc.
+    if (want.hien.lpf){
+      for (const k of Object.keys(MODES)) hien[k] = !!want.hien[k];
+      if (MODES[want.mode]) mode = want.mode;
+    }
+    dongBo();
+  }
+
+  const dungDuoc = k => !!MODES[k] && (k !== "lpf" || lpfSeen);
+
+  // tuTay = nguoi dung bam nut/phim. Chi luc do moi ghi de lua chon da nho,
+  // de lenh dat luc khoi dong khong xoa mat lua chon cua lan chay truoc.
+  function bat(k, on, tuTay){
+    if (!dungDuoc(k)) return;
+    hien[k] = on;
+    if (on) mode = k;                              // vua bat thi thanh nguon chinh
+    else if (mode === k){                          // tat nguon chinh -> giao cho cai khac
+      const con = Object.keys(MODES).filter(j => hien[j] && dungDuoc(j));
+      if (con.length) mode = con[0];
+    }
+    if (tuTay){
+      want = {hien:{...hien}, mode};
+      try { localStorage.setItem("uwb-src", JSON.stringify(want)); } catch {}
+    }
+    dongBo();
+  }
+
+  // Chi hien mot nguon duy nhat - dung luc khoi dong va khi LPF vua co du lieu.
+  function chiHien(k){
+    if (!dungDuoc(k)) return;
+    for (const j of Object.keys(MODES)) hien[j] = j === k;
+    mode = k;
+    dongBo();
+  }
+
+  function dongBo(){
+    for (const k of Object.keys(MODES)){
+      $("md-"+k).checked = hien[k];
+      $("lb-"+k).className = "chk" + (hien[k] ? " on" : "") + (k === "lpf" ? " lpf-only" : "");
+      if (k === "lpf" && lpfSeen) $("lb-lpf").style.display = "";
+    }
+    const so = Object.keys(MODES).filter(k => hien[k]).length;
+    $("pos-title").textContent = "Vị trí — " + (hien[mode] ? M().ten : "—")
+                              + (so > 1 ? " (" + so + " nguồn đang hiện)" : "");
+    $("v-x").style.color = $("v-y").style.color = css(M().col);
+    veChuThich();
+    refresh();
+  }
+
+  function veChuThich(){
+    const L = $("legend");
+    L.innerHTML = "";
+    for (const k of ["tril","ukf","lpf"]){
+      if (!hien[k] || !dungDuoc(k)) continue;
+      const sp = document.createElement("span");
+      const i = document.createElement("i");
+      i.style.borderColor = css(MODES[k].col);
+      i.style.borderTopStyle = MODES[k].dash ? "dashed" : "solid";
+      sp.appendChild(i);
+      sp.appendChild(document.createTextNode(MODES[k].ten + (k === mode ? " ●" : "")));
+      L.appendChild(sp);
+    }
+    if (!L.childNodes.length) L.textContent = "chưa bật nguồn nào";
+  }
 
   fetch("map.json").then(r => r.json()).then(d => {
-    nodes = d.nodes.map(n => ({id:n.id, x:n.x, y:n.y, wx:-n.dx, wy:n.dy}));
-    YMAX = nodes[0].y + (-nodes[0].wx);              // wx = y - ymax  =>  ymax = y - wx
+    nodes = d.nodes.map(n => ({id:n.id, x:n.x, y:n.y, hx:0, hy:0, wx:0, wy:0}));
+    const moc = nodes.find(n => String(n.id) === GRAPH_NODE);
+    if (moc){ N50X = moc.x; N50Y = moc.y; }
+    else { N50X = Math.min(...nodes.map(n => n.x)) - NODE_X;   // khong thay node moc:
+           N50Y = Math.min(...nodes.map(n => n.y)) - NODE_Y;   // giu graph nhu cu
+           console.warn("khong thay node " + GRAPH_NODE + " trong map.json"); }
+    for (const n of nodes){
+      const h = hienGraph(n.x, n.y); n.hx = h[0]; n.hy = h[1];
+      const w = toWorldPt(h[0], h[1]); n.wx = w[0]; n.wy = w[1];
+    }
+    HX0 = Math.min(...nodes.map(n => n.hx)); HX1 = Math.max(...nodes.map(n => n.hx));
+    HY0 = Math.min(...nodes.map(n => n.hy)); HY1 = Math.max(...nodes.map(n => n.hy));
     // Ve nhu graph.png: chi canh graph + cham node, khong ve bien/divider/lane.
     const at = new Map(nodes.map(n => [String(n.id), [n.wx, n.wy]]));
     layers = {edge: d.edges.map(([u, v]) => [at.get(String(u)), at.get(String(v))])
@@ -184,6 +341,10 @@
     const eat = (x,y) => { a.x0=Math.min(a.x0,x); a.y0=Math.min(a.y0,y);
                            a.x1=Math.max(a.x1,x); a.y1=Math.max(a.y1,y); };
     nodes.forEach(n => eat(n.wx,n.wy));
+    // goc truc co the nam ngoai khung node; om ca no va chua cho nhan truc
+    const g0 = toWorldPt(0, 0);
+    eat(g0[0] - 0.6, g0[1] + 0.4);
+    eat(g0[0] + 0.4, g0[1] - 0.4);
     Object.values(layers).forEach(L => L.forEach(p => p.forEach(q => eat(q[0],q[1]))));
     bounds = a; bgKey = ""; resize(); fit(); connect();
   }).catch(e => setStatus("không tải được map.json: " + e.message, false));
@@ -239,9 +400,99 @@
       bgx.moveTo(sx+1.8, sy); bgx.arc(sx,sy,1.8,0,7);
     }
     bgx.fill();
+    veNhanNode(bgx, w, h);
+    veTruc(bgx, w, h);
   }
 
-  // ix = 0 lay cot UKF, ix = 2 lay cot tril; doan tril bi thieu thi ngat net.
+  // Ten node + toa do cho TAT CA node. Mac dinh TAT: 522 node phu kin map thi
+  // roi mat, thuong chi can nhan hien khi ro chuot toi (xem khoi hover trong
+  // paint). Bat nut "ten node" khi can doc hang loat, vi du luc doi chieu toa
+  // do mot vung voi thuc dia.
+  // Ve san vao canvas nen nen khong ton gi moi khung hinh. Cac nhan de len nhau
+  // thi giu lai o da ve roi, o nao dam vao thi bo qua; zoom vao la cac o roi ra
+  // va nhan hien dan them, khong can nguong zoom cung.
+  function veNhanNode(c, w, h){
+    if (!$("ck-nhan").checked || view.s < 12) return;
+    const daVe = [];                                 // [x0,y0,x1,y1] cac nhan da dat
+    const dam = (a) => {
+      for (const b of daVe)
+        if (a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]) return true;
+      return false;
+    };
+    c.save();
+    c.font = '9px ui-monospace,Menlo,monospace';
+    c.textAlign = "left"; c.textBaseline = "middle";
+    for (const n of nodes){
+      const [sx,sy] = toScreen(n.wx,n.wy);
+      if (sx < -BG_PAD || sy < -BG_PAD || sx > w+BG_PAD || sy > h+BG_PAD) continue;
+      const t1 = String(n.id);
+      const t2 = n.hx.toFixed(2) + "," + n.hy.toFixed(2);
+      const rong = Math.max(c.measureText(t1).width, c.measureText(t2).width);
+      const o = [sx + 4, sy - 10, sx + 6 + rong, sy + 10];
+      if (dam(o)) continue;
+      daVe.push(o);
+      c.fillStyle = css("--ink-2"); c.fillText(t1, sx + 5, sy - 5);
+      c.fillStyle = css("--ink-3"); c.fillText(t2, sx + 5, sy + 5);
+    }
+    c.restore();
+  }
+
+  // Truc do met, goc (0,0) dat tai node moc + offset. Truc x la duong ngang
+  // qua goc, truc y la duong doc qua goc; ca hai keo het be ngang/be cao cua
+  // graph, ke ca phan nam ve phia am neu goc nam trong long graph.
+  // Vach thua dan khi thu nho de chu khong chong len nhau.
+  function veTruc(c, w, h){
+    if (HX1 === HX0) return;
+    const buoc = view.s >= 45 ? 1 : view.s >= 22 ? 2 : view.s >= 10 ? 5 : 10;
+    // Pham vi graph trong khung hien thi; goc truc luon la (0,0).
+    const x0 = Math.min(HX0, 0), x1 = Math.max(HX1, 0);
+    const y0 = Math.min(HY0, 0), y1 = Math.max(HY1, 0);
+    const P = (dx, dy) => toScreen(...toWorldPt(dx, dy));
+    const goc = P(0, 0), traiX = P(x0, 0), phaiX = P(x1, 0);
+    const duoiY = P(0, y0), trenY = P(0, y1);
+
+    c.save();
+    c.strokeStyle = css("--ink-3"); c.fillStyle = css("--ink-3");
+    c.lineWidth = 1.2; c.setLineDash([]);
+    c.beginPath();
+    c.moveTo(traiX[0], traiX[1]); c.lineTo(phaiX[0], phaiX[1]);
+    c.moveTo(duoiY[0], duoiY[1]); c.lineTo(trenY[0], trenY[1]);
+    c.stroke();
+
+    // Vach: dem tu goc ra hai phia, chi lay phan nam trong pham vi graph.
+    const tu = (a, b) => Math.ceil((a - 1e-9) / buoc) * buoc;
+    c.beginPath();                                   // gop het vach vao mot net
+    for (let m = tu(x0); m <= x1 + 1e-6; m += buoc){
+      const s0 = P(m, 0); c.moveTo(s0[0], s0[1]); c.lineTo(s0[0], s0[1] + 5);
+    }
+    for (let m = tu(y0); m <= y1 + 1e-6; m += buoc){
+      const s0 = P(0, m); c.moveTo(s0[0], s0[1]); c.lineTo(s0[0] - 5, s0[1]);
+    }
+    c.stroke();
+
+    c.font = "10px ui-monospace,Menlo,monospace";
+    c.textAlign = "center"; c.textBaseline = "top";
+    for (let m = tu(x0); m <= x1 + 1e-6; m += buoc){
+      if (Math.abs(m) < 1e-6) continue;              // so 0 ve rieng o duoi
+      const s0 = P(m, 0); c.fillText(String(+m.toFixed(2)), s0[0], s0[1] + 7);
+    }
+    c.textAlign = "right"; c.textBaseline = "middle";
+    for (let m = tu(y0); m <= y1 + 1e-6; m += buoc){
+      if (Math.abs(m) < 1e-6) continue;
+      const s0 = P(0, m); c.fillText(String(+m.toFixed(2)), s0[0] - 7, s0[1]);
+    }
+    c.textAlign = "right"; c.textBaseline = "top";
+    c.fillText("0", goc[0] - 6, goc[1] + 5);
+    c.beginPath(); c.arc(goc[0], goc[1], 2.5, 0, 7); c.fill();   // danh dau goc
+    c.font = "600 11px system-ui,sans-serif";
+    c.textAlign = "left"; c.textBaseline = "top";
+    c.fillText("x [m]", phaiX[0] + 8, phaiX[1] - 4);
+    c.textAlign = "left"; c.textBaseline = "bottom";
+    c.fillText("y [m]", trenY[0] + 6, trenY[1] - 6);
+    c.restore();
+  }
+
+  // ix = 0 lay cot UKF, ix = 2 cot tril, ix = 4 cot tril da loc; doan thieu thi ngat net.
   function trailPath(ix, color, width, alpha, dash){
     if (trail.length < 2) return;
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.globalAlpha = alpha;
@@ -274,60 +525,86 @@
     ctx.drawImage(bg, (view.tx - bgTx) - BG_PAD, (view.ty - bgTy) - BG_PAD,
                   bg.width/dpr, bg.height/dpr);
 
-    if ($("ck-trail").checked){
-      if ($("ck-raw").checked) trailPath(2, css("--raw"), 1.2, .40, [3,3]);
-      trailPath(0, css("--live"), 1.6, .50, null);
-    }
+    // Nguon phu ve truoc, nguon chinh ve sau cung de no nam tren.
+    const thuTu = ["tril","ukf","lpf"].filter(k => hien[k] && dungDuoc(k) && k !== mode);
+    if (hien[mode] && dungDuoc(mode)) thuTu.push(mode);
 
-    if (pose){
-      const [sx,sy] = place(pose.ukf_x_m, pose.ukf_y_m);
-      const raw = hasRaw(pose) ? place(pose.tril_x_m, pose.tril_y_m) : null;
+    for (const k of thuTu){
+      const m = MODES[k], col = css(m.col), chinh = k === mode;
+      if ($("ck-trail").checked)
+        trailPath(m.ix, col, chinh ? 1.6 : 1.2, chinh ? .55 : .35, m.dash);
 
-      const sig = pose.cov_valid ? Math.sqrt(Math.max(pose.cov_xx_m2 + pose.cov_yy_m2, 0)) : 0;
+      const p = pose && m.lay(pose);
+      if (!p) continue;
+      const [sx,sy] = place(p[0], p[1]);
+
+      if (!chinh){                                 // nguon phu: chi mot vong tron
+        ctx.beginPath(); ctx.arc(sx,sy,4.5,0,7);
+        ctx.fillStyle = css("--surface"); ctx.fill();
+        ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.stroke();
+        continue;
+      }
+
+      // Vong ±1σ la cua UKF, chi co nghia khi nguon chinh la UKF.
+      const sig = k === "ukf" && pose.cov_valid
+        ? Math.sqrt(Math.max(pose.cov_xx_m2 + pose.cov_yy_m2, 0)) : 0;
       if (sig > 0){
         ctx.beginPath(); ctx.arc(sx,sy,sig*view.s,0,7);
-        ctx.fillStyle = css("--live") + "22"; ctx.fill();
-        ctx.strokeStyle = css("--live") + "66"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = col + "22"; ctx.fill();
+        ctx.strokeStyle = col + "66"; ctx.lineWidth = 1; ctx.stroke();
       }
-      if (raw && $("ck-raw").checked){
-        if ($("ck-link").checked){                     // do dai = luong hieu chinh cua UKF
-          ctx.strokeStyle = css("--ink-3"); ctx.lineWidth = 1; ctx.setLineDash([2,3]);
-          ctx.beginPath(); ctx.moveTo(raw[0],raw[1]); ctx.lineTo(sx,sy);
-          ctx.stroke(); ctx.setLineDash([]);
-        }
-        ctx.strokeStyle = css("--raw"); ctx.lineWidth = 1.6;
-        ctx.beginPath(); ctx.arc(raw[0],raw[1],4.5,0,7); ctx.stroke();
-        ctx.globalAlpha = .55; ctx.lineWidth = 1.2; ctx.beginPath();
-        ctx.moveTo(raw[0]-8,raw[1]); ctx.lineTo(raw[0]+8,raw[1]);
-        ctx.moveTo(raw[0],raw[1]-8); ctx.lineTo(raw[0],raw[1]+8);
-        ctx.stroke(); ctx.globalAlpha = 1;
-      }
-      // huong xe: yaw do trong khung UWB (x,y) -> khung hien thi
+      // huong xe: yaw do trong khung UWB (x,y) -> khung hien thi. Phep chieu
+      // cho graph +x sang phai va graph +y len tren, nen huong th trong khung
+      // graph thanh (cos th, -sin th) tren canvas.
       const th = (pose.ukf_yaw_deg + A.rot + A.yaw) * Math.PI/180;
-      const hx = Math.sin(th), hy = Math.cos(th);
+      const hx = Math.cos(th), hy = -Math.sin(th);
       ctx.save(); ctx.translate(sx,sy); ctx.rotate(Math.atan2(hy,hx));
-      ctx.fillStyle = css("--live");
+      ctx.fillStyle = col;
       ctx.beginPath(); ctx.moveTo(13,0); ctx.lineTo(-7,7); ctx.lineTo(-3,0); ctx.lineTo(-7,-7);
       ctx.closePath(); ctx.fill();
       ctx.restore();
       ctx.beginPath(); ctx.arc(sx,sy,3.5,0,7);
       ctx.fillStyle = css("--surface"); ctx.fill();
-      ctx.strokeStyle = css("--live"); ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
     }
 
     if (hover){
       const [sx,sy] = toScreen(hover.wx,hover.wy);
       ctx.beginPath(); ctx.arc(sx,sy,6,0,7);
       ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = css("--ink"); ctx.font = '11px ui-monospace,Menlo,monospace';
-      ctx.fillText("node " + hover.id, sx+9, sy-7);
+
+      // Nhan hai dong: id va toa do node tren truc do met (cung he voi bang
+      // ben phai va so duoi con tro). Co nen mo de doc duoc khi nam tren canh.
+      const d1 = "node " + hover.id;
+      const d2 = hover.hx.toFixed(2) + " , " + hover.hy.toFixed(2);
+      ctx.font = '11px ui-monospace,Menlo,monospace';
+      const rong = Math.max(ctx.measureText(d1).width, ctx.measureText(d2).width);
+      const px = 5, ph = 15, cao = ph*2 + 6;
+      // Lat sang trai/len tren khi sat mep de nhan khong bi tran ra ngoai.
+      const w = cv.clientWidth, h = cv.clientHeight;
+      let bx = sx + 10, by = sy - cao - 8;
+      if (bx + rong + 2*px > w) bx = sx - 10 - rong - 2*px;
+      if (by < 0) by = sy + 10;
+      ctx.fillStyle = css("--surface"); ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx, by, rong + 2*px, cao, 5);
+      else ctx.rect(bx, by, rong + 2*px, cao);
+      ctx.fill(); ctx.stroke();
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillStyle = css("--ink-2");
+      ctx.fillText(d1, bx + px, by + 3 + ph/2);
+      ctx.fillStyle = css("--accent");
+      ctx.fillText(d2, bx + px, by + 3 + ph + ph/2);
+      ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
     }
   }
 
-  function nearestNode(gx, gy){
+  // hx,hy la toa do TRONG KHUNG HIEN THI - khong so sanh thang voi n.x/n.y nua,
+  // vi graph gio dat doc lap voi khung do.
+  function nearestNode(hx, hy){
     let best = null, bd = Infinity;
     for (const n of nodes){
-      const d = (n.x-gx)**2 + (n.y-gy)**2;
+      const d = (n.hx-hx)**2 + (n.hy-hy)**2;
       if (d < bd){ bd = d; best = n; }
     }
     return best ? {node:best, dist:Math.sqrt(bd)} : null;
@@ -340,6 +617,7 @@
   }
   function connect(){
     const es = new EventSource("stream");
+    es.addEventListener("cfg", e => setCfg(JSON.parse(e.data)));
     es.addEventListener("status", e => setStatus(JSON.parse(e.data).status, true));
     es.addEventListener("pose", e => onPose(JSON.parse(e.data)));
     es.onopen = () => setStatus("đã kết nối server", true);
@@ -347,7 +625,9 @@
   }
   function onPose(s){
     pose = s; count++;
-    trail.push([s.ukf_x_m, s.ukf_y_m, s.tril_x_m || 0, s.tril_y_m || 0]);
+    if (hasLpf(s)) enableLpfUi();
+    trail.push([s.ukf_x_m, s.ukf_y_m, s.tril_x_m || 0, s.tril_y_m || 0,
+                s.tril_x_lpf_m || 0, s.tril_y_lpf_m || 0]);
     if (trail.length > 4400) trail.splice(0, trail.length - 4000);
     if (hasRaw(s)) rawCount++;
     const now = performance.now();
@@ -359,9 +639,10 @@
   function refresh(){
     const s = pose;
     if (!s){ draw(); return; }
-    const g = align(s.ukf_x_m, s.ukf_y_m);
-    $("v-x").textContent = g[0].toFixed(2);
-    $("v-y").textContent = g[1].toFixed(2);
+    const cur = posNow();                          // vi tri cua nguon dang xem
+    const curD = cur && docXY(cur);
+    $("v-x").textContent = curD ? curD[0].toFixed(2) : "—";
+    $("v-y").textContent = curD ? curD[1].toFixed(2) : "—";
     $("v-yaw").textContent = (s.ukf_yaw_deg + A.yaw).toFixed(1) + "°";
     const sig = s.cov_valid ? Math.sqrt(Math.max(s.cov_xx_m2 + s.cov_yy_m2, 0)) : null;
     $("v-sig").textContent = sig === null ? "—" : sig.toFixed(2) + " m";
@@ -370,22 +651,42 @@
     $("v-hz").textContent = (rateHist.length / 3).toFixed(1);
     $("v-n").textContent = count;
 
-    if (hasRaw(s)){
-      const r = align(s.tril_x_m, s.tril_y_m);
-      $("r-x").textContent = r[0].toFixed(2);
-      $("r-y").textContent = r[1].toFixed(2);
-      $("r-d").textContent = Math.hypot(r[0]-g[0], r[1]-g[1]).toFixed(2) + " m";
-    } else {
-      $("r-x").textContent = $("r-y").textContent = $("r-d").textContent = "—";
-    }
+    // Bang ba nguon: xem mot nguon tren map van doi chieu duoc hai nguon kia.
+    const xy = k => { const q = MODES[k].lay(s); return q ? align(q[0], q[1]) : null; };
+    const g = xy("ukf"), r = xy("tril"), q = xy("lpf");
+    const txt = v => { if (!v) return "—";
+                       const d = docXY(v); return d[0].toFixed(2) + " , " + d[1].toFixed(2); };
+    $("s-ukf").textContent = txt(g);
+    $("s-tril").textContent = txt(r);
+    $("s-lpf").textContent = txt(q);
+    $("r-d").textContent = (r && g) ? Math.hypot(r[0]-g[0], r[1]-g[1]).toFixed(2) + " m" : "—";
     $("r-n").textContent = rawCount;
+    // Tre cua chuoi loc = trung vi (N-1)/2 mau + lowpass 1/(2*pi*fc). Phan
+    // trung vi tinh theo SO MAU nen nhip ra nghiem tut la tre tang theo.
+    const phz = +s.pkt_hz || 0;
+    $("v-pkt").textContent = phz ? phz.toFixed(1) + " Hz" : "—";
+    $("v-pkt").title = "nhịp gói theo đồng hồ MCU; ô \"tần số\" ở trên là nhịp "
+                     + "gói đến trình duyệt, lệch nhau là do đường truyền";
+    const fhz = +s.fix_hz || 0;
+    $("v-fix").textContent = fhz ? fhz.toFixed(1) + " Hz" : "—";
+    $("v-fix").title = "số lần tril ra nghiệm mới; thấp hơn tần số lấy mẫu vì "
+                     + "một nghiệm được phát lại nhiều gói";
+    if (lpfHz && fhz){
+      const tre = (lpfMed - 1) / 2 / fhz + 1 / (2 * Math.PI * lpfHz);
+      $("v-tre").textContent = tre.toFixed(2) + " s";
+      $("v-tre").title = "trung vị " + lpfMed + " mẫu ở " + fhz.toFixed(1)
+                       + " Hz = " + ((lpfMed-1)/2/fhz).toFixed(2) + " s, cộng lowpass "
+                       + (1/(2*Math.PI*lpfHz)).toFixed(2) + " s";
+    } else {
+      $("v-tre").textContent = lpfHz ? "—" : "tắt";
+    }
 
-    const nr = nearestNode(g[0], g[1]);
+    const nr = curD ? nearestNode(curD[0], curD[1]) : null;
     $("v-node").textContent = nr ? nr.node.id : "—";
     $("v-dev").textContent = nr ? nr.dist.toFixed(2) + " m" : "—";
 
-    if ($("ck-follow").checked){
-      const p = toWorldPt(g[0], g[1]);
+    if (curD && $("ck-follow").checked){
+      const p = toWorldPt(curD[0], curD[1]);
       view.tx = cv.clientWidth/2 - p[0]*view.s;
       view.ty = cv.clientHeight/2 - p[1]*view.s;
     }
@@ -404,7 +705,8 @@
       $("ck-follow").checked = false;
     }
     const [wx,wy] = toWorld(e.offsetX, e.offsetY);
-    $("readout").textContent = "x " + wy.toFixed(2) + " m ,  y " + (wx + YMAX).toFixed(2) + " m";
+    // wx/wy la toa do ve; lat lai truc y la ra so tren truc.
+    $("readout").textContent = "x " + wx.toFixed(2) + " m ,  y " + (-wy).toFixed(2) + " m";
     let best = null, bd = (14/view.s)**2;
     for (const n of nodes){
       const d = (n.wx-wx)**2 + (n.wy-wy)**2;
@@ -431,10 +733,14 @@
     });
   }
   $("btn-here").onclick = () => {                 // dat xe hien tai ve dung node gan nhat
-    if (!pose) return;
-    const g = align(pose.ukf_x_m, pose.ukf_y_m), nr = nearestNode(g[0], g[1]);
+    const g = posNow();
+    if (!g) return;
+    const d = docXY(g);                           // xe trong khung hien thi
+    const nr = nearestNode(d[0], d[1]);
     if (!nr) return;
-    A.dx += nr.node.x - g[0]; A.dy += nr.node.y - g[1];
+    // A.dx cong trong khung UWB, nhung docXY chi tru mot hang so nen do lech
+    // trong khung hien thi bang dung do lech can cong vao A.
+    A.dx += nr.node.hx - d[0]; A.dy += nr.node.hy - d[1];
     $("a-dx").value = A.dx.toFixed(3); $("a-dy").value = A.dy.toFixed(3);
     localStorage.setItem("uwb-align", JSON.stringify(A));
     refresh();
@@ -447,8 +753,27 @@
   };
   $("btn-clear").onclick = () => { trail = []; count = 0; rawCount = 0; refresh(); };
   $("btn-fit").onclick = fit;
-  for (const id of ["ck-trail","ck-raw","ck-link"]) $(id).onchange = draw;
-  addEventListener("keydown", e => { if (e.target.tagName !== "INPUT" && (e.key === "f" || e.key === "F")) fit(); });
+  $("ck-trail").onchange = draw;
+  $("ck-nhan").onchange = () => { bgKey = ""; draw(); };   // nhan nam o canvas nen
+  for (const k of Object.keys(MODES))
+    $("md-"+k).onchange = () => bat(k, $("md-"+k).checked, true);
+  addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.key === "f" || e.key === "F") fit();
+    const k = {"1":"tril", "2":"ukf", "3":"lpf"}[e.key];   // 1/2/3 doi nhanh nguon
+    if (k) bat(k, !hien[k], true);                  // phim 1/2/3 bat/tat tung nguon
+  });
+  // Dat nhan/mau ngay tu dau. Lan truoc xem LPF ma server chua gui thi tam ve UKF,
+  // enableLpfUi() se tra lai khi co mau LPF dau tien.
+  // LPF chua co du lieu thi tam hien UKF; enableLpfUi() tra lai lua chon that.
+  if (want.hien.lpf && !want.hien.ukf && !want.hien.tril){
+    chiHien("ukf");
+  } else {
+    for (const k of Object.keys(MODES)) hien[k] = dungDuoc(k) && !!want.hien[k];
+    mode = dungDuoc(want.mode) && hien[want.mode] ? want.mode
+         : (Object.keys(MODES).find(k => hien[k]) || "ukf");
+    dongBo();
+  }
   new ResizeObserver(resize).observe(cv);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readCss(); draw(); });
 })();

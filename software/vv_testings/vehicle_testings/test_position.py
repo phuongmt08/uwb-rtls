@@ -15,6 +15,7 @@ Usage
     python3 test_position.py --seconds 30       # stop after 30 s
     python3 test_position.py --no-start         # just listen, do not send ranging_start
     python3 test_position.py --quiet            # CSV only, no console spam
+    python3 test_position.py --lpf-hz 1.0       # smooth tril_x/tril_y for display
 
 Needs only the headless dependency set:
     python3 software/install.py --profile orin
@@ -26,6 +27,7 @@ import argparse
 import csv
 import math
 import signal
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -52,6 +54,7 @@ from serial.tools import list_ports                        # noqa: E402
 
 from common import protocol_pb2 as pb                      # noqa: E402
 from common.commands import CommandFactory                 # noqa: E402
+from common.filters import PositionSmoother                # noqa: E402
 from common.transport import VvAddress, VvProtocol         # noqa: E402
 
 VCP_VID, VCP_PID = 0x0483, 0x5740
@@ -63,6 +66,7 @@ CSV_COLUMNS = [
     "host_time", "timestamp_ms", "ukf_step",
     "ukf_x_m", "ukf_y_m", "ukf_yaw_deg",
     "tril_x_m", "tril_y_m", "yaw_deg",
+    "tril_x_lpf_m", "tril_y_lpf_m",
     "zone_id", "anchor_mask", "n_anchors",
     "ranging_error_count", "prefilter_reject_count",
     "cov_xx_m2", "cov_xy_m2", "cov_yy_m2", "cov_valid",
@@ -92,6 +96,8 @@ def decode(result) -> dict:
         "tril_x_m": result.tril_x_m / FIXED_SCALE,
         "tril_y_m": result.tril_y_m / FIXED_SCALE,
         "yaw_deg": result.yaw_deg / FIXED_SCALE,
+        "tril_x_lpf_m": result.tril_x_m / FIXED_SCALE,
+        "tril_y_lpf_m": result.tril_y_m / FIXED_SCALE,
         "zone_id": result.zone_id,
         "anchor_mask": result.anchor_mask,
         "n_anchors": len(anchors),
@@ -113,7 +119,7 @@ def uncertainty_m(s: dict) -> float | None:
     return math.sqrt(trace) if trace > 0 else 0.0
 
 
-def format_line(s: dict, n: int) -> str:
+def format_line(s: dict, n: int, lpf: bool = False) -> str:
     sigma = uncertainty_m(s)
     sigma_txt = f"±{sigma:5.2f}m" if sigma is not None else "  --   "
     dists = " ".join(f"A{a['id']}:{a['distance_mm'] / 1000:5.2f}" for a in s["anchors"])
@@ -122,7 +128,8 @@ def format_line(s: dict, n: int) -> str:
         f"UKF x={s['ukf_x_m']:7.3f} y={s['ukf_y_m']:7.3f} yaw={s['ukf_yaw_deg']:7.2f}°  "
         f"{sigma_txt}  "
         f"tril x={s['tril_x_m']:7.3f} y={s['tril_y_m']:7.3f}  "
-        f"zone={s['zone_id']} anch={s['n_anchors']}  {dists}"
+        + (f"lpf x={s['tril_x_lpf_m']:7.3f} y={s['tril_y_lpf_m']:7.3f}  " if lpf else "")
+        + f"zone={s['zone_id']} anch={s['n_anchors']}  {dists}"
     )
 
 
@@ -147,6 +154,15 @@ def main() -> int:
     parser.add_argument("--no-stop", action="store_true",
                         help="leave ranging running when this script exits")
     parser.add_argument("--quiet", action="store_true", help="do not print each sample")
+    parser.add_argument("--lpf-hz", type=float, default=0.0,
+                        help="low-pass cutoff for tril_x/tril_y in Hz "
+                             "(0 = off; 1.0 is a good starting point, lower = smoother)")
+    parser.add_argument("--lpf-median", type=int, default=5,
+                        help="median window that blocks outliers before the low-pass "
+                             "(1 = off)")
+    parser.add_argument("--lpf-jump-m", type=float, default=0.0,
+                        help="restart the low-pass when a fix moves more than this "
+                             "many metres in one sample (0 = never restart)")
     args = parser.parse_args()
 
     port = args.port or find_port()
@@ -176,8 +192,28 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, on_sigint)
 
+    lpf = (PositionSmoother(args.lpf_hz, args.lpf_median, args.lpf_jump_m)
+           if args.lpf_hz > 0.0 else None)
+
     count = 0
     started = time.time()
+    # Cho mo cong + cho ranging ra nghiem dau tien co the mat vai chuc giay.
+    # Gop quang cho do vao tan so thi con so bi keo xuong rat thap va gay hieu
+    # nham la duong truyen cham, nen do rieng nhip thuc va quang cho.
+    first_host = None            # luc mau dau tien ve toi Orin
+    first_ms = last_ms = None    # gio MCU cua mau dau va mau cuoi
+    max_gap_ms = 0.0             # khoang lang dai nhat giua hai mau
+    gaps_ms: list[float] = []    # khoang cach giua cac mau, de lay trung vi
+    # Goi ra o nhip UKF predict, nhanh hon nhieu so voi nhip ranging. Cai quyet
+    # dinh chat luong la nhip tril doi gia tri, tuc mot vong ranging thanh cong.
+    # Do rieng no, va do luon xem anchor nao chiu tra loi.
+    fix_gaps_ms: list[float] = []
+    last_tril = None
+    last_fix_ms = None
+    anchor_hits: dict[int, int] = {}
+    rounds = 0                   # so goi co it nhat mot anchor
+    err_first = err_last = None
+    rej_first = rej_last = None
 
     try:
         with serial.Serial(port, args.baud, timeout=0.2) as link:
@@ -188,6 +224,10 @@ def main() -> int:
                     src, dst, proto.next_seq(), yaw_deg=args.yaw, is_ukf_reinit=args.reinit))
                 print(f"ranging_start sent (yaw={args.yaw}°, reinit={args.reinit})")
 
+            if lpf:
+                print(f"tril smoothing on: median {args.lpf_median} -> "
+                      f"fc={args.lpf_hz} Hz, jump reset={args.lpf_jump_m or 'off'} m")
+
             print("Waiting for sensor_fusion_result...  Ctrl-C to stop\n")
 
             while not stopping:
@@ -196,7 +236,17 @@ def main() -> int:
                 if args.samples and count >= args.samples:
                     break
 
-                chunk = link.read(4096)
+                # read(4096) cho cho du 4096 byte hoac het timeout 0.2 s. Goi
+                # sensor_fusion_result chi ~65 byte va ra ~26 Hz, tuc ~1.7 kB/s,
+                # nen khong lan nao du 4096 -> lan nao cung cho het 0.2 s roi moi
+                # tra ra ca cum ~5 mau. Vi tri vi the nhay theo tung cum 200 ms
+                # mot, moi mau bi om lai trung binh ~100 ms.
+                # Lay dung so byte dang cho san; chua co byte nao thi read(1) nam
+                # doi byte dau tien roi lay tiep phan con lai. Bo giai ma HDLC la
+                # may trang thai chay tung byte, giu trang thai qua cac lan goi,
+                # nen chia goi nho vo tu. live_server.py doc y het kieu nay.
+                n = link.in_waiting
+                chunk = link.read(n if n else 1)
                 if not chunk:
                     continue
 
@@ -205,10 +255,35 @@ def main() -> int:
                         continue
 
                     sample = decode(packet.sensor_fusion_result)
+                    ms = sample["timestamp_ms"]
+                    tril = (sample["tril_x_m"], sample["tril_y_m"])
+                    if tril != last_tril:
+                        if last_fix_ms is not None:
+                            fix_gaps_ms.append(ms - last_fix_ms)
+                        last_tril, last_fix_ms = tril, ms
+                    if sample["anchors"]:
+                        rounds += 1
+                        for a in sample["anchors"]:
+                            anchor_hits[a["id"]] = anchor_hits.get(a["id"], 0) + 1
+                    if err_first is None:
+                        err_first = sample["ranging_error_count"]
+                        rej_first = sample["prefilter_reject_count"]
+                    err_last = sample["ranging_error_count"]
+                    rej_last = sample["prefilter_reject_count"]
+                    if first_ms is None:
+                        first_host, first_ms = time.time(), ms
+                    else:
+                        gaps_ms.append(ms - last_ms)
+                        max_gap_ms = max(max_gap_ms, ms - last_ms)
+                    last_ms = ms
+                    if lpf:
+                        sample["tril_x_lpf_m"], sample["tril_y_lpf_m"] = lpf.update_if_new(
+                            sample["tril_x_m"], sample["tril_y_m"],
+                            sample["timestamp_ms"] / 1000.0)
                     count += 1
 
                     if not args.quiet:
-                        print(format_line(sample, count))
+                        print(format_line(sample, count, lpf is not None))
 
                     if writer:
                         row = dict(sample)
@@ -233,8 +308,36 @@ def main() -> int:
             csv_file.close()
 
     elapsed = time.time() - started
-    rate = count / elapsed if elapsed > 0 else 0.0
-    print(f"\n{count} samples in {elapsed:.1f}s  ({rate:.1f} Hz)")
+    print(f"\n{count} samples in {elapsed:.1f}s of wall time")
+    if count >= 2 and last_ms > first_ms:
+        span = (last_ms - first_ms) / 1000.0
+        typ = statistics.median(gaps_ms)
+        print(f"  typical spacing {typ:.0f} ms = {1000 / typ:.1f} Hz "
+              f"(median; this is the real stream rate)")
+        print(f"  average {(count - 1) / span:.1f} Hz "
+              f"over {span:.1f}s between first and last sample")
+        print(f"  waited {first_host - started:.1f}s for the first sample; "
+              f"longest gap after that {max_gap_ms / 1000:.1f}s")
+        if fix_gaps_ms:
+            fg = statistics.median(fix_gaps_ms)
+            print(f"  new tril fix every {fg:.0f} ms = {1000 / fg:.1f} Hz "
+                  f"({len(fix_gaps_ms) + 1} fixes) <- the rate that matters")
+        else:
+            print("  no new tril fix at all: trilateration never converged")
+        if rounds:
+            seen = "  ".join(f"A{i}:{100 * anchor_hits.get(i, 0) / rounds:.0f}%"
+                             for i in sorted(set(anchor_hits) | {1, 2, 3, 4}))
+            print(f"  anchors answering, over {rounds} rounds:  {seen}")
+            missing = [i for i in (1, 2, 3, 4) if not anchor_hits.get(i)]
+            if missing:
+                print("  never answered: "
+                      + ", ".join(f"A{i}" for i in missing)
+                      + "  (trilateration needs 3)")
+        if err_first is not None:
+            print(f"  ranging errors +{err_last - err_first}, "
+                  f"prefilter rejects +{rej_last - rej_first} during the run")
+    elif count:
+        print(f"  ({count / elapsed if elapsed else 0:.1f} Hz counting the wait)")
     if args.csv:
         print(f"CSV: {args.csv}")
     if count == 0:

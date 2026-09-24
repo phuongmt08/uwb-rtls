@@ -15,6 +15,7 @@ Vi du
     python3 live_server.py --http 8080 --csv live.csv  # -> live_<ngay>_<gio>.csv
     python3 live_server.py --record                  # ghi runs/run_<ngay>_<gio>.csv
     python3 live_server.py --record duong_thang.csv  # tu dat ten file
+    python3 live_server.py --lpf-hz 1.0              # loc tril truoc khi ve len trang
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import json
 import queue
 import signal
 import socket
+import statistics
 import sys
 import threading
 import time
@@ -36,15 +38,32 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 RUN_STAMP = time.strftime("%Y%m%d_%H%M%S")      # tem cho lan chay nay
 TP_DIR = HERE.parent / "vehicle_testings"
+SOFTWARE_DIR = HERE.parent.parent               # .../software, cho goi common/
+sys.path.insert(0, str(SOFTWARE_DIR))
 
-state = {"status": "khoi dong", "last": None, "count": 0, "started": time.time()}
-# Moi phan tu: [ukf_x, ukf_y, tril_x, tril_y] - da loc va chua loc di cung nhau.
+from common.filters import PositionSmoother     # noqa: E402  (sau khi co sys.path)
+
+state = {"status": "khoi dong", "last": None, "count": 0, "started": time.time(),
+         "lpf_hz": 0.0, "lpf_median": 0}
+# Moi phan tu: [ukf_x, ukf_y, tril_x, tril_y, lpf_x, lpf_y] - ba duong di cung nhau.
+# Khong bat --lpf-hz thi hai so cuoi luon la 0 va trang web khong ve duong do.
 trail: deque = deque(maxlen=4000)
+lpf = None                               # PositionSmoother, chi co khi --lpf-hz > 0
+# Nhip ra nghiem tril moi. Goi ve ~26 Hz nhung nghiem moi thi cham hon nhieu,
+# ma do tre cua chuoi loc lai tinh theo SO MAU nen no phu thuoc hoan toan vao
+# nhip nay. Do va gui kem moi mau de trang web noi ra duoc dang tre bao nhieu.
+fix_times: deque = deque(maxlen=21)      # gio MCU cua cac nghiem tril gan day
+last_tril = None
+pkt_times: deque = deque(maxlen=41)      # gio MCU cua cac goi gan day
 
 # 5 gia tri ghi lai moi mau, dung thu tu cot trong file CSV.
 RUN_COLUMNS = ["ukf_x_m", "ukf_y_m", "tril_x_m", "tril_y_m", "ukf_yaw_deg"]
-# Cot cho --csv: nhat ky pose.
-LOG_COLUMNS = ["host_time", "ukf_x_m", "ukf_y_m", "ukf_yaw_deg", "zone_id", "n_anchors"]
+# Cot cho --csv: nhat ky pose. Co ca tril tho lan tril da loc de con do lai
+# nhieu va chon tan so cat tu chinh du lieu chay that. Khong bat --lpf-hz thi
+# hai cot lpf de trong (khac 0, de khoi lan voi nghiem that bang 0).
+LOG_COLUMNS = ["host_time", "timestamp_ms", "ukf_x_m", "ukf_y_m", "ukf_yaw_deg",
+               "tril_x_m", "tril_y_m", "tril_x_lpf_m", "tril_y_lpf_m",
+               "zone_id", "n_anchors"]
 session = None                           # K2Session, chi co khi dung --k2-plan
 # K2Session la may trang thai mot luong. O day co hai luong dung no: luong doc
 # Tag goi feed(), luong HTTP goi start()/stop()/goto()/state(). Khong khoa thi
@@ -80,12 +99,59 @@ def set_status(text: str) -> None:
     publish("status", {"status": text})
 
 
+def pkt_hz() -> float:
+    """Nhip lay mau that [Hz], do theo dong ho MCU chu khong theo gio Orin.
+
+    Gio Orin con dinh do tre cua USB va cua vong doc, con timestamp_ms do
+    chinh MCU dong dau luc dung goi, nen day moi la nhip lay mau that.
+    """
+    if len(pkt_times) < 3:
+        return 0.0
+    ts = list(pkt_times)
+    gaps = [b - a for a, b in zip(ts, ts[1:]) if 0.0 < b - a < 5.0]
+    return round(1.0 / statistics.median(gaps), 1) if gaps else 0.0
+
+
+def fix_hz(s: dict) -> float:
+    """Nhip ra nghiem tril moi [Hz], lay trung vi vai chuc nghiem gan nhat."""
+    global last_tril
+    tril = (s.get("tril_x_m"), s.get("tril_y_m"))
+    if tril != last_tril and (tril[0] or tril[1]):
+        last_tril = tril
+        fix_times.append((s.get("timestamp_ms") or 0.0) / 1000.0)
+    if len(fix_times) < 3:
+        return 0.0
+    ts = list(fix_times)
+    gaps = [b - a for a, b in zip(ts, ts[1:]) if 0.0 < b - a < 5.0]
+    return round(1.0 / statistics.median(gaps), 2) if gaps else 0.0
+
+
+def apply_lpf(s: dict) -> None:
+    """Them tril_x_lpf_m/tril_y_lpf_m vao mau; tat loc thi bo han hai khoa do.
+
+    Loc o server chu khong o trang web: moi tab deu thay cung mot duong, va
+    file CSV ghi ra khop voi cai dang nhin thay. Mau khong co nghiem tril
+    ((0,0)) thi khong dua vao bo loc, neu khong duong loc bi keo ve goc.
+    """
+    if lpf is None or not (s.get("tril_x_m") or s.get("tril_y_m")):
+        s.pop("tril_x_lpf_m", None)
+        s.pop("tril_y_lpf_m", None)
+        return
+    s["tril_x_lpf_m"], s["tril_y_lpf_m"] = lpf.update_if_new(
+        s["tril_x_m"], s["tril_y_m"], (s.get("timestamp_ms") or 0.0) / 1000.0)
+
+
 def on_sample(s: dict) -> None:
     s["host_time"] = time.time()
+    pkt_times.append((s.get("timestamp_ms") or 0.0) / 1000.0)
+    s["pkt_hz"] = pkt_hz()
+    s["fix_hz"] = fix_hz(s)
+    apply_lpf(s)
     state["last"] = s
     state["count"] += 1
     trail.append([s["ukf_x_m"], s["ukf_y_m"],
-                  s.get("tril_x_m", 0.0), s.get("tril_y_m", 0.0)])
+                  s.get("tril_x_m", 0.0), s.get("tril_y_m", 0.0),
+                  s.get("tril_x_lpf_m", 0.0), s.get("tril_y_lpf_m", 0.0)])
     for sink in sinks:
         sink.feed(s)
     publish("pose", s)
@@ -235,8 +301,9 @@ class CsvSink:
         self.thread.start()
 
     def feed(self, s: dict) -> None:
+        # Thieu khoa thi de o trong: 0.0 se bi doc nham thanh mot nghiem that.
         row = [round(v, 3) if isinstance(v, float) else v
-               for v in (s.get(k, 0.0) for k in self.cols)]
+               for v in (s.get(k, "") for k in self.cols)]
         try:
             self.q.put_nowait(row)
         except queue.Full:
@@ -326,6 +393,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/state":
             body = json.dumps({
                 "status": state["status"], "count": state["count"],
+                "lpf_hz": state["lpf_hz"], "lpf_median": state["lpf_median"],
                 "last": state["last"], "trail": list(trail)[-500:],
             }, separators=(",", ":")).encode()
             return self._send(200, body, "application/json")
@@ -392,6 +460,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         try:
+            self._emit("cfg", json.dumps({"lpf_hz": state["lpf_hz"],
+                                          "lpf_median": state["lpf_median"]}))
             self._emit("status", json.dumps({"status": state["status"]}))
             if state["last"]:
                 self._emit("pose", json.dumps(state["last"], separators=(",", ":")))
@@ -456,6 +526,19 @@ def main() -> int:
     ap.add_argument("--record", nargs="?", const="", metavar="FILE",
                     help="ghi 5 gia tri moi mau ra CSV rieng cho lan chay nay; "
                          "khong dua ten thi tu dat runs/run_<ngay>_<gio>.csv")
+    ap.add_argument("--lpf-hz", type=float, default=1.0,
+                    help="tan so cat cua bo loc thap cho tril_x/tril_y [Hz]; "
+                         "0 = tat. Mac dinh 1.0 do tu ban ghi xe dung im ngay "
+                         "22/09/2026: sigma 7.0 -> 4.2 cm, diem van xa nhat "
+                         "1.01 -> 0.53 m. Thap hon nua loi khong dang bao nhieu "
+                         "ma tre khi xe chay tang nhanh.")
+    ap.add_argument("--lpf-median", type=int, default=5,
+                    help="so mau cua so trung vi chan diem van, chay truoc loc "
+                         "thap; 1 = tat. Mac dinh 5: buoc nhay 95%% tu 0.103 "
+                         "xuong 0.040 m so voi chi dung loc thap.")
+    ap.add_argument("--lpf-jump-m", type=float, default=0.0,
+                    help="nghiem tril nhay xa hon bay nhieu met trong mot mau thi "
+                         "khoi dong lai bo loc (0 = khong bao gio)")
     ap.add_argument("--yaw", type=float, default=0.0)
     ap.add_argument("--reinit", action="store_true")
     ap.add_argument("--no-start", action="store_true")
@@ -474,6 +557,14 @@ def main() -> int:
         print("Thieu map.json. Tao bang:\n"
               "  python3 draw_map.py graph.hml map.png --json map.json")
         return 1
+
+    if args.lpf_hz > 0.0:
+        global lpf
+        lpf = PositionSmoother(args.lpf_hz, args.lpf_median, args.lpf_jump_m)
+        state["lpf_hz"] = args.lpf_hz
+        state["lpf_median"] = args.lpf_median
+        print(f"Loc tril:  trung vi {args.lpf_median} mau -> fc={args.lpf_hz} Hz, "
+              f"nhay lai={args.lpf_jump_m or 'tat'} m")
 
     if args.k2_plan:
         global session
