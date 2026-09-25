@@ -72,7 +72,7 @@ typedef struct
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define SENSOR_FUSION_QUEUE_WAIT_TICKS pdMS_TO_TICKS(20U)
+#define SENSOR_FUSION_QUEUE_WAIT_TICKS 0U
 
 /* USER CODE END PD */
 
@@ -664,8 +664,11 @@ void sensor_fusion_entry(void *argument)
 
         /* anchor_distances is unused in decoupled Sensor Fusion thread */
 
+        static uint8_t s_prefilter_divergence_streak = 0U;
+
         /* 3. Sort and Select the Best 3 anchors for UKF Update */
         if (candidate_count >= 3U) {
+            s_prefilter_divergence_streak = 0U;
             mw_trilateration_compute_weights(workspace->candidate_anchors,
                                              candidate_count,
                                              ukf_reference_valid,
@@ -717,6 +720,41 @@ void sensor_fusion_entry(void *argument)
                 }
             }
         }
+#if SYS_FUSION_PREFILTER_ENABLED
+        else if (sensor_fusion_count_valid_ranges(msg.mask) >= MAHALANOBIS_PREFILTER_RESCUE_MIN_ANCHORS) {
+            s_prefilter_divergence_streak++;
+            if (s_prefilter_divergence_streak > MAHALANOBIS_PREFILTER_RESCUE_MIN_REJECT_STREAK) {
+                /* Persistent prefilter rejection across multiple cycles indicates UKF has diverged / lost track
+                 * due to sudden acceleration or displacement. Re-align UKF using raw UWB trilateration. */
+                mw_tril_anchor_t raw_anchors[MAX_ANCHORS_SUPPORTED];
+                uint8_t raw_count = 0U;
+                for (uint8_t i = 0U; i < candidate_count && raw_count < MAX_ANCHORS_SUPPORTED; i++) {
+                    raw_anchors[raw_count++] = workspace->candidate_anchors[i];
+                }
+                for (uint8_t i = 0U; i < prefilter_reject_count && raw_count < MAX_ANCHORS_SUPPORTED; i++) {
+                    if (!sensor_fusion_has_candidate(raw_anchors, raw_count, workspace->rejected_anchors[i].id)) {
+                        raw_anchors[raw_count++] = workspace->rejected_anchors[i];
+                    }
+                }
+                if (raw_count >= 3U) {
+                    mw_tril_anchor_t best_3[3];
+                    vec2d_t zero_ref = {0.0f, 0.0f};
+                    if (mw_trilateration_select_best_3(raw_anchors, raw_count, best_3, 0, false, zero_ref) >= 3U) {
+                        vec2d_t rec_tril_pos = {0.0f, 0.0f};
+                        if (mw_trilateration_2d(best_3, &rec_tril_pos, NULL) == MW_TRIL_OK) {
+                            RLOG_W(LOG_OBJECT_CODE_TAG,
+                                   "[FUSION RESCUE] Filter divergence streak=%u! Re-aligning UKF to raw tril (%.2f, %.2f)",
+                                   s_prefilter_divergence_streak, (float)rec_tril_pos.x, (float)rec_tril_pos.y);
+                            (void)sys_sensor_fusion_realign_position(&ukf_data, (float)rec_tril_pos.x, (float)rec_tril_pos.y);
+                            mw_filter_mahalanobis_reset_anchors(&s_prefilter);
+                            s_prefilter_divergence_streak = 0U;
+                            fusion_update_performed = true;
+                        }
+                    }
+                }
+            }
+        }
+#endif
 
         /* app_tag already counts frames with fewer than three raw ranges.
          * Every otherwise-valid UWB cycle that does not produce an UKF update
@@ -796,8 +834,22 @@ void sensor_fusion_entry(void *argument)
     {
       sys_sensor_fusion_stream_ble(fusion_update_performed ? UKF_STEP_UPDATE : UKF_STEP_PREDICT);
     }
-    
+
+#if TEST_UKF_STREAM_BLE || TEST_UKF_STREAM_UART
     osDelay(20);
+#else
+    static uint32_t s_sensor_fusion_next_tick = 0U;
+    uint32_t now_tick = osKernelGetTickCount();
+    if (s_sensor_fusion_next_tick == 0U || (int32_t)(now_tick - s_sensor_fusion_next_tick) > 0)
+    {
+      s_sensor_fusion_next_tick = now_tick + pdMS_TO_TICKS(20U);
+    }
+    else
+    {
+      s_sensor_fusion_next_tick += pdMS_TO_TICKS(20U);
+    }
+    (void)osDelayUntil(s_sensor_fusion_next_tick);
+#endif
   }
 
   osThreadExit();
