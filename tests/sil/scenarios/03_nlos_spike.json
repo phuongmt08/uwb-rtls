@@ -1,0 +1,34 @@
+{
+  "description": "NLOS Outlier Rejection: Tag moves 1.0m -> 4.0m, Anchor 2 injected with +3m error (cycles 60..140)",
+  "init_pos": [
+    1.0,
+    2.0
+  ],
+  "anchors": [
+    {
+      "id": 1,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 2.495
+    },
+    {
+      "id": 2,
+      "x": 5.0,
+      "y": 0.0,
+      "z": 2.495
+    },
+    {
+      "id": 3,
+      "x": 5.0,
+      "y": 5.0,
+      "z": 2.495
+    },
+    {
+      "id": 4,
+      "x": 0.0,
+      "y": 5.0,
+      "z": 2.495
+    }
+  ],
+  "step_count": 200
+}

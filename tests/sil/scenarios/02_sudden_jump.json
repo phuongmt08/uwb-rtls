@@ -1,0 +1,34 @@
+{
+  "description": "Sudden Motion Deadlock Recovery: Jump from (1.5, 1.5) to (3.5, 1.5) at cycle 50",
+  "init_pos": [
+    1.5,
+    1.5
+  ],
+  "anchors": [
+    {
+      "id": 1,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 2.495
+    },
+    {
+      "id": 2,
+      "x": 5.0,
+      "y": 0.0,
+      "z": 2.495
+    },
+    {
+      "id": 3,
+      "x": 5.0,
+      "y": 5.0,
+      "z": 2.495
+    },
+    {
+      "id": 4,
+      "x": 0.0,
+      "y": 5.0,
+      "z": 2.495
+    }
+  ],
+  "step_count": 150
+}
