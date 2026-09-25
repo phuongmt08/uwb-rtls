@@ -1,0 +1,68 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="d2" for="edge" attr.name="dotted" attr.type="boolean" />
+  <key id="d1" for="node" attr.name="y" attr.type="double" />
+  <key id="d0" for="node" attr.name="x" attr.type="double" />
+@node
+  <graph edgedefault="undirected">
+    <node id="room_1">
+      <data key="d0">0.0000</data>
+      <data key="d1">0.0000</data>
+    </node>
+    <node id="room_2">
+      <data key="d0">9.7600</data>
+      <data key="d1">0.0000</data>
+    </node>
+    <node id="room_3">
+      <data key="d0">9.7600</data>
+      <data key="d1">14.6400</data>
+    </node>
+    <node id="room_4">
+      <data key="d0">0.0000</data>
+      <data key="d1">14.6400</data>
+    </node>
+    <node id="A1">
+      <data key="d0">-0.5000</data>
+      <data key="d1">-0.5000</data>
+    </node>
+    <node id="A2">
+      <data key="d0">10.2600</data>
+      <data key="d1">-0.5000</data>
+    </node>
+    <node id="A3">
+      <data key="d0">-0.5000</data>
+      <data key="d1">10.2600</data>
+    </node>
+    <node id="A4">
+      <data key="d0">10.2600</data>
+      <data key="d1">10.2600</data>
+    </node>
+@graph
+    <edge source="room_1" target="room_2">
+      <data key="d2">False</data>
+    </edge>
+    <edge source="room_2" target="room_3">
+      <data key="d2">False</data>
+    </edge>
+    <edge source="room_3" target="room_4">
+      <data key="d2">False</data>
+    </edge>
+    <edge source="room_4" target="room_1">
+      <data key="d2">False</data>
+    </edge>
+    <edge source="A1" target="A2">
+      <data key="d2">True</data>
+    </edge>
+    <edge source="A2" target="A4">
+      <data key="d2">True</data>
+    </edge>
+    <edge source="A4" target="A3">
+      <data key="d2">True</data>
+    </edge>
+    <edge source="A3" target="A1">
+      <data key="d2">True</data>
+    </edge>
+  </graph>
+</graphml>
