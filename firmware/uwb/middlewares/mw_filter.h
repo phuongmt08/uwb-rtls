@@ -49,6 +49,8 @@ bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   float ax, float ay, float az,
                                   float *d2_score);
 
+void mw_filter_mahalanobis_reset_anchors(mahalanobis_prefilter_t *ctx);
+
 
 
 typedef struct {

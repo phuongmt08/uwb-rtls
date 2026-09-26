@@ -35,7 +35,7 @@
 #define RESP_RETRY_DELAY_MS             200
 #define WAIT_TIME_TO_RESEND_ACK_MS      3000u
 #ifndef SENSOR_FUSION_STREAM_PERIOD_MS
-#define SENSOR_FUSION_STREAM_PERIOD_MS  20u
+#define SENSOR_FUSION_STREAM_PERIOD_MS  18u
 #endif
 
 typedef void (*cmd_handler_t)(const protobuf_packet_t *pkt);

@@ -69,6 +69,7 @@ typedef struct
 sys_sensor_fusion_err_t sys_sensor_fusion_init(sys_sensor_fusion_data_t *p_ukf);
 
 sys_sensor_fusion_err_t sys_sensor_fusion_set_initial_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0);
+sys_sensor_fusion_err_t sys_sensor_fusion_realign_position(sys_sensor_fusion_data_t *p_ukf, float x0, float y0);
 
 sys_sensor_fusion_err_t sys_sensor_fusion_predict(sys_sensor_fusion_data_t *p_ukf);
 

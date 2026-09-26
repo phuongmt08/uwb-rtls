@@ -63,6 +63,15 @@ void mw_filter_mahalanobis_init(mahalanobis_prefilter_t *ctx,
     ctx->initialized = true;
 }
 
+void mw_filter_mahalanobis_reset_anchors(mahalanobis_prefilter_t *ctx)
+{
+    if (!ctx) return;
+    for (uint8_t i = 0; i < 8; i++) {
+        ctx->anchors[i].rejected = false;
+        ctx->anchors[i].reject_streak = 0U;
+    }
+}
+
 bool mw_filter_mahalanobis_update(mahalanobis_prefilter_t *ctx,
                                   uint8_t anchor_id, float d_raw,
                                   float px, float py, float pz,
