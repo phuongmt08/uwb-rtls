@@ -21,6 +21,9 @@
     #include "app_rtos_handles.h"
     #include "version.h"
     #include "sys_sensor_fusion.h"
+#if SYS_DIAG_TO_VEHICLE
+    #include "serial/debug_serial.h"
+#endif
 #else
     #include "sys_logger_bl.h"
     #include "otp/otp.h"
@@ -157,6 +160,23 @@ uint32_t stream_packet_cnt = 0;
 #define SF_STREAM_SLOT_COUNT    2u
 
 static uint32_t s_last_sensor_fusion_stream_tick[SF_STREAM_SLOT_COUNT] = {0u, 0u};
+
+#if SYS_DIAG_TO_VEHICLE
+/* calib_data to the vehicle follows sensor_fusion_result to the same
+ * destination in the same loop; sharing that pacing tick would reject it
+ * every time. */
+static uint32_t s_last_calib_stream_tick[SF_STREAM_SLOT_COUNT] = {0u, 0u};
+#define CALIB_STREAM_TICK s_last_calib_stream_tick
+
+/* Diagnostic packets to the vehicle go only over an active USB session and
+ * only while the CDC endpoint is idle: dropped rather than delaying fusion. */
+static bool diag_vehicle_link_ready(const network_core_t *stream)
+{
+    return stream->serial_connection_active && debug_serial_usb_tx_ready();
+}
+#else
+#define CALIB_STREAM_TICK s_last_sensor_fusion_stream_tick
+#endif
 
 static uint32_t sf_stream_slot(uint8_t dst)
 {
@@ -1646,9 +1666,14 @@ bool network_send_calib_data(network_core_t *stream, uint8_t dst, const protobuf
 
     const uint32_t slot = sf_stream_slot(dst);
     uint32_t now = bsp_util_get_ticks();
-    CHECK((uint32_t)(now - s_last_sensor_fusion_stream_tick[slot]) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+    CHECK((uint32_t)(now - CALIB_STREAM_TICK[slot]) >= SENSOR_FUSION_STREAM_PERIOD_MS, false);
+#if SYS_DIAG_TO_VEHICLE
+    if (dst == protobuf_PACKET_ADDR_VEHICLE) {
+        CHECK(diag_vehicle_link_ready(stream), false);
+    }
+#endif
 
-    dt_s = (float)(now - s_last_sensor_fusion_stream_tick[slot]) / 1000.0f;
+    dt_s = (float)(now - CALIB_STREAM_TICK[slot]) / 1000.0f;
 
     protobuf_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -1656,7 +1681,7 @@ bool network_send_calib_data(network_core_t *stream, uint8_t dst, const protobuf
     pkt.params.calib_data = *data;
 
     if (network_core_send_packet(stream, dst, &pkt)) {
-        s_last_sensor_fusion_stream_tick[slot] = now;
+        CALIB_STREAM_TICK[slot] = now;
         stream_packet_cnt++;
         return true;
     }
@@ -1668,7 +1693,15 @@ bool network_send_range_diag(network_core_t *stream, uint8_t dst, const protobuf
 {
     CHECK(stream && data, false);
     CHECK(network_cmd_is_ranging_enabled(), false);
+#if SYS_DIAG_TO_VEHICLE
+    if (dst == protobuf_PACKET_ADDR_VEHICLE) {
+        CHECK(diag_vehicle_link_ready(stream), false);
+    } else {
+        CHECK(network_cmd_is_ble_host_active(), false);
+    }
+#else
     CHECK(network_cmd_is_ble_host_active(), false);
+#endif
 
     /* Research stream paced by its caller; it must not consume the sensor
      * fusion stream period. */

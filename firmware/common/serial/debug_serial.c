@@ -9,6 +9,12 @@
 #include "sys_config.h"
 #endif
 
+#if !defined(BOOTLOADER) && SYS_DIAG_TO_VEHICLE
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "task.h"
+#endif
+
 #include <string.h>
 
 #define CHECK(_cond, _ret) do { if (!(_cond)) return (_ret); } while (0)
@@ -28,6 +34,43 @@ static uint8_t s_dma_rx_buf[DEBUG_DMA_BUF_SIZE];
 static uint32_t s_last_dma_ptr = 0;
 
 extern DMA_HandleTypeDef hdma_usart1_rx;
+#endif
+
+#if !defined(BOOTLOADER) && SYS_DIAG_TO_VEHICLE
+/* CDC_Transmit_FS checks TxState and then copies into UserTxBufferFS; two tasks
+ * sending at once could overwrite a frame already being transmitted. */
+extern USBD_HandleTypeDef hUsbDeviceFS;
+
+static StaticSemaphore_t s_usb_tx_mutex_buf;
+static SemaphoreHandle_t s_usb_tx_mutex = NULL;
+
+static bool usb_tx_lock(uint32_t timeout_ms)
+{
+    if (s_usb_tx_mutex == NULL || __get_IPSR() != 0U ||
+        xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
+        return true; /* no contention possible: before scheduler start or in ISR */
+    }
+    return xSemaphoreTake(s_usb_tx_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
+static void usb_tx_unlock(void)
+{
+    if (s_usb_tx_mutex != NULL && __get_IPSR() == 0U &&
+        xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
+        (void)xSemaphoreGive(s_usb_tx_mutex);
+    }
+}
+
+bool debug_serial_usb_tx_ready(void)
+{
+    if (sys_config_get_host_transport() != HOST_TRANSPORT_USB ||
+        hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED ||
+        hUsbDeviceFS.pClassData == NULL) {
+        return false;
+    }
+    const USBD_CDC_HandleTypeDef *hcdc = (const USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
+    return hcdc->TxState == 0U;
+}
 #endif
 
 static inline bool debug_rx_pop(uint8_t *out)
@@ -74,6 +117,11 @@ void debug_serial_init(void)
     /* Start DMA circular receive for Console/Network UART */
     __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
     HAL_UART_Receive_DMA(&huart1, s_dma_rx_buf, DEBUG_DMA_BUF_SIZE);
+#endif
+#if !defined(BOOTLOADER) && SYS_DIAG_TO_VEHICLE
+    if (s_usb_tx_mutex == NULL) {
+        s_usb_tx_mutex = xSemaphoreCreateMutexStatic(&s_usb_tx_mutex_buf);
+    }
 #endif
 }
 
@@ -138,7 +186,16 @@ int debug_serial_write(int file, char *ptr, int len, uint8_t type)
         uint32_t start_ms = HAL_GetTick();
         uint8_t res;
         do {
+#if SYS_DIAG_TO_VEHICLE
+            if (!usb_tx_lock(10u)) {
+                res = USBD_BUSY;
+                break;
+            }
             res = CDC_Transmit_FS(frame, (uint16_t)frame_len);
+            usb_tx_unlock();
+#else
+            res = CDC_Transmit_FS(frame, (uint16_t)frame_len);
+#endif
             if (res != USBD_BUSY) {
                 break;
             }

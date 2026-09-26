@@ -795,7 +795,11 @@ void app_tag_range_diag_stream(void)
         msg.pkt_seq            = ++s_pkt_seq;
         msg.link_drop_count    = s_link_drop_count;
         msg.uart_tx_fail_count = g_ble_bridge_diag.tx_failed;
+#if SYS_DIAG_TO_VEHICLE
+        (void)network_send_range_diag(&g_network_core, protobuf_PACKET_ADDR_VEHICLE, &msg);
+#else
         (void)network_send_range_diag(&g_network_core, protobuf_PACKET_ADDR_HOST, &msg);
+#endif
 
         s_next_link++;
         if (s_next_link >= s_cycle.link_count) {

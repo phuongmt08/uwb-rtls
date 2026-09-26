@@ -1077,6 +1077,36 @@ void sys_sensor_fusion_stream_ble(uint8_t ukf_step)
     (void)network_send_sensor_fusion_result(&g_network_core,
                                             protobuf_PACKET_ADDR_VEHICLE,
                                             &stream_data);
+#if SYS_DIAG_TO_VEHICLE
+    /* Research stream: raw IMU + per-anchor ranges/quality for the vehicle
+     * logger, sent right after the sensor_fusion_result of the same loop.
+     * tx_frame_cnt counts delivered frames only. */
+    static uint32_t s_diag_calib_tx_cnt = 0U;
+    static protobuf_calib_data_t s_diag_calib; /* SensorFusion task only */
+    memset(&s_diag_calib, 0, sizeof(s_diag_calib));
+
+    s_diag_calib.anchor_mask = s_last_selected_anchors_mask;
+    s_diag_calib.tx_frame_cnt = s_diag_calib_tx_cnt;
+    s_diag_calib.ax = ukf.imu_current.ax;
+    s_diag_calib.ay = ukf.imu_current.ay;
+    s_diag_calib.gz = ukf.imu_current.gz;
+    s_diag_calib.px = s_latest_tril_x;
+    s_diag_calib.py = s_latest_tril_y;
+    s_diag_calib.distance_count = NUM_ANCHORS;
+    s_diag_calib.fp_amp_norm_count = NUM_ANCHORS;
+    s_diag_calib.fp_snr_count = NUM_ANCHORS;
+    memcpy(s_diag_calib.distance, s_latest_distances, sizeof(s_latest_distances));
+    memcpy(s_diag_calib.fp_amp_norm, s_latest_fp_amp_norm, sizeof(s_latest_fp_amp_norm));
+    memcpy(s_diag_calib.fp_snr, s_latest_fp_snr, sizeof(s_latest_fp_snr));
+    s_diag_calib.error_frame_cnt = s_error_count;
+    s_diag_calib.dt = s_fusion_dt;
+
+    if (network_send_calib_data(&g_network_core,
+                                protobuf_PACKET_ADDR_VEHICLE,
+                                &s_diag_calib)) {
+        s_diag_calib_tx_cnt++;
+    }
+#endif
 #else
     static uint32_t tx_frame_cnt = 0U;
     protobuf_calib_data_t stream_data;

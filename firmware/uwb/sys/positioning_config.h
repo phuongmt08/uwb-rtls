@@ -486,6 +486,20 @@
 #endif
 
 /* ===================================================================
+ * DIAGNOSTIC STREAMS TO THE VEHICLE CONTROLLER (research data collection)
+ * =================================================================== */
+
+/* Tag only. 1 = while a USB session with the vehicle controller is active,
+ * also send calib_data_t (IMU ax/ay/gz, per-anchor distance, fp_amp_norm,
+ * fp_snr, dt) after each sensor_fusion_result, and send range_diag_t to the
+ * vehicle instead of the BLE host. Diagnostic packets are dropped, never
+ * waited for, while USB is busy, so they cannot delay the fusion loop. USB
+ * CDC writes are serialized by a mutex. 0 = unchanged behaviour. */
+#ifndef SYS_DIAG_TO_VEHICLE
+#define SYS_DIAG_TO_VEHICLE                      0
+#endif
+
+/* ===================================================================
  * ERROR HANDLING
  * =================================================================== */
 
